@@ -5,6 +5,7 @@
 /// @brief Decoded CDNA3/CDNA4 F32 SMFMAC SIMD-vs-scalar checks.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "../decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
@@ -42,7 +43,7 @@ constexpr std::array<uint32_t, 6> LEGAL_PAIRS{0x4u, 0x8u, 0xCu, 0x9u, 0xDu, 0xEu
 enum class Alias { None, A, B, Index };
 
 struct SmfmacCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint16_t opcode;
   const char *name;
   Fmt a_fmt;
@@ -53,9 +54,9 @@ struct SmfmacCase {
 };
 
 #define C3(OP, NAME, A, B, D, AFMT, BFMT)                                                          \
-  SmfmacCase { ROCJITSU_CODE_ARCH_CDNA3, cdna3::k##OP##Vop3pMfma, NAME, AFMT, BFMT, A, B, D }
+  SmfmacCase { rocjitsu::IsaFamily::Cdna3, cdna3::k##OP##Vop3pMfma, NAME, AFMT, BFMT, A, B, D }
 #define C4(OP, NAME, A, B, D, AFMT, BFMT)                                                          \
-  SmfmacCase { ROCJITSU_CODE_ARCH_CDNA4, cdna4::k##OP##Vop3pMfma, NAME, AFMT, BFMT, A, B, D }
+  SmfmacCase { rocjitsu::IsaFamily::Cdna4, cdna4::k##OP##Vop3pMfma, NAME, AFMT, BFMT, A, B, D }
 
 // Every generated F32 SMFMAC form. Integer execution has separate exact
 // dense-reference checks in instruction_execution_harness_test.cpp.
@@ -106,13 +107,13 @@ constexpr std::array CDNA4_CASES{
 #undef C4
 
 struct SmfmacFixture : ExactFixture {
-  explicit SmfmacFixture(rj_code_arch_t arch) : ExactFixture(arch, WF_SIZE) {}
+  explicit SmfmacFixture(rocjitsu::IsaFamily arch) : ExactFixture(arch, WF_SIZE) {}
 };
 
 TEST(Cdna4MatrixControlTest, SparseMetadataSelectsUpperHalfOnlyWithZeroCbsz) {
-  SmfmacFixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  SmfmacFixture fx(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(fx.wf, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     for (uint32_t r = 0; r < 4; ++r)
@@ -141,13 +142,13 @@ TEST(Cdna4MatrixControlTest, SparseMetadataSelectsUpperHalfOnlyWithZeroCbsz) {
 
 TEST(MatrixControlTest, IntegerMatrixOverflowSaturatesAtBothSignedLimits) {
   struct Case {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     bool sparse;
     uint32_t products;
   };
   for (const Case test :
-       {Case{ROCJITSU_CODE_ARCH_CDNA3, false, 32}, Case{ROCJITSU_CODE_ARCH_CDNA4, false, 64},
-        Case{ROCJITSU_CODE_ARCH_CDNA4, true, 64}}) {
+       {Case{rocjitsu::IsaFamily::Cdna3, false, 32}, Case{rocjitsu::IsaFamily::Cdna4, false, 64},
+        Case{rocjitsu::IsaFamily::Cdna4, true, 64}}) {
     SCOPED_TRACE(::testing::Message() << "arch=" << test.arch << " sparse=" << test.sparse);
     SmfmacFixture fx(test.arch);
     ASSERT_NE(fx.wf, nullptr);
@@ -155,7 +156,7 @@ TEST(MatrixControlTest, IntegerMatrixOverflowSaturatesAtBothSignedLimits) {
     ASSERT_NE(decoder, nullptr);
     const uint16_t src2 = 256 + (test.sparse ? INDEX_OFF : DST_OFF);
     auto words =
-        test.arch == ROCJITSU_CODE_ARCH_CDNA3
+        test.arch == rocjitsu::IsaFamily::Cdna3
             ? cdna3::build_vop3p_mfma(
                   cdna3::kVMfmaI3216x16x32I8Vop3pMfma,
                   {.vdst = DST_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = src2})
@@ -270,7 +271,7 @@ std::unique_ptr<Instruction> decode(const SmfmacCase &test, uint32_t a_off, uint
   auto decoder = Decoder::create(test.arch);
   if (!decoder)
     return nullptr;
-  if (test.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+  if (test.arch == rocjitsu::IsaFamily::Cdna3) {
     const auto words = cdna3::build_vop3p_mfma(test.opcode, {.vdst = fields.vdst,
                                                              .acc_cd = fields.acc_cd,
                                                              .src0 = fields.src0,
@@ -330,7 +331,7 @@ void run_case(const SmfmacCase &test, Mode mode, uint32_t seed, uint32_t phase,
   // D is also C, so every case starts with a real accumulator. For overlap
   // cases, overwrite its initial words with the aliased source afterwards.
   fx.seed(DST_OFF, test.dst_regs, Fmt::F32, Mode::RandomInt, seed + 3);
-  const bool fnuz = test.arch == ROCJITSU_CODE_ARCH_CDNA3;
+  const bool fnuz = test.arch == rocjitsu::IsaFamily::Cdna3;
   seed_input(fx, a_off, test.a_regs, test.a_fmt, mode, seed + 1, fnuz);
   seed_input(fx, b_off, test.b_regs, test.b_fmt, mode, seed + 2, fnuz);
   seed_indices(fx, index_off, phase);
@@ -344,7 +345,7 @@ void run_case(const SmfmacCase &test, Mode mode, uint32_t seed, uint32_t phase,
 }
 
 void run_acc_case(const SmfmacCase &test, bool acc_sources, uint32_t seed) {
-  ASSERT_EQ(test.arch, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_EQ(test.arch, rocjitsu::IsaFamily::Cdna3);
   SmfmacFixture fx(test.arch);
   ASSERT_NE(fx.wf, nullptr);
   restore(fx, std::vector<uint32_t>(static_cast<size_t>(STATE_REGS) * WF_SIZE, 0));
@@ -401,7 +402,7 @@ void run_nan_priority_case(const SmfmacCase &test, bool nan_in_b, uint32_t seed)
   SmfmacFixture fx(test.arch);
   ASSERT_NE(fx.wf, nullptr);
   restore(fx, std::vector<uint32_t>(static_cast<size_t>(STATE_REGS) * WF_SIZE, 0));
-  const bool fnuz = test.arch == ROCJITSU_CODE_ARCH_CDNA3;
+  const bool fnuz = test.arch == rocjitsu::IsaFamily::Cdna3;
   seed_input(fx, A_OFF, test.a_regs, test.a_fmt, Mode::Cancel, seed + 1, fnuz);
   seed_input(fx, B_OFF, test.b_regs, test.b_fmt, nan_in_b ? Mode::NaN : Mode::Cancel, seed + 2,
              fnuz);
@@ -429,8 +430,9 @@ template <size_t N> void run_all_forms(const std::array<SmfmacCase, N> &cases) {
     for (size_t mode_index = 0; mode_index < MODES.size(); ++mode_index) {
       const Mode mode = MODES[mode_index];
       // FP8 has no infinity, and CDNA3 FNUZ BF8 has none either.
-      if (mode == Mode::Inf && (test.a_fmt == Fmt::FP8 || test.b_fmt == Fmt::FP8 ||
-                                (test.arch == ROCJITSU_CODE_ARCH_CDNA3 && test.a_fmt == Fmt::BF8)))
+      if (mode == Mode::Inf &&
+          (test.a_fmt == Fmt::FP8 || test.b_fmt == Fmt::FP8 ||
+           (test.arch == rocjitsu::IsaFamily::Cdna3 && test.a_fmt == Fmt::BF8)))
         continue;
       SCOPED_TRACE(::testing::Message() << test.name << " arch=" << static_cast<int>(test.arch)
                                         << " mode=" << static_cast<int>(mode));
@@ -512,7 +514,7 @@ TEST(SmfmacSimdExact, SparseGatherMatchesIndependentPhysicalLayoutOracle) {
     // nonzero element. D reg1/lane23 is row5, column7: 2 * 3 = 6.
     fx.cu->write_vgpr(fx.vbase + A_OFF + 1, 21, 0x40000000u);
     fx.cu->write_vgpr(fx.vbase + INDEX_OFF, 21, 0x444444C4u);
-    const uint32_t b_lane = test.arch == ROCJITSU_CODE_ARCH_CDNA3 ? 23u : 39u;
+    const uint32_t b_lane = test.arch == rocjitsu::IsaFamily::Cdna3 ? 23u : 39u;
     fx.cu->write_vgpr(fx.vbase + B_OFF + 3, b_lane, 0x42000000u);
 
     auto instruction = decode(test, A_OFF, B_OFF, INDEX_OFF);
@@ -600,7 +602,7 @@ TEST(Cdna4MatrixControlTest, SparseBf16ClampsFiniteOverflowAndPreservesInfiniteI
       {0x3f80, 0x4000, 0xff800000, 0xff800000, 0xff800000}, // infinite C
       {0x7fc1, 0x4000, 0, 0x7fc10000, 0x7fc10000},          // NaN payload
   };
-  SmfmacFixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  SmfmacFixture fx(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(fx.wf, nullptr);
   for (const auto &test : CDNA4_CASES) {
     if (test.a_fmt != Fmt::BF16)
@@ -632,9 +634,9 @@ TEST(Cdna4MatrixControlTest, SparseBf16ClampsFiniteOverflowAndPreservesInfiniteI
 }
 
 TEST(Cdna4MatrixControlTest, DenseF32AndBf16ClampFiniteOverflowOnly) {
-  SmfmacFixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  SmfmacFixture fx(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(fx.wf, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   ForceScalarGuard scalar_guard;
   for (bool force_scalar : {false, true}) {

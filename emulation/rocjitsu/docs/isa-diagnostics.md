@@ -1,6 +1,6 @@
 # ISA diagnostics
 
-RocJITsu checks for these explicitly undefined ISA conditions:
+rocjitsu checks for these explicitly undefined ISA conditions:
 
 | Check | Targets | Legal cases kept silent |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ do not scan register allocations, track lane conflicts or maintain an access
 history.
 
 These small checks run unconditionally, independently of memory-wait checking,
-in both RocJITsu and Mirage. They have no CLI or configuration switch.
+in both rocjitsu and Mirage. They have no CLI or configuration switch.
 A warning on a defined instruction is a checker bug and should be reported.
 
 Combined offsets are checked before alignment masks are applied. CDNA1–4 and

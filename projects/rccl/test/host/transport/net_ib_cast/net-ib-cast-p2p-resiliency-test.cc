@@ -166,12 +166,15 @@ TEST_F(P2pResiliencyMicrotest, DeviceNumSet_SingleProbingQp_IsStillConfigured) {
   EXPECT_EQ(res_->nProbingQps, 2);
 }
 
+// Resiliency forces the scheduler off, so the sizing follows the default QP set: one QP per
+// device, or every QP under NCCL_IB_SPLIT_DATA_ON_QPS. schedParms stays zeroed throughout and
+// must not move the result.
 TEST_F(P2pResiliencyMicrotest, DataCqSizeGet_Sender_HoldsEveryRequestOnOneSurvivingDevice) {
   MakeSender(2, 4);
   int cqSize = 0;
   ASSERT_EQ(IbCastResiliencyDataCqSizeGet(res_, 0, &cqSize), ncclSuccess);
-  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 1 * 2);
-  send_->base.schedParms.splitData = true;
+  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 2 * 2);
+  send_->base.splitDataOnQps = 1;
   ASSERT_EQ(IbCastResiliencyDataCqSizeGet(res_, 1, &cqSize), ncclSuccess);
   EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 4 * 2);
 }
@@ -180,15 +183,15 @@ TEST_F(P2pResiliencyMicrotest, DataCqSizeGet_Receiver_CountsTheCtsCompletionToo)
   MakeReceiver(3, 3);
   int cqSize = 0;
   ASSERT_EQ(IbCastResiliencyDataCqSizeGet(res_, 0, &cqSize), ncclSuccess);
-  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 2 * 1 * 3);
+  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 2 * 3 * 3);
 }
 
 TEST_F(P2pResiliencyMicrotest, DataRqSizeGet_Receiver_HoldsEveryRequestOnOneQp) {
   MakeReceiver(2, 4);
   uint32_t rqSize = 0;
   ASSERT_EQ(IbCastResiliencyDataRqSizeGet(res_, 0, &rqSize), ncclSuccess);
-  EXPECT_EQ(rqSize, (uint32_t)NET_IB_MAX_REQUESTS);
-  recv_->base.schedParms.doWrr = true;
+  EXPECT_EQ(rqSize, (uint32_t)NET_IB_MAX_REQUESTS * 2);
+  recv_->base.splitDataOnQps = 1;
   ASSERT_EQ(IbCastResiliencyDataRqSizeGet(res_, 0, &rqSize), ncclSuccess);
   EXPECT_EQ(rqSize, (uint32_t)NET_IB_MAX_REQUESTS * 4);
 }
@@ -1118,6 +1121,35 @@ TEST_F(P2pResiliencyProbeMicrotest, Progress_ProbeShowsMissingData_ResendsOnlyTh
   EXPECT_TRUE(req_->send.sentData[3]);
   EXPECT_EQ(sendRes_->failedRequests[kSlot].request, nullptr);
   EXPECT_FALSE(res_->inProgress);
+}
+
+// The repost walks the QP set recorded on the first request, not one recomputed here. A partial
+// set on a 4-QP comm separates the two: desc says QPs 2 and 3, while recomputing would give all
+// four QPs from splitDataOnQps, and keying the walk off the request id would give QPs 1 and 2
+// (kId % nqps == 1). Only QPs 2 and 3 may be touched.
+TEST_F(P2pResiliencyProbeMicrotest, Progress_PartialQpSet_ResendsOnlyTheRecordedQps) {
+  FailRequestOnDevice0(4, 2);
+  send_->base.splitDataOnQps = 1;  // a recomputed count would be all 4 QPs
+  for (int q = 0; q < 4; q++) req_->send.sentData[q] = true;
+  req_->desc.nqps = 2;
+  req_->desc.startQpIndex = 2;
+  req_->desc.wrrSched = false;
+  P2pResiliencyAdvanceMs(kProbeDelayMs);
+  ASSERT_EQ(IbCastResiliencyProgress(res_), ncclSuccess);
+  CompleteProbe(1);
+  ASSERT_EQ(IbCastResiliencyProgress(res_), ncclSuccess);
+
+  ASSERT_EQ(scene_.multiSends.size(), 1u);
+  EXPECT_EQ(scene_.multiSends[0].nqps, 2);
+  EXPECT_EQ(scene_.multiSends[0].startQpIndex, 2);
+  EXPECT_FALSE(scene_.multiSends[0].wrrSched);
+  // Nothing was delivered, so both recorded QPs resend, for each of the two sub-requests.
+  ASSERT_EQ(scene_.addEvents.size(), 4u);
+  for (const auto& e : scene_.addEvents) EXPECT_EQ(e.devIndex, 1);
+  EXPECT_TRUE(req_->send.sentData[0]);
+  EXPECT_TRUE(req_->send.sentData[1]);
+  EXPECT_FALSE(req_->send.sentData[2]);
+  EXPECT_FALSE(req_->send.sentData[3]);
 }
 
 TEST_F(P2pResiliencyProbeMicrotest, Progress_ResendFails_ReturnsTheError) {

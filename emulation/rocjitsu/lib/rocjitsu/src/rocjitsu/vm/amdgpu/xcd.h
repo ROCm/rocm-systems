@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
@@ -45,9 +46,13 @@ public:
   /// @param arch ISA architecture.
   /// @param memory Shared GPU memory for instruction fetch (not owned).
   /// @param exec_mode Execution mode for CU creation.
-  Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
-      simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
-      std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>());
+  /// @param emit_error Destination for failure diagnostics.
+  /// @returns Null if a child configuration is rejected; emits the reason.
+  static std::unique_ptr<Xcd>
+  create(std::string name, const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
+         simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
+         std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>(),
+         util::DiagnosticEmitter emit_error = {});
 
   /// @brief Construct an empty XCD (children added externally by the config loader).
   explicit Xcd(std::string name, simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL)
@@ -69,7 +74,7 @@ public:
   /// shared GWS store (see GwsDevice for the scheduling policy).
   /// @details Each CU takes a shared_ptr, so the store outlives every registered
   /// CU regardless of teardown order. Must be called after the CUs are attached to
-  /// the command processor; the full constructor and the config loader both do so.
+  /// the command processor; the configured factory and the config loader both do so.
   /// Called during topology construction, before execution starts; every CU must
   /// accept the XCD's GWS store.
   void wire_gws_to_cus();
@@ -116,7 +121,7 @@ public:
   ///
   /// @details L2→HBM/fabric wiring is done by SoC::initialize() since the
   /// destination depends on the IOD topology.
-  void initialize() override;
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override;
 
   /// @brief Return the command processor.
   /// @returns Pointer to the command processor.
@@ -152,6 +157,11 @@ public:
   const L2Cache *l2_cache() const { return l2_cache_; }
 
 private:
+  util::Result configure(const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
+                         simdojo::ExecMode exec_mode,
+                         std::shared_ptr<DeviceCacheCoherence> coherence,
+                         util::DiagnosticEmitter emit_error);
+
   simdojo::ExecMode exec_mode_;
   std::shared_ptr<DeviceCacheCoherence> coherence_ = std::make_shared<DeviceCacheCoherence>();
   /// Device-global GWS store shared by every CU of this XCD (see wire_gws_to_cus).

@@ -6488,7 +6488,7 @@ void VDivScaleF64Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
     s2 = amdgpu::source_modifier::apply_to_float(s2, 2, 0u, inst_.neg);
     const amdgpu::DivisionScaleResult<double> scaled =
         amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(),
-                          wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3);
+                          wf.cu().arch() != rocjitsu::IsaFamily::Rdna3);
     const double result = scaled.value;
     const bool set_vcc = scaled.post_scale;
     if (set_vcc)
@@ -6545,7 +6545,7 @@ RJ_NOINLINE void VDivScaleF64Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefron
     s2 = amdgpu::source_modifier::apply_to_float(s2, 2, 0u, inst_.neg);
     const amdgpu::DivisionScaleResult<double> scaled =
         amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(),
-                          wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3);
+                          wf.cu().arch() != rocjitsu::IsaFamily::Rdna3);
     const double result = scaled.value;
     const bool set_vcc = scaled.post_scale;
     if (set_vcc)

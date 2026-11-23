@@ -79,11 +79,13 @@ rdc_status_t RdcModuleMgrImpl::insert_modules() {
 
 RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher) : fetcher_(fetcher) {
   // this module has a unique constructor and must be initialized explicitly
+  // RDC reads no GPU field without it, so the handler cannot start without it either.
   try {
     auto smi_module = std::make_shared<RdcSmiLib>(fetcher);
     insert_modules(smi_module);
   } catch (RdcException& e) {
     RDC_LOG(RDC_ERROR, "Failed to insert module: " << typeid(RdcSmiLib).name() << "\n" << e.what());
+    throw;
   }
 
   // all other modules get initialized by insert_modules
