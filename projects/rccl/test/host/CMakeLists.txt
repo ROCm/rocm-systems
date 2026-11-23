@@ -1214,6 +1214,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroHierHost hier-host-test.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/recorder_fakes.cc
+    fakes/utils_fakes.cc
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_hier_host.yaml")
 target_compile_definitions(rccl-UnitTestsMicroHierHost PRIVATE
   HIER_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/hier_host.cc")

@@ -258,7 +258,12 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   const bool doInter = h->inter != nullptr;
   // The inter-host AllReduce runs out of place: in place it is several times slower.
   const size_t stride = (chunkBytes + 255) & ~size_t{255};
-  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes));
+  const size_t scratchBytes = doInter ? stride + chunkBytes : chunkBytes;
+  if (h->scratchBytes < scratchBytes) {
+    // Every rank grows on the same call, and one that cannot allocate would skip the ReduceScatter its peers wait in.
+    ncclResult_t res = reserveScratch(comm, h, scratchBytes);
+    if (!allRanksReady(comm, &res)) return res;
+  }
   char* rsOut = static_cast<char*>(h->scratch);
   char* agIn = doInter ? rsOut + stride : rsOut;
 
