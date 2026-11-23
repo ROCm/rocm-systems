@@ -71,7 +71,7 @@ jobs:
   build_python_bindings:
     # The sdist build itself is platform-agnostic and happy on a GitHub-hosted
     # runner, so only the leg that also runs the hardware test claims one of the
-    # scarce self-hosted AIS runners (shared with the AIS_system_* jobs).
+    # scarce self-hosted AIS runners (shared with the AIS_system_tests jobs).
     runs-on: ["${{ inputs.run_hardware_test && 'AIS' || 'ubuntu-24.04' }}"]
     outputs:
       hipfile_python_sdist_filename: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}

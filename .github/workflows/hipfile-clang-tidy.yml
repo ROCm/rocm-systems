@@ -10,13 +10,6 @@ env:
   AIS_CLANG_TIDY_VERSION: 24
   # Ubuntu codename for the apt.llvm.org repository, matching the CI image.
   AIS_CLANG_TIDY_DISTRO: noble
-  # apt.llvm.org repository that provides clang-tidy-${AIS_CLANG_TIDY_VERSION}.
-  # A released LLVM version has its own repository
-  # (llvm-toolchain-<distro>-<version>), but the development version only comes
-  # from the nightly trunk snapshot (llvm-toolchain-<distro>, no version). LLVM
-  # 24 is still in development, so this uses the snapshot; switch to
-  # llvm-toolchain-noble-24 once LLVM 24 branches for release.
-  AIS_CLANG_TIDY_APT_SUITE: llvm-toolchain-noble
 
 on:
   workflow_call:
@@ -89,10 +82,17 @@ jobs:
         # AIS_CLANG_TIDY_VERSION must track the LLVM major version of the ROCm
         # toolchain (ROCm 10.2 is LLVM 24). Mismatched clang-tidy versions report
         # conflicting diagnostics.
+        #
+        # A released LLVM version has its own apt.llvm.org repository
+        # (llvm-toolchain-<distro>-<version>), but the development version only
+        # comes from the nightly trunk snapshot (llvm-toolchain-<distro>). Use the
+        # versioned repository if it exists and fall back to the snapshot
+        # otherwise. apt.llvm.org creates the versioned repository when the
+        # release branches, which is also when the snapshot moves on to the next
+        # version, so this follows the switch without a workflow change.
         run: |
           docker exec \
             -t \
-            -e AIS_CLANG_TIDY_APT_SUITE \
             -e AIS_CLANG_TIDY_DISTRO \
             -e AIS_CLANG_TIDY_VERSION \
             "${AIS_CONTAINER_NAME}" \
@@ -102,11 +102,17 @@ jobs:
               apt-get install -y --no-install-recommends ca-certificates curl gnupg
               curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
                 -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-              echo "deb http://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/ ${AIS_CLANG_TIDY_APT_SUITE} main" \
+              suite="llvm-toolchain-${AIS_CLANG_TIDY_DISTRO}-${AIS_CLANG_TIDY_VERSION}"
+              if ! curl -fsL --retry 3 -o /dev/null \
+                "https://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/dists/${suite}/Release"; then
+                suite="llvm-toolchain-${AIS_CLANG_TIDY_DISTRO}"
+              fi
+              echo "Installing clang-tidy-${AIS_CLANG_TIDY_VERSION} from apt.llvm.org ${suite}"
+              echo "deb http://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/ ${suite} main" \
                 > /etc/apt/sources.list.d/llvm.list
               apt-get update
-              apt-get install -y --no-install-recommends clang-tidy-${AIS_CLANG_TIDY_VERSION}
-              clang-tidy-${AIS_CLANG_TIDY_VERSION} --version
+              apt-get install -y --no-install-recommends "clang-tidy-${AIS_CLANG_TIDY_VERSION}"
+              "clang-tidy-${AIS_CLANG_TIDY_VERSION}" --version
             '
       - name: Generate build files for hipFile with clang-tidy enabled
         run: |
