@@ -65,6 +65,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - RDC's log reports a field that fails to read with its AMD SMI status, and with the RDC status converted once, as `rdc.h` now documents for `rdc_field_value.status`. Some lines printed an RDC status as an AMD SMI one, or a status converted twice.
 
+- A counter that RDC starts for an XGMI event field (`RDC_EVNT_XGMI_*`) is released when it fails to start or to stop, instead of staying open until RDC exits.
+
 - `rdci group -l` lists 64 groups, the most RDC holds; it reported `The max limit reached`.
 
 - `rdc_job_get_stats()` and `rdc_policy_get()` with `rdcd` no longer report more GPUs, processes, or policies than the `rdcd` reply carries, or read past the entries it carries.
