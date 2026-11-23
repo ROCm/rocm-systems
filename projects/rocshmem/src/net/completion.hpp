@@ -31,17 +31,17 @@ namespace rocshmem {
 namespace net {
 
 /**
- * @brief Per-lane posted/completed bookkeeping for the standalone conduits.
+ * @brief Per-lane posted/completed bookkeeping for the standalone backends.
  *
- * The raw verbs conduit (and the OFI conduit when using a plain CQ) gets no
+ * The raw verbs backend (and the OFI backend when using a plain CQ) gets no
  * completion aggregation from its library: ibv_post_send / ibv_poll_cq only
  * hand back individual work completions. This tracks, per lane, how many
  * operations were posted vs. reaped, which is exactly what quiet(lane) needs:
  * spin the poller until outstanding(lane) == 0.
  *
  * This is intentionally NOT the MPI backend's B2/B3/B4 progress machinery --
- * it is plain counters. Threading is the conduit's concern; this type does no
- * locking (a conduit that posts and polls on the same progress thread needs
+ * it is plain counters. Threading is the backend's concern; this type does no
+ * locking (a backend that posts and polls on the same progress thread needs
  * none).
  *
  * Transport-neutral: no NIC headers.
