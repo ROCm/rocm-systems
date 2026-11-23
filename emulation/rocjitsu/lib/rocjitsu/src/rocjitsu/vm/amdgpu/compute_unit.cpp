@@ -570,7 +570,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
         case simdojo::ExecMode::FUNCTIONAL:
           compute_unit = create_functional_cu<Isa>(std::move(name), config, memory, l2);
           compute_unit->global_mem_pipeline_.set_direct_backing(vmem_direct_enabled());
-          compute_unit->scalar_mem_pipeline_.set_direct_backing(vmem_direct_enabled());
+          compute_unit->scalar_mem_pipeline_.set_direct_backing(vmem_scalar_direct_enabled());
           return util::Result::success();
         case simdojo::ExecMode::CLOCKED:
           compute_unit = std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(

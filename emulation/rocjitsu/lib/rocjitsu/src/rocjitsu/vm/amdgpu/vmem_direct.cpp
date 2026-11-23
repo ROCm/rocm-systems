@@ -23,6 +23,14 @@ bool vmem_line_groups_enabled() {
   return enabled;
 }
 
+bool vmem_scalar_direct_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_VMEM_SCALAR_DIRECT");
+    return vmem_direct_enabled() && (!value || std::strcmp(value, "0") != 0);
+  }();
+  return enabled;
+}
+
 bool vmem_direct_enabled() {
   static const bool enabled = [] {
     const char *value = std::getenv("RJ_VMEM_DIRECT");

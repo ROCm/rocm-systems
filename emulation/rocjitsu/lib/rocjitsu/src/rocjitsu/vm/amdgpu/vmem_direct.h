@@ -31,6 +31,11 @@ class VmDirectBacking;
 /// be compared inside one binary.
 [[nodiscard]] bool vmem_line_groups_enabled();
 
+/// @brief Whether admitted local scalar loads read host backing directly.
+/// @details Requires vmem_direct_enabled(); RJ_VMEM_SCALAR_DIRECT=0 keeps
+/// scalar loads alone on the K$ model.
+[[nodiscard]] bool vmem_scalar_direct_enabled();
+
 /// One plain vector request whose bounding box local ingress already admitted.
 struct DirectVectorRequest {
   const uint64_t *addrs = nullptr;
