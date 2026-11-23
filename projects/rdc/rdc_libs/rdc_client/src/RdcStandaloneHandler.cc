@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include <chrono>  // NOLINT
 #include <future>
+#include <limits>
 #include <utility>
 
 #include "rdc.grpc.pb.h"  // NOLINT
@@ -174,6 +175,43 @@ rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status, uint32_t 
   return static_cast<rdc_status_t>(rdc_status);
 }
 
+namespace {
+
+// How long a call waits for rdcd before it fails with RDC_ST_CLIENT_ERROR. A
+// diagnostic answers once its tests have run. A test case run, which can run an RVS
+// test for as long as its configuration sets, and a policy stream have no deadline.
+constexpr std::chrono::seconds kCallTimeout(120);
+constexpr std::chrono::minutes kDiagnosticTimeout(30);
+
+void set_timeout(::grpc::ClientContext* context, std::chrono::seconds timeout) {
+  context->set_deadline(std::chrono::system_clock::now() + timeout);
+}
+
+// Copies a field value from a GetLatestFieldValue or GetFieldSince reply. A value
+// of a type the C API does not have is a client error, and leaves *value as it was.
+template <typename Reply>
+rdc_status_t copy_field_value(const Reply& reply, rdc_field_value* value) {
+  const uint32_t type = reply.type();
+  if (type != INTEGER && type != DOUBLE && type != STRING && type != BLOB) {
+    RDC_LOG(RDC_ERROR, "rdcd replied with a field value of unknown type " << type);
+    return RDC_ST_CLIENT_ERROR;
+  }
+  value->field_id = static_cast<rdc_field_t>(reply.field_id());
+  value->status = reply.rdc_status();
+  value->ts = reply.ts();
+  value->type = static_cast<rdc_field_type_t>(type);
+  if (type == INTEGER) {
+    value->value.l_int = reply.l_int();
+  } else if (type == DOUBLE) {
+    value->value.dbl = reply.dbl();
+  } else {
+    strncpy_with_null(value->value.str, reply.str().c_str(), RDC_MAX_STR_LENGTH);
+  }
+  return RDC_ST_OK;
+}
+
+}  // namespace
+
 // JOB RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
                                                        const char job_id[64],
@@ -181,6 +219,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
   ::rdc::StartJobStatsRequest request;
   ::rdc::StartJobStatsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(groupId);
   request.set_job_id(job_id);
@@ -270,6 +309,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(const char job_id[64],
   ::rdc::GetJobStatsRequest request;
   ::rdc::GetJobStatsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_job_id(job_id);
   ::grpc::Status status = stub_->GetJobStats(&context, request, &reply);
@@ -311,6 +351,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(const char job_id[64]) {
   ::rdc::StopJobStatsRequest request;
   ::rdc::StopJobStatsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_job_id(job_id);
   ::grpc::Status status = stub_->StopJobStats(&context, request, &reply);
@@ -323,6 +364,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_remove(const char job_id[64]) {
   ::rdc::RemoveJobRequest request;
   ::rdc::RemoveJobResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_job_id(job_id);
   ::grpc::Status status = stub_->RemoveJob(&context, request, &reply);
@@ -335,6 +377,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_remove_all() {
   ::rdc::Empty request;
   ::rdc::RemoveAllJobResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   ::grpc::Status status = stub_->RemoveAllJob(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
@@ -351,6 +394,7 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_all(uint32_t gpu_index_list[RD
   ::rdc::Empty request;
   ::rdc::GetAllDevicesResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   ::grpc::Status status = stub_->GetAllDevices(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
@@ -376,6 +420,7 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
   ::rdc::GetDeviceAttributesRequest request;
   ::rdc::GetDeviceAttributesResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_gpu_index(gpu_index);
   ::grpc::Status status = stub_->GetDeviceAttributes(&context, request, &reply);
@@ -397,6 +442,7 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_component_version(
   ::rdc::GetComponentVersionRequest request;
   ::rdc::GetComponentVersionResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_component_index(component);
   ::grpc::Status status = stub_->GetComponentVersion(&context, request, &reply);
@@ -418,6 +464,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_gpu_create(rdc_group_type_t type,
   ::rdc::CreateGpuGroupRequest request;
   ::rdc::CreateGpuGroupResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_type(static_cast<::rdc::CreateGpuGroupRequest_GpuGroupType>(type));
   request.set_group_name(group_name);
@@ -434,6 +481,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_gpu_add(rdc_gpu_group_t group_id, u
   ::rdc::AddToGpuGroupRequest request;
   ::rdc::AddToGpuGroupResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   request.set_gpu_index(gpu_index);
@@ -454,6 +502,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_create(uint32_t num_field_ids
   ::rdc::CreateFieldGroupRequest request;
   ::rdc::CreateFieldGroupResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_field_group_name(field_group_name);
   for (uint32_t i = 0; i < num_field_ids; i++) {
@@ -473,6 +522,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_add_field(rdc_field_grp_t rdc
   ::rdc::AddFieldToFieldGroupRequest request;
   ::rdc::AddFieldToFieldGroupResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_field_group_id(rdc_field_group_id);
   request.set_field_id(rdc_field_id_number(field_id));
@@ -491,6 +541,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_get_info(
   ::rdc::GetFieldGroupInfoRequest request;
   ::rdc::GetFieldGroupInfoResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_field_group_id(rdc_field_group_id);
   ::grpc::Status status = stub_->GetFieldGroupInfo(&context, request, &reply);
@@ -520,6 +571,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_gpu_get_info(rdc_gpu_group_t p_rdc_
   ::rdc::GetGpuGroupInfoRequest request;
   ::rdc::GetGpuGroupInfoResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(p_rdc_group_id);
   ::grpc::Status status = stub_->GetGpuGroupInfo(&context, request, &reply);
@@ -547,6 +599,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_get_all_ids(rdc_gpu_group_t group_i
   ::rdc::Empty request;
   ::rdc::GetGroupAllIdsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   ::grpc::Status status = stub_->GetGroupAllIds(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
@@ -573,6 +626,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_get_all_ids(
   ::rdc::Empty request;
   ::rdc::GetFieldGroupAllIdsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   ::grpc::Status status = stub_->GetFieldGroupAllIds(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
@@ -594,6 +648,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_gpu_destroy(rdc_gpu_group_t p_rdc_g
   ::rdc::DestroyGpuGroupRequest request;
   ::rdc::DestroyGpuGroupResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(p_rdc_group_id);
   ::grpc::Status status = stub_->DestroyGpuGroup(&context, request, &reply);
@@ -604,6 +659,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_destroy(rdc_field_grp_t rdc_f
   ::rdc::DestroyFieldGroupRequest request;
   ::rdc::DestroyFieldGroupResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_field_group_id(rdc_field_group_id);
   ::grpc::Status status = stub_->DestroyFieldGroup(&context, request, &reply);
@@ -618,6 +674,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_watch(rdc_gpu_group_t group_id,
   ::rdc::WatchFieldsRequest request;
   ::rdc::WatchFieldsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   request.set_field_group_id(field_group_id);
@@ -638,6 +695,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(uint32_t gpu_index
   ::rdc::GetLatestFieldValueRequest request;
   ::rdc::GetLatestFieldValueResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_gpu_index(gpu_index);
   request.set_field_id(rdc_field_id_number(field));
@@ -645,17 +703,8 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(uint32_t gpu_index
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  value->field_id = static_cast<rdc_field_t>(reply.field_id());
-  value->status = reply.rdc_status();
-  value->ts = reply.ts();
-  value->type = static_cast<rdc_field_type_t>(reply.type());
-  if (value->type == INTEGER) {
-    value->value.l_int = reply.l_int();
-  } else if (value->type == DOUBLE) {
-    value->value.dbl = reply.dbl();
-  } else if (value->type == STRING || value->type == BLOB) {
-    strncpy_with_null(value->value.str, reply.str().c_str(), RDC_MAX_STR_LENGTH);
-  }
+  err_status = copy_field_value(reply, value);
+  if (err_status != RDC_ST_OK) return err_status;
 
   return RDC_ST_OK;
 }
@@ -671,6 +720,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
   ::rdc::GetFieldSinceRequest request;
   ::rdc::GetFieldSinceResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_gpu_index(gpu_index);
   request.set_field_id(rdc_field_id_number(field));
@@ -679,17 +729,8 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  value->field_id = static_cast<rdc_field_t>(reply.field_id());
-  value->status = reply.rdc_status();
-  value->ts = reply.ts();
-  value->type = static_cast<rdc_field_type_t>(reply.type());
-  if (value->type == INTEGER) {
-    value->value.l_int = reply.l_int();
-  } else if (value->type == DOUBLE) {
-    value->value.dbl = reply.dbl();
-  } else if (value->type == STRING || value->type == BLOB) {
-    strncpy_with_null(value->value.str, reply.str().c_str(), RDC_MAX_STR_LENGTH);
-  }
+  err_status = copy_field_value(reply, value);
+  if (err_status != RDC_ST_OK) return err_status;
   *next_since_time_stamp = reply.next_since_time_stamp();
 
   return RDC_ST_OK;
@@ -700,6 +741,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
   ::rdc::UnWatchFieldsRequest request;
   ::rdc::UnWatchFieldsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   request.set_field_group_id(field_group_id);
@@ -720,6 +762,7 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   ::rdc::DiagnosticRunRequest request;
   ::rdc::DiagnosticRunResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kDiagnosticTimeout);
 
   request.set_group_id(group_id);
   request.set_level(level);
@@ -737,6 +780,7 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   // A reply with an error status instead ends a run that failed or was rejected. (A stream
   // cannot use error_handle(): its status comes in a reply, and the gRPC status at the end.)
   rdc_status_t run_status = RDC_ST_OK;
+  bool has_response = false;
   while (reader->Read(&reply)) {
     if (reply.has_log()) {
       // TODO: Add different logging levels
@@ -750,11 +794,15 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
     if (reply.has_response()) {
       RDC_LOG(RDC_DEBUG, "HAS RESPONSE!");
       auto res = reply.response();
-      response->results_count = res.results_count();
-
       if (res.diag_info_size() > static_cast<int>(MAX_TEST_CASES)) {
         return RDC_ST_BAD_PARAMETER;
       }
+      for (const ::rdc::DiagnosticTestResult& result : res.diag_info()) {
+        if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
+          return RDC_ST_BAD_PARAMETER;
+        }
+      }
+      response->results_count = res.diag_info_size();
       for (int i = 0; i < res.diag_info_size(); i++) {
         const ::rdc::DiagnosticTestResult& result = res.diag_info(i);
         rdc_diag_test_result_t& to_result = response->diag_info[i];
@@ -766,12 +814,9 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
                           MAX_DIAG_MSG_LENGTH);
 
         to_result.test_case = static_cast<rdc_diag_test_cases_t>(result.test_case());
-        to_result.per_gpu_result_count = result.per_gpu_result_count();
+        to_result.per_gpu_result_count = result.gpu_results_size();
 
         // Set Result details
-        if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
-          return RDC_ST_BAD_PARAMETER;
-        }
         for (int j = 0; j < result.gpu_results_size(); j++) {
           auto per_gpu_result = result.gpu_results(j);
           rdc_diag_per_gpu_result_t& to_per_gpu = to_result.gpu_results[j];
@@ -782,12 +827,17 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
         }
         strncpy_with_null(to_result.info, result.info().c_str(), MAX_DIAG_MSG_LENGTH);
       }
+      has_response = true;
     }
   }
 
   auto status = reader->Finish();
   if (!status.ok()) {
     RDC_LOG(RDC_ERROR, "DiagnosticRun failed: gRPC status " << status.error_code());
+    return RDC_ST_CLIENT_ERROR;
+  }
+  if (run_status == RDC_ST_OK && !has_response) {
+    RDC_LOG(RDC_ERROR, "rdcd ended the diagnostic without its results");
     return RDC_ST_CLIENT_ERROR;
   }
   return run_status;
@@ -816,6 +866,7 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
   // A reply with a log message reports progress, as in rdc_diagnostic_run(). A reply with an
   // error status ends a run that failed or was rejected.
   rdc_status_t run_status = RDC_ST_OK;
+  bool has_result = false;
   while (reader->Read(&reply)) {
     if (reply.has_log()) {
       std::cout << "LOG: " << reply.log() << std::endl;
@@ -831,6 +882,9 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
     }
 
     auto result = reply.result();
+    if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
+      return RDC_ST_BAD_PARAMETER;
+    }
 
     to_result->status = static_cast<rdc_diag_result_t>(result.status());
 
@@ -839,12 +893,9 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
     strncpy_with_null(to_result->details.msg, result.details().msg().c_str(), MAX_DIAG_MSG_LENGTH);
 
     to_result->test_case = static_cast<rdc_diag_test_cases_t>(result.test_case());
-    to_result->per_gpu_result_count = result.per_gpu_result_count();
+    to_result->per_gpu_result_count = result.gpu_results_size();
 
     // Set Result details
-    if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
-      return RDC_ST_BAD_PARAMETER;
-    }
     for (int j = 0; j < result.gpu_results_size(); j++) {
       auto per_gpu_result = result.gpu_results(j);
       rdc_diag_per_gpu_result_t& to_per_gpu = to_result->gpu_results[j];
@@ -854,11 +905,16 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
                         MAX_DIAG_MSG_LENGTH);
     }
     strncpy_with_null(to_result->info, result.info().c_str(), MAX_DIAG_MSG_LENGTH);
+    has_result = true;
   }
 
   auto status = reader->Finish();
   if (!status.ok()) {
     RDC_LOG(RDC_ERROR, "DiagnosticTestCaseRun failed: gRPC status " << status.error_code());
+    return RDC_ST_CLIENT_ERROR;
+  }
+  if (run_status == RDC_ST_OK && !has_result) {
+    RDC_LOG(RDC_ERROR, "rdcd ended the test case run without its result");
     return RDC_ST_CLIENT_ERROR;
   }
   return run_status;
@@ -869,6 +925,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_update_all(uint32_t wait_for_update
   ::rdc::UpdateAllFieldsRequest request;
   ::rdc::UpdateAllFieldsResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_wait_for_update(wait_for_update);
   ::grpc::Status status = stub_->UpdateAllFields(&context, request, &reply);
@@ -882,6 +939,7 @@ rdc_status_t RdcStandaloneHandler::rdc_config_set(rdc_gpu_group_t group_id,
   ::rdc::SetConfigRequest request;
   ::rdc::SetConfigResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
 
@@ -902,6 +960,7 @@ rdc_status_t RdcStandaloneHandler::rdc_config_get(rdc_gpu_group_t group_id,
   ::rdc::GetConfigRequest request;
   ::rdc::GetConfigResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   ::grpc::Status status = stub_->GetConfig(&context, request, &reply);
@@ -929,6 +988,7 @@ rdc_status_t RdcStandaloneHandler::rdc_config_clear(rdc_gpu_group_t group_id) {
   ::rdc::ClearConfigRequest request;
   ::rdc::ClearConfigResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
 
@@ -949,6 +1009,7 @@ rdc_status_t RdcStandaloneHandler::get_mixed_component_version(
   ::rdc::GetMixedComponentVersionRequest request;
   ::rdc::GetMixedComponentVersionResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_component_id(component);
   ::grpc::Status status = stub_->GetMixedComponentVersion(&context, request, &reply);
@@ -965,6 +1026,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_set(rdc_gpu_group_t group_id, rdc_
   ::rdc::SetPolicyRequest request;
   ::rdc::SetPolicyResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   auto to_policy = request.mutable_policy();
@@ -986,6 +1048,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_get(rdc_gpu_group_t group_id, uint
   ::rdc::GetPolicyRequest request;
   ::rdc::GetPolicyResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   if (count == nullptr) {
     return RDC_ST_BAD_PARAMETER;
@@ -1024,6 +1087,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
   ::rdc::DeletePolicyRequest request;
   ::rdc::DeletePolicyResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
 
@@ -1210,6 +1274,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
   ::rdc::UnRegisterPolicyRequest request;
   ::rdc::UnRegisterPolicyResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   // A callback cannot wait for its own reader, or for another reader that
   // may be waiting for it, so from a callback the stream goes to draining_
@@ -1281,6 +1346,7 @@ rdc_status_t RdcStandaloneHandler::rdc_health_set(rdc_gpu_group_t group_id,
   ::rdc::SetHealthRequest request;
   ::rdc::SetHealthResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   request.set_components(components);
@@ -1299,6 +1365,7 @@ rdc_status_t RdcStandaloneHandler::rdc_health_get(rdc_gpu_group_t group_id,
   ::rdc::GetHealthRequest request;
   ::rdc::GetHealthResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   ::grpc::Status status = stub_->GetHealth(&context, request, &reply);
@@ -1318,6 +1385,7 @@ rdc_status_t RdcStandaloneHandler::rdc_health_check(rdc_gpu_group_t group_id,
   ::rdc::CheckHealthRequest request;
   ::rdc::CheckHealthResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   ::grpc::Status status = stub_->CheckHealth(&context, request, &reply);
@@ -1330,7 +1398,7 @@ rdc_status_t RdcStandaloneHandler::rdc_health_check(rdc_gpu_group_t group_id,
   }
 
   response->overall_health = static_cast<rdc_health_result_t>(res.overall_health());
-  response->incidents_count = res.incidents_count();
+  response->incidents_count = res.incidents_size();
 
   for (int i = 0; i < res.incidents_size(); i++) {
     const ::rdc::HealthIncidents& result = res.incidents(i);
@@ -1352,6 +1420,7 @@ rdc_status_t RdcStandaloneHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
   ::rdc::ClearHealthRequest request;
   ::rdc::ClearHealthResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_group_id(group_id);
   ::grpc::Status status = stub_->ClearHealth(&context, request, &reply);
@@ -1366,6 +1435,7 @@ rdc_status_t RdcStandaloneHandler::rdc_device_topology_get(uint32_t gpu_index,
   ::rdc::GetTopologyRequest request;
   ::rdc::GetTopologyResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   request.set_gpu_index(gpu_index);
   ::grpc::Status status = stub_->GetTopology(&context, request, &reply);
@@ -1373,14 +1443,14 @@ rdc_status_t RdcStandaloneHandler::rdc_device_topology_get(uint32_t gpu_index,
   if (err_status != RDC_ST_OK) return err_status;
 
   ::rdc::Topology Topology = reply.toppology();
-  if (Topology.num_of_gpus() > RDC_MAX_NUM_DEVICES) {
+  if (Topology.link_infos_size() > RDC_MAX_NUM_DEVICES) {
     return RDC_ST_BAD_PARAMETER;
   }
 
-  results->num_of_gpus = Topology.num_of_gpus();
+  results->num_of_gpus = Topology.link_infos_size();
   results->numa_node = Topology.numa_node();
 
-  for (uint32_t i = 0; i < Topology.num_of_gpus(); ++i) {
+  for (int i = 0; i < Topology.link_infos_size(); ++i) {
     ::rdc::TopologyLinkInfo linkinfo = Topology.link_infos(i);
     results->link_infos[i].gpu_index = linkinfo.gpu_index();
     results->link_infos[i].weight = linkinfo.weight();
@@ -1398,27 +1468,30 @@ rdc_status_t RdcStandaloneHandler::rdc_link_status_get(rdc_link_status_t* result
   ::rdc::Empty request;
   ::rdc::GetLinkStatusResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   ::grpc::Status status = stub_->GetLinkStatus(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
-  ::rdc::LinkStatus LinkStatus = reply.linkstatus();
-  if (LinkStatus.num_of_gpus() > RDC_MAX_NUM_DEVICES) {
+  const ::rdc::LinkStatus& LinkStatus = reply.linkstatus();
+  if (LinkStatus.gpus_size() > RDC_MAX_NUM_DEVICES) {
     return RDC_ST_BAD_PARAMETER;
   }
-
-  results->num_of_gpus = LinkStatus.num_of_gpus();
-
-  for (uint32_t i = 0; i < LinkStatus.num_of_gpus(); ++i) {
-    ::rdc::GpuLinkStatus gpulinkstatus = LinkStatus.gpus(i);
-    if (gpulinkstatus.num_of_links() > RDC_MAX_NUM_OF_LINKS) {
+  for (const ::rdc::GpuLinkStatus& gpulinkstatus : LinkStatus.gpus()) {
+    if (gpulinkstatus.link_states_size() > RDC_MAX_NUM_OF_LINKS) {
       return RDC_ST_BAD_PARAMETER;
     }
+  }
+
+  results->num_of_gpus = LinkStatus.gpus_size();
+
+  for (int i = 0; i < LinkStatus.gpus_size(); ++i) {
+    const ::rdc::GpuLinkStatus& gpulinkstatus = LinkStatus.gpus(i);
     results->gpus[i].gpu_index = gpulinkstatus.gpu_index();
-    results->gpus[i].num_of_links = gpulinkstatus.num_of_links();
+    results->gpus[i].num_of_links = gpulinkstatus.link_states_size();
     results->gpus[i].link_types = static_cast<rdc_topology_link_type_t>(gpulinkstatus.link_types());
-    for (uint32_t n = 0; n < gpulinkstatus.num_of_links(); n++) {
+    for (int n = 0; n < gpulinkstatus.link_states_size(); n++) {
       results->gpus[i].link_states[n] = static_cast<rdc_link_state_t>(gpulinkstatus.link_states(n));
     }
   }
@@ -1431,13 +1504,18 @@ rdc_status_t RdcStandaloneHandler::rdc_get_num_partition(uint32_t index, uint16_
   request.set_gpu_index(index);
   ::rdc::GetNumPartitionResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   ::grpc::Status status = stub_->GetNumPartition(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) {
     return err_status;
   }
-  *num_partition = reply.num_partition();
+  if (reply.num_partition() > std::numeric_limits<uint16_t>::max()) {
+    RDC_LOG(RDC_ERROR, "rdcd replied with " << reply.num_partition() << " partitions");
+    return RDC_ST_CLIENT_ERROR;
+  }
+  *num_partition = static_cast<uint16_t>(reply.num_partition());
   return RDC_ST_OK;
 }
 
@@ -1450,6 +1528,7 @@ rdc_status_t RdcStandaloneHandler::rdc_instance_profile_get(
 
   ::rdc::GetInstanceProfileResponse reply;
   ::grpc::ClientContext context;
+  set_timeout(&context, kCallTimeout);
 
   ::grpc::Status status = stub_->GetInstanceProfile(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());

@@ -1037,7 +1037,11 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle);
  *  @brief Connect to rdcd daemon
  *
  *  @details This method is used to connect to a remote stand-alone
- *  rdcd daemon.
+ *  rdcd daemon. A call through the handle fails with ::RDC_ST_CLIENT_ERROR
+ *  if rdcd does not answer it within 120 seconds, or 30 minutes for
+ *  rdc_diagnostic_run(). rdc_test_case_run(), which runs a test for as long
+ *  as its configuration sets, and the stream that rdc_policy_register()
+ *  opens have no deadline.
  *
  *  @param[in] ipAndPort The IP and port of the remote rdcd. The ipAndPort
  *  can be specified in this x.x.x.x:yyyy format, where x.x.x.x is the
@@ -1121,7 +1125,7 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  @retval ::RDC_ST_MAX_LIMIT is returned if the job has more than
  *  ::RDC_MAX_NUM_GPUS_PER_JOB GPUs.
  *  @retval ::RDC_ST_BAD_PARAMETER is returned if job_id is NULL, has no NUL in
- *  its first 64 bytes, or has a control character.
+ *  its first 64 bytes, or has a control character, or if p_job_info is NULL.
  */
 rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
                                rdc_job_info_t* p_job_info);
@@ -1210,6 +1214,9 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle, uint32_t wait_for_u
  *  ::RDC_MAX_NUM_DEVICES.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if gpu_index_list is NULL, or,
+ *  on a handle from rdc_connect(), if rdcd sent more GPUs than gpu_index_list
+ *  holds.
  */
 rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
                                 uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
@@ -1272,7 +1279,7 @@ rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_com
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_BAD_PARAMETER is returned if group_name is NULL or has
- *  no NUL in its first RDC_MAX_STR_LENGTH bytes.
+ *  no NUL in its first RDC_MAX_STR_LENGTH bytes, or if p_rdc_group_id is NULL.
  */
 rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t type,
                                   const char* group_name, rdc_gpu_group_t* p_rdc_group_id);
@@ -1330,6 +1337,7 @@ rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_MAX_LIMIT there are more than ::RDC_MAX_NUM_GROUPS
  *  groups; count is not set.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if group_id_list is NULL.
  */
 rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id_list[],
                                    uint32_t* count);
@@ -1408,6 +1416,7 @@ rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_FLDGROUP_NOT_FOUND is returned if the field group does not exist.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if field_group_info is NULL.
  */
 rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id,
                                       rdc_field_group_info_t* field_group_info);
@@ -1427,6 +1436,7 @@ rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_MAX_LIMIT there are more than
  *  ::RDC_MAX_NUM_FIELD_GROUPS field groups; count is not set.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if field_group_id_list is NULL.
  */
 rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
                                          rdc_field_grp_t field_group_id_list[], uint32_t* count);
@@ -1496,6 +1506,9 @@ rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id
  *  @param[out] value  The field value got from cache.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, does not answer in time, or sent a value of a type that
+ *  rdc_field_type_t does not have.
  */
 rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                         rdc_field_t field, rdc_field_value* value);
@@ -1520,6 +1533,9 @@ rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle, uint32_t gpu_
  *  @param[out] value  The field value got from cache.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, does not answer in time, or sent a value of a type that
+ *  rdc_field_type_t does not have.
  */
 rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_field_t field, uint64_t since_time_stamp,
@@ -1572,7 +1588,8 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *  @retval ::RDC_ST_MAX_LIMIT On a handle from rdc_connect(): rdcd already
  *  runs two diagnostics.
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
- *  be reached, or the connection failed during the run.
+ *  be reached, does not finish the run within 30 minutes, the connection
+ *  failed during the run, or rdcd ended the run without its results.
  *  @retval ::RDC_ST_BAD_PARAMETER response is NULL, or, on a handle from
  *  rdc_connect(), the run reported more test cases or GPU results than
  *  rdc_diag_response_t holds.
@@ -1608,7 +1625,8 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
  *  @retval ::RDC_ST_MAX_LIMIT On a handle from rdc_connect(): rdcd already
  *  runs two diagnostics.
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
- *  be reached, or the connection failed during the run.
+ *  be reached, the connection failed during the run, or rdcd ended the run
+ *  without its result.
  *  @retval ::RDC_ST_BAD_PARAMETER result is NULL, or, on a handle from
  *  rdc_connect(), the run reported more GPU results than rdc_diag_test_result_t
  *  holds.
@@ -1701,6 +1719,7 @@ rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if count or policies is NULL.
  */
 rdc_status_t rdc_policy_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id, uint32_t* count,
                             rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]);
@@ -1836,6 +1855,7 @@ rdc_status_t rdc_health_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if components is NULL.
  */
 rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             unsigned int* components);
@@ -1854,6 +1874,8 @@ rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_NOT_FOUND is returned if no health watches are set for the group.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if response is NULL, or, on a
+ *  handle from rdc_connect(), if rdcd sent more incidents than response holds.
  */
 rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                               rdc_health_response_t* response);
@@ -1890,6 +1912,8 @@ rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_NOT_FOUND gpu_index, its NUMA node or another GPU cannot be found.
  *  @retval ::RDC_ST_MAX_LIMIT the system has more GPUs than link_infos can hold.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if results is NULL, or, on a
+ *  handle from rdc_connect(), if rdcd sent more GPUs than results holds.
  *
  *  Other failures, such as an invalid handle or an error from rdcd, return their own
  *  status. On any error, results is not valid.
@@ -1908,6 +1932,9 @@ rdc_status_t rdc_device_topology_get(rdc_handle_t p_rdc_handle, uint32_t gpu_ind
  * lts  The link up or down status
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if results is NULL, or, on a
+ *  handle from rdc_connect(), if rdcd sent more GPUs, or links of a GPU, than
+ *  results holds.
  */
 rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* results);
 /**
@@ -2072,6 +2099,9 @@ rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity
  * @retval ::RDC_ST_OK on success.
  * @retval ::RDC_ST_NOT_FOUND for a GPU that AMD SMI cannot identify, unless
  * it can identify another partition of the same GPU (see rdc_device_get_all()).
+ * @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot be
+ * reached, does not answer in time, or reported more partitions than a
+ * uint16_t holds.
  */
 rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
                                    uint16_t* num_partition);
