@@ -13,6 +13,7 @@ from utils.metrics.expression import (
     InvalidExpressionError,
     build_eval_string,
     columns_read,
+    normalize_equation,
     update_denominator_string,
     update_normal_unit_string,
 )
@@ -159,3 +160,141 @@ def test_columns_read_follows_built_in_variables():
     assert columns_read(
         "raw_pmc_df['TCC_HIT[0]'] / ammolite__numActiveCUs", build_in_vars
     ) == {"TCC_HIT[0]", "SQ_BUSY_CU_CYCLES", "GRBM_GUI_ACTIVE"}
+
+
+class TestCriticalCorrectness:
+    """Rewrites that would change the value of an equation."""
+
+    def test_unary_negation_preserves_semantics(self):
+        """A minus sign keeps the parentheses of its operand: -(a + b) is not -a + b."""
+        for equation in ["-(a + b)", "-(a * b)", "-(a - b)", "a - -b", "-SUM(x) / y"]:
+            assert normalize_equation(equation) == equation
+
+
+class TestConstantFactoring:
+    """Constants move out of the aggregation functions."""
+
+    @pytest.mark.parametrize("func", ["SUM", "AVG", "MIN", "MAX"])
+    def test_constant_factored_out(self, func):
+        """SUM(x * 128) becomes 128 * SUM(x)."""
+        assert normalize_equation(f"{func}(x * 128)") == f"128 * {func}(x)"
+        assert normalize_equation(f"{func}(64 * x)") == f"64 * {func}(x)"
+
+    def test_real_world_cache_bw_equation(self):
+        """An equation from the gfx115x configs."""
+        input_eq = (
+            "SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / "
+            "SUM(End_Timestamp - Start_Timestamp)"
+        )
+        expected = (
+            "128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / "
+            "SUM(End_Timestamp - Start_Timestamp)"
+        )
+        assert normalize_equation(input_eq) == expected
+
+    def test_nested_aggregations(self):
+        """Each aggregation gives up its own constant."""
+        result = normalize_equation("SUM(x * 2) / SUM(y * 3)")
+        assert result == "2 * SUM(x) / (3 * SUM(y))"
+
+    def test_every_constant_factored_out(self):
+        """Both constants come out in one run, so a second run changes nothing."""
+        assert normalize_equation("SUM(x * 4 * 2)") == "2 * (4 * SUM(x))"
+        assert normalize_equation("2 * (4 * SUM(x))") == "2 * (4 * SUM(x))"
+
+    def test_no_factoring_for_non_aggregation(self):
+        """Only SUM, AVG, MIN and MAX give up their constants."""
+        assert normalize_equation("SQRT(x * 2)") == "SQRT(x * 2)"
+
+    def test_no_factoring_for_addition(self):
+        """Only a product gives up its constant, not a sum."""
+        assert normalize_equation("SUM(x + 128)") == "SUM(x + 128)"
+
+    def test_no_factoring_that_changes_the_result(self):
+        """A call with two arguments keeps its constant, and so does a negative
+        constant, which would swap MIN and MAX."""
+        assert normalize_equation("MAX(2 * x, 1)") == "MAX(2 * x, 1)"
+        assert normalize_equation("MIN(-2 * x)") == "MIN(-2 * x)"
+
+
+class TestParenthesesMinimization:
+    """Only the parentheses that the order of evaluation needs are kept."""
+
+    def test_unnecessary_parens_removed(self):
+        """A left operand of the same precedence needs no parentheses."""
+        assert normalize_equation("(a + b) + c") == "a + b + c"
+        assert normalize_equation("(a * b) * c") == "a * b * c"
+
+    def test_necessary_parens_preserved(self):
+        """A right operand of the same precedence keeps its parentheses, so the
+        order of evaluation stays the same."""
+        assert normalize_equation("a - (b - c)") == "a - (b - c)"
+        assert normalize_equation("a / (b / c)") == "a / (b / c)"
+        assert normalize_equation("a + (b + c)") == "a + (b + c)"
+
+    def test_precedence_parens_preserved(self):
+        """A sum inside a product keeps its parentheses."""
+        assert normalize_equation("(a + b) * c") == "(a + b) * c"
+        assert normalize_equation("a * (b + c)") == "a * (b + c)"
+
+
+class TestRealWorldEquations:
+    """Equations in the forms the YAML files use."""
+
+    def test_variable_substitution(self):
+        """A $variable is a name like a counter, not a constant to factor out."""
+        eq = (
+            "SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)"
+        )
+        assert normalize_equation(eq) == eq
+
+    def test_peak_value_equation(self):
+        """A peak such as $L2Bw_empirical_peak * 1e9 stays as written."""
+        eq = "$L2Bw_empirical_peak * 1e9"
+        assert normalize_equation(eq) == eq
+
+    def test_scientific_notation(self):
+        """A number in scientific notation stays as written."""
+        assert normalize_equation("x / 1e9") == "x / 1e9"
+
+    def test_channel_templates_left_as_written(self):
+        """A per-channel template such as TCC_ATOMIC[::_1] stays as written."""
+        equation = "SUM(TO_INT(TCC_ATOMIC[::_1])) / SUM($denom)"
+        assert normalize_equation(equation) == equation
+
+
+class TestErrorHandling:
+    """Equations that do not parse raise ValueError."""
+
+    @pytest.mark.parametrize(
+        "equation",
+        [
+            "a @ b",  # a character that no equation uses
+            "a + b extra",  # a name after the end of the equation
+            "a + (b",  # an unclosed parenthesis
+            "a + b)",  # a closing parenthesis without its opening one
+            "a +",  # an operator without its right operand
+            "SUM()",  # a call without an argument
+            "TCC_HIT[0]",  # a single channel, which no equation names
+            "a ** b",  # Python syntax outside the equation grammar
+            "a if b else c",
+            "a < b",
+            "$x(1)",  # a call of a variable
+            "a$b",  # a $ inside a name
+        ],
+    )
+    def test_unparseable_equation_raises(self, equation):
+        with pytest.raises(ValueError):
+            normalize_equation(equation)
+
+    def test_whitespace_normalization(self):
+        """Each operator has one space on each side."""
+        assert normalize_equation("a+b") == "a + b"
+        assert normalize_equation("a  +  b") == "a + b"
+
+    def test_empty_and_simple_cases(self):
+        """A single number or name stays as written, also None, which a panel
+        writes for a column without a value."""
+        assert normalize_equation("42") == "42"
+        assert normalize_equation("x") == "x"
+        assert normalize_equation("None") == "None"
