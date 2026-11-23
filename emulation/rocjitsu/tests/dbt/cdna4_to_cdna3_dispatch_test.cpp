@@ -5,6 +5,7 @@
 /// @brief End-to-end dispatch tests for CDNA4-to-CDNA3 DBT.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/amd_hsa_signal.h>
@@ -898,7 +899,8 @@ void translate_triton_fixture(const char *name, uint32_t mach, std::vector<uint8
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, mach, options);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna3, mach,
+                              options);
   auto translated = translator.translate(*co);
   ASSERT_FALSE(translated.elf_bytes.empty());
   ASSERT_TRUE(translated.ok()) << (translated.diagnostics.empty()
@@ -918,7 +920,7 @@ void translate_hip_fixture(const char *name, uint32_t mach, std::vector<uint8_t>
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, mach);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna3, mach);
   auto translated = translator.translate(*co);
   ASSERT_FALSE(translated.elf_bytes.empty());
   ASSERT_TRUE(translated.ok()) << "Translation diagnostic: "
@@ -957,7 +959,8 @@ void translate_cvt_pk_bf16_spill_fixture(uint32_t mach, std::vector<uint8_t> &el
   ASSERT_TRUE(widened_source.is_valid());
   BinaryTranslatorOptions options;
   options.debug_min_free_vgpr = 256;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, mach, options);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna3, mach,
+                              options);
   auto translated = translator.translate(widened_source);
   ASSERT_TRUE(translated.ok()) << (translated.diagnostics.empty()
                                        ? "Translation failed without diagnostics"
@@ -1858,7 +1861,7 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopTranslates) {
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3,
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna3,
                               EF_AMDGPU_MACH_AMDGCN_GFX942);
   auto translated = translator.translate(*co);
   ASSERT_FALSE(translated.elf_bytes.empty());
@@ -1952,7 +1955,7 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, target.mach);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna3, target.mach);
   auto translated = translator.translate(*co);
   ASSERT_FALSE(translated.elf_bytes.empty());
   ASSERT_TRUE(translated.ok()) << "Translation diagnostic: "

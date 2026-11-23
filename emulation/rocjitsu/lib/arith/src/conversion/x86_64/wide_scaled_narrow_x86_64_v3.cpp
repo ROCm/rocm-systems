@@ -11,7 +11,7 @@
 namespace rocjitsu::arith {
 // Consume all source elements before publishing each lane group's results.
 // Inactive lanes preserve D; gfx950 additionally preserves scale-exponent255 lanes.
-template <ScaledNarrowDestination Dst, bool Stochastic, bool FullScale>
+template <ScaledNarrowDestination Dst, bool Stochastic, bool Gfx1250>
 void wide_scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSource source,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *scale, bool saturate,
@@ -20,27 +20,18 @@ void wide_scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSou
       Dst == ScaledNarrowDestination::Fp4                                            ? 4
       : (Dst == ScaledNarrowDestination::Fp6 || Dst == ScaledNarrowDestination::Bf6) ? 6
                                                                                      : 8;
-  constexpr int elements = FullScale ? (bits == 6 ? 16 : 8) : 32;
+  constexpr int elements = Gfx1250 ? (bits == 6 ? 16 : 8) : 32;
   constexpr int words = elements * bits / 32;
   for (int lane = 0; lane < lanes; lane += 8) {
-    __m256 scaling;
-    __m256i preserve = _mm256_setzero_si256();
-    if constexpr (FullScale) {
-      scaling = _mm256_loadu_ps(reinterpret_cast<const float *>(scale + lane));
-    } else {
-      auto exponent = _mm256_and_si256(
-          _mm256_srli_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(scale + lane)),
-                            23),
-          _mm256_set1_epi32(255));
-      preserve = _mm256_cmpeq_epi32(exponent, _mm256_set1_epi32(255));
-      auto subnormal_scale = _mm256_cmpeq_epi32(exponent, _mm256_set1_epi32(254));
-      auto inverse_bits = _mm256_slli_epi32(_mm256_sub_epi32(_mm256_set1_epi32(254), exponent), 23);
-      inverse_bits =
-          _mm256_blendv_epi8(inverse_bits, _mm256_set1_epi32(0x00400000), subnormal_scale);
-      // Exponent 255 keeps D, so use a harmless multiplier in those lanes.
-      inverse_bits = _mm256_blendv_epi8(inverse_bits, _mm256_set1_epi32(0x3f800000), preserve);
-      scaling = _mm256_castsi256_ps(inverse_bits);
-    }
+    auto raw_scale = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(scale + lane));
+    auto exponent = _mm256_and_si256(_mm256_srli_epi32(raw_scale, 23), _mm256_set1_epi32(255));
+    auto nan_scale = _mm256_cmpeq_epi32(exponent, _mm256_set1_epi32(255));
+    auto subnormal_scale = _mm256_cmpeq_epi32(exponent, _mm256_set1_epi32(254));
+    auto inverse_bits = _mm256_slli_epi32(_mm256_sub_epi32(_mm256_set1_epi32(254), exponent), 23);
+    inverse_bits = _mm256_blendv_epi8(inverse_bits, _mm256_set1_epi32(0x00400000), subnormal_scale);
+    // Exponent 255 is handled separately from the multiply.
+    inverse_bits = _mm256_blendv_epi8(inverse_bits, _mm256_set1_epi32(0x3f800000), nan_scale);
+    auto inverse_scale = _mm256_castsi256_ps(inverse_bits);
 
     auto seed = _mm256_setzero_si256();
     if constexpr (Stochastic) {
@@ -53,7 +44,7 @@ void wide_scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSou
     for (int element = 0; element < elements; ++element) {
       const uint32_t *input;
       if (source == ScaledNarrowSource::F32) {
-        if constexpr (Stochastic || FullScale) {
+        if constexpr (Stochastic || Gfx1250) {
           input = a[element];
         } else {
           // Index before selecting to avoid GCC 13.3 miscompiling the array base.
@@ -67,14 +58,11 @@ void wide_scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSou
         raw = _mm256_srli_epi32(raw, 16);
       }
       auto decoded = x86_64_v3::scaled_narrow_decode(raw, source, flush_input);
-      __m256 scaled;
-      if constexpr (FullScale) {
-        scaled = _mm256_div_ps(decoded, scaling);
-      } else {
-        scaled = _mm256_mul_ps(decoded, scaling);
+      auto scaled = _mm256_castps_si256(_mm256_mul_ps(decoded, inverse_scale));
+      if constexpr (Gfx1250) {
+        scaled = _mm256_blendv_epi8(scaled, _mm256_set1_epi32(kE8M0ScaleNaNBits), nan_scale);
       }
-      auto value = x86_64_v3::scaled_narrow_encode<Dst, Stochastic>(_mm256_castps_si256(scaled),
-                                                                    seed, saturate);
+      auto value = x86_64_v3::scaled_narrow_encode<Dst, Stochastic>(scaled, seed, saturate);
       // Six-bit formats can straddle adjacent destination registers.
       int bit = element * bits, word = bit / 32, shift = bit % 32;
       result[word] =
@@ -91,7 +79,9 @@ void wide_scaled_narrow_x86_64_v3(int lanes, uint64_t exec_mask, ScaledNarrowSou
     }
     auto active = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                     _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
-    active = _mm256_andnot_si256(preserve, active);
+    if constexpr (!Gfx1250) {
+      active = _mm256_andnot_si256(nan_scale, active);
+    }
     for (int word = 0; word < words; ++word) {
       _mm256_maskstore_epi32(reinterpret_cast<int *>(d[word] + lane), active, result[word]);
     }

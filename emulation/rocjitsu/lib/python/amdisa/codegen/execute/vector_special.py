@@ -991,7 +991,7 @@ def gen_vector_div_scale(
         L.extend(vop3_src_mod('s2', 2, has_abs))
     mode = 'f16_f64' if is_f64 else 'f32'
     # RDNA3 preserves F64 signaling NaNs; physical gfx1100 and gfx1201 differ.
-    quiet_nan = ', wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3' if is_f64 else ''
+    quiet_nan = ', wf.cu().arch() != rocjitsu::IsaFamily::Rdna3' if is_f64 else ''
     L.append(
         f'    const amdgpu::DivisionScaleResult<{fp_type}> scaled = amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}(){quiet_nan});'
     )
