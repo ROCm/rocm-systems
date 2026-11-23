@@ -1,0 +1,87 @@
+# What HRR CI runs and where, read by
+# projects/hrr/tests/scripts/hrr_ci_configure.py (hrr-ci.yml's configure job).
+# Unknown keys, triggers or families are errors.
+version: 1
+
+# The ROCm SDK the host unit job installs. Pinned so a run does not depend on
+# the day's nightly.
+rocm_sdk_version: "10.1.0a20260822"
+
+# Path prefixes, relative to the repository root. A path ending in "/" matches
+# everything under it; any other path matches only itself.
+paths:
+  # A change under any of these runs the API check, script and unit jobs.
+  # Changes under emulation/rocjitsu, runtimes/api-headers and
+  # shared/machine-readable-isa are not path triggers; the nightly schedule and
+  # workflow_dispatch cover them.
+  cpu:
+    - projects/hrr/
+    - projects/clr/hipamd/src/hrr/
+    - projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
+    - projects/clr/hipamd/src/amdhip.def.in
+    - projects/hip/include/hip/hip_runtime_api.h
+    - .github/workflows/hrr-ci.yml
+    - .github/workflows/hrr-gpu.yml
+  # A change under any of these also runs the capture-enabled build and the
+  # rocJitsu suite. hip_runtime_api.h is deliberately absent: almost every HIP API change
+  # touches it, and the script tests job (test_generated_files_current.py)
+  # already regenerates HRR from it and compares.
+  # amdhip.def.in is absent for the same reason (cpu only).
+  capture:
+    - projects/clr/hipamd/src/hrr/
+    - projects/clr/hipamd/src/hip_context.cpp
+    - projects/clr/hipamd/src/hip_code_object.cpp
+    - projects/clr/hipamd/src/hip_code_object.hpp
+    - projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
+    - projects/hrr/CMakeLists.txt
+    - projects/hrr/include/
+    - projects/hrr/playback/
+    - projects/hrr/tests/CMakeLists.txt
+    - projects/hrr/tests/include/
+    - projects/hrr/tests/integration/
+    - projects/hrr/tests/config/integration.yaml
+    - projects/hrr/tests/scripts/run_catch2.py
+    - projects/hrr/tests/scripts/hrr_test_config.py
+    - projects/hrr/tests/scripts/summarize_junit.py
+    - projects/hrr/tests/scripts/hrr_capture_build.py
+    - projects/hrr/tests/scripts/hrr_ci_configure.py
+    - projects/hrr/tests/scripts/hrr_ci_report.py
+    - .github/workflows/hrr-ci.yml
+    - .github/workflows/hrr-gpu.yml
+  # Runs the suite without changing the capture binary.
+  suite:
+    - projects/hrr/tests/config/ci.yaml
+  # Ignored by both lists; hrr-skills.yml covers these.
+  excluded:
+    - projects/hrr/skills/
+    - projects/hrr/README.md
+
+# A pull request with this label runs the rocJitsu suite even when it touches no
+# capture path. It must still touch a cpu, capture or suite path: hrr-ci.yml's
+# paths filter, which is those lists, starts no run otherwise.
+capture_label: ci:hrr-capture
+
+# Every job runs on the rocJitsu simulator; no job uses a real GPU. Each row is
+# a rocJitsu KMD config that exposes the family's GPU to HIP, and the whole
+# integration suite passes on it, less the cases integration.yaml skips with
+# "emulator: true" (each names its reason). Checked 2026-10-19 on a
+# two-GPU gfx950 config and the single-GPU configs of the others.
+#
+# Not listed: gfx103x, gfx1150 and gfx1153, which rocJitsu has no config for.
+# A workflow_dispatch families input that names one fails the configure job.
+# default_families are the jobs a pull request, push and the nightly run;
+# the workflow_dispatch families input replaces them with any key in configs.
+# The integration binary is built for targets.arch in integration.yaml; the
+# configure job fails unless that covers every GPU target TheRock lists for
+# each family in configs.
+simulator:
+  runner: ubuntu-26.04
+  default_families: [gfx90a, gfx94x, gfx950, gfx110x, gfx1151, gfx120x, gfx125x]
+  configs:
+    gfx94x: emulation/rocjitsu/configs/gfx942_cdna3_kmd.json
+    gfx950: emulation/rocjitsu/configs/gfx950_mi355x_kmd_2gpu.json
+    gfx90a: emulation/rocjitsu/configs/gfx90a_mi210_kmd.json
+    gfx110x: emulation/rocjitsu/configs/gfx1100_w7900.json
+    gfx1151: emulation/rocjitsu/configs/gfx1151.json
+    gfx120x: emulation/rocjitsu/configs/gfx1201_r9700.json
+    gfx125x: emulation/rocjitsu/configs/gfx1250_mi455x_kmd_4gpu.json
