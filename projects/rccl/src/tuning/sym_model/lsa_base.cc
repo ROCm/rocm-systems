@@ -171,6 +171,9 @@ ncclResult_t ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymk
     busBytes = (nRanks - 1) * nBytes; // Wrong. Should be nRanks*nBytes but we want to beat non-MC.
     busMultiplier = 0.55 * nRanks;
     break;
+  case ncclSymkKernelId_ReduceScatter_HierLsaLDST:
+    busBytes = (nRanks - 1) * nBytes;
+    break;
   }
 
   bool isTma = ncclSymkTmaKernelMask() >> kernelId & 1;

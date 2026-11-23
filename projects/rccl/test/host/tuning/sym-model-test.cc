@@ -477,6 +477,33 @@ TEST_F(SymModelTdmHierTest, TmaForced_TdmKernelsSplitAllGatherLikeTheirVectorTwi
   }
 }
 
+// gfx1250 partition mode runs ReduceScatter on LL up to 1 MiB of bus bytes, then on the hierarchical kernel. avg has
+// no hierarchical kernel, so LD takes its range.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterOrder) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  struct {
+    size_t nBytes;  // per rank; the crossover counts bus bytes, four times this
+    bool avg;
+    ncclSymkKernelId expected;
+  } const cases[] = {
+      {size_t(256) << 10, false, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, false, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
+      {size_t(256) << 10, true, ncclSymkKernelId_ReduceScatter_LL},
+      {size_t(512) << 10, true, ncclSymkKernelId_ReduceScatter_LD},
+  };
+  for (const auto& c : cases) {
+    ncclTuningInput_t in = Input(ncclFuncReduceScatter, c.nBytes);
+    if (c.avg) {
+      in.redOp = ncclAvg;
+      in.devRedOp = ncclDevSumPostDiv;
+    }
+    Pick p = Select(in);
+    EXPECT_EQ(p.kernelId, c.expected) << c.nBytes << " B " << (c.avg ? "avg" : "sum") << " picked "
+                                      << ncclSymkKernelIdToString(p.kernelId);
+  }
+}
+
 // An algorithm selection naming only the TDM hierarchical kernel reaches it without NCCL_SYM_KERNEL.
 TEST_F(SymModelTdmHierTest, SelectionOfOnlyHierTma_KeepsItValid) {
   ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);
