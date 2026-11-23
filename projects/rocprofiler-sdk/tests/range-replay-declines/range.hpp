@@ -60,6 +60,10 @@ constexpr int kExpectedFirstOnlyResult = 1;
 // mode does the same with an ordinary kernel from the other thread.
 constexpr int kExpectedTwoLaunches = 2;
 
+// The recorder accepts 4096 dispatches. The next dispatch is observed but cannot be retained, so
+// CLOSE must report all 4097 dispatches and PROGRAM_TOO_LARGE.
+constexpr size_t kProgramTooLargeDispatches = 4097;
+
 // Set by the application before it exits without opening the range, so the tool reports a skip
 // rather than a missing CLOSE. Its value is the reason.
 constexpr const char* kSkipEnv = "RR_DECLINE_SKIPPED";

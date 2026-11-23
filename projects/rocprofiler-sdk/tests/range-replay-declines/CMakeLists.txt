@@ -130,3 +130,17 @@ add_rr_decline_test(test-range-replay-decline-graph-launch MODE graph-launch EXP
 # has bound to that agent. CLOSE reports the binding dispatch only.
 add_rr_decline_test(test-range-replay-decline-concurrent-dispatch MODE
                     concurrent-dispatch EXPECT CONCURRENT_DISPATCH DISPATCHES 1)
+
+# C7: the recorder retains at most 4096 dispatches. The dispatch that exceeds the budget
+# is still part of the application's range and must be included in CLOSE's observed count.
+add_rr_decline_test(test-range-replay-decline-program-too-large MODE program-too-large
+                    EXPECT PROGRAM_TOO_LARGE DISPATCHES 4097)
+
+# C14: begin does not nest on one thread. The first range remains open after the rejected
+# second begin, so closing it emits one empty-range CLOSE.
+add_rr_decline_test(test-range-replay-api-begin-twice MODE begin-twice EXPECT NO_DISPATCH
+                    DISPATCHES 0)
+
+# C14: end with no open range is rejected before any range callback is emitted.
+add_rr_decline_test(test-range-replay-api-end-without-range MODE end-without-range EXPECT
+                    NONE DISPATCHES 0)

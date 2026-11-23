@@ -37,6 +37,10 @@
 //   concurrent-dispatch
 //                     one binding kernel, then another thread's kernel on the same agent
 //                     (CONCURRENT_DISPATCH)
+//   program-too-large  4097 dispatches exceed the 4096-dispatch recording budget
+//                     (PROGRAM_TOO_LARGE)
+//   begin-twice        a second begin on the same thread returns INVALID_ARGUMENT
+//   end-without-range  end with no open range returns INVALID_ARGUMENT
 //
 // The range is bound by its first kernel before a copy or allocation change runs: those declines
 // need a range that already belongs to an agent (and, for allocations, an entry snapshot). The
@@ -273,6 +277,93 @@ end_range()
     return true;
 }
 
+int
+run_invalid_api(const char* mode)
+{
+    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
+        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
+    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
+        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
+    if(begin_fn == nullptr || end_fn == nullptr)
+    {
+        fprintf(stderr, "[app] FAIL: the range replay API is not in this process\n");
+        return EXIT_FAILURE;
+    }
+
+    if(std::string_view{mode} == "begin-twice")
+    {
+        const auto first  = begin_fn(kRangeId);
+        const auto second = begin_fn(kRangeId + 1);
+        const auto close  = end_fn();
+        printf("[app] mode=%s first=%d second=%d close=%d\n",
+               mode,
+               static_cast<int>(first),
+               static_cast<int>(second),
+               static_cast<int>(close));
+        if(first != ROCPROFILER_STATUS_SUCCESS ||
+           second != ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT ||
+           close != ROCPROFILER_STATUS_SUCCESS)
+        {
+            fprintf(stderr,
+                    "[app] FAIL: begin twice returned (%d, %d), close returned %d\n",
+                    static_cast<int>(first),
+                    static_cast<int>(second),
+                    static_cast<int>(close));
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
+    }
+
+    const auto status = end_fn();
+    printf("[app] mode=%s status=%d\n", mode, static_cast<int>(status));
+    if(status != ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)
+    {
+        fprintf(stderr,
+                "[app] FAIL: end without a range returned %d (expected %d)\n",
+                static_cast<int>(status),
+                static_cast<int>(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT));
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+int
+run_program_too_large(const char* mode)
+{
+    int* counter = nullptr;
+    HIP_CHECK(hipMalloc(&counter, sizeof(int)));
+    HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
+    // Load the code object before the range so this tests the recording budget, not a code-object
+    // load during the range.
+    rr_decline_count<<<1, 64>>>(counter);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
+    if(!begin_range()) return EXIT_FAILURE;
+    for(size_t i = 0; i < kProgramTooLargeDispatches; ++i)
+        rr_decline_count<<<1, 64>>>(counter);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+    if(!end_range()) return EXIT_FAILURE;
+
+    auto counter_h = 0;
+    HIP_CHECK(hipMemcpy(&counter_h, counter, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(counter));
+
+    printf("[app] mode=%s counter=%d\n", mode, counter_h);
+    if(counter_h != static_cast<int>(kProgramTooLargeDispatches))
+    {
+        fprintf(stderr,
+                "[app] FAIL: counter=%d (expected %zu)\n",
+                counter_h,
+                kProgramTooLargeDispatches);
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 // Captured and launched once before the range, so the in-range launch is GRAPH_LAUNCH rather than
 // a code object loading on first use. The launch is not recorded, so CLOSE reports no dispatches.
 int
@@ -412,7 +503,8 @@ main()
     const auto  mode     = std::string_view{mode_env != nullptr ? mode_env : ""};
     if(mode != "hip-memcpy-async" && mode != "hsa-batch-copy" && mode != "hip-malloc" &&
        mode != "hip-free" && mode != "empty" && mode != "graph-launch" &&
-       mode != "concurrent-dispatch")
+       mode != "concurrent-dispatch" && mode != "program-too-large" && mode != "begin-twice" &&
+       mode != "end-without-range")
     {
         fprintf(stderr, "[app] FAIL: unknown RR_DECLINE_MODE '%s'\n", mode_env ? mode_env : "");
         return EXIT_FAILURE;
@@ -427,6 +519,8 @@ main()
         return EXIT_SUCCESS;
     }
 
+    if(mode == "begin-twice" || mode == "end-without-range") return run_invalid_api(mode_env);
+    if(mode == "program-too-large") return run_program_too_large(mode_env);
     if(mode == "graph-launch") return run_graph_launch(mode_env);
     if(mode == "concurrent-dispatch") return run_concurrent_dispatch(mode_env);
 
