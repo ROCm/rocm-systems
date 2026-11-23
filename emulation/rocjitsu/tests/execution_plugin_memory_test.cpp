@@ -2284,6 +2284,8 @@ TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
   EXPECT_EQ(generic_obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
   EXPECT_EQ(generic_obligations[1].wait_counter_type(), WaitCounterType::LGKMCNT);
   EXPECT_EQ(generic_obligations[1].completion_class(), MemoryCompletionClass::UNORDERED);
+  // Only single-counter segments take the one-destination wait shortcut.
+  EXPECT_FALSE(generic_flat->flags() & SIMPLE_MEMORY_RESULT);
 
   for (const uint8_t fixed_segment : {uint8_t{1}, uint8_t{2}}) {
     const auto fixed_words = cdna4::build_flat(
@@ -2296,6 +2298,8 @@ TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
     ASSERT_EQ(fixed_obligations.size(), 1u);
     EXPECT_EQ(fixed_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
     EXPECT_EQ(fixed_obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+    EXPECT_TRUE(fixed->flags() & SIMPLE_MEMORY_RESULT);
+    EXPECT_TRUE(fixed->flags() & DIRECT_REGISTER_ACCESSES);
   }
 }
 
