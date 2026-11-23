@@ -1326,7 +1326,7 @@ namespace {
 // A CUID library failure in amd-smi's vocabulary. The distinction that has to
 // survive the mapping is "this caller may not know" against "this node cannot
 // answer": they ask different things of an operator.
-amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
+constexpr amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
       return AMDSMI_STATUS_SUCCESS;
@@ -1399,6 +1399,17 @@ std::string cuid_partition_node(amdsmi_processor_handle processor_handle) {
   return node;
 }
 
+// A GPU amd-smi has a handle for but the library cannot name has no CUID: it
+// is not a bad handle. Under WSL there is neither a render node nor a PCI
+// function in sysfs for the library to find.
+constexpr amdsmi_status_t cuid_lookup_status(amdcuid_status_t status) {
+  return status == AMDCUID_STATUS_DEVICE_NOT_FOUND ? AMDSMI_STATUS_NOT_SUPPORTED
+                                                   : cuid_status_to_amdsmi(status);
+}
+
+static_assert(cuid_lookup_status(AMDCUID_STATUS_DEVICE_NOT_FOUND) == AMDSMI_STATUS_NOT_SUPPORTED,
+              "a valid processor absent from the CUID inventory is unsupported");
+
 // Resolve a processor handle to its CUID handle, which is the component's
 // derived CUID. A partition node amdgpu publishes names the partition, and
 // its answer stands. Otherwise the library resolves the render node: to a
@@ -1408,12 +1419,12 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
                                 amdcuid_id_t& handle_out) {
   const std::string partition_node = cuid_partition_node(processor_handle);
   if (!partition_node.empty()) {
-    return cuid_status_to_amdsmi(amdcuid_get_handle_by_dev_path(
-        partition_node.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
+    return cuid_lookup_status(amdcuid_get_handle_by_dev_path(partition_node.c_str(),
+                                                             AMDCUID_DEVICE_TYPE_GPU, &handle_out));
   }
   const std::string render = cuid_render_node(processor_handle, "/sys");
   if (!render.empty() && access(render.c_str(), F_OK) == 0) {
-    return cuid_status_to_amdsmi(
+    return cuid_lookup_status(
         amdcuid_get_handle_by_dev_path(render.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
   }
   amdsmi_bdf_t bdf = {};
@@ -1422,7 +1433,7 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
     return smi_status;
   }
   const std::string bdf_str = stringify_bdf(bdf);
-  return cuid_status_to_amdsmi(
+  return cuid_lookup_status(
       amdcuid_get_handle_by_bdf(bdf_str.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
 }
 
@@ -1509,8 +1520,7 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
 
   // The primary is CAP_SYS_ADMIN-gated at the source because its payload embeds
   // the raw serial number. An unprivileged caller gets an empty string and a
-  // successful call: the derived CUID is what it is supposed to be reading, and
-  // failing the whole snapshot would push it back onto the legacy UUID.
+  // successful call: the derived CUID is what it is supposed to be reading.
   amdcuid_id_t primary = {};
   uint32_t length = sizeof(primary);
   const amdcuid_status_t primary_status =
@@ -3913,6 +3923,72 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
   auto rstatus = rsmi_topo_get_link_type(src_device->get_gpu_id(), dst_device->get_gpu_id(),
                                          hops_out, reinterpret_cast<RSMI_IO_LINK_TYPE*>(type));
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
+amdsmi_status_t amdsmi_get_gpu_cpu_links(amdsmi_processor_handle processor_handle,
+                                         uint32_t* num_cpu_links, amdsmi_cpu_link_t* cpu_links) {
+  AMDSMI_CHECK_INIT();
+  if (num_cpu_links == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+#ifdef ENABLE_WSL_BACKEND
+  if (device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+
+  // Discover the raw KFD-level links with our own query-then-fetch, separate
+  // from the caller's buffer: some raw entries get dropped below if their
+  // NUMA node can't be resolved to a physical package, so the count the
+  // caller sees (post-resolution) isn't known until every entry is checked.
+  uint32_t raw_count = 0;
+  auto rstatus = rsmi_topo_get_cpu_links(device->get_gpu_id(), &raw_count, nullptr);
+  if (rstatus != RSMI_STATUS_SUCCESS) return amd::smi::rsmi_to_amdsmi_status(rstatus);
+
+  std::vector<rsmi_cpu_link_t> rsmi_links(raw_count);
+  if (raw_count > 0) {
+    rstatus = rsmi_topo_get_cpu_links(device->get_gpu_id(), &raw_count, rsmi_links.data());
+    if (rstatus != RSMI_STATUS_SUCCESS) return amd::smi::rsmi_to_amdsmi_status(rstatus);
+    // raw_count may have changed since the first call (live topology, not a
+    // snapshot); re-clamp so a shrunk count doesn't iterate the now-stale,
+    // zeroed-out tail of rsmi_links below.
+    rsmi_links.resize(std::min<size_t>(rsmi_links.size(), raw_count));
+  }
+
+  std::vector<amdsmi_cpu_link_t> resolved;
+  resolved.reserve(rsmi_links.size());
+  for (const auto& link : rsmi_links) {
+    auto packages = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(
+        static_cast<int32_t>(link.numa_node_id));
+    if (packages.empty()) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | NUMA node " << link.numa_node_id
+         << " did not resolve to a physical CPU package; dropping this CPU link";
+      LOG_DEBUG(ss);
+      continue;  // can't resolve this NUMA node to a physical package; drop it
+    }
+    amdsmi_cpu_link_t resolved_link{};
+    resolved_link.package_id = packages[0];
+    switch (link.type) {
+      case RSMI_IOLINK_TYPE_XGMI:
+        resolved_link.link_type = AMDSMI_LINK_TYPE_XGMI;
+        break;
+      case RSMI_IOLINK_TYPE_PCIEXPRESS:
+        resolved_link.link_type = AMDSMI_LINK_TYPE_PCIE;
+        break;
+      default:
+        resolved_link.link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+        break;
+    }
+    resolved.push_back(resolved_link);
+  }
+
+  uint32_t copy_count = std::min(static_cast<uint32_t>(resolved.size()), *num_cpu_links);
+  for (uint32_t i = 0; i < copy_count && cpu_links != nullptr; i++) {
+    cpu_links[i] = resolved[i];
+  }
+  *num_cpu_links = static_cast<uint32_t>(resolved.size());
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,

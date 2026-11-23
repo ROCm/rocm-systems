@@ -16,10 +16,31 @@ add_library(
 target_sources(
     rocprofiler-systems-parser
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/backend.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/config_store.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/configuration_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/help.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/precedence.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_text.cpp
     PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/backend.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/config_store.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/configuration_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/help.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/parse_result.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/precedence.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_text.hpp
@@ -34,6 +55,7 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-parser
+    PUBLIC $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>

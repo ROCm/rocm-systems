@@ -5,6 +5,7 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -24,21 +25,21 @@ namespace {
 
 using namespace rocjitsu;
 
-class LdsCounterTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class LdsCounterTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   bool gfx9() const {
     const auto arch = GetParam();
-    return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+           arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
   }
 };
 
 INSTANTIATE_TEST_SUITE_P(AllArchitectures, LdsCounterTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA1,
-                                           ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                                           ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna1,
+                                           rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                           rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5));
 
 TEST_P(LdsCounterTest, AppendAndConsumeBroadcastOldCounterToSparseActiveLanes) {
   for (auto arch : {GetParam()}) {

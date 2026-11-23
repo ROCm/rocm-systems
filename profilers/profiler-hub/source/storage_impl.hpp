@@ -25,27 +25,35 @@ struct storage_t::impl
         write = 2
     };
 
-    explicit impl(std::string database_path, std::string uuid);
+    explicit impl(std::string             database_path,
+                  std::string             uuid,
+                  profiler_hub::version_t schema_version);
 
     [[nodiscard]] std::string get_database_path() const;
     [[nodiscard]] std::string get_uuid() const;
 
-    // Reads the schema version stamped into the trace's rocpd_metadata
-    // table on first call, then caches it (immutable for a trace's lifetime).
-    // An empty database path has no trace, so the version compiled into the
-    // loaded library is returned instead.
     [[nodiscard]] profiler_hub::version_t get_storage_version() const;
+    [[nodiscard]] profiler_hub::version_t get_writer_schema_version() const;
+
+    // Schema version stamped into the trace's rocpd_metadata table. Read on first
+    // call, then cached (immutable for a trace's lifetime). An empty database path
+    // has no trace, so the version compiled into the loaded library is returned.
+    [[nodiscard]] profiler_hub::version_t get_trace_schema_version() const;
 
     std::shared_ptr<data_storage::sqlite_backend> create_database(
         const storage_type_t& storage_type) const;
 
 private:
-    mutable std::optional<profiler_hub::version_t> m_version;
+    profiler_hub::version_t m_schema_version{};  // The schema the writer will create.
+
+    mutable std::optional<profiler_hub::version_t> m_version;  // Trace schema, read once.
     mutable storage_type_t                         m_storage_type{ storage_type_t::none };
     mutable std::shared_ptr<data_storage::sqlite_backend> m_database{ nullptr };
 
     std::string m_database_path;
     std::string m_uuid;
+
+    profiler_hub::version_t m_library_version{};
 
     struct database_factory_t;
 };

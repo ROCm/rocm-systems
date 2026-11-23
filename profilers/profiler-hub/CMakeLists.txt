@@ -91,13 +91,13 @@ set_target_properties(
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
 
+# get_storage_version() reports the library version. project() above sets
+# profiler-hub_VERSION_{MAJOR,MINOR,PATCH} from the VERSION file.
 target_compile_definitions(
     profiler-hub-objects
     PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MAJOR=${profiler-hub_VERSION_MAJOR}>
-    PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}>
-    PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}>
 )
 

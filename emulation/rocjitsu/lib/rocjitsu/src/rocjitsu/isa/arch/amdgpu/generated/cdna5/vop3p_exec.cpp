@@ -12,12 +12,12 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_dense_matrix_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_packed_f32_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_packed_u64_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/big_int.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include <algorithm>
@@ -36,11 +36,6 @@ struct PkU64Pair {
   uint64_t hi;
 };
 
-struct PkU32Pair {
-  uint32_t lo;
-  uint32_t hi;
-};
-
 uint32_t packed_vgpr_physical_base(const Operand &operand, const amdgpu::Wavefront &wf) {
   const auto offset = Isa::resolved_vgpr_offset(wf, operand.opr_type_, operand.encoding_value_,
                                                 operand.vgpr_msb_role());
@@ -56,18 +51,6 @@ PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf, 
 
   const uint32_t base = packed_vgpr_physical_base(operand, wf);
   return {lo, amdgpu::RegisterAccess(wf).read_vgpr64(base + 2, lane)};
-}
-
-PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  // Packed 32-bit scalar inputs replicate one word, including special
-  // scalar registers. Only VGPR inputs supply two independent words.
-  const auto reg = operand.to_register_ref();
-  if (!reg || reg->cls != RegClass::VGPR) {
-    const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
-    return {value, value};
-  }
-  const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
-  return {pair.lo, pair.hi};
 }
 
 void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
@@ -3029,69 +3012,17 @@ void VPkAddF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkAddNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const auto lhs = read_pk_u64_pair(src0, wf, lane);
-    const auto rhs = read_pk_u64_pair(src1, wf, lane);
-    const auto apply = [&](uint64_t lhs_value, uint64_t rhs_value, bool negate_lhs,
-                           bool negate_rhs) -> uint64_t {
-      using Wide = util::int128_t;
-      Wide lhs_wide = static_cast<Wide>(lhs_value);
-      Wide rhs_wide = static_cast<Wide>(rhs_value);
-      if (negate_lhs)
-        lhs_wide = -lhs_wide;
-      if (negate_rhs)
-        rhs_wide = -rhs_wide;
-      const Wide result = lhs_wide + rhs_wide;
-      if (inst_.clamp) {
-        if (result < Wide{})
-          return 0;
-        constexpr Wide kMax = static_cast<Wide>(std::numeric_limits<uint64_t>::max());
-        if (result > kMax)
-          return std::numeric_limits<uint64_t>::max();
-      }
-      return static_cast<uint64_t>(result);
-    };
-    const uint64_t result_lo = apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);
-    const uint64_t result_hi =
-        apply(lhs.hi, rhs.hi, (inst_.neg_hi & 1u) != 0, (inst_.neg_hi & 2u) != 0);
-    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
-  }
+  const uint64_t modifiers =
+      inst_.neg | (uint64_t(inst_.neg_hi) << 3) | (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0);
+  amdgpu::arith::execute_packed_u64<false>(wf, rj_arith_v_pk_add_nc_u64_w32, modifiers, vdst, src0,
+                                           src1);
 }
 
 void VPkSubNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const auto lhs = read_pk_u64_pair(src0, wf, lane);
-    const auto rhs = read_pk_u64_pair(src1, wf, lane);
-    const auto apply = [&](uint64_t lhs_value, uint64_t rhs_value, bool negate_lhs,
-                           bool negate_rhs) -> uint64_t {
-      using Wide = util::int128_t;
-      Wide lhs_wide = static_cast<Wide>(lhs_value);
-      Wide rhs_wide = static_cast<Wide>(rhs_value);
-      if (negate_lhs)
-        lhs_wide = -lhs_wide;
-      if (negate_rhs)
-        rhs_wide = -rhs_wide;
-      const Wide result = lhs_wide - rhs_wide;
-      if (inst_.clamp) {
-        if (result < Wide{})
-          return 0;
-        constexpr Wide kMax = static_cast<Wide>(std::numeric_limits<uint64_t>::max());
-        if (result > kMax)
-          return std::numeric_limits<uint64_t>::max();
-      }
-      return static_cast<uint64_t>(result);
-    };
-    const uint64_t result_lo = apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);
-    const uint64_t result_hi =
-        apply(lhs.hi, rhs.hi, (inst_.neg_hi & 1u) != 0, (inst_.neg_hi & 2u) != 0);
-    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
-  }
+  const uint64_t modifiers =
+      inst_.neg | (uint64_t(inst_.neg_hi) << 3) | (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0);
+  amdgpu::arith::execute_packed_u64<false>(wf, rj_arith_v_pk_sub_nc_u64_w32, modifiers, vdst, src0,
+                                           src1);
 }
 
 void VPkMaxNumF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -3147,30 +3078,8 @@ void VPkMinNumF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkLshlAddU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  std::array<PkU64Pair, 64> results{};
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const auto values = read_pk_u64_pair(src0, wf, lane);
-    const auto shifts = read_pk_u32_pair(src1, wf, lane);
-    const auto addends = read_pk_u64_pair(src2, wf, lane);
-    if (shifts.lo > 4u || shifts.hi > 4u) {
-      wf.report_instruction_execution_error(
-          amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-      return;
-    }
-    const uint64_t result_lo =
-        amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo;
-    const uint64_t result_hi =
-        amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi;
-    results[lane] = {result_lo, result_hi};
-  }
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    write_pk_u64_pair(vdst, wf, lane, results[lane]);
-  }
+  amdgpu::arith::execute_packed_u64<true>(wf, rj_arith_v_pk_lshl_add_u64_w32, 0, vdst, src0, src1,
+                                          &src2);
 }
 
 void VWmmaF6416x16x4F64Vop3p::execute_impl(amdgpu::Wavefront &wf) {

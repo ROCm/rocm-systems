@@ -6,6 +6,8 @@
 #include "../../sql_cancel.hpp"
 #include "common/traits.hpp"
 #include "debug.hpp"
+#include "profiler-hub/cpp/version.hpp"
+
 #include <fmt/format.h>
 
 #include <cstddef>
@@ -145,9 +147,14 @@ public:
                  raw, position++, std::forward<Values>(value), m_query)),
              ...);
 
-            m_backend->validate_sqlite3_result(
-                SqlitePolicy::step(raw), m_query.c_str(), "Failed to execute step");
+            // Reset before validating so a failed step does not leave the statement
+            // in an error state for the next insert. Clear bindings too so a failed
+            // insert can't leave stale parameter values bound on the statement.
+            const int rc = SqlitePolicy::step(raw);
             SqlitePolicy::reset(raw);
+            SqlitePolicy::clear_bindings(raw);
+            m_backend->validate_sqlite3_result(
+                rc, m_query.c_str(), "Failed to execute step");
         }
 
     private:
@@ -255,7 +262,7 @@ public:
     // =========================================================================
     // Schema & admin
     // =========================================================================
-    void                      initialize_schema();
+    void                      initialize_schema(profiler_hub::version_t schema_version);
     void                      execute(const std::string& query);
     void                      interrupt() noexcept;
     void                      flush();

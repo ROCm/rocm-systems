@@ -22,8 +22,10 @@ downstream consumer of the library.
 
 ### Added
 
+- RocPD schema SQL is embedded in the profiler-hub library. Configure reads `versions.yml` from the cloned `rocprofiler-sdk-rocpd` tree and compiles each listed schema into the library.
 - Windows/MSVC build support. When SQLite is fetched, Windows downloads the
   official amalgamation zip instead of running `./configure`.
+- `storage_t` takes a RocPD schema version. No version, and `version_t{}`, both write 3.0.1. An explicit 3.0.0 is also accepted. Every other version fails initialization.
 
 ### Changed
 
@@ -189,7 +191,7 @@ downstream consumer of the library.
   `<date>_<format>_<version>_<name>_<size>` instead of a 16-digit hash, for
   example `20261106-110502_rocpd_v3.0.0_trace_70b_1024_32_1.5GB`. Folders
   named with the old hash are no longer read and can be deleted.
-- `storage_t::get_storage_version()` uses the same schema-version rules as
+- `storage_t::get_trace_schema_version()` uses the same schema-version rules as
   `probe_file()`. All three split tags are required, otherwise
   `schema_version` must be `major`, `major.minor`, or `major.minor.patch`.
   A partial set of split tags is not a version.
@@ -244,10 +246,12 @@ downstream consumer of the library.
 
 ### Fixed
 
-- `storage_t::get_storage_version()` now reads the schema version actually
-  stamped in the opened trace's `rocpd_metadata` table, instead of returning
-  the profiler-hub library's own version (which can legitimately differ from
-  the trace's schema version).
+- `storage_t::get_trace_schema_version()` reads the schema version actually
+  stamped in the opened trace's `rocpd_metadata` table. Before this,
+  `get_storage_version()` returned the profiler-hub library's own version,
+  which can legitimately differ from the trace's schema version. It now
+  returns the library version only (see `get_writer_schema_version()` for the
+  schema the writer creates).
 
 ### Deprecated
 
