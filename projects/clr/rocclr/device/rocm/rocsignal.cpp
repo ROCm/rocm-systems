@@ -21,8 +21,26 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
   }
 
   ws_ = ws;
-  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL, "Initialize Hostcall signal=0x%zx", signal_);
+  // hsa_amd_signal_value_pointer() succeeds only for a busy-wait signal (BusyWaitSignal::IsType
+  // check in rocr hsa_ext_amd.cpp) and refuses an interrupt signal. A default signal (no
+  // attributes) is a busy-wait signal only when the runtime has no interrupt signals (WSL with AQL
+  // emulation, HSA_ENABLE_INTERRUPT=0, ...); a wait on it then spins for its whole timeout
+  // whatever the wait hint, so the caller has to poll it; Load() then reads the value directly.
+  // Not on Windows (ROCr through the DXG thunk has no interrupt signals either): the listener's
+  // short naps there would round up to a timer tick (~15.6 ms), so it keeps the blocking wait.
+#if !defined(_WIN32)
+  volatile hsa_signal_value_t* value_ptr = nullptr;
+  if (Hsa::signal_value_pointer(signal_, &value_ptr) == HSA_STATUS_SUCCESS) {
+    value_ptr_ = value_ptr;
+  }
+#endif
+  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL, "Initialize Hostcall signal=0x%zx poll_only=%d",
+          signal_.handle, IsPollOnly());
   return true;
+}
+
+uint64_t Signal::Load() {
+  return (value_ptr_ != nullptr) ? *value_ptr_ : Hsa::signal_load_relaxed(signal_);
 }
 
 uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t timeout) {

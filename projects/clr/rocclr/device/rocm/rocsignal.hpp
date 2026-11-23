@@ -14,6 +14,8 @@ namespace amd::roc {
 class Signal : public device::Signal {
  private:
   hsa_signal_t signal_;
+  //! Value of a busy-wait signal, set only when the signal is poll-only
+  volatile hsa_signal_value_t* value_ptr_ = nullptr;
 
  public:
   ~Signal() override;
@@ -24,7 +26,11 @@ class Signal : public device::Signal {
 
   void Reset(uint64_t value) override;
 
+  uint64_t Load() override;
+
   void* getHandle() override { return reinterpret_cast<void*>(signal_.handle); }
+
+  bool IsPollOnly() const override { return value_ptr_ != nullptr; }
 };
 
 //! IPC-capable signal using hsa_amd_ipc_signal_create/attach.
