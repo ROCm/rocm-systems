@@ -115,26 +115,6 @@ class DatabaseHandler(ABC):
         # By default, if we can detect it, we should move it
         return True
 
-    def is_shared_sidecar(self, path: Path, prefix_root: Path) -> bool:
-        """
-        Return True for a file that every architecture artifact of the prefix needs.
-
-        Such a file is copied into each per-architecture artifact the prefix
-        produces and removed from the generic artifact. If the prefix produces
-        no per-architecture artifacts, the file stays in the generic artifact.
-        """
-        return False
-
-    def render_shared_sidecar(self, path: Path, arch: str) -> Optional[bytes]:
-        """
-        Return the content of a shared sidecar for one architecture artifact.
-
-        The default is a verbatim copy. Handlers override this when the sidecar
-        refers to per-architecture files, so each artifact only references what
-        it contains. Returning None skips the sidecar for this architecture.
-        """
-        return path.read_bytes()
-
 
 # Regex matching a library/<arch>/ path component (for per-arch subdirectory layout).
 _LIBRARY_ARCH_DIR_PATTERN = re.compile(
@@ -465,19 +445,23 @@ class HotswapCacheHandler(DatabaseHandler):
 # Same architecture id as _GFX_ARCH_PATTERN. "-strict" is its own target, as it
 # is for rocBLAS and composable_kernel. xnack is a feature; base_arch() strips
 # it before the artifact name is chosen.
-_HIPRTC_GPU_PATTERN = re.compile(r"\.(gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?)\.gpu$")
-_HIPRTC_FEATURE_RE = re.compile(r"-(?:xnack|sramecc)[+-]?")
-# A list entry of the hiprtcc run description: "  - 'name.gfx942.gpu'".
-_HIPRTC_BUILD_ENTRY = re.compile(r"^\s*-\s*'?([^'\s]+)'?\s*$")
+_HIPRTC_ARCH_FILE_PATTERN = re.compile(
+    r"\.(gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?)"
+    r"\.(?:gpu|build\.yml|compile_cmd|unsupported)$"
+)
 
 
 class LibhipcxxHiprtcHandler(DatabaseHandler):
-    """Handler for prebuilt libhipcxx hiprtc test device code.
+    """Handler for prebuilt libhipcxx hiprtc test files.
 
-    hiprtcc writes one device build per target next to each prebuilt test:
-        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.gpu
-    together with <test>.build.yml, which lists those builds and the run
-    configuration. Every architecture archive needs that yml, so it is shared.
+    hiprtcc and the lit format write every file of a prebuilt test once per
+    target, with the target in the name:
+        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.gpu         device build
+        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.build.yml   run description
+        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.compile_cmd compile command
+        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.unsupported test not built
+    Each goes to the artifact of its target, so an artifact holds complete
+    tests for its own targets and nothing for the others.
     """
 
     _TEST_DIR = "libhipcxx/lit-hiprtc/"
@@ -494,46 +478,17 @@ class LibhipcxxHiprtcHandler(DatabaseHandler):
 
     def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
         """
-        Detect hiprtc device builds.
+        Detect the per-target files of a prebuilt hiprtc test.
 
-        Pattern: bin/libhipcxx/lit-hiprtc/**/*.gfx*.gpu
+        Pattern: bin/libhipcxx/lit-hiprtc/**/*.gfx*.{gpu,build.yml,compile_cmd,unsupported}
 
         Returns:
             Architecture id (e.g., 'gfx1250' or 'gfx1250-strict') or None.
         """
-        if path.suffix != ".gpu" or not self._in_test_dir(path, prefix_root):
+        if not self._in_test_dir(path, prefix_root):
             return None
-        match = _HIPRTC_GPU_PATTERN.search(path.name)
+        match = _HIPRTC_ARCH_FILE_PATTERN.search(path.name)
         return match.group(1) if match else None
-
-    def is_shared_sidecar(self, path: Path, prefix_root: Path) -> bool:
-        """Detect the run description that lists the device builds of a test."""
-        return path.name.endswith(".build.yml") and self._in_test_dir(path, prefix_root)
-
-    def render_shared_sidecar(self, path: Path, arch: str) -> Optional[bytes]:
-        """
-        Restrict the run description to the device build of one architecture.
-
-        Every other line (thread count, shared memory size, ``builds:``) is kept.
-        List entries are kept only when they name a ``.<arch>.gpu`` build, so the
-        description of an architecture artifact only lists files it ships and
-        hiprtcc runs exactly that build. Returns None when the test has no build
-        for this architecture.
-        """
-        kept: List[str] = []
-        found = False
-        for line in path.read_text().splitlines(keepends=True):
-            entry = _HIPRTC_BUILD_ENTRY.match(line)
-            if entry is None:
-                kept.append(line)
-                continue
-            gpu_match = _HIPRTC_GPU_PATTERN.search(entry.group(1))
-            # The artifact arch is the base arch (xnack/sramecc features are
-            # folded into it, '-strict' is not), as in the splitter.
-            if gpu_match and _HIPRTC_FEATURE_RE.sub("", gpu_match.group(1)) == arch:
-                kept.append(line)
-                found = True
-        return "".join(kept).encode() if found else None
 
 
 # Registry of available handlers

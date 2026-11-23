@@ -1234,6 +1234,11 @@ class TestLibhipcxxHiprtcHandler:
             ("half_common_type.pass.cpp.gfx1250.gpu", "gfx1250"),
             ("half_common_type.pass.cpp.gfx1250-strict.gpu", "gfx1250-strict"),
             ("half_common_type.pass.cpp.gfx942-xnack+.gpu", "gfx942-xnack+"),
+            ("half_common_type.pass.cpp.gfx942.build.yml", "gfx942"),
+            ("half_common_type.pass.cpp.gfx1250-strict.build.yml", "gfx1250-strict"),
+            ("half_common_type.pass.cpp.gfx942.compile_cmd", "gfx942"),
+            ("half_common_type.pass.cpp.gfx1250-strict.compile_cmd", "gfx1250-strict"),
+            ("half_common_type.pass.cpp.gfx942.unsupported", "gfx942"),
         ],
     )
     def test_detect_device_build(self, handler, prefix_root, file_name, expected):
@@ -1243,8 +1248,11 @@ class TestLibhipcxxHiprtcHandler:
     @pytest.mark.parametrize(
         "relative_path",
         [
-            f"{TEST_DIR}/half_common_type.pass.cpp.build.yml",
             f"{TEST_DIR}/half_common_type.pass.cpp.exe",
+            # Without an arch in the name a file stays in the generic artifact.
+            f"{TEST_DIR}/half_common_type.pass.cpp.build.yml",
+            f"{TEST_DIR}/half_common_type.pass.cpp.compile_cmd",
+            f"{TEST_DIR}/half_common_type.pass.cpp.unsupported",
             f"{TEST_DIR}/half_common_type.pass.cpp.gpu",
             "bin/libhipcxx/lit-amdclang/test/x.gfx942.gpu",
             f"{TEST_DIR}/half_common_type.pass.cpp.gfx942.o",
@@ -1253,57 +1261,6 @@ class TestLibhipcxxHiprtcHandler:
     def test_reject_non_device_build(self, handler, prefix_root, relative_path):
         file_path = self._touch(prefix_root, relative_path)
         assert handler.detect(file_path, prefix_root) is None
-
-    def test_is_shared_sidecar_for_run_description(self, handler, prefix_root):
-        file_path = self._touch(prefix_root, f"{self.TEST_DIR}/x.build.yml")
-        assert handler.is_shared_sidecar(file_path, prefix_root)
-
-    @pytest.mark.parametrize(
-        "relative_path",
-        [
-            f"{TEST_DIR}/x.gfx942.gpu",
-            "bin/libhipcxx/lit-amdclang/test/x.build.yml",
-            "share/x.build.yml",
-        ],
-    )
-    def test_not_shared_sidecar(self, handler, prefix_root, relative_path):
-        file_path = self._touch(prefix_root, relative_path)
-        assert not handler.is_shared_sidecar(file_path, prefix_root)
-
-    RUN_DESCRIPTION = (
-        "cuda_thread_count: 1\n"
-        "cuda_block_shmem_size: 0\n"
-        "builds:\n"
-        "  - 'x.gfx1250.gpu'\n"
-        "  - 'x.gfx1250-strict.gpu'\n"
-        "  - 'x.gfx942-xnack+.gpu'\n"
-    )
-
-    @pytest.mark.parametrize(
-        "arch, expected_entries",
-        [
-            ("gfx1250", ["x.gfx1250.gpu"]),
-            ("gfx1250-strict", ["x.gfx1250-strict.gpu"]),
-            # xnack variants fold into the base arch, as for the artifact name
-            ("gfx942", ["x.gfx942-xnack+.gpu"]),
-        ],
-    )
-    def test_render_run_description_keeps_only_own_build(
-        self, handler, prefix_root, arch, expected_entries
-    ):
-        file_path = self._touch(prefix_root, f"{self.TEST_DIR}/x.build.yml")
-        file_path.write_text(self.RUN_DESCRIPTION)
-        rendered = handler.render_shared_sidecar(file_path, arch).decode()
-        assert rendered == (
-            "cuda_thread_count: 1\n"
-            "cuda_block_shmem_size: 0\n"
-            "builds:\n" + "".join(f"  - '{name}'\n" for name in expected_entries)
-        )
-
-    def test_render_run_description_without_build_for_arch(self, handler, prefix_root):
-        file_path = self._touch(prefix_root, f"{self.TEST_DIR}/x.build.yml")
-        file_path.write_text(self.RUN_DESCRIPTION)
-        assert handler.render_shared_sidecar(file_path, "gfx1100") is None
 
 
 class TestDatabaseHandlerRegistry:
