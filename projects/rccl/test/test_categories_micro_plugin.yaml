@@ -11,7 +11,7 @@ test_categories:
       - "Gin*"  # gin.cc's GinPluginInitTest and GinFinalizeTest
       - "Plugin*"
       - "Profiler*"
-      - "Rma*"  # rma.cc's RmaPluginInitTest and rma/rma_v<N>.cc
+      - "Rma*"  # rma.cc's RmaPluginInitTest and RmaInternalBackendTest, and rma/rma_v<N>.cc
     exclude_windows:
       - "*"
     labels:

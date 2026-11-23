@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
@@ -45,7 +46,7 @@ public:
   /// @param arch ISA architecture.
   /// @param memory Shared GPU memory for instruction fetch (not owned).
   /// @param exec_mode Execution mode for CU creation.
-  Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
+  Xcd(std::string name, const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
       simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
       std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>());
 

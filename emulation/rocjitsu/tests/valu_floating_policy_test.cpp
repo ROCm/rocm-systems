@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -50,7 +51,7 @@ namespace {
 
 class InstructionPolicyMachine {
 public:
-  explicit InstructionPolicyMachine(rj_code_arch_t arch, uint32_t vgprs = 256,
+  explicit InstructionPolicyMachine(rocjitsu::IsaFamily arch, uint32_t vgprs = 256,
                                     uint32_t wave_size = 0)
       : memory_("policy_memory"), cache_("policy_cache") {
     amdgpu::ComputeUnitCore::Config config{};
@@ -136,34 +137,34 @@ private:
   uint32_t base_ = 0;
 };
 TEST(ValuFloatingPolicy, RejectsInvalidFixtureInstruction) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::array<uint32_t, 1> invalid_words{test::kUndecodableInstruction};
   EXPECT_TRUE(machine.run(invalid_words, 0).failed());
 }
 
 TEST(ValuFloatingPolicy, RejectsFailedFixtureExecution) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4, 256, 64);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Rdna4, 256, 64);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   // VOPD instructions decode successfully but require wave32.
   const std::array<uint32_t, 2> words{0xc9080300u, 0x06060702u};
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   ASSERT_FALSE(decoder->decode(words.data()).failed());
   EXPECT_TRUE(machine.run(words, 0).failed());
   EXPECT_EQ(machine.destination(), 0xfacebeefu);
 }
 
-void witness(const char *name, rj_code_arch_t arch, uint32_t got, uint32_t expected) {
+void witness(const char *name, rocjitsu::IsaFamily arch, uint32_t got, uint32_t expected) {
   EXPECT_EQ(got, expected) << name << " arch=" << unsigned(arch);
 }
-constexpr std::array<rj_code_arch_t, 10> kAllArchitectures = {
-    ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-    ROCJITSU_CODE_ARCH_RDNA4};
-std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t clamp = 0) {
+constexpr std::array<rocjitsu::IsaFamily, 10> kAllArchitectures = {
+    rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+    rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+    rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+    rocjitsu::IsaFamily::Rdna4};
+std::array<uint32_t, 2> packed_words(rocjitsu::IsaFamily arch, uint16_t op, uint8_t clamp = 0) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_vop3p(op, {.vdst = 6,
                                    .op_sel_hi_2 = 1,
                                    .clamp = clamp,
@@ -171,7 +172,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_vop3p(op, {.vdst = 6,
                                    .op_sel_hi_2 = 1,
                                    .clamp = clamp,
@@ -179,7 +180,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop3p(op, {.vdst = 6,
                                    .op_sel_hi_2 = 1,
                                    .clamp = clamp,
@@ -187,7 +188,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop3p(op, {.vdst = 6,
                                    .op_sel_hi_2 = 1,
                                    .clamp = clamp,
@@ -195,7 +196,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_vop3p(op, {.vdst = 6,
                                    .opsel_hi_2 = 1,
                                    .clamp = clamp,
@@ -203,7 +204,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .opsel_hi = 3});
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_vop3p(op, {.vdst = 6,
                                    .op_sel_hi_2 = 1,
                                    .clamp = clamp,
@@ -211,7 +212,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_vop3p(op, {.vdst = 6,
                                    .op_sel_hi_2 = 1,
                                    .clamp = clamp,
@@ -219,7 +220,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_vop3p(op, {.vdst = 6,
                                    .op_sel_hi_2 = 1,
                                    .clamp = clamp,
@@ -227,7 +228,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                    .src1 = 257,
                                    .src2 = 258,
                                    .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_vop3p(op, {.vdst = 6,
                                      .op_sel_hi_2 = 1,
                                      .clamp = clamp,
@@ -235,7 +236,7 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
                                      .src1 = 257,
                                      .src2 = 258,
                                      .op_sel_hi = 3});
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop3p(op, {.vdst = 6,
                                    .opsel_hi_2 = 1,
                                    .clamp = clamp,
@@ -247,63 +248,63 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
     return {};
   }
 }
-std::array<uint32_t, 1> unary_words(rj_code_arch_t arch, size_t op) {
+std::array<uint32_t, 1> unary_words(rocjitsu::IsaFamily arch, size_t op) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1: {
+  case rocjitsu::IsaFamily::Cdna1: {
     const std::array<uint16_t, 7> ops = {
         cdna1::kVRcpF32Vop1, cdna1::kVSqrtF32Vop1, cdna1::kVLogF32Vop1, cdna1::kVExpF32Vop1,
         cdna1::kVRsqF32Vop1, cdna1::kVRsqF16Vop1,  cdna1::kVSqrtF16Vop1};
     return cdna1::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_CDNA2: {
+  case rocjitsu::IsaFamily::Cdna2: {
     const std::array<uint16_t, 7> ops = {
         cdna2::kVRcpF32Vop1, cdna2::kVSqrtF32Vop1, cdna2::kVLogF32Vop1, cdna2::kVExpF32Vop1,
         cdna2::kVRsqF32Vop1, cdna2::kVRsqF16Vop1,  cdna2::kVSqrtF16Vop1};
     return cdna2::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_CDNA3: {
+  case rocjitsu::IsaFamily::Cdna3: {
     const std::array<uint16_t, 7> ops = {
         cdna3::kVRcpF32Vop1, cdna3::kVSqrtF32Vop1, cdna3::kVLogF32Vop1, cdna3::kVExpF32Vop1,
         cdna3::kVRsqF32Vop1, cdna3::kVRsqF16Vop1,  cdna3::kVSqrtF16Vop1};
     return cdna3::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_CDNA4: {
+  case rocjitsu::IsaFamily::Cdna4: {
     const std::array<uint16_t, 7> ops = {
         cdna4::kVRcpF32Vop1, cdna4::kVSqrtF32Vop1, cdna4::kVLogF32Vop1, cdna4::kVExpF32Vop1,
         cdna4::kVRsqF32Vop1, cdna4::kVRsqF16Vop1,  cdna4::kVSqrtF16Vop1};
     return cdna4::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_CDNA5: {
+  case rocjitsu::IsaFamily::Cdna5: {
     const std::array<uint16_t, 7> ops = {
         cdna5::kVRcpF32Vop1, cdna5::kVSqrtF32Vop1, cdna5::kVLogF32Vop1, cdna5::kVExpF32Vop1,
         cdna5::kVRsqF32Vop1, cdna5::kVRsqF16Vop1,  cdna5::kVSqrtF16Vop1};
     return cdna5::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_RDNA1: {
+  case rocjitsu::IsaFamily::Rdna1: {
     const std::array<uint16_t, 7> ops = {
         rdna1::kVRcpF32Vop1, rdna1::kVSqrtF32Vop1, rdna1::kVLogF32Vop1, rdna1::kVExpF32Vop1,
         rdna1::kVRsqF32Vop1, rdna1::kVRsqF16Vop1,  rdna1::kVSqrtF16Vop1};
     return rdna1::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_RDNA2: {
+  case rocjitsu::IsaFamily::Rdna2: {
     const std::array<uint16_t, 7> ops = {
         rdna2::kVRcpF32Vop1, rdna2::kVSqrtF32Vop1, rdna2::kVLogF32Vop1, rdna2::kVExpF32Vop1,
         rdna2::kVRsqF32Vop1, rdna2::kVRsqF16Vop1,  rdna2::kVSqrtF16Vop1};
     return rdna2::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_RDNA3: {
+  case rocjitsu::IsaFamily::Rdna3: {
     const std::array<uint16_t, 7> ops = {
         rdna3::kVRcpF32Vop1, rdna3::kVSqrtF32Vop1, rdna3::kVLogF32Vop1, rdna3::kVExpF32Vop1,
         rdna3::kVRsqF32Vop1, rdna3::kVRsqF16Vop1,  rdna3::kVSqrtF16Vop1};
     return rdna3::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_RDNA3_5: {
+  case rocjitsu::IsaFamily::Rdna3_5: {
     const std::array<uint16_t, 7> ops = {
         rdna3_5::kVRcpF32Vop1, rdna3_5::kVSqrtF32Vop1, rdna3_5::kVLogF32Vop1, rdna3_5::kVExpF32Vop1,
         rdna3_5::kVRsqF32Vop1, rdna3_5::kVRsqF16Vop1,  rdna3_5::kVSqrtF16Vop1};
     return rdna3_5::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
+  case rocjitsu::IsaFamily::Rdna4: {
     const std::array<uint16_t, 7> ops = {
         rdna4::kVRcpF32Vop1, rdna4::kVSqrtF32Vop1, rdna4::kVLogF32Vop1, rdna4::kVExpF32Vop1,
         rdna4::kVRsqF32Vop1, rdna4::kVRsqF16Vop1,  rdna4::kVSqrtF16Vop1};
@@ -313,46 +314,47 @@ std::array<uint32_t, 1> unary_words(rj_code_arch_t arch, size_t op) {
     return {};
   }
 }
-std::array<uint32_t, 2> root_f16_vop3_words(rj_code_arch_t arch, bool square_root = false) {
+std::array<uint32_t, 2> root_f16_vop3_words(rocjitsu::IsaFamily arch, bool square_root = false) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_vop3(square_root ? cdna1::kVSqrtF16Vop3 : cdna1::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_vop3(square_root ? cdna2::kVSqrtF16Vop3 : cdna2::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop3(square_root ? cdna3::kVSqrtF16Vop3 : cdna3::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop3(square_root ? cdna4::kVSqrtF16Vop3 : cdna4::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_vop3(square_root ? cdna5::kVSqrtF16Vop3 : cdna5::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_vop3(square_root ? rdna1::kVSqrtF16Vop3 : rdna1::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_vop3(square_root ? rdna2::kVSqrtF16Vop3 : rdna2::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_vop3(square_root ? rdna3::kVSqrtF16Vop3 : rdna3::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_vop3(square_root ? rdna3_5::kVSqrtF16Vop3 : rdna3_5::kVRsqF16Vop3,
                                {.vdst = 6, .src0 = 256});
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop3(square_root ? rdna4::kVSqrtF16Vop3 : rdna4::kVRsqF16Vop3,
                              {.vdst = 6, .src0 = 256});
   default:
     return {};
   }
 }
-util::FailureOr<std::array<uint32_t, 2>>
-fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omod, uint8_t clamp) {
+util::FailureOr<std::array<uint32_t, 2>> fma_f32_words(rocjitsu::IsaFamily arch, uint8_t absolute,
+                                                       uint8_t negate, uint8_t omod,
+                                                       uint8_t clamp) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_vop3(cdna1::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -361,7 +363,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_vop3(cdna2::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -370,7 +372,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop3(cdna3::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -379,7 +381,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop3(cdna4::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -388,7 +390,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_vop3(cdna5::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -397,7 +399,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_vop3(rdna1::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -406,7 +408,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_vop3(rdna2::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -415,7 +417,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_vop3(rdna3::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -424,7 +426,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                    .src2 = 258,
                                                    .omod = omod,
                                                    .neg = negate});
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_vop3(rdna3_5::kVFmaF32Vop3, {.vdst = 6,
                                                        .abs = absolute,
                                                        .clamp = clamp,
@@ -433,7 +435,7 @@ fma_f32_words(rj_code_arch_t arch, uint8_t absolute, uint8_t negate, uint8_t omo
                                                        .src2 = 258,
                                                        .omod = omod,
                                                        .neg = negate});
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop3(rdna4::kVFmaF32Vop3, {.vdst = 6,
                                                    .abs = absolute,
                                                    .clamp = clamp,
@@ -459,7 +461,7 @@ TEST(ValuFloatingPolicy, FmaF32OutputScalingFlushesSubnormalIntermediate) {
     for (uint32_t mode : {0xf0u, 0x2f0u})
       for (uint32_t addend : {0x007fffffu, 0x807fffffu}) {
         const uint32_t expected =
-            arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : addend;
+            arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 ? 0u : addend;
         {
           util::FailureOr<uint32_t> result = machine.run(words, 0, 0, addend, mode);
           ASSERT_TRUE(result.succeeded());
@@ -503,7 +505,7 @@ TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
         for (uint32_t round = 0; round < 4; ++round)
           for (uint8_t omod : {0, 1}) {
             const bool scaling =
-                omod && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 ||
+                omod && (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 ||
                          (!ieee && !(denorm & 2u)));
             util::FailureOr<std::array<uint32_t, 2>> maybe_words =
                 fma_f32_words(arch, 0, 0, omod, 0);
@@ -530,7 +532,7 @@ TEST(ValuFloatingPolicy, FmaF32FlushesTinySignificandBeforePacking) {
 
 TEST(ValuFloatingPolicy, ScalarFmaF32UsesModeAndNanPolicy) {
   // CDNA5 section 6.8 gives SALU floating point the same MODE controls as VALU.
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   struct Case {
     uint32_t a, b, c, mode, expected;
@@ -594,9 +596,11 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
               if (modified && ((denorm & 1u) || test.flushed == test.preserved))
                 expected = test.modified;
               if ((expected & 0x7fffffffu) > 0x7f800000u &&
-                  (ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+                  (ieee || arch == rocjitsu::IsaFamily::Rdna4 ||
+                   arch == rocjitsu::IsaFamily::Cdna5))
                 expected |= 0x00400000u;
-              if (clamped && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+              if (clamped &&
+                  (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5))
                 expected = 0;
               SCOPED_TRACE(::testing::Message()
                            << "arch=" << arch << " IEEE=" << ieee << " denorm=" << denorm
@@ -613,7 +617,7 @@ TEST(ValuFloatingPolicy, FmaF32MatchesPhysicalNanBits) {
 }
 
 TEST(ValuFloatingPolicy, PackedMinimumPropagatesNaN) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {cdna5::kVPkMinNumF16Vop3p, cdna5::kVPkMaxNumF16Vop3p,
@@ -630,13 +634,13 @@ TEST(ValuFloatingPolicy, PackedMinimumPropagatesNaN) {
   }
 }
 TEST(ValuFloatingPolicy, PackedF32Mode) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                              ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                   rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     // src1 is v1:v2; testing the low result makes the high component immaterial.
     const std::array<uint32_t, 2> words =
-        packed_words(arch, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 41 : 50);
+        packed_words(arch, arch == rocjitsu::IsaFamily::Cdna5 ? 41 : 50);
     util::FailureOr<uint32_t> denorm = machine.run(words, 1, 1, 0, 0);
     ASSERT_TRUE(denorm.succeeded());
     witness("packed_f32_denorm", arch, denorm.value(), 0);
@@ -645,7 +649,7 @@ TEST(ValuFloatingPolicy, PackedF32Mode) {
     witness("packed_f32_round_up", arch, round_up.value(), 0x3f800001);
     // Only the unmigrated legacy implementation promises immunity to host rounding.
     // rj-arith assumes the default host FP environment and never changes it.
-    if (arch == ROCJITSU_CODE_ARCH_CDNA2) {
+    if (arch == rocjitsu::IsaFamily::Cdna2) {
       const rocjitsu::test::RestoreRounding restore_rounding;
       std::fesetround(FE_UPWARD);
       util::FailureOr<uint32_t> maybe_got = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf0);
@@ -657,7 +661,7 @@ TEST(ValuFloatingPolicy, PackedF32Mode) {
   }
 }
 TEST(ValuFloatingPolicy, PackedF16Clamp) {
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode :
@@ -667,7 +671,7 @@ TEST(ValuFloatingPolicy, PackedF16Clamp) {
       ASSERT_TRUE(result.succeeded());
       witness("packed_f16_clamp", arch, result.value(), 0x00003c00);
     }
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+    if (arch != rocjitsu::IsaFamily::Cdna5 && arch != rocjitsu::IsaFamily::Rdna4)
       continue;
     for (uint16_t opcode : {cdna5::kVPkMinNumF16Vop3p, cdna5::kVPkMaxNumF16Vop3p,
                             cdna5::kVPkMinimumF16Vop3p, cdna5::kVPkMaximumF16Vop3p}) {
@@ -682,7 +686,7 @@ TEST(ValuFloatingPolicy, PackedF16Clamp) {
   }
 }
 TEST(ValuFloatingPolicy, PackedF16Mode) {
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkAddF16Vop3p);
@@ -706,7 +710,7 @@ TEST(ValuFloatingPolicy, PackedF16Mode) {
   }
 }
 TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkFmaF16Vop3p);
@@ -742,8 +746,8 @@ TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
 }
 
 TEST(ValuFloatingPolicy, F16Dot2HostContract) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = rdna4::build_vop3(
@@ -757,7 +761,7 @@ TEST(ValuFloatingPolicy, F16Dot2HostContract) {
     // halfway point. Migrated paths require default host controls.
     witness("dot2_f16_default_host", arch, nearest & 0xffffu, 0x3c01u);
     EXPECT_EQ(std::fegetround(), FE_TONEAREST);
-    if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    if (arch == rocjitsu::IsaFamily::Rdna3_5) {
       // This architecture still uses the legacy builtin implementation.
       std::fesetround(FE_UPWARD);
       util::FailureOr<uint32_t> maybe_upward = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
@@ -768,7 +772,7 @@ TEST(ValuFloatingPolicy, F16Dot2HostContract) {
   }
 }
 TEST(ValuFloatingPolicy, F32UnaryDenormControls) {
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     struct Case {
@@ -790,11 +794,11 @@ TEST(ValuFloatingPolicy, F32UnaryDenormControls) {
 TEST(ValuFloatingPolicy, ReciprocalSquareRootUsesSharedMappingAcrossProfiles) {
   // The shared one-ULP/FTZ contract applies to all profiles. Raw hardware
   // qualification for these finite approximation witnesses covers RDNA3/4.
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const auto words = unary_words(arch, 4);
-    const bool quiet = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const bool quiet = arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
     for (const auto &test :
          {std::pair{0x3f80cab3u, 0x3f7f363du}, std::pair{0x80000001u, 0xff800000u},
           std::pair{0xbf800000u, 0xffc00000u},
@@ -814,7 +818,7 @@ TEST(ValuFloatingPolicy, LogarithmUsesSharedMappingAcrossProfiles) {
       {0x3f810000u, 0x3c37f286u}, {0x3f820001u, 0x3cb73d0fu}, {0x3f835d48u, 0x3d19508bu},
       {0x3f860001u, 0x3d8759dbu},
   };
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const auto words = unary_words(arch, 2);
@@ -834,10 +838,10 @@ TEST(ValuFloatingPolicy, HalfReciprocalSquareRootModesAndNaNPayloads) {
   // All profiles support F16 input denormals; the shared mapping meets the
   // stricter 0.51-ULP bound of older RDNA/CDNA profiles.
   // Finite witness bits are physically qualified on RDNA3/4.
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    const bool quiet = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const bool quiet = arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
     for (uint32_t mode = 0; mode < 16; ++mode) {
       const uint32_t raw_mode = 0x30u | ((mode & 3u) << 2) | ((mode >> 2) << 6);
       for (const auto &test :
@@ -863,7 +867,7 @@ TEST(ValuFloatingPolicy, HalfReciprocalSquareRootModesAndNaNPayloads) {
 }
 
 TEST(ValuFloatingPolicy, F32UnaryQuietsSignalingNaNs) {
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (size_t op = 0; op < 5; ++op) {
@@ -876,8 +880,8 @@ TEST(ValuFloatingPolicy, F32UnaryQuietsSignalingNaNs) {
   }
 }
 TEST(ValuFloatingPolicy, Dot2InlineReplication) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {rdna4::kVDot2F16F16Vop3, rdna4::kVDot2Bf16Bf16Vop3}) {
@@ -893,15 +897,15 @@ TEST(ValuFloatingPolicy, Dot2InlineReplication) {
   }
 }
 TEST(ValuFloatingPolicy, PackedBf16Clamp) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode : {cdna5::kVPkFmaBf16Vop3p, cdna5::kVPkAddBf16Vop3p, cdna5::kVPkMulBf16Vop3p,
                           cdna5::kVPkMinNumBf16Vop3p, cdna5::kVPkMaxNumBf16Vop3p}) {
-    const std::array<uint32_t, 2> words = packed_words(ROCJITSU_CODE_ARCH_CDNA5, opcode, 1);
+    const std::array<uint32_t, 2> words = packed_words(rocjitsu::IsaFamily::Cdna5, opcode, 1);
     {
       util::FailureOr<uint32_t> result = machine.run(words, 0xc0004000, 0x40004000, 0);
       ASSERT_TRUE(result.succeeded());
-      witness("packed_bf16_clamp", ROCJITSU_CODE_ARCH_CDNA5, result.value(),
+      witness("packed_bf16_clamp", rocjitsu::IsaFamily::Cdna5, result.value(),
               opcode == cdna5::kVPkMaxNumBf16Vop3p ? 0x3f803f80 : 0x00003f80);
     }
   }
@@ -910,12 +914,12 @@ TEST(ValuFloatingPolicy, PackedBf16Clamp) {
 TEST(ValuFloatingPolicy, SquareRootModesAndNaNPayloads) {
   // Finite words and MODE behavior captured on gfx1100/gfx1201. The mapping
   // also meets the one-ULP F32 and 0.51-ULP F16 bounds of older profiles.
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint32_t ieee : {0u, 1u}) {
       const bool quiet =
-          ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+          ieee || arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
       for (uint32_t mode = 0; mode < 16; ++mode) {
         const uint32_t f32_mode = 0xc0u | (mode & 3u) | ((mode >> 2) << 4) | (ieee << 9);
         for (const auto &sample :
@@ -953,7 +957,7 @@ TEST(ValuFloatingPolicy, SquareRootModesAndNaNPayloads) {
 }
 
 TEST(ValuFloatingPolicy, Bf16UnaryQuietsSignalingNaNs) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode : {cdna5::kVRcpBf16Vop1, cdna5::kVSqrtBf16Vop1, cdna5::kVRsqBf16Vop1,
                           cdna5::kVLogBf16Vop1, cdna5::kVExpBf16Vop1}) {
@@ -961,19 +965,19 @@ TEST(ValuFloatingPolicy, Bf16UnaryQuietsSignalingNaNs) {
     util::FailureOr<uint32_t> maybe_snan = machine.run(words, 0x7f81, 0, 0, 0x2f0);
     ASSERT_TRUE(maybe_snan.succeeded());
     const uint32_t snan = maybe_snan.value() & 0xffff;
-    witness("unary_bf16_quiet_snan", ROCJITSU_CODE_ARCH_CDNA5, snan & 0x7fc0, 0x7fc0);
+    witness("unary_bf16_quiet_snan", rocjitsu::IsaFamily::Cdna5, snan & 0x7fc0, 0x7fc0);
   }
 }
 
 TEST(ValuFloatingPolicy, PackedF32MultiplyAndFmaUseMode) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                              ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                   rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const uint16_t multiply =
-        arch == ROCJITSU_CODE_ARCH_CDNA5 ? cdna5::kVPkMulF32Vop3p : cdna2::kVPkMulF32Vop3p;
+        arch == rocjitsu::IsaFamily::Cdna5 ? cdna5::kVPkMulF32Vop3p : cdna2::kVPkMulF32Vop3p;
     const uint16_t fused =
-        arch == ROCJITSU_CODE_ARCH_CDNA5 ? cdna5::kVPkFmaF32Vop3p : cdna2::kVPkFmaF32Vop3p;
+        arch == rocjitsu::IsaFamily::Cdna5 ? cdna5::kVPkFmaF32Vop3p : cdna2::kVPkFmaF32Vop3p;
     for (uint16_t opcode : {multiply, fused}) {
       const std::array<uint32_t, 2> words = packed_words(arch, opcode);
       // Exactly 1 + 2^-22 + 2^-46 rounds upward to the next float.
@@ -1002,7 +1006,7 @@ TEST(ValuFloatingPolicy, PackedF32MultiplyAndFmaUseMode) {
 }
 
 TEST(ValuFloatingPolicy, PackedF16OutputFlushAndSignedZero) {
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> multiply = packed_words(arch, cdna5::kVPkMulF16Vop3p);
@@ -1036,8 +1040,8 @@ TEST(ValuFloatingPolicy, PackedF16OutputFlushAndSignedZero) {
 }
 
 TEST(ValuFloatingPolicy, Dot2ReplicatesEachInlineSourceButPreservesLiteralHalves) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {rdna4::kVDot2F16F16Vop3, rdna4::kVDot2Bf16Bf16Vop3}) {
@@ -1076,7 +1080,7 @@ TEST(ValuFloatingPolicy, Dot2ReplicatesEachInlineSourceButPreservesLiteralHalves
 }
 
 TEST(ValuFloatingPolicy, SqrtFlushesNegativeDenormalsToNegativeZero) {
-  for (rj_code_arch_t arch : kAllArchitectures) {
+  for (rocjitsu::IsaFamily arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     {
@@ -1088,7 +1092,7 @@ TEST(ValuFloatingPolicy, SqrtFlushesNegativeDenormalsToNegativeZero) {
 }
 
 TEST(ValuFloatingPolicy, Bf16MixInlineConstantsRespectSelectedHalf) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode :
        {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
@@ -1118,7 +1122,7 @@ TEST(ValuFloatingPolicy, Bf16MixInlineConstantsRespectSelectedHalf) {
 }
 
 TEST(ValuFloatingPolicy, TanhQuietsSignalingNaNsAcrossFormats) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   struct Case {
     uint16_t opcode;
@@ -1139,12 +1143,12 @@ TEST(ValuFloatingPolicy, TanhQuietsSignalingNaNsAcrossFormats) {
 }
 
 TEST(ValuFloatingPolicy, PackedF32ClampAcrossTargets) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                              ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                   rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint16_t, 3> opcodes =
-        arch == ROCJITSU_CODE_ARCH_CDNA5
+        arch == rocjitsu::IsaFamily::Cdna5
             ? std::array<uint16_t, 3>{cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p,
                                       cdna5::kVPkFmaF32Vop3p}
             : std::array<uint16_t, 3>{cdna2::kVPkAddF32Vop3p, cdna2::kVPkMulF32Vop3p,
@@ -1171,11 +1175,11 @@ TEST(ValuFloatingPolicy, PackedF32ClampAcrossTargets) {
 }
 
 TEST(ValuFloatingPolicy, PackedF16ThreeInputSelectionsUseClampAndDenormMode) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::vector<uint16_t> opcodes =
-        arch == ROCJITSU_CODE_ARCH_CDNA5
+        arch == rocjitsu::IsaFamily::Cdna5
             ? std::vector<uint16_t>{cdna5::kVPkMinimum3F16Vop3p, cdna5::kVPkMaximum3F16Vop3p,
                                     cdna5::kVPkMin3NumF16Vop3p, cdna5::kVPkMax3NumF16Vop3p}
             : std::vector<uint16_t>{cdna4::kVPkMinimum3F16Vop3p, cdna4::kVPkMaximum3F16Vop3p};
@@ -1203,13 +1207,13 @@ TEST(ValuFloatingPolicy, PackedF16ThreeInputSelectionsUseClampAndDenormMode) {
 }
 
 TEST(ValuFloatingPolicy, PackedBf16MinimumAndMaximumOrderSignedZeros) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool minimum : {false, true}) {
     const uint16_t opcode = minimum ? cdna5::kVPkMinNumBf16Vop3p : cdna5::kVPkMaxNumBf16Vop3p;
     {
       util::FailureOr<uint32_t> result =
-          machine.run(packed_words(ROCJITSU_CODE_ARCH_CDNA5, opcode), 0x80000000, 0x00008000);
+          machine.run(packed_words(rocjitsu::IsaFamily::Cdna5, opcode), 0x80000000, 0x00008000);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), minimum ? 0x80008000u : 0u);
     }
@@ -1217,7 +1221,7 @@ TEST(ValuFloatingPolicy, PackedBf16MinimumAndMaximumOrderSignedZeros) {
 }
 
 TEST(ValuFloatingPolicy, Rdna4F32DotInlineSourcesMatchHardware) {
-  InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+  InstructionPolicyMachine machine(rocjitsu::IsaFamily::Rdna4);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (uint16_t opcode : {rdna4::kVDot2F32F16Vop3p, rdna4::kVDot2F32Bf16Vop3p}) {
     const std::array<uint32_t, 2> words = rdna4::build_vop3p(
@@ -1241,16 +1245,16 @@ TEST(ValuFloatingPolicy, DppFloatingSourceAbsoluteAndNegate) {
         ARCH::build_vop2(ARCH::kVAddF32Vop2, {.src0 = amdgpu::SRC_DPP, .vsrc1 = 1, .vdst = 6})[0]; \
     break;
     switch (arch) {
-      ADD_DPP(cdna1, ROCJITSU_CODE_ARCH_CDNA1)
-      ADD_DPP(cdna2, ROCJITSU_CODE_ARCH_CDNA2)
-      ADD_DPP(cdna3, ROCJITSU_CODE_ARCH_CDNA3)
-      ADD_DPP(cdna4, ROCJITSU_CODE_ARCH_CDNA4)
-      ADD_DPP(cdna5, ROCJITSU_CODE_ARCH_CDNA5)
-      ADD_DPP(rdna1, ROCJITSU_CODE_ARCH_RDNA1)
-      ADD_DPP(rdna2, ROCJITSU_CODE_ARCH_RDNA2)
-      ADD_DPP(rdna3, ROCJITSU_CODE_ARCH_RDNA3)
-      ADD_DPP(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5)
-      ADD_DPP(rdna4, ROCJITSU_CODE_ARCH_RDNA4)
+      ADD_DPP(cdna1, rocjitsu::IsaFamily::Cdna1)
+      ADD_DPP(cdna2, rocjitsu::IsaFamily::Cdna2)
+      ADD_DPP(cdna3, rocjitsu::IsaFamily::Cdna3)
+      ADD_DPP(cdna4, rocjitsu::IsaFamily::Cdna4)
+      ADD_DPP(cdna5, rocjitsu::IsaFamily::Cdna5)
+      ADD_DPP(rdna1, rocjitsu::IsaFamily::Rdna1)
+      ADD_DPP(rdna2, rocjitsu::IsaFamily::Rdna2)
+      ADD_DPP(rdna3, rocjitsu::IsaFamily::Rdna3)
+      ADD_DPP(rdna3_5, rocjitsu::IsaFamily::Rdna3_5)
+      ADD_DPP(rdna4, rocjitsu::IsaFamily::Rdna4)
     default:
       FAIL();
     }
@@ -1283,10 +1287,10 @@ TEST(ValuFloatingPolicy, DppTrue16SelectsHalvesBeforeSourceModifiers) {
     a[lane] = ((0xc800 + step) << 16) | (0x4000 + step);
     b[lane] = ((0x4600 + step) << 16) | (0xc000 + step);
   }
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (uint32_t wave_size : {32u, 64u}) {
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && wave_size == 64)
+      if (arch == rocjitsu::IsaFamily::Cdna5 && wave_size == 64)
         continue;
       for (uint32_t vgprs : {8u, 256u}) {
         InstructionPolicyMachine machine(arch, vgprs, wave_size);

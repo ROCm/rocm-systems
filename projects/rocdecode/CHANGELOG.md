@@ -7,12 +7,14 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Added
 
 * Reference MD5 digests of the planar YUV 4:2:0 decoded output for the AVC, HEVC, AV1 and VP9 test streams, installed to `share/rocdecode/md5`. The `video_decode-AVC`, `video_decode-HEVC`, `video_decode-AV1`, `video_decode-VP9` and `video_decodeMem-HEVC` CTests now pass them to the samples' `-md5_check` option, so a test fails when the decoded output doesn't match its reference.
+* A `--mem_type` option for the `run_rocDecode_Conformance.py` and `run_rocDecodeSamples.py` test scripts, which passes the output surface memory type to the samples as `-m` so conformance and performance runs can cover the copied modes as well as the default.
 
 ### Resolved issues
 
 * The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report it as skipped instead of failed.
 * The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files rather than exiting when a file has an unsupported codec.
 * Fixed decoders that one process creates on different compute partitions of the same GPU (DPX, TPX, QPX, or CPX mode) all decoding on the first partition of that GPU that the process used.
+* Fixed the `RocVideoDecoder` utility returning skipped, repeated or corrupt frames after a decoder reconfigure in the `OUT_SURFACE_MEM_DEV_COPIED` and `OUT_SURFACE_MEM_HOST_COPIED` output modes, which affected HEVC streams with a repeated sequence header and VP9 streams with resolution changes.
 
 ## rocDecode 1.12.0 for ROCm 10.2.0
 

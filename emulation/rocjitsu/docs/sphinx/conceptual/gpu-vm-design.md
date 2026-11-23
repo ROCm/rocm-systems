@@ -1,12 +1,12 @@
 ---
 myst:
     html_meta:
-        "description": "GPU virtual machine design in rocJITsu, covering SoC component hierarchy, command processor dispatch, wavefront execution, memory hierarchy, MTYPE coherency, and supported ISA targets."
-        "keywords": "rocJITsu, GPU, virtual machine, SoC, XCD, shader engine, compute unit, command processor, wavefront, memory hierarchy, cache, MTYPE, coherency, ROCm"
+        "description": "GPU virtual machine design in rocjitsu, covering SoC component hierarchy, command processor dispatch, wavefront execution, memory hierarchy, MTYPE coherency, and supported ISA targets."
+        "keywords": "rocjitsu, GPU, virtual machine, SoC, XCD, shader engine, compute unit, command processor, wavefront, memory hierarchy, cache, MTYPE, coherency, ROCm"
 ---
 # GPU virtual machine design
 
-rocJITsu models a complete GPU system-on-chip (SoC) as a hierarchy of
+rocjitsu models a complete GPU system-on-chip (SoC) as a hierarchy of
 simulation components. This page describes how those components are
 organized, how work flows from an AQL dispatch packet through the
 command processor to wavefront execution on compute units, and how the

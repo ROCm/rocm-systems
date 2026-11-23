@@ -30,7 +30,7 @@ def test_benchmark_pr_trigger_extends_develop_push_paths():
         '.github/workflows/rocjitsu-benchmarks.yml',
     ]
     trigger = workflow[True]['pull_request']
-    assert trigger['branches'] == ['develop']
+    assert 'branches' not in trigger and 'branches-ignore' not in trigger
     assert trigger['types'] == ['labeled', 'synchronize']
     assert trigger['paths'] == push['paths'] + [
         '.github/scripts/rocjitsu_benchmark_report.js',
@@ -218,7 +218,7 @@ def test_dispatch_form_explains_source_and_pr_constraints():
     assert 'side-branch SHA' in source and 'develop' in source
     pr = inputs['pull_request_number']['description']
     assert 'open' in pr and 'same-repository' in pr
-    assert 'selected side branch' in pr and 'develop' in pr
+    assert 'selected side branch' in pr and 'stacked' in pr
 
 
 def test_python_ci_names_its_current_workflow_responsibilities():
@@ -404,14 +404,14 @@ def test_tensile_revision_shell_consumes_declared_pin(tmp_path, matches):
 
 def test_benchmark_pin_and_unfiltered_execution():
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
-    assert workflow['env']['CORPUS_SHA'] == 'b95ea549e1f500ce4ce83ae511ae5e4434930374'
+    assert workflow['env']['CORPUS_SHA'] == '970fb7cb6d94f818a6dd65f9a928eeee26edce7a'
     benchmark = workflow['jobs']['benchmark']
     command = next(
         s['run'] for s in benchmark['steps'] if s['name'] == 'Run performance suite'
     )
     assert command.count('-m benchmarks.runner') == 1
     assert (
-        workflow['env']['BENCHMARK_MANIFEST'] == 'benchmarks/suites/performance-v1.toml'
+        workflow['env']['BENCHMARK_MANIFEST'] == 'benchmarks/suites/performance-v2.toml'
     )
     assert '--manifest "${BENCHMARK_MANIFEST}"' in command
     generation = next(
@@ -424,10 +424,10 @@ def test_benchmark_pin_and_unfiltered_execution():
         in generation
     )
     workflow_text = (WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text()
-    assert workflow_text.count('benchmarks/suites/performance-v1.toml') == 1
+    assert workflow_text.count('benchmarks/suites/performance-v2.toml') == 1
     helper = WORKFLOWS.parents[1] / 'emulation/rocjitsu/scripts/prepare-benchmarks.py'
     assert 'benchmarks/suites/performance-v1.toml' not in helper.read_text()
-    assert command.count('--target-config ') == 2
+    assert command.count('--target-config ') == 4
     assert '--output "${ROCJITSU_RESULT_DIR}"' in command
     for selector in (
         '--thread-policy',

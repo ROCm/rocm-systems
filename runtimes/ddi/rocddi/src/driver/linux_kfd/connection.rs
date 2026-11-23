@@ -30,7 +30,7 @@ use crate::memory::storage::TryPush;
 use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::errno;
 use super::uapi;
@@ -62,6 +62,8 @@ pub(super) struct Kfd {
     process: ProcessIdentity,
     /// Serialized context selection and runtime enablement.
     runtime: Mutex<RuntimeControl>,
+    /// Checked migration support negotiated on this native endpoint.
+    checked_prefetch: OnceLock<bool>,
     /// Optional unit-test replacement for native ioctls.
     #[cfg(test)]
     hook: Option<IoctlHook>,
@@ -105,6 +107,7 @@ impl Kfd {
     pub(super) fn new(file: File, process: ProcessIdentity) -> Self {
         Self {
             file: Some(file),
+            checked_prefetch: OnceLock::new(),
             process,
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
@@ -121,6 +124,7 @@ impl Kfd {
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
         Self {
             file: Some(file),
+            checked_prefetch: OnceLock::new(),
             process: ProcessIdentity::capture().expect("test process identity"),
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
@@ -145,6 +149,18 @@ impl Kfd {
         let mut version = uapi::Version::default();
         self.call(Call::Version(&mut version))?;
         Ok(version)
+    }
+
+    pub(super) fn checked_prefetch(&self) -> io::Result<bool> {
+        self.check_process()?;
+        if let Some(supported) = self.checked_prefetch.get() {
+            return Ok(*supported);
+        }
+        let mut extension = uapi::VersionExtension::default();
+        self.call(Call::VersionExtension(&mut extension))?;
+        let supported = extension.checked_prefetch();
+        let _ = self.checked_prefetch.set(supported);
+        Ok(supported)
     }
 
     pub(super) fn clock_counters(&self, gpu_id: u32) -> io::Result<uapi::ClockCounters> {
@@ -324,6 +340,16 @@ impl Kfd {
         result
     }
 
+    /// # Safety
+    /// The queue is inactive and its complete writable CWSR allocation remains
+    /// live at `control_stack_address` through this synchronous call.
+    pub(super) unsafe fn queue_wave_state(
+        &self,
+        args: &mut uapi::QueueWaveState,
+    ) -> io::Result<()> {
+        self.call(Call::QueueWaveState(args))
+    }
+
     pub(super) fn enable_runtime(&self) -> io::Result<()> {
         let mut runtime = self.runtime_guard()?;
         self.enable_runtime_locked(&mut runtime)
@@ -375,6 +401,25 @@ impl Kfd {
                 .state
                 .debugger
                 .is_some_and(|active| (active.address, active.setup_ttmp) == (address, setup_ttmp)))
+    }
+
+    pub(super) fn core_runtime_info(
+        &self,
+    ) -> io::Result<crate::device::gpu::diagnostic::CoreRuntimeInfo> {
+        let runtime = self.runtime_guard()?;
+        if !matches!(
+            runtime.state.enable,
+            RuntimeState::Enabled | RuntimeState::Disabled
+        ) {
+            return Err(invalid_data("runtime registration outcome is uncertain"));
+        }
+        let enabled = runtime.state.enable == RuntimeState::Enabled;
+        let registration = runtime.state.debugger.filter(|_| enabled);
+        Ok(crate::device::gpu::diagnostic::CoreRuntimeInfo {
+            r_debug: registration.map_or(0, |value| value.address),
+            runtime_state: u32::from(enabled),
+            ttmp_setup: u32::from(registration.is_some_and(|value| value.setup_ttmp)),
+        })
     }
 
     pub(super) fn enable_runtime_locked(&self, runtime: &mut RuntimeGuard<'_>) -> io::Result<()> {
@@ -642,20 +687,33 @@ impl Kfd {
             || size == 0
             || address % page_size != 0
             || size % page_size != 0
-            || !matches!(operation, uapi::SVM_OP_SET_ATTR | uapi::SVM_OP_GET_ATTR)
+            || !matches!(
+                operation,
+                uapi::SVM_OP_SET_ATTR | uapi::SVM_OP_GET_ATTR | uapi::SVM_OP_PREFETCH_CHECKED
+            )
             || uapi::svm_request(attributes.len()).is_none()
         {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
-        self.call(Call::Svm(
-            &mut uapi::SvmArgs {
-                start_address: address,
-                size,
-                operation,
-                attribute_count,
-            },
-            attributes,
-        ))
+        let mut args = uapi::SvmArgs {
+            start_address: address,
+            size,
+            operation,
+            attribute_count,
+        };
+        loop {
+            // Legacy SVM validation can race with MMU invalidation or splitting.
+            // Like libhsakmt, retry those requests with the same inputs/outputs.
+            // Checked prefetch uses EAGAIN for incomplete placement (e.g. pinned
+            // pages), which must reach its caller before that condition can change.
+            // EINTR remains visible to the owner; generic ioctls are not replayed.
+            match self.call(Call::Svm(&mut args, attributes)) {
+                Err(source)
+                    if matches!(operation, uapi::SVM_OP_SET_ATTR | uapi::SVM_OP_GET_ATTR)
+                        && source.raw_os_error() == Some(errno::EAGAIN) => {}
+                result => return result,
+            }
+        }
     }
 
     pub(super) fn spm(&self, args: &mut uapi::Spm) -> io::Result<()> {

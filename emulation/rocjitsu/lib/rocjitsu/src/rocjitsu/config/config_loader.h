@@ -12,6 +12,7 @@
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/config/system_graph.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -92,7 +93,7 @@ struct ExecutionThreadSettings {
   std::vector<uint32_t> dispatch_capacities;
   bool async_supported = false;
   bool clocked = false;
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   util::FailureOr<ExecutionThreadAllocation> resolve(uint32_t host_threads,
                                                      util::DiagnosticEmitter emit_error) const {
@@ -141,7 +142,7 @@ util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_str
     util::DiagnosticEmitter emit_error);
 
 /// @brief Check whether the ISA supports asynchronous MMA execution.
-bool configured_async_mma_supported(rj_code_arch_t arch);
+bool configured_async_mma_supported(rocjitsu::IsaFamily arch);
 /// @brief Create lazy VM-owned resources for the requested helper count.
 std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
 make_async_execution_resources(uint32_t helpers);
@@ -326,11 +327,11 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
                                                            const std::string &schema_text,
                                                            util::DiagnosticEmitter emit_error);
 
-/// @brief Parse an architecture name string to an rj_code_arch_t enum value.
-rj_code_arch_t parse_arch(const std::string &arch_str);
+/// @brief Parse an architecture name string to an rocjitsu::IsaFamily enum value.
+rocjitsu::IsaFamily parse_arch(const std::string &arch_str);
 
-/// @brief Convert an rj_code_arch_t enum to its string name.
-const char *arch_to_string(rj_code_arch_t arch);
+/// @brief Convert an rocjitsu::IsaFamily enum to its string name.
+const char *arch_to_string(rocjitsu::IsaFamily arch);
 
 /// @brief Parse an execution mode name, defaulting to FUNCTIONAL.
 simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
