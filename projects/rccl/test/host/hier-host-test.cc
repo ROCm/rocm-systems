@@ -10,34 +10,50 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/comm_fakes.h"
+#include "fakes/hip_fakes.h"
 #include "fakes/nccl_stubs.h"
 
 #include HIER_HOST_CC_PATH
 
 namespace {
 std::vector<ncclComm_t> g_aborted;
+// The three stages of rcclHostHierAllReduce, and the parent votes and scratch calls some tests log alongside them.
+std::vector<std::string> g_log;
 }  // namespace
 
-// The externals of hier_host.cc that no shared fake covers. The stages never run here.
+// The externals of hier_host.cc that no shared fake covers.
 ncclResult_t ncclCommAbort(ncclComm_t comm) {
   g_aborted.push_back(comm);
   return ncclSuccess;
 }
 ncclResult_t ncclReduceScatter(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t, hipStream_t) {
-  ::abort();
+  g_log.push_back("ReduceScatter");
+  return ncclSuccess;
 }
 ncclResult_t ncclAllReduce(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t, hipStream_t) {
+  g_log.push_back("AllReduce");
+  return ncclSuccess;
+}
+ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t, ncclComm_t, hipStream_t) {
+  g_log.push_back("AllGather");
+  return ncclSuccess;
+}
+// The mock comm has no DDA fabric, so the fused kernel never runs.
+bool ncclAllReduceDdaFabricHierEligible(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t, int, int) { return false; }
+ncclResult_t ncclAllReduceDdaFabricHier(const void*, void*, size_t, ncclDataType_t, ncclComm*, hipStream_t, int, int,
+                                        int, int, const int*, const int*) {
   ::abort();
 }
-ncclResult_t ncclAllGather(const void*, void*, size_t, ncclDataType_t, ncclComm_t, hipStream_t) { ::abort(); }
 const char* ncclGetErrorString(ncclResult_t) { return "faked error"; }
 
 namespace {
@@ -105,9 +121,48 @@ auto SplitHook(Children* children, int* calls, int failOnCall) {
 
 class HostHierEnsureTest : public ::testing::Test {
  protected:
-  void SetUp() override { g_aborted.clear(); }
-  void TearDown() override { g_aborted.clear(); }
+  void SetUp() override {
+    g_aborted.clear();
+    g_log.clear();
+    g_hipEventCreateResult = hipSuccess;
+    g_hipAsyncOpsResult = hipSuccess;  // stream capture mode exchange and event records on the scratch path
+    g_hipEventSynchronize = [](hipEvent_t) { return hipSuccess; };
+    // ncclCudaFree looks up the allocation's base before freeing it.
+    g_hipMemGetAddressRange = [](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
+      *base = ptr;
+      *size = 0;
+      return hipSuccess;
+    };
+  }
+  void TearDown() override {
+    g_aborted.clear();
+    g_log.clear();
+    ResetHipFakes();
+  }
 };
+
+// Builds the child comms with every peer ready.
+void EnsureReady(HierComm* hc, Children* children) {
+  Votes votes;
+  int splits = 0;
+  ScopedHook split(g_ncclCommSplit, SplitHook(children, &splits, /*failOnCall=*/-1));
+  ScopedHook vote(g_bootstrapAllGather, VoteHook(&votes));
+  ASSERT_EQ(ncclSuccess, rcclHostHierEnsure(hc->get()));
+}
+
+// Logs each parent vote and fills the peers' slots, with peer `failingPeer` reporting not ready.
+auto LoggedVote(int failingPeer) {
+  return [failingPeer](void*, void* allData, int size) {
+    g_log.push_back("vote");
+    uint8_t* ready = static_cast<uint8_t*>(allData);
+    for (int r = 1; r < 4; r++) ready[r * size] = r == failingPeer ? 0 : 1;
+    return ncclSuccess;
+  };
+}
+
+// fp32 counts: the scratch holds one chunk per host-local rank, twice with the inter-host stage.
+constexpr size_t kSmallCount = 1024;
+constexpr size_t kLargeCount = 64 * 1024;
 
 TEST_F(HostHierEnsureTest, SplitFailingHereStopsAfterTheFirstVote) {
   HierComm hc;
@@ -265,6 +320,95 @@ TEST_F(HostHierEnsureTest, SplitsRunBlockingAndUnsharedThenRestoreTheParent) {
     EXPECT_EQ(1, hc.comm.config.splitShare) << "failOnCall " << failOnCall;
     rcclHostHierTeardown(hc.get());
   }
+}
+
+// Every rank grows the scratch on the same call and votes before the first stage; a call that fits does not vote.
+TEST_F(HostHierEnsureTest, ScratchGrowthVotesBeforeTheStages) {
+  HierComm hc;
+  Children children;
+  EnsureReady(&hc, &children);
+  ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/-1));
+  const std::vector<std::string> grow = {"vote", "ReduceScatter", "AllReduce", "AllGather"};
+  const std::vector<std::string> fits = {"ReduceScatter", "AllReduce", "AllGather"};
+  for (const auto& [count, expected] : {std::make_pair(kSmallCount, grow), std::make_pair(kSmallCount, fits),
+                                        std::make_pair(kLargeCount, grow)}) {
+    g_log.clear();
+    ASSERT_EQ(ncclSuccess, rcclHostHierAllReduce(nullptr, nullptr, count, ncclFloat32, ncclSum, hc.get(), nullptr));
+    EXPECT_EQ(expected, g_log) << "count " << count;
+  }
+  rcclHostHierTeardown(hc.get());
+}
+
+TEST_F(HostHierEnsureTest, PeerFailingScratchGrowthLaunchesNothing) {
+  HierComm hc;
+  Children children;
+  EnsureReady(&hc, &children);
+  ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/2));
+  EXPECT_EQ(ncclRemoteError, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(),
+                                                   nullptr));
+  EXPECT_EQ(std::vector<std::string>{"vote"}, g_log);
+  rcclHostHierTeardown(hc.get());
+}
+
+TEST_F(HostHierEnsureTest, ScratchAllocationFailingHereLaunchesNothing) {
+  HierComm hc;
+  Children children;
+  EnsureReady(&hc, &children);
+  ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/-1));
+  ScopedHook alloc(g_hipExtMallocWithFlags, [](void**, size_t, unsigned) { return hipErrorOutOfMemory; });
+  EXPECT_NE(ncclSuccess, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(),
+                                               nullptr));
+  EXPECT_EQ(std::vector<std::string>{"vote"}, g_log) << "this rank still votes, then launches nothing";
+  rcclHostHierTeardown(hc.get());
+}
+
+// An outgrown stage buffer is kept until teardown rather than freed while the comm lives.
+TEST_F(HostHierEnsureTest, RegrowKeepsTheOldBufferUntilTeardown) {
+  HierComm hc;
+  Children children;
+  EnsureReady(&hc, &children);
+  ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/-1));
+  ScopedHook release(g_hipFree, [](void* ptr) {
+    g_log.push_back("free");
+    std::free(ptr);  // DefaultHipExtMallocWithFlags allocates with std::malloc
+    return hipSuccess;
+  });
+  ASSERT_EQ(ncclSuccess, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(), nullptr));
+  void* const first = hc.comm.hostHier->scratch;
+  g_log.clear();
+  ASSERT_EQ(ncclSuccess, rcclHostHierAllReduce(nullptr, nullptr, kLargeCount, ncclFloat32, ncclSum, hc.get(), nullptr));
+  const std::vector<std::string> expected = {"vote", "ReduceScatter", "AllReduce", "AllGather"};
+  EXPECT_EQ(expected, g_log) << "no free while the comm lives";
+  EXPECT_NE(first, hc.comm.hostHier->scratch);
+  ASSERT_EQ(1, hc.comm.hostHier->nRetired);
+  EXPECT_EQ(first, hc.comm.hostHier->retired[0]);
+  g_log.clear();
+  rcclHostHierTeardown(hc.get());
+  EXPECT_EQ((std::vector<std::string>{"free", "free"}), g_log) << "the kept and the current buffer";
+}
+
+// Only a rank whose buffers are not 16-byte aligned copies them, so its copy buffer grows without a vote and leaves the
+// stage buffer, which every rank grows together, untouched.
+TEST_F(HostHierEnsureTest, MisalignedRankGrowsItsCopyBufferWithoutAVote) {
+  HierComm hc;
+  Children children;
+  EnsureReady(&hc, &children);
+  ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/-1));
+  ScopedHook copies(g_hipMemcpyAsync, [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) {
+    g_log.push_back("copy");
+    return hipSuccess;
+  });
+  ASSERT_EQ(ncclSuccess, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(), nullptr));
+  const size_t stageBytes = hc.comm.hostHier->scratchBytes;
+  g_log.clear();
+  void* const misaligned = reinterpret_cast<void*>(0x1004);
+  ASSERT_EQ(ncclSuccess,
+            rcclHostHierAllReduce(misaligned, misaligned, kSmallCount, ncclFloat32, ncclSum, hc.get(), nullptr));
+  const std::vector<std::string> expected = {"copy", "ReduceScatter", "AllReduce", "AllGather", "copy"};
+  EXPECT_EQ(expected, g_log);
+  EXPECT_GE(hc.comm.hostHier->copyBytes, kSmallCount * sizeof(float));
+  EXPECT_EQ(stageBytes, hc.comm.hostHier->scratchBytes);
+  rcclHostHierTeardown(hc.get());
 }
 
 // Every step votes once: the two splits and the two fabric inits.

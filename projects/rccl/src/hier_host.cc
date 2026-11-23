@@ -60,15 +60,15 @@ bool allRanksReady(struct ncclComm* comm, ncclResult_t* res) {
 // Never frees a buffer while the comm lives: freeing one that peer GPUs of the same process have just accessed
 // through the child comms intermittently fails in HIP, so a buffer that is outgrown is kept until teardown. Growing
 // at least twofold keeps the kept buffers under the size of the current one.
-ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes) {
-  if (h->scratchBytes >= bytes) return ncclSuccess;
+ncclResult_t reserveBuffer(struct ncclComm* comm, struct rcclHostHier* h, void** buf, size_t* bufBytes, size_t bytes) {
+  if (*bufBytes >= bytes) return ncclSuccess;
   if (h->nRetired == kHostHierMaxRetired) return ncclInternalError;
-  const size_t grown = std::max(bytes, 2 * h->scratchBytes);
-  char* buf = nullptr;
-  NCCLCHECK(ncclCudaMalloc(&buf, grown, comm->memManager));
-  if (h->scratch != nullptr) h->retired[h->nRetired++] = h->scratch;
-  h->scratch = buf;
-  h->scratchBytes = grown;
+  const size_t grown = std::max(bytes, 2 * *bufBytes);
+  char* next = nullptr;
+  NCCLCHECK(ncclCudaMalloc(&next, grown, comm->memManager));
+  if (*buf != nullptr) h->retired[h->nRetired++] = *buf;
+  *buf = next;
+  *bufBytes = grown;
   return ncclSuccess;
 }
 
@@ -267,6 +267,7 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   // The children's collectives read the scratch buffers.
   for (int i = 0; i < h->nRetired; i++) NCCLCHECKGOTO(ncclCudaFree(h->retired[i], comm->memManager), res, exit);
   if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
+  if (h->copy != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->copy, comm->memManager), res, exit);
 exit:
   free(h->hostRanks);
   free(h);
@@ -355,13 +356,18 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   // The inter-host AllReduce runs out of place: in place it is several times slower.
   const size_t stride = (chunkBytes + 255) & ~size_t{255};
   const size_t stageBytes = fused ? 0 : doInter ? stride + chunkBytes : chunkBytes;
+  if (h->scratchBytes < stageBytes) {
+    // Every rank grows on the same call, and one that cannot allocate would skip the ReduceScatter its peers wait in.
+    ncclResult_t res = reserveBuffer(comm, h, &h->scratch, &h->scratchBytes, stageBytes);
+    if (!allRanksReady(comm, &res)) return res;
+  }
   // The fused kernel and some algorithms of the child collectives are chosen from each rank's own buffer alignment, so
-  // a rank whose buffers are not 16-byte aligned copies them through scratch instead of taking a path its peers do
-  // not take.
+  // a rank whose buffers are not 16-byte aligned copies them through its copy buffer instead of taking a path its peers
+  // do not take. Only that rank grows the buffer, so it cannot vote: if the allocation fails, its peers wait in the
+  // collective it skips.
   const bool aligned = ((reinterpret_cast<uintptr_t>(sendbuff) | reinterpret_cast<uintptr_t>(recvbuff)) & 15) == 0;
-  const size_t copyBytes = aligned ? 0 : (bytes + 255) & ~size_t{255};
-  NCCLCHECK(reserveScratch(comm, h, copyBytes + stageBytes));
-  char* const copy = static_cast<char*>(h->scratch);
+  if (!aligned) NCCLCHECK(reserveBuffer(comm, h, &h->copy, &h->copyBytes, bytes));
+  char* const copy = static_cast<char*>(h->copy);
   const void* in = aligned ? sendbuff : copy;
   void* out = aligned ? recvbuff : copy;
   if (!aligned) CUDACHECK(cudaMemcpyAsync(copy, sendbuff, bytes, cudaMemcpyDeviceToDevice, stream));
@@ -382,7 +388,7 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
     NCCLCHECK(res);
   } else {
     // The child comms keep their own stop events, so this comm's is recorded after the copy-out below.
-    char* rsOut = copy + copyBytes;
+    char* rsOut = static_cast<char*>(h->scratch);
     char* agIn = doInter ? rsOut + stride : rsOut;
     // The parent AllReduce is already recorded.
     rccl::Recorder::instance().skip(true);
