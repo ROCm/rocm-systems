@@ -31,7 +31,7 @@ file(
 file(READ "${TEST_CONFIG_SOURCE}" _profile_json)
 string(
     REPLACE
-    "{\"num_threads\": 8, \"cpu_dispatch_threads\": 17, \"async_helper_threads\": 8}"
+    "{\"num_threads\": 8, \"cpu_dispatch_threads\": 17, \"async_helper_threads\": 0}"
     "{\"num_threads\": 7, \"cpu_dispatch_threads\": 19, \"async_helper_threads\": 0}"
     _profile_json
     "${_profile_json}"

@@ -241,11 +241,11 @@ set_tests_properties(
 )
 set_tests_properties(
     RocjitsuProfileDefaultThreadBudget
-    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 17 \\| 0 \\| 24"
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 25 \\| 0 \\| 32"
 )
 set_tests_properties(
     RocjitsuProfileCaseInsensitiveThreadBudget
-    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 33 \\| 0 \\| 40"
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 41 \\| 0 \\| 48"
 )
 
 add_test(
