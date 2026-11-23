@@ -9207,6 +9207,13 @@ TEST(WrapMicrotestIsolated, DdaFabricA2aLL128Shape_FromTable) {
           EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAlltoAll)) << n;
           EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAlltoAll)) << n;
         }
+        // SPX runs AllToAll LL128 to 64 MiB at every rank count; DPX above stays at 16 MiB.
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        for (int n : {4, 8, 16, 32, 64}) {
+          comm->nRanks = n;
+          EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAlltoAll)) << n;
+          EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAlltoAll)) << n;
+        }
         DeleteCommWithArch(comm);
       });
 }
