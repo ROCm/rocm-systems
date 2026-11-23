@@ -116,6 +116,9 @@ struct KernelOwnerFlow {
 /// target-bound CFG itself. Unknown flow or unproved returns fail without facts.
 /// Shared multi-target transfers require kernel-specific provenance; PC builders
 /// carried across calls require callee-preservation proof. Both fail in this profile.
+/// gfx942 pairs overlapping descriptor-dependent VCC/FLAT_SCRATCH aliases are
+/// not proved as return links or recovered PC builders; recovered pairs must
+/// name ordinary SGPRs.
 /// Query spans are valid only while both this result and the source remain alive;
 /// callers must retain the source when consuming a returned span.
 class KernelOwnership {
