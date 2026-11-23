@@ -21,6 +21,7 @@ from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.specs import MachineSpecs
+from utils.utils_analysis import pass_tables_on_rows
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
@@ -32,7 +33,11 @@ from utils.utils_common import (
     metric_ids_by_name,
     normalize_filter_to_str_list,
 )
-from utils.utils_counter_defs import metric_expressions, metric_value_keys
+from utils.utils_counter_defs import (
+    is_simple_box_table,
+    metric_expressions,
+    metric_value_keys,
+)
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -198,15 +203,12 @@ def _build_metric_table_df(
     """
     table_id = data_config["id"]
     table_data_source_idx = format_table_id(table_id)
-    is_simple_box = data_config.get("cli_style") == "simple_box"
+    is_simple_box = is_simple_box_table(data_config)
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
     value_keys = metric_value_keys(data_config)
     if is_simple_box:
         headers.extend(simple_box)
-        for key, tile in data_config["header"].items():
-            if key != "metric" and key != "expr":
-                headers.append(tile)
     else:
         for key, tile in data_config["header"].items():
             if key != "metric":
@@ -599,7 +601,7 @@ def load_table_data(
         workload.roofline_peaks,
         filtered_pmc,
         args.debug_metric_expression,
-        [table.loc[filtered_pmc.index] for table in workload.pass_tables.values()],
+        pass_tables_on_rows(workload.pass_tables, filtered_pmc),
     )
 
 

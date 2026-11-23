@@ -5,7 +5,9 @@
 
 #include "rocjitsu/code/consan/contract.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -35,15 +37,22 @@ struct NativeLdsAccess {
 [[nodiscard]] Result qualify_lds_race_block(const BasicBlock &block, InputError &error);
 
 /// @brief Qualify original workgroup barrier groups and populate program.barriers.
-/// @details On the already qualified closed forward CFG, require an original LDS
-/// drain immediately before signal and a matching wait in the same block, with
-/// no intervening memory or synchronization. Each group block must dominate every exit.
+/// @details Require an original LDS drain immediately before signal and a matching
+/// wait in the same block, with no intervening memory or synchronization. Acyclic
+/// groups must dominate exits; the qualified single-block loop uses repeated epochs.
 [[nodiscard]] Result qualify_lds_race_barrier(InputProgram &program,
                                               std::span<BasicBlock *const> blocks,
                                               InputError &error);
 
+/// @brief Order the reachable CFG, deferring conditional self-edges to barrier qualification.
+/// @details Reject all other cycles. The input collector uses this order to preserve
+/// increasing native LDS access PCs along paths with backward trampoline edges.
+/// A deferred self-edge is admitted only if qualify_lds_race_barrier() later succeeds.
+[[nodiscard]] FailureOr<std::vector<const BasicBlock *>>
+qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error);
 [[nodiscard]] Result classify_lds_race_instruction(const Instruction &instruction,
-                                                   rj_code_arch_t arch, uint32_t allocated_vgprs,
+                                                   rocjitsu::IsaFamily arch,
+                                                   uint32_t allocated_vgprs,
                                                    std::vector<NativeLdsAccess> &accesses,
                                                    InputError &error);
 [[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,

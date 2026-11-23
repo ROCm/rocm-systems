@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/file_io.h"
@@ -62,14 +63,13 @@ bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC
 using detail::fits_in_bounds;
 
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
-  const IsaGpuTargetDescription *binding =
-      default_isa_target_registry().find_gpu_target_by_elf_machine(flags & EF_AMDGPU_MACH);
+  const IsaTargetBinding *binding =
+      default_isa_target_registry().find_target_by_elf_machine(flags & EF_AMDGPU_MACH);
   return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
 rj_code_target_id_t target_from_code_object_id(std::string_view id) {
-  const IsaGpuTargetDescription *binding =
-      default_isa_target_registry().find_gpu_target_by_code_object_id(id);
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target_by_code_object_id(id);
   return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
@@ -357,13 +357,13 @@ namespace {
 // sgpr_count_is_descriptor_encoded(); kept as the short, stable CDNA
 // list so a new non-CDNA family falls through to the RDNA-style branch by
 // default. (Canonical copy: code/dbt/kernel_descriptor_translator.cpp.)
-[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+[[nodiscard]] bool is_cdna_arch(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+         arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
 }
 
 // Decode one kernel descriptor's per-wave SGPR count from its granulated field.
-[[nodiscard]] uint32_t sgpr_count_from_granulated(uint32_t granulated, rj_code_arch_t arch) {
+[[nodiscard]] uint32_t sgpr_count_from_granulated(uint32_t granulated, rocjitsu::IsaFamily arch) {
   // Descriptor-encoded (granulated != 0, or a CDNA target): (granulated + 1) * 8.
   // Otherwise the field is an RDNA-style sentinel and the wave owns the fixed
   // per-wave SGPR pool.
@@ -375,7 +375,7 @@ namespace {
 } // namespace
 
 std::optional<uint32_t>
-AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
+AmdGpuCodeObject::min_kernel_sgpr_count(rocjitsu::IsaFamily arch,
                                         std::span<const KernelDescriptorInfo> kernels) {
   namespace kd = rocjitsu::amdhsa;
 
@@ -389,7 +389,7 @@ AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
   return min_count;
 }
 
-std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rocjitsu::IsaFamily arch) const {
   const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
                                        image_size()};
   // Discover descriptors through the shared scanner rather than re-walking sections

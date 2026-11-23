@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vgpr_msb.h
-/// @brief AMDGPU VGPR high-bank mode helpers shared by model and execution code.
+/// @brief AMDGPU HWREG decoding and MODE helpers shared by analysis and execution code.
 
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_VGPR_MSB_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_VGPR_MSB_H_
@@ -28,6 +28,7 @@ enum class VgprMsbRole : uint8_t {
 constexpr uint32_t VGPR_MSB_MODE_SHIFT = 12;
 constexpr uint32_t VGPR_MSB_MODE_MASK = 0xffu << VGPR_MSB_MODE_SHIFT;
 constexpr uint16_t MODE_HWREG = 1;
+constexpr uint16_t MODE_VSKIP_SHIFT = 28;
 constexpr size_t VGPR_MSB_ROLE_COUNT = 4;
 
 /// @brief Known bank for each role in S_SET_VGPR_MSB field order.
@@ -70,7 +71,7 @@ struct HwregSlice {
 };
 
 /// @brief Decode HWREG id[5:0], offset[10:6], and size-1[15:11].
-[[nodiscard]] constexpr HwregSlice decode_vgpr_msb_hwreg(uint16_t hwreg) {
+[[nodiscard]] constexpr HwregSlice decode_hwreg_slice(uint16_t hwreg) {
   return HwregSlice{.id = static_cast<uint16_t>(hwreg & 0x3f),
                     .begin = static_cast<uint16_t>((hwreg >> 6) & 0x1f),
                     .width = static_cast<uint16_t>(((hwreg >> 11) & 0x1f) + 1)};
@@ -78,14 +79,14 @@ struct HwregSlice {
 
 /// @brief Whether an S_SETREG slice covers one MODE bit.
 [[nodiscard]] constexpr bool hwreg_slice_overlaps_mode_bit(uint16_t hwreg, uint16_t bit) {
-  const HwregSlice slice = decode_vgpr_msb_hwreg(hwreg);
+  const HwregSlice slice = decode_hwreg_slice(hwreg);
   return slice.id == MODE_HWREG && slice.begin <= bit &&
          static_cast<uint32_t>(slice.begin) + slice.width > bit;
 }
 
 /// @brief Whether an S_SETREG slice overlaps MODE.VGPR_MSB (bits 19:12).
 [[nodiscard]] constexpr bool hwreg_slice_overlaps_vgpr_msb(uint16_t hwreg) {
-  const HwregSlice slice = decode_vgpr_msb_hwreg(hwreg);
+  const HwregSlice slice = decode_hwreg_slice(hwreg);
   return slice.id == MODE_HWREG && slice.begin < VGPR_MSB_MODE_SHIFT + 8 &&
          static_cast<uint32_t>(slice.begin) + slice.width > VGPR_MSB_MODE_SHIFT;
 }
@@ -100,7 +101,7 @@ struct HwregSlice {
 inline void apply_vgpr_msb_mode_write(VgprMsbBanks &banks, uint16_t hwreg,
                                       std::optional<uint32_t> value) {
   constexpr std::array<uint8_t, VGPR_MSB_ROLE_COUNT> mode_bit_offset = {14, 16, 18, 12};
-  const HwregSlice slice = decode_vgpr_msb_hwreg(hwreg);
+  const HwregSlice slice = decode_hwreg_slice(hwreg);
   const uint16_t begin = slice.begin;
   if (slice.id != MODE_HWREG || begin >= 32)
     return;

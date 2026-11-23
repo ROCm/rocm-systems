@@ -48,7 +48,7 @@ else()
         system/amd/io-data-modification-kernel.hip
     )
     list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
-    list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
+    list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_AMD_TEST_PATH})
 endif()
 
 # hipfile_tests holds the platform-portable unit tests. Today those sources only
@@ -85,6 +85,7 @@ hipfile_add_test_executable(
     SYSINCLS ${TEST_SYSINCLS}
 )
 target_link_libraries(hipfile_system_tests PRIVATE GTest::gtest)
+target_link_libraries(hipfile_system_tests PRIVATE GTest::gmock)
 # -pthread is critical for sanitizer builds via TheRock
 # NEVER REMOVE IT
 target_compile_options(hipfile_system_tests PRIVATE -pthread)
