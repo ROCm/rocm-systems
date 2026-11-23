@@ -209,6 +209,62 @@ public:
   }
 };
 
+/// @brief A per-lane array that only some memory instructions use.
+/// @details Reused states are rebuilt in place for every instruction, so a
+/// large inline array is rewritten even when nothing touched it. This array
+/// keeps its storage across reuse and is allocated on first mutable access;
+/// unallocated storage reads as zeros. Any mutable access marks it for
+/// zeroing on reuse, which preserves the value-initialized contract.
+template <typename T, size_t N> class ColdLaneArray {
+public:
+  using value_type = T;
+  ColdLaneArray() = default;
+  ColdLaneArray(const ColdLaneArray &other)
+      : storage_(other.storage_ ? std::make_unique<std::array<T, N>>(*other.storage_) : nullptr),
+        dirty_(other.dirty_) {}
+  ColdLaneArray(ColdLaneArray &&) noexcept = default;
+  ColdLaneArray &operator=(ColdLaneArray &&) noexcept = default;
+  ColdLaneArray &operator=(const ColdLaneArray &other) {
+    if (this != &other)
+      mutable_storage() = other.view();
+    return *this;
+  }
+
+  [[nodiscard]] const std::array<T, N> &view() const { return storage_ ? *storage_ : zeros(); }
+  operator const std::array<T, N> &() const { return view(); }
+  [[nodiscard]] T &operator[](size_t i) { return mutable_storage()[i]; }
+  [[nodiscard]] const T &operator[](size_t i) const { return view()[i]; }
+  [[nodiscard]] T *data() { return mutable_storage().data(); }
+  [[nodiscard]] const T *data() const { return view().data(); }
+  [[nodiscard]] T *begin() { return data(); }
+  [[nodiscard]] T *end() { return data() + N; }
+  [[nodiscard]] const T *begin() const { return data(); }
+  [[nodiscard]] const T *end() const { return data() + N; }
+  [[nodiscard]] static constexpr size_t size() { return N; }
+  void fill(const T &value) { mutable_storage().fill(value); }
+
+  /// @brief Take the storage of a retired state, zeroing it only if written.
+  void adopt(ColdLaneArray &retired) noexcept {
+    storage_ = std::move(retired.storage_);
+    if (std::exchange(retired.dirty_, false) && storage_)
+      storage_->fill(T{});
+  }
+
+private:
+  static const std::array<T, N> &zeros() {
+    static const std::array<T, N> value{};
+    return value;
+  }
+  std::array<T, N> &mutable_storage() {
+    if (!storage_)
+      storage_ = std::make_unique<std::array<T, N>>();
+    dirty_ = true;
+    return *storage_;
+  }
+  std::unique_ptr<std::array<T, N>> storage_;
+  bool dirty_ = false;
+};
+
 /// @brief Per-element vector-memory lane masks with inline storage for the
 /// common one-to-four-element access widths.
 class ElementLaneMasks {
@@ -456,11 +512,11 @@ public:
   /// Per-lane LDS endpoints of a load or store: per_lane_lds_addr holds the LDS
   /// destination (lds_dst) or source (lds_src) addresses.
   bool lds_per_lane_addr = false;
-  std::array<uint32_t, 64> per_lane_lds_addr = {};
+  ColdLaneArray<uint32_t, 64> per_lane_lds_addr;
   /// For lds_src, the leading LDS bytes each lane reads from per_lane_lds_addr:
   /// the bytes of its source inside the allocation. Bytes past them read zero.
   /// Zero for lanes that read no LDS.
-  std::array<uint8_t, 64> per_lane_lds_src_bytes = {};
+  ColdLaneArray<uint8_t, 64> per_lane_lds_src_bytes;
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).
@@ -497,7 +553,7 @@ public:
 
   bool ds_src2 = false; ///< Atomic operand read from ds2_per_lane_addr at issue.
   bool ds2_active = false;
-  std::array<uint64_t, 64> ds2_per_lane_addr = {};
+  ColdLaneArray<uint64_t, 64> ds2_per_lane_addr;
   uint32_t ds2_dst_reg_base = 0;
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
@@ -565,12 +621,21 @@ public:
     std::vector<uint8_t> ds2_store = std::move(ds2_store_data);
     std::vector<TranslatedMemoryRequest> requests = std::move(translated.requests);
     std::vector<uint8_t> reordered_data = std::move(translated.reordered_data);
+    ColdLaneArray<uint32_t, 64> lds_addr;
+    ColdLaneArray<uint8_t, 64> lds_src_bytes;
+    ColdLaneArray<uint64_t, 64> ds2_addr;
+    lds_addr.adopt(per_lane_lds_addr);
+    lds_src_bytes.adopt(per_lane_lds_src_bytes);
+    ds2_addr.adopt(ds2_per_lane_addr);
     // Inline destruction here so the compiler can discard cleanup of the moved buffers.
 #if defined(__clang__)
     [[clang::always_inline]]
 #endif
     this->~VectorMemState();
     VectorMemState *fresh = std::construct_at(this, pipeline);
+    fresh->per_lane_lds_addr.adopt(lds_addr);
+    fresh->per_lane_lds_src_bytes.adopt(lds_src_bytes);
+    fresh->ds2_per_lane_addr.adopt(ds2_addr);
     fresh->response_data = std::move(response);
     fresh->store_data = std::move(store);
     fresh->ds2_response_data = std::move(ds2_response);
