@@ -57,10 +57,6 @@ _RESERVED_OFFSET = 40
 _RESERVED_COUNT = 11
 
 
-@unittest.skipIf(
-    not hasattr(ai.amdsmi_wrapper, "struct_amdsmi_power_stabilization_info_t"),
-    "amdsmi_wrapper does not expose struct_amdsmi_power_stabilization_info_t",
-)
 class TestPowerStabilizationInfoLayout(unittest.TestCase):
     """Pins the all-integer ramp fields' offsets and reserved[11] tail
     (see test_asic_info_layout.py for the same pattern on a sibling struct)."""
@@ -87,10 +83,6 @@ class TestPowerStabilizationInfoLayout(unittest.TestCase):
         self.assertEqual(reserved.offset + reserved.size, _INFO_STRUCT_SIZE)
 
 
-@unittest.skipIf(
-    not hasattr(ai, "amdsmi_set_power_stabilization_param"),
-    "amdsmi_interface source does not expose amdsmi_set_power_stabilization_param",
-)
 class TestPowerStabilizationParamIntValidation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

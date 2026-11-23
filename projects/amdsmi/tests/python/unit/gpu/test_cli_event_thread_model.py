@@ -38,7 +38,14 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
+from common.common import (
+    cli_search_order,
+    fake_amdsmi_init,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 EVENT_PATH = os.path.join(_CLI_DIR, "subcommands", "event.py") if _CLI_DIR else None
@@ -117,7 +124,7 @@ class TestOpenListeners(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
@@ -234,7 +241,7 @@ class TestEventThreadMessageParsing(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.exception_module = modules["amdsmi.amdsmi_exception"]
@@ -382,7 +389,7 @@ class TestEventSigtermHandler(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.event_module = _load_event_module()
@@ -402,7 +409,7 @@ class TestEventOrchestration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.exception_module = modules["amdsmi.amdsmi_exception"]
@@ -555,9 +562,7 @@ class TestEventRealThreads(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
-        if not hasattr(signal, "SIGALRM"):
-            raise unittest.SkipTest("SIGALRM is POSIX-only; unavailable on this platform")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
@@ -692,9 +697,9 @@ class TestEventOpenListenersRealRecordOrRaise(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
+            raise FileNotFoundError("amd-smi CLI source not found")
 
         modules = _build_fake_amdsmi()
         interface = modules["amdsmi.amdsmi_interface"]
@@ -717,8 +722,9 @@ class TestEventOpenListenersRealRecordOrRaise(unittest.TestCase):
 
         # amdsmi_helpers.py does `from amdsmi_init import *`; evict any stale
         # fake a sibling test file left behind so this loads the real sources.
-        modules.update(
-            dict.fromkeys(("amdsmi_init", "amdsmi_helpers", "amdsmi_cli_exceptions", "BDF"))
+        modules.update(dict.fromkeys(("amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")))
+        modules["amdsmi_init"] = fake_amdsmi_init(
+            modules["amdsmi.amdsmi_interface"], modules["amdsmi.amdsmi_exception"]
         )
         stub_modules(cls, modules)
         if _CLI_DIR not in sys.path:

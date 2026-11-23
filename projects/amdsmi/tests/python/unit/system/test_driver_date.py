@@ -8,11 +8,16 @@ import importlib
 import sys
 import types
 import unittest
-from pathlib import Path
 from unittest import mock
 
+from common.common import amdsmi_interface_path
 
-_PACKAGE_DIR = Path(__file__).resolve().parents[4] / "py-interface"
+
+try:
+    # The checkout's py-interface/, or the installed amdsmi/ package, which holds the same files.
+    _PACKAGE_DIR = amdsmi_interface_path(__file__).parent
+except FileNotFoundError:
+    _PACKAGE_DIR = None
 
 
 def _load_source_package() -> types.ModuleType:
@@ -24,14 +29,14 @@ def _load_source_package() -> types.ModuleType:
     return package
 
 
-amdsmi = _load_source_package() if _PACKAGE_DIR.is_dir() else None
+amdsmi = _load_source_package() if _PACKAGE_DIR is not None else None
 
 
 class TestDriverDate(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if amdsmi is None:
-            raise unittest.SkipTest(f"amdsmi py-interface source not found at {_PACKAGE_DIR}")
+            raise FileNotFoundError("amdsmi_interface.py not found in the checkout or the install")
 
     def test_empty_driver_date_renders_na(self) -> None:
         handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()

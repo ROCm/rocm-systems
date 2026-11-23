@@ -20,7 +20,7 @@ runner, and names the runner that owns it.
 
 It also fails if a module builds a CLI path out of hardcoded ``amdsmi_cli`` /
 ``libexec`` components instead of calling ``common.find_cli_dir``. Hand-rolled
-resolution silently skips the suite in whichever layout it was not written for,
+resolution silently breaks the suite in whichever layout it was not written for,
 and typically prefers the source tree over ``AMDSMI_PATH``, so an explicit
 override is ignored.
 
@@ -59,6 +59,11 @@ _SYS_MODULES_ASSIGN = re.compile(r"""^\s*sys\.modules\[\s*['"][^'"]+['"]\s*\]\s*
 # ``stub_modules`` (class-scoped) or ``stub_modules_at_import`` (module-scoped,
 # restored from tearDownModule).
 _STUB_MODULES_CALL = re.compile(r"\bstub_modules(?:_at_import)?\s*\(")
+
+# Every way a unittest/pytest test opts out of running.
+_SKIP_CONSTRUCT = re.compile(
+    r"\b(?:SkipTest|skipTest|skipIf|skipUnless|expectedFailure|pytest\.skip|unittest\.skip)\b"
+)
 
 # Top-level suite directory -> the runner script that discovers/runs it
 # (see the common.run_test_dir callers).
@@ -122,16 +127,17 @@ _CLI_PATH_MESSAGE_HEADER = (
     "calling `common.find_cli_dir`.\n\n"
     "The CLI lives at `<rocm>/libexec/amdsmi_cli` when installed and at\n"
     "`projects/amdsmi/amdsmi_cli` in a source checkout, so a path written for one\n"
-    "layout resolves to nothing in the other and the suite skips itself instead of\n"
-    "failing. A hand-rolled resolver also gets the priority wrong. `cli_search_order`\n"
+    "layout resolves to nothing in the other and the suite breaks there instead of\n"
+    "running. A hand-rolled resolver also gets the priority wrong. `cli_search_order`\n"
     "owns that rule: the source tree wins by default, so a checkout tests itself\n"
     "rather than a stale install, and an explicit AMDSMI_PATH wins over source.\n\n"
-    "Resolve the directory once, at module scope, and skip only when it is None:\n\n"
+    "Resolve the directory once, at module scope, and fail when it is None (unit tests\n"
+    "must not skip, so a missing CLI is an error):\n\n"
     "    from common.common import cli_search_order, find_cli_dir\n\n"
     "    _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))\n"
     '    SOME_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None\n\n'
     "    if not SOME_PATH or not os.path.isfile(SOME_PATH):\n"
-    "        raise unittest.SkipTest(\n"
+    "        raise FileNotFoundError(\n"
     '            f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"\n'
     "        )"
 )
@@ -167,6 +173,21 @@ _STUB_MESSAGE_HEADER = (
 def _format_stub_message(offenders):
     blocks = "\n".join(f"  [*] {rel}" for rel in offenders)
     return f"{_STUB_MESSAGE_HEADER}\n\nOffenders:\n{blocks}\n"
+
+
+_SKIP_MESSAGE_HEADER = (
+    "These unit tests skip or expect failure.\n\n"
+    "Unit tests need no hardware, so a skipped test is a check that never ran, and\n"
+    "`python -m unittest` and pytest report it as a pass. Fail instead, so a missing\n"
+    "CLI, header or library shows up under every runner:\n\n"
+    "    raise FileNotFoundError(...)   # module level or setUpClass\n"
+    "    self.fail(...)                 # inside a test"
+)
+
+
+def _format_skip_message(offenders):
+    blocks = "\n".join(f"  [*] {rel}" for rel in offenders)
+    return f"{_SKIP_MESSAGE_HEADER}\n\nOffenders:\n{blocks}\n"
 
 
 def _iter_test_sources():
@@ -217,3 +238,15 @@ class TestRunnerHygiene(unittest.TestCase):
 
         offenders.sort()
         self.assertEqual(offenders, [], _format_stub_message(offenders))
+
+    def test_unit_tests_do_not_skip(self):
+        this_file = os.path.basename(__file__)
+        offenders = []
+        for rel_path, source in _iter_test_sources():
+            if not rel_path.startswith("unit" + os.sep) or os.path.basename(rel_path) == this_file:
+                continue
+            if _SKIP_CONSTRUCT.search(source):
+                offenders.append(rel_path)
+
+        offenders.sort()
+        self.assertEqual(offenders, [], _format_skip_message(offenders))

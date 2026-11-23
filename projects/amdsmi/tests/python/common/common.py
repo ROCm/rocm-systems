@@ -22,6 +22,7 @@ Imported by every functional/unit leaf test and by all three runners
 
 import contextlib
 import fnmatch
+import importlib.abc
 import importlib.util
 import inspect
 import io
@@ -32,40 +33,6 @@ import sys
 import time
 import types
 import unittest
-from unittest import mock
-
-
-def cli_search_order(start_dir):
-    """Return source-tree and installed CLI directories to search."""
-    candidates = [parent / "amdsmi_cli" for parent in pathlib.Path(start_dir).resolve().parents]
-    candidates.append(pathlib.Path(amdsmi_path).resolve().parent.parent / "libexec" / "amdsmi_cli")
-    return [str(candidate) for candidate in candidates]
-
-
-def find_cli_dir(*candidates):
-    """Return the first candidate containing the CLI logger and subcommands."""
-    for candidate in candidates:
-        candidate = os.fspath(candidate)
-        if os.path.isfile(os.path.join(candidate, "amdsmi_logger.py")) and os.path.isdir(
-            os.path.join(candidate, "subcommands")
-        ):
-            return candidate
-    return ""
-
-
-def fake_module(name, **attributes):
-    """Create a module stub with the supplied attributes."""
-    module = types.ModuleType(name)
-    for attribute, value in attributes.items():
-        setattr(module, attribute, value)
-    return module
-
-
-def stub_modules(test_case, modules):
-    """Temporarily install module stubs for a test class."""
-    patcher = mock.patch.dict(sys.modules, modules)
-    patcher.start()
-    test_case.addClassCleanup(patcher.stop)
 
 
 def _print_path_remediation(script, file):
@@ -188,15 +155,18 @@ def amdsmi_interface_path(start_file: str) -> pathlib.Path:
     """Return the ``amdsmi_interface.py`` source for tests that parse it as text.
 
     A checkout carries it in ``py-interface/``; an install ships it inside the ``amdsmi``
-    package under ``share/amd_smi`` and has no ``py-interface`` directory. Priority follows
-    ``cli_search_order()``: a pinned install wins, otherwise the checkout does.
+    package under ``share/amd_smi`` and has no ``py-interface`` directory. The start dirs come
+    from ``cli_search_order()``, so install-vs-source is decided in that one place: a pinned
+    install wins, otherwise the checkout does. Each start dir and its parents are checked for
+    either layout, because the depth differs between a checkout and an install.
     """
-    checkout = [
-        parent / "py-interface" / "amdsmi_interface.py"
-        for parent in pathlib.Path(start_file).resolve().parents
-    ]
-    installed = [pathlib.Path(amdsmi_path) / "amdsmi" / "amdsmi_interface.py"]
-    candidates = installed + checkout if amdsmi_path_is_explicit else checkout + installed
+    source_dir = str(pathlib.Path(start_file).resolve().parent)
+    candidates = []
+    for start in cli_search_order(source_dir):
+        start_path = pathlib.Path(os.path.abspath(start))
+        for directory in (start_path, *start_path.parents):
+            candidates.append(directory / "py-interface" / "amdsmi_interface.py")
+            candidates.append(directory / "amdsmi" / "amdsmi_interface.py")
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -221,48 +191,63 @@ def generated_version_stub(version="0.0.0+source"):
 
 
 def load_cli_module(name, path, sys_path_dir=None):
-    """Import the CLI file at *path* as module *name*, or skip the test.
+    """Import the CLI file at *path* as module *name*.
 
-    Skipping is the point: the module-level ``*_PATH`` constants are None when
-    find_cli_dir() came up empty, and ``os.path.isfile(None)`` raises TypeError
-    rather than returning False, so an unguarded loader reports a hard error on
-    a machine that simply has no CLI installed.
+    Raises FileNotFoundError when there is no such file: the module-level ``*_PATH``
+    constants are None when find_cli_dir() came up empty, and ``os.path.isfile(None)``
+    raises TypeError rather than returning False. A missing CLI fails the test rather
+    than skipping it, because a skipped check never ran.
 
     Pass *sys_path_dir* when the loaded file imports its CLI siblings by bare
     name, so those resolve to the real modules.
     """
     if not path or not os.path.isfile(path):
-        raise unittest.SkipTest(f"amd-smi CLI file not available: {name} ({path})")
+        raise FileNotFoundError(f"amd-smi CLI file not available: {name} ({path})")
     if sys_path_dir and sys_path_dir not in sys.path:
         sys.path.insert(0, sys_path_dir)
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise unittest.SkipTest(f"amd-smi CLI file is not loadable: {name} ({path})")
+        raise ImportError(f"amd-smi CLI file is not loadable: {name} ({path})")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+# Cleanup lists of every class that registered one; empty once its tearDownClass has run.
+_class_cleanup_lists = []
+
+
+def _run_cleanups(cleanups):
+    while cleanups:  # last registered runs first, as addClassCleanup does
+        cleanup, cleanup_args = cleanups.pop()
+        cleanup(*cleanup_args)
+
+
+def run_pending_class_cleanups():
+    """Run the cleanups of a class whose ``setUpClass`` raised, as unittest skips its teardown."""
+    for cleanups in _class_cleanup_lists:
+        _run_cleanups(cleanups)
 
 
 def add_class_cleanup(test_cls, func, *args):
     """Run ``func`` after ``test_cls`` finishes.
 
     Not ``addClassCleanup`` (3.8+, and Debian 10 ships 3.7). This runs off
-    ``tearDownClass``, which unittest skips when ``setUpClass`` raises, so a
-    class that dies mid-setup leaves its cleanups unrun.
+    ``tearDownClass``, which unittest skips when ``setUpClass`` raises; the
+    runner then calls ``run_pending_class_cleanups()`` instead.
     """
     # Own the list rather than inherit a base class's, so subclasses do not share.
     cleanups = test_cls.__dict__.get("_pending_class_cleanups")
     if cleanups is None:
         cleanups = test_cls._pending_class_cleanups = []
+        _class_cleanup_lists.append(cleanups)
         previous = test_cls.tearDownClass.__func__
 
         def _run_class_cleanups(cls):
             try:
                 previous(cls)
             finally:
-                while cleanups:  # last registered runs first, as addClassCleanup does
-                    cleanup, cleanup_args = cleanups.pop()
-                    cleanup(*cleanup_args)
+                _run_cleanups(cleanups)
 
         test_cls.tearDownClass = classmethod(_run_class_cleanups)
 
@@ -280,6 +265,55 @@ def fake_module(name, **attrs):
     for key, value in attrs.items():
         setattr(module, key, value)
     return module
+
+
+def fake_amdsmi_init(interface, exception, init_flag=None):
+    """Stand-in for the CLI's ``amdsmi_init`` module, so a test never runs the real one.
+
+    Importing the real ``amdsmi_init`` runs ``amdsmi_cli_init()``, which probes the host for
+    the amdgpu/hsmp drivers. Without them it calls into ``amdsmi_interface`` and exits, so a
+    test that stubs ``amdsmi_interface`` passes on a host with a driver and errors on one
+    without. ``amdsmi_helpers`` only star-imports ``amdsmi_interface``, ``amdsmi_exception``
+    and the init flag from it, so supply those and the result no longer depends on the host.
+    Install it as the ``"amdsmi_init"`` entry of the mapping given to ``stub_modules``.
+    """
+    if init_flag is None:
+        init_flag = getattr(getattr(interface, "AmdSmiInitFlags", None), "INIT_ALL_PROCESSORS", 0)
+    return fake_module(
+        "amdsmi_init",
+        AMDSMI_INIT_FLAG=init_flag,
+        AMDSMI_INITIALIZED=True,
+        amdsmi_interface=interface,
+        amdsmi_exception=exception,
+    )
+
+
+class RealAmdsmiInitImportError(ImportError):
+    """A unit test imported the real ``amdsmi_init``; reported without a traceback."""
+
+
+class _ForbidRealAmdsmiInit(importlib.abc.MetaPathFinder):
+    """Make ``import amdsmi_init`` an error unless a test already put a stub in sys.modules."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "amdsmi_init":
+            raise RealAmdsmiInitImportError(
+                "imported the real amdsmi_init, which probes host drivers. "
+                "Add common.fake_amdsmi_init() as the 'amdsmi_init' entry in stub_modules()."
+            )
+        return None
+
+
+def forbid_real_amdsmi_init():
+    """Fail any import of the CLI's real ``amdsmi_init`` for the rest of this process.
+
+    Called from ``unit/__init__.py``. Importing it runs ``amdsmi_cli_init()``, so a test that does
+    passes on a host with a driver and fails on one without. A test that needs the module
+    puts ``fake_amdsmi_init()`` in sys.modules first, which the import system finds before
+    it asks this finder.
+    """
+    if not any(isinstance(finder, _ForbidRealAmdsmiInit) for finder in sys.meta_path):
+        sys.meta_path.insert(0, _ForbidRealAmdsmiInit())
 
 
 def stub_modules_at_import(modules):
@@ -805,7 +839,7 @@ def _filter_suite_exclude(suite, pattern):
     return _filter_suite(suite, lambda test_id: pattern not in test_id)
 
 
-def run_test_dir(subdir, title, top_level_dir):
+def run_test_dir(subdir, title, top_level_dir, fail_on_skip=False):
     """Discover and run every test under *top_level_dir*/*subdir*, then exit.
 
     Single implementation of the runner boilerplate shared by the three entry
@@ -814,6 +848,9 @@ def run_test_dir(subdir, title, top_level_dir):
     root-privilege check, the legend/title preamble, output buffering
     (``-b``/``--buffer``) and the GTest-style summary runner.  Never returns —
     always calls ``sys.exit()`` (0 on success, 1 on failure).
+
+    With *fail_on_skip*, a skipped test fails the run. The unit tests need no hardware, so
+    nothing in them has a legitimate reason to skip, and a skip means the check never ran.
     """
     argv = sys.argv
 
@@ -838,8 +875,10 @@ def run_test_dir(subdir, title, top_level_dir):
     if k_pattern and sys.version_info < (3, 7):
         suite = _filter_suite(
             suite,
-            lambda test_id: test_id.startswith("unittest.loader.")
-            or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"),
+            lambda test_id: (
+                test_id.startswith("unittest.loader.")
+                or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*")
+            ),
         )
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
@@ -876,6 +915,16 @@ def run_test_dir(subdir, title, top_level_dir):
         buffer="-b" in argv or "--buffer" in argv,
     )
     result = runner.run(suite)
+    if fail_on_skip and result.skipped:
+        print(
+            f"\nFAILED: {len(result.skipped)} skipped test(s). A skip is a failure here because "
+            "these tests need no hardware, so a skip means something they need is missing "
+            "(the CLI, a header, the library) and the check did not run:",
+            file=sys.stderr,
+        )
+        for skipped_test, reason in result.skipped:
+            print(f"  {skipped_test.id()}\n      {reason}", file=sys.stderr)
+        sys.exit(1)
     sys.exit(0 if result.wasSuccessful() else 1)
 
 
@@ -888,6 +937,8 @@ class _IsolationLeakMarker:
     """Stand-in "test" for attributing a sys.modules leak when the offending
     class cannot be identified (rare fallback). Implements the minimal
     ``TestResult`` surface (``id``/``shortDescription``/``str``)."""
+
+    failureException = AssertionError  # read by TestResult._exc_info_to_string
 
     def __init__(self, label):
         self._label = label
@@ -942,6 +993,22 @@ class _ModuleIsolationResult(unittest.TextTestResult):
         # (class label, [leaked module names]) per offending class, so the runner
         # can print a distinct root-cause banner after the normal summary.
         self._iso_leaks = []
+
+    @staticmethod
+    def _is_setup_class_failure(test):
+        # unittest reports a failed setUpClass against a stand-in described "setUpClass (...)".
+        return str(getattr(test, "description", "")).startswith("setUpClass")
+
+    def addError(self, test, err):
+        if self._is_setup_class_failure(test):
+            run_pending_class_cleanups()
+        super().addError(test, err)
+
+    def _exc_info_to_string(self, err, test):
+        exc_type, exc_value = err[:2]
+        if issubclass(exc_type, RealAmdsmiInitImportError):
+            return f"{exc_type.__name__}: {exc_value}\n"  # the test id names the culprit
+        return super()._exc_info_to_string(err, test)
 
     @staticmethod
     def _iso_looks_like_stub(mod):

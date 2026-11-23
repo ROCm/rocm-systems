@@ -19,6 +19,7 @@ import unittest
 from common.common import (
     add_class_cleanup,
     cli_search_order,
+    fake_amdsmi_init,
     fake_module,
     find_cli_dir,
     stub_modules,
@@ -106,6 +107,7 @@ def _build_fake_amdsmi_modules():
     modules["amdsmi"] = amdsmi_pkg
     modules["amdsmi.amdsmi_interface"] = interface
     modules["amdsmi.amdsmi_exception"] = exception
+    modules["amdsmi_init"] = fake_amdsmi_init(interface, exception)
     return modules
 
 
@@ -113,7 +115,7 @@ class TestAmppValidators(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(_HELPERS_SRC):
-            raise unittest.SkipTest(f"amd-smi CLI amdsmi_helpers.py not found at {_HELPERS_SRC}")
+            raise FileNotFoundError(f"amd-smi CLI amdsmi_helpers.py not found at {_HELPERS_SRC}")
 
         stub_modules(cls, _build_fake_amdsmi_modules())
         path_added = _CLI_DIR not in sys.path

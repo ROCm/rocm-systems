@@ -84,6 +84,7 @@ from unittest import mock
 from common.common import (
     amdsmi_path,
     cli_search_order,
+    fake_amdsmi_init,
     fake_module,
     find_cli_dir,
     load_cli_module,
@@ -161,6 +162,7 @@ def _build_fake_amdsmi():
         "amdsmi": amdsmi_pkg,
         "amdsmi.amdsmi_interface": interface,
         "amdsmi.amdsmi_exception": exception,
+        "amdsmi_init": fake_amdsmi_init(interface, exception),
         "amdsmi.amdsmi_wrapper": wrapper,
     }
 
@@ -215,7 +217,7 @@ class TestCliSetNodeBalancingMode(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = dict.fromkeys(_CLI_MODULES)
@@ -333,7 +335,7 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
+            raise FileNotFoundError("amd-smi CLI source not found")
         modules = dict.fromkeys(_CLI_MODULES)
         modules.update(_build_fake_amdsmi_for_helpers())
         stub_modules(cls, modules)

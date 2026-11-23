@@ -119,7 +119,7 @@ class TestPrintNoAinicsFound(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI directory not found")
+            raise FileNotFoundError("amd-smi CLI directory not found")
         helpers = fake_module("amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {}))
         with mock.patch.dict(sys.modules, {"amdsmi_helpers": helpers}):
             module = load_cli_module(

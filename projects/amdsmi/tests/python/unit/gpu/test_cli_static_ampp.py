@@ -207,7 +207,7 @@ class TestCliStaticAmpp(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+            raise FileNotFoundError(f"amd-smi CLI static.py not found at {STATIC_PATH}")
         cls.holder = {
             "get_profiles": lambda: ("1.0", copy.deepcopy(_PROFILES)),
             "get_fields": lambda name: copy.deepcopy(_FIELDS_BY_PROFILE[name]),

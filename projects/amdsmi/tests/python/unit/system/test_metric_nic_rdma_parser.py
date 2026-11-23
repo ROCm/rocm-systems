@@ -15,7 +15,7 @@ from unittest import mock
 
 from common.common import (
     cli_search_order,
-    fake_module,
+    fake_amdsmi_init,
     find_cli_dir,
     generated_version_stub,
     stub_modules_at_import,
@@ -32,13 +32,7 @@ if "amdsmi_init" not in sys.modules:
     from amdsmi import amdsmi_exception as _amdsmi_exception
     from amdsmi import amdsmi_interface as _amdsmi_interface
 
-    _stubs["amdsmi_init"] = fake_module(
-        "amdsmi_init",
-        AMDSMI_INIT_FLAG=0,
-        AMDSMI_INITIALIZED=True,
-        amdsmi_interface=_amdsmi_interface,
-        amdsmi_exception=_amdsmi_exception,
-    )
+    _stubs["amdsmi_init"] = fake_amdsmi_init(_amdsmi_interface, _amdsmi_exception, init_flag=0)
 _stubs.update(generated_version_stub())
 _restore_stubs = stub_modules_at_import(_stubs) if _stubs else None
 
@@ -52,7 +46,7 @@ except ImportError as _import_error:
 
 def setUpModule():
     if _PARSER_IMPORT_ERROR is not None:
-        raise unittest.SkipTest(f"amd-smi CLI parser unusable: {_PARSER_IMPORT_ERROR}")
+        raise ImportError(f"amd-smi CLI parser unusable: {_PARSER_IMPORT_ERROR}")
 
 
 def tearDownModule():

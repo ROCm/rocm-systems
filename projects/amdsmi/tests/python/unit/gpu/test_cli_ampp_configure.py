@@ -34,10 +34,11 @@ import unittest
 # insert + ``import amdsmi`` + module-level ``build_type_lists()``), which fails
 # on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself, so
 # degrade gracefully rather than erroring at import; without the harness there is
-# no resolver, and the suite skips with the reason below.
+# no resolver, and the suite fails with the reason below.
 try:
     from common.common import (
         cli_search_order,
+        fake_amdsmi_init,
         fake_module,
         find_cli_dir,
         load_cli_module,
@@ -98,7 +99,7 @@ def _import_real_amdsmi_helpers():
     ``_build_fake_modules()``.
     """
     if not HELPERS_PATH:
-        # Neither CLI layout was found; the test classes below will skip via
+        # Neither CLI layout was found; the test classes below will fail via
         # their own setUpClass checks, so avoid crashing at import time here.
         return None
 
@@ -137,7 +138,7 @@ def _import_real_amdsmi_helpers():
             "amdsmi": amdsmi_pkg,
             "amdsmi.amdsmi_interface": interface,
             "amdsmi.amdsmi_exception": exception,
-            "amdsmi_init": None,
+            "amdsmi_init": fake_amdsmi_init(interface, exception),
         }
     )
     try:
@@ -247,7 +248,7 @@ class TestAmppConfigureParserAction(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(PARSER_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI amdsmi_parser.py not found at {PARSER_PATH}")
+            raise FileNotFoundError(f"amd-smi CLI amdsmi_parser.py not found at {PARSER_PATH}")
         modules = _build_fake_modules()
         stub_modules(cls, modules)
         cls.parser_module = _load_module("amdsmi_parser_under_test", PARSER_PATH)
@@ -456,7 +457,7 @@ class TestSetGpuAmppConfigureCallSite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(SET_VALUE_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
+            raise FileNotFoundError(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
         modules = _build_fake_modules()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
@@ -562,7 +563,7 @@ class TestSetGpuAmppActivateCallSite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(SET_VALUE_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
+            raise FileNotFoundError(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
         modules = _build_fake_modules()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
@@ -653,7 +654,7 @@ class TestSetGpuAmppConfigureFromFile(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(SET_VALUE_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
+            raise FileNotFoundError(f"amd-smi CLI set_value.py not found at {SET_VALUE_PATH}")
         modules = _build_fake_modules()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]

@@ -28,6 +28,7 @@ from unittest import mock
 
 from common.common import (
     cli_search_order,
+    fake_amdsmi_init,
     fake_module,
     find_cli_dir,
     generated_version_stub,
@@ -47,7 +48,7 @@ _restore_stubs = None
 def setUpModule() -> None:
     global cli_exc, helpers_module, parser_module, _restore_stubs
     if _CLI_DIR is None:
-        raise unittest.SkipTest("amd-smi CLI not found")
+        raise FileNotFoundError("amd-smi CLI not found")
     # amdsmi_helpers does ``from amdsmi_init import *``, which initializes the library, and
     # _version is generated at build time. Stub them unless another module already has:
     # generated_version_stub() cannot look past a stub that is already installed.
@@ -55,13 +56,7 @@ def setUpModule() -> None:
     if "amdsmi_init" not in sys.modules:
         from amdsmi import amdsmi_exception, amdsmi_interface
 
-        stubs["amdsmi_init"] = fake_module(
-            "amdsmi_init",
-            AMDSMI_INIT_FLAG=0,
-            AMDSMI_INITIALIZED=True,
-            amdsmi_interface=amdsmi_interface,
-            amdsmi_exception=amdsmi_exception,
-        )
+        stubs["amdsmi_init"] = fake_amdsmi_init(amdsmi_interface, amdsmi_exception, init_flag=0)
     if "_version" not in sys.modules:
         stubs.update(generated_version_stub())
     _restore_stubs = stub_modules_at_import(stubs)
@@ -72,7 +67,7 @@ def setUpModule() -> None:
     except ImportError as error:  # no CLI in this layout
         _restore_stubs()
         _restore_stubs = None
-        raise unittest.SkipTest(f"amd-smi CLI not importable: {error}")
+        raise ImportError(f"amd-smi CLI not importable: {error}") from error
 
 
 def tearDownModule() -> None:

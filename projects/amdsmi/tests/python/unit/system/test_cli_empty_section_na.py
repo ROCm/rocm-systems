@@ -42,7 +42,7 @@ class TestCliEmptySectionNA(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not LOGGER_PATH or not os.path.isfile(LOGGER_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI amdsmi_logger.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         # Registered before the stub is installed, so the restore still runs if

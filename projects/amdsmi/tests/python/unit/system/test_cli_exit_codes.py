@@ -20,14 +20,14 @@ from typing import Any
 from common.common import (
     amdsmi,
     cli_search_order,
-    fake_module,
+    fake_amdsmi_init,
     find_cli_dir,
     generated_version_stub,
     stub_modules_at_import,
 )
 
 # Locate the CLI dir and add it to sys.path. cli_search_order() decides whether
-# the install or this checkout wins; None -> setUpModule() skips.
+# the install or this checkout wins; None -> setUpModule() fails.
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 if _CLI_DIR and _CLI_DIR not in sys.path:
     sys.path.append(_CLI_DIR)
@@ -60,21 +60,15 @@ if "amdsmi_init" not in sys.modules:
     from amdsmi import amdsmi_exception as _amdsmi_exception
     from amdsmi import amdsmi_interface as _amdsmi_interface
 
-    _stubs["amdsmi_init"] = fake_module(
-        "amdsmi_init",
-        AMDSMI_INIT_FLAG=0,
-        AMDSMI_INITIALIZED=True,
-        amdsmi_interface=_amdsmi_interface,
-        amdsmi_exception=_amdsmi_exception,
-    )
+    _stubs["amdsmi_init"] = fake_amdsmi_init(_amdsmi_interface, _amdsmi_exception, init_flag=0)
 
 _stubs.update(generated_version_stub())
 
 _restore_stubs = stub_modules_at_import(_stubs) if _stubs else None
 
-# CLI absent (rare package-only layout) or too old -> record the reason and skip
-# in setUpModule() instead of failing collection. The alias is declared Any
-# and bound separately from the import: the None only exists to defer that skip,
+# CLI absent (rare package-only layout) or too old -> record the reason and fail
+# in setUpModule() rather than at collection. The alias is declared Any
+# and bound separately from the import: the None only exists to defer that failure,
 # so no test ever sees it, and typing it Any keeps that out of every call site.
 cli_exc: Any = None
 _CLI_IMPORT_ERROR = None
@@ -98,14 +92,14 @@ from amdsmi import amdsmi_wrapper  # noqa: E402
 # The set-dispatch and parser tests below drive real CLI subcommand/parser
 # modules. Resolve them from the same env-var-discovered CLI dir (find_cli_dir,
 # which honors AMDSMI_PATH/ROCM_HOME/ROCM_PATH via common.py) and import them
-# guarded, so a missing or unimportable CLI SKIPS those tests with a message --
+# guarded, so a missing or unimportable CLI fails those tests with a message --
 # mirroring the metric-partition tests -- instead of erroring mid-test.
 _SUBCOMMANDS_DIR = os.path.join(_CLI_DIR, "subcommands") if _CLI_DIR else None
 if _SUBCOMMANDS_DIR and _SUBCOMMANDS_DIR not in sys.path:
     sys.path.append(_SUBCOMMANDS_DIR)
 cli_set_value: Any = None
 AMDSMIParser: Any = None
-_CLI_DRIVE_SKIP = None
+_CLI_DRIVE_ERROR = None
 try:
     import set_value as _set_value_module  # noqa: E402
     from amdsmi_parser import AMDSMIParser as _AMDSMIParser  # noqa: E402
@@ -113,15 +107,15 @@ try:
     cli_set_value = _set_value_module
     AMDSMIParser = _AMDSMIParser
 except ImportError as _cli_drive_import_error:
-    _CLI_DRIVE_SKIP = (
+    _CLI_DRIVE_ERROR = (
         f"amd-smi CLI drive modules not importable ({_CLI_DIR}): {_cli_drive_import_error}"
     )
 
 
 def setUpModule():
-    """Skip the suite when the amd-smi CLI is missing or too old to carry exit codes."""
+    """Fail the suite when the amd-smi CLI is missing or too old to carry exit codes."""
     if _CLI_IMPORT_ERROR is not None:
-        raise unittest.SkipTest(f"amd-smi CLI at {_CLI_DIR} unusable: {_CLI_IMPORT_ERROR}")
+        raise ImportError(f"amd-smi CLI at {_CLI_DIR} unusable: {_CLI_IMPORT_ERROR}")
 
 
 def tearDownModule():
@@ -383,7 +377,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
 
         header = _find_amdsmi_header(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
         if header is None:
-            self.skipTest("amdsmi.h not found in the source tree or the ROCm install")
+            self.fail("amdsmi.h not found in the source tree or the ROCm install")
 
         with open(header, encoding="utf-8") as handle:
             source = handle.read()
@@ -1019,8 +1013,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         / 194), NOT a bare ValueError (which would exit 1). Drives the real
         set_value combined-args guard, which runs before any device dispatch.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import argparse
 
         from amdsmi_helpers import AMDSMIHelpers
@@ -1052,8 +1046,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         must list the valid options (the hint). Exercises the real parser action
         directly, without building the whole driver-backed parser.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import argparse
 
         class _Host:
@@ -1068,8 +1062,13 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         parser: Any = None
         action_cls = AMDSMIParser._level_select(host)
         action = action_cls(option_strings=["-c", "--clk-level"], dest="clk_level")
-        with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
-            action(parser, argparse.Namespace(), ["badclk", "0"])
+        # The error names the subcommand from sys.argv[1], which is empty when the runner
+        # is started without arguments.
+        from unittest import mock
+
+        with mock.patch.object(sys, "argv", ["amd-smi", "set"]):
+            with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
+                action(parser, argparse.Namespace(), ["badclk", "0"])
         self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
         message = str(ctx.exception)
         self.assertIn("badclk", message)
@@ -1083,8 +1082,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         raised, so `amd-smi set -C 0 --json` emitted a bare line first and
         json.loads failed on it.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import contextlib
         import io
         import json as json_mod
@@ -1190,8 +1189,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         top-level handler. It must still print the formatted library error and
         exit with the status code -- not a raw log line plus a traceback.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import contextlib
         import io
         import json as json_mod
@@ -1231,8 +1230,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         Neither may reuse INVALID_FILE_PATH or a bare exit 1 -- the path was
         valid, the user just said no.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import argparse
         import builtins
         import contextlib
@@ -1292,8 +1291,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         piping into one of these commands died on an uncaught EOFError and a
         bare exit 1.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import builtins
         import contextlib
         import io
@@ -1335,8 +1334,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         (REQUIRED_COMMAND / 201). Reachable only via a direct/programmatic call
         (the dispatcher fills the target first), so this locks in the guard.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import argparse
 
         class _FakeLogger:
@@ -1352,8 +1351,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         """set_core with no core target raises AmdSmiRequiredCommandException
         (REQUIRED_COMMAND / 201). Same direct-call rationale as set_cpu.
         """
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         import argparse
 
         class _FakeLogger:
@@ -1430,8 +1429,8 @@ def _load_set_value():
     """Import the set_value subcommand standalone. It uses only absolute imports,
     so this triggers no driver-backed package init.
     """
-    if _CLI_DRIVE_SKIP:
-        raise unittest.SkipTest(_CLI_DRIVE_SKIP)
+    if _CLI_DRIVE_ERROR:
+        raise ImportError(_CLI_DRIVE_ERROR)
     sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
     if sub_dir not in sys.path:
         sys.path.append(sub_dir)
@@ -1918,8 +1917,8 @@ class TestSetGpuGAllFailureGuards(unittest.TestCase):
 
 
 def _load_reset():
-    if _CLI_DRIVE_SKIP:
-        raise unittest.SkipTest(_CLI_DRIVE_SKIP)
+    if _CLI_DRIVE_ERROR:
+        raise ImportError(_CLI_DRIVE_ERROR)
     sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
     if sub_dir not in sys.path:
         sys.path.append(sub_dir)
@@ -2093,8 +2092,8 @@ class TestRasCperAfidExitCodes(unittest.TestCase):
     AFIDS = [11, 22, 33]
 
     def setUp(self):
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         from amdsmi_helpers import AMDSMIHelpers
 
         self.helpers = AMDSMIHelpers()
@@ -2217,8 +2216,8 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
     ABOVE_RANGE_RAW = (250, False)
 
     def setUp(self):
-        if _CLI_DRIVE_SKIP:
-            self.skipTest(_CLI_DRIVE_SKIP)
+        if _CLI_DRIVE_ERROR:
+            self.fail(_CLI_DRIVE_ERROR)
         self.set_value = _load_set_value()
 
     def _drive_fan(self, od_range, fan_arg):

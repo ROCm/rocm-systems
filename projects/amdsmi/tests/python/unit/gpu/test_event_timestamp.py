@@ -136,7 +136,7 @@ class TestEventTimestamp(unittest.TestCase):
 
     def test_human_readable_event_is_block_with_timestamp(self):
         if self.logger_cls is None:
-            self.skipTest("amdsmi_logger.py not found in source or install")
+            self.fail("amdsmi_logger.py not found in source or install")
         logger = self.logger_cls()
         event = {
             "gpu": 0,
@@ -159,7 +159,7 @@ class TestEventTimestamp(unittest.TestCase):
 
     def test_multiple_gpus_read_through_one_shared_thread(self):
         if self.event_cls is None:
-            self.skipTest("event.py not found in source or install")
+            self.fail("event.py not found in source or install")
 
         threads = []
         readers = []

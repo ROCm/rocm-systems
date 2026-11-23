@@ -24,7 +24,7 @@ _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file
 _MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "list_devices.py") if _CLI_DIR else None
 
 if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
-    raise unittest.SkipTest(
+    raise FileNotFoundError(
         f"amd-smi CLI list_devices.py not found (looked in {_CLI_DIR or amdsmi_path})"
     )
 
