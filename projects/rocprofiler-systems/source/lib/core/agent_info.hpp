@@ -54,6 +54,8 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     data["sdma_fw_version"]["uCodeSDMA"] = agent_data.sdma_fw_version.uCodeSDMA;
 #if defined(HSAKMT_HAS_SPLIT_GFXIP)
     data["sdma_fw_version"]["uCodeCompute"] = agent_data.sdma_fw_version.uCodeCompute;
+#else
+    data["sdma_fw_version"]["uCodeRes"]  = agent_data.sdma_fw_version.uCodeRes;
 #endif
 
     data["fw_version"]["uCode"]    = agent_data.fw_version.ui32.uCode;
