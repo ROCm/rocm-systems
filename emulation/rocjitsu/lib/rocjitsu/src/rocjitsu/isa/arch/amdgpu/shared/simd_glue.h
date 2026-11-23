@@ -448,28 +448,6 @@ inline util::native<uint64_t> simd_ashr_i64(util::native<uint64_t> v, util::nati
   });
 }
 
-inline util::native<int32_t> simd_cvt_i32_f32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<int32_t>(s, [](float32_t value) {
-    if (std::isnan(value))
-      return int32_t{0};
-    if (value >= 2147483648.0f)
-      return std::numeric_limits<int32_t>::max();
-    if (value < -2147483648.0f)
-      return std::numeric_limits<int32_t>::min();
-    return static_cast<int32_t>(value);
-  });
-}
-
-inline util::native<uint32_t> simd_cvt_u32_f32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
-    if (std::isnan(value) || value < 0.0f)
-      return uint32_t{0};
-    if (value >= 4294967296.0f)
-      return std::numeric_limits<uint32_t>::max();
-    return static_cast<uint32_t>(value);
-  });
-}
-
 /// @brief Convert f32 to a zero-extended packed i16 lane.
 /// @details NaN converts to zero and out-of-range values saturate before the
 /// signed 16-bit result is returned in the low half of a uint32_t.
@@ -868,10 +846,6 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
 
 /// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
 /// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
-template <typename Op>
-inline Op conversion_f32_to_integer(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
-  return {abs, neg, input_denormal_policy<fp_format::F32>(wf)};
-}
 
 /// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
 inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
