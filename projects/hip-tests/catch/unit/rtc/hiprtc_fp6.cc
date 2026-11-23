@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include <hip/hiprtc.h>
 #include <hip/hip_fp6.h>
 
-TEST_CASE("Unit_hiprtc_fp6_simple") {
+HIP_TEST_CASE(Unit_hiprtc_fp6_simple) {
   constexpr const char* source = R"(
 extern "C" __global__ void float_to_fp6_to_float(float* out, float* in, bool e2m3, size_t size) {
   size_t i = threadIdx.x;

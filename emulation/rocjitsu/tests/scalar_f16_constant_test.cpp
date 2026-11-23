@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -122,6 +123,85 @@ TEST(Rdna35ScalarFp, WaveModesAndExceptionsWithEmptyExec) {
     EXPECT_EQ(wf->pending_alu_causes(), test.expected_causes);
   }
   wf->halt();
+}
+
+// Scalar arithmetic executes with empty EXEC and reads sources before an aliased SGPR write.
+TEST(Rdna35ScalarFp, InheritedNanPolicyAndAliasing) {
+  struct Case {
+    uint32_t word, mode, a, b, expected, causes;
+    bool half;
+  };
+  constexpr Case cases[] = {
+      {0xa0020100, 0xf0, 0x7f800123, 0x3f800000, 0x7f800123, 1, false},
+      {0xa0020100, 0x2f0, 0x7f800123, 0x3f800000, 0x7fc00123, 1, false},
+      {0xa1020100, 0xf0, 0x7f800123, 0x3f800000, 0x3f800000, 1, false},
+      {0xa1020100, 0x2f0, 0x7f800123, 0x3f800000, 0x7fc00123, 1, false},
+      {0xbe826000, 0xf0, 0x7f800123, 0, 0x7f800123, 1, false},
+      {0xbe826000, 0x2f0, 0x7f800123, 0, 0x7fc00123, 1, false},
+      {0xbe826800, 0xf0, 0x7f812345, 0, 0x7e09, 1, true},
+      {0xbe826800, 0x2f0, 0x7f812345, 0, 0x7e09, 1, true},
+      {0xbe826a00, 0xf0, 0x7c11a55a, 0, 0x7f822000, 1, false},
+      {0xbe826a00, 0x2f0, 0x7c11a55a, 0, 0x7fc22000, 1, false},
+      {0xa4020100, 0xf0, 0x3f800001, 0x40000000, 0x40003c00, 32, false},
+      {0xa0020100, 0x2f1, 0x3f800000, 0x33800000, 0x3f800001, 32, false},
+  };
+  for (int lanes : {32, 64}) {
+    for (auto semantics :
+         {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose}) {
+      amdgpu::GpuMemory memory("rdna35_scalar_policy");
+      amdgpu::L2Cache cache("rdna35_scalar_policy");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = rocjitsu::IsaFamily::Rdna3_5;
+      config.arithmetic = {semantics};
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 8;
+      config.lds_size_kb = 64;
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "scalar_policy", config, &memory, &cache));
+      auto decoder = Decoder::create(config.arch);
+      ASSERT_NE(decoder, nullptr);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 8, lanes);
+      ASSERT_NE(wave, nullptr);
+      const auto base = wave->sgpr_alloc().base;
+      for (const auto &test : cases) {
+        for (uint32_t aliasing_offset : {0U, 2U}) {
+          SCOPED_TRACE(::testing::Message()
+                       << std::hex << test.word << ':' << test.mode << ':' << lanes << ':'
+                       << int(semantics) << ':' << aliasing_offset);
+          wave->set_exec(0);
+          wave->set_mode_raw(test.mode);
+          wave->set_trapsts(0x100);
+          wave->clear_pending_alu_causes();
+          wave->write_scc(true);
+          cu->write_sgpr(base, test.a);
+          cu->write_sgpr(base + 1, test.b);
+          cu->write_sgpr(base + 2, 0xdeadbeef);
+          const std::array<uint32_t, 2> words{(test.word & ~0x7f0000U) | (aliasing_offset << 16),
+                                              0};
+          auto instruction = decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+          const uint32_t actual = cu->read_sgpr(base + aliasing_offset);
+          const uint32_t magnitude = test.half ? 0x7fff : 0x7fffffff;
+          const uint32_t infinity = test.half ? 0x7c00 : 0x7f800000;
+          if (semantics == amdgpu::ArithmeticSemantics::Loose &&
+              (test.expected & magnitude) > infinity) {
+            EXPECT_GT(actual & magnitude, infinity);
+          } else {
+            EXPECT_EQ(actual, test.expected);
+          }
+          const uint32_t causes =
+              semantics == amdgpu::ArithmeticSemantics::Compatibility ? test.causes : 0;
+          EXPECT_EQ(wave->trapsts(), 0x100U | causes);
+          EXPECT_EQ(wave->pending_alu_causes(), causes);
+          EXPECT_TRUE(wave->read_scc());
+          EXPECT_EQ(wave->exec(), 0U);
+        }
+      }
+    }
+  }
 }
 
 struct ScalarF16Target {

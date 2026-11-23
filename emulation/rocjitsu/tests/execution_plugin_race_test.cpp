@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -741,23 +742,34 @@ protected:
                              exec);
   }
 
+  /// The routed access of a DS instruction whose lanes in `exec` are active.
+  static MemoryAccessObservation local_access(uint64_t exec) {
+    MemoryAccessObservation access{};
+    access.route = MemoryRoute::LOCAL;
+    access.decoded_space = DecodedMemorySpace::LOCAL;
+    access.request_lane_mask = exec;
+    return access;
+  }
+
   /// Issue a one-lane ds_atomic_async_barrier_arrive_b64 on the barrier cell at
-  /// `address`, as execution does. It completes on ASYNCcnt in the async-load
-  /// class.
+  /// `address`, as execution does: an aligned 64-bit LDS atomic that completes
+  /// on ASYNCcnt in the async-load class.
   void async_barrier_arrive(int wave, uint32_t address) {
     waves[wave]->pc += 16;
     auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
     state->elem_size = sizeof(uint64_t);
     state->num_elems = 1;
     state->is_load = false;
+    state->atomic_op = AtomicOp::BARRIER_ARRIVE;
     state->wf_size = waves[wave]->wf_size();
     state->exec_mask = 1;
     state->lane_mask = 1;
     state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
-                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                               /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
-    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted(local_access(1), inst, *waves[wave]);
   }
 
   void wait_tensorcnt(int wave, uint16_t count) {
@@ -1710,6 +1722,7 @@ protected:
     state->elem_size = sizeof(uint64_t);
     state->num_elems = 1;
     state->is_load = false;
+    state->atomic_op = AtomicOp::BARRIER_ARRIVE;
     state->wf_size = waves[wave]->wf_size();
     state->exec_mask = exec;
     state->lane_mask = exec;
@@ -1717,7 +1730,7 @@ protected:
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
                                /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
-    issue(wave, inst, {}, exec);
+    issue(wave, inst, local_access(exec), exec);
   }
 
   /// Issue a one-dword async load into LDS with EXEC zero.
@@ -2573,6 +2586,451 @@ TEST_P(CdnaCounterCapacityRaceTest, LoadAdvancesVmcnt) {
 
 INSTANTIATE_TEST_SUITE_P(Cdna1ThroughCdna4, CdnaCounterCapacityRaceTest,
                          ::testing::Values("cdna1", "cdna2", "cdna3", "cdna4"));
+
+// --- LDS barrier cells: an arrival releases, a read of the cell acquires ---
+
+/// Drives the race detector's LDS barrier cell handling for two gfx1250 waves
+/// of one workgroup: the routed-memory hook for the DS arrive instructions and
+/// for reads of a cell, and the arrival hook that reports each arrival (CDNA5
+/// ISA 11.2.2). Ordering semantics are covered in race_detector_tests.cpp;
+/// these tests cover the hooks' translation.
+class LdsBarrierCellRaceTest : public Gfx1250CounterCapacityRaceTest {
+protected:
+  using Source = LdsBarrierArrivalObservation::Source;
+
+  /// A data tile and a barrier cell, apart from each other.
+  static constexpr uint32_t kTile = 0;
+  static constexpr uint32_t kCell = kFlatLdsAddress;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(Gfx1250CounterCapacityRaceTest::SetUp());
+    // Reports are deduplicated by PC, so keep the waves' PCs apart.
+    waves[1]->pc = 0x8000;
+  }
+
+  /// Issue a one-lane barrier arrive on the cell at `cell`, as execution does:
+  /// an aligned 64-bit LDS atomic, on DScnt for the returning form and on
+  /// ASYNCcnt in the async-load class for the async form. With `exec` zero the
+  /// instruction issues with no active lane. Returns whether it raced.
+  bool issue_arrive(int wave, Source source, uint32_t cell, uint64_t exec = 1) {
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    const bool returns = source == Source::DsAtomic;
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint64_t);
+    state->num_elems = 1;
+    state->is_load = returns;
+    state->atomic_op = AtomicOp::BARRIER_ARRIVE;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + 4;
+    state->per_lane_addr[0] = cell;
+    const MemoryAccessObservation access = local_access(exec);
+    if (returns) {
+      TestMemoryInstruction inst(std::move(state),
+                                 {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                                 /*exec_masked=*/true, "ds_atomic_barrier_arrive_rtn_b64");
+      issue(wave, inst, access, exec);
+    } else {
+      TestMemoryInstruction inst(std::move(state),
+                                 {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                                 /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
+      issue(wave, inst, access, exec);
+    }
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  /// Report one arrival at `cell`, as the simulator does once the cell is
+  /// updated. The plugin uses the source, the address and whether the phase
+  /// completed; the cell states are filled in to match: a cell that needs one
+  /// arrival per phase completes on each, one that needs two is left with one
+  /// pending. Returns whether it raced.
+  bool arrived(int wave, Source source, uint32_t cell, bool completes) {
+    const size_t previous = sink->str().size();
+    const uint64_t old_state = lds_barrier_cell_init_state(completes ? 1 : 2);
+    fixture.plugin_group_->onAmdgpuLdsBarrierArrived(
+        {.source = source,
+         .cell_address = cell,
+         .old_state = old_state,
+         .new_state = lds_barrier_cell_update_arrive(old_state),
+         .phase_completed = completes},
+        *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  /// A DS arrive instruction and its arrival. Returns whether either raced.
+  bool arrive(int wave, Source source, uint32_t cell = kCell, bool completes = true) {
+    const bool issue_raced = issue_arrive(wave, source, cell);
+    return arrived(wave, source, cell, completes) || issue_raced;
+  }
+
+  /// How many times `needle` occurs in `text`.
+  static int occurrences(std::string_view text, std::string_view needle) {
+    int count = 0;
+    for (size_t at = text.find(needle); at != std::string_view::npos;
+         at = text.find(needle, at + needle.size()))
+      ++count;
+    return count;
+  }
+
+  /// Poll the cell with a DS load of its low dword, which holds the phase
+  /// (CDNA5 ISA 11.2.2, Table 70), and wait for the value. Returns whether the
+  /// load raced.
+  bool poll(int wave, uint32_t cell = kCell) {
+    const bool raced = ds_read(wave, cell);
+    wait_dscnt(wave, 0);
+    return raced;
+  }
+};
+
+// The canonical async handoff: the producer never waits on ASYNCcnt, because
+// the arrive executes only after its earlier async loads (CDNA5 ISA 11.2.2).
+TEST_F(LdsBarrierCellRaceTest, AsyncArriveHandsOffAPendingAsyncLoad) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+TEST_F(LdsBarrierCellRaceTest, AsyncLoadIssuedAfterTheArriveRaces) {
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// A consumer that reads the tile without reading the cell acquired nothing.
+TEST_F(LdsBarrierCellRaceTest, HandoffWithoutAReadOfTheCellRaces) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// ds_atomic_barrier_arrive_rtn_b64 is in order with the wave's DS instructions
+// (CDNA5 ISA 11.2.2), so it hands off a DS write the wave has not waited for.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveHandsOffAPendingDsWrite) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::DsAtomic));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+// The returning arrive reads the cell, so the wave whose arrival completes the
+// phase acquires it without a separate load.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveThatCompletesThePhaseAcquiresIt) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::DsAtomic, kCell, /*completes=*/false));
+  EXPECT_FALSE(arrive(1, Source::DsAtomic, kCell, /*completes=*/true));
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+// The async arrive returns nothing, so it acquires nothing.
+TEST_F(LdsBarrierCellRaceTest, AsyncArriveThatCompletesThePhaseDoesNotAcquireIt) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::DsAtomic, kCell, /*completes=*/false));
+  EXPECT_FALSE(arrive(1, Source::AsyncDsAtomic, kCell, /*completes=*/true));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// A tensor transfer's arrival follows the transfer (CDNA5 ISA 10.11.3), so the
+// producer never waits on TENSORcnt.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalHandsOffItsTensorLoad) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile + 4));
+}
+
+// The same transfer with no arrival reported: the release comes from the
+// arrival hook, not from the consumer's read of the cell.
+TEST_F(LdsBarrierCellRaceTest, TensorLoadWithoutAnArrivalRaces) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile + 4));
+}
+
+// A tensor load, a TENSORcnt wait, then an async arrive: the arrive releases
+// the load the wave has completed.
+TEST_F(LdsBarrierCellRaceTest, TensorLoadWaitedBeforeAnAsyncArriveIsHandedOff) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile + 4));
+}
+
+// Tensor instructions are unordered with other memory instructions (CDNA5 ISA
+// 10.11.1), so an async arrive does not follow a pending tensor load.
+TEST_F(LdsBarrierCellRaceTest, TensorLoadWaitedAfterAnAsyncArriveRaces) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile + 4));
+}
+
+// An arrive updates the cell atomically, so polling the cell from another
+// wave is not a race, whichever comes first.
+TEST_F(LdsBarrierCellRaceTest, PollingACellIsNotARace) {
+  uint32_t cell = kCell;
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    EXPECT_FALSE(arrive(0, source, cell)) << "arrive, then poll";
+    EXPECT_FALSE(poll(1, cell)) << "arrive, then poll";
+    cell += 16;
+    EXPECT_FALSE(poll(1, cell)) << "poll, then arrive";
+    EXPECT_FALSE(arrive(0, source, cell)) << "poll, then arrive";
+    cell += 16;
+  }
+}
+
+// A wave that polls a cell after its own async arrive: the arrive is in the
+// async-load class and the load in the LDS class.
+TEST_F(LdsBarrierCellRaceTest, PollingACellAfterTheWavesOwnAsyncArriveIsNotARace) {
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(poll(0));
+}
+
+// A plain store to the cell is ordinary LDS data. A tensor transfer's arrival
+// at a cell another wave stores to, with no barrier between them, races with
+// the store in either order: the store can erase the arrival. The arrival has
+// no lane.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverAnUnorderedInitRaces) {
+  {
+    SCOPED_TRACE("store, then arrival");
+    EXPECT_FALSE(ds_write(1, kCell));
+    wait_dscnt(1, 0);
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "RACE "), 1) << report;
+    EXPECT_EQ(occurrences(report, std::format("type=LDS access=read reg={} wave=0 lane=-1", kCell)),
+              1)
+        << report;
+  }
+  {
+    SCOPED_TRACE("arrival, then store");
+    const uint32_t cell = kCell + 16;
+    waves[0]->pc = 0x3000;
+    const uint64_t transfer_pc = waves[0]->pc + 16;
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile + 16, .bytes = 16}}));
+    EXPECT_FALSE(arrived(0, Source::TensorDma, cell, /*completes=*/true));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(ds_write(1, cell));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "RACE "), 1) << report;
+    EXPECT_EQ(occurrences(report, std::format("type=LDS access=write reg={} wave=1 lane=0", cell)),
+              1)
+        << report;
+    EXPECT_EQ(occurrences(report, "write-after-read (WAR)"), 1) << report;
+    EXPECT_EQ(occurrences(
+                  report,
+                  std::format("  Conflict: arrival at an LDS barrier cell at PC 0x{:x}, wave 0.\n",
+                              transfer_pc)),
+              1)
+        << report;
+  }
+}
+
+// A wave that polled the cell after the phase completed acquired the transfer
+// and its arrival, so it may store to the cell.
+TEST_F(LdsBarrierCellRaceTest, StoreToTheCellAfterPollingATensorArrivalIsSafe) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_write(1, kCell));
+}
+
+// The arrival updates the cell atomically, as another wave's arrive does.
+TEST_F(LdsBarrierCellRaceTest, ArriveAfterATensorArrivalIsNotARace) {
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+    EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/false));
+    EXPECT_FALSE(arrive(1, source, kCell, /*completes=*/true));
+  }
+}
+
+// The ISA does not order a tensor transfer's arrival with its wave's DS
+// instructions (CDNA5 ISA 10.11.1), so the wave has to wait for the transfer
+// before it stores to the cell.
+TEST_F(LdsBarrierCellRaceTest, OwnStoreToTheCellBeforeTheTransfersWaitRaces) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_TRUE(ds_write(0, kCell));
+}
+
+// The cell shares the transfer's wait: once the wave has waited for the
+// transfer, its own store to the cell follows the arrival. Another wave's
+// store needs a barrier as well.
+TEST_F(LdsBarrierCellRaceTest, StoreToTheCellAfterTheTransfersWait) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(ds_write(0, kCell)) << "after the wait";
+  wait_dscnt(0, 0);
+  EXPECT_TRUE(ds_write(1, kCell)) << "another wave, no barrier";
+  wait_dscnt(1, 0);
+  barrier();
+  EXPECT_FALSE(ds_write(1, kCell)) << "another wave, after a barrier";
+}
+
+// The arrival takes no TENSORcnt slot: s_wait_tensorcnt 1 after two transfers
+// completes the first and its arrival, and not the second and its arrival.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalTakesNoTensorcntSlot) {
+  const uint32_t second_cell = kCell + 16;
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile + 16, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, second_cell, /*completes=*/true));
+  wait_tensorcnt(0, 1);
+  EXPECT_FALSE(ds_write(0, kCell));
+  EXPECT_TRUE(ds_write(0, second_cell));
+}
+
+// The ISA does not order a tensor transfer's arrival with its wave's DS
+// instructions (CDNA5 ISA 10.11.1), so the wave has to wait for its own store
+// to the cell before a transfer arrives there.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverTheWavesOwnPendingInitRaces) {
+  EXPECT_FALSE(ds_write(0, kCell));
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_TRUE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+}
+
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverTheWavesOwnCompletedInitIsSafe) {
+  EXPECT_FALSE(ds_write(0, kCell));
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+}
+
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverAnInitOrderedByABarrierIsSafe) {
+  EXPECT_FALSE(ds_write(1, kCell));
+  wait_dscnt(1, 0);
+  barrier();
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+}
+
+// A FLAT load whose address resolves to the cell reads it like a DS load.
+TEST_F(LdsBarrierCellRaceTest, FlatLoadOfTheCellAcquires) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  const size_t previous = sink->str().size();
+  flat_load(1, /*vgpr=*/8, FlatRoute::Lds);
+  EXPECT_EQ(sink->str().find("RACE ", previous), std::string::npos);
+  wait_loadcnt(1, 0);
+  wait_dscnt(1, 0);
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+// ds_atomic_barrier_arrive_rtn_b64 with an update value of zero reads the cell
+// without arriving: the simulator reports it with the cell unchanged. No phase
+// waits for it, so it releases and hands off nothing, and the pending write is
+// not ordered for the wave whose arrival completes the phase.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveWithUpdateZeroReleasesNothing) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(issue_arrive(0, Source::DsAtomic, kCell));
+  const uint64_t unchanged = lds_barrier_cell_init_state(1);
+  fixture.plugin_group_->onAmdgpuLdsBarrierArrived({.source = Source::DsAtomic,
+                                                    .cell_address = kCell,
+                                                    .old_state = unchanged,
+                                                    .new_state = unchanged,
+                                                    .phase_completed = false},
+                                                   *waves[0]);
+  EXPECT_FALSE(arrive(1, Source::DsAtomic));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// A race report describes a barrier arrive as an arrival, not as a plain
+// transfer: a plain store over a cell another wave arrived at conflicts with
+// the arrive's read of the cell.
+TEST_F(LdsBarrierCellRaceTest, ReportDescribesTheConflictingArrive) {
+  uint32_t cell = kCell;
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    waves[0]->pc = 0x3000 + cell;
+    const uint64_t arrive_pc = waves[0]->pc + 16;
+    EXPECT_FALSE(arrive(0, source, cell));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(ds_write(1, cell));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "write-after-read (WAR)"), 1) << report;
+    EXPECT_EQ(occurrences(
+                  report,
+                  std::format(
+                      "  Conflict: arrival at an LDS barrier cell{} at PC 0x{:x}, wave 0.\n",
+                      source == Source::DsAtomic ? " returning the cell to VGPRs" : "", arrive_pc)),
+              1)
+        << report;
+    cell += 16;
+  }
+}
+
+// A FLAT load routed to LDS that the wave has not waited for is handed off by
+// a returning arrive, which stays in order with it (CDNA5 ISA 5.7.1.3), so
+// the wave that reads the cell may overwrite the bytes the load read.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveHandsOffAPendingFlatLdsLoad) {
+  flat_load(0, /*vgpr=*/8, FlatRoute::Lds);
+  EXPECT_FALSE(arrive(0, Source::DsAtomic, kCell + 16));
+  EXPECT_FALSE(poll(1, kCell + 16));
+  EXPECT_FALSE(ds_write(1, kFlatLdsAddress));
+}
+
+// A FLAT load whose lanes split between global memory and LDS has its LDS
+// lanes checked when they are accessed, after its global lanes translate. Its
+// read of a cell acquires then, not when the instruction issues.
+TEST_F(LdsBarrierCellRaceTest, MixedFlatLoadOfTheCellAcquiresWhenItsLdsLanesAreAccessed) {
+  constexpr uint32_t kOtherTile = kTile + 32;
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(async_load(0, kOtherTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+
+  // Lane 0 resolves to global memory and lane 1 to the cell.
+  waves[1]->pc += 16;
+  constexpr uint64_t kExec = 0x3;
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = waves[1]->wf_size();
+  state->exec_mask = kExec;
+  state->lane_mask = kExec;
+  state->dst_reg_base = waves[1]->vgpr_alloc().base + 8;
+  state->per_lane_addr[0] = kCell;
+  state->per_lane_addr[1] = kCell;
+  TestMemoryInstruction load(std::move(state),
+                             {{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM},
+                              {WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                             /*exec_masked=*/true, "flat_load_b32");
+  // Execution records the issue it routed, which defers the LDS lanes.
+  load.data_as<VectorMemState>()->routed_issue_info = *load.amdgpu_memory_issue_info();
+  MemoryAccessObservation access{};
+  access.route = MemoryRoute::GLOBAL;
+  access.decoded_space = DecodedMemorySpace::FLAT;
+  access.request_lane_mask = kExec;
+  access.flat_local_lane_mask = 0x2;
+  const size_t previous = sink->str().size();
+  issue(1, load, access, kExec);
+  EXPECT_EQ(sink->str().find("RACE ", previous), std::string::npos);
+
+  // The cell has not been read yet, so nothing is acquired.
+  EXPECT_TRUE(ds_read(1, kTile));
+  fixture.plugin_group_->onAmdgpuMixedFlatLdsAccess(load, *waves[1]);
+  EXPECT_FALSE(ds_read(1, kOtherTile));
+}
+
+// With EXEC zero no lane arrives, so the simulator reports no arrival (see
+// LdsBarrierArriveTest.ExecZeroArriveReportsNothing) and nothing is handed
+// off: the instruction is issued here without one.
+TEST_F(LdsBarrierCellRaceTest, ExecZeroArriveHandsOffNothing) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(issue_arrive(0, Source::AsyncDsAtomic, kCell, /*exec=*/0));
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
 
 // Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
 // bytes. The fixture's DS helpers are not specific to tensor DMA.

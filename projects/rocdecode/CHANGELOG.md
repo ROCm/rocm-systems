@@ -17,6 +17,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed decoders that one process creates on different compute partitions of the same GPU (DPX, TPX, QPX, or CPX mode) all decoding on the first partition of that GPU that the process used.
 * Fixed corrupted output for the last frames decoded before an AV1 frame size change: they were displayed after the decoder reconfigure had replaced the surfaces holding them.
 * Fixed AV1 streams using super-resolution running the sequence callback on every frame, as if the frame size had changed.
+* Fixed the samples and the negative API tests building with no GPU targets when `AMDGPU_TARGETS` or `GPU_ARCHS` is set in the environment but empty. An empty value is now treated the same as an unset one and the default target list applies, so the `videoDecodeRGB` sample no longer fails with `hipErrorInvalidImage`.
 * Fixed the `RocVideoDecoder` utility returning skipped, repeated or corrupt frames after a decoder reconfigure in the `OUT_SURFACE_MEM_DEV_COPIED` and `OUT_SURFACE_MEM_HOST_COPIED` output modes, which affected HEVC streams with a repeated sequence header and VP9 streams with resolution changes.
 
 ## rocDecode 1.12.0 for ROCm 10.2.0

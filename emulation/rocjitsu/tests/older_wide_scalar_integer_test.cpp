@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -36,12 +37,12 @@ namespace {
 // Scalar results and SCC are independent of EXEC; destination aliases must preserve inputs.
 TEST(OlderWideScalarInteger, ArithmeticAndCondition) {
   struct Family {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const IsaExecutionBackend *backend;
     std::array<std::array<uint32_t, 1>, 7> instructions;
   };
   const Family families[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1,
+      {rocjitsu::IsaFamily::Cdna1,
        &cdna1::execution_backend(),
        {cdna1::build_sop2(cdna1::kSAndB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         cdna1::build_sop2(cdna1::kSLshlB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
@@ -50,7 +51,7 @@ TEST(OlderWideScalarInteger, ArithmeticAndCondition) {
         cdna1::build_sop2(cdna1::kSBfmB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         cdna1::build_sop1(cdna1::kSBitset1B64Sop1, {.ssrc0 = 2, .sdst = 0}),
         cdna1::build_sopc(cdna1::kSCmpEqU64Sopc, {.ssrc0 = 0, .ssrc1 = 2})}},
-      {ROCJITSU_CODE_ARCH_CDNA2,
+      {rocjitsu::IsaFamily::Cdna2,
        &cdna2::execution_backend(),
        {cdna2::build_sop2(cdna2::kSAndB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         cdna2::build_sop2(cdna2::kSLshlB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
@@ -59,7 +60,7 @@ TEST(OlderWideScalarInteger, ArithmeticAndCondition) {
         cdna2::build_sop2(cdna2::kSBfmB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         cdna2::build_sop1(cdna2::kSBitset1B64Sop1, {.ssrc0 = 2, .sdst = 0}),
         cdna2::build_sopc(cdna2::kSCmpEqU64Sopc, {.ssrc0 = 0, .ssrc1 = 2})}},
-      {ROCJITSU_CODE_ARCH_RDNA1,
+      {rocjitsu::IsaFamily::Rdna1,
        &rdna1::execution_backend(),
        {rdna1::build_sop2(rdna1::kSAndB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         rdna1::build_sop2(rdna1::kSLshlB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
@@ -68,7 +69,7 @@ TEST(OlderWideScalarInteger, ArithmeticAndCondition) {
         rdna1::build_sop2(rdna1::kSBfmB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         rdna1::build_sop1(rdna1::kSBitset1B64Sop1, {.ssrc0 = 2, .sdst = 0}),
         rdna1::build_sopc(rdna1::kSCmpEqU64Sopc, {.ssrc0 = 0, .ssrc1 = 2})}},
-      {ROCJITSU_CODE_ARCH_RDNA2,
+      {rocjitsu::IsaFamily::Rdna2,
        &rdna2::execution_backend(),
        {rdna2::build_sop2(rdna2::kSAndB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         rdna2::build_sop2(rdna2::kSLshlB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
@@ -77,7 +78,7 @@ TEST(OlderWideScalarInteger, ArithmeticAndCondition) {
         rdna2::build_sop2(rdna2::kSBfmB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         rdna2::build_sop1(rdna2::kSBitset1B64Sop1, {.ssrc0 = 2, .sdst = 0}),
         rdna2::build_sopc(rdna2::kSCmpEqU64Sopc, {.ssrc0 = 0, .ssrc1 = 2})}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rocjitsu::IsaFamily::Rdna3_5,
        &rdna3_5::execution_backend(),
        {rdna3_5::build_sop2(rdna3_5::kSAndB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
         rdna3_5::build_sop2(rdna3_5::kSLshlB64Sop2, {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0}),
