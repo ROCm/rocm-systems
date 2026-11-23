@@ -266,8 +266,9 @@ bootstrap or resource allocation.
 Descriptor ownership also requires a complete symbol inventory: weak `.kd`
 definitions and distinct names aliasing one descriptor are rejected before
 planning. Identical name/location records in `.symtab` and `.dynsym` remain
-valid. Unknown PC-writing branch targets are rejected for native siblings even
-when only a `KernelEntry` callback is requested.
+valid. Program-path terminators, including ROCr's non-returning `s_trap 2`, end
+the ownership scope. Other unknown PC-writing branch targets are rejected for
+native siblings even when only a `KernelEntry` callback is requested.
 
 For explicit requests, look up `InstrumentedCodeObject::entries` by
 `InstrumentedEntry::original_descriptor_offset` and read that entry's `resources`,

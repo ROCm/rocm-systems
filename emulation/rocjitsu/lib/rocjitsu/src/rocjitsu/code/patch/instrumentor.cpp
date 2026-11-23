@@ -3412,7 +3412,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
           result.errors.emplace_back("disjoint entry requests do not admit calls or indirect flow");
           return result;
         }
-        if ((instruction.flags() & WRITES_PC) != 0 && !instruction.branch_offset_bytes()) {
+        if ((instruction.flags() & WRITES_PC) != 0 && !is_program_path_terminator(instruction) &&
+            !instruction.branch_offset_bytes()) {
           result.errors.emplace_back(
               "disjoint entry requests do not admit an unknown branch target");
           return result;

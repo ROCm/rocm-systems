@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/amdhsa_metadata.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -8839,6 +8840,91 @@ TEST(InstrumentorDisjointEntries, RejectsWeakAndAliasedDescriptorSymbolsBeforeDe
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.sites.empty());
     EXPECT_TRUE(result.entries.empty());
+  }
+}
+
+TEST(InstrumentorDisjointEntries, EntryOnlyRequestAcceptsNativeAbortTrapAsPathTerminator) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
+  const FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  const FailureOr<uint32_t> dead_branch = build_s_branch(-5, kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded() && ret.succeeded() && dead_branch.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  struct NativeTrapCase {
+    uint16_t trap_id;
+    bool branch_after_trap;
+  };
+  const std::array cases = {NativeTrapCase{.trap_id = 1, .branch_after_trap = false},
+                            NativeTrapCase{.trap_id = 2, .branch_after_trap = false},
+                            NativeTrapCase{.trap_id = 2, .branch_after_trap = true},
+                            NativeTrapCase{.trap_id = 3, .branch_after_trap = false}};
+  for (const NativeTrapCase test_case : cases) {
+    SCOPED_TRACE(test_case.trap_id);
+    SCOPED_TRACE(test_case.branch_after_trap);
+    const FailureOr<uint32_t> trap = build_s_trap(kArch, test_case.trap_id);
+    ASSERT_TRUE(trap.succeeded());
+    const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+    ASSERT_NE(decoder, nullptr);
+    const std::unique_ptr<Instruction> decoded(decode_valid(*decoder, &trap.value()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_NE(decoded->flags() & WRITES_PC, 0u);
+    EXPECT_FALSE(decoded->branch_offset_bytes());
+    EXPECT_EQ(is_program_path_terminator(*decoded), test_case.trap_id == 2);
+
+    // A occupies [0, 8), and native B starts at 8. Only abort trap 2
+    // makes the branch at 16 unreachable, so it cannot connect B to A.
+    const std::vector<uint32_t> words = {nop.value(), end.value(), nop.value(), trap.value(),
+                                         test_case.branch_after_trap ? dead_branch.value()
+                                                                     : end.value()};
+    std::vector<uint8_t> image =
+        make_amdgpu_two_kernel_elf(words, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 2u);
+    amdhsa::kernel_descriptor_t native = kernels[1].descriptor;
+    native.kernel_code_entry_byte_offset += 8;
+    std::memcpy(image.data() + kernels[1].descriptor_file_offset, &native, sizeof(native));
+    const AmdGpuCodeObject source(image.data(), image.size());
+    Instrumentor instrumentor(
+        source, kArch,
+        {.register_growth = std::nullopt,
+         .entries = {{.descriptor_file_offset = kernels[0].descriptor_file_offset,
+                      .register_growth = std::nullopt}}});
+    instrumentor.add_point({.anchor_offset = 0,
+                            .kind = InstrumentationKind::KernelEntry,
+                            .probe_obj = &probe,
+                            .probe_symbol = "entry_probe",
+                            .probe_args = {}});
+    const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+    const InstrumentedCodeObject result = instrumentor.patch();
+    if (test_case.trap_id != 2) {
+      const std::vector<std::string> expected = {
+          "disjoint entry requests do not admit an unknown branch target"};
+      EXPECT_EQ(validation.errors, expected);
+      EXPECT_TRUE(validation.sites.empty());
+      EXPECT_EQ(result.errors, expected);
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.entries.empty());
+      EXPECT_TRUE(result.sites.empty());
+      continue;
+    }
+    ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+    ASSERT_EQ(validation.sites.size(), 1u);
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_FALSE(result.elf_bytes.empty());
+    ASSERT_EQ(result.entries.size(), 1u);
+    EXPECT_EQ(result.entries.front().original_descriptor_offset, kernels[0].descriptor_file_offset);
+    EXPECT_NE(result.entries.front().prepared_entry_offset, 0u);
+    const std::vector<KernelDescriptorInfo> updated = entry_growth_kernels(result.elf_bytes);
+    ASSERT_EQ(updated.size(), 2u);
+    EXPECT_EQ(updated[1].entry_text_offset, 8u);
+    EXPECT_EQ(updated[1].descriptor.compute_pgm_rsrc1, native.compute_pgm_rsrc1);
+    const AmdGpuCodeObject prepared(result.elf_bytes.data(), result.elf_bytes.size());
+    const Section *prepared_text = prepared.text_sections().front();
+    EXPECT_GT(prepared_text->size(), words.size() * sizeof(uint32_t));
+    EXPECT_EQ(std::memcmp(prepared_text->data() + 8, words.data() + 2, 3 * sizeof(uint32_t)), 0);
   }
 }
 
