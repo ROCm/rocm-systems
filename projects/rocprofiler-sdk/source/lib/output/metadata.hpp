@@ -217,6 +217,13 @@ struct metadata
     void add_decoder(rocprofiler_code_object_info_t* obj_data_v, bool capture_content_hash);
     code_object_load_info_vec_t get_code_object_load_info() const;
     std::optional<std::string>  get_code_object_content_hash(uint64_t code_obj_id) const;
+    std::optional<std::string>  get_code_object_snapshot_uri(uint64_t code_obj_id) const;
+
+    // Writes the bytes of a memory-backed code object to a new file at (or, if taken, next to)
+    // `filename` so ROCpd post-processing can decode its PC samples after the process exits.
+    // The file:// URI is recorded only after every byte was written.
+    bool add_code_object_snapshot(const rocprofiler_code_object_info_t& obj_data,
+                                  const std::string&                    filename);
 
     string_index_map_t get_string_entries() const;
 
@@ -260,6 +267,7 @@ private:
     std::map<inst_t, size_t> indexes             = {};
 
     synced_map<std::unordered_map<uint64_t, std::string>> code_object_content_hashes = {};
+    synced_map<std::unordered_map<uint64_t, std::string>> code_object_snapshot_uris  = {};
 };
 
 template <typename Tp>
