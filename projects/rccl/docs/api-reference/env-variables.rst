@@ -920,9 +920,9 @@ in the following table.
         | operation runs as one kernel launch per ``K`` peers, so every channel
         | carries one peer per launch. The grid is unchanged.
         | It applies only from 4 MiB per peer and only when it gives a peer more
-        | channels than the per-peer count. It does not apply to the self copy,
-        | to P2P over the network, to channel maps set by
-        | ``RCCL_P2P_SHIFT_SIZE`` on more than two nodes, or with
+        | channels than the per-peer count, and only on communicators that span
+        | one node (a fabric communicator spanning hosts counts as one node).
+        | It does not apply to the self copy or with
         | ``NCCL_ENQUEUE_REARCH_ENABLE``. All ranks must use the same value.
       - | Integer.
         | Default: ``-1`` (architecture default): ``16`` on gfx1250, off
