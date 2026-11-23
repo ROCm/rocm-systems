@@ -5,11 +5,12 @@
 
 use super::queue::{
     QueueParameters, QueuePriority, QueueProducerMode, QueueRequest, QueueRingMemory,
-    store_ordered_mmio64,
+    RetainedQueue, store_ordered_mmio64,
 };
 use super::{CopyFailure, GpuDevice};
 use crate::memory::{DeviceAccess, MemoryKind, host_page_size};
 use crate::{Error, ErrorKind};
+use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -22,6 +23,50 @@ struct Completion {
     value: AtomicI64,
     /// Unused event, profiling and queue fields.
     reserved: [u64; 6],
+}
+
+/// The first condition that ended the completion wait.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WaitOutcome {
+    Completed,
+    Cancelled,
+    Deadline,
+}
+
+/// Retains native error identity and live backing while annotating retirement.
+fn inactivation_failure(mut error: Error, outcome: WaitOutcome) -> CopyFailure {
+    if let Error::NativeOperation { operation, .. } = &mut error {
+        *operation = match (*operation, outcome) {
+            ("AMDKFD_IOC_UPDATE_QUEUE", WaitOutcome::Completed) => {
+                "AMDKFD_IOC_UPDATE_QUEUE during code-cache queue inactivation (wait=Completed)"
+            }
+            ("AMDKFD_IOC_UPDATE_QUEUE", WaitOutcome::Cancelled) => {
+                "AMDKFD_IOC_UPDATE_QUEUE during code-cache queue inactivation (wait=Cancelled)"
+            }
+            ("AMDKFD_IOC_UPDATE_QUEUE", WaitOutcome::Deadline) => {
+                "AMDKFD_IOC_UPDATE_QUEUE during code-cache queue inactivation (wait=Deadline)"
+            }
+            (operation, _) => operation,
+        };
+    }
+    CopyFailure {
+        error,
+        operands_may_be_live: true,
+    }
+}
+
+/// Writes one snapshot without replacing the publication or cleanup result.
+#[cold]
+fn write_failure_diagnostic(
+    output: &mut impl Write,
+    outcome: WaitOutcome,
+    (read, write): (u64, u64),
+    completion: i64,
+) -> io::Result<()> {
+    writeln!(
+        output,
+        "rocddi code-cache: wait={outcome:?}; read={read}; write={write}; completion={completion}"
+    )
 }
 
 /// Builds the full-range `ACQUIRE_MEM` cache operation used by `ROCr`'s loader.
@@ -56,6 +101,42 @@ fn invalid(kind: ErrorKind, detail: &'static str) -> CopyFailure {
 }
 
 impl GpuDevice<'_> {
+    /// Samples retained resources only after rechecking the native process owner.
+    #[cold]
+    #[allow(unsafe_code)]
+    fn diagnose_wait_failure(
+        &self,
+        outcome: WaitOutcome,
+        queue: &RetainedQueue<(crate::memory::Allocation, crate::device::Device)>,
+        completion: &Completion,
+    ) {
+        let Ok(_operation) = self.driver.admit() else {
+            return;
+        };
+        if std::env::var_os("ROCDDI_CODE_CACHE_DIAGNOSTICS").is_some_and(|value| value == "1") {
+            let transport = queue.info();
+            // SAFETY: Creation validated aligned 64-bit, nonwrapping AQL
+            // indices, and this private owner retains both mappings until
+            // after this sample. Direct loads avoid progress()'s exception
+            // polling, event resets and sticky device-loss updates.
+            let progress = unsafe {
+                (
+                    (&*(transport.read_index_host_address as *const AtomicU64))
+                        .load(Ordering::Acquire),
+                    (&*(transport.write_index_host_address as *const AtomicU64))
+                        .load(Ordering::Acquire),
+                )
+            };
+            let completion = completion.value.load(Ordering::Acquire);
+            let _ = write_failure_diagnostic(
+                &mut std::io::stderr().lock(),
+                outcome,
+                progress,
+                completion,
+            );
+        }
+    }
+
     /// Publishes newly written code to instruction and scalar caches.
     ///
     /// The current mechanism invalidates the full cache range. The supplied
@@ -186,57 +267,116 @@ impl GpuDevice<'_> {
             store_ordered_mmio64(transport.doorbell_host_address, 0);
         }
         let deadline = Instant::now() + Duration::from_secs(5);
-        let completed = loop {
+        let outcome = loop {
             // SAFETY: Queue dependencies own the initialized signal page.
             if unsafe { &*(host as *const Completion) }
                 .value
                 .load(Ordering::Acquire)
                 == 0
             {
-                break true;
+                break WaitOutcome::Completed;
             }
-            if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
-                break false;
+            if cancel.load(Ordering::Acquire) {
+                break WaitOutcome::Cancelled;
+            }
+            if Instant::now() >= deadline {
+                break WaitOutcome::Deadline;
             }
             std::thread::sleep(Duration::from_micros(50));
         };
-        queue.inactivate().map_err(|mut error| {
-            if let Error::NativeOperation { operation, .. } = &mut error {
-                *operation = match (*operation, completed) {
-                    ("AMDKFD_IOC_UPDATE_QUEUE", true) => {
-                        "AMDKFD_IOC_UPDATE_QUEUE during code-cache queue inactivation (completion observed)"
-                    }
-                    ("AMDKFD_IOC_UPDATE_QUEUE", false) => {
-                        "AMDKFD_IOC_UPDATE_QUEUE during code-cache queue inactivation (wait ended without completion)"
-                    }
-                    (operation, _) => operation,
-                };
-            }
-            CopyFailure {
-                error,
-                operands_may_be_live: true,
-            }
-        })?;
+        if outcome != WaitOutcome::Completed {
+            // SAFETY: The retained dependency bundle still owns this signal.
+            self.diagnose_wait_failure(outcome, &queue, unsafe { &*(host as *const Completion) });
+        }
+        queue
+            .inactivate()
+            .map_err(|error| inactivation_failure(error, outcome))?;
         // SAFETY: The sole producer has stopped and CP is inactivated. The
         // retained owner releases its IB and signal only on native success.
         unsafe { queue.destroy() }.map_err(|error| CopyFailure {
             error,
             operands_may_be_live: true,
         })?;
-        if completed {
-            Ok(())
-        } else {
-            Err(invalid(
+        match outcome {
+            WaitOutcome::Completed => Ok(()),
+            WaitOutcome::Cancelled => Err(invalid(
                 ErrorKind::Busy,
-                "code-cache publication did not complete",
-            ))
+                "code-cache publication did not complete (wait=Cancelled)",
+            )),
+            WaitOutcome::Deadline => Err(invalid(
+                ErrorKind::Busy,
+                "code-cache publication did not complete (wait=Deadline)",
+            )),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::invalidate_packet;
+    use super::{WaitOutcome, inactivation_failure, invalidate_packet, write_failure_diagnostic};
+    use crate::{Error, ErrorKind};
+    use std::io;
+
+    #[test]
+    fn inactivation_context_preserves_native_error_and_live_operands() {
+        for outcome in [
+            WaitOutcome::Completed,
+            WaitOutcome::Cancelled,
+            WaitOutcome::Deadline,
+        ] {
+            let error = crate::os::native_error(
+                "AMDKFD_IOC_UPDATE_QUEUE",
+                io::Error::from_raw_os_error(13),
+            );
+            let status = error.native_status();
+            let kind = error.kind();
+            let failure = inactivation_failure(error, outcome);
+            assert!(failure.operands_may_be_live);
+            assert_eq!(failure.error.kind(), kind);
+            assert_eq!(failure.error.native_status(), status);
+            assert!(
+                failure
+                    .error
+                    .to_string()
+                    .contains(&format!("wait={outcome:?}"))
+            );
+        }
+        for error in [
+            crate::os::native_error("KFD queue inactivation", io::Error::from_raw_os_error(13)),
+            Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "queue is not available",
+            },
+        ] {
+            let text = error.to_string();
+            let status = error.native_status();
+            let kind = error.kind();
+            let failure = inactivation_failure(error, WaitOutcome::Deadline);
+            assert!(failure.operands_may_be_live);
+            assert_eq!(failure.error.to_string(), text);
+            assert_eq!(failure.error.kind(), kind);
+            assert_eq!(failure.error.native_status(), status);
+        }
+    }
+
+    #[test]
+    fn failure_diagnostic_records_passive_snapshot() -> io::Result<()> {
+        let mut output = Vec::new();
+        write_failure_diagnostic(&mut output, WaitOutcome::Deadline, (0, 1), 1)?;
+        assert_eq!(
+            output,
+            b"rocddi code-cache: wait=Deadline; read=0; write=1; completion=1\n"
+        );
+        output.clear();
+        write_failure_diagnostic(&mut output, WaitOutcome::Cancelled, (1, 1), -1)?;
+        assert_eq!(
+            output,
+            b"rocddi code-cache: wait=Cancelled; read=1; write=1; completion=-1\n"
+        );
+        let mut full = &mut [0_u8; 0][..];
+        assert!(write_failure_diagnostic(&mut full, WaitOutcome::Deadline, (0, 1), 1).is_err());
+        Ok(())
+    }
 
     #[test]
     fn cache_packets_match_generation_register_layouts() {
