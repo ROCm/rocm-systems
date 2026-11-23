@@ -206,7 +206,8 @@ const auto libdir            = path::get_internal_libdir();
 strvec_t   _dyn_api_rt_paths = { libdir, libdir + "/rocprofsys" };
 
 std::string
-get_absolute_filepath(std::string _name, const strvec_t& _paths);
+get_absolute_filepath(std::string _name, const strvec_t& _paths,
+                      bool report_missing = true);
 
 std::string
 get_absolute_filepath(std::string _name);
@@ -215,7 +216,7 @@ std::string
 get_absolute_exe_filepath(std::string exe_name);
 
 std::string
-get_absolute_lib_filepath(std::string lib_name);
+get_absolute_lib_filepath(std::string lib_name, bool report_missing = true);
 
 std::string
 absolute(std::string _path);
@@ -3088,7 +3089,8 @@ absolute(std::string _path)
 //======================================================================================//
 //
 std::string
-get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
+get_absolute_filepath(std::string _name, const strvec_t& _search_paths,
+                      bool report_missing)
 {
     if(!_name.empty() && !path::is_regular_file(absolute(_name)))
     {
@@ -3121,7 +3123,7 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
             }
         }
 
-        if(!path::is_regular_file(absolute(_name)))
+        if(report_missing && !path::is_regular_file(absolute(_name)))
         {
             auto const _search_paths_v =
                 fmt::format("{}", fmt::join(bin_search_paths, ", "));
@@ -3177,17 +3179,37 @@ get_absolute_exe_filepath(std::string exe_name)
 //======================================================================================//
 //
 std::string
-get_absolute_lib_filepath(std::string lib_name)
+get_absolute_lib_filepath(std::string lib_name, bool report_missing)
 {
     auto const _orig_name = lib_name;
-    lib_name              = get_absolute_filepath(std::move(lib_name), lib_search_paths);
+    lib_name =
+        get_absolute_filepath(std::move(lib_name), lib_search_paths, report_missing);
     if(_orig_name == lib_name && !path::is_regular_file(absolute(lib_name)) &&
        lib_name.find(".so") == std::string::npos &&
        lib_name.find(".a") == std::string::npos)
     {
-        lib_name = get_absolute_filepath(lib_name + ".so", lib_search_paths);
+        lib_name =
+            get_absolute_filepath(lib_name + ".so", lib_search_paths, report_missing);
     }
     return lib_name;
+}
+
+[[nodiscard]] std::string
+resolve_library_path(const std::vector<std::string>& library_names)
+{
+    for(const auto& library_name : library_names)
+    {
+        if(library_name.empty())
+        {
+            continue;
+        }
+        const auto resolved = get_absolute_lib_filepath(library_name, false);
+        if(!resolved.empty() && path::is_regular_file(absolute(resolved)))
+        {
+            return resolved;
+        }
+    }
+    return {};
 }
 
 std::string
@@ -3217,14 +3239,26 @@ find_dyn_api_rt()
 
     auto const _dyn_api_rt_env =
         rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB", _dyn_api_rt_base + ".so");
-    auto _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_env);
 
-    if(!path::is_regular_file(absolute(_dyn_api_rt_abs)))
+    const auto user_rt_lib = rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB", "");
+    if(!user_rt_lib.empty() && resolve_library_path({ user_rt_lib }).empty())
     {
-        _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_base + ".a");
+        verbprintf(0, "Ignoring DYNINSTAPI_RT_LIB=%s: library not found\n",
+                   user_rt_lib.c_str());
     }
 
-    if(path::is_regular_file(absolute(_dyn_api_rt_abs)))
+    auto library_names = std::vector<std::string>{ _dyn_api_rt_env };
+    // libdyninstAPI_RT.so is an optional alias of librocprof-sys-rt.so, and
+    // some installs ship only the real library. Try it before the static
+    // archive, which a live process cannot preload.
+    if(_dyn_api_rt_base != "librocprof-sys-rt")
+    {
+        library_names.emplace_back("librocprof-sys-rt.so");
+    }
+    library_names.emplace_back(_dyn_api_rt_base + ".a");
+
+    auto const _dyn_api_rt_abs = resolve_library_path(library_names);
+    if(!_dyn_api_rt_abs.empty())
     {
         rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
         rocprofsys::set_env<string_t>("DYNINST_REWRITER_PATHS",
@@ -3232,6 +3266,15 @@ find_dyn_api_rt()
                                                   path::parent_path(_dyn_api_rt_abs),
                                                   fmt::join(lib_search_paths, ":")),
                                       1);
+    }
+    else
+    {
+        const auto tried    = fmt::format("{}", fmt::join(library_names, ", "));
+        const auto searched = fmt::format("{}", fmt::join(lib_search_paths, ", "));
+        verbprintf(0,
+                   "Warning! File path to Dyninst runtime library could not be "
+                   "determined... tried: %s; search: %s\n",
+                   tried.c_str(), searched.c_str());
     }
 
     auto const _v = rocprofsys::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
