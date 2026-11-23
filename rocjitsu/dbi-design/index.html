@@ -202,7 +202,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 567 · build snapshot" aria-label="Stars: 567">567</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 568 · build snapshot" aria-label="Stars: 568">568</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 511 · build snapshot" aria-label="Forks: 511">511</li>
       </ul>
     </div>
@@ -255,7 +255,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 567 · build snapshot" aria-label="Stars: 567">567</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 568 · build snapshot" aria-label="Stars: 568">568</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 511 · build snapshot" aria-label="Forks: 511">511</li>
       </ul>
     </div>
@@ -1237,6 +1237,17 @@
     <span class="md-ellipsis">
       
         Current scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instruction-replacement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction replacement
       
     </span>
   </a>
@@ -2241,6 +2252,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#instruction-replacement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction replacement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#key-design-constraint" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2777,8 +2799,8 @@
 
 <h1 id="dbi-design-document"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg></span> DBI Design Document<a class="headerlink" href="#dbi-design-document" title="Permanent link">&para;</a></h1>
 <h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
-<p>The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects
-in-place, before they are loaded into device memory, to inject code at chosen
+<p>The Dynamic Binary Instrumentation (DBI) system rewrites AMDGPU HSA code objects
+before they are loaded into device memory, to inject code at chosen
 anchor instructions. ConSan loads DBI-patched objects through its HSA tools
 plugin (<code>HSA_TOOLS_LIB=libhsa_consan.so</code>) in simulator and physical-GPU runs.
 DBI itself is target-agnostic at the layer boundary; most per-ISA differences
@@ -2786,7 +2808,8 @@ are confined to the instruction/spill builders and decoder, but a few arch
 predicates (<code>max_scratch_offset_bytes</code>, <code>arch_has_accvgpr</code>,
 <code>arch_has_unified_vgpr_allocation</code>) live in the orchestrator.</p>
 <p>This document describes the DBI subsystem as implemented. The instrumentor can
-insert an inline nop or call a verified, copied probe body. Calls pass explicit
+replace a complete instruction through a trampoline, insert an inline nop through a
+trampoline, or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement,
 callable <code>AfterInst</code>, and callable kernel entry/exit observations are supported,
 subject to the <a href="#key-design-constraint">admission contract</a>. Block boundaries
@@ -2798,44 +2821,59 @@ future work. ConSan exercises the shared callable path across its
 seven target/wave modes; hardware and simulator coverage must be distinguished.</p>
 <hr />
 <h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────────────────────────────┐
-│  Instrumentor                                                    │
-│  Orchestration: collect points, validate, plan, build, splice    │
-│                                                                  │
-│  ┌────────────────────────┐  ┌─────────────────────────────────┐ │
-│  │  Validators            │  │  Trampoline planning            │ │
-│  │  - is_relocatable_     │  │  - make_trampoline_plan()       │ │
-│  │    anchor() (structural│  │  - validate_inline_nop_plan()   │ │
-│  │  - validate_anchor()   │  │    (milestone guardrail)        │ │
-│  │    (+ milestone rules) │  │                                 │ │
-│  └────────────────────────┘  └─────────────────────────────────┘ │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  TrampolineBuilder                                           ││
-│  │  Plan → bytes: patched anchor word + trampoline body words   ││
-│  └──────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  CodeObjectPatcher                                           ││
-│  │  ELF mutation: grow .text, fix ELF references, emit          ││
-│  └──────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────┘
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────────────────────────────────────┐
+│  Instrumentor                                                            │
+│  Queue observation / replacement / probe + replacement                   │
+│                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ Source admission + operation resolution                            │  │
+│  │ Observation / replacement checks bound to the original source      │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ Analysis when required by observations / probes / register growth  │  │
+│  │ Replacements: private effective guest + fresh CFG/liveness         │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ Shared trampoline planning / TrampolineBuilder                     │  │
+│  │ Observation: relocate original; replacement: emit supplied body    │  │
+│  │ Optional probe runs before the guest body                          │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ CheckedTextEdits                                                   │  │
+│  │ Validate the full anchor batch; apply source edits atomically      │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ ELF layout / CodeObjectPatcher                                     │  │
+│  │ Append local cave; replace_text(); update resources                │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+│  Publish ELF bytes + sites only after every stage succeeds               │
+└──────────────────────────────────────────────────────────────────────────┘
 </code></pre></div>
 <p>The orchestrator owns the multi-stage pipeline. It builds a private candidate and publishes ELF bytes and site maps only after validation, code emission, layout, and resource updates succeed. A late failure (e.g. branch-range overflow) returns diagnostics without publishing a partial image.</p>
 <hr />
 <h2 id="instrumentor">Instrumentor<a class="headerlink" href="#instrumentor" title="Permanent link">&para;</a></h2>
 <p><strong>Files:</strong> <code>code/patch/instrumentor.h</code>, <code>code/patch/instrumentor.cpp</code></p>
-<p>The Instrumentor is the top-level orchestrator. Callers queue <code>InstrumentationPoint</code>s (requests) and then invoke <code>patch()</code>. The orchestrator validates each anchor, plans and builds a trampoline per site, then checks and applies the original-text anchor batch before appending the local cave. The checked operation borrows the source, decoded boundaries, decoder, and patcher already owned by this observation call.</p>
+<p>The Instrumentor is the top-level orchestrator. Callers queue <code>InstrumentationPoint</code>s and invoke <code>patch()</code>. Observations and replacements share trampoline layout, checked anchor writes and final ELF emission. Replacements omit the original instruction and execute their supplied body after an optional probe.</p>
 <h3 id="pipeline-stages">Pipeline stages<a class="headerlink" href="#pipeline-stages" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>InstrumentationPoint        -- request: "instrument here, with this body"
+<div class="highlight"><pre><span></span><code>InstrumentationPoint        -- source offset + operation-specific payload
       |  validate_points()
       v
 ResolvedInstrumentationSite -- one validated anchor + snapshot of the
       |                        original bytes (captured before mutation)
-      |  make_trampoline_plan() + TrampolineBuilder::build()
+      |  private replacement layout for fresh analysis when needed
+      |  shared planning and TrampolineBuilder emission
       v
 (preflight: per-site plan + built bytes, accumulated locally)
-      |  local checked-edit batch on original text
+      |  shared checked-edit batch on original text
       |  append probes/stub/trampolines, then replace_text()
       |  (KernelEntry callbacks retarget only the entry-stub branch)
       v
@@ -2848,9 +2886,9 @@ InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
 <a href="../consan/#extending-consan">Extending ConSan</a> for the ownership boundary and
 current limits.</p>
 <ul>
-<li>Source-derived decoding: a concrete ELF target selects its concrete decoder features. Without a concrete target binding, the caller's architecture supplies the decoder; a recognized conflicting ELF architecture is rejected. CFG construction is lazy and uses <code>BasicBlock::build</code>. The checked batch uses this same decoder selection and the existing full-section instruction, clause, and direct-reference index after verifying complete coverage. It does not introduce a second target-admission policy.</li>
-<li><code>validate_points()</code> looks up the decoded <code>Instruction</code> at each requested <code>anchor_offset</code> and runs <code>validate_anchor()</code>. All-or-nothing today: any per-site failure empties <code>sites</code> and reports diagnostics in <code>errors</code>. Success establishes per-site eligibility, not that the final patch will succeed: batch, reference, and layout checks still run during <code>patch()</code>. Checked-edit failures also expose <code>edit_error</code> with a category and text-relative offset; the diagnostic types do not expose the private writer.</li>
-<li><code>patch()</code> builds trampolines, then checks their original-text anchor replacements together. The local transaction checks expected bytes, complete instruction extents, replacement encoding, clauses, overlap, and the collected references described under <a href="#checked-edits-codepatchchecked_text_editsh">Checked edits</a> before changing the private text buffer. Existing kernel descriptor entries are supplied by observation resolution. <code>KernelEntry</code> callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one <code>CodeObjectPatcher::replace_text()</code> call. It returns ELF bytes, diagnostics, production site maps, and planned resources.</li>
+<li>Source-derived decoding: a concrete ELF target selects its concrete decoder features; recognized legacy ELF identities retain the existing architecture policy, and an unknown machine uses the caller architecture. Both operation paths use the same decoder selection; a conflicting known architecture is rejected. Observational CFG construction is lazy and uses <code>BasicBlock::build</code>; replacement-only validation needs full-text structural facts. Sized RDNA4 function alignment additionally requires original CFG qualification; liveness remains optional.</li>
+<li><code>validate_points()</code> resolves each operation through its own admission path. Observations use <code>validate_anchor()</code> for per-site eligibility; final encoded-batch references and layout are checked during <code>patch()</code>. Replacements validate expected bytes, complete extents, references, clauses, and replacement encoding. Any failure empties <code>sites</code> and reports diagnostics in <code>errors</code>; source-facts and structural replacement failures also expose <code>edit_error</code> with a category and text-relative offset. Malformed requests or unsupported options use <code>errors</code> only, without an <code>edit_error</code>.</li>
+<li><code>patch()</code> preflights the entire batch before changing the private writer. Both operations build trampolines and commit their original-text anchor replacements together through the checked backend. <code>KernelEntry</code> callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one <code>CodeObjectPatcher::replace_text()</code> call. The shared pipeline returns ELF bytes, diagnostics, production site maps and any planned probe resources.</li>
 <li><code>patch_with_debug_summaries()</code> is a test/debug entry point returning <code>InstrumentedCodeObjectDebug</code> (extends <code>InstrumentedCodeObject</code> with per-site <code>InstrumentationPatch</code> summaries — schema unstable; production callers use <code>patch()</code> and its <code>InstrumentedSite</code> maps).</li>
 <li>Single-attempt: both entry points share one budget. After <code>patched_ = true</code>, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.</li>
 </ul>
@@ -2858,16 +2896,126 @@ current limits.</p>
 <ul>
 <li>Multiple queued <code>InstrumentationPoint</code>s per <code>patch()</code> call are supported; sites sharing the same <code>(probe_obj, probe_symbol)</code> reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.</li>
 <li>Single <code>.text</code> section (multi-text is fatal).</li>
-<li><code>BeforeInst</code> relocates an ordinary anchor. Callable <code>AfterInst</code> relocates the same supported anchors and observes their resulting state; callable sites follow the <a href="#key-design-constraint">admission contract</a>. Callable <code>KernelEntry</code> runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable <code>KernelExit</code> runs before <code>s_endpgm</code> without a return branch. Other kinds are rejected.</li>
-<li><code>probe_obj</code> + <code>probe_symbol</code> are <strong>consumed</strong>: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.</li>
-<li><code>filter_flags</code> is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. <code>force_full_exec</code> is consumed (see <a href="#mask-policy">Mask policy</a>); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.</li>
+<li><code>ReplaceWithInst</code> omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. <code>BeforeInst</code> relocates an ordinary anchor. Callable <code>AfterInst</code> relocates the same supported anchors and observes their resulting state; callable sites follow the <a href="#key-design-constraint">admission contract</a>. Callable <code>KernelEntry</code> runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable <code>KernelExit</code> runs before <code>s_endpgm</code> without a return branch. Other kinds are rejected.</li>
+<li>Replacement and observation requests share a batch. A replacement can carry its callable probe directly or coalesce one same-site callable BeforeInst. Probe analysis reflects all replacements in the batch; pristine CFG/liveness cannot be reused for the changed guest program.</li>
+<li>For observational points, <code>probe_obj</code> + <code>probe_symbol</code> are <strong>consumed</strong>: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.</li>
+<li><code>filter_flags</code> is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. <code>force_full_exec</code> is consumed by callable points (see <a href="#mask-policy">Mask policy</a>); points without a probe reject it because they have no call envelope whose mask could be widened.</li>
 <li>Probe calls require the probe body to read no register its ABI does not supply (<code>analyze_probe_live_ins</code>, see <a href="#probe-live-ins">Probe live-ins</a>). Under <code>AmdGpuFuncReturnS30S31</code> that is the link pair plus the declared argument VGPRs; any other input is fatal.</li>
 <li>Callable probes reject code objects containing decoded guest <code>s_movrel*</code> instructions because liveness does not model M0-displaced SGPR accesses. This check includes unreachable blocks and other kernels. Inline-nop instrumentation without register growth remains supported.</li>
-<li>Callable <code>AfterInst</code> and register growth require complete decoded VGPR usage, rejecting relative accesses and possible runtime GPR indexing throughout the decoded scope. Other placements without register growth retain the pre-existing vector-relative liveness limitation: on gfx1200 with <code>M0 = 2</code>, <code>v_movrels_b32 v3, v0</code> reads a hidden live <code>v2</code> that a callback can clobber.</li>
+<li>Callable probes also require complete VGPR usage on the effective guest. Relative moves/swaps and potentially enabled GPR indexing are rejected because their runtime-selected registers are absent from ordinary def/use. This includes access introduced by replacement bodies; removing the only indirect access remains permitted. Pure replacement without register growth does not require this analysis.</li>
 <li>Probe calls may pass 32-bit arguments via <code>InstrumentationPoint::probe_args</code>, delivered in VGPRs from <code>v0</code>. Each names a <code>ProbeArgSource</code>: a build-time constant, an anchor VGPR, a dword of the anchor <code>EXEC</code> mask, a dword of the framework's entry storage, or an SGPR, TTMP, or lane-zero VGPR snapshot captured once at guest entry after wrapper restoration. The two snapshot slots share a bounded reservation; source class and index identify each value. Original allocation and enabled hardware-input bounds apply even when instrumentation grows the register file. The count and the sources are declared by the caller and verified against the body; see <a href="#probe-arguments">Probe arguments</a>.</li>
 <li>Probe calls require the probe's link pair (<code>s[30:31]</code> for <code>rj_nop_probe</code>) to be within the kernel's SGPR allocation (<code>kernel_sgpr_count</code>) and any chosen scratch/special-state temps to be below <code>ordinary_sgpr_bound</code> of it; allocation growth requires explicit original metadata counts and a supported resource note (see <a href="#instrumentation-flow-probe-call">Probe-call register requirement</a>).</li>
 <li>Register spilling is enabled for <code>spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)</code>. The orchestrator scans the kernel descriptor (<code>scan_kernel_descriptors</code>), builds one <code>SpillManager</code> from its <code>private_segment_fixed_size</code>, splits the spill set by class, and calls <code>plan_vgpr_spills</code> / <code>plan_sgpr_spills</code> / <code>plan_acc_spills</code>. Spilling is gated per-arch by <code>max_scratch_offset_bytes()</code> (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no <code>SpillPolicy</code> enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.</li>
 </ul>
+<h3 id="instruction-replacement">Instruction replacement<a class="headerlink" href="#instruction-replacement" title="Permanent link">&para;</a></h3>
+<p>Set <code>InstrumentationPoint::kind</code> to <code>ReplaceWithInst</code> and provide an
+<code>InstructionReplacement</code>. Expected bytes identify one complete 4/8/12-byte source
+instruction. Replacement bytes are a separately sized sequence of complete
+instructions; an empty sequence deletes the original operation. The source
+instruction is never replayed. Each request builds an ordinary trampoline and
+patches the source extent with a branch plus NOP padding. This implementation has
+no direct in-place replacement fast path.</p>
+<div class="highlight"><pre><span></span><code>source anchor:        branch to cave; padding NOPs as needed
+replacement cave:     [optional probe envelope] [replacement instructions] [return]
+empty deletion:       [optional probe envelope] [return]
+terminal replacement: [optional probe envelope] [replacement ending in s_endpgm]
+</code></pre></div>
+<p>The body moves to a cave. PC-dependent branch/call/getpc forms and clauses are
+rejected rather than copied with changed PC semantics. A final <code>s_endpgm</code> ends the
+body without a return branch; other terminators or instructions after termination
+are rejected. A nonterminal body requires a decoded source continuation after the
+original extent. A byte inside <code>.text</code> that is linker padding is not a valid
+continuation. The omitted source instruction need not be relocatable, but source
+admission still enforces the missing-reference metadata guards below.</p>
+<p>Source admission validates expected bytes, bounds/overflow, physical overlap,
+one complete source extent, clause membership, and collected incoming references.
+References include direct branches throughout pristine allocated executable
+sections in linked objects, symbol starts/ends, supported raw relocation
+destinations and descriptor entries. ET_REL symbols
+remain section-relative. Interior references reject the batch; boundary references
+remain permitted. Known <code>s_cbranch_cdbg*</code>, <code>s_subvector_loop_begin</code>, and
+<code>s_subvector_loop_end</code> forms without destination metadata reject source admission;
+the same forms cannot be emitted as replacement payloads without relocation
+support. Adding complete branch metadata remains separate work. Computed
+PC-relative addresses remain outside this collected-reference proof. Payload
+decoding uses the source's concrete decoder, including variants.</p>
+<p>Replacement facts retain the shared source-admission proof, while each batch
+still checks its edited PT_LOAD file ranges; see <a href="#checked-edits-codepatchchecked_text_editsh">Checked edits</a>.</p>
+<p>Replacement batches reject retained <code>s_getpc_b64</code> / <code>s_get_pc_i64</code> when growth
+moves allocated storage or consumes a loaded file/zero-fill tail. Linked address
+constants are not yet relocated. This conservative restriction includes cases
+whose actual target stays fixed while unrelated metadata moves. Removing every
+source getpc in the batch remains permitted. The check uses immutable source
+facts across queries and forks; this movement guard does not require liveness.</p>
+<p>Retained direct branches and section-tail fallthrough edges in every allocated
+executable section of a linked object are checked against storage moved by growth,
+including allocated sections and unsectioned loaded tails.
+A batch that changes the distance between a retained edge's source and destination
+is rejected before publishing ELF bytes or sites. Edges whose source and target
+both stay fixed or move together remain supported. Only edges removed from
+<code>.text</code> by the batch are excluded. Foreign sections are decoded separately without
+adding their offsets to the public <code>.text</code> index; incomplete or undecodable streams
+and supported dynamic loader writes into executable bytes reject admission.
+Foreign branch destinations also participate in interior-reference checks, and
+foreign getpc instructions retain the conservative restriction above.
+Descriptor entries in other allocated executable sections are also retained
+references. Growth that moves such a kernel entry rejects even when the descriptor
+moves too: the writer's descriptor adjustment preserves the old absolute entry.
+Fixed entries retain the existing descriptor-only movement handling.
+ET_REL sections retain their separate section-relative coordinate spaces and the
+existing text-local reference proof.
+These checks reuse the boundary index's checked destination arithmetic and shared
+source-facts lifetime across queries and forks.</p>
+<p>A replacement point can carry the normal callable-probe fields; its probe runs
+before the replacement body. One separate callable <code>BeforeInst</code> at the same offset
+can also coalesce with the replacement in either queue order. Multiple replacements,
+multiple probes for one replacement, and other conflicting duplicates reject.
+Distinct observation and replacement sites share one atomic batch. The normal
+probe ABI, resource, scratch and wrapper gates apply when a probe is requested;
+a pure replacement needs no probe or liveness.
+Replacement batches with callable probes reject effective CFGs with missing
+successors or indirect/call-return flows that the current liveness scope does not
+model. This check follows the private replacement layout, so removing an unsafe
+edge can make a batch admissible. Probe-free replacements retain their existing
+structural and growth checks. The callable-probe MOVREL check also runs on the
+effective guest blocks, including relative SGPR accesses introduced only by
+replacement bodies. Replacement batches with probes and queues observing
+<code>AnchorVgpr</code> require complete physical VGPR usage in the effective guest.
+Other observation queues retain their per-site MODE checks and the additional
+patch-time physical-usage requirement for <code>AfterInst</code>.</p>
+<p>Before probe planning, all replacements are laid out privately using the same
+TrampolineBuilder and CodeObjectPatcher used for final output. Fresh CFG/liveness
+is built from this effective guest program, not the pristine instructions. This
+also handles a replacement at another site removing a definition that would
+otherwise hide a live value from an earlier probe. PC-independent replacement
+bodies make this probe-free analysis layout semantically equivalent to the final
+probe-bearing layout. No second Instrumentor pass or intermediate published ELF
+is used. The analysis code object owns its bytes; its temporary patcher is discarded.
+Site validation and source attribution decode the pristine instruction at its
+original boundary, including a KernelEntry shared with a replacement. Liveness
+and probe planning use the effective CFG at that source offset.</p>
+<p>Every final anchor batch is preflighted before private text writes. The common
+emitter appends probes, entry stub and trampolines, then grows <code>.text</code> through
+<code>CodeObjectPatcher::replace_text()</code>. Failure publishes neither ELF bytes nor sites.
+<code>InstrumentationPatch</code> is present for replacement sites too. In <code>InstrumentedSite</code>,
+<code>original_offset/original_size</code> describe the source extent; <code>guest_offset/guest_size</code>
+describe the effective replacement sequence in the cave (zero size for deletion).
+The preceding <code>instrumentation_offset/instrumentation_size</code> range describes the
+probe envelope and is empty for pure replacement. Return branches follow the guest.</p>
+<p><code>instruction_boundaries(error)</code> exposes a borrowed read-only pristine full-text
+index. Cold gap-free sources use linear decoding; sized RDNA4 function alignment
+is qualified through the original CFG first. Private <code>SourceTextFacts</code> owns the
+index and collected reference values; no mutable decoder, writer, CFG or liveness
+is shared.
+<code>fork(error)</code> retains those facts for the exact same source/architecture/options
+while creating an empty queue and independent patch budget. A child can outlive its
+parent, but the immutable, unmoved source <strong>code object</strong> must outlive all forks.
+A borrowed index must not outlive the last sharing Instrumentor or the source.
+<code>AmdGpuCodeObject</code> itself copies its constructor input; Instrumentor borrows that
+owning object, not the caller's original input buffer.</p>
+<p>Facts reuse does not bypass any batch's expected-byte or source-reference checks.
+For later processing of an emitted mutant, create a new code object and analyze its
+emitted bytes afresh; pristine facts cannot be attached to a different source.</p>
 <h3 id="key-design-constraint">Key design constraint<a class="headerlink" href="#key-design-constraint" title="Permanent link">&para;</a></h3>
 <p>Callable <code>AfterInst</code> requires an ordinary relocatable anchor and a supported
 post-anchor state. Pre-anchor liveness alone cannot justify a callback after
@@ -2923,7 +3071,7 @@ sections 5.7.2 and 7.12.1.</p>
 <hr />
 <h2 id="trampolinebuilder">TrampolineBuilder<a class="headerlink" href="#trampolinebuilder" title="Permanent link">&para;</a></h2>
 <p><strong>Files:</strong> <code>code/patch/trampoline_builder.h</code>, <code>code/patch/trampoline_builder.cpp</code></p>
-<p>Generic byte emitter. Takes a <code>TrampolinePlan</code> and returns <code>TrampolineBytes</code> (see <a href="#data-types">Data Types</a>). Knows nothing about <code>InstrumentationPoint</code>s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope preceding or following the relocated original. <code>plan_probe_call()</code> selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports <code>builder_clobbers</code>; <code>emit_probe_call()</code> lowers the chosen plan to bytes.</p>
+<p>Generic byte emitter. Takes a <code>TrampolinePlan</code> and returns <code>TrampolineBytes</code> (see <a href="#data-types">Data Types</a>). Knows nothing about <code>InstrumentationPoint</code>s or milestones. It emits supplied inline items, optional original replay and an optional return. Observation plans use an inline nop or a probe-call envelope preceding or following the relocated original; replacement plans omit the original and retain their supplied <code>after_items</code> body, including empty deletion. <code>plan_probe_call()</code> selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports <code>builder_clobbers</code>; <code>emit_probe_call()</code> lowers the chosen plan to bytes.</p>
 <p>The low-level <code>probe_after_original</code> plan option places the relocated instruction
 before its callable envelope. It defaults to false; the Instrumentor selects it
 for callable <code>AfterInst</code> requests. A caller selecting this layout must supply
@@ -2941,13 +3089,13 @@ obligations nor inserts anchor-specific hazard spacing.</p>
 or eight bytes only when <code>emit_original</code> is true. With the original omitted,
 both placements emit the envelope at the trampoline start and call the same
 probe body, with identical bytes and attribution offsets. <code>original_byte_offset</code>
-then names the return branch, or the end of the trampoline if no return branch
-is requested.
+then names the replacement body when present, or the return branch/end of the
+trampoline for empty deletion.
 <code>TrampolineBytes</code> reports the call envelope's offset and size separately from the
 guest instruction and resume branch, allowing the Instrumentor to attribute
 emitted bytes without deriving their range from a particular layout.</p>
 <p>The caller supplies the <code>preserve_exec</code>, <code>preserve_vcc</code>, and <code>preserve_m0</code> inputs. <code>plan_probe_call()</code> reserves an EXEC temp when <code>preserve_exec || needs_full_mask</code>; VCC and M0 temps follow their respective inputs. The full-mask window is required for spills, argument writes, or <code>force_full_exec</code>. The builder allocates a dead SGPR pair for each saved EXEC/VCC and a single dead SGPR for saved M0; the caller's production decisions are described in <a href="#special-state-preservation">Special state</a>.</p>
-<p>The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (<code>s_mov</code> EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the <strong>spill prologue</strong> (see below); the argument writes; the guest-mask restore; the SCC save; the <code>s_getpc_b64</code> + 64-bit add chain that materializes the copied probe body's address; <code>s_swappc_b64</code> to it; then after the call a <code>build_wait_all_loads_complete()</code> drain (so the probe's own in-flight loads finish before state restoration and before the guest resumes), the SCC restore, the <strong>spill epilogue</strong>, and the special-state restores. The default layout places this envelope before the relocated original; <code>probe_after_original</code> places it after the original. Saves and restores protect the state at the selected observation point.</p>
+<p>The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (<code>s_mov</code> EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the <strong>spill prologue</strong> (see below); the argument writes; the guest-mask restore; the SCC save; the <code>s_getpc_b64</code> + 64-bit add chain that materializes the copied probe body's address; <code>s_swappc_b64</code> to it; then after the call a <code>build_wait_all_loads_complete()</code> drain (so the probe's own in-flight loads finish before state restoration and before the guest resumes), the SCC restore, the <strong>spill epilogue</strong>, and the special-state restores. The default layout places this envelope before the relocated original; <code>probe_after_original</code> places it after the original. Saves and restores protect the state at the selected observation point. For replacement, restoration completes before the supplied replacement body executes.</p>
 <p>On gfx1100, both boundaries also wait for pending VALU destinations before
 the envelope reads or restores registers.</p>
 <p>For <code>AfterInst</code>, the Instrumentor includes the original instruction's definitions
@@ -2966,8 +3114,8 @@ results.</p>
 <h3 id="what-it-handles">What it handles<a class="headerlink" href="#what-it-handles" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Encoding the forward <code>s_branch</code> that goes into the anchor slot, pointing at the trampoline's first word.</li>
-<li>Emitting the trampoline body in order: <code>before_items</code> (each an <code>InlineAsmItem</code> containing one or more pre-encoded words), then the relocated original instruction words (when <code>emit_original</code>), then <code>after_items</code>, then the return <code>s_branch</code> back to <code>anchor_offset + original_size</code>.</li>
-<li>Plan well-formedness: <code>original_size</code> ∈ {4, 8}, <code>original_words.size() * sizeof(uint32_t) == original_size</code>, branch reach fits in SOPP <code>simm16</code>.</li>
+<li>Emitting the trampoline body in order: <code>before_items</code> (each an <code>InlineAsmItem</code> containing one or more pre-encoded words), then the original instruction words when <code>emit_original</code>, then <code>after_items</code>. A return <code>s_branch</code> to <code>return_target</code> follows only when <code>returns_to_kernel</code>; nonterminal replacement uses <code>anchor_offset + original_size</code>, while terminal bodies omit the return.</li>
+<li>Plan well-formedness: <code>original_size</code> is nonzero and dword-aligned, and <code>original_words.size() * sizeof(uint32_t) == original_size</code>. Original replay accepts 4/8-byte extents; an anchor splice accepts 4/8/12 bytes, with 12 allowed only when the original is omitted. Emitted branches must fit SOPP <code>simm16</code>. Source splices fill any bytes after the forward branch with NOPs.</li>
 <li>Architecture awareness — SOPP encoding format is uniform across AMDGPU but opcodes differ (e.g. <code>s_branch</code> is opcode 2 on GFX9/CDNA, opcode 32 on GFX12/RDNA4). All opcode selection goes through <code>instruction_builder.h</code> helpers.</li>
 </ul>
 <h3 id="what-it-does-not-handle">What it does NOT handle<a class="headerlink" href="#what-it-does-not-handle" title="Permanent link">&para;</a></h3>
@@ -2989,14 +3137,14 @@ results.</p>
 <li><code>anchor.size()</code> is 4 or 8 and fits inside <code>text_bytes</code> (subtraction-based bounds check; resists overflow when <code>anchor_offset</code> is huge).</li>
 <li><code>anchor.raw_encoding()</code> is non-null.</li>
 <li><code>anchor</code> is not a branch / cond branch / indirect branch / indirect call / program terminator, and <code>branch_offset_bytes()</code> is <code>nullopt</code>.</li>
-<li><code>anchor.mnemonic()</code> is not on the small PC-relative denylist (<code>s_getpc_b64</code>, <code>s_call_b64</code>, <code>s_setpc_b64</code>, <code>s_swappc_b64</code>, <code>s_rfe_*</code>, plus the gfx1250 spellings <code>s_get_pc_i64</code>, <code>s_call_i64</code>, <code>s_set_pc_i64</code>, <code>s_swap_pc_i64</code>) — these may not surface as flag bits on every ISA.</li>
-<li><code>anchor.mnemonic()</code> is not <code>s_clause</code>. This predicate sees no surrounding stream, so the orchestrator separately rejects an anchor <em>inside</em> a clause run.</li>
+<li><code>anchor.reads_pc()</code> is false: decoded ISA metadata identifies PC readers independently of their target-specific spellings. Set-PC and return-from-exception operations are also excluded by their decoded operation.</li>
+<li><code>anchor.amdgpu_operation()</code> is not <code>S_CLAUSE</code>. This predicate sees no surrounding stream, so the orchestrator separately rejects an anchor <em>inside</em> a clause run.</li>
 </ul>
-<p><code>arch</code> is accepted now so a future ISA-specific denylist can grow without an API change.</p>
+<p><code>arch</code> is accepted for target-specific validation without changing the API.</p>
 <h3 id="validate_anchoranchor-anchor_offset-text_bytes-pt-arch-error_out"><code>validate_anchor(anchor, anchor_offset, text_bytes, pt, arch, error_out)</code><a class="headerlink" href="#validate_anchoranchor-anchor_offset-text_bytes-pt-arch-error_out" title="Permanent link">&para;</a></h3>
 <p>Combines <code>is_relocatable_anchor()</code> with milestone-scoped policy checks against <code>pt</code>: <code>filter_flags</code> is zero, <code>kind</code> is an admitted instruction or kernel-boundary placement, and neither <code>probe_args</code> nor <code>force_full_exec</code> is set without a probe. The <code>probe_obj</code>/<code>probe_symbol</code> pair is consumed (not rejected): consistency (both set or both empty) and symbol resolution happen during point resolution. On success returns a <code>ResolvedInstrumentationSite</code> with the captured anchor snapshot (offset, size, original bytes, mnemonic, kind); <code>probe_index</code> and <code>probe_args</code> are filled later, during point resolution.</p>
 <h3 id="validate_inline_nop_planplan-error_out"><code>validate_inline_nop_plan(plan, error_out)</code><a class="headerlink" href="#validate_inline_nop_planplan-error_out" title="Permanent link">&para;</a></h3>
-<p>Defense-in-depth check that the orchestrator-produced <code>TrampolinePlan</code> matches the canonical inline-nop shape: exactly one <code>before_items</code> entry containing <code>s_nop 0</code>, empty <code>after_items</code>, <code>emit_original == true</code>. Lives at the orchestrator boundary rather than inside the builder so the builder stays generic. Deleted once arbitrary inline-asm bodies are supported.</p>
+<p>Defense-in-depth check that the orchestrator-produced <code>TrampolinePlan</code> matches the canonical inline-nop shape: exactly one <code>before_items</code> entry containing <code>s_nop 0</code>, empty <code>after_items</code>, <code>emit_original == true</code>. Runs only for inline-nop observations at the orchestrator boundary; replacement and probe-call plans use their own validation while the builder stays generic.</p>
 <hr />
 <h2 id="data-types">Data Types<a class="headerlink" href="#data-types" title="Permanent link">&para;</a></h2>
 <table>
@@ -3011,12 +3159,17 @@ results.</p>
 <tr>
 <td><code>InstrumentationPoint</code></td>
 <td>request</td>
-<td><code>anchor_offset</code>, <code>kind</code>, <code>probe_obj</code>, <code>probe_symbol</code>, <code>probe_args</code>, <code>force_full_exec</code>, reserved <code>filter_flags</code></td>
+<td><code>anchor_offset</code>, <code>kind</code>, optional <code>replacement</code>, <code>probe_obj</code>, <code>probe_symbol</code>, <code>probe_args</code>, <code>force_full_exec</code>, reserved <code>filter_flags</code></td>
+</tr>
+<tr>
+<td><code>InstructionReplacement</code></td>
+<td>replacement payload</td>
+<td>owned complete source <code>expected_bytes</code> and independently sized <code>replacement_bytes</code></td>
 </tr>
 <tr>
 <td><code>ResolvedInstrumentationSite</code></td>
 <td>post-validation</td>
-<td><code>anchor_offset</code>, <code>original_size</code>, <code>original_bytes</code>, <code>mnemonic</code>, <code>kind</code>, <code>probe_index</code> (set for probe calls), <code>probe_args</code></td>
+<td><code>anchor_offset</code>, <code>original_size</code>, <code>original_bytes</code>, <code>mnemonic</code>, <code>kind</code>, <code>probe_index</code> (set for probe calls), <code>probe_args</code>, <code>replacement_words</code>, <code>replacement_terminates</code></td>
 </tr>
 <tr>
 <td><code>ProbeCallable</code></td>
@@ -3026,7 +3179,7 @@ results.</p>
 <tr>
 <td><code>TrampolinePlan</code></td>
 <td>builder input</td>
-<td><code>arch</code>, <code>anchor_offset</code>, <code>original_size</code>, <code>original_words</code>, <code>trampoline_offset</code>, <code>return_target</code>, <code>before_items</code>, <code>after_items</code>, <code>emit_original</code>, <code>kernel_sgpr_count</code>, <code>entry_storage_base</code>; probe-call: <code>is_probe_call</code>, <code>probe_after_original</code>, <code>probe_target_offset</code>, <code>link_pair_base</code>, <code>arg_vgpr_base</code>, <code>probe_args</code>, <code>force_full_exec</code>, <code>target_pair_base</code>, <code>scc_temp</code>, <code>preserve_scc</code>, <code>preserve_exec</code>, <code>preserve_vcc</code>, <code>preserve_m0</code>, <code>special_state_saves</code>, <code>vgpr_spills</code>, <code>sgpr_spills</code>, <code>acc_spills</code>, <code>spill_bridge_vgpr</code>, <code>planned_envelope_word_count</code>, <code>builder_clobbers</code></td>
+<td><code>arch</code>, <code>anchor_offset</code>, <code>original_size</code>, <code>original_words</code>, <code>trampoline_offset</code>, <code>return_target</code>, <code>before_items</code>, <code>after_items</code>, <code>emit_original</code>, <code>patch_anchor</code>, <code>returns_to_kernel</code>, <code>kernel_sgpr_count</code>, <code>entry_storage_base</code>; probe-call: <code>is_probe_call</code>, <code>probe_after_original</code>, <code>probe_target_offset</code>, <code>link_pair_base</code>, <code>arg_vgpr_base</code>, <code>probe_args</code>, <code>force_full_exec</code>, <code>target_pair_base</code>, <code>scc_temp</code>, <code>preserve_scc</code>, <code>preserve_exec</code>, <code>preserve_vcc</code>, <code>preserve_m0</code>, <code>special_state_saves</code>, <code>vgpr_spills</code>, <code>sgpr_spills</code>, <code>acc_spills</code>, <code>spill_bridge_vgpr</code>, <code>planned_envelope_word_count</code>, <code>builder_clobbers</code></td>
 </tr>
 <tr>
 <td><code>TrampolineBytes</code></td>
@@ -3037,6 +3190,11 @@ results.</p>
 <td><code>InstrumentationPatch</code></td>
 <td>per-site summary (test/debug)</td>
 <td><code>anchor_offset</code>, <code>original_size</code>, <code>trampoline_offset</code>, optional <code>return_target</code>, <code>original_bytes</code>, <code>patched_anchor_bytes</code>; probe-call: <code>is_probe_call</code>, <code>probe_symbol</code>, <code>probe_target_offset</code>, <code>link_pair_base</code>, <code>target_pair_base</code></td>
+</tr>
+<tr>
+<td><code>InstrumentedSite</code></td>
+<td>production attribution</td>
+<td><code>kind</code>, <code>original_offset</code>, <code>original_size</code>, effective guest and instrumentation ranges; replacement guest names its body, with size zero for deletion</td>
 </tr>
 <tr>
 <td><code>InstrumentedCodeObject</code></td>
@@ -3058,8 +3216,8 @@ valid destination, distinct from an absent branch.</p>
 <hr />
 <h2 id="supporting-modules">Supporting Modules<a class="headerlink" href="#supporting-modules" title="Permanent link">&para;</a></h2>
 <h3 id="code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt">Code Object Patcher (<code>code/patch/code_object_patcher.h</code>) [shared with DBT]<a class="headerlink" href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt" title="Permanent link">&para;</a></h3>
-<p>Owns ELF-level mutations. The orchestrator applies validated original-text
-anchor edits to a local text buffer, then
+<p>Owns ELF-level mutations. All operations apply checked branch splices to private original text. The common path applies
+its validated original-text anchor edits to a local text buffer, then
 assembles the new <code>.text</code> (the already-edited original text,
 then the probe bodies, the <code>s_nop</code>-padded entry-prologue stub if there is one, and
 every trampoline appended after the original bytes with <code>append_words()</code> /
@@ -3115,14 +3273,41 @@ text remain eligible. A failed growth check returns through the existing patcher
 error path; Instrumentor publishes neither ELF bytes nor successful site records.
 Section-only images without LOAD segments retain their offline mutation path.</p>
 <h3 id="checked-edits-codepatchchecked_text_editsh">Checked edits (<code>code/patch/checked_text_edits.h</code>)<a class="headerlink" href="#checked-edits-codepatchchecked_text_editsh" title="Permanent link">&para;</a></h3>
-<p>The checked operation is local to one original-text anchor batch. It requires
-the unchanged source, full-section decoded boundaries, selected decoder, and
-existing patcher; these inputs remain owned by Instrumentor for the duration of
-the call. Its edit extents are the 4/8-byte anchors supported by observation.
-It does not cache source facts, create a fallback decoder or patcher,
-or expose a reusable context. All edits are validated before writing the
-orchestrator's private text buffer. Probe admission, layout, and resource policy
-remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.</p>
+<p>This internal backend serves both Instrumentor operations. Source admission and
+reference collection are separate from per-batch validation and writing. The
+collector checks full-text boundary coverage, ELF/section aliases, relocation
+admission, symbol endpoints, raw relative destinations and descriptor entries.
+Observation can supply its already decoded pristine index, existing patcher and
+resolved descriptor entries. Replacement/query/fork share pristine facts for
+independent mutants; both operations use local transactions. Observation's replay
+admission remains 4/8 bytes; the shared splice supports complete 4/8/12-byte extents.</p>
+<p>Replacement/query/fork are the consumers of reusable ownership. A private
+<code>SourceTextFacts</code> owns the full-text index and collected references behind
+<code>shared_ptr&lt;const ...&gt;</code>; it does not own the source ELF. Instrumentor performs a
+standalone full-section decode when no existing index is available, using the
+same decoder-selection policy as observation. For symbol-bounded RDNA4 alignment,
+it instead reuses the original CFG so fallthrough and returning calls into a gap
+retain the shared rejection rules. Descriptor entries and known branch destinations
+into those gaps also reject admission. Gap classification belongs only to the
+original <code>.text</code>; foreign sections keep their independent decoding. A fork shares
+only the resulting immutable structural facts. Each Instrumentor creates its own
+decoder. Source admission checks complete 4/8/12-byte extents and incoming references;
+final branch splices preserve those
+extents while effective guest bodies can have different lengths. The transaction borrows those inputs for a synchronous call
+and writes only after the entire batch passes. It has no factory, cache or PImpl.</p>
+<p>Without an explicit relocation map, ELF emission grows only the final function
+range, including aliases at that start, to cover the cave. Earlier ranges keep
+their original extents so inter-function alignment remains outside function
+bodies in both private analysis and emitted objects. Cave code reached from an
+earlier function is discontiguous and cannot fit its single ELF symbol range.</p>
+<p>The orchestrator passes its existing patcher's text or its local assembly buffer;
+it does not emit an intermediate ELF merely to recover text. Diagnostics live
+in <code>text_edit_error.h</code>, separately from the private writer. Instruction replacement
+is requested through Instrumentor, not a second public context/apply API. Kernel
+ownership, recipe qualification/selection, dynamic descriptor-write admission and
+whole-kernel loaded-mapping ownership and alias qualification stay with the
+consumer. Generic structural admission also supports section-only transformations
+without a load mapping.</p>
 <p>Source admission checks the complete write interval of supported ROCr dynamic
 relocations against the original <code>.text</code>. A write can start before the section
 and still overwrite its first instruction. Overflowing write ends reject; an
@@ -3215,6 +3400,21 @@ computed-address analysis is separate work.</p>
 <p>A non-empty result is a probe expecting state that only exists at kernel entry — <code>workitem_id_x</code> in <code>v31</code>, written by the kernel's own prologue — which a trampoline at an arbitrary anchor cannot reproduce. <code>Instrumentor::resolve_points()</code> rejects the site. This is also how a declared argument count is verified against the body the compiler actually emitted; see <a href="#probe-arguments">Probe arguments</a>.</p>
 <p>CFG liveness rather than a linear scan of the body words: a def under a forward branch does not reach a use after the join, so a linear walk would report a smaller footprint than the body has.</p>
 <p>The analysis sets <code>LivenessAnalysisOptions::exec_masked_defs_kill</code>, so a masked vector write counts as writing the whole register. Without it no masked def is ever a kill and every VGPR the probe reads — including ones it defines itself — is reported as an input. The probe owns its own EXEC; the option's doc states what that obliges.</p>
+<p>Callable probes enter with VSKIP proven clear. Dispatch establishes that state
+for KernelEntry probes; other sites require a proof on the effective guest CFG.
+When no decoded instruction may enable VSKIP, resolved local calls also preserve
+this state if their return links remain intact. The bounded proof follows scalar
+copies and constant-lane saves/restores of the incoming return pair, including
+non-leaf callees; unknown transfers, damaged links, and recursive summaries
+remain unproven. On CDNA1–4, clear GPR indexing can use the same bounded flow
+proof with an independent check for GPR-indexing enables. These establish MODE
+preconditions; EXEC and interprocedural register liveness retain their own checks.
+Probe bodies that may enable VSKIP are rejected because the call envelope also
+requires vector instructions to execute. Probe live-in analysis seeds its entry
+with this callable precondition, independently of its EXEC policy.
+<code>validate_points()</code> checks per-site MODE and storage state alongside structural
+and probe-body contracts. Patch preflight additionally checks physical register
+usage, allocation and spill requirements.</p>
 <p>Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5 without a proof that all <code>MODE.VGPR_MSB</code> roles are zero at each call site (the instrumentor derives this from the sole kernel entry and rejects guests with calls); relative (<code>v_movrel*</code>) or GPR-indexed (<code>MODE.GPR_IDX_EN</code>) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the <code>s_movrel*</code> family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one <code>.text</code>, or a body outside it, since <code>BasicBlock::build()</code> decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable <code>.text</code>; and an entry offset that starts no decoded block.</p>
 <h3 id="spillmanager">SpillManager<a class="headerlink" href="#spillmanager" title="Permanent link">&para;</a></h3>
 <p><strong>Files:</strong> <code>code/patch/spill_manager.h</code>, <code>code/patch/spill_manager.cpp</code></p>
@@ -3255,7 +3455,7 @@ computed-address analysis is separate work.</p>
 <p><code>RegisterSet</code> exposes <code>expand</code> / <code>erase</code> / <code>contains</code> / <code>none</code> / <code>size</code> / <code>intersects</code>, the standard set operators (<code>|=</code>, <code>&amp;=</code>, <code>-=</code>), and a <code>for_each</code> visitor that yields tracked single-lane <code>RegisterRef</code>s in (SGPR, VGPR, AccVGPR) ascending-index order.</p>
 <hr />
 <h2 id="instrumentation-flow-inline-nop">Instrumentation Flow (inline-nop)<a class="headerlink" href="#instrumentation-flow-inline-nop" title="Permanent link">&para;</a></h2>
-<p>For a code object with one queued <code>InstrumentationPoint</code> at <code>anchor_offset</code>:</p>
+<p>For a code object with one queued <code>BeforeInst</code> at <code>anchor_offset</code> and no callable probe:</p>
 <ol>
 <li><strong>Lazy block decode:</strong> On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder, or the caller architecture's decoder when no concrete target binding exists. <code>BasicBlock::build</code> populates <code>blocks_</code>, and decoded instructions populate the full-text <code>InstructionBoundaries</code> index. An unsupported architecture or recognized source mismatch surfaces as a fatal error here. The final checked batch uses this same selection.</li>
 <li><strong>Validate:</strong> <code>validate_points()</code> walks <code>points_</code>; for each, <code>find_instruction_at_offset()</code> locates the decoded <code>Instruction</code>, then <code>validate_anchor()</code> runs milestone-scoped + structural checks and produces a <code>ResolvedInstrumentationSite</code> capturing the original bytes.</li>
@@ -3443,7 +3643,27 @@ zero instead of the requested launch value.</p>
 <p><code>AnchorVgpr</code> sources are parallel copies made before constants or scalar-sourced
 argument writes. The builder orders overlapping copies and breaks cycles with a
 dead VGPR. Observed sources participate in resource exclusion even if the guest
-itself no longer uses them. Register-backup destinations must avoid live values,
+itself no longer uses them. Each observation is a read at its selected point in
+the effective CFG: after the anchor for AfterInst, before it for ordinary sites,
+including when a replacement deletes the last guest read. Liveness
+propagates that read backward to earlier probes until a definition is proven to
+execute and overwrite every lane. A VSKIP-affected instruction can end that range
+only where VSKIP is proven clear, including when its result is an SGPR or an
+AccVGPR. The forward proof uses the same scoped edges as liveness, merges clear
+dispatch entries with backedges, and treats unknown entries, possible enables,
+and calls conservatively. Explicit clears can restore the proof. Partial or unknown EXEC remains conservative;
+EXEC precision is disabled for unmodeled calls, transfers, or descriptor entries.
+Dispatch-only KernelEntry reads are local to their entry probe, rather than reads
+on guest backedges. CDNA3/CDNA4 kernarg-preload descriptors retain conservative
+EXEC liveness: firmware may dispatch at entry + 256, whose mask cannot inherit
+instructions in the skipped prefix. Both dispatch paths are explicit external
+CFG roots, bounded by the original text; firmware entry discovery starts with
+fresh register facts even when the software prefix falls through. Dispatch-clear
+MODE state still merges with guest backedges. Adding a queued point invalidates
+the cached liveness.
+Sources must fit the original ordinary VGPR allocation before register growth;
+growth also reserves observed inputs beyond the original metadata's used count.
+Register-backup destinations must avoid live values,
 probe clobbers, fixed argument/link registers, and persistent entry storage.</p>
 <p><code>kernarg_segment_ptr_slot</code> and <code>CommandProcessor::init_wavefront_regs</code> walk the user-SGPR enable-bit order independently, and the CP interleaves register writes with its walk so it cannot call the helper. <code>tests/dbi/kernarg_sgpr_slot_test.cpp</code> dispatches every combination to pin the agreement; a drift would have the prologue load from an unrelated pair with no fault and every unit test still green.</p>
 <h3 id="fail-closed-list">Fail-closed list<a class="headerlink" href="#fail-closed-list" title="Permanent link">&para;</a></h3>
@@ -3487,6 +3707,9 @@ probe clobbers, fixed argument/link registers, and persistent entry storage.</p>
 <li><strong>Hardware probe-call smoke (<code>HsaDbiNopProbeCdna2Hardware</code>, gated on <code>HAS_CDNA2_GPU</code>):</strong> Load + validate; dispatch the probe-call-patched kernel and confirm bit-identical output to the original (the no-op probe is transparent); a <em>sabotage</em> test overwrites the copied probe body's first word with <code>s_endpgm</code> and asserts the wave terminates, proving the <code>s_swappc_b64</code> genuinely transfers control into the body. <strong>Preconditions:</strong> these dispatching cases require the <a href="#instrumentation-flow-probe-call">register-padded fixture kernel</a> <em>and</em> the SMEM SBASE operand decode fix in the branch's base; without both the probe-call wave hangs the GPU.</li>
 <li>Run with <code>build/tests/rocjitsu_tests</code>, <code>build/tests/hsa_dbi_nop_asm_test</code>, and <code>build/tests/hsa_dbi_nop_probe_test</code>.</li>
 </ul>
+<p>Replacement/probe simulation in <code>tests/dbi/dbi_replacement_sim_test.cpp</code> checks
+replacement-only inputs and cross-site definition deletion with independent
+memory sentinels and missing-restore/replayed-original corruption controls.</p>
 
 
 
