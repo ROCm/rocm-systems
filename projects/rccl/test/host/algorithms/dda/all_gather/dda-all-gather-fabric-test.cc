@@ -119,11 +119,18 @@ TEST_F(DdaAllGatherFabricMicrotest, Eligible_PerRankBytesMustBeMultipleOf16) {
   EXPECT_TRUE(Eligible(16, ncclBfloat16));
 }
 
-// Eligibility compares one rank's bytes with scratch, but the launcher needs room for all nRanks; a fix flips this pin.
-TEST_F(DdaAllGatherFabricMicrotest, Eligible_KnownBug_ScratchCheckUsesPerRankBytesNotGatheredTotal) {
-  comm().ddaScratchBytes = 64;
+// Eligibility checks the gathered total against scratch, as the launcher does, so an eligible call always launches.
+// Four ranks, not the mock's eight, so the check must scale by nRanks.
+TEST_F(DdaAllGatherFabricMicrotest, Eligible_ScratchCheckUsesGatheredTotal) {
+  comm().nRanks = 4;
+  comm().ddaScratchBytes = 4 * 64;
   EXPECT_TRUE(Eligible(16));
   EXPECT_FALSE(Eligible(20));
+  comm().ddaScratchBytes = 4 * 64 - 1;
+  EXPECT_FALSE(Eligible(16));
+  // One rank's 64 bytes fit, but the gathered 256 do not.
+  comm().ddaScratchBytes = 64;
+  EXPECT_FALSE(Eligible(16));
   EXPECT_EQ(Run(16), ncclInvalidArgument);
   EXPECT_TRUE(g_ddaLaunches.empty());
 }
