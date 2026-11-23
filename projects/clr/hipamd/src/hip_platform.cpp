@@ -111,8 +111,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // the aligned size rather than for the exact number of bytes requested.
   const size_t lds_granularity = device.isa().ldsAlignment();
   const size_t requested_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
-  // One workgroup can't allocate more than the per-workgroup LDS limit (sharedMemPerBlock), even
-  // when the WGP pool above is larger. Such a block can't be launched, so none is resident.
+  // One workgroup can't allocate more than the per-workgroup LDS limit, even when the WGP pool
+  // above is larger. Such a block can't be launched, so none is resident. localMemSizePerCU_ is
+  // the per-workgroup limit: hipDeviceProp_t::sharedMemPerBlock reports it (hip_device.cpp).
   if (requested_lds > device.info().localMemSizePerCU_) {
     *maxBlocksPerCU = 0;
     *numBlocksPerGrid = 0;
