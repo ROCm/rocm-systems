@@ -139,6 +139,9 @@ fn capture(writer: &mut dyn Write, size_limit: u64) -> io::Result<()> {
         memory.push(allocation.allocation.diagnostic_memory().map_err(native)?);
     }
     for locked in &runtime.memory_state.locked_allocations {
+        if locked.retired {
+            continue;
+        }
         if let Some(allocation) = &locked.allocation {
             memory.push(allocation.diagnostic_memory().map_err(native)?);
         }

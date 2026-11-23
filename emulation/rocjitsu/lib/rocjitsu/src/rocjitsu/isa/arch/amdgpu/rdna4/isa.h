@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
 
@@ -82,7 +83,7 @@ struct Isa : amdgpu::RdnaIsaBase {
 
 } // namespace rdna4
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_RDNA4> {
+template <> struct IsaTrait<rocjitsu::IsaFamily::Rdna4> {
   using type = rdna4::Isa;
 };
 

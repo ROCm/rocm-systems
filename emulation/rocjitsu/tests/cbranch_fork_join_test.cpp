@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -76,7 +77,7 @@ Program if_else_program(uint32_t fork) {
   };
 }
 
-class CbranchForkJoinTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class CbranchForkJoinTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     ComputeUnitCore::Config config{};
@@ -832,7 +833,7 @@ TEST_P(CbranchForkJoinTest, WaitScoreboardSeesNoStackAccessForAFallthroughJoin) 
 
 // MODE.CSP and the fork/join instructions exist only on CDNA1-4.
 INSTANTIATE_TEST_SUITE_P(Cdna, CbranchForkJoinTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 
 } // namespace

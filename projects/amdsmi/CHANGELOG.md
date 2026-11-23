@@ -55,6 +55,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `amdsmi_get_gpu_cpu_links()` to report a GPU's directly-connected CPU link(s) (package id and link type)**.  
   - On MI450, `amd-smi xgmi --metric` and `--link-status` now show a `CPU(PKG<n>)` column per connected CPU package; `--metric`'s JSON/CSV output carries the same data in a new `cpu_links` field, separate from the existing `links` array.
 
+- **Added Component Unified ID (CUID) reporting APIs**.  
+  - New `amdsmi_get_gpu_cuid_info()` and `amdsmi_get_cuid_components()`, `amd-smi static --cuid` and `amd-smi node --cuid` (add `--cuid-primary`, as root, for the primary CUID), and `cuid`, `source`, `auxiliary` and `cuid_metadata_status` in `amd-smi list`. `amdsmi_get_gpu_device_cuid()` now returns the derived CUID, and `--gpu` accepts it. All CUIDs are currently temporary IDs.
+  - `uuid`/`gpu_uuid` in `amd-smi list` keep reporting the legacy UUID instead of switching to the CUID as 10.1 announced, because a temporary CUID changes with the host's machine ID.
+  - The `BUILD_CUID` CMake option now takes `AUTO` (default), `ON` or `OFF`. It was off by default.
+
 ### Changed
 
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
@@ -226,13 +231,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_get_gpu_total_ecc_count()` in the Rust API returning wrong totals**.  
   - The counts were added to uninitialized memory, so the totals could be wrong. The Rust activity, power, clock and per-block ECC queries now also zero their output before the call.
-
-### Upcoming Changes
-
-- **`uuid`/`gpu_uuid` in `amd-smi list` will report only the legacy UUID**.  
-  - In a future release they will no longer report the CUID (Component Unified ID). Use `cuid` and `identifier_kind` instead. GPU selection accepts both identifiers, and the legacy UUID API is unchanged.
-  - CUID preview support is available: new `amdsmi_get_gpu_cuid_info()` and `amdsmi_get_cuid_components()`, `amd-smi static --cuid` and `amd-smi node --cuid` (add `--cuid-primary`, as root, for the primary CUID), and `cuid` and `identifier_kind` in `amd-smi list`. `amdsmi_get_gpu_device_cuid()` now returns the derived CUID. All CUIDs are currently temporary IDs.
-  - The `BUILD_CUID` CMake option now takes `AUTO` (default), `ON` or `OFF`. It was off by default.
 
 ## amd_smi_lib for ROCm 10.2.0
 

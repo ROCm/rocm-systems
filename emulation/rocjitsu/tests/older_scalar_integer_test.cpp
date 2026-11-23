@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -36,40 +37,40 @@ namespace {
 // Scalar results and SCC are independent of EXEC; destination aliases must preserve inputs.
 TEST(OlderScalarInteger, ArithmeticAndCondition) {
   struct Family {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const IsaExecutionBackend *backend;
     std::array<std::array<uint32_t, 1>, 5> instructions;
   };
   const Family families[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1,
+      {rocjitsu::IsaFamily::Cdna1,
        &cdna1::execution_backend(),
        {cdna1::build_sop2(cdna1::kSAddcU32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0}),
         cdna1::build_sopk(cdna1::kSCmpkGtU32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         cdna1::build_sopk(cdna1::kSCmpkGtI32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         cdna1::build_sop1(cdna1::kSFf1I32B32Sop1, {.ssrc0 = 0, .sdst = 0}),
         cdna1::build_sop2(cdna1::kSCselectB32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0})}},
-      {ROCJITSU_CODE_ARCH_CDNA2,
+      {rocjitsu::IsaFamily::Cdna2,
        &cdna2::execution_backend(),
        {cdna2::build_sop2(cdna2::kSAddcU32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0}),
         cdna2::build_sopk(cdna2::kSCmpkGtU32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         cdna2::build_sopk(cdna2::kSCmpkGtI32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         cdna2::build_sop1(cdna2::kSFf1I32B32Sop1, {.ssrc0 = 0, .sdst = 0}),
         cdna2::build_sop2(cdna2::kSCselectB32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0})}},
-      {ROCJITSU_CODE_ARCH_RDNA1,
+      {rocjitsu::IsaFamily::Rdna1,
        &rdna1::execution_backend(),
        {rdna1::build_sop2(rdna1::kSAddcU32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0}),
         rdna1::build_sopk(rdna1::kSCmpkGtU32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         rdna1::build_sopk(rdna1::kSCmpkGtI32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         rdna1::build_sop1(rdna1::kSFf1I32B32Sop1, {.ssrc0 = 0, .sdst = 0}),
         rdna1::build_sop2(rdna1::kSCselectB32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0})}},
-      {ROCJITSU_CODE_ARCH_RDNA2,
+      {rocjitsu::IsaFamily::Rdna2,
        &rdna2::execution_backend(),
        {rdna2::build_sop2(rdna2::kSAddcU32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0}),
         rdna2::build_sopk(rdna2::kSCmpkGtU32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         rdna2::build_sopk(rdna2::kSCmpkGtI32Sopk, {.simm16 = 0xffff, .sdst = 0}),
         rdna2::build_sop1(rdna2::kSFf1I32B32Sop1, {.ssrc0 = 0, .sdst = 0}),
         rdna2::build_sop2(rdna2::kSCselectB32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0})}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rocjitsu::IsaFamily::Rdna3_5,
        &rdna3_5::execution_backend(),
        {rdna3_5::build_sop2(rdna3_5::kSAddcU32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0}),
         rdna3_5::build_sopk(rdna3_5::kSCmpkGtU32Sopk, {.simm16 = 0xffff, .sdst = 0}),

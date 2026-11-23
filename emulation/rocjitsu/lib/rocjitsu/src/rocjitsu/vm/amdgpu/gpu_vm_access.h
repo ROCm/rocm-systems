@@ -35,13 +35,14 @@ class GpuVmAccess;
 class GpuVmAccessState;
 class GpuVmTransferBatch;
 class DeviceCacheMaintenanceLease;
+struct CacheMaintenanceResult;
 class VmTransferEffectGate;
 
 /// @brief Acquire a move-only cache lease for one tokenized data step.
 /// @details Acquisition runs without the VM state lock. A local backing step
 /// keeps the lease through its effect; a deferred request releases it before
 /// submission or polling.
-using VmTransferMaintenance = std::function<util::FailureOr<DeviceCacheMaintenanceLease>()>;
+using VmTransferMaintenance = std::function<util::FailureOr<CacheMaintenanceResult>()>;
 
 /// @brief Cache immutable VM snapshots for one bounded execution quantum.
 /// @details Nested guards share the outer cache. Borrowed objects remain alive

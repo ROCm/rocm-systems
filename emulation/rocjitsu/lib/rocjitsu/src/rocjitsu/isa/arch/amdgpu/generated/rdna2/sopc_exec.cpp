@@ -246,19 +246,67 @@ void SBitcmp1B32Sopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBitcmp0B64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp0_b64_sopc(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = uint64_t(registers.read_scalar64(ssrc0));
+  const uint32_t input1 = uint32_t(registers.read_scalar(ssrc1));
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed())
+    return;
+  const int status = rj_arith_s_bitcmp0_b64(wf.cu().arithmetic_flags(), 0, &scc, input0, input1);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  wf.write_scc(scc);
 }
 
 void SBitcmp1B64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitcmp1_b64_sopc(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = uint64_t(registers.read_scalar64(ssrc0));
+  const uint32_t input1 = uint32_t(registers.read_scalar(ssrc1));
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed())
+    return;
+  const int status = rj_arith_s_bitcmp1_b64(wf.cu().arithmetic_flags(), 0, &scc, input0, input1);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  wf.write_scc(scc);
 }
 
 void SCmpEqU64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_u64_sopc(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = uint64_t(registers.read_scalar64(ssrc0));
+  const uint64_t input1 = uint64_t(registers.read_scalar64(ssrc1));
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed())
+    return;
+  const int status = rj_arith_s_cmp_eq_u64(wf.cu().arithmetic_flags(), 0, &scc, input0, input1);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  wf.write_scc(scc);
 }
 
 void SCmpLgU64Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_u64_sopc(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = uint64_t(registers.read_scalar64(ssrc0));
+  const uint64_t input1 = uint64_t(registers.read_scalar64(ssrc1));
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed())
+    return;
+  const int status = rj_arith_s_cmp_lg_u64(wf.cu().arithmetic_flags(), 0, &scc, input0, input1);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  wf.write_scc(scc);
 }
 
 } // namespace rdna2
