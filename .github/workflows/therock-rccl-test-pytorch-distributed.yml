@@ -14,6 +14,10 @@ on:
       test_scope:
         type: string
         default: 'smoke'
+      suites:
+        description: 'JSON list of suites to run; empty picks by test_scope'
+        type: string
+        default: ''
       notify_email:
         type: string
         default: ''
@@ -34,9 +38,13 @@ on:
       artifact_run_id:
         type: string
       test_scope:
-        description: 'smoke (22 curated tests, ~3min) or all'
+        description: 'smoke (c10d_nccl smoke tier only) or all (every suite, full)'
         type: string
         default: 'smoke'
+      suites:
+        description: 'Optional JSON list overriding the suites, e.g. ["fsdp_dtensor"]'
+        type: string
+        default: ''
       notify_email:
         description: 'Email address to send test summary report'
         type: string
@@ -51,11 +59,25 @@ permissions:
 
 jobs:
   test_pytorch_distributed:
-    name: 'Test PyTorch c10d NCCL'
+    name: 'Test PyTorch ${{ matrix.suite }}'
     runs-on: ${{ inputs.test_runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Suites are defined in SUITES in test_pytorch_c10d.py. The nightly
+        # (smoke) runs only the c10d_nccl smoke tier; the weekly (all) run adds
+        # the suites PyTorch's own CI found RCCL bugs in: c10d_nccl2,
+        # symmetric_memory and fsdp_dtensor. Each suite is its own job, so
+        # the new files do not eat into c10d_nccl's 150 min budget.
+        suite: ${{ fromJSON(inputs.suites != '' && inputs.suites || (inputs.test_scope == 'all' && '["c10d_nccl","c10d_nccl2","symmetric_memory","fsdp_dtensor"]' || '["c10d_nccl"]')) }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      options: --ipc host
+      # A private IPC namespace with PyTorch CI's 10 GiB /dev/shm, not
+      # --ipc host. RCCL keeps per-communicator proxy state in /dev/shm, and
+      # tests that hold many communicators (FSDP/HSDP meshes) run out of it
+      # in PyTorch CI (ROCM-33640). With the host's /dev/shm that can never
+      # reproduce here. The harness checks the size (--expect-shm-gib).
+      options: --shm-size=10g
         --group-add video
         --device /dev/kfd
         --device /dev/dri
@@ -116,7 +138,7 @@ jobs:
             numpy \
             psutil
 
-      - name: Run PyTorch c10d NCCL tests
+      - name: Run PyTorch ${{ matrix.suite }} tests
         # The all scope has come within ~2 min of the old 120 min ceiling twice
         # (117m44s, 119m09s). Being killed here is worse than a slow run:
         # pytest never writes pytorch_c10d_results.xml, so the summary, email
@@ -152,17 +174,18 @@ jobs:
           python rocm-systems/projects/rccl/ci/scripts/test_pytorch_c10d.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --pytorch-src ${{ env.PYTORCH_SRC }} \
-            --results-log ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log \
+            --suite "${{ matrix.suite }}" \
             --test-scope ${{ inputs.test_scope || 'smoke' }} \
+            --expect-shm-gib 10 \
             "${NOTIFY_ARGS[@]}"
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: pytorch-c10d-results-${{ inputs.amdgpu_families }}
+          name: pytorch-${{ matrix.suite }}-results-${{ inputs.amdgpu_families }}
           path: |
-            ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log
-            ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.xml
-            ${{ env.PYTORCH_SRC }}/pytorch_c10d_summary.txt
+            ${{ env.PYTORCH_SRC }}/pytorch_*_results.log
+            ${{ env.PYTORCH_SRC }}/pytorch_*_results.xml
+            ${{ env.PYTORCH_SRC }}/pytorch_*_summary.txt
           retention-days: 14

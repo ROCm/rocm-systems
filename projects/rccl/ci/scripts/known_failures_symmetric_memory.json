@@ -1,0 +1,12 @@
+{
+  "_comment": "Known failures for the PyTorch symmetric_memory suite (SUITES in test_pytorch_c10d.py). Keys are \"Class.test\" as reported in the JUnit XML. Same rules as known_failures.json: an entry is excluded from the verdict so a new failure stays visible, it is not a statement that the test is expected to fail forever, and each entry should name a ticket or cause. Remove an entry once its cause is resolved; the harness logs entries that now pass. Baselined 2026-11-15 from the PR #15864 runs: develop at the v2.32.6 sync fork point (RCCL 2.32.3) and the v2.32.6 sync branch, torch 2.16 nightlies 20261113 and 20261115, MI300X (TheRock CI runners) and MI350X (Ruby).",
+  "tests": {
+    "SymmetricMemoryTest.test_alloc_rendezvous_on_current_stream": "kineto_no_barrier_events",
+    "AsyncTPTest.test_fused_matmul_reduce_scatter_bfloat16_custom_reduce": "async_tp_timeout_mi300x",
+    "AsyncTPTest.test_optimal_layout_dim_2": "async_tp_timeout_mi300x"
+  },
+  "categories": {
+    "kineto_no_barrier_events": "AssertionError: 0 not greater than 0. The profiler (Kineto) records no barrier events (ROCM-31102). Fails in every run (10/10, both GPUs). Not RCCL. PyTorch then skips the rest of SymmetricMemoryTest; the harness reports those as NOT RUN.",
+    "async_tp_timeout_mi300x": "Intermittent, MI300X only: test_fused_matmul_reduce_scatter_bfloat16_custom_reduce hits the 600 s pytest-timeout and test_optimal_layout_dim_2 then errors on teardown ('ranks [...] did not exit within 300s'). Failed in 5 of 6 MI300X runs (develop 3/3, sync 2/3) and 0 of 4 on MI350X; same on RCCL 2.32.3 and 2.32.6. When it fails, PyTorch skips the 9 AsyncTPTest tests after it (reported as NOT RUN). Cause not yet determined (AICOMRCCL-3666)."
+  }
+}
