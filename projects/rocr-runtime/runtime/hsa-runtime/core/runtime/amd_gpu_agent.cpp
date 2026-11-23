@@ -520,12 +520,23 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
   code_buf_size = AlignUp(header_size + asic_shader->size, 0x1000);
 
-  // NonPaged: GPU-executed code, and a trap handler that can itself fault turns one fault into a
-  // retry storm.
-  code_buf = system_allocator()(code_buf_size, 0x1000,
-                                core::MemoryRegion::AllocateExecutable |
-                                    core::MemoryRegion::AllocateExecutableBlitKernelObject |
-                                    core::MemoryRegion::AllocateNonPaged);
+  if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+    // DRM mode: GTTAccess + node_id creates a GTT BO with a DRM render VM
+    // mapping. The kernel's AMDGPU_VM_OP_SET_L2_TRAP validates that TBA is
+    // mapped in the render VM. Runtime::system_allocator() is used because the
+    // agent-level wrapper lacks the node_id parameter.
+    code_buf = core::Runtime::runtime_singleton_->system_allocator()(code_buf_size, 0x1000,
+                                  core::MemoryRegion::AllocateExecutable |
+                                      core::MemoryRegion::AllocateExecutableBlitKernelObject |
+                                      core::MemoryRegion::AllocateNonPaged |
+                                      core::MemoryRegion::AllocateGTTAccess,
+                                  node_id());
+  } else {
+    code_buf = system_allocator()(code_buf_size, 0x1000,
+                                  core::MemoryRegion::AllocateExecutable |
+                                      core::MemoryRegion::AllocateExecutableBlitKernelObject |
+                                      core::MemoryRegion::AllocateNonPaged);
+  }
   assert(code_buf != NULL && "Code buffer allocation failed");
 
   memset(code_buf, 0, code_buf_size);
@@ -3665,7 +3676,16 @@ void GpuAgent::BindTrapHandler() {
     // The trap handler uses this to retrieve a wave's amd_queue_v2_t*.
     auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(amd_queue_v2_t*);
 
-    doorbell_queue_map_ = (amd_queue_v2_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
+    if (core::Runtime::runtime_singleton_->flag().enable_drm()) {
+      // DRM mode: GTTAccess + node_id creates a GTT BO with a DRM render VM
+      // mapping that AMDGPU_VM_OP_SET_L2_TRAP requires for TMA validation.
+      doorbell_queue_map_ = (amd_queue_v2_t**)core::Runtime::runtime_singleton_->system_allocator()(
+          doorbell_queue_map_size, 0x1000,
+          core::MemoryRegion::AllocateNonPaged | core::MemoryRegion::AllocateGTTAccess,
+          node_id());
+    } else {
+      doorbell_queue_map_ = (amd_queue_v2_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
+    }
     if (doorbell_queue_map_ == NULL)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Doorbell queue map allocation failed.");

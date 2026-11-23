@@ -494,6 +494,12 @@ struct drm_amdgpu_userq_mqd_gfx11 {
 	 * Use AMDGPU_INFO_IOCTL to find the exact size of the object.
 	 */
 	__u64   csa_va;
+	/**
+	 * @queue_percentage: Queue resource allocation percentage (0-100)
+	 * Defines the percentage of GPU resources allocated to this queue.
+	 * A value of 0 marks the queue inactive and it will not be mapped.
+	 */
+	__u32   queue_percentage;
 };
 
 /* GFX V11 SDMA IP specific MQD parameters */
@@ -504,6 +510,12 @@ struct drm_amdgpu_userq_mqd_sdma_gfx11 {
 	 * to get the size.
 	 */
 	__u64   csa_va;
+	/**
+	 * @queue_percentage: Queue resource allocation percentage (0-100)
+	 * Defines the percentage of GPU resources allocated to this queue.
+	 * A value of 0 marks the queue inactive and it will not be mapped.
+	 */
+	__u32   queue_percentage;
 };
 
 /* GFX V11 Compute IP specific MQD parameters */
@@ -594,6 +606,11 @@ struct drm_amdgpu_userq_signal {
 	 * @bo_write_handles.
 	 */
 	__u32	num_bo_write_handles;
+	/**
+	 * @syncobj_points: The list of syncobj points submitted by the user queue job
+	 * for the corresponding @syncobj_handles.
+	 */
+	__u64	syncobj_points;
 };
 
 struct drm_amdgpu_userq_fence_info {
@@ -708,14 +725,34 @@ union drm_amdgpu_sem {
 /* vm ioctl */
 #define AMDGPU_VM_OP_RESERVE_VMID	1
 #define AMDGPU_VM_OP_UNRESERVE_VMID	2
-#define AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE 3
+#define AMDGPU_VM_OP_STALLING_FAULT	3
+#define AMDGPU_VM_OP_SET_L2_TRAP	4
+#define AMDGPU_VM_OP_CLEAR_L2_TRAP	5
+#define AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE 6
 
 struct drm_amdgpu_vm_in {
 	/** AMDGPU_VM_OP_* */
 	__u32	op;
 	union {
-		 __u32 flags;
-		 __u32 size;
+		__u32	flags;
+		__u32	size;
+	};
+	union {
+		struct {
+			/** GPU VA of second-level trap handler code buffer */
+			__u64 tba_va;
+			/** GPU VA of second-level trap handler scratch buffer */
+			__u64 tma_va;
+			/** TBA buffer size in bytes */
+			__u32 tba_sz;
+			/** TMA buffer size in bytes */
+			__u32 tma_sz;
+		} l2trap;
+		/**
+		 * Reserved; keeps the union at a fixed 32-byte size for
+		 * future operations.
+		 */
+		__u64 reserved[4];
 	};
 };
 
@@ -747,16 +784,14 @@ union drm_amdgpu_sched {
 };
 
 struct drm_amdgpu_proc_options {
-  __u32 op;
-  union {
-    struct {
-      __u32 value;
-    } kfd_sigbus_delay;
-  };
+	__u32 op;
+	struct {
+		__u32 value;
+	} kfd_sigbus_delay;
 };
 
-#define AMDGPU_PROC_OPTIONS_OP_KFD_SIGBUS_DELAY 0
-#define AMDGPU_PROC_OPTIONS_KFD_SIGBUS_DELAY_DISABLED UINT32_MAX
+#define AMDGPU_PROC_OPTIONS_OP_KFD_SIGBUS_DELAY		0
+#define AMDGPU_PROC_OPTIONS_KFD_SIGBUS_DELAY_DISABLED	0xFFFFFFFFu
 
 /*
  * This is not a reliable API and you should expect it to fail for any
@@ -1711,7 +1746,6 @@ struct drm_amdgpu_info_device {
 	__u64 lds_limit;         /* LDS limit */
 	__u64 scratch_base;      /* Scratch base */
 	__u64 scratch_limit;     /* Scratch limit */
-	__u32 persisting_gl2_cache_size_max;
 };
 
 struct drm_amdgpu_info_hw_ip {

@@ -104,14 +104,7 @@ int DrmUserqFree(amdgpu_device_handle dev, uint32_t queue_id) {
 // can distinguish EOPNOTSUPP (CWSR L2 trap optional) from a hard failure.
 int DrmCwsrSetL2Trap(amdgpu_device_handle dev, uint64_t tba_va, uint32_t tba_sz,
                      uint64_t tma_va, uint32_t tma_sz) {
-  union drm_amdgpu_cwsr args;
-  memset(&args, 0, sizeof(args));
-  args.in.op = AMDGPU_CWSR_OP_SET_L2_TRAP;
-  args.in.l2trap.tba_va = tba_va;
-  args.in.l2trap.tba_sz = tba_sz;
-  args.in.l2trap.tma_va = tma_va;
-  args.in.l2trap.tma_sz = tma_sz;
-  return drmIoctl(amdgpu_device_get_fd(dev), DRM_IOCTL_AMDGPU_CWSR, &args);
+  return amdgpu_vm_set_l2_trap(dev, tba_va, tba_sz, tma_va, tma_sz);
 }
 
 int DrmQueryInfo(amdgpu_device_handle dev, uint32_t query, uint32_t hw_ip_type,
@@ -237,6 +230,7 @@ hsa_status_t DrmDriver::CreateQueue(const CreateQueueInParams *queueIn, CreateQu
     ip_type = AMDGPU_HW_IP_COMPUTE;
   } else if (type == SDMA_QUEUE) {
     sdma_mqd.csa_va = drmQueueIn->extra_va;
+    sdma_mqd.queue_percentage = AMDGPU_USERQ_MAX_QUEUE_PERCENTAGE;
     mqd_in = &sdma_mqd;
     flags = 0;
     ip_type = AMDGPU_HW_IP_DMA;
@@ -597,9 +591,11 @@ hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
     constexpr size_t kDrmTrapTmaSize = 0x1000;
     void*& tma = trap_tma_by_agent_[agent];
     if (tma == nullptr) {
-      tma = gpuAgent->system_allocator()(kDrmTrapTmaSize, 0x1000,
-                      core::MemoryRegion::AllocateExecutable |
-                      core::MemoryRegion::AllocateExecutableBlitKernelObject);
+      tma = core::Runtime::runtime_singleton_->system_allocator()(
+                      kDrmTrapTmaSize, 0x1000,
+                      core::MemoryRegion::AllocateNonPaged |
+                      core::MemoryRegion::AllocateGTTAccess,
+                      gpuAgent->node_id());
       if (tma == nullptr) {
         trap_tma_by_agent_.erase(agent);
         debug_print(
@@ -624,15 +620,9 @@ hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
   // The level-2 trap handler is genuinely optional only when the kernel has no
   // per-file CWSR object (user queues disabled): the kernel installs the
   // first-level handler itself and reports EOPNOTSUPP. Treat that as non-fatal.
-  //
-  // Do NOT swallow EINVAL. On this ioctl EINVAL means the kernel's
-  // amdgpu_cwsr_validate_user_addr() could not find the TBA/TMA in this
-  // process's DRM render VM (amdgpu_vm_bo_lookup_mapping failed) -- i.e. the
-  // trap buffer is not mapped where the kernel expects. That is a real
-  // VM-mapping bug, not a "feature absent" condition, so surface it.
   if (err == EOPNOTSUPP) {
-    debug_print("DrmDriver::SetTrapHandler: CWSR L2 trap handler unavailable "
-                "(EOPNOTSUPP); continuing without it\n");
+    debug_print("DrmDriver::SetTrapHandler: L2 trap handler failed "
+                "(errno %d); continuing without it\n", err);
     return HSA_STATUS_SUCCESS;
   }
   debug_print("DrmCwsrSetL2Trap failed: %d (errno %d)\n", result, err);
@@ -1121,7 +1111,8 @@ hsa_status_t DrmDriver::ComputeCwsrSizeFallback(const GpuAgent& gpu_agent,
   const uint32_t num_xcc = properties_.NumXcc ? properties_.NumXcc : 1;
   const uint32_t cu_num = properties_.NumFComputeCores / properties_.NumSIMDPerCU / num_xcc;
 
-  // Calculate number of waves per GPU (GFX12+ uses GFX10+ formula)
+  // Waves per XCC, matching thunk queues.c:get_num_waves() for GFX10+.
+  // Must produce the same value as the kernel's amdgpu_trap_cwsr_init_save_area_info().
   const uint32_t wave_num = cu_num * properties_.NumSIMDPerCU * properties_.MaxWavesPerSIMD;
 
   // Sanity check
