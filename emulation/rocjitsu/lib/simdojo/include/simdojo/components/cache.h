@@ -104,7 +104,9 @@ struct CacheTag {
   /// at most 128-byte lines, so two words cover every byte.
   std::array<uint64_t, 2> valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
   uint32_t vmid = 0;
-  bool valid = false;
+  /// Validity generation of the owning cache; zero is always invalid. Tags
+  /// handed out by a cache are current, so callers may test it as a boolean.
+  uint16_t valid = 0;
   bool dirty = false;
   CoherenceState coherence = CoherenceState::INVALID;
 };
@@ -224,7 +226,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         policy_.access(set, w);
         return {&t, line_data(set, w)};
@@ -243,7 +245,7 @@ public:
     const uint64_t tag = tag_bits(addr);
     for (uint32_t way = 0; way < Associativity; ++way) {
       const auto &entry = tag_at(set, way);
-      if (entry.valid && entry.tag == tag && entry.vmid == vmid &&
+      if (is_valid(entry) && entry.tag == tag && entry.vmid == vmid &&
           entry.address_space_identity == address_space_identity)
         return &entry;
     }
@@ -256,7 +258,8 @@ public:
   /// @param vmid Owning process address space recorded in the new line's tag.
   /// @param evicted_tag If non-null, filled with the evicted tag (caller checks dirty,
   ///        and uses @c evicted_tag->vmid for the writeback address space).
-  /// @param evicted_data If non-null, the evicted line data is copied here.
+  /// @param evicted_data If non-null and the victim is dirty, its line data is
+  ///        copied here; otherwise the buffer is left untouched.
   /// @returns Pointer to the allocated tag entry.
   CacheTag *allocate(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                      uint8_t *evicted_data = nullptr, uint64_t address_space_identity = 0) {
@@ -279,7 +282,7 @@ public:
     // Check for an invalid way first.
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (!t.valid) {
+      if (!is_valid(t)) {
         // Adjacent markers can share a host cache line. Write only on first use.
         if (!touched_sets_[set])
           touched_sets_[set] = 1;
@@ -294,7 +297,7 @@ public:
         t.local_line_epoch = 0;
         t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
         t.vmid = vmid;
-        t.valid = true;
+        t.valid = validity_generation_;
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
         policy_.access(set, w);
@@ -309,7 +312,8 @@ public:
     auto &vt = tag_at(set, victim_way);
     if (evicted_tag)
       *evicted_tag = vt;
-    if (evicted_data)
+    // Clean victims need no writeback, so their bytes are never consumed.
+    if (evicted_data && vt.dirty)
       std::memcpy(evicted_data, line_data(set, victim_way), LINE_SIZE);
 
     vt.tag = tag;
@@ -323,7 +327,7 @@ public:
     vt.local_line_epoch = 0;
     vt.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
     vt.vmid = vmid;
-    vt.valid = true;
+    vt.valid = validity_generation_;
     vt.dirty = false;
     vt.coherence = CoherenceState::INVALID;
     policy_.access(set, victim_way);
@@ -345,7 +349,7 @@ public:
     const uint32_t set = set_index(addr);
     bool has_invalid_way = false;
     for (uint32_t way = 0; way < Associativity; ++way) {
-      if (!tag_at(set, way).valid) {
+      if (!is_valid(tag_at(set, way))) {
         has_invalid_way = true;
         break;
       }
@@ -360,7 +364,7 @@ public:
   const CacheTag *full_set_victim(uint64_t addr) const {
     const uint32_t set = set_index(addr);
     for (uint32_t way = 0; way < Associativity; ++way)
-      if (!tag_at(set, way).valid)
+      if (!is_valid(tag_at(set, way)))
         return nullptr;
     return &tag_at(set, policy_.victim(set));
   }
@@ -391,7 +395,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         invalidate_tag(t);
         return;
@@ -409,14 +413,28 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag) {
+      if (is_valid(t) && t.tag == tag) {
         invalidate_tag(t);
       }
     }
   }
 
   /// @brief Invalidate all cache lines, optionally restricted to one VMID.
+  /// @details Whole-cache invalidation advances the validity generation instead
+  /// of rewriting tags, so its cost does not grow with the resident lines.
+  /// Discarded lines keep stale metadata that no accessor reads while invalid.
   void invalidate_all(std::optional<uint32_t> vmid = std::nullopt) {
+    if (!vmid) {
+      std::fill(touched_sets_.begin(), touched_sets_.end(), uint8_t{0});
+      if (++validity_generation_ != 0)
+        return;
+      // A wrapped generation would revive lines left from an older one.
+      if (tags_.materialized())
+        for (size_t i = 0; i < static_cast<size_t>(NumSets) * Associativity; ++i)
+          tags_[i].valid = 0;
+      validity_generation_ = 1;
+      return;
+    }
     for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {
       const uint32_t end = std::min<uint32_t>(first + sizeof(uint64_t), NumSets);
       uint64_t touched = 0;
@@ -430,22 +448,10 @@ public:
           continue;
         for (uint32_t w = 0; w < Associativity; ++w) {
           auto &t = tag_at(s, w);
-          if (vmid && t.vmid != *vmid)
+          if (t.vmid != *vmid)
             continue;
-          t.coherence_epoch = 0;
-          t.admission_generation = 0;
-          t.cache_identity = 0;
-          t.address_space_identity = 0;
-          t.backing_address = 0;
-          t.mapping_attributes = 0;
-          t.local_backing_epoch = 0;
-          t.local_line_epoch = 0;
-          t.valid = false;
-          t.dirty = false;
-          t.coherence = CoherenceState::INVALID;
+          invalidate_tag(t);
         }
-        if (!vmid)
-          touched_sets_[s] = 0;
       }
     }
   }
@@ -464,9 +470,9 @@ public:
         continue;
       for (uint32_t way = 0; way < Associativity; ++way) {
         CacheTag &tag = tag_at(set, way);
-        if (tag.valid && !tag.dirty && matches(tag)) {
+        if (is_valid(tag) && !tag.dirty && matches(tag)) {
           tag.coherence_epoch = 0;
-          tag.valid = false;
+          tag.valid = 0;
           tag.coherence = CoherenceState::INVALID;
         }
       }
@@ -489,7 +495,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       const auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         assert(offset + size <= LINE_SIZE);
         assert(bytes_valid(t, offset, size) && "read_line called for absent bytes");
@@ -521,7 +527,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity && accept(t)) {
         policy_.access(set, w);
         return line_data(set, w);
@@ -546,7 +552,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         write_line({&t, line_data(set, w)}, src, offset, size);
         return;
@@ -575,7 +581,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         std::memcpy(line_data(set, w), data, LINE_SIZE);
         t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
@@ -599,7 +605,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         fill_missing_bytes({&t, line_data(set, w)}, data);
         return;
@@ -629,7 +635,7 @@ public:
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
-      if (t.valid && t.tag == tag && t.vmid == vmid &&
+      if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         policy_.access(set, w);
         return line_data(set, w);
@@ -647,7 +653,7 @@ public:
         continue;
       for (uint32_t w = 0; w < Associativity; ++w) {
         auto &t = tag_at(s, w);
-        if (t.valid && t.dirty) {
+        if (is_valid(t) && t.dirty) {
           uint64_t line_addr =
               (t.tag << (LineSizeBits + log2_sets())) | (static_cast<uint64_t>(s) << LineSizeBits);
           fn(t, line_addr, line_data(s, w));
@@ -668,7 +674,7 @@ public:
         continue;
       for (uint32_t w = 0; w < Associativity; ++w) {
         auto &t = tag_at(s, w);
-        if (!t.valid)
+        if (!is_valid(t))
           continue;
         const uint64_t line_addr =
             (t.tag << (LineSizeBits + log2_sets())) | (static_cast<uint64_t>(s) << LineSizeBits);
@@ -757,6 +763,8 @@ private:
       return elements_[index];
     }
 
+    bool materialized() const { return elements_ != nullptr; }
+
     void materialize() {
       if constexpr (LazyStorage)
         if (!elements_)
@@ -791,6 +799,8 @@ private:
     return bits;
   }
 
+  bool is_valid(const CacheTag &tag) const { return tag.valid == validity_generation_; }
+
   CacheTag &tag_at(uint32_t set, uint32_t way) {
     return tags_[static_cast<size_t>(set) * Associativity + way];
   }
@@ -817,6 +827,8 @@ private:
   // different sets to be accessed concurrently under controller-provided set locks.
   // Full-cache operations still require exclusive maintenance access.
   std::vector<uint8_t> touched_sets_;
+  // Tags whose token differs are invalid. Zero is never current.
+  uint16_t validity_generation_ = 1;
 };
 
 } // namespace simdojo
