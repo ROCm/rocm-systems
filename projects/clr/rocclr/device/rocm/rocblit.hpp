@@ -310,6 +310,7 @@ class KernelBlitManager : public DmaBlitManager {
     StreamOpsIncrement,
     StreamOpsDecrement,
     BlitCopyBufferBatch,
+    AtomicProbe,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -534,6 +535,11 @@ class KernelBlitManager : public DmaBlitManager {
   bool RunGwsInit(uint32_t value  //!< Initial value for GWS resource
   ) const;
 
+  //! Runs a single system scope atomic add on host memory, to test the host link
+  bool RunAtomicProbe(uint64_t va,    //!< Device VA of a host resident dword
+                      uint32_t value  //!< Value to add
+  ) const;
+
   //! Stream memory write operation - Write a 'value' at 'memory'.
   bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const override;
@@ -683,6 +689,7 @@ class KernelBlitManager : public DmaBlitManager {
     "__amd_rocclr_streamOpsIncrement",
     "__amd_rocclr_streamOpsDecrement",
     "__amd_rocclr_copyBufferBatch",
+    "__amd_rocclr_atomicProbe",
     "__amd_rocclr_fillImage",
     "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",
