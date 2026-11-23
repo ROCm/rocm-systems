@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <set>
+#include <unordered_map>
 
 namespace rocjitsu::consan {
 namespace {
@@ -146,6 +147,50 @@ Result qualify_lds_race_block(const BasicBlock &block, InputError &error) {
           "only a conditional single-block backedge can enter barrier qualification",
           block.start_offset());
   return Result::success();
+}
+
+FailureOr<std::vector<const BasicBlock *>>
+qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error) {
+  // A trampoline return can point backward without revisiting any executed block.
+  // Defer only conditional self-edges to the later whole-program barrier gate;
+  // every other edge must form a DAG. This ordering alone does not admit a loop.
+  std::unordered_map<const BasicBlock *, size_t> incoming;
+  incoming.reserve(blocks.size());
+  for (const std::unique_ptr<BasicBlock> &block : blocks)
+    incoming.emplace(block.get(), 0);
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    for (const BasicBlock *successor : block->successors()) {
+      if (successor == block.get() && block->successors().size() == 2)
+        continue;
+      const std::unordered_map<const BasicBlock *, size_t>::iterator edge =
+          incoming.find(successor);
+      if (edge == incoming.end())
+        return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                  "CFG successor leaves the selected entry", block->start_offset());
+      ++edge->second;
+    }
+  }
+  std::vector<const BasicBlock *> ready;
+  ready.reserve(blocks.size());
+  for (const std::unique_ptr<BasicBlock> &block : blocks)
+    if (incoming.find(block.get())->second == 0)
+      ready.push_back(block.get());
+  for (size_t index = 0; index < ready.size(); ++index) {
+    for (const BasicBlock *successor : ready[index]->successors()) {
+      if (successor == ready[index] && ready[index]->successors().size() == 2)
+        continue;
+      size_t &count = incoming.find(successor)->second;
+      if (--count == 0)
+        ready.push_back(successor);
+    }
+  }
+  if (ready.size() != blocks.size()) {
+    for (const std::unique_ptr<BasicBlock> &block : blocks)
+      if (incoming.find(block.get())->second != 0)
+        return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                  "MVP does not admit CFG cycles", block->start_offset());
+  }
+  return ready;
 }
 
 Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,

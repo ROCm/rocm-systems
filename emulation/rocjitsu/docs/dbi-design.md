@@ -1037,3 +1037,12 @@ Each aborts the whole patch with its own diagnostic. Those raised while planning
 Replacement/probe simulation in `tests/dbi/dbi_replacement_sim_test.cpp` checks
 replacement-only inputs and cross-site definition deletion with independent
 memory sentinels and missing-restore/replayed-original corruption controls.
+ConSan input qualification checks actual CFG cycles rather than address order: a
+trampoline returning backward to an unvisited continuation is acyclic and accepted;
+cycles remain rejected except for ConSan's qualified conditional single-block
+workgroup-barrier loop. Native LDS access PCs must increase along every path
+within an iteration; the qualified loop uses repeated epochs, preserving the analyzer's
+static site-order contract. The topological walk propagates the maximum prior
+native access PC through joins and rejects an incompatible access order without
+changing capture/facts formats. Simulation and host analysis
+do not establish physical FI-mutant execution or detector qualification.

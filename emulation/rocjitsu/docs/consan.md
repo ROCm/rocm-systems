@@ -516,3 +516,37 @@ the prepared guest wait while retaining its callback checks that instrumentation
 does not substitute for guest synchronization. These scheduling controls provide
 simulator evidence; physical hardware may schedule unsynchronized accesses
 differently.
+
+## Fault injection
+
+The independent offline fault-injection library can remove a qualified complete
+barrier from an AMDGPU code object. It uses Instrumentor's instruction-replacement
+path and does not require the ConSan compiler, runtime, or analyzer. See
+[Fault injection](fault-injection.md) for its architecture, library interface,
+current features, target/wave coverage, and limitations.
+
+Treat the mutant as a new original image: perform a **fresh ConSan prepare**,
+then execution/capture → analyze. Do not reuse pristine prepared artifacts or
+capture bindings. Drop uses branch-to-NOP trampolines, so emitted ELF file
+offsets and CFG block boundaries can differ from the pristine image. Preparation
+must discover the mutant's entries and instructions. Preparation may reject a
+target or program profile that the mutation library admits.
+
+Fresh preparation currently requires a **single-kernel code object**. A
+sibling-preserving multi-kernel mutant cannot use this path. Remaining barriers
+must satisfy ConSan's qualified gfx1250 wave32 workgroup-barrier profile; other
+barrier forms remain unsupported. The mutant must also satisfy ConSan's other
+target, entry, instruction, native-LDS and resource restrictions, enforced by
+[input qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/input.cpp) and
+the [LDS classifier](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp).
+Acyclic trampoline returns can be admitted. Apart from ConSan's qualified
+conditional single-block barrier loop, CFG cycles remain rejected. Native LDS
+access PCs must increase along each path within an iteration; the qualified
+loop uses repeated epochs. Mutation admission and detector admission remain
+independent decisions.
+
+Mutation success reports emission after input qualification. It establishes
+neither execution nor detector qualification: removing a barrier does not prove
+that a race occurs, that a particular execution observes it, or that ConSan
+reports it. Qualify those stages separately using the normal capture and analysis
+workflow.
