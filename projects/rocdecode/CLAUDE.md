@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 rocDecode is AMD's high-performance video decode SDK. It provides a C/C++ API to access hardware-accelerated video decoding (VCN engines) on AMD GPUs via VA-API, with HIP for GPU interoperability. Supported codecs: H.265/HEVC (8/10 bit), H.264/AVC (8 bit), AV1 (8/10 bit), VP9 (8/10 bit). Requires AMD GPU gfx908+.
 
+Platforms: **Linux** (VA-API on DRM) and **Windows 11** (VA-API on D3D12, i.e. `vaon12`). Much of `CMakeLists.txt` and the VA-API layer is split on `WIN32` — see "Windows / VA-API loading" below. Assume a change to decoder setup, VA surface handling, or CMake needs checking on both.
+
 - rocDecode is located at `projects/rocdecode` within the `rocm-systems` repo
 - CI is at `.github/workflows/media-libs-ci.yml` (builds via TheRock super-project)
 - Python test scripts are in `test/testScripts/`; samples are in `samples/`
@@ -45,6 +47,7 @@ Tests use a **build-and-test pattern**: CTest configures and builds each sample 
 - `ROCDECODE_ENABLE_ROCPROFILER_REGISTER` - Enable profiling support (default: ON)
 - `ROCDECODE_ENABLE_HOST_DECODER` - Build FFmpeg-based software decoder `librocdecode-host.so` (default: ON; only built when FFmpeg is found)
 - `ENABLE_EXTENDED_TESTS` - Enable FFmpeg-dependent tests (default: OFF)
+- `BUILD_TESTS` - Build the sample/test binaries during the main build (via nested `ExternalProject`s against a staged install in the build tree) and install them to `share/rocdecode/bin` (default: OFF; Linux only — the nested builds assume a single-config generator and `$ORIGIN` RPATHs)
 
 ## Required Dependencies
 
@@ -57,6 +60,9 @@ HIP, libva, libdrm_amdgpu, pthreads. Optional: FFmpeg (>= 4.0.4) for samples, ex
 - `rocdec_Decode-HEVC` — low-level C API decode (rocdecDecode sample)
 - `rocDecode_Negative_API_Tests` — invalid parameter tests for all public API functions
 - `video_decodeCaps` — query hardware decoder capabilities (videoDecodeCaps sample)
+
+**Platform-gated:**
+- `rocDecode_Missing_VA_Lib_Test` — added only when `WIN32 AND USING_THE_ROCK`; asserts `rocdecode.dll` fails cleanly when the TheRock VA-API DLLs are absent (they are runtime-loaded, so the DLL must still load)
 
 
 **Extended tests (require FFmpeg + `ENABLE_EXTENDED_TESTS=ON`):**
@@ -100,7 +106,7 @@ Input (video file)
 - **`src/amd_detail/`** — rocprofiler API tracing/dispatch
 - **`src/commons.h`** — Singleton logger, exception class, RAII function-scope logging macros
 - **`utils/`** — High-level utility classes shared by samples (see below)
-- **`samples/`** — 10 sample applications demonstrating different decode scenarios
+- **`samples/`** — 11 sample applications demonstrating different decode scenarios
 - **`test/`** — CTest definitions, negative API tests, Python conformance/benchmark scripts
 
 ### Key Internal Classes
@@ -108,6 +114,23 @@ Input (video file)
 - **`VaContext`** (`src/rocdecode/vaapi/`) — Meyer's singleton managing GPU-to-VA context mapping. Handles DRM render node discovery, GPU UUID mapping, compute partition awareness (SPX/DPX/TPX/QPX/CPX), and VA profile probing. Thread-safe via mutex.
 - **`RocDecoder`** (`src/rocdecode/`) — Wraps `VaapiVideoDecoder` + HIP interop (`HipInteropDeviceMem`). Orchestrates decode frame, get frame, reconfigure.
 - **`RocVideoParser`** (`src/parser/`) — Abstract base with NAL extraction, EBSP-to-RBSP conversion, Exp-Golomb utilities, SEI parsing, callback dispatch.
+- **`VaapiLoader`** (`src/rocdecode/vaapi/vaapi_loader.h`) — Runtime loader for libva. See below.
+- **`D3D12Interop`** (`src/rocdecode/vaapi/d3d12_interop.h`) — Windows-only; shares decoded D3D12 surfaces with HIP via `CreateSharedHandle` (the counterpart to the DRM PRIME fd path on Linux).
+
+### Windows / VA-API loading
+
+`librocdecode` never links libva directly: it is always built with `ROCDECODE_USE_DLOPEN_VA`, and `VaapiLoader` resolves every VA entry point into a `VaapiVtable` function-pointer struct — `dlopen`/`dlsym` on Linux, `LoadLibraryExW`/`GetProcAddress` on Windows. **Any new VA-API call must be added to `VaapiVtable` and resolved in the loader**, not called directly.
+
+The two platforms differ at the display and surface-sharing layer:
+
+| | Linux | Windows (`vaon12`) |
+|---|---|---|
+| Display | `vaGetDisplayDRM(fd)` on a DRM render node | `vaGetDisplayWin32(adapter_luid)` |
+| Headers | `va/va_drm.h` | `va/va_win32.h` |
+| HIP interop | DRM PRIME fd → `HipInteropDeviceMem` | `D3D12Interop` shared handle |
+| Deps | libdrm_amdgpu, pthreads | neither (vaon12 replaces DRM) |
+
+`BUILD_TESTS` is Linux-only; `rocDecodeMissingVaLibTest` is installed only on Windows.
 
 ### Utils Layer
 
