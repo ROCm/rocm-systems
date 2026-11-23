@@ -149,7 +149,7 @@ bool
 pool<Tp>::release(size_type idx)
 {
     auto lock = std::unique_lock<std::mutex>{m_pool_mtx};
-    if(!m_pool.at(idx).mark_released()) return false;
+    if(idx >= m_pool.size() || !m_pool.at(idx).mark_released()) return false;
     m_available.push(idx);
     m_released++;
     return true;

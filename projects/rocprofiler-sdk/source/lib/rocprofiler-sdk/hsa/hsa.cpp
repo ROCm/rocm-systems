@@ -558,10 +558,22 @@ should_wrap_functor(const context::context_array_t&     _contexts,
 
 auto hsa_reference_count_value = std::atomic<int>{0};
 auto runtime_shutdown_value    = std::atomic<bool>{false};
-auto hsa_lifecycle_mutex       = std::mutex{};
-auto hsa_shutdown_cv           = std::condition_variable{};
 auto hsa_shutdown_draining     = false;
 auto hsa_init_epoch            = uint64_t{0};
+
+std::mutex&
+get_hsa_lifecycle_mutex()
+{
+    static auto* mtx = new std::mutex{};
+    return *mtx;
+}
+
+std::condition_variable&
+get_hsa_shutdown_cv()
+{
+    static auto* cv = new std::condition_variable{};
+    return *cv;
+}
 
 hsa_status_t
 hsa_init_refcnt_impl()
@@ -569,7 +581,7 @@ hsa_init_refcnt_impl()
     if(internal_threading::fork_stale()) return get_core_table()->hsa_init_fn();
 
     {
-        auto lock = std::lock_guard{hsa_lifecycle_mutex};
+        auto lock = std::lock_guard{get_hsa_lifecycle_mutex()};
         // A runtime table installed during native init must see this reference already counted.
         ++hsa_reference_count_value;
         auto status = get_core_table()->hsa_init_fn();
@@ -602,15 +614,15 @@ hsa_shut_down_refcnt_impl()
 {
     if(internal_threading::fork_stale()) return get_core_table()->hsa_shut_down_fn();
 
-    auto lock = std::unique_lock{hsa_lifecycle_mutex};
-    hsa_shutdown_cv.wait(lock, []() { return !hsa_shutdown_draining; });
+    auto lock = std::unique_lock{get_hsa_lifecycle_mutex()};
+    get_hsa_shutdown_cv().wait(lock, []() { return !hsa_shutdown_draining; });
     if(hsa_reference_count_value == 0) return HSA_STATUS_SUCCESS;
     if(hsa_reference_count_value > 1) return hsa_release_reference();
 
     hsa_shutdown_draining = true;
     auto reset_draining   = common::scope_destructor{[&]() {
         hsa_shutdown_draining = false;
-        hsa_shutdown_cv.notify_all();
+        get_hsa_shutdown_cv().notify_all();
     }};
 
     const auto deadline = std::chrono::steady_clock::now() + hsa_drain_timeout;
@@ -646,7 +658,9 @@ hsa_shut_down_refcnt_impl()
     queue_controller_shutdown(drained);
     dispatch_time_reset();
     async_copy_reset();
-    return hsa_release_reference();
+    const auto status = hsa_release_reference();
+    if(status != HSA_STATUS_SUCCESS) open_queue_write_interceptors();
+    return status;
 }
 
 template <size_t TableIdx, typename LookupT = internal_table, typename Tp, size_t OpIdx>
