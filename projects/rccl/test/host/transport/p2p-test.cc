@@ -5083,6 +5083,7 @@ TEST_F(P2pShareableBufferMicrotest,
             return ncclSuccess;
         });
 
+    std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
     auto r = CallImport();
 
     EXPECT_EQ(r, ncclSuccess);
@@ -5091,6 +5092,10 @@ TEST_F(P2pShareableBufferMicrotest,
     EXPECT_EQ(accessCalls, 1);
     EXPECT_EQ(trackCalls, 1);
     EXPECT_EQ(devMem_, kReserved);
+    // The mapping is counted at its granularity-aligned size, which the
+    // ncclCudaFree / ncclCuMemFree release path subtracts (alloc-test pins that side).
+    EXPECT_EQ(allocTracker[0].totalAlloc, 1u);
+    EXPECT_EQ(allocTracker[0].totalAllocSize, 4096u);
 }
 
 // cuMem arm, POSIX_FD handle type: the remote handle is converted to a local
@@ -5177,9 +5182,11 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
+    std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
     auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(allocTracker[0].totalAlloc, 0u);   // nothing mapped, nothing counted
 }
 
 // cuMem arm, granularity query fails: the first driver call in the import
@@ -6638,6 +6645,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_SameProcessCuMem_MapsSegmentsAnd
             return hipErrorInvalidValue;
         });
 
+    std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
     void* resp = nullptr;
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
@@ -6648,6 +6656,10 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_SameProcessCuMem_MapsSegmentsAnd
     EXPECT_EQ(mapCalls, kNumSegments);          // one map per segment
     EXPECT_EQ(setAccessCalls, 1);               // one access grant over the range
     EXPECT_EQ(done, 1);
+    // The whole mapped range is counted once on the proxy's device; deregister
+    // releases it through ncclCuMemFreeAddr (alloc-test pins that side).
+    EXPECT_EQ(allocTracker[state_.cudaDev].totalAlloc, 1u);
+    EXPECT_EQ(allocTracker[state_.cudaDev].totalAllocSize, 2u * 0x1000);
     // Returned address is the reserved base plus the first segment's offset.
     EXPECT_EQ(resp, reinterpret_cast<void*>(kBase + kOffset));
 
@@ -6753,6 +6765,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessNonPosix_ImportsFrom
             return hipSuccess;
         });
 
+    std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
     void* resp = nullptr;
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
@@ -6763,6 +6776,9 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessNonPosix_ImportsFrom
     EXPECT_EQ(importCalls, 1);                   // imported from the cuDesc
     EXPECT_EQ(done, 1);
     ASSERT_NE(QueueHead(conn_), nullptr);
+    // Cross-process imports are counted too: deregister frees them with ncclCudaFree.
+    EXPECT_EQ(allocTracker[state_.cudaDev].totalAlloc, 1u);
+    EXPECT_EQ(allocTracker[state_.cudaDev].totalAllocSize, 0x1000u);
 }
 
 // A same-process cuMem register whose per-segment map fails takes the
@@ -6801,6 +6817,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_UnmapsWithoutRelea
             return hipSuccess;
         });
 
+    std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
     void* resp = reinterpret_cast<void*>(0xDEAD);
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
@@ -6810,6 +6827,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_UnmapsWithoutRelea
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(resp, nullptr);                    // no address handed back
     EXPECT_EQ(done, 1);
+    EXPECT_EQ(allocTracker[state_.cudaDev].totalAlloc, 0u);   // a failed register is not counted
     EXPECT_EQ(unmapCalls, 1);                    // only the first segment was mapped
     // The requester already dropped its retain and still owns the handles.
     EXPECT_EQ(releaseCalls, 0);
@@ -7022,6 +7040,7 @@ void P2pProxyRegisterCuMemUnwindTest::RunRecordAllocFails(int sameProcess, int e
     });
     SetP2pCallocFailSize(sizeof(proxyMemHandle));
 
+    std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
     void* resp = reinterpret_cast<void*>(0xDEAD);
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
@@ -7032,6 +7051,9 @@ void P2pProxyRegisterCuMemUnwindTest::RunRecordAllocFails(int sameProcess, int e
     EXPECT_EQ(resp, nullptr);
     EXPECT_EQ(done, 1);
     EXPECT_EQ(QueueHead(conn_), nullptr);
+    // Mapped, then unwound: the register is not counted.
+    EXPECT_EQ(allocTracker[state_.cudaDev].totalAlloc, 0u);
+    EXPECT_EQ(allocTracker[state_.cudaDev].totalAllocSize, 0u);
     ASSERT_EQ(unmapped.size(), static_cast<size_t>(kNumSegments));
     for (int segment = 0; segment < kNumSegments; segment++) {
         EXPECT_EQ(unmapped[segment], reinterpret_cast<void*>(kBase + segment * kSegSize));
