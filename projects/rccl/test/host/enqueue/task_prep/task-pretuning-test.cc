@@ -220,6 +220,20 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGatherSendingFromItsOwnSli
 
     EXPECT_EQ(1, in.inPlace) << "rank " << rank;
   }
+
+  // Rank 2 not sending from its own slice is not in place: a separate send buffer, and slice 0, the start of
+  // recvbuff, where a bare sendbuff == recvbuff check would say otherwise.
+  constexpr int kRank = 2;
+  for (int sendSlice : {-1, 0}) {
+    TaskPrepScene scene(kRanks, kRank);
+    struct ncclRawTask* raw = scene.NewColl(ncclFuncAllGather);
+    if (sendSlice >= 0) raw->coll.sendbuff = static_cast<char*>(raw->coll.recvbuff) + sendSlice * kCollSendBytes;
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+    EXPECT_EQ(0, in.inPlace) << "send slice " << sendSlice;
+  }
 }
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_FindWindowFails_PropagatesForEitherBuffer) {
