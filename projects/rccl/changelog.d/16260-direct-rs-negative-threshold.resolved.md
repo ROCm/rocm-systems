@@ -1,1 +1,1 @@
-* Fixed a hang on multi-node gfx950 `ncclReduceScatter` with a negative `RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD`. The host selected direct ReduceScatter while the kernel ran the ring path. A negative value now disables direct ReduceScatter.
+* Fixed a host/device algorithm mismatch for multi-node gfx950 `ncclReduceScatter` with a negative `RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD`. A negative value now disables direct ReduceScatter on the host, matching the device limit.
