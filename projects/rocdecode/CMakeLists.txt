@@ -412,6 +412,8 @@ if(_deps_met)
       DEPENDS ${PROJECT_NAME}
       COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
     )
+    # Everything the install rules copy from the build tree must be built first, the stub VA driver included.
+    add_dependencies(stage_${PROJECT_NAME} rocdecstub_drv_video)
 
     # Assemble the search prefix for the nested test configures.
     #
