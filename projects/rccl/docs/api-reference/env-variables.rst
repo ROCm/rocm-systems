@@ -922,7 +922,8 @@ in the following table.
         | It applies only from 4 MiB per peer and only when it gives a peer more
         | channels than the per-peer count, and only on communicators that span
         | one node (a fabric communicator spanning hosts counts as one node).
-        | It does not apply to the self copy or with
+        | It does not apply to the self copy, to P2P over the network, to P2P
+        | channel pools above 256 channels, or with
         | ``NCCL_ENQUEUE_REARCH_ENABLE``. All ranks must use the same value.
       - | Integer.
         | Default: ``-1`` (architecture default): ``16`` on gfx1250, off

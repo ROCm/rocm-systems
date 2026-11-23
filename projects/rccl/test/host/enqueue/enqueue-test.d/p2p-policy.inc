@@ -280,15 +280,8 @@ void SetBatchEnableAndThreshold(int64_t threshold, bool thresholdSet = true) {
   };
 }
 // Several params at once; the rest keep their defaults.
-void SetParams(std::vector<std::pair<std::string, int64_t>> params) {
-  g_loadParam = [params](const char* env, int64_t deft) {
-    for (const auto& [key, value] : params) {
-      if (key == env) {
-        return value;
-      }
-    }
-    return deft;
-  };
+void SetParams(std::initializer_list<std::pair<const char*, int64_t>> kv) {
+  g_loadParam = ParamOverride(kv);
 }
 }  // namespace
 
@@ -441,10 +434,10 @@ TEST_F(EnqueueMicrotest, A2aP2pLayerParts_UnsetIsSixteenInFlightOnGfx1250AndOffE
   };
   // Unset and -1 pick 16 in flight on gfx1250 only; 0 and 1 turn the gfx1250 default off; a set K applies on every
   // arch.
-  constexpr int64_t kUnset = kPeersInFlightUnset;
-  for (Case k : {Case{1250, kUnset, 8, 16}, Case{1250, kUnset, 4, 16}, Case{1250, -1, 8, 16}, Case{1250, kUnset, 16, 0},
-                 Case{1250, 0, 8, 0}, Case{1250, 1, 8, 0}, Case{1250, 32, 4, 8}, Case{950, kUnset, 4, 0},
-                 Case{942, kUnset, 4, 0}, Case{942, -1, 4, 0}, Case{942, 16, 4, 16}, Case{0, kUnset, 4, 0}}) {
+  constexpr int64_t kNone = kPeersInFlightUnset;
+  for (Case k : {Case{1250, kNone, 8, 16}, Case{1250, kNone, 4, 16}, Case{1250, -1, 8, 16}, Case{1250, kNone, 16, 0},
+                 Case{1250, 0, 8, 0}, Case{1250, 1, 8, 0}, Case{1250, 32, 4, 8}, Case{950, kNone, 4, 0},
+                 Case{942, kNone, 4, 0}, Case{942, -1, 4, 0}, Case{942, 16, 4, 16}, Case{0, kNone, 4, 0}}) {
     SetPeersInFlight(k.knob);
     auto comm = P2pPartsComm(/*nNodes=*/1, /*nRanks=*/64, /*p2pnChannels=*/256, k.perPeer);
     comm->rank = 0;
