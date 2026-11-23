@@ -62,13 +62,17 @@ class KernelConfigSearchMicrotest : public ::testing::Test {
   std::string BuildConfig() const { return "/lib/modules/" + release_ + "/build/.config"; }
   static void Write(const std::string& path, const std::string& text) {
     std::filesystem::create_directories(std::filesystem::path(g_root + path).parent_path());
-    std::ofstream(g_root + path) << text;
+    std::ofstream file(g_root + path);
+    ASSERT_TRUE(file.is_open()) << path;
+    file << text;
+    file.close();
+    ASSERT_TRUE(file.good()) << path;
   }
 };
 
 TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_SkipsEmptyCandidateForLaterOne) {
-  Write(ModulesConfig(), "");
-  Write(BuildConfig(), "CONFIG_PCI_P2PDMA=y\n");
+  ASSERT_NO_FATAL_FAILURE(Write(ModulesConfig(), ""));
+  ASSERT_NO_FATAL_FAILURE(Write(BuildConfig(), "CONFIG_PCI_P2PDMA=y\n"));
   std::string content;
   char path[256] = {};
 
@@ -79,8 +83,8 @@ TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_SkipsEmptyCandidateForLat
 }
 
 TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_FirstNonEmptyCandidateWins) {
-  Write(ModulesConfig(), "CONFIG_A=y\n");
-  Write(BuildConfig(), "CONFIG_B=y\n");
+  ASSERT_NO_FATAL_FAILURE(Write(ModulesConfig(), "CONFIG_A=y\n"));
+  ASSERT_NO_FATAL_FAILURE(Write(BuildConfig(), "CONFIG_B=y\n"));
   std::string content;
   char path[256] = {};
 
@@ -91,8 +95,8 @@ TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_FirstNonEmptyCandidateWin
 }
 
 TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_OnlyEmptyCandidatesIsUnavailable) {
-  Write(ModulesConfig(), "");
-  Write(BuildConfig(), "");
+  ASSERT_NO_FATAL_FAILURE(Write(ModulesConfig(), ""));
+  ASSERT_NO_FATAL_FAILURE(Write(BuildConfig(), ""));
   std::string content;
   char path[256] = {};
 
