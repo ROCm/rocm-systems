@@ -3066,7 +3066,7 @@ the instruction; addressing and storage must be valid at the observation point.<
 </tr>
 <tr>
 <td>Allocated storage</td>
-<td>Required VGPRs and scratch must remain available. Unproven <code>s_alloc_vgpr</code> or VGPR/scratch-deallocation effects, including those inherited from incoming paths, are rejected. No allocation-recovery proof is implemented yet.</td>
+<td>Every kernel that can reach the site must use static VGPR allocation. Admission also rejects <code>AfterInst</code> at or after an unproven <code>s_alloc_vgpr</code> or VGPR/scratch release.</td>
 </tr>
 <tr>
 <td>Register hazards</td>
@@ -3080,9 +3080,22 @@ the instruction; addressing and storage must be valid at the observation point.<
 </table>
 <p>Inherited GPR indexing, VSKIP, and storage availability also constrain callable
 <code>BeforeInst</code> and <code>KernelExit</code> observations on targets that support those states.
-Descriptors describe the initial allocation, not storage after guest allocation
-changes. <code>KernelEntry</code> uses dispatch-entry state: guest backedges to the original
-entry do not execute its descriptor stub again.</p>
+On RDNA4 and CDNA5, a dynamic wave can start with fewer VGPRs than its
+descriptor declares. Growing that count cannot guarantee registers for either
+the probe body or its save and restore instructions. Callable <code>BeforeInst</code>,
+<code>AfterInst</code>, and <code>KernelExit</code> sites must therefore be unreachable from dynamic
+dispatches. An unresolved successor in a dynamic kernel excludes those sites
+throughout the code object. <code>KernelEntry</code> checks its own dispatch descriptor
+for static allocation because guest backedges bypass the entry stub.</p>
+<p>The callable-state analysis follows resolved branches in a leaf helper when
+every path leaves the state under analysis unchanged and returns through the
+original ordinary SGPR pair. A numeric pair in the allocated special-register
+tail can alias VCC or FLAT_SCRATCH. For such a pair, only nops may precede
+the return or the recognized PC adjustment back to a kernel entry. A branch
+or dispatch that bypasses the call, a cycle, or a nested call prevents this
+leaf-helper proof. The separate closed-text MODE analysis can follow nested
+calls. For a helper that adjusts its caller's return PC, every caller must
+supply a continuation that the adjustment maps to a kernel entry.</p>
 <p>Independent of placement, copied probes on CDNA1–4 must not enable VSKIP:
 the envelope uses vector instructions for restoration, even with <code>force_full_exec</code>.
 Copied probes also reject MFMA/SMFMAC and CDNA5 matrix/transcendental producers
