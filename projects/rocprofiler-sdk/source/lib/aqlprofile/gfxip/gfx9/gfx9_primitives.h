@@ -79,6 +79,7 @@ public:
     static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__CLEAR_ALL_MASK_PRM  = 0x02000000L;
 
     static constexpr Register SPI_SQG_EVENT_CTL_ADDR{};
+    static constexpr Register SPI_CONFIG_CNTL_ADDR = REG_32B_ADDR(GC, 0, regSPI_CONFIG_CNTL);
     static constexpr Register SQ_PERFCOUNTER_CTRL_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL);
     static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR{};
@@ -803,6 +804,16 @@ public:
 
     static uint32_t spi_sqg_event_ctl(bool enableSqgEvents) { return 0; }
 
+    static uint32_t spi_config_cntl_value(bool enableSqgEvents)
+    {
+        uint32_t spi_config_cntl =
+            SET_REG_FIELD_BITS(SPI_CONFIG_CNTL, GPR_WRITE_PRIORITY, 0x2c688) |
+            SET_REG_FIELD_BITS(SPI_CONFIG_CNTL, EXP_PRIORITY_ORDER, 3) |
+            SET_REG_FIELD_BITS(SPI_CONFIG_CNTL, ENABLE_SQG_TOP_EVENTS, enableSqgEvents) |
+            SET_REG_FIELD_BITS(SPI_CONFIG_CNTL, ENABLE_SQG_BOP_EVENTS, enableSqgEvents);
+        return spi_config_cntl;
+    }
+
     static uint32_t sqtt_zero_size_value() { return 0; }
 
     // Thread trace ctrl register value
@@ -836,6 +847,8 @@ public:
         const uint32_t NUM_PIPES = 8;
         return (1u << NUM_PIPES) - 1;
     }
+
+    static uint32_t sqtt_finish_done_mask() { return SQ_THREAD_TRACE_STATUS__FINISH_DONE_MASK; }
 };
 
 }  // namespace gfx9

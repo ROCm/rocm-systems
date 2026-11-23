@@ -59,6 +59,9 @@ public:
     void  deallocate(void* ptr);
     bool  is_device_pointer(const void* ptr) const;
 
+    amd_signal_t* allocate_signal();
+    void          deallocate_signal(amd_signal_t* signal);
+
     uint32_t gpu_id() const;
     uint32_t gfx_target_version() const;
     uint32_t cwsr_size() const;

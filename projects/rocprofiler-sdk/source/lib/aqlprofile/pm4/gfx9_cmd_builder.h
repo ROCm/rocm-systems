@@ -407,7 +407,15 @@ public:
         }
     }
 
-    void BuildThreadTraceEventFinish(CmdBuffer* cmdBuf) {}
+    void BuildThreadTraceEventFinish(CmdBuffer* cmdBuf)
+    {
+        uint32_t header = MakePacket3Header(PACKET3_EVENT_WRITE, 2 * sizeof(uint32_t));
+        uint32_t dword2 = PACKET3_EVENT_WRITE__EVENT_TYPE(THREAD_TRACE_FINISH) |
+                          PACKET3_EVENT_WRITE__EVENT_INDEX(PACKET3_EVENT_WRITE__EVENT_INDEX__OTHER);
+
+        uint32_t pm4mec_event_write_cmd[2] = {header, dword2};
+        APPEND_COMMAND_WRAPPER(cmdBuf, pm4mec_event_write_cmd);
+    }
 
     void BuildIndirectBufferCmd(CmdBuffer* cmdbuf, const void* cmd_addr, std::size_t cmd_size)
     {

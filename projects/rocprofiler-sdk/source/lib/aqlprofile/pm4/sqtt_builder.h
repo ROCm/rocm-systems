@@ -256,10 +256,14 @@ public:
             config->target_cu_per_se[se_index] = bMaskedIn ? config->targetCu : -1;
         }
 
-        if(Primitives::GFXIP_LEVEL == 9)
+        if constexpr(Primitives::GFXIP_LEVEL == 9)
         {
             // Program Grbm to broadcast messages to all shader engines
             SetGRBMToBroadcast(cmd_buffer);
+
+            builder.BuildWritePConfigRegPacket(cmd_buffer,
+                                               Primitives::SPI_CONFIG_CNTL_ADDR,
+                                               Primitives::spi_config_cntl_value(true));
 
             // Program the thread trace mask - specifies SH, CU, SIMD and
             // VM Id masks to apply. Enabling SQ/SPI/REG_STALL_EN bits
@@ -522,12 +526,41 @@ public:
             }
         }
 
-        if(Primitives::GFXIP_LEVEL == 9)
+        if constexpr(Primitives::GFXIP_LEVEL == 9)
         {
+            builder.BuildWriteWaitIdlePacket(cmd_buffer);
+            builder.BuildWriteUConfigRegPacket(
+                cmd_buffer, Primitives::SQ_THREAD_TRACE_TOKEN_MASK_ADDR, 0);
+            builder.BuildThreadTraceEventFinish(cmd_buffer);
+            for(size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
+            {
+                if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
+
+                XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
+                for(size_t se_index_xcc = 0; se_index_xcc < se_number_xcc; se_index_xcc++)
+                {
+                    if(config->target_cu_per_se.at(xcc * se_number_xcc + se_index_xcc) < 0)
+                        continue;
+
+                    Select_GRBM_SE_SH0(cmd_buffer, se_index_xcc);
+                    builder.BuildWaitRegMemCommand(cmd_buffer,
+                                                   false,
+                                                   Primitives::SQ_THREAD_TRACE_STATUS_ADDR,
+                                                   false,
+                                                   Primitives::sqtt_finish_done_mask(),
+                                                   0);
+                }
+            }
+            SetGRBMToBroadcast(cmd_buffer);
+
             // Program the thread trace mode register to disable thread trace
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_MODE_ADDR,
                                                Primitives::sqtt_mode_off_value());
+            builder.BuildWriteWaitIdlePacket(cmd_buffer);
+            builder.BuildWritePConfigRegPacket(cmd_buffer,
+                                               Primitives::SPI_CONFIG_CNTL_ADDR,
+                                               Primitives::spi_config_cntl_value(false));
 
             if(config->perfcounters.size()) StopPerfMon(cmd_buffer);
 
@@ -544,11 +577,6 @@ public:
 
                 // Program Grbm to direct writes to one SE
                 Select_GRBM_SE_SH0(cmd_buffer, se_index_xcc);
-
-                // Issue WaitRegMem command to wait until SQTT event has completed
-                const uint32_t mask_val      = Primitives::sqtt_busy_mask();
-                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
-                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
                 ReadValues(cmd_buffer, config, se_index);
             }
