@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_CPU_DISPATCH_POOL_H_
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 
 #include <algorithm>
 #include <atomic>
@@ -45,6 +46,7 @@ class CpuDispatchPoolTestAccess;
 class CpuDispatchPool {
 public:
   explicit CpuDispatchPool(uint32_t threads) {
+    matrix_coexecution::offer_dispatch_threads(std::max(threads, 1u));
     const uint32_t worker_count = std::max(threads, 1u) - 1;
     workers_.reserve(worker_count);
     for (uint32_t i = 0; i < worker_count; ++i)
@@ -169,6 +171,7 @@ private:
       const size_t i = submission.next_task.fetch_add(1, std::memory_order_relaxed);
       if (i >= submission.tasks.size())
         return;
+      matrix_coexecution::RunningCu running;
       submission.results[i] = submission.tasks[i]->run_quantum();
     }
   }

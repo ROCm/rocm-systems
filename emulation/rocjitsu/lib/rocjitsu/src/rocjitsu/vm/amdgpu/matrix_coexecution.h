@@ -20,6 +20,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -63,6 +64,33 @@ inline void register_helper_fork_guard() {
   if (status != 0)
     helpers_disabled.store(true, std::memory_order_relaxed);
 #endif
+}
+
+// Borrowed helper capacity. When a budget is set, helpers may only use host
+// threads that CU dispatch leaves idle: a claim succeeds while running CU
+// quanta plus claimed helpers stay below the budget. Dispatch is never gated.
+// A zero budget keeps helpers as a separate reservation.
+inline constinit std::atomic<int> running_cus{0};
+inline constinit std::atomic<int> executor_budget{0};
+/// @brief Counts one CU quantum as an occupied host thread.
+struct RunningCu {
+  RunningCu() { running_cus.fetch_add(1, std::memory_order_relaxed); }
+  ~RunningCu() { running_cus.fetch_sub(1, std::memory_order_relaxed); }
+  RunningCu(const RunningCu &) = delete;
+  RunningCu &operator=(const RunningCu &) = delete;
+};
+/// RJ_MMA_BORROW=1 shares the dispatch width with helpers instead of adding to it.
+inline void offer_dispatch_threads(uint32_t threads) {
+  static const bool borrow = [] {
+    const char *value = std::getenv("RJ_MMA_BORROW");
+    return value && *value && *value != '0';
+  }();
+  if (!borrow)
+    return;
+  int budget = executor_budget.load(std::memory_order_relaxed);
+  while (int(threads) > budget &&
+         !executor_budget.compare_exchange_weak(budget, int(threads), std::memory_order_relaxed)) {
+  }
 }
 
 // Persistent helpers belong to a VM-owned pool, constructed lazily.
@@ -250,16 +278,27 @@ public:
 
   /// Cheap advisory capacity check. A following submit() may still lose a race.
   bool available() const {
-    if (!helpers_enabled())
+    if (!helpers_enabled() || !within_budget())
       return false;
     return free_[0].load(std::memory_order_relaxed) != 0 ||
            (slots_.size() > 64 && free_[1].load(std::memory_order_relaxed) != 0);
   }
 
 private:
+  /// Claimed helpers plus running CU quanta stay below a borrowing budget.
+  bool within_budget() const {
+    const int budget = executor_budget.load(std::memory_order_relaxed);
+    if (!budget)
+      return true;
+    int claimed = int(slots_.size());
+    for (const auto &word : free_)
+      claimed -= std::popcount(word.load(std::memory_order_relaxed));
+    return running_cus.load(std::memory_order_relaxed) + claimed < budget;
+  }
+
   Slot *try_submit(Instruction *const *chain, unsigned count, void *wave,
                    const MatrixInputSnapshot *const *snapshots = nullptr) {
-    if (!helpers_enabled())
+    if (!helpers_enabled() || !within_budget())
       return nullptr;
     // A stable preference may reuse a still-awake helper without pinning or a
     // per-job cursor. Single-issuer counters support lower sleep/wakeup costs,
