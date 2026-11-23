@@ -71,7 +71,7 @@
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
 #include WRAP_CC_PATH
 
-#include "algorithms/dda/dda_init_detail.h"  // ddaFabricScratchSizing, the LL128 slot helpers
+#include "algorithms/dda/dda_init_detail.h"  // ddaFabricScratchSizing
 #include "dev_runtime_internal.h"
 
 namespace {
@@ -9210,7 +9210,7 @@ TEST(WrapMicrotestIsolated, DdaFabricA2aLL128Shape_FromTable) {
         }
         // SPX runs AllToAll LL128 to 64 MiB at every rank count; DPX above stays at 16 MiB.
         comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-        for (int n : {4, 8, 16, 32, 64}) {
+        for (int n : {2, 4, 8, 16, 32, 64}) {
           comm->nRanks = n;
           EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAlltoAll)) << n;
           EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAlltoAll)) << n;
@@ -9232,6 +9232,7 @@ TEST(WrapMicrotestIsolated, DdaFabricScratch_SpxCarriesA2aLL128Ceiling) {
           comm->nRanks = n;
           const size_t ceiling = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
           ASSERT_EQ(64 * kMiB, ceiling) << n;
+          // These args mirror ddaFabricScratchSizing's call in fabric_init.cu; keep the two in step.
           const size_t scratch = nccl_dda_detail::ddaFabricScratchSizing(
               n, /*overrideBytes=*/-1, rcclParamDdaEnable(), rcclDdaScratchPayloadCap(comm), rcclParamDdaLL(),
               rcclParamDdaLL128(), rcclDdaLL128Threshold(comm, ncclFuncAllReduce));
