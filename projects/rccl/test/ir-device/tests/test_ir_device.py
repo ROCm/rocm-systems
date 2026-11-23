@@ -165,7 +165,7 @@ def test_reduce_copy_typed_exports(ir_bitcode, paths):
 @pytest.mark.reduce_copy
 def test_reduce_copy_typed_local(run_gtest, summarize_gtest, paths, monkeypatch):
     """[D1] ncclLocalReduceSumCopy_{I8,F32,BF16}: 3 sources -> 2 destinations."""
-    # D1 raises the stack limit (up to 64 KiB). HSA_NO_SCRATCH_RECLAIM=1 makes
+    # D1 raises the stack limit (to 32 KiB). HSA_NO_SCRATCH_RECLAIM=1 makes
     # ROCr map that for every wave slot of the GPU, more than MI300X's scratch
     # aperture holds; with reclaim it maps what this dispatch needs.
     monkeypatch.setenv("HSA_NO_SCRATCH_RECLAIM", "0")
@@ -178,7 +178,7 @@ def test_reduce_copy_typed_local(run_gtest, summarize_gtest, paths, monkeypatch)
     except subprocess.TimeoutExpired as e:
         proc, timed_out = None, e
     try:
-        with open(log) as fh:
+        with open(log, errors="replace") as fh:
             out = fh.read()
     except OSError:
         out = ""
