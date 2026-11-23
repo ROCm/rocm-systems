@@ -25,6 +25,7 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/effective_config.h"
+#include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -52,6 +53,7 @@
 #include <iterator>
 #include <optional>
 #include <poll.h>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -869,6 +871,34 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
   return rocjitsu::launcher::enumerate_kfd_gpus(gpus);
 }
 
+rocjitsu::FailureOr<uint32_t> selected_gpu_count_from_config(const std::string &config_path,
+                                                             util::DiagnosticEmitter emit_error) {
+  rocjitsu::FailureOr<std::string> json =
+      rocjitsu::config::read_config_file(config_path, emit_error);
+  if (json.failed())
+    return util::Result::failure();
+
+  rocjitsu::FailureOr<std::string> local_node =
+      rocjitsu::config::with_parsed_simulation_config_json(
+          json.value(), rocjitsu::kEmbeddedSchema, emit_error,
+          [](const auto *config) -> rocjitsu::FailureOr<std::string> {
+            return config->local_node() ? config->local_node()->str() : std::string{};
+          });
+  if (local_node.failed())
+    return util::Result::failure();
+
+  rocjitsu::FailureOr<rocjitsu::config::SystemGraph> graph =
+      rocjitsu::config::load_system_graph_from_string(json.value(), rocjitsu::kEmbeddedSchema,
+                                                      emit_error);
+  if (graph.failed())
+    return util::Result::failure();
+  rocjitsu::FailureOr<std::span<const rocjitsu::config::SystemGpuInstance>> gpus =
+      graph.value().local_gpus(emit_error, local_node.value());
+  if (gpus.failed())
+    return util::Result::failure();
+  return static_cast<uint32_t>(gpus.value().size());
+}
+
 void print_usage() {
   std::cerr
       << "Usage: rocjitsu [options] -- <app> [args...]\n"
@@ -1406,6 +1436,24 @@ int main(int argc, char *argv[]) {
 
   if (!write_config_for_this_launch())
     return 1;
+
+  if (!dbt_guest_mode && !overrides.plugins.empty() && !abs_config.empty()) {
+    rocjitsu::FailureOr<uint32_t> selected_gpu_count =
+        selected_gpu_count_from_config(abs_config, launch_config_diagnostic.emitter());
+    if (selected_gpu_count.failed()) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                               launch_config_diagnostic.message());
+      cleanup_runtime_files(invocation_runtime_dir);
+      return 1;
+    }
+    if (selected_gpu_count.value() > 1) {
+      std::cerr << std::format("rocjitsu: --plugin currently supports only one selected GPU; "
+                               "selected node has {} GPUs\n",
+                               selected_gpu_count.value());
+      cleanup_runtime_files(invocation_runtime_dir);
+      return 1;
+    }
+  }
 
   if (!dbt_guest_mode && !abs_config.empty()) {
     try {

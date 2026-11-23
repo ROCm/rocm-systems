@@ -347,6 +347,24 @@ add_test(
         ${_rj_cli_failure_script}
 )
 add_test(
+    NAME RocjitsuPluginRejectsMultiGpuLocalLaunch
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ENVIRONMENT=ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuPluginRejectsMultiGpuLocalLaunch"
+        "-DTEST_ARGS=--profile;mi350x;--gpus-per-node;2;--plugin;race;--;/usr/bin/true"
+        "-DTEST_REGEX=--plugin currently supports only one selected GPU; selected node has 2 GPUs"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuPluginRejectsMultiGpuDaemonLaunch
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ENVIRONMENT=ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuPluginRejectsMultiGpuDaemonLaunch"
+        "-DTEST_ARGS=--daemon;--profile;mi350x;--gpus-per-node;2;--plugin;race;--;/usr/bin/true"
+        "-DTEST_REGEX=--plugin currently supports only one selected GPU; selected node has 2 GPUs"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
     NAME RocjitsuPluginRepeatedValuesReachLaunchConfig
     COMMAND
         ${CMAKE_COMMAND} -E env

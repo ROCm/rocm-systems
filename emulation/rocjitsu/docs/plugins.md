@@ -228,9 +228,11 @@ rocjitsu --plugin race --plugin logging -- ./my_app
 rocjitsu --profile mi350x --plugin race -- ./my_app
 ```
 
-Each `--plugin` enables the plugin with its schema defaults and requires that
-plugin to load for this launch. Required plugins from the selected profile stay
-required; unrelated configured plugins remain best-effort when
+Each `--plugin` requires that plugin to load for this launch. If the selected
+profile or config already has an entry for that plugin, the existing plugin
+configuration is preserved; schema defaults are used only when `--plugin` adds a
+plugin that was absent from the config. Required plugins from the selected
+profile stay required; unrelated configured plugins remain best-effort when
 `require_all_plugins` is false. Plugins that take required arguments, or runs
 that need custom sink settings, are configured through a profile or an explicit
 `--config <file>`.
