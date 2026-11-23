@@ -41,7 +41,9 @@ set(_MICRO_PLUGIN_DEFS
   # src/CMakeLists.txt lists plugin/rma.cc before rma/rma.cc, so it keeps its own name.
   RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc"
   RMA_V14_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma/rma_v14.cc"
-  RMA_V15_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma/rma_v15.cc")
+  RMA_V15_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma/rma_v15.cc"
+  TUNER_V5_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/tuner_v5.cc"
+  TUNER_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/tuner_v6.cc")
 
 # One src/plugin/ test file per binary; see rccl_add_unit_micro_binary().
 macro(rccl_add_plugin_micro_binary _name _test)
@@ -164,6 +166,14 @@ rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginRmaV14 rma/rma-v14-test.cc
     fakes/nccl_fakes.cc)
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginRmaV15 rma/rma-v15-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc)
+
+rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginTunerV5 tuner/tuner-v5-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc)
+
+rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginTunerV6 tuner/tuner-v6-test.cc
   SOURCES
     fakes/nccl_fakes.cc)
 
