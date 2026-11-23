@@ -104,7 +104,7 @@ Parsing a stream
 
 ``rocJpegStreamParse()`` is used to parse a JPEG stream.
 
-The stream data buffer is passed through the ``data`` input parameter. The length of the buffer is passed through the ``length`` input parameter. The parsed stream is returned through the ``jpeg_stream_handle`` provided. ``jpeg_stream_handle`` must have already been created with ``rocJpegStreamCreate()``.
+The stream data buffer is passed through the ``data`` input parameter. The length of the buffer in bytes is passed through the ``length`` input parameter. ``length`` must be at most ``UINT32_MAX``; ``rocJpegStreamParse()`` returns ``ROCJPEG_STATUS_INVALID_PARAMETER`` for a larger length. The parsed stream is returned through the ``jpeg_stream_handle`` provided. ``jpeg_stream_handle`` must have already been created with ``rocJpegStreamCreate()``.
 
 Keep ``data`` valid and unchanged, and don't parse or destroy ``jpeg_stream_handle`` again until every decode call that uses the handle has returned. 
 

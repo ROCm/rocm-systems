@@ -661,6 +661,26 @@ int RocJpegApiNegativeTests::TestInvalidStreamParse() {
         return EXIT_FAILURE;
     }
 
+    // Scenario 14: Pass a length greater than UINT32_MAX with a valid JPEG. The length must be rejected without reading
+    // the buffer, so no 4 GiB buffer is needed. Previously only the low 32 bits of the length reached the parser, so
+    // 2^32 was parsed as an empty stream and reported as a bad JPEG, and 2^32 + size and SIZE_MAX parsed the JPEG and
+    // succeeded. The JPEG is parsed with its true size first, so that the rejections can only come from the length.
+    const std::vector<uint8_t> &seed = ColorSeedJpeg();
+    rocjpeg_status = rocJpegStreamParse(seed.data(), seed.size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 16x16 seed JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    const size_t oversized_lengths[] = {size_t{1} << 32, (size_t{1} << 32) + seed.size(), SIZE_MAX};
+    for (size_t oversized_length : oversized_lengths) {
+        rocjpeg_status = rocJpegStreamParse(seed.data(), oversized_length, rocjpeg_stream_handle_);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegStreamParse with length " << oversized_length << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
     return EXIT_SUCCESS;
 }
 
