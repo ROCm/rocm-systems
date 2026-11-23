@@ -19,11 +19,13 @@ namespace {
 using namespace rocjitsu::arith::test;
 
 // Construct matrices logically, pack them into independent format layouts and compare the product.
-template <int M, int K, bool Scaled = false, typename Entry> void arithmetic(Entry entry) {
+template <int M, int K, bool Scaled = false, typename Entry>
+void arithmetic(Entry entry, bool finite_fp4 = false) {
   constexpr int D = M * M / 64, Scale = 16 + 2 * D;
   const auto levels = supported_cpu_levels();
-  for (int fa = 0; fa < 5; ++fa) {
-    for (int fb = 0; fb < 5; ++fb) {
+  const int first_format = finite_fp4 ? int(RJ_ARITH_MATRIX_FORMAT_FP4) : 0;
+  for (int fa = first_format; fa < 5; ++fa) {
+    for (int fb = first_format; fb < 5; ++fb) {
       std::array<std::array<uint32_t, 64>, Scale + D> input{};
       float left[M][K], right[M][K];
       std::minstd_rand random;
@@ -68,7 +70,9 @@ template <int M, int K, bool Scaled = false, typename Entry> void arithmetic(Ent
         input[Scale][lane] = uint32_t(126 + lane % 3) << 8;
         input[Scale + 1][lane] = uint32_t(126 + lane % 4) << 16;
       }
-      input[Scale][1] = 255U << 8;
+      if (!finite_fp4) {
+        input[Scale][1] = 255U << 8;
+      }
       uint64_t controls = uint64_t(fa) | (uint64_t(fb) << 3);
       if constexpr (Scaled) {
         controls |= (1ULL << 6) | (2ULL << 8);
@@ -164,9 +168,11 @@ TEST(MfmaMixed, F32_16x16x128) { arithmetic<16, 128>(rj_arith_v_mfma_f32_16x16x1
 TEST(MfmaMixed, F32_32x32x64) { arithmetic<32, 64>(rj_arith_v_mfma_f32_32x32x64_f8f6f4_w64); }
 TEST(MfmaMixed, ScaleF32_16x16x128) {
   arithmetic<16, 128, true>(rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64);
+  arithmetic<16, 128, true>(rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64, /*finite_fp4=*/true);
 }
 TEST(MfmaMixed, ScaleF32_32x32x64) {
   arithmetic<32, 64, true>(rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64);
+  arithmetic<32, 64, true>(rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64, /*finite_fp4=*/true);
 }
 
 TEST(MfmaMixed, ScaleClampsFiniteOverflowAndPreservesNonfiniteInputs) {
