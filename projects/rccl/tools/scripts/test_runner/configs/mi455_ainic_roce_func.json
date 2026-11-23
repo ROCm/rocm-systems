@@ -2816,6 +2816,16 @@
           "name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled",
           "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM",
           "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"
+        },
+        {
+          "name": "InspectorUserTag.WritesCollRecords",
+          "description": "Verify the Inspector plugin writes coll_perf records for AllReduces issued with a per-call profiler tag",
+          "test_filter": "InspectorUserTag.WritesCollRecords"
+        },
+        {
+          "name": "InspectorUserTag.CollRecordsCarryUserTag",
+          "description": "Verify Inspector coll_perf records carry the per-call ncclCollConfig_t userProfilerTag as coll_user_tag (NCCL 2.32.6)",
+          "test_filter": "InspectorUserTag.CollRecordsCarryUserTag"
         }
       ]
     },

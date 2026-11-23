@@ -327,6 +327,7 @@ if(BUILD_TESTS)
     ProfilerApiEventRankTests.cpp
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
+    InspectorUserTagTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
@@ -393,6 +394,13 @@ if(BUILD_TESTS)
   add_dependencies(rccl-UnitTests rccl-test-profiler-stub)
   target_compile_definitions(rccl-UnitTests PRIVATE
     RCCL_TEST_PROFILER_STUB_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-stub>")
+
+  # InspectorUserTagTests loads the in-tree Inspector plugin; it skips when there is none.
+  if(TARGET rccl-profiler-inspector)
+    add_dependencies(rccl-UnitTests rccl-profiler-inspector)
+    set_source_files_properties(InspectorUserTagTests.cpp PROPERTIES COMPILE_DEFINITIONS
+      "RCCL_INSPECTOR_PLUGIN_SO=\"$<TARGET_FILE:rccl-profiler-inspector>\"")
+  endif()
 
   # The test suite also runs from an install: TheRock CI executes the packaged
   # rccl-UnitTests with no build tree present, so the stub has to ship with it.
