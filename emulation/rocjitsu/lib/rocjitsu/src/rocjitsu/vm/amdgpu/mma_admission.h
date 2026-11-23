@@ -44,12 +44,15 @@ public:
   void flush() {
     if (!(stats.accept + stats.reject + stats.issuer))
       return;
-    util::Logger::vm([&](auto &os) {
-      os << std::format("RJ_ADMISSION decodes={} plans={} hits={} validations={} "
-                        "accept={} reject={} issuer={} entries={} evictions={}",
-                        stats.decodes, stats.plans, stats.hits, stats.validations, stats.accept,
-                        stats.reject, stats.issuer, plans_.size(), stats.evictions);
-    });
+    const auto line = [&] {
+      return std::format("RJ_ADMISSION decodes={} plans={} hits={} validations={} "
+                         "accept={} reject={} issuer={} entries={} evictions={}",
+                         stats.decodes, stats.plans, stats.hits, stats.validations, stats.accept,
+                         stats.reject, stats.issuer, plans_.size(), stats.evictions);
+    };
+    util::Logger::vm([&](auto &os) { os << line(); });
+    if (async_execution::report_enabled())
+      std::fprintf(stderr, "%s\n", line().c_str());
     stats = {};
   }
 

@@ -19,12 +19,36 @@
 
 namespace rocjitsu::amdgpu::async_mma_policy {
 
-// All formerly eligible handlers now use issuer-owned rj-arith error state.
-// Keep requested helper counts in configs/checkpoints, but allocate no workers
-// and use synchronous CUs until a handler can safely run on a helper again.
-constexpr bool supported(rocjitsu::IsaFamily) { return false; }
+// CDNA4 dense MFMA handlers touch no wave status register. They only read the
+// issuer-owned instruction error field, which stays clear on valid kernels.
+// CDNA5 WMMA remains synchronous.
+constexpr bool supported(rocjitsu::IsaFamily arch) { return arch == rocjitsu::IsaFamily::Cdna4; }
 
-inline bool candidate(const Instruction &) { return false; }
+inline bool candidate(const Instruction &inst) {
+  switch (inst.amdgpu_operation()) {
+  case Operation::V_MFMA_SCALE_F32_16X16X128_F8F6F4:
+  case Operation::V_MFMA_SCALE_F32_32X32X64_F8F6F4:
+  case Operation::V_MFMA_F32_16X16X128_F8F6F4:
+  case Operation::V_MFMA_F32_32X32X64_F8F6F4:
+  case Operation::V_MFMA_F32_16X16X32_FP8_FP8:
+  case Operation::V_MFMA_F32_16X16X32_FP8_BF8:
+  case Operation::V_MFMA_F32_16X16X32_BF8_FP8:
+  case Operation::V_MFMA_F32_16X16X32_BF8_BF8:
+  case Operation::V_MFMA_F32_32X32X16_FP8_FP8:
+  case Operation::V_MFMA_F32_32X32X16_FP8_BF8:
+  case Operation::V_MFMA_F32_32X32X16_BF8_FP8:
+  case Operation::V_MFMA_F32_32X32X16_BF8_BF8:
+  case Operation::V_MFMA_F32_16X16X32_F16:
+  case Operation::V_MFMA_F32_32X32X16_F16:
+  case Operation::V_MFMA_F32_16X16X16_F16:
+  case Operation::V_MFMA_F32_32X32X8_F16:
+  case Operation::V_MFMA_F32_16X16X32_BF16:
+  case Operation::V_MFMA_F32_32X32X16_BF16:
+    return true;
+  default:
+    return false;
+  }
+}
 
 // Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
 // This is only a hint: decoded eligibility remains authoritative.

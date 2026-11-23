@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <format>
 #include <memory>
 #include <optional>
@@ -24,6 +26,15 @@ class MmaAdmissionCache;
 namespace async_execution {
 inline constexpr unsigned issue_limit() { return 32; }
 inline constexpr unsigned kMaxPendingMma = 7;
+// Release builds compile out VM logging. RJ_ASYNC_STATS=1 reports the same
+// counters to stderr so admission can be checked without per-instruction logs.
+inline bool report_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_ASYNC_STATS");
+    return value && *value && *value != '0';
+  }();
+  return enabled;
+}
 using Access = async_mma_policy::Access;
 using async_mma_policy::footprint;
 inline bool safe_inline(const Instruction &inst) { return async_mma_policy::safe_inline(inst); }
@@ -38,12 +49,16 @@ public:
   uint64_t retired_mma = 0;
   ~Stats() { flush(); }
   void flush() {
-    if (windows)
-      util::Logger::vm([&](auto &os) {
-        os << std::format("RJ_ASYNC windows={} mma={} inline_overlap={} hazards={} "
-                          "boundaries={} full={} retired_mma={}",
-                          windows, mma, inline_overlap, hazards, boundaries, full, retired_mma);
-      });
+    if (windows) {
+      const auto line = [&] {
+        return std::format("RJ_ASYNC windows={} mma={} inline_overlap={} hazards={} "
+                           "boundaries={} full={} retired_mma={}",
+                           windows, mma, inline_overlap, hazards, boundaries, full, retired_mma);
+      };
+      util::Logger::vm([&](auto &os) { os << line(); });
+      if (report_enabled())
+        std::fprintf(stderr, "%s\n", line().c_str());
+    }
     windows = mma = inline_overlap = hazards = boundaries = full = retired_mma = 0;
   }
 };

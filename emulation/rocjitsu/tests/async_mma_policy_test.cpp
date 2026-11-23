@@ -82,7 +82,7 @@ TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
   for (unsigned opcode : {45, 46}) {
     const auto words = mma_test::make_cdna4_mfma_scale_words(opcode, 1, 448, 449);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    EXPECT_FALSE(policy::candidate(*inst));
+    EXPECT_TRUE(policy::candidate(*inst));
     EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna4, words[0]));
   }
   const auto add = cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 1, .ssrc1 = 2, .sdst = 0});
@@ -90,7 +90,7 @@ TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
 }
 
 TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
-  EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna4));
+  EXPECT_TRUE(policy::supported(rocjitsu::IsaFamily::Cdna4));
   EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna5));
   EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna3));
   EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Rdna3));
@@ -117,6 +117,11 @@ TEST(AsyncMmaPolicyTest, QualifiedMfmaFamiliesExcludeUnmeasuredShapes) {
            Operation::V_MFMA_F32_32X32X64_F8F6F4,
            Operation::V_MFMA_SCALE_F32_16X16X128_F8F6F4,
            Operation::V_MFMA_SCALE_F32_32X32X64_F8F6F4,
+           Operation::V_MFMA_F32_16X16X32_BF16,
+           Operation::V_MFMA_F32_32X32X16_BF16,
+       })
+    EXPECT_TRUE(policy::candidate(mma_test::PolicyInstruction(operation)));
+  for (Operation operation : {
            Operation::V_MFMA_F32_32X32X4_2B_F16,
            Operation::V_MFMA_I32_16X16X64_I8,
        })

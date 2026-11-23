@@ -15,7 +15,6 @@
 #include <array>
 #include <atomic>
 #include <bit>
-#include <cfenv>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -64,6 +63,7 @@ inline void register_helper_fork_guard() {
 }
 
 // Persistent helpers belong to a VM-owned pool, constructed lazily.
+// Helpers run in the default host floating-point environment, like the issuer.
 // Callbacks must return normally; admitted guest errors are rejected before publication.
 // Instructions remain allocated and destroyed by the original decoder thread.
 // The caller validates disjoint register accesses and materializes destinations
@@ -80,7 +80,6 @@ public:
   void submit(Instruction &instruction, void *wave) {
     instruction_ = &instruction;
     wave_ = wave;
-    std::fegetenv(&environment_);
     publish(1);
   }
 
@@ -126,7 +125,6 @@ private:
         wait_while(0);
         continue;
       }
-      std::fesetenv(&environment_);
       instruction_->execute(*instruction_, wave_);
       publish(0);
     }
@@ -135,7 +133,6 @@ private:
   alignas(64) std::atomic<int> state_{0};
   alignas(64) Instruction *instruction_ = nullptr;
   void *wave_ = nullptr;
-  std::fenv_t environment_{};
   std::thread thread_;
 };
 
