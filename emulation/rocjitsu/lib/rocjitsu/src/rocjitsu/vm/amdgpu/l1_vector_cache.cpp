@@ -415,37 +415,49 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
       cache_.read_line(ea, out, line_offset, count, vmid);
   };
 
-  // A resident read within one line needs one current allocation generation.
-  // The request's VM snapshot also supplies the cache identity and page MTYPE.
-  const uint32_t offset = CacheStore::line_offset(addr);
-  if (size && size <= LINE_SIZE - offset && transactions_.chunk_size(addr, size) == size &&
-      !non_temporal && !request_l1_bypass) {
-    const uint64_t line_addr = CacheStore::line_address(addr);
-    if (const auto *grant = mtypes.local_grant(line_addr, LINE_SIZE)) {
-      const auto policy = mtypes.at(addr);
-      if (policy != Mtype::UC && policy != Mtype::CC) {
-        const auto *line = cache_.line_data_for_read_if(addr, vmid, 0, [&](const auto &tag) {
-          return tag.cache_identity == grant->identity() &&
-                 tag.admission_generation == grant->generation() &&
-                 CacheStore::bytes_valid(tag, offset, size) && grant->covers(line_addr, LINE_SIZE);
-        });
-        if (line) {
-          std::memcpy(dst, line + offset, size);
-          return VmAccessOutcome::Complete;
-        }
-        // The whole line is local. A fill still checks backing coverage and
-        // revalidates the grant and VM identity after reading from L2.
-        if (grant->covers(line_addr, LINE_SIZE) &&
-            l2_->can_fetch_range(line_addr, LINE_SIZE, vmid)) {
-          EnsuredLine ensured;
-          const auto outcome = ensure_line(addr, vmid, grant->generation(), true, grant, &ensured);
-          if (outcome != VmAccessOutcome::Complete)
-            return outcome;
-          copy_ensured(ensured, addr, dst, offset, size);
-          return VmAccessOutcome::Complete;
-        }
+  // A resident transaction needs one current allocation generation. The
+  // request's VM snapshot also supplies the cache identity and page MTYPE.
+  // Lane-ordered runs span several lines, so take transactions this way
+  // until one cannot, then finish the rest below.
+  if (size && !non_temporal && !request_l1_bypass) {
+    uint32_t done = 0;
+    while (done < size) {
+      const uint64_t ea = addr + done;
+      const uint32_t chunk = static_cast<uint32_t>(transactions_.chunk_size(ea, size - done));
+      const uint32_t offset = CacheStore::line_offset(ea);
+      const uint64_t line_addr = CacheStore::line_address(ea);
+      const auto *grant = mtypes.local_grant(line_addr, LINE_SIZE);
+      if (!grant)
+        break;
+      const auto policy = mtypes.at(ea);
+      if (policy == Mtype::UC || policy == Mtype::CC)
+        break;
+      const auto *line = cache_.line_data_for_read_if(ea, vmid, 0, [&](const auto &tag) {
+        return tag.cache_identity == grant->identity() &&
+               tag.admission_generation == grant->generation() &&
+               CacheStore::bytes_valid(tag, offset, chunk) && grant->covers(line_addr, LINE_SIZE);
+      });
+      if (line) {
+        std::memcpy(dst + done, line + offset, chunk);
+        done += chunk;
+        continue;
       }
+      // The whole line is local. A fill still checks backing coverage and
+      // revalidates the grant and VM identity after reading from L2.
+      if (!grant->covers(line_addr, LINE_SIZE) || !l2_->can_fetch_range(line_addr, LINE_SIZE, vmid))
+        break;
+      EnsuredLine ensured;
+      const auto outcome = ensure_line(ea, vmid, grant->generation(), true, grant, &ensured);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      copy_ensured(ensured, ea, dst + done, offset, chunk);
+      done += chunk;
     }
+    if (done == size)
+      return VmAccessOutcome::Complete;
+    addr += done;
+    dst += done;
+    size -= done;
   }
   const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Read);
   if (!admission)
