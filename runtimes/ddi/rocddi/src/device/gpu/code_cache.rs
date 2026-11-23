@@ -87,6 +87,32 @@ fn invalidate_packet(major: u32, minor: u32) -> ([u32; 8], usize) {
     (words, count as usize)
 }
 
+/// Wraps cache commands in the AMD AQL PM4 indirect-buffer packet.
+fn publication_packet(
+    indirect_buffer_address: u64,
+    completion_address: u64,
+    command_count: usize,
+) -> Result<[u32; 16], CopyFailure> {
+    let mut packet = [0_u32; 16];
+    // VENDOR_SPECIFIC packet, AMD_AQL_FORMAT_PM4_IB. Cache maintenance is
+    // explicit in the IB; match ROCr's NONE/NONE wrapper fence scopes.
+    packet[0] = 1 << 16;
+    packet[1] = 0xc002_3f00; // INDIRECT_BUFFER, four dwords.
+    packet[2] = u32::try_from(indirect_buffer_address & u64::from(u32::MAX))
+        .map_err(|_| invalid(ErrorKind::Internal, "IB low word overflow"))?;
+    packet[3] = u32::try_from(indirect_buffer_address >> 32)
+        .map_err(|_| invalid(ErrorKind::Internal, "IB high word overflow"))?;
+    packet[4] = (1 << 23)
+        | u32::try_from(command_count)
+            .map_err(|_| invalid(ErrorKind::Internal, "IB count overflow"))?;
+    packet[5] = 0xa;
+    packet[14] = u32::try_from(completion_address & u64::from(u32::MAX))
+        .map_err(|_| invalid(ErrorKind::Internal, "signal low word overflow"))?;
+    packet[15] = u32::try_from(completion_address >> 32)
+        .map_err(|_| invalid(ErrorKind::Internal, "signal high word overflow"))?;
+    Ok(packet)
+}
+
 /// Wraps an error after all native users of caller resources have retired.
 fn retired(error: Error) -> CopyFailure {
     CopyFailure {
@@ -240,22 +266,7 @@ impl GpuDevice<'_> {
         })?;
         let transport = queue.info();
         let ib = gpu_address + 256;
-        let mut packet = [0_u32; 16];
-        // VENDOR_SPECIFIC packet, AMD_AQL_FORMAT_PM4_IB, system fences.
-        packet[0] = (1 << 16) | (2 << 9) | (2 << 11);
-        packet[1] = 0xc002_3f00; // INDIRECT_BUFFER, four dwords.
-        packet[2] = u32::try_from(ib & u64::from(u32::MAX))
-            .map_err(|_| invalid(ErrorKind::Internal, "IB low word overflow"))?;
-        packet[3] = u32::try_from(ib >> 32)
-            .map_err(|_| invalid(ErrorKind::Internal, "IB high word overflow"))?;
-        packet[4] = (1 << 23)
-            | u32::try_from(count)
-                .map_err(|_| invalid(ErrorKind::Internal, "IB count overflow"))?;
-        packet[5] = 0xa;
-        packet[14] = u32::try_from(gpu_address & u64::from(u32::MAX))
-            .map_err(|_| invalid(ErrorKind::Internal, "signal low word overflow"))?;
-        packet[15] = u32::try_from(gpu_address >> 32)
-            .map_err(|_| invalid(ErrorKind::Internal, "signal high word overflow"))?;
+        let packet = publication_packet(ib, gpu_address, count)?;
         // SAFETY: Native transport supplies an aligned writable ring and index;
         // all body and IB stores precede the release header and MMIO doorbell.
         unsafe {
@@ -313,9 +324,44 @@ impl GpuDevice<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{WaitOutcome, inactivation_failure, invalidate_packet, write_failure_diagnostic};
+    use super::{
+        WaitOutcome, inactivation_failure, invalidate_packet, publication_packet,
+        write_failure_diagnostic,
+    };
     use crate::{Error, ErrorKind};
     use std::io;
+
+    #[test]
+    fn publication_packet_matches_rocr_cache_wrapper() -> Result<(), Error> {
+        for (command_count, indirect_buffer_control) in [(7, 0x0080_0007), (8, 0x0080_0008)] {
+            let packet =
+                publication_packet(0x0000_0123_4567_8900, 0x0000_abcd_ef01_2000, command_count)
+                    .map_err(|failure| failure.error)?;
+            // ROCr's cache invalidation uses ExecutePM4's NONE/NONE defaults.
+            assert_eq!(
+                packet,
+                [
+                    0x0001_0000,
+                    0xc002_3f00,
+                    0x4567_8900,
+                    0x0000_0123,
+                    indirect_buffer_control,
+                    0xa,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0xef01_2000,
+                    0x0000_abcd,
+                ]
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn inactivation_context_preserves_native_error_and_live_operands() {
