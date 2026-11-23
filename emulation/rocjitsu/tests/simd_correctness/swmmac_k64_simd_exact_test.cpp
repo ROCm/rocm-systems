@@ -6,6 +6,7 @@
 /// F16/BF16 SWMMAC instructions.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "../decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -76,7 +77,7 @@ constexpr std::array SWMMAC_CASES{
 };
 
 struct SwmmacFixture : ExactFixture {
-  SwmmacFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA5, WF_SIZE) {}
+  SwmmacFixture() : ExactFixture(rocjitsu::IsaFamily::Cdna5, WF_SIZE) {}
 };
 
 struct Observation {
@@ -219,7 +220,7 @@ void run_exact_case(const SwmmacCase &test, Mode mode, uint32_t seed, uint32_t m
                     .src0 = static_cast<uint16_t>(256 + a_off),
                     .src1 = static_cast<uint16_t>(256 + b_off),
                     .src2 = static_cast<uint16_t>(256 + index_off)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
@@ -244,7 +245,7 @@ std::unique_ptr<Instruction> decode_case(const SwmmacCase &test) {
   const auto words = cdna5::build_vop3p(
       test.opcode,
       {.vdst = ACC_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   if (!decoder)
     return nullptr;
   return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
@@ -344,10 +345,30 @@ void seed_bf16f32_contract_state(SwmmacFixture &fx, std::vector<uint32_t> &expec
 
 } // namespace
 
+TEST(SwmmacK64SimdExact, IndexKeyUsesShiftedMetadataWord) {
+  SwmmacFixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  for (uint32_t low : {0x4444U, 0xeeeeU}) {
+    clear_state(fx);
+    // A[0,0]=2, B[2,0]=3. Only the upper metadata half selects dense K=2.
+    fx.cu->write_vgpr(fx.vbase + A_OFF, 0, 0x4000);
+    fx.cu->write_vgpr(fx.vbase + B_OFF + 1, 0, 0x4200);
+    fx.cu->write_vgpr(fx.vbase + INDEX_OFF, 0, 0xeeee0000U | low);
+    const auto words =
+        cdna5::build_vop3p(cdna5::kVSwmmacF3216x16x64F16Vop3p, {.vdst = ACC_OFF,
+                                                                .opsel = 1,
+                                                                .src0 = 256 + A_OFF,
+                                                                .src1 = 256 + B_OFF,
+                                                                .src2 = 256 + INDEX_OFF});
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + ACC_OFF, 0), 0x40c00000U);
+  }
+}
+
 TEST(SwmmacK64SimdExact, AllDecodedFormsMatchScalarForLegalMetadata) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
 
   constexpr std::array MODES{Mode::RandomInt, Mode::Zeros, Mode::SignedZero, Mode::Cancel,
                              Mode::NaN,       Mode::Inf,   Mode::Denorm,     Mode::MaxFinite};
@@ -366,9 +387,6 @@ TEST(SwmmacK64SimdExact, AllDecodedFormsMatchScalarForLegalMetadata) {
 }
 
 TEST(SwmmacK64SimdExact, PackedF16SnapshotsAliasedInputsAndSupportsReuseHints) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
 
   const auto &test = SWMMAC_CASES[2];
   constexpr std::array ALIASES{DstAlias::A, DstAlias::B, DstAlias::Index};
@@ -414,7 +432,7 @@ TEST(SwmmacK64SimdExact, Bf16ResultRoundsHalfwayToEven) {
   const auto words = cdna5::build_vop3p(
       test.opcode,
       {.vdst = ACC_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);

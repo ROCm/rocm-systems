@@ -510,7 +510,7 @@ NCCL_DEVICE_INLINE uint64_t nccl_umul64hi(uint64_t a, uint64_t b) {
 #else // Host fallbacks
 
 inline uint32_t nccl_umulhi(uint32_t a, uint32_t b) {
-  return uint64_t(a) * b >> 32;
+  return (uint64_t)a * b >> 32;
 }
 
 inline uint64_t nccl_umul64hi(uint64_t a, uint64_t b) {

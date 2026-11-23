@@ -8,7 +8,8 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
 
 #include "rocjitsu/base/api.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address_types.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <algorithm>
 #include <array>
@@ -23,10 +24,11 @@ class Operand;
 namespace amdgpu {
 
 /// Add an M0-relative VGPR offset after resolving the encoded register bank.
-inline std::optional<uint32_t> relative_vgpr_index(std::optional<uint32_t> base, uint32_t offset,
-                                                   uint32_t width, uint32_t allocation_size,
-                                                   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5) {
-  const uint32_t max_offset = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1023 : 255;
+inline std::optional<uint32_t>
+relative_vgpr_index(std::optional<uint32_t> base, uint32_t offset, uint32_t width,
+                    uint32_t allocation_size,
+                    rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5) {
+  const uint32_t max_offset = arch == rocjitsu::IsaFamily::Cdna5 ? 1023 : 255;
   if (!base || offset > max_offset || uint64_t{*base} + offset + width > allocation_size)
     return std::nullopt;
   return *base + offset;
@@ -83,9 +85,9 @@ constexpr bool valid_lds_direct_operand(uint32_t m0) {
 
 enum class DsPermutation : uint8_t { None, Permute, Bpermute, BpermuteFi, Swizzle };
 
-constexpr unsigned ds_permute_group_width(rj_code_arch_t arch, unsigned wave_size) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+constexpr unsigned ds_permute_group_width(rocjitsu::IsaFamily arch, unsigned wave_size) {
+  if (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+      arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     return 32;
   return wave_size;
 }
@@ -193,6 +195,115 @@ constexpr uint64_t valu_swap_write_lanes(uint64_t exec, unsigned wave_size, unsi
   return exec & wave & (upper ? lower << stride : lower);
 }
 
+/// VMEM and EXP substitute v0 independently for each missing source DWORD.
+constexpr uint16_t gfx115_source_vgpr(uint32_t selector, uint32_t allocation) {
+  return selector < allocation ? static_cast<uint16_t>(selector) : 0;
+}
+
+template <typename Encoding>
+constexpr std::array<uint8_t, 4> shader_export_sources(const Encoding &inst) {
+  return {static_cast<uint8_t>(inst.vsrc0), static_cast<uint8_t>(inst.vsrc1),
+          static_cast<uint8_t>(inst.vsrc2), static_cast<uint8_t>(inst.vsrc3)};
+}
+
+class Gfx10ShaderExportOperands {
+public:
+  uint8_t target, enabled;
+  bool compressed;
+  std::array<uint8_t, 4> sources;
+
+  bool valid() const {
+    return (target <= 9 || (target >= 12 && target <= 16) || target == 20 || target >= 32) &&
+           (!compressed || !((enabled ^ (enabled >> 1)) & 5u));
+  }
+
+  template <typename Visit> void for_each_source(uint32_t allocation, Visit visit) const {
+    if (target == 9)
+      return;
+    for (unsigned channel = 0; channel < 4; channel += compressed ? 2 : 1)
+      if (enabled & (1u << channel))
+        visit(channel, gfx115_source_vgpr(sources[compressed ? channel / 2 : channel], allocation));
+  }
+};
+
+class ShaderExportOperands {
+public:
+  static constexpr uint8_t kLastMrt = 7, kDepth = 8, kFirstPosition = 12, kLastPosition = 16,
+                           kPrimitive = 20, kDualSource0 = 21, kDualSource1 = 22;
+  uint8_t target;
+  uint8_t components;
+  bool done;
+  bool row_from_m0;
+  std::array<uint8_t, 4> sources;
+
+  /// Decode the shared GFX11 EXP and GFX12 VEXPORT operand layout.
+  template <typename Encoding> static ShaderExportOperands decode(const Encoding &inst) {
+    return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.done),
+            bool(inst.row_en), shader_export_sources(inst)};
+  }
+
+  uint64_t source_lanes(uint64_t exec) const {
+    if (target == kDualSource0) {
+      const uint64_t even = exec & 0x5555555555555555ULL;
+      return even | (even << 1);
+    }
+    if (target == kDualSource1) {
+      const uint64_t odd = exec & 0xaaaaaaaaaaaaaaaaULL;
+      return odd | (odd >> 1);
+    }
+    return exec;
+  }
+
+  bool channel_enabled(unsigned channel) const { return components & (1u << channel); }
+
+  template <typename Visit> void for_each_source(uint32_t allocation, Visit visit) const {
+    for (unsigned channel = 0; channel < sources.size(); ++channel)
+      if (channel_enabled(channel))
+        visit(channel, gfx115_source_vgpr(sources[channel], allocation));
+  }
+};
+
+/// E8M0 scale location for a CDNA5 V_CVT_SCALE_PK widening conversion.
+struct CvtScaleSelection {
+  uint8_t lane_base;
+  uint8_t first_byte;
+  uint8_t byte_step;
+
+  // CDNA5 ISA 7.6.3, Table 36. Bit 0 selects the scale half-wave. Bit 2 selects
+  // Block16, where bit 1 chooses bytes 0/2 or 1/3 for the two data half-waves.
+  // In Block32, bit 1 chooses bytes 0/1 or 2/3. Bit 3 is ignored.
+  static constexpr CvtScaleSelection f4_f6(unsigned opsel) {
+    const auto base = static_cast<uint8_t>((opsel & 1) * 16);
+    const auto pair = static_cast<uint8_t>(opsel & 2);
+    if (opsel & 4)
+      return {base, static_cast<uint8_t>(pair / 2), 2};
+    return {base, pair, 1};
+  }
+
+  // Table 37. Bit 3 selects Block16. In Block32, bit 0 selects the scale half-wave
+  // and bits 1 and 2 contribute 2 and 1 to the byte index shared by both data halves.
+  // In Block16, bit 1 selects both the scale half-wave and byte pair. Bit 0 is
+  // ignored. Selectors 12..15 are reserved.
+  static constexpr CvtScaleSelection f8(unsigned opsel) {
+    if (opsel & 8) {
+      const unsigned half = (opsel >> 1) & 1;
+      return {static_cast<uint8_t>(half * 16), static_cast<uint8_t>(half * 2), 1};
+    }
+    return {static_cast<uint8_t>((opsel & 1) * 16),
+            static_cast<uint8_t>((opsel & 2) | ((opsel >> 2) & 1)), 0};
+  }
+
+  constexpr unsigned lane(unsigned data_lane) const { return (data_lane & ~16u) | lane_base; }
+  constexpr unsigned byte(unsigned data_lane) const {
+    return first_byte + ((data_lane & 16) ? byte_step : 0);
+  }
+};
+
+constexpr bool has_gfx11_plus_image_operands(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4;
+}
+
 /// @brief Decoded register-access modifiers.
 /// @details This view contains no wave state or values.
 struct RegisterModifiers {
@@ -203,11 +314,11 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf; // Last data word, excluding optional image status.
   /// A nonzero count bounds the payload masks. An appended status word owns all four bytes.
   uint8_t memory_result_payload_words = 0;
-  bool memory_result_has_status = false;
-  void set_packed_image_result(unsigned components, unsigned result_words) {
+  std::optional<CvtScaleSelection> cvt_scale; // Widening conversion scale in SRC1.
+  void set_packed_image_result(unsigned components) {
     if (components & 1u) {
       memory_result_last_bytes = 0x3;
-      memory_result_has_status = result_words > (components + 1) / 2;
+      memory_result_payload_words = (components + 1) / 2;
     }
   }
   const Operand *packed_store_data = nullptr; // Only the low half of the final word is stored.
@@ -216,16 +327,33 @@ struct RegisterModifiers {
 
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
+  std::optional<ShaderExportOperands> shader_export;
+  /// Base SGPR selector of the four-DWORD BVH resource (encoded SRSRC multiplied by four).
+  std::optional<uint16_t> bvh_resource;
+  /// Leading VADDR words read for every active lane. The remaining ray words are
+  /// read only for lanes whose pointer can fetch a complete node from that resource.
+  uint8_t bvh_pointer_words = 0;
+  const Operand *image_atomic_data = nullptr;
+  const Operand *image_resource = nullptr;
+  bool image_resource_info = false;
+  std::optional<uint8_t> image_transfer_dim;
+  bool image_reads_address = true;
+  /// Sampling controls select active lanes and implicit derivative inputs from the 2x2 quad.
+  std::optional<ImageSampleSources> image_sample_sources;
+  const Operand *image_store_data = nullptr;
+  std::optional<Gfx10ShaderExportOperands> gfx10_export;
   /// Coordinate VGPR selectors, including NSA selectors.
   ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
-  /// VGPR words occupied by derivative inputs.
+  /// GFX10 GET_LOD reads quad lanes 0, 1, and 2 for each active quad.
+  bool gfx10_lod_query_quad = false;
+  /// VGPR words before coordinates, including offset, bias, compare, and explicit gradients.
   uint8_t image_prefix_words = 0;
-  /// Prefix words whose upper half is unused by packed odd-dimensional derivatives.
-  uint16_t image_low_half_prefix = 0;
+  /// Prefix words in which only the low half carries an input.
+  uint16_t image_prefix_low16_words = 0;
   /// GFX9 derives its actual tuple from the descriptor. The sentinel
   /// leaves RDNA's instruction-derived coordinate metadata in effect.
   struct Gfx9ImageTuple {
@@ -466,12 +594,13 @@ inline void append_bit_array(std::string &out, std::string_view name, uint32_t b
 /// @brief Add packed VOP3 source-selection and arithmetic attributes.
 inline void append_vop3p_disassembly(std::string &out, uint32_t op_sel, uint32_t op_sel_hi,
                                      uint32_t neg_lo, uint32_t neg_hi, uint32_t clamp,
-                                     uint32_t source_count, bool packed_defaults) {
+                                     uint32_t source_count, bool packed_defaults,
+                                     bool display_op_sel_hi = true) {
   const uint32_t mask = (uint32_t{1} << source_count) - 1;
   if ((op_sel & mask) != 0)
     append_bit_array(out, "op_sel", op_sel, source_count);
   const uint32_t default_op_sel_hi = packed_defaults ? mask : 0;
-  if ((op_sel_hi & mask) != default_op_sel_hi)
+  if (display_op_sel_hi && (op_sel_hi & mask) != default_op_sel_hi)
     append_bit_array(out, "op_sel_hi", op_sel_hi, source_count);
   if ((neg_lo & mask) != 0)
     append_bit_array(out, "neg_lo", neg_lo, source_count);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/diagnostic.h"
 
@@ -12,7 +13,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 std::unique_ptr<ShaderEngine> ShaderEngine::create(std::string name, const Config &config,
-                                                   rj_code_arch_t arch, GpuMemory *memory,
+                                                   rocjitsu::IsaFamily arch, GpuMemory *memory,
                                                    L2Cache *l2, simdojo::ExecMode exec_mode,
                                                    util::DiagnosticEmitter emit_error) {
   auto shader_engine = std::make_unique<ShaderEngine>(std::move(name));
@@ -21,8 +22,8 @@ std::unique_ptr<ShaderEngine> ShaderEngine::create(std::string name, const Confi
   return shader_engine;
 }
 
-util::Result ShaderEngine::configure(const Config &config, rj_code_arch_t arch, GpuMemory *memory,
-                                     L2Cache *l2, simdojo::ExecMode exec_mode,
+util::Result ShaderEngine::configure(const Config &config, rocjitsu::IsaFamily arch,
+                                     GpuMemory *memory, L2Cache *l2, simdojo::ExecMode exec_mode,
                                      util::DiagnosticEmitter emit_error) {
   set_weight(0); // Structural container, not a work-producing component.
   auto se_name = this->name();

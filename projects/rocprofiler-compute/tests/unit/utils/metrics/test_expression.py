@@ -12,6 +12,7 @@ from utils.metrics.expression import (
     CodeTransformer,
     InvalidExpressionError,
     build_eval_string,
+    columns_read,
     update_denominator_string,
     update_normal_unit_string,
 )
@@ -146,3 +147,15 @@ class TestExpression:
             result = build_eval_string('"".__class__')
         assert result == ""
         assert mock_warning.called
+
+
+def test_columns_read_follows_built_in_variables():
+    """Columns read through nested built-in variables count too."""
+    build_in_vars = {
+        "numActiveCUs": "SQ_BUSY_CU_CYCLES / $GRBM_GUI_ACTIVE_PER_XCD",
+        "GRBM_GUI_ACTIVE_PER_XCD": "GRBM_GUI_ACTIVE / $num_xcd",
+    }
+
+    assert columns_read(
+        "raw_pmc_df['TCC_HIT[0]'] / ammolite__numActiveCUs", build_in_vars
+    ) == {"TCC_HIT[0]", "SQ_BUSY_CU_CYCLES", "GRBM_GUI_ACTIVE"}

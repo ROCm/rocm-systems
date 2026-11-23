@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
 
@@ -56,8 +57,8 @@ public:
   auto HALT() const { return member<13, 13>(); }
   auto TRAP() { return member<14, 14>(); }
   auto TRAP() const { return member<14, 14>(); }
-  auto SKIP_EXPORT() { return member<15, 15>(); }
-  auto SKIP_EXPORT() const { return member<15, 15>(); }
+  auto SKIP_EXPORT() { return member<18, 18>(); }
+  auto SKIP_EXPORT() const { return member<18, 18>(); }
   auto VALID() { return member<16, 16>(); }
   auto VALID() const { return member<16, 16>(); }
   auto ECC_ERR() { return member<17, 17>(); }
@@ -90,7 +91,7 @@ struct Isa : amdgpu::RdnaIsaBase {
 
 } // namespace rdna1
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_RDNA1> {
+template <> struct IsaTrait<rocjitsu::IsaFamily::Rdna1> {
   using type = rdna1::Isa;
 };
 

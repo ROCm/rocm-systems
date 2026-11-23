@@ -22,6 +22,7 @@
 /// CP documentation</a>
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -142,7 +143,7 @@ public:
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
   bool packed_tid() const { return packed_tid_; }
   /// @brief Configure launch and packet behavior derived from the GPU architecture.
-  void configure_for_arch(rj_code_arch_t arch);
+  void configure_for_arch(rocjitsu::IsaFamily arch);
   void set_shared_dispatch_pool(CpuDispatchPool *pool);
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
@@ -229,6 +230,10 @@ public:
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_queue_registration(uint64_t registration_id) noexcept;
 
+  /// @brief Stop pending execution once committed queue publication is complete.
+  [[nodiscard]] QueuePrepareCloseStatus
+  prepare_preempt_queue_registration(uint64_t registration_id) noexcept;
+
   /// @brief Register one DRM indirect-buffer submission queue.
   [[nodiscard]] bool register_drm_queue(ComputeQueueConfig config);
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
@@ -274,7 +279,7 @@ public:
   /// signal_queue_exception(..., false). This operation is safe to serialize
   /// under a driver status-publication mutex because it cannot flush CU
   /// notifications back into the driver. With wait_for_ack=false, success
-  /// means the status and interrupt were published, not consumed by ROCr.
+  /// means the status and software event were published, not consumed by ROCr.
   bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
                                bool wait_for_ack = true);
 
@@ -439,6 +444,17 @@ public:
     return queue == compute_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
   }
 
+  /// @brief Numeric identity namespace retained by a registered queue.
+  [[nodiscard]] std::optional<ProcessIdentityKind>
+  queue_process_identity_kind_for_test(uint32_t queue_id, uint32_t process_id) const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto queue = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &entry) {
+      return entry.queue_id == queue_id && entry.process_id == process_id;
+    });
+    return queue == compute_queues_.end() ? std::nullopt
+                                          : std::optional(queue->process_identity_kind);
+  }
+
   /// @brief Address-space identity carried by the first accepted queue entry.
   /// @details Test-only. The bounded history in ComputeQueueRecord lets fan-out tests
   /// inspect an entry after it has retired without retaining production work.
@@ -564,6 +580,20 @@ public:
            });
   }
 
+  /// @brief Whether a completed dispatch retained its scoped cache flush after a retry.
+  /// @details Test-only. The queued entry and ordinary VM snapshot remain live while
+  /// the blocked flush has not published the grid share or completion signal.
+  [[nodiscard]] bool completion_flush_retry_pending_for_test(uint32_t queue_id,
+                                                             uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const ComputeQueueRecord *state = find_compute_queue(queue_id, process_id);
+    if (state == nullptr || !state->publication_retry_pending || state->entries.empty())
+      return false;
+    const DispatchEntry &head = state->entries.front();
+    return head.fully_completed() && !head.grid_share_published &&
+           static_cast<bool>(head.completion_publication.flush_access);
+  }
+
   void drain_fanout_inbox_for_test() {
     drain_dispatch_fault_inbox();
     drain_fanout_inbox();
@@ -607,8 +637,10 @@ private:
   };
 
   uint64_t register_queue(ComputeQueueConfig queue, bool fanout_replica);
+  [[nodiscard]] QueuePrepareCloseStatus
+  prepare_close_queue_registration(uint64_t registration_id, QueueCloseMode mode) noexcept;
   [[nodiscard]] QueuePrepareCloseStatus close_queue_registration(uint64_t registration_id,
-                                                                 bool force) noexcept;
+                                                                 QueueCloseMode mode) noexcept;
 
   struct DispatchLaunchMetadata {
     std::array<uint32_t, 4> scratch_resource_descriptor{};
@@ -717,6 +749,7 @@ private:
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
   void cancel_queue_dispatches(const ComputeQueueRecord &queue);
+  void reset_ordered_ids(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void complete_failed_queue(ComputeQueueRecord &queue);
   void drain_pending_queue_failures();
@@ -994,8 +1027,13 @@ private:
   struct PendingClusterBarrierCompletion {
     uint32_t dispatch_id = 0;
     uint8_t completion_bit = 0;
+    uint64_t generation = 0; ///< The round that completed.
     std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
   };
+  /// Complete a cluster round on each peer workgroup and report it to plugins.
+  void
+  complete_cluster_barrier_round(uint32_t dispatch_id, uint8_t completion_bit, uint64_t generation,
+                                 std::span<const std::pair<ComputeUnitCore *, uint32_t>> peers);
   std::vector<PendingClusterBarrierCompletion> pending_cluster_barrier_completions_;
 
   class ClusterWorkgroupPlacement {
@@ -1025,6 +1063,8 @@ private:
     uint32_t member_count = 0;
     std::unordered_set<uint32_t> registered_workgroups;
     std::array<std::unordered_set<uint32_t>, 2> signaled_workgroups;
+    /// The current round of the cluster barrier and cluster trap barrier.
+    std::array<uint64_t, 2> generation{};
   };
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 

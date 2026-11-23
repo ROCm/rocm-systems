@@ -9,9 +9,11 @@
 #include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
+#include <algorithm>
 #include <bit>
 #include <limits>
 
@@ -147,4 +149,61 @@ TEST(WmmaF16F16W32Gfx12, Arithmetic) {
       rj_arith_v_wmma_f16_16x16x16_f16_w32_gfx12);
   rocjitsu::arith::test::expect_wmma_exact_simd<false, 32, false, true>(
       rj_arith_v_wmma_f16_16x16x16_f16_w32_gfx12);
+}
+
+// Check ties at zero, the normal/subnormal boundary, and between DOT4 stages.
+TEST(WmmaF16F16W32Gfx12, ExactPackedHalfway) {
+  using rocjitsu::arith::test::set_wmma_gfx12_half;
+  Registers r;
+  for (int reg = 0; reg < 12; ++reg) {
+    std::fill_n(r.v[reg], 32, 0);
+  }
+  set_wmma_gfx12_half<32>(r.v, 0, 0, 0x3800); // A[0,0] = 1/2.
+  set_wmma_gfx12_half<32>(r.v, 0, 8, 0x3800);
+  set_wmma_gfx12_half<32>(r.v + 4, 0, 0, 0x0001);
+  set_wmma_gfx12_half<32>(r.v + 4, 1, 0, 0x0003);
+  set_wmma_gfx12_half<32>(r.v + 4, 2, 0, 0x07ff);
+  // Column 3 receives half the least subnormal in each of two separate stages.
+  set_wmma_gfx12_half<32>(r.v + 4, 3, 0, 0x0001);
+  set_wmma_gfx12_half<32>(r.v + 4, 3, 8, 0x0001);
+
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    SCOPED_TRACE(cpu);
+    ASSERT_EQ(rj_arith_v_wmma_f16_16x16x16_f16_w32_gfx12(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0, r.v + 12, r.v, r.v + 4, r.v + 8),
+              RJ_ARITH_SUCCESS);
+    // Row 0 is the low half of D[0]. The four exact ties round to even.
+    EXPECT_EQ(uint16_t(r.v[12][0]), 0x0000);
+    EXPECT_EQ(uint16_t(r.v[12][1]), 0x0002);
+    EXPECT_EQ(uint16_t(r.v[12][2]), 0x0400);
+    EXPECT_EQ(uint16_t(r.v[12][3]), 0x0000);
+  }
+}
+
+// Both DOT4 totals would round to an FP16 midpoint if first rounded to FP32.
+TEST(WmmaF16F16W32Gfx12, ExactPackedDoubleRounding) {
+  using rocjitsu::arith::test::set_wmma_gfx12_half;
+  Registers r;
+  for (int reg = 0; reg < 12; ++reg) {
+    std::fill_n(r.v[reg], 32, 0);
+  }
+  set_wmma_gfx12_half<32>(r.v, 0, 0, 0x1000); // 2^-11
+  set_wmma_gfx12_half<32>(r.v, 0, 1, 0x0800); // 2^-13
+  set_wmma_gfx12_half<32>(r.v + 4, 0, 0, 0x3c00);
+  set_wmma_gfx12_half<32>(r.v + 4, 1, 0, 0x3c00);
+  set_wmma_gfx12_half<32>(r.v + 4, 0, 1, 0x0800);
+  set_wmma_gfx12_half<32>(r.v + 4, 1, 1, 0x8800);
+  r.v[8][0] = 0x3c00; // 1
+  r.v[8][1] = 0x3c01; // 1 + 2^-10
+
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    SCOPED_TRACE(cpu);
+    ASSERT_EQ(rj_arith_v_wmma_f16_16x16x16_f16_w32_gfx12(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0, r.v + 12, r.v, r.v + 4, r.v + 8),
+              RJ_ARITH_SUCCESS);
+    // Adding 2^-11 ± 2^-26 puts column 0 just above its midpoint and column 1
+    // just below its midpoint. Both round to the same odd FP16 significand.
+    EXPECT_EQ(uint16_t(r.v[12][0]), 0x3c01);
+    EXPECT_EQ(uint16_t(r.v[12][1]), 0x3c01);
+  }
 }

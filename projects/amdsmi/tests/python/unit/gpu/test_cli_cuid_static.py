@@ -282,6 +282,7 @@ class TestStaticCuidOutputShape(unittest.TestCase):
                 "soc_pstate",
                 "xgmi_plpd",
                 "profile",
+                "power_stabilization",
                 "numa",
                 "dfc_ucode",
                 "fb_info",

@@ -75,6 +75,7 @@ if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
     hipStreamCaptureExtModuleLaunchKernel.cc
     hipStreamBeginCaptureToGraph.cc
+    hipStreamCaptureNonBlockingInvalidation.cc
     hipGetProcAddressGraphApis.cc
     # Below files are disabled in NVIDIA as PSDB builds are failing due to lower CUDA version.
     hipGraphExecNodeSetParams.cc
@@ -85,7 +86,9 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamGetCaptureInfo_v2.cc
     hipStreamUpdateCaptureDependencies.cc
     hipGraphAddNodeBeginCapture.cc
+    hipStreamCaptureAPIRestrictions.cc
     hipGraphExternalSemaphoresNodes.cc
+    hipGraphInstantiateNullStreamFence.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
@@ -93,6 +96,23 @@ endif()
 hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+
+if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+  add_executable(hipGraphInstantiateNullStreamFence_exe EXCLUDE_FROM_ALL
+                 hipGraphInstantiateNullStreamFence_exe.cc)
+  set_source_files_properties(hipGraphInstantiateNullStreamFence_exe.cc
+                              PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipGraphInstantiateNullStreamFence_exe
+                        ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(GraphsTest1 hipGraphInstantiateNullStreamFence_exe)
+  # STANDALONE_TESTS creates a per-file target that also runs this helper.
+  if(TARGET hipGraphInstantiateNullStreamFence)
+    add_dependencies(hipGraphInstantiateNullStreamFence
+                     hipGraphInstantiateNullStreamFence_exe)
+  endif()
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+               hipGraphInstantiateNullStreamFence_exe)
+endif()
 
 # Collapse tests need scheduling flags set before HIP init.  They live in
 # their own binary built directly (bypassing hip_add_exe_to_target) so that
@@ -223,6 +243,10 @@ set(TEST_SRC
   hipDeviceGetGraphMemAttribute.cc
   hipDeviceGraphMemTrim.cc
   hipDrvGraphExecMemsetNodeSetParams.cc
+  hipGraphGetId.cc
+  hipGraphExecGetId.cc
+  hipGraphNodeGetLocalId.cc
+  hipGraphNodeGetToolsId.cc
   hipGraphMultiDevice.cc
 )
 

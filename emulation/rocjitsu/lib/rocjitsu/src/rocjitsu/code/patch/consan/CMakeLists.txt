@@ -59,7 +59,10 @@ add_custom_command(
     DEPENDS embed_probes.py ${_probe_inputs}
     VERBATIM
 )
-target_sources(rocjitsu_consan_compiler PRIVATE ${_embedded_probes})
+target_sources(
+    rocjitsu_consan_compiler
+    PRIVATE ${_embedded_probes} $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+)
 target_link_libraries(
     rocjitsu_consan_compiler
     PUBLIC rocjitsu_consan_image rocjitsu_dbt_internal simdojo_headers

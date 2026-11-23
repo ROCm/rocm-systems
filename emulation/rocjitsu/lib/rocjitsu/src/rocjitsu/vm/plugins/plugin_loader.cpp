@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
 #include "util/dynamic_loader.h"
+#include "util/host_path.h"
 #include "util/log.h"
 
 #include "flatbuffers/flexbuffers.h"
@@ -84,9 +85,9 @@ std::string resolve_plugin_path(const std::string &soname, const std::string &pl
 #if defined(__linux__)
   Dl_info info{};
   if (dladdr(reinterpret_cast<const void *>(&resolve_plugin_path), &info) != 0 && info.dli_fname) {
-    std::error_code error;
-    const auto module_dir = std::filesystem::canonical(info.dli_fname, error).parent_path();
-    if (!error) {
+    const std::filesystem::path module = util::canonical_host_path(info.dli_fname);
+    if (!module.empty()) {
+      const std::filesystem::path module_dir = module.parent_path();
       // Shared-library hosts keep plugins beside librocjitsu. The statically
       // linked CLI uses <build>/tools/rocjitsu/rocjitsu in a build tree and
       // <prefix>/bin/rocjitsu when installed, so probe those layouts too.
@@ -96,6 +97,7 @@ std::string resolve_plugin_path(const std::string &soname, const std::string &pl
           module_dir / ".." / "lib64" / soname,
           module_dir / ".." / ".." / soname,
       };
+      std::error_code error;
       for (const auto &candidate : candidates) {
         if (std::filesystem::is_regular_file(candidate, error) && !error)
           return candidate.lexically_normal().string();

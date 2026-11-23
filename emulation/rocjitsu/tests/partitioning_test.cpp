@@ -486,7 +486,7 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 64));
   EXPECT_EQ(loaded.execution_threads.engines, 8u);
-  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{25}));
   EXPECT_EQ(loaded.execution_threads.helpers, 0u);
   ASSERT_NE(loaded.async_resources, nullptr);
   EXPECT_EQ(loaded.async_resources->helpers(), 0u);
@@ -519,7 +519,7 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
   ASSERT_TRUE(test::load_valid_config_from_string(json, untouched, 64));
   EXPECT_EQ(untouched.cpu_thread_budget, 32u);
   EXPECT_EQ(untouched.execution_threads.engines, 8u);
-  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{25}));
   EXPECT_EQ(untouched.execution_threads.helpers, 0u);
 }
 
@@ -635,8 +635,8 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
     auto settings = std::move(settings_result).value();
     settings.request.helpers = 0;
     for (Case c : {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u},
-                   Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, cdna5 ? 25u : 17u},
-                   Case{40, 8, cdna5 ? 33u : 17u}, Case{48, 8, cdna5 ? 33u : 17u}}) {
+                   Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, 25},
+                   Case{40, 8, cdna5 ? 33u : 25u}, Case{48, 8, cdna5 ? 41u : 25u}}) {
       SCOPED_TRACE(name);
       SCOPED_TRACE(c.budget);
       settings.request.budget = c.budget;
@@ -653,24 +653,25 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsDoNotReserveUnusedHelpers) {
   for (const char *name : {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
-    const uint32_t max_cpu = cdna5 ? 40 : 24;
+    const uint32_t max_cpu = cdna5 ? 48 : 32;
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
         std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
         settings_diagnostic.emitter());
     ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
     auto settings = std::move(settings_result).value();
+    ASSERT_FALSE(settings.choices.empty());
+    EXPECT_EQ(settings.choices.back().helpers, 0u);
     for (uint32_t affinity = 1; affinity <= 128; ++affinity) {
       config::ExecutionThreadAllocation plan;
       ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, affinity));
       ASSERT_EQ(plan.dispatch.size(), 1u);
       const auto cpu = plan.engines + plan.dispatch[0] - 1;
       EXPECT_LE(cpu, std::min(affinity, max_cpu));
-      EXPECT_LE(cpu + plan.helpers, std::min(affinity, max_cpu + 8));
       EXPECT_EQ(plan.helpers, 0u);
       if (affinity >= 24) {
         EXPECT_EQ(plan.engines, 8u);
-        const uint32_t expected_cpu = cdna5 && affinity >= 32 ? (affinity >= 40 ? 40 : 32) : 24;
+        const uint32_t expected_cpu = std::min(affinity / 8 * 8, max_cpu);
         EXPECT_EQ(cpu, expected_cpu);
       }
     }
@@ -1045,10 +1046,9 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 // than in a CI grep keeps every config covered as new ones are added.
 TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   const std::set<std::string> kPinnedConfigs = {
-      "gfx950_mi350x_kmd_2gpu.json",
-      "gfx950_mi355x_kmd_2gpu.json",
-      "gfx1250_mi455x_kmd_4gpu.json",
-      "gfx1250_mi455x_kmd_2node_net.json",
+      "gfx950_mi350x_kmd_2gpu.json",      "gfx950_mi355x_kmd_2gpu.json",
+      "gfx1250_mi455x_kmd_4gpu.json",     "gfx1250_mi455x_kmd_2node_net.json",
+      "gfx1250_mi455x_4gpu_scaleup.json", "gfx1250_mi455x_kmd_4node_2gpu_if.json",
   };
   std::set<std::string> saw_pinned_configs;
   uint32_t configs_checked = 0;
@@ -1078,7 +1078,8 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
       // turns a pin of 0 -- which opts back into the default -- into 1 as
       // surely as a real pin does. At 64 the config has to carry the literal 1.
       config::LoadedConfig pinned;
-      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json") {
+      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json" ||
+          entry.path().filename() == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
         ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), pinned, "node0",
                                                      /*host_threads=*/64));
       } else {
@@ -1098,24 +1099,31 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   EXPECT_GT(configs_checked, 1u);
 }
 
-TEST(XcdPartitioningTest, CApiDefaultsToOnePartitionPerXcdAndRuns) {
-  rj_vm_t *raw_vm = nullptr;
-  testing::internal::CaptureStderr();
-  const rj_status_t status = rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
-  const std::string warning = testing::internal::GetCapturedStderr();
-  ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(raw_vm, nullptr);
-  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+TEST(XcdPartitioningTest, CApiDefaultsFollowExecutionThreadBudgetAndRuns) {
+  // The shipped allocation table shares the budget with dispatch workers; a
+  // two-CPU host gets one engine, not min(host CPUs, XCDs). Pin the budgets so
+  // both small CI runners and large developer machines exercise this rule.
+  for (const auto &[budget, engines] :
+       {std::pair{1u, 1u}, std::pair{2u, 1u}, std::pair{4u, 2u}, std::pair{16u, 8u}}) {
+    SCOPED_TRACE(budget);
+    std::string json;
+    ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 0));
+    json.insert(json.find('{') + 1, "\"cpu_thread_budget\":" + std::to_string(budget) + ",");
+    rj_vm_t *raw_vm = nullptr;
+    testing::internal::CaptureStderr();
+    const rj_status_t status = rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(raw_vm, nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
 
-  // Resolving the default is not a clamp, so it must not warn.
-  EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
-  EXPECT_EQ(vm->engine_config.num_threads, amdgpu::default_xcd_partition_count(vm->soc));
-
-  ASSERT_NE(vm->soc, nullptr);
-  for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
-    expect_subtree_partition(vm->soc->xcd(i), i % vm->engine_config.num_threads);
-
-  EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
+    EXPECT_EQ(vm->engine_config.num_threads, engines);
+    ASSERT_NE(vm->soc, nullptr);
+    for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
+      expect_subtree_partition(vm->soc->xcd(i), i % engines);
+    EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  }
 }
 
 TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {

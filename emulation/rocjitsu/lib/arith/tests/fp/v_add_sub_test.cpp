@@ -4,6 +4,7 @@
 // Tests for FP add/subtract and reversed-subtract entry points.
 
 #include "fp/binary_arithmetic_test.h"
+#include "fp/captured_gfx11_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
@@ -35,7 +36,8 @@ TEST(FpAddF16W64Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpAddF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
-      rj_arith_v_add_f32_w32_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true);
+      rj_arith_v_add_f32_w32_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -47,7 +49,8 @@ TEST(FpAddF32W32Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpAddF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
-      rj_arith_v_add_f32_w64_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true);
+      rj_arith_v_add_f32_w64_gfx12, [](double x, double y) { return x + y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -107,7 +110,8 @@ TEST(FpSubF16W64Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
-      rj_arith_v_sub_f32_w32_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true);
+      rj_arith_v_sub_f32_w32_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -119,7 +123,8 @@ TEST(FpSubF32W32Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
-      rj_arith_v_sub_f32_w64_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true);
+      rj_arith_v_sub_f32_w64_gfx12, [](double x, double y) { return x - y; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -155,7 +160,8 @@ TEST(FpSubrevF16W64Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubrevF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
-      rj_arith_v_subrev_f32_w32_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true);
+      rj_arith_v_subrev_f32_w32_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -167,7 +173,8 @@ TEST(FpSubrevF32W32Gfx11, Arithmetic) {
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpSubrevF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
-      rj_arith_v_subrev_f32_w64_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true);
+      rj_arith_v_subrev_f32_w64_gfx12, [](double x, double y) { return y - x; }, /*gfx12=*/true,
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -257,7 +264,8 @@ TEST(FpSubF16, CompatibilityNanSigns) {
   }
 }
 
-// Compatibility retains Rocjitsu's quieting policy, including gfx11 with IEEE clear.
+// Compatibility quiets signaling NaNs on gfx11 only when IEEE is set; with IEEE clear the
+// source is kept, as gfx1100 does.
 TEST(FpBinaryF16, CompatibilitySignalingNan) {
   using namespace rocjitsu::arith::test;
   const auto calls = {rj_arith_v_add_f16_w32, rj_arith_v_sub_f16_w32, rj_arith_v_mul_f16_w32};
@@ -273,7 +281,9 @@ TEST(FpBinaryF16, CompatibilitySignalingNan) {
             uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | ieee | rounding |
                              (omod ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
             ASSERT_EQ(call(flags, 1, omod, r.v + 2, r.v, r.v + 1, nullptr), RJ_ARITH_SUCCESS);
-            EXPECT_EQ(r.v[2][0] & 0xffffU, call == rj_arith_v_sub_f16_w32 ? 0xfe01U : 0x7e01U);
+            const uint32_t quiet = ieee ? 0x0200U : 0;
+            EXPECT_EQ(r.v[2][0] & 0xffffU,
+                      (call == rj_arith_v_sub_f16_w32 ? 0xfc01U : 0x7c01U) | quiet);
           }
         }
       }
@@ -299,12 +309,12 @@ TEST(FpAddF64, GuestRounding) {
                 {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL,
                  0x7fefffffffffffffULL}}};
   for (const auto &sample : cases) {
-    for (auto call : {rj_arith_v_add_f64_w32, rj_arith_v_add_f64_w32_gfx12}) {
-      check_binary64_rounding<32>(call, sample.a, sample.b, sample.expected);
-    }
-    for (auto call : {rj_arith_v_add_f64_w64, rj_arith_v_add_f64_w64_gfx12}) {
-      check_binary64_rounding<64>(call, sample.a, sample.b, sample.expected);
-    }
+    check_binary64_rounding<32>(rj_arith_v_add_f64_w32, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<32>(rj_arith_v_add_f64_w32_gfx12, sample.a, sample.b, sample.expected);
+    check_binary64_rounding<64>(rj_arith_v_add_f64_w64, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<64>(rj_arith_v_add_f64_w64_gfx12, sample.a, sample.b, sample.expected);
   }
 }
 
@@ -323,5 +333,179 @@ TEST(FpAddF64, NanPriority) {
     const uint64_t expected[] = {sample[2], sample[2], sample[2], sample[2]};
     check_binary64_rounding<32>(rj_arith_v_add_f64_w32_gfx12, sample[0], sample[1], expected);
     check_binary64_rounding<64>(rj_arith_v_add_f64_w64_gfx12, sample[0], sample[1], expected);
+  }
+}
+
+namespace {
+
+using rocjitsu::arith::test::CapturedGfx11;
+
+// gfx1100 lanes from the MODE.IEEE-clear corpus (hw1100-noieee), plus AbsA/AbsB from a W7900
+// probe: a signaling NaN source is returned unquieted, after ABS, NEG and the SUB sign flip, also
+// under directed rounding and OMOD.
+const CapturedGfx11 add_f16_lanes[] = {
+    {"E32Mode00", 0, 0x100, 0x63377c01, 0x12680000, 0, 0xa5a57c01},
+    {"E32RoundDown", 0, 0x15a, 0xaabb0000, 0xd5d77c01, 0, 0xa5a57c01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0x2d450000, 0x452b7c01, 0, 0xa5a5fc01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0xc9457c01, 0xba620000, 0, 0xa5a57c01},
+    {"AbsA", RJ_ARITH_ALU_ABS_A, 0x1f0, 0xa5a5fc01, 0xa5a53c00, 0, 0xa5a57c01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
+     0xaf2ec100, 0xfd498000, 0, 0xfd49a5a5},
+};
+const CapturedGfx11 sub_f16_lanes[] = {
+    {"E32Mode00", 0, 0x100, 0xbd0b7c01, 0x78430000, 0, 0xa5a57c01},
+    {"E32RoundDownSubtrahend", 0, 0x15a, 0x7a990000, 0x0e867c01, 0, 0xa5a5fc01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0xadab0000, 0xb5ff7c01, 0, 0xa5a57c01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x76637c01, 0xb7bd0000, 0, 0xa5a57c01},
+    {"AbsB", RJ_ARITH_ALU_ABS_B, 0x1f0, 0xa5a53c00, 0xa5a5fc01, 0, 0xa5a5fc01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
+     0xa6ec83ff, 0xfce20000, 0, 0x7ce2a5a5},
+};
+const CapturedGfx11 subrev_f16_lanes[] = {
+    {"E32Mode00", 0, 0x100, 0xa4e67c01, 0x42b40000, 0, 0xa5a5fc01},
+    {"E32RoundDown", 0, 0x15a, 0x940d0000, 0x9faf7c01, 0, 0xa5a57c01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0x1b0d0000, 0x0e5b7c01, 0, 0xa5a5fc01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0xc29d7c01, 0x569b0000, 0, 0xa5a5fc01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
+     0x4d62fe00, 0x7d338000, 0, 0x7d33a5a5},
+};
+
+// gfx1100 (W7900) CLAMP lanes with a signaling-NaN source. DX10_CLAMP clear lets the NaN
+// through CLAMP, unquieted with IEEE clear and quieted with IEEE set; DX10_CLAMP set gives 0.
+const CapturedGfx11 add_f16_clamp_lanes[] = {
+    {"Dx10ClampOff", RJ_ARITH_ALU_CLAMP, 0x0f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57c01},
+    {"Dx10ClampOffFlush", RJ_ARITH_ALU_CLAMP, 0x000, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57c01},
+    {"Dx10ClampOn", RJ_ARITH_ALU_CLAMP, 0x1f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a50000},
+    {"IeeeSet", RJ_ARITH_ALU_CLAMP, 0x2f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57e01},
+};
+const CapturedGfx11 sub_f16_clamp_lanes[] = {
+    {"Dx10ClampOff", RJ_ARITH_ALU_CLAMP, 0x0f0, 0xa5a53c00, 0xa5a57c01, 0, 0xa5a5fc01},
+    {"Dx10ClampOn", RJ_ARITH_ALU_CLAMP, 0x1f0, 0xa5a53c00, 0xa5a57c01, 0, 0xa5a50000},
+    {"IeeeSet", RJ_ARITH_ALU_CLAMP, 0x2f0, 0xa5a53c00, 0xa5a57c01, 0, 0xa5a5fe01},
+};
+const CapturedGfx11 subrev_f16_clamp_lanes[] = {
+    {"Dx10ClampOff", RJ_ARITH_ALU_CLAMP, 0x0f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a5fc01},
+    {"Dx10ClampOn", RJ_ARITH_ALU_CLAMP, 0x1f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a50000},
+    {"IeeeSet", RJ_ARITH_ALU_CLAMP, 0x2f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a5fe01},
+};
+
+// gfx1100 ADD_F64 returns the first NaN source with its modifiers applied, quieted only when
+// MODE.IEEE is set. IEEE-set lanes are from the gfx1100 v2 capture (hw2-gfx1100).
+const CapturedGfx11 add_f64_lanes[] = {
+    {"SignalingFirst", 0, 0x1f0, 0x7ff0000000000001, 0x7ff8000000000000, 0, 0x7ff0000000000001},
+    {"NegativeQuietFirst", 0, 0x1f0, 0xfff8000000000000, 0x7ff8000000000000, 0, 0xfff8000000000000},
+    {"PayloadFirst", 0, 0x1f0, 0x7ff8000012345678, 0x7ff8000000000000, 0, 0x7ff8000012345678},
+    {"SignalingSecondRoundZero", 0, 0x1ff, 0x0, 0x7ff0000000000001, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff8000000000000, 0x7ff8000000000000, 0,
+     0xfff8000000000000},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+    {"IeeeSetSignalingFirst", 0, 0x3f0, 0x7ff0000000000001, 0x7ff8000000000000, 0,
+     0x7ff8000000000001},
+    {"IeeeSetNegativeQuietFirst", 0, 0x3f0, 0xfff8000000000000, 0x7ff8000000000000, 0,
+     0xfff8000000000000},
+};
+
+} // namespace
+
+// Compatibility reproduces captured gfx1100 FP16 ADD/SUB/SUBREV lanes.
+TEST(FpAddSubF16Gfx11, CapturedSignalingNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 16>(rj_arith_v_add_f16_w32, add_f16_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_add_f16_w64, add_f16_lanes);
+  check_captured_gfx11<32, 16>(rj_arith_v_sub_f16_w32, sub_f16_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_lanes);
+  check_captured_gfx11<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_lanes);
+}
+
+// Compatibility reproduces captured gfx1100 clamped FP16 ADD/SUB/SUBREV NaN lanes.
+TEST(FpAddSubF16Gfx11, CapturedClampedNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 16>(rj_arith_v_add_f16_w32, add_f16_clamp_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_add_f16_w64, add_f16_clamp_lanes);
+  check_captured_gfx11<32, 16>(rj_arith_v_sub_f16_w32, sub_f16_clamp_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_clamp_lanes);
+  check_captured_gfx11<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_clamp_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_clamp_lanes);
+}
+
+// Compatibility and strict exact reproduce captured gfx1100 FP64 ADD NaN lanes.
+TEST(FpAddF64Gfx11, CapturedNans) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_add_f64_w32, add_f64_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_add_f64_w64, add_f64_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) Track C hw1100-wide corpus (2026-11-18), MODE.IEEE clear, denormals
+// kept: min normal + -1.0 rounds to -1.0 only to nearest and toward -inf; toward +inf and zero
+// give the predecessor. A kernel that ignores guest rounding fails two of the four rows.
+const CapturedGfx11 add_f64_rounding_lanes[] = {
+    {"MinNormalMinusOneNearest", 0, 0x1f0, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbff0000000000000},
+    {"MinNormalMinusOneRoundUp", 0, 0x1f5, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbfefffffffffffff},
+    {"MinNormalMinusOneRoundDown", 0, 0x1fa, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbff0000000000000},
+    {"MinNormalMinusOneRoundZero", 0, 0x1ff, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbfefffffffffffff},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce captured gfx1100 FP64 ADD directed rounding.
+TEST(FpAddF64Gfx11, CapturedDirectedRounding) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_add_f64_w32, add_f64_rounding_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_add_f64_w64, add_f64_rounding_lanes);
+}
+
+// Expected causes retain the inherited bridge classifiers, including their
+// distinction from the separately qualified strict MUL reporting model.
+TEST(FpBinaryF32, CompatibilityStatus) {
+  using namespace rocjitsu::arith::test;
+  struct Case {
+    decltype(&rj_arith_v_add_f32_w32) wave32;
+    decltype(&rj_arith_v_add_f32_w64) wave64;
+    uint32_t a, b, causes;
+    uint64_t mode = 0, fp = 0;
+  };
+  const Case cases[] = {
+      {rj_arith_v_add_f32_w32_gfx12, rj_arith_v_add_f32_w64_gfx12, 0x7f7fffff, 0x7f7fffff, 0x28},
+      {rj_arith_v_add_f32_w32_gfx12, rj_arith_v_add_f32_w64_gfx12, 0x7f7fffff, 0x7f7fffff, 8,
+       RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_sub_f32_w32_gfx12, rj_arith_v_sub_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
+      {rj_arith_v_subrev_f32_w32_gfx12, rj_arith_v_subrev_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0, 0x7f800000, 1},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x7fc00000, 2},
+      {rj_arith_v_mul_f32_w32, rj_arith_v_mul_f32_w64, 0, 0x7f800000, 0},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0x7f7fffff, 0x40000000, 8,
+       RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0x32, 0,
+       RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS},
+      {rj_arith_v_min_num_f32_w32, rj_arith_v_min_num_f32_w64, 0x7f800000, 1, 2},
+      {rj_arith_v_maximum_f32_w32, rj_arith_v_maximum_f32_w64, 0x7f800001, 1, 3},
+      {rj_arith_v_min_num_f32_w32_gfx1250, rj_arith_v_min_num_f32_w64_gfx1250, 0x7f800001, 1, 0},
+  };
+  for (auto cpu : supported_cpu_levels()) {
+    for (int lanes : {32, 64}) {
+      for (const auto &test : cases) {
+        for (uint64_t exec_mask : {uint64_t(0), uint64_t(1) << (lanes - 1)}) {
+          Registers<3, 64> r;
+          r.v[0][lanes - 1] = test.a;
+          r.v[1][lanes - 1] = test.b;
+          uint32_t status = 0x80;
+          const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | test.fp;
+          // Alias D with A to catch classification performed after the source is overwritten.
+          const int error =
+              lanes == 32
+                  ? test.wave32(flags, uint32_t(exec_mask), test.mode, r.v, r.v, r.v + 1, &status)
+                  : test.wave64(flags, exec_mask, test.mode, r.v, r.v, r.v + 1, &status);
+          ASSERT_EQ(error, RJ_ARITH_SUCCESS);
+          EXPECT_EQ(status, 0x80U | (exec_mask ? test.causes : 0));
+        }
+      }
+    }
   }
 }

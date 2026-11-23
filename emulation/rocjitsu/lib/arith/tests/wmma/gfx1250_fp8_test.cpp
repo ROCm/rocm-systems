@@ -6,7 +6,8 @@
 #include "common/floating_point.h"
 #include "common/half_reference.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include <array>
 #include <bit>
 #include <cmath>
@@ -39,7 +40,8 @@ float decode(uint8_t code, bool bf8, bool fnuz) {
 }
 
 // Exercise one instruction on all CPU levels with shared deterministic data and aliases.
-template <int K, bool Bf8A, bool Bf8B, bool Packed> void arithmetic(Entry entry) {
+template <int K, bool Bf8A, bool Bf8B, bool Packed>
+void check_arithmetic(Entry entry, bool inject_nonfinite) {
   constexpr int Inputs = K / 8, Outputs = Packed ? 4 : 8;
   std::array<std::array<uint32_t, 32>, 2 * Inputs + 16> input{};
   std::minstd_rand random;
@@ -56,16 +58,25 @@ template <int K, bool Bf8A, bool Bf8B, bool Packed> void arithmetic(Entry entry)
       }
     }
   }
-  input[0][0] = Bf8A ? 0x7d : 0x7f;
-  input[Inputs][0] = Bf8B ? 0x7d : 0x7f;
+  if (inject_nonfinite) {
+    // Put two different E5M2 NaNs in distinct packed byte positions.
+    input[0][0] = Bf8A ? 0x0000fd00U : 0x7f;
+    input[Inputs][0] = Bf8B ? 0x7f000000U : 0x7f;
+    if constexpr (!Packed) {
+      input[2 * Inputs][3] = 0;
+      input[2 * Inputs + 2][0] = 0;
+    }
+  }
   // A finite overflowing dot distinguishes normal narrowing from FP16_OVFL saturation.
   for (int reg = 0; reg < Inputs; ++reg) {
     input[reg][3] = input[reg][19] = Bf8A ? 0x7b7b7b7bU : 0x7e7e7e7eU;
     input[Inputs + reg][7] = input[Inputs + reg][23] = Bf8B ? 0x7b7b7b7bU : 0x7e7e7e7eU;
   }
-  // C contains one infinity and one NaN; both are retained by the reduction.
-  input[2 * Inputs][1] = Packed ? 0x7c00U : kF32PositiveInfinityBits;
-  input[2 * Inputs][2] = Packed ? 0x7e00U : kF32QuietNaNBits;
+  if (inject_nonfinite) {
+    // C contains one infinity and one NaN; both are retained by the reduction.
+    input[2 * Inputs][1] = Packed ? 0x7c00U : kF32PositiveInfinityBits;
+    input[2 * Inputs][2] = Packed ? 0x7e00U : kF32QuietNaNBits;
+  }
   const auto levels = supported_cpu_levels();
   for (int variant : {0, 1, 2}) {
     uint64_t controls = variant == 1             ? RJ_ARITH_WMMA_ABS_C | RJ_ARITH_WMMA_NEG_C
@@ -138,6 +149,16 @@ template <int K, bool Bf8A, bool Bf8B, bool Packed> void arithmetic(Entry entry)
             continue;
           }
           ASSERT_EQ(status, RJ_ARITH_SUCCESS);
+          if (inject_nonfinite) {
+            // Each output has just one NaN operand. BF8 widening keeps its sign
+            // and discards the E5M2 payload before the reduction.
+            if constexpr (!Packed && Bf8A) {
+              EXPECT_EQ(d[0][3], 0xffc00000U);
+            }
+            if constexpr (!Packed && Bf8B) {
+              EXPECT_EQ(d[2][0], 0x7fc00000U);
+            }
+          }
           for (int row = 0; row < 16; ++row) {
             for (int col = 0; col < 16; ++col) {
               int reg = row % 8, lane = col + 16 * (row / 8);
@@ -155,6 +176,12 @@ template <int K, bool Bf8A, bool Bf8B, bool Packed> void arithmetic(Entry entry)
   }
   EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 63, nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
+}
+template <int K, bool Bf8A, bool Bf8B, bool Packed> void arithmetic(Entry entry) {
+  for (bool inject_nonfinite : {false, true}) {
+    SCOPED_TRACE(inject_nonfinite);
+    check_arithmetic<K, Bf8A, Bf8B, Packed>(entry, inject_nonfinite);
+  }
 }
 } // namespace
 TEST(WmmaGfx1250Fp8, f32_64_fp8_fp8) {

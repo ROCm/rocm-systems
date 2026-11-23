@@ -4,6 +4,7 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -162,6 +163,7 @@ TEST(TensorDmaMemoryAccessObservationTest, PreservesLegacyPositionalInitializati
   EXPECT_EQ(access.data_size, 0u);
   EXPECT_EQ(access.tensor_dim0_stride, 0);
   EXPECT_EQ(access.tensor_dim1_stride, 0);
+  EXPECT_EQ(access.operation, amdgpu::Operation::Unknown);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDescriptorReadPropagatesFailure) {
@@ -264,7 +266,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsElementCountOverflow) {
   EXPECT_TRUE(validate_supported_descriptor(desc, layout).failed());
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaDenseTransferSkipsUnusedInteriorDimensions) {
+TEST(Gfx1250ExecutionTest, TensorDmaDenseTransferWithUnusedInteriorDimensions) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -273,8 +275,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaDenseTransferSkipsUnusedInteriorDimensions) 
   wf->set_lds_base(cu->allocate_lds(256));
   wf->set_lds_size(256);
 
-  // Axes 0, 2 and 4 each contain two elements. Axes 1 and 3 have zero
-  // bounds and deliberately large strides, but their tile dimensions are unused.
+  // Axes 0, 2 and 4 each contain two elements. Tile dimensions 1 and 3 are zero.
   constexpr uint64_t kGlobal = 0x135000;
   constexpr std::array<uint32_t, 16> groups{
       2u << 16, 2u << 16, 0,        2u << 16, 2u << 16, 99, 8u << 16, 0, // Group 1.
@@ -292,20 +293,41 @@ TEST(Gfx1250ExecutionTest, TensorDmaDenseTransferSkipsUnusedInteriorDimensions) 
   ASSERT_NE(store, nullptr);
 
   constexpr std::array<uint32_t, 8> global_indices{0, 1, 8, 9, 24, 25, 32, 33};
-  for (const uint32_t index_size : {0u, 1u << 30}) {
-    // The gather index-size flag has no effect on dense descriptors.
-    write_wave_sgpr(*cu, *wf, 0, 1u | index_size);
+  struct Case {
+    uint32_t extent1, extent3, index_size;
+    bool copies;
+  };
+  // In gfx1250 descriptor_fields.hip cases 2/3, LDS kept 0x80000000 + lane after the load.
+  // Cases 6/7 kept global[index] = 1000 + index after the store. The probes have one
+  // empty axis, numbered 1 and 2 respectively. Axis 3 here extends the same rule.
+  constexpr Case cases[]{
+      {0, 1, 0, false},
+      {1, 0, 0, false},
+      {1, 1, 0, true},
+      {1, 1, 1u << 30, true},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << "tensor_dim1=" << test_case.extent1 << " tensor_dim3=" << test_case.extent3
+                 << " index_size=" << test_case.index_size);
+    // The gather index-size bit has no effect on dense descriptors.
+    write_wave_sgpr(*cu, *wf, 0, 1u | test_case.index_size);
+    write_wave_sgpr(*cu, *wf, 14, test_case.extent1 << 16);
+    write_wave_sgpr(*cu, *wf, 21, test_case.extent3);
+    for (uint32_t tile_index = 0; tile_index < global_indices.size(); ++tile_index)
+      cu->lds().write32(wf->lds_base() + 4 * tile_index, 3000 + tile_index);
     for (uint32_t global_index = 0; global_index < 34; ++global_index)
       write_global_u32(*sim.memory, kGlobal + 4 * global_index, 1000 + global_index);
     ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
     for (uint32_t tile_index = 0; tile_index < global_indices.size(); ++tile_index) {
       EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * tile_index),
-                1000 + global_indices[tile_index]);
+                test_case.copies ? 1000 + global_indices[tile_index] : 3000 + tile_index);
       cu->lds().write32(wf->lds_base() + 4 * tile_index, 2000 + global_indices[tile_index]);
     }
     ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
     for (uint32_t global_index = 0; global_index < 34; ++global_index) {
-      const bool copied = std::ranges::find(global_indices, global_index) != global_indices.end();
+      const bool copied = test_case.copies &&
+                          std::ranges::find(global_indices, global_index) != global_indices.end();
       EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4 * global_index),
                 (copied ? 2000 : 1000) + global_index);
     }
@@ -1063,6 +1085,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   observer.inspect = [&](const amdgpu::TensorDmaMemoryAccessObservation &access) {
     if (!access.is_load)
       return;
+    EXPECT_EQ(access.operation, amdgpu::Operation::TENSOR_LOAD_TO_LDS);
     const uint64_t barrier = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
     load_was_complete_at_callback =
         cu->lds().read32(wf->lds_base() + 0 * sizeof(uint32_t)) == 0x81000000u &&
@@ -1110,6 +1133,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   observer.inspect = [&](const amdgpu::TensorDmaMemoryAccessObservation &access) {
     if (access.is_load)
       return;
+    EXPECT_EQ(access.operation, amdgpu::Operation::TENSOR_STORE_FROM_LDS);
     store_was_complete_at_callback =
         store_storage[0] == 0x82000000u && store_storage[1] == 0x82000001u &&
         store_storage[4] == 0x82000003u && store_storage[5] == 0x82000004u;
@@ -1567,12 +1591,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kGlobalSentinel);
 }
 
-// Pipelines drain an iterating prefetch with a zero-width tile. Such a tile
-// visits no elements, so its iteration need not describe valid origins: it
-// passes with an overlapping or zero stride, which no transfer could invert,
-// and with every tile dimension zero, which leaves no rank to iterate over. A
-// tile with elements and the same overlapping stride is still rejected.
-TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
+// A zero-width tile can drain an iterating prefetch even when every dimension is zero.
+TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsRankValidation) {
   constexpr uint64_t kGlobal = 0x18c000;
   // Distinct values, so a copy in either direction changes one of them.
   constexpr uint32_t kLdsSentinel = 0x5e5e5e5eu;
@@ -1591,7 +1611,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
        .tile_dim1 = 4,
        .tensor_dim0_stride = 1,
        .succeeds = true},
-      // A zero stride has no inverse; origin reconstruction would divide by it.
       {.name = "zero-width tile, zero stride",
        .tile_dim0 = 0,
        .tile_dim1 = 4,
@@ -1615,9 +1634,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
        .tile_dim1 = 0,
        .tensor_dim0_stride = 4,
        .succeeds = true},
-      {.name = "one-element-wide tile, overlapping stride",
+      {.name = "nonempty rank-one tile",
        .tile_dim0 = 1,
-       .tile_dim1 = 4,
+       .tile_dim1 = 0,
        .tensor_dim0_stride = 1,
        .succeeds = false},
   };
@@ -1816,6 +1835,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
     Gfx1250Sim sim;
     ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto &observer = install_tensor_dma_issue_observer(sim);
+    auto &arrivals = add_lds_barrier_arrival_recorder(*sim.plugin_group);
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -1847,6 +1867,18 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
               c.arrives ? kArrivedOnce : kUnarrived);
     ASSERT_EQ(observer.issues.size(), 1u);
     EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
+    // The arrival is reported exactly when it happens.
+    std::vector<LdsBarrierArrivalRecorder::Arrival> expected_arrivals;
+    if (c.arrives)
+      expected_arrivals.push_back(
+          {.observation = {.source = amdgpu::LdsBarrierArrivalObservation::Source::TensorDma,
+                           .cell_address = wf->lds_base() + kBarrierLdsAddr,
+                           .old_state = kUnarrived,
+                           .new_state = kArrivedOnce,
+                           .phase_completed = false},
+           .wave = wf,
+           .wave_state = amdgpu::WfState::RUNNING});
+    EXPECT_EQ(arrivals.arrivals, expected_arrivals);
     EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLdsSentinel);
     EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kGlobalSentinel);
   }
@@ -2799,9 +2831,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaUnsupportedCountEncodingsAreRejected) {
   }
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksRowsBeyondTensorDimension) {
-  // Two iterations cover four rows, but the tensor has only three. The final
-  // repeated row must be zero-filled instead of copied from global memory.
+TEST(Gfx1250ExecutionTest, TensorDmaIterateLoadsAndStoresAtEachGlobalBase) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -2812,101 +2842,73 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksRowsBeyondTensorDimension) {
 
   constexpr uint64_t kGlobal = 0x131000;
   constexpr uint32_t kCols = 2;
-  constexpr uint32_t kRows = 3;
   constexpr uint32_t kTileRows = 2;
+  constexpr uint32_t kRowStride = 4;
   constexpr uint32_t kIterations = 2;
+  constexpr uint32_t kTotalRows = kTileRows * kIterations;
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
   write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
   write_wave_sgpr(*cu, *wf, 13, kCols << 16);             // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, kRows << 16);             // tensor dim1.
   write_wave_sgpr(*cu, *wf, 15, kCols << 16);             // tile dim0.
   write_wave_sgpr(*cu, *wf, 16, kTileRows);               // tile dim1.
-  write_wave_sgpr(*cu, *wf, 17, kCols);                   // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 17, kRowStride);
   write_wave_sgpr(*cu, *wf, 18, 0);
   write_wave_sgpr(*cu, *wf, 19, 0);
   write_wave_sgpr(*cu, *wf, 20, 0);
-  write_wave_sgpr(*cu, *wf, 21, kCols * kTileRows); // LDS increment in elements.
-  write_wave_sgpr(*cu, *wf, 22, kCols * kTileRows); // Global increment in elements.
+  write_wave_sgpr(*cu, *wf, 21, kCols * kTileRows);      // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, kRowStride * kTileRows); // Global increment in elements.
   write_wave_sgpr(*cu, *wf, 23, (kIterations - 1) << 16);
 
-  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
-    for (uint32_t col = 0; col < kCols; ++col)
-      write_global_u32(*sim.memory, kGlobal + (row * kCols + col) * 4,
-                       0x45000000u + row * 0x100u + col);
-  }
-
-  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  const std::array<uint32_t, 3> load_words{0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  const std::array<uint32_t, 3> store_words{0xd0714001u, 0x7c000000u, 0x7c140c00u};
   auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
-  ASSERT_NE(load, nullptr);
-  load->execute(*load, wf);
-
-  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
-    for (uint32_t col = 0; col < kCols; ++col) {
-      const uint32_t actual =
-          cu->lds().read32(wf->lds_base() + (row * kCols + col) * sizeof(uint32_t));
-      const uint32_t expected = row < kRows ? 0x45000000u + row * 0x100u + col : 0u;
-      EXPECT_EQ(actual, expected) << "row " << row << ", col " << col;
-    }
-  }
-}
-
-TEST(Gfx1250ExecutionTest, TensorDmaIterateStoreSkipsRowsBeyondTensorDimension) {
-  // Two iterations source four LDS rows, but the tensor has only three. The
-  // final repeated row must not overwrite global memory.
-  Gfx1250Sim sim;
-  ASSERT_NO_FATAL_FAILURE(sim.initialize());
-  auto *cu = sim.cu();
-  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-  ASSERT_NE(wf, nullptr);
-  wf->set_lds_base(cu->allocate_lds(256));
-  wf->set_lds_size(256);
-
-  constexpr uint64_t kGlobal = 0x136000;
-  constexpr uint32_t kCols = 2;
-  constexpr uint32_t kRows = 3;
-  constexpr uint32_t kTileRows = 2;
-  constexpr uint32_t kIterations = 2;
-  constexpr uint32_t kSentinel = 0xAC1DAC1Du;
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
-  write_wave_sgpr(*cu, *wf, 13, kCols << 16);             // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, kRows << 16);             // tensor dim1.
-  write_wave_sgpr(*cu, *wf, 15, kCols << 16);             // tile dim0.
-  write_wave_sgpr(*cu, *wf, 16, kTileRows);               // tile dim1.
-  write_wave_sgpr(*cu, *wf, 17, kCols);                   // tensor dim0 stride.
-  write_wave_sgpr(*cu, *wf, 18, 0);
-  write_wave_sgpr(*cu, *wf, 19, 0);
-  write_wave_sgpr(*cu, *wf, 20, 0);
-  write_wave_sgpr(*cu, *wf, 21, kCols * kTileRows); // LDS increment in elements.
-  write_wave_sgpr(*cu, *wf, 22, kCols * kTileRows); // Global increment in elements.
-  write_wave_sgpr(*cu, *wf, 23, (kIterations - 1) << 16);
-
-  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
-    for (uint32_t col = 0; col < kCols; ++col) {
-      write_global_u32(*sim.memory, kGlobal + (row * kCols + col) * 4, kSentinel);
-      cu->lds().write32(wf->lds_base() + (row * kCols + col) * sizeof(uint32_t),
-                        0x4B000000u + row * 0x100u + col);
-    }
-  }
-
-  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c140c00u};
   auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(load, nullptr);
   ASSERT_NE(store, nullptr);
-  store->execute(*store, wf);
 
-  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
-    for (uint32_t col = 0; col < kCols; ++col) {
-      const uint32_t actual =
-          read_global_u32(*sim.memory, kGlobal + (row * kCols + col) * sizeof(uint32_t));
-      const uint32_t expected = row < kRows ? 0x4B000000u + row * 0x100u + col : kSentinel;
-      EXPECT_EQ(actual, expected) << "row " << row << ", col " << col;
+  struct Case {
+    uint32_t tensor_rows;
+    std::array<bool, kTotalRows> copied_rows;
+  };
+  constexpr Case cases[]{
+      // gfx1250 iteration_bounds.hip case 1 loaded global words 12 and 13 into LDS words 6 and 7.
+      // Case 5 stored 0x80000006 and 0x80000007 back to those global words.
+      {3, {true, true, true, true}},
+      // The model masks the second row in both tiles when the tensor has only one row.
+      // The three-row captures above have no out-of-bounds row within either tile.
+      {1, {true, false, true, false}},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(::testing::Message() << "tensor_rows=" << test_case.tensor_rows);
+    write_wave_sgpr(*cu, *wf, 14, test_case.tensor_rows << 16);
+    for (uint32_t global_index = 0; global_index < kTotalRows * kRowStride; ++global_index)
+      write_global_u32(*sim.memory, kGlobal + global_index * 4, 1000 + global_index);
+    for (uint32_t lds_index = 0; lds_index < kTotalRows * kCols; ++lds_index)
+      cu->lds().write32(wf->lds_base() + lds_index * 4, 0x80000000u + lds_index);
+
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+    for (uint32_t lds_index = 0; lds_index < kTotalRows * kCols; ++lds_index) {
+      const uint32_t row = lds_index / kCols, col = lds_index % kCols;
+      const uint32_t expected = test_case.copied_rows[row] ? 1000 + row * kRowStride + col : 0;
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + lds_index * 4), expected)
+          << "LDS word " << lds_index;
+      cu->lds().write32(wf->lds_base() + lds_index * 4, 0x80000000u + lds_index);
+    }
+
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+    for (uint32_t global_index = 0; global_index < kTotalRows * kRowStride; ++global_index) {
+      const uint32_t row = global_index / kRowStride, col = global_index % kRowStride;
+      const bool copied = col < kCols && test_case.copied_rows[row];
+      const uint32_t expected = copied ? 0x80000000u + row * kCols + col : 1000 + global_index;
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + global_index * 4), expected)
+          << "global word " << global_index;
     }
   }
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaZeroLengthDimensionMasksEntireTile) {
-  // Global memory contains data and LDS starts nonzero. A zero active tensor
-  // extent must actively zero-fill the tile rather than copy or do nothing.
+  // A positive tile extent with zero tensor extent uses the ISA out-of-bounds rule.
+  // Nonzero LDS distinguishes the modeled zero-fill from the measured both-zero no-op.
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -2947,6 +2949,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroLengthDimensionMasksEntireTile) {
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaRankThreeNullD2MasksTransfersAndCompletes) {
+  // Null D2 supplies a zero tensor extent on an active tile axis. This exercises
+  // the modeled out-of-bounds load/store behavior, including barrier completion.
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -3012,7 +3016,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRankThreeNullD2MasksTransfersAndCompletes) {
   EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaNonIteratingRankFiveAvoidsOriginDecomposition) {
+TEST(Gfx1250ExecutionTest, TensorDmaRankFiveAllowsZeroGlobalStrides) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -3052,9 +3056,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaNonIteratingRankFiveAvoidsOriginDecompositio
   EXPECT_EQ(cu->lds().read32(wf->lds_base()), kValue);
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksSubrowOriginBeyondTensor) {
-  // Three one-element iterations walk a 2x1 tensor. The first two origins are
-  // valid dim0 coordinates; the third carries into dim1 and must zero-fill.
+TEST(Gfx1250ExecutionTest, TensorDmaIterateAdvancesBySingleElements) {
+  // Three one-element tiles start at consecutive global addresses.
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -3091,12 +3094,12 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksSubrowOriginBeyondTensor) {
 
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x49000000u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x49000001u);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 2 * 4), 0u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 2 * 4), 0x49000002u);
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksPlanesBeyondTensorDimension) {
-  // The descriptor iterates across two planes of a tensor whose depth is one.
-  // The second plane must be zero-filled rather than copied.
+TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksOutOfBoundsPlanesWithinEveryTile) {
+  // Exercise the model's tile-local bounds in 3D. With two tile planes and tensor depth one,
+  // it zero-fills both second planes. The observer reports only the first plane of each tile.
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto &observer = install_tensor_dma_observer(sim);
@@ -3113,18 +3116,18 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksPlanesBeyondTensorDimension) {
   write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
   write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
   write_wave_sgpr(*cu, *wf, 15, 2u << 16);                // tile dim0.
-  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16));         // tile dim1 and dim2.
+  write_wave_sgpr(*cu, *wf, 16, 1u | (2u << 16));         // tile dim1 and dim2.
   write_wave_sgpr(*cu, *wf, 17, 2u);                      // tensor dim0 stride.
   write_wave_sgpr(*cu, *wf, 18, 4u << 16);                // tensor dim1 stride.
   write_wave_sgpr(*cu, *wf, 19, 0);
   write_wave_sgpr(*cu, *wf, 20, 1u);       // tensor dim2.
-  write_wave_sgpr(*cu, *wf, 21, 2u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 21, 4u);       // LDS increment in elements.
   write_wave_sgpr(*cu, *wf, 22, 4u);       // Global increment in elements.
   write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
 
-  for (uint32_t i = 0; i < 6; ++i)
+  for (uint32_t i = 0; i < 10; ++i)
     write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x4A000000u + i);
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 8; ++i)
     cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kSentinel);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
@@ -3136,12 +3139,16 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksPlanesBeyondTensorDimension) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x4A000001u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 2 * 4), 0u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 3 * 4), 0u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * 4), 0x4A000004u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 5 * 4), 0x4A000005u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 6 * 4), 0u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 7 * 4), 0u);
   ASSERT_EQ(observer.accesses.size(), 1u);
   EXPECT_EQ(observer.accesses[0].addresses,
-            (std::vector<uint64_t>{kGlobal, kGlobal + sizeof(uint32_t)}));
+            (std::vector<uint64_t>{kGlobal, kGlobal + 4, kGlobal + 16, kGlobal + 20}));
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesInBoundsOverlappingRows) {
+TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesOverlappingRows) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -3165,18 +3172,18 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesInBoundsOverlappingRows) {
   auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
   ASSERT_NE(store, nullptr);
 
-  constexpr std::array<uint32_t, 4> global_indices{0, 1, 1, 2};
+  constexpr std::array<uint32_t, 6> global_indices{0, 1, 1, 2, 2, 3};
   for (const uint32_t row_dim : {1u, 2u}) {
     SCOPED_TRACE(row_dim);
-    write_wave_sgpr(*cu, *wf, 23, 1u << 16); // Two iterations fit.
+    write_wave_sgpr(*cu, *wf, 23, 2u << 16); // Three overlapping tiles.
     // Use two active axes, also when the row resides in dimension 2.
-    write_wave_sgpr(*cu, *wf, 14, row_dim == 1 ? 2u << 16 : 0u); // tensor dim1.
-    write_wave_sgpr(*cu, *wf, 16, row_dim == 1 ? 1u : 1u << 16); // tile dim1 / dim2.
-    write_wave_sgpr(*cu, *wf, 17, row_dim == 1 ? 1u : 99u);      // dim0 stride.
-    write_wave_sgpr(*cu, *wf, 18, row_dim == 2 ? 1u << 16 : 0u); // dim1 stride.
+    write_wave_sgpr(*cu, *wf, 14, (row_dim == 1 ? 2u : 1u) << 16); // tensor dim1.
+    write_wave_sgpr(*cu, *wf, 16, row_dim == 1 ? 1u : 1u << 16);   // tile dim1 / dim2.
+    write_wave_sgpr(*cu, *wf, 17, row_dim == 1 ? 1u : 99u);        // dim0 stride.
+    write_wave_sgpr(*cu, *wf, 18, row_dim == 2 ? 1u << 16 : 0u);   // dim1 stride.
     write_wave_sgpr(*cu, *wf, 19, 0);
     write_wave_sgpr(*cu, *wf, 20, row_dim == 2 ? 2u : 0u); // tensor dim2.
-    for (uint32_t global_index = 0; global_index < 4; ++global_index)
+    for (uint32_t global_index = 0; global_index < 5; ++global_index)
       write_global_u32(*sim.memory, kGlobal + 4 * global_index, 1000 + global_index);
     ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
     for (uint32_t tile_index = 0; tile_index < global_indices.size(); ++tile_index) {
@@ -3185,17 +3192,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesInBoundsOverlappingRows) {
       cu->lds().write32(wf->lds_base() + 4 * tile_index, 2000 + global_indices[tile_index]);
     }
     ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
-    for (uint32_t global_index = 0; global_index < 3; ++global_index)
+    for (uint32_t global_index = 0; global_index < 4; ++global_index)
       EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4 * global_index), 2000 + global_index);
-    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 12), 1003u);
-
-    // A third tile would step past the last row of this overlapping layout.
-    write_wave_sgpr(*cu, *wf, 23, 2u << 16);
-    for (auto *inst : {load.get(), store.get()}) {
-      EXPECT_TRUE(cu->execute_instruction(inst, *wf).failed());
-      EXPECT_EQ(wf->instruction_execution_error(),
-                amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    }
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 16), 1004u);
   }
 }
 
@@ -3229,15 +3228,14 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateChecksAdvancingStepsAcrossUnusedDimen
 
   struct Case {
     uint32_t tile_dim1, global_increment;
-    bool supported;
   };
   constexpr Case cases[] = {
-      {0, 2, false}, // Step along the unused axis.
-      {1, 2, true},  // Same step with that axis active.
-      {0, 4, true},  // Whole row along dimension 2.
-      {0, 0, true},  // Repeated tile at the same origin.
+      {0, 2}, // Step along the unused axis.
+      {1, 2}, // Same step with that axis active.
+      {0, 4}, // Whole row along dimension 2.
+      {0, 0}, // Repeated tile at the same origin.
   };
-  for (const auto &[tile_dim1, increment, supported] : cases) {
+  for (const auto &[tile_dim1, increment] : cases) {
     SCOPED_TRACE(::testing::Message() << "tile_dim1=" << tile_dim1 << " increment=" << increment);
     write_wave_sgpr(*cu, *wf, 16, tile_dim1 | (1u << 16));
     write_wave_sgpr(*cu, *wf, 22, increment);
@@ -3250,28 +3248,21 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateChecksAdvancingStepsAcrossUnusedDimen
     for (uint32_t tile_index = 0; tile_index < 4; ++tile_index)
       cu->lds().write32(wf->lds_base() + 4 * tile_index, kSentinel);
 
-    const auto expected_error = supported
-                                    ? amdgpu::InstructionExecutionError::None
-                                    : amdgpu::InstructionExecutionError::UnsupportedOperandValue;
-    EXPECT_EQ(cu->execute_instruction(load.get(), *wf).succeeded(), supported);
-    EXPECT_EQ(wf->instruction_execution_error(), expected_error);
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
     for (uint32_t tile_index = 0; tile_index < 4; ++tile_index) {
       const uint32_t global_element = (tile_index / 2) * increment + tile_index % 2;
-      EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * tile_index),
-                supported ? 1000 + global_element : kSentinel);
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * tile_index), 1000 + global_element);
       cu->lds().write32(wf->lds_base() + 4 * tile_index, 2000 + global_element);
-      if (supported)
-        expected_global[global_element] = 2000 + global_element;
+      expected_global[global_element] = 2000 + global_element;
     }
-    EXPECT_EQ(cu->execute_instruction(store.get(), *wf).succeeded(), supported);
-    EXPECT_EQ(wf->instruction_execution_error(), expected_error);
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
     for (uint32_t global_index = 0; global_index < expected_global.size(); ++global_index)
       EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4 * global_index),
                 expected_global[global_index]);
   }
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsAliasedUnitExtent) {
+TEST(Gfx1250ExecutionTest, TensorDmaIterateLoadsUnitTilesAcrossStrideLayouts) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -3284,146 +3275,43 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsAliasedUnitExtent) {
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
   write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
   write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, 1u << 16);                // unit tensor dim1.
   write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
-  write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
-  write_wave_sgpr(*cu, *wf, 17, 1u); // dim1 aliases dim0 but has only one coordinate.
-  write_wave_sgpr(*cu, *wf, 18, 0);
   write_wave_sgpr(*cu, *wf, 19, 0);
-  write_wave_sgpr(*cu, *wf, 20, 0);
   write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
-  write_wave_sgpr(*cu, *wf, 22, 1u);       // advance along tensor dim0.
-  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
-
-  write_global_u32(*sim.memory, kGlobal, 0x55000000u);
-  write_global_u32(*sim.memory, kGlobal + sizeof(uint32_t), 0x55000001u);
-
-  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // Two iterations.
+  for (uint32_t global_index = 0; global_index < 8; ++global_index)
+    write_global_u32(*sim.memory, kGlobal + global_index * 4, 1000 + global_index);
+  const std::array<uint32_t, 3> load_words{0xd0710001u, 0x7c000000u, 0x7c140c00u};
   auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
   ASSERT_NE(load, nullptr);
-  load->execute(*load, wf);
 
-  EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x55000000u);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + sizeof(uint32_t)), 0x55000001u);
+  struct Case {
+    const char *layout;
+    uint32_t rows, planes, row_stride, plane_stride, global_increment;
+  };
+  constexpr Case cases[]{
+      {"aliased unit extent", 1, 0, 1, 0, 1},
+      {"permuted disjoint strides", 2, 2, 4, 2, 2},
+      {"overlapping rows with repeated origin", 2, 0, 1, 0, 0},
+      {"padded row and plane strides", 2, 2, 4, 6, 6},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.layout);
+    write_wave_sgpr(*cu, *wf, 14, test_case.rows << 16);
+    write_wave_sgpr(*cu, *wf, 16, test_case.planes ? (1u << 16) | 1u : 1u);
+    write_wave_sgpr(*cu, *wf, 17, test_case.row_stride);
+    write_wave_sgpr(*cu, *wf, 18, test_case.plane_stride << 16);
+    write_wave_sgpr(*cu, *wf, 20, test_case.planes);
+    write_wave_sgpr(*cu, *wf, 22, test_case.global_increment);
+    cu->lds().write32(wf->lds_base(), 0xDEADDEADu);
+    cu->lds().write32(wf->lds_base() + 4, 0xDEADDEADu);
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+    EXPECT_EQ(cu->lds().read32(wf->lds_base()), 1000u);
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4), 1000u + test_case.global_increment);
+  }
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsPermutedNonOverlappingStrides) {
-  Gfx1250Sim sim;
-  ASSERT_NO_FATAL_FAILURE(sim.initialize());
-  auto *cu = sim.cu();
-  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-  ASSERT_NE(wf, nullptr);
-  wf->set_lds_base(cu->allocate_lds(256));
-  wf->set_lds_size(256);
-
-  constexpr uint64_t kGlobal = 0x183000;
-  constexpr uint32_t kSentinel = 0xDEADDEADu;
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
-  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
-  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
-  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16));         // tile dim1 and dim2.
-  write_wave_sgpr(*cu, *wf, 17, 4u);                      // tensor dim1 stride.
-  write_wave_sgpr(*cu, *wf, 18, 2u << 16);                // tensor dim2 stride.
-  write_wave_sgpr(*cu, *wf, 19, 0);
-  write_wave_sgpr(*cu, *wf, 20, 2u);       // tensor dim2.
-  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
-  write_wave_sgpr(*cu, *wf, 22, 2u);       // advance along tensor dim2.
-  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
-
-  for (uint32_t i = 0; i < 8; ++i)
-    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x52000000u + i);
-  cu->lds().write32(wf->lds_base(), kSentinel);
-  cu->lds().write32(wf->lds_base() + sizeof(uint32_t), kSentinel);
-
-  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
-  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
-  ASSERT_NE(load, nullptr);
-  load->execute(*load, wf);
-
-  EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x52000000u);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + sizeof(uint32_t)), 0x52000002u);
-}
-
-TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsRepeatedOriginWithOverlappingStrides) {
-  Gfx1250Sim sim;
-  ASSERT_NO_FATAL_FAILURE(sim.initialize());
-  auto *cu = sim.cu();
-  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-  ASSERT_NE(wf, nullptr);
-  wf->set_lds_base(cu->allocate_lds(256));
-  wf->set_lds_size(256);
-
-  constexpr uint64_t kGlobal = 0x139000;
-  constexpr uint32_t kValue = 0x4D000000u;
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
-  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
-  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
-  write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
-  write_wave_sgpr(*cu, *wf, 17, 1u);                      // overlapping tensor dim0 stride.
-  write_wave_sgpr(*cu, *wf, 18, 0);
-  write_wave_sgpr(*cu, *wf, 19, 0);
-  write_wave_sgpr(*cu, *wf, 20, 0);
-  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
-  write_wave_sgpr(*cu, *wf, 22, 0);        // Global origin does not advance.
-  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
-
-  write_global_u32(*sim.memory, kGlobal, kValue);
-  cu->lds().write32(wf->lds_base() + 0 * sizeof(uint32_t), 0xDEADDEADu);
-  cu->lds().write32(wf->lds_base() + 1 * sizeof(uint32_t), 0xDEADDEADu);
-
-  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
-  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
-  ASSERT_NE(load, nullptr);
-  load->execute(*load, wf);
-
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * sizeof(uint32_t)), kValue);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * sizeof(uint32_t)), kValue);
-}
-
-TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsPaddedRowPlaneStride) {
-  Gfx1250Sim sim;
-  ASSERT_NO_FATAL_FAILURE(sim.initialize());
-  auto *cu = sim.cu();
-  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-  ASSERT_NE(wf, nullptr);
-  wf->set_lds_base(cu->allocate_lds(256));
-  wf->set_lds_size(256);
-
-  constexpr uint64_t kGlobal = 0x13A000;
-  constexpr uint32_t kSentinel = 0xDEADDEADu;
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
-  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
-  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
-  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16));         // tile dim1 and dim2.
-  write_wave_sgpr(*cu, *wf, 17, 4u);                      // padded tensor dim0 stride.
-  write_wave_sgpr(*cu, *wf, 18, 6u << 16);                // occupied plane span.
-  write_wave_sgpr(*cu, *wf, 19, 0);
-  write_wave_sgpr(*cu, *wf, 20, 2u);       // tensor dim2.
-  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
-  write_wave_sgpr(*cu, *wf, 22, 6u);       // Global plane increment in elements.
-  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
-
-  write_global_u32(*sim.memory, kGlobal, 0x4E000000u);
-  write_global_u32(*sim.memory, kGlobal + 6 * sizeof(uint32_t), 0x4E000001u);
-  cu->lds().write32(wf->lds_base(), kSentinel);
-  cu->lds().write32(wf->lds_base() + sizeof(uint32_t), kSentinel);
-
-  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
-  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
-  ASSERT_NE(load, nullptr);
-  load->execute(*load, wf);
-
-  EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x4E000000u);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + sizeof(uint32_t)), 0x4E000001u);
-}
-
-TEST(Gfx1250ExecutionTest, TensorDmaIterateZeroExtentSkipsLayoutValidationAndCompletes) {
+TEST(Gfx1250ExecutionTest, TensorDmaIterateZeroTensorExtentMasksEachTileAndCompletes) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -3537,7 +3425,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitIsNoOpForSingleWaveWorkgroup) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
@@ -3565,7 +3453,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterSignalQuorum) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
@@ -3598,7 +3486,7 @@ TEST(Gfx1250ExecutionTest, ReleaseWaitCounterWakesWaitcntWhenTargetIsSatisfied) 
   ASSERT_NE(wf, nullptr);
 
   wf->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
-  wf->set_wait_target_tensorcnt(0);
+  wf->wait_for({.tensorcnt = 0});
   ASSERT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
 
   wf->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
@@ -3734,6 +3622,279 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleArrivals) {
       amdgpu::lds_barrier_cell_update_arrive(reserved | amdgpu::lds_barrier_cell_init_state(2));
   EXPECT_EQ(reserved_state & amdgpu::kLdsBarrierCellReservedMask, reserved);
   EXPECT_EQ(amdgpu::lds_barrier_cell_init_count(reserved_state), 1ull);
+}
+
+// Whether an arrival meets the barrier is the roll-under test of CDNA5 ISA
+// 15.15: bit WIDTH-1 of the 32-bit subtraction result, with WIDTH=29. The
+// states and updates are those DsAtomicBarrierArriveSubtractsLowDwordAndReturnsOldCell
+// checks the cell contents for.
+TEST(Gfx1250ExecutionTest, LdsBarrierCellArriveCompletesPhaseOnRollUnder) {
+  struct Case {
+    uint64_t state;
+    uint32_t update;
+    bool completes;
+  };
+  constexpr Case kCases[] = {
+      {0x0000000300000000ull, 2, true},            // 0 - 2: rolls under.
+      {0x0000000320000002ull, 5, true},            // 2 - 5 borrows from a nonzero phase.
+      {0x0000000300000000ull, 0x20000000u, false}, // Result 0xe0000000: bit 28 clear.
+      {0x0000000300000000ull, 0x10000001u, false}, // Result 0xefffffff: bit 28 clear.
+      {0x0000000310000000ull, 0, true},            // Zero update, bit 28 already set.
+      {0x0000000200000002ull, 1, false},           // 2 - 1: one arrival still pending.
+      {0x0000000200000002ull, 0, false},           // Zero update, nothing pending rolls.
+  };
+  for (const Case &c : kCases) {
+    SCOPED_TRACE(testing::Message() << std::hex << c.state << " - " << c.update);
+    EXPECT_EQ(amdgpu::lds_barrier_cell_arrive_completes_phase(c.state, c.update), c.completes);
+  }
+
+  // A cell for two arrivals per phase completes on every second arrival.
+  uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+  for (const bool completes : {false, true, false, true}) {
+    EXPECT_EQ(amdgpu::lds_barrier_cell_arrive_completes_phase(state), completes);
+    state = amdgpu::lds_barrier_cell_update_arrive(state);
+  }
+  // A cell for one arrival per phase completes on each.
+  EXPECT_TRUE(
+      amdgpu::lds_barrier_cell_arrive_completes_phase(amdgpu::lds_barrier_cell_init_state(1)));
+}
+
+/// One wave with a 256-byte LDS allocation, for executing the DS barrier
+/// arrive instructions directly. VGPR 0 holds each lane's cell address and
+/// VGPRs 2-3 its 64-bit update value; the RTN form returns to VGPRs 4-5.
+struct LdsBarrierArriveTest : testing::Test {
+  using Source = amdgpu::LdsBarrierArrivalObservation::Source;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    cu = sim.cu();
+    wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+    wf->set_lds_size(256);
+  }
+
+  void set_lane(uint32_t lane, uint32_t cell, uint32_t update = 1) {
+    const uint32_t base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base, lane, cell);
+    cu->write_vgpr(base + 2, lane, update);
+    cu->write_vgpr(base + 3, lane, 0);
+  }
+
+  void set_cell(uint32_t cell, uint64_t state) { cu->lds().write64(wf->lds_base() + cell, state); }
+
+  /// Execute ds_atomic_barrier_arrive_rtn_b64 for the lanes in `exec`.
+  void arrive_rtn(uint64_t exec) {
+    wf->set_exec(exec);
+    const auto words = cdna5::build_vds(cdna5::kDsAtomicBarrierArriveRtnB64Vds,
+                                        {.addr = 0, .data0 = 2, .vdst = 4});
+    auto inst = std::make_unique<cdna5::DsAtomicBarrierArriveRtnB64Vds>(words.data());
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  }
+
+  /// Execute ds_atomic_async_barrier_arrive_b64 for the lanes in `exec`.
+  void arrive_async(uint64_t exec) {
+    wf->set_exec(exec);
+    const auto words = cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds, {.addr = 0});
+    auto inst = std::make_unique<cdna5::DsAtomicAsyncBarrierArriveB64Vds>(words.data());
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  }
+
+  /// The arrival the hook should report for an arrival at `cell` that finds
+  /// it in `old_state`.
+  LdsBarrierArrivalRecorder::Arrival arrival(Source source, uint32_t cell, uint64_t old_state,
+                                             bool completed, uint32_t update = 1) const {
+    return {.observation = {.source = source,
+                            .cell_address = wf->lds_base() + cell,
+                            .old_state = old_state,
+                            .new_state = amdgpu::lds_barrier_cell_update_arrive(old_state, update),
+                            .phase_completed = completed},
+            .wave = wf,
+            .wave_state = amdgpu::WfState::RUNNING};
+  }
+
+  Gfx1250Sim sim;
+  amdgpu::ComputeUnitCore *cu = nullptr;
+  amdgpu::Wavefront *wf = nullptr;
+};
+
+// Each active lane of ds_atomic_barrier_arrive_rtn_b64 arrives once: an LDS
+// atomic operates per thread unless stated otherwise (CDNA5 ISA 11.2.1, "DS_APPEND
+// and DS_CONSUME are unusual in that they modify only a single LDS location,
+// not one per thread"). The ISA does not order the lanes; the simulator
+// arrives in lane order. Three lanes arrive at one cell that needs two
+// arrivals per phase, so the second completes a phase and the third starts
+// the next.
+TEST_F(LdsBarrierArriveTest, RtnArriveReportsEachActiveLaneInLaneOrder) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t first = amdgpu::lds_barrier_cell_init_state(2);
+  const uint64_t second = amdgpu::lds_barrier_cell_update_arrive(first);
+  const uint64_t third = amdgpu::lds_barrier_cell_update_arrive(second);
+  set_cell(kCell, first);
+  for (uint32_t lane = 0; lane < 3; ++lane)
+    set_lane(lane, kCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b111));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::DsAtomic, kCell, first, /*completed=*/false),
+                         arrival(Source::DsAtomic, kCell, second, /*completed=*/true),
+                         arrival(Source::DsAtomic, kCell, third, /*completed=*/false)}));
+}
+
+// A lane's update value comes from its own DATA0 (CDNA5 ISA 11.2.2). An update
+// of zero reads the cell without arriving, and is still reported.
+TEST_F(LdsBarrierArriveTest, RtnArriveUsesEachLanesUpdateValue) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t first = amdgpu::lds_barrier_cell_init_state(3);
+  const uint64_t second = amdgpu::lds_barrier_cell_update_arrive(first, 2);
+  set_cell(kCell, first);
+  set_lane(0, kCell, /*update=*/2);
+  set_lane(1, kCell, /*update=*/0);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b11));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::DsAtomic, kCell, first, /*completed=*/false, 2),
+                         arrival(Source::DsAtomic, kCell, second, /*completed=*/false, 0)}));
+}
+
+// ds_atomic_async_barrier_arrive_b64 arrives once per active lane, like other
+// LDS atomics, with a fixed update of one: its DATA0 is "unused ... (value is
+// 1)" (CDNA5 ISA 11.2.2). A cell that needs one arrival per phase completes a
+// phase on each.
+TEST_F(LdsBarrierArriveTest, AsyncArriveReportsAsyncSource) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t first = amdgpu::lds_barrier_cell_init_state(1);
+  const uint64_t second = amdgpu::lds_barrier_cell_update_arrive(first);
+  set_cell(kCell, first);
+  // The async form ignores DATA0.
+  set_lane(0, kCell, /*update=*/7);
+  set_lane(1, kCell, /*update=*/7);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_async(0b11));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::AsyncDsAtomic, kCell, first, /*completed=*/true),
+                         arrival(Source::AsyncDsAtomic, kCell, second, /*completed=*/true)}));
+}
+
+// Each lane arrives at the cell its own address names.
+TEST_F(LdsBarrierArriveTest, LanesArriveAtTheirOwnCells) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kFirstCell = 64;
+  constexpr uint32_t kSecondCell = 128;
+  const uint64_t two = amdgpu::lds_barrier_cell_init_state(2);
+  const uint64_t one = amdgpu::lds_barrier_cell_init_state(1);
+  set_cell(kFirstCell, two);
+  set_cell(kSecondCell, one);
+  set_lane(0, kFirstCell);
+  set_lane(1, kSecondCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b11));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::DsAtomic, kFirstCell, two, /*completed=*/false),
+                         arrival(Source::DsAtomic, kSecondCell, one, /*completed=*/true)}));
+}
+
+// With EXEC zero no lane arrives, so nothing is reported and the cell is
+// unchanged.
+TEST_F(LdsBarrierArriveTest, ExecZeroArriveReportsNothing) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+  set_cell(kCell, state);
+  set_lane(0, kCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0));
+  ASSERT_NO_FATAL_FAILURE(arrive_async(0));
+
+  EXPECT_TRUE(recorder.arrivals.empty());
+  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kCell), state);
+}
+
+// A plugin that does not opt in is never called, and the arrival still
+// updates the cell.
+TEST_F(LdsBarrierArriveTest, ArrivalIsNotReportedToAPluginThatDoesNotObserveIt) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim, /*wants_hook=*/false);
+  constexpr uint32_t kCell = 64;
+  const uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+  set_cell(kCell, state);
+  set_lane(0, kCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b1));
+  ASSERT_NO_FATAL_FAILURE(arrive_async(0b1));
+
+  EXPECT_TRUE(recorder.arrivals.empty());
+  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kCell),
+            amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_update_arrive(state)));
+}
+
+// A tensor DMA instruction whose descriptor requests it arrives once, when the
+// transfer completes (CDNA5 ISA 10.11.3): after the issue observation and the
+// transfer's LDS writes, and before the completed-access observation. "The
+// EXEC mask is ignored: tensor instructions are issued no matter if EXEC==0 or
+// not" (CDNA5 ISA 10.11.1), so the arrival is reported with EXEC zero too.
+TEST_F(LdsBarrierArriveTest, TensorTransferArrivesAfterItIssuesAndMovesItsData) {
+  using Hook = LdsBarrierArrivalRecorder::Hook;
+  constexpr uint64_t kGlobal = 0x1a0000;
+  constexpr uint32_t kCell = 64;
+  constexpr uint32_t kLoaded = 0x12345678u;
+  constexpr uint32_t kStored = 0x9abcdef0u;
+  struct Case {
+    bool store;
+    uint64_t exec;
+  };
+  constexpr Case kCases[] = {{.store = false, .exec = 1},
+                             {.store = true, .exec = 1},
+                             {.store = false, .exec = 0},
+                             {.store = true, .exec = 0}};
+  for (const auto [store, exec] : kCases) {
+    SCOPED_TRACE(testing::Message() << (store ? "store" : "load") << ", EXEC " << exec);
+    auto &recorder = install_lds_barrier_arrival_recorder(sim);
+    wf->set_exec(exec);
+    const uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+    set_cell(kCell, state);
+    write_global_u32(*sim.memory, kGlobal, kLoaded);
+    cu->lds().write32(wf->lds_base(), kStored);
+
+    // One 4-byte element at LDS offset 0, with the arrival enabled. In
+    // descriptor group 1 (CDNA5 ISA 10.11.4), data_size is bits 17:16 (2 is 4
+    // bytes), atomic_barrier_enable is bit 18, atomic_barrier_address is bits
+    // 47:32 and holds the cell's 64-bit-aligned LDS address without its three
+    // low bits, tensor_dim0 starts at bit 48 and tile_dim0 at bit 112.
+    write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+    write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18));
+    write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (kCell >> 3));
+    write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+    // tensor_load_to_lds and tensor_store_from_lds with descriptor group 0 in
+    // SGPRs 0-3 and group 1 in SGPRs 12-19; the last word's bytes are VADDR0 to
+    // VADDR3. Groups 2 and 3 are NULL: "These fields recognize NULL as 0x7C"
+    // (CDNA5 ISA 10.11.1).
+    const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                           0x7c7c0c00u};
+    auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+
+    // The transfer happened, so the arrival below followed it.
+    if (store)
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kStored);
+    else
+      EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLoaded);
+    EXPECT_EQ(recorder.arrivals,
+              (std::vector{arrival(Source::TensorDma, kCell, state, /*completed=*/false)}));
+    EXPECT_EQ(recorder.hooks,
+              (std::vector{Hook::TensorIssued, Hook::Arrived, Hook::TensorMemoryAccess}));
+  }
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {
@@ -4277,6 +4438,7 @@ public:
   std::vector<uint64_t> addresses;
 };
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(Gfx1250ExecutionTest, TensorDmaCoalescingPreservesClippedAndRefusedExtents) {
   using namespace amdgpu::tensor_dma_detail;
   constexpr uint32_t kProcessId = 81251;
@@ -4360,5 +4522,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingPreservesClippedAndRefusedExtents)
   }
   ASSERT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
+#endif
 
 } // namespace

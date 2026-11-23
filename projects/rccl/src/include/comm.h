@@ -23,6 +23,7 @@
 #include "allocator.h"
 #include "dev_runtime.h"
 #include "sym_kernels.h"
+#include "algorithms/gin/gin_all_gather.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "algorithms/gin/gin_all_reduce.h"
 #include "ce_coll.h"
@@ -177,9 +178,6 @@ struct ncclSharedResources {
 
   /* proxy related shared res */
   struct ncclProxyState* proxyState;
-
-  // GIN state
-  struct ncclGinState ginState;
 };
 
  /**
@@ -242,6 +240,7 @@ struct ncclTaskColl {
   ncclRedOp_t opHost;
   struct ncclDevRedOpFull opDev;
   int chunkSteps, sliceSteps;
+  int minChunkPayloadBytes;
   // Computed later:
   size_t trafficBytes;
 #ifdef ENABLE_WARP_SPEED
@@ -288,9 +287,9 @@ struct ncclTaskColl {
 
   // Profiler plugin
   int eActivationMask;
-  void* groupApiEventHandle;
-  void* collApiEventHandle;
-  void* eventHandle;
+  struct ncclProfilerEventRef groupApiEventHandle;
+  struct ncclProfilerEventRef collApiEventHandle;
+  struct ncclProfilerEventRef eventHandle;
   // 16-bit so MAXCHANNELS=256 (512 with ENABLE_WARP_SPEED) fits without wrap-to-zero.
   uint16_t nChannels;
   // Inclusive channel range this task ran on; mirrors devWork->channelLo/Hi.
@@ -306,7 +305,7 @@ struct ncclTaskColl {
   int nvlsCTAs;
   int cgaClusterSize;
   // Resolved algorithm selection, captured at append time for the same reason.
-  uint64_t algMask;    // set bit == algorithm allowed by the filter; 0 == automatic (no filter)
+  rcclTuningMask algMask; // Set bit == algorithm allowed by the filter; empty == automatic (no filter)
   int forceAlgSelection; // 1 (default) == error on unsatisfiable selection; 0 == fall back to automatic
   int CTAPolicy;  // resolved effective CTAPolicy for this task
   // Per-call profiler annotation (0 == untagged), resolved at task-append time and
@@ -329,9 +328,9 @@ struct ncclTaskBcast {
 
   // Profiler plugin
   int eActivationMask;
-  void* groupApiEventHandle;
-  void* collApiEventHandle;
-  void* eventHandle;
+  struct ncclProfilerEventRef groupApiEventHandle;
+  struct ncclProfilerEventRef collApiEventHandle;
+  struct ncclProfilerEventRef eventHandle;
   uint8_t nChannels;
   uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
 };
@@ -347,13 +346,15 @@ struct ncclTaskP2p {
   size_t bytes;
   uint64_t opCount;
   bool allowUB;
+  int maxCTAs;
+  int collOpCount; // Zero for explicit P2P; otherwise identifies the originating collective.
   cudaEvent_t launchCompletionEvent;
 
   // Profiler plugin
   int eActivationMask;
-  void* groupApiEventHandle;
-  void* p2pApiEventHandle;
-  void* eventHandle;
+  struct ncclProfilerEventRef groupApiEventHandle;
+  struct ncclProfilerEventRef p2pApiEventHandle;
+  struct ncclProfilerEventRef eventHandle;
   uint8_t nChannels;
   uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
   // Per-direction channels used by this task; read by the profiler to emit and
@@ -391,9 +392,9 @@ struct ncclTaskRma {
 
   // Profiler plugin
   int eActivationMask;
-  void* groupApiEventHandle;
-  void* rmaApiEventHandle;
-  void* eventHandle;
+  struct ncclProfilerEventRef groupApiEventHandle;
+  struct ncclProfilerEventRef rmaApiEventHandle;
+  struct ncclProfilerEventRef eventHandle;
   uint8_t nChannels;
 };
 
@@ -450,9 +451,9 @@ struct ncclKernelPlan {
   struct ncclIntruQueue<struct ncclProxyOp, &ncclProxyOp::enqNext> proxyOpQueue;
 
   // Profiler plugin
-  void* groupApiEventHandle;
-  void* kernelLaunchEventHandle;
-  void* groupEventHandle;
+  struct ncclProfilerEventRef groupApiEventHandle;
+  struct ncclProfilerEventRef kernelLaunchEventHandle;
+  struct ncclProfilerEventRef groupEventHandle;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -535,6 +536,7 @@ struct ncclKernelPlanner {
 
   struct Peer {
     bool sendSeen, recvSeen;
+    bool sendCeSeen, recvCeSeen;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> sendQueue;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> recvQueue;
     struct ncclIntruQueue<struct ncclTaskBcast, &ncclTaskBcast::next> bcastQueue;
@@ -543,6 +545,9 @@ struct ncclKernelPlanner {
   struct Peer* peers /*[nRanks]*/;
   int nTasksColl, nTasksP2p, nTasksBcast, nTasksRma;
   int nTasksP2pSend, nTasksP2pRecv;
+  int p2pCollOpCount;
+  bool p2pCollNeedsIsolation;
+  struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> p2pCollTaskQueue;
   int nCollConfigLaunchCompletionEvents; // Original event-bearing collective requests in this group.
 
   struct {
@@ -659,6 +664,11 @@ struct ncclPeerInfo {
   // none. Every rank of the comm adopts them (computeBuffSizes). Append later fields after these.
   int sharedLl128BuffSize;
   int sharedP2pLl128BuffSize;
+  // NCCL 2.32.6 additions, appended at the tail in upstream order.
+  int rmaRankStride;
+  bool cuMemHostSupport;
+  uint32_t cftUnicastCliqueId;
+  uint32_t cftMulticastCliqueId;
 };
 
 typedef enum ncclGroupTaskType {
@@ -847,6 +857,9 @@ struct ncclComm {
   int p2pChannelShiftSize;
   int p2pSchedGroupSize;
   int p2pMaxPeers;
+  // A2A NET peer envelope derived from the P2P channel schedule.
+  int p2pA2aMinPeers;
+  int p2pA2aMaxPeers;
 
   // Should this comm allocate LL buffers for network P2P connections?
   bool allocP2pNetLLBuffers;
@@ -1013,6 +1026,7 @@ struct ncclComm {
 #endif
 
   ncclConfig_t config;
+  bool allRanksBlocking;
   // initState is to more conveniently reclaim resources when errors happen.
   ncclResult_t initState;
   // flag to indicate if ncclCommFinalize() is called
@@ -1052,6 +1066,9 @@ struct ncclComm {
   struct ncclRmaState rmaState;
   struct ncclIntruQueue<struct ncclRmaCeInitTask, &ncclRmaCeInitTask::next> rmaCeInitTaskQueue;
 
+  // GIN state
+  struct ncclGinState ginState;
+
   // Debug check
   struct ncclIntruQueue<struct ncclArgsInfo, &ncclArgsInfo::next> argsInfoQueue;
 
@@ -1078,10 +1095,16 @@ struct ncclComm {
   ncclGinConnectionType_t globalGinSupport;
   bool globalRmaProxySupport;
   bool hostRmaSupport;
+
+  int rmaBaseStride;      // determined by NIC
+  uint32_t rmaBaseStride_rcp32; // idivRcp32(rmaBaseStride) for idivFast32 on the proxy hot path
+  int rmaUserCtxStride;   // determined by NVLD/user environment variable
+
   int childCount;
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
+  struct ncclGinAllGatherState ginAllGatherState; // GIN-SDMA allgather state (private devComm)
   struct ncclGinA2AState ginA2AState; // GIN-SDMA alltoall state (private devComm)
   struct ncclGinAllReduceState ginAllReduceState; // GIN-SDMA AllReduce state (private devComm)
 
@@ -1224,6 +1247,13 @@ inline void ncclCommDropPersistentPlanRefs(struct ncclComm* comm) {
   }
 }
 
+inline int ncclCommNMaxChannels(struct ncclComm* comm, int isCollNet, int isNvls) {
+  if (isCollNet && isNvls) return std::min(comm->nChannels, comm->nvlsChannels);
+  if (isCollNet /* &&!isNvls */) return comm->nChannels;
+  if (/* !isCollNet&& */ isNvls) return comm->nvlsChannels;
+  /*if ( !isCollNet&& !isNvls)*/ return comm->nChannels;
+}
+
 inline ncclResult_t ncclCommPollEventCallbacks(struct ncclComm* comm, bool waitSome) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
@@ -1316,6 +1346,8 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
 ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState);
+ncclResult_t ncclComputeBuffSizes(struct ncclComm* comm);
+ncclResult_t ncclParseCommConfig(ncclComm_t comm, ncclConfig_t* config);
 
 // Process-wide NCCL_CTA_POLICY env override, or NCCL_CONFIG_UNDEF_INT when unset/invalid.
 int ncclGetEnvCtaPolicy();

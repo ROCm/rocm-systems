@@ -94,7 +94,12 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
             std::format("SDMA{} queue {}:{} stopped after cache maintenance failure: {}",
                         context.engine_id, context.process_id, context.queue_id, message));
       };
-      return coherence->acquire_cache_maintenance(operation, util::DiagnosticEmitter(report));
+      auto acquired =
+          coherence->acquire_cache_maintenance(operation, util::DiagnosticEmitter(report));
+      if (acquired.failed())
+        return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+      return util::FailureOr<CacheMaintenanceResult>(
+          CacheMaintenanceResult{.lease = std::move(acquired.value())});
     };
   }
   if (!callbacks.timestamp) {

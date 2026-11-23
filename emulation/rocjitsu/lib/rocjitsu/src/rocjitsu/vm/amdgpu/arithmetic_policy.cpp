@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <cassert>
 #include <cstdlib>
@@ -60,6 +60,11 @@ const char *arithmetic_semantics_name(ArithmeticSemantics semantics) {
 ArithmeticExecution::ArithmeticExecution(ArithmeticPolicy policy)
     : flags_(detected_cpu_flags() | (static_cast<uint64_t>(policy.semantics) << 16)) {
   static_assert(cpu_flags_mask == (RJ_ARITH_CPU_MASK | RJ_ARITH_CPU_FEATURES_MASK));
+}
+
+void ArithmeticExecution::limit_cpu_level(uint64_t max_level) {
+  flags_ = (flags_ & ~cpu_flags_mask) | rj_arith_limit_cpu_flags(detected_cpu_flags(), max_level);
+  force_scalar_ = max_level == RJ_ARITH_CPU_BASELINE;
 }
 
 } // namespace rocjitsu::amdgpu

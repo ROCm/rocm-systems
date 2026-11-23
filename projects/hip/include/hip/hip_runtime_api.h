@@ -130,7 +130,7 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipErrorInvalidDevicePointer = 17,    ///< Invalid Device Pointer
   hipErrorInvalidMemcpyDirection = 21,  ///< Invalid memory copy direction
   hipErrorInsufficientDriver = 35,
-  hipErrorMissingConfiguration = 52,
+  hipErrorMissingConfiguration = 52,   ///< Produced when a kernel launch configuration is missing.
   hipErrorPriorLaunchFailure = 53,
   hipErrorInvalidDeviceFunction = 98,  ///< Invalid device function
   hipErrorNoDevice = 100,              ///< Call to hipGetDeviceCount returned 0 devices
@@ -138,7 +138,7 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipErrorInvalidImage = 200,          ///< Invalid image
   hipErrorInvalidContext = 201,        ///< Produced when input context is invalid.
   hipErrorContextAlreadyCurrent = 202,
-  hipErrorMapFailed = 205,
+  hipErrorMapFailed = 205,   ///< Produced when a memory mapping operation failed.
   // Deprecated
   hipErrorMapBufferObjectFailed = 205,  ///< Produced when the IPC memory attach failed from ROCr.
   hipErrorUnmapFailed = 206,
@@ -657,6 +657,16 @@ typedef enum hipDeviceAttribute_t {
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
 
+/**
+ * @brief Execution affinity types, mirroring CUDA's CUexecAffinityType.
+ */
+typedef enum hipExecAffinityType {
+  hipExecAffinityTypeCUCount = 0,     ///< Compute-unit count affinity (== CU_EXEC_AFFINITY_TYPE_SM_COUNT); always supported
+  hipExecAffinityTypeMax,             ///< Sentinel (== CU_EXEC_AFFINITY_TYPE_MAX)
+  hipExtExecAffinityTypeGranularityCU = 0x1000,   ///< Per-CU CU-mask granularity. Valid only on Rocm device.
+  hipExtExecAffinityTypeGranularityWGP = 0x1001,  ///< Per-WGP CU-mask granularity. Valid only on Rocm device.
+} hipExecAffinityType;
+
 // Flags that can be used with hipGetProcAddress.
 /** Default flag. Equivalent to HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM if compiled with
  *  -fgpu-default-stream=per-thread flag or HIP_API_PER_THREAD_DEFAULT_STREAM macro is
@@ -683,9 +693,17 @@ enum hipComputeMode {
   hipComputeModeExclusiveProcess = 3
 };
 
+/**
+ * The ways a device supports flushing of outstanding GPUDirect RDMA writes.
+ *
+ * The supported options are reported as a bitmask by
+ * hipDeviceAttributeGPUDirectRDMAFlushWritesOptions.
+ */
 enum hipFlushGPUDirectRDMAWritesOptions {
-  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,
-  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1
+  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,   ///< hipDeviceFlushGPUDirectRDMAWrites() is
+                                                    ///< supported
+  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1  ///< The memory operations API supports
+                                                    ///< remote write ordering
 };
 
 enum hipGPUDirectRDMAWritesOrdering {
@@ -1009,7 +1027,7 @@ enum hipLimit_t {
  * @note  This allocation flag is applicable on AMD devices, except for Navi4X, in Linux only.
  */
 #define hipHostMallocUncached 0x10000000
-#define hipHostAllocUncached hipHostMallocUncached
+#define hipHostAllocUncached hipHostMallocUncached  ///< Alias of #hipHostMallocUncached.
 
 /**
  * Host memory allocation will follow numa policy set by user.
@@ -1032,7 +1050,7 @@ enum hipLimit_t {
 /** Memory can only be accessed by a single stream on the associated device.*/
 #define hipMemAttachSingle 0x04
 
-#define hipDeviceMallocDefault 0x0
+#define hipDeviceMallocDefault 0x0  ///< Default device memory allocation flag.
 
 /** Memory is allocated in fine grained region of device.*/
 #define hipDeviceMallocFinegrained 0x1
@@ -1084,10 +1102,10 @@ enum hipLimit_t {
 /** Yield the CPU to the operating system when waiting. May increase latency, but lowers power
  * and is friendlier to other threads in the system.*/
 #define hipDeviceScheduleYield 0x2
-#define hipDeviceScheduleBlockingSync 0x4
+#define hipDeviceScheduleBlockingSync 0x4  ///< Use blocking synchronization when waiting on the device.
 #define hipDeviceScheduleMask 0x7
-#define hipDeviceMapHost 0x8
-#define hipDeviceLmemResizeToMax 0x10
+#define hipDeviceMapHost 0x8  ///< Support mapping host memory into the device address space.
+#define hipDeviceLmemResizeToMax 0x10  ///< Resize the per-thread local memory to the maximum size.
 /** Indicates that the deviceFlags passed to hipInitDevice() are valid and should be applied.*/
 #define hipInitDeviceFlagsAreValid 0x1
 /** Default HIP array allocation flag.*/
@@ -1101,15 +1119,15 @@ enum hipLimit_t {
 #define hipCooperativeLaunchMultiDeviceNoPreSync 0x01
 #define hipCooperativeLaunchMultiDeviceNoPostSync 0x02
 #define hipCpuDeviceId ((int)-1)
-#define hipInvalidDeviceId ((int)-2)
+#define hipInvalidDeviceId ((int)-2)  ///< Sentinel value representing an invalid device ordinal.
 // Flags that can be used with hipExtLaunch Set of APIs.
 /** AnyOrderLaunch of kernels.*/
 #define hipExtAnyOrderLaunch 0x01
 // Flags to be used with hipStreamWaitValue32 and hipStreamWaitValue64.
-#define hipStreamWaitValueGte 0x0
-#define hipStreamWaitValueEq 0x1
-#define hipStreamWaitValueAnd 0x2
-#define hipStreamWaitValueNor 0x3
+#define hipStreamWaitValueGte 0x0  ///< Wait until *ptr & mask >= value.
+#define hipStreamWaitValueEq 0x1  ///< Wait until *ptr & mask == value.
+#define hipStreamWaitValueAnd 0x2  ///< Wait until ((*ptr & mask) & value) != 0.
+#define hipStreamWaitValueNor 0x3  ///< Wait until ~((*ptr & mask) | (value & mask)) != 0.
 // Flags to be used with hipStreamWriteValue32 and hipStreamWriteValue64.
 #define hipStreamWriteValueDefault 0x0
 #define hipExtStreamWriteValueIncrement 0x1000
@@ -1374,7 +1392,7 @@ typedef enum hipMemAllocationType {
    */
   hipMemAllocationTypePinned = 0x1,
   hipMemAllocationTypeManaged = 0x2,
-  hipMemAllocationTypeUncached = 0x40000000,
+  hipMemAllocationTypeUncached = 0x40000000,   ///< Allocation is uncached memory.
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
 /**
@@ -2255,6 +2273,27 @@ typedef struct hipArrayMemoryRequirements {
 } hipArrayMemoryRequirements;
 
 /**
+ * Indicates that the layered sparse HIP array or HIP mipmapped array has a single mip tail region
+ * for all layers.
+ */
+#define hipArraySparsePropertiesSingleMipTail 0x1
+
+/**
+ * Sparse HIP array and HIP mipmapped array properties.
+ */
+typedef struct hipArraySparseProperties {
+  struct {
+    unsigned int width;   ///< Width of sparse tile in elements
+    unsigned int height;  ///< Height of sparse tile in elements
+    unsigned int depth;   ///< Depth of sparse tile in elements
+  } tileExtent;
+  unsigned int miptailFirstLevel;  ///< First mip level at which the mip tail begins
+  unsigned long long miptailSize;  ///< Total size of the mip tail
+  unsigned int flags;  ///< Zero or ::hipArraySparsePropertiesSingleMipTail
+  unsigned int reserved[4];  ///< Reserved for future use, must be zero now
+} hipArraySparseProperties;
+
+/**
  * Requested handle type for address range.
  */
 typedef enum hipMemRangeHandleType {
@@ -2565,6 +2604,28 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceI
  */
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target,
                                              enum hipFlushGPUDirectRDMAWritesScope scope);
+/**
+ * @brief Returns whether the device supports an execution affinity type, and the
+ * device's CU-masking granularity.
+ *
+ * For #hipExecAffinityTypeCUCount, @p pi is always set to 1.
+ *
+ * For #hipExtExecAffinityTypeGranularityCU and #hipExtExecAffinityTypeGranularityWGP,
+ * @p pi reports the granularity the runtime will actually apply to a CU mask on this
+ * device, so exactly one of the two is reported as supported and the other as
+ * unsupported. This is an effective runtime property rather than a fixed hardware one:
+ * WGP granularity is used on gfx10 through gfx12.4 and is controlled by the
+ * GPU_ENABLE_WGP_MODE environment variable, which defaults to 1. Setting
+ * GPU_ENABLE_WGP_MODE=0 makes those devices report CU granularity instead. gfx9 and
+ * gfx12.5 and later always report CU granularity, regardless of that variable.
+ *
+ * @param [out] pi   Set to 1 if @p type is supported, 0 otherwise.
+ * @param [in]  type The ::hipExecAffinityType to query.
+ * @param [in]  dev  The device ordinal to query.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice
+ */
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev);
 /**
  * @brief Returns the default memory pool of the specified device
  *
@@ -3398,7 +3459,7 @@ hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
  * @brief Queries the Id of a stream.
  *
  * @param[in] stream  Stream to be queried
- * @param[in,out] flags  Pointer to an unsigned long long in which the stream's id is returned
+ * @param[in,out] streamId  Pointer to an unsigned long long in which the stream's id is returned
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
  *
  * @see hipStreamCreateWithFlags, hipStreamGetFlags, hipStreamCreateWithPriority, hipStreamGetPriority
@@ -3497,9 +3558,9 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
 /**
  *@brief queries stream attribute.
- * @param[in] stream - Stream to geet attributes from
+ * @param[in] stream - Stream to get attributes from
  * @param[in] attr   - Attribute ID for the attribute to query
- * @param[out] value  - Attribute value output
+ * @param[out] value_out  - Attribute value output
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle
  */
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
@@ -6084,6 +6145,26 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
  */
 hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 /**
+ * @brief Gets a HIP array plane from a multiplanar HIP array.
+ *
+ * @note HIP does not implement multiplanar arrays. On AMD devices no array a caller can create
+ * has planes, so well-formed calls always report #hipErrorNotSupported. On NVIDIA devices the
+ * call forwards to cuArrayGetPlane, which succeeds for an array created as multiplanar through
+ * the CUDA driver API.
+ *
+ * @param[out] pPlaneArray - pointer to the returned HIP array that represents a single format
+ * plane of the input HIP array hArray
+ * @param[in] hArray - multiplanar HIP array
+ * @param[in] planeIdx - index of the array plane
+ *
+ * @returns #hipErrorInvalidValue if @p pPlaneArray is nullptr, #hipErrorInvalidHandle if
+ * @p hArray is not a valid array. Otherwise #hipErrorNotSupported on AMD devices, or on NVIDIA
+ * devices #hipSuccess and the requested plane for a multiplanar array.
+ *
+ * @see hipArrayCreate, hipArray3DCreate, hipArrayDestroy
+ */
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
+/**
  *  @brief Copies data between host and device.
  *
  * hipMemcpy2D supports memory matrix copy from the pointed area src to the pointed area dst.
@@ -6564,6 +6645,20 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dp
  */
 hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap, hipDevice_t device);
+
+/**
+ * @brief Returns the layout properties of a sparse HIP array.
+ *
+ * @param [out] sparseProperties - Pointer to hipArraySparseProperties
+ * @param [in] array - HIP array to get the sparse properties of
+ *
+ * @returns #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotSupported
+ *
+ * @note Sparse HIP arrays are not currently supported on AMD devices;
+ * This function always reports #hipErrorNotSupported for well-formed arguments.
+ */
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array);
 // doxygen end Memory
 /**
  * @}
@@ -7461,7 +7556,7 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
 /**
  * @brief Get the module handle backing a library.
  *
- * Returns the #hipModule_t that @p library was loaded into, so a library can be
+ * Returns the hipModule_t that @p library was loaded into, so a library can be
  * consumed by the module-based APIs
  *
  * @param [out] pMod    Pointer to receive the module handle.
@@ -7483,7 +7578,7 @@ hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
  *
  * @param [out] kernels Buffer for kernel handles
  * @param [in] numKernels Maximum number of kernel handles to return to buffer
- * @oaram [in] library Library handle to query from
+ * @param [in] library Library handle to query from
  * @return #hipSuccess, #hipErrorInvalidValue
 */
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
@@ -9002,6 +9097,9 @@ int hipGetStreamDeviceId(hipStream_t stream);
  *  @defgroup Graph Graph Management
  *  @{
  *  This section describes the graph management types & functions of HIP runtime API.
+ *
+ *  @note hipGraph_t objects are not thread-safe. It is the user's responsibility to ensure that
+ *  multiple threads do not concurrently access the same hipGraph_t.
  */
 
 /**
@@ -9263,6 +9361,54 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
  *
  */
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
+
+/**
+ * @brief Returns the local node ID of a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] nodeId - Returns the node ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the node ID of @p node in @p nodeId. The value matches the node ID reported by
+ * #hipGraphDebugDotPrint. The local node ID and graph ID together uniquely identify the node.
+ *
+ */
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
+
+/**
+ * @brief Returns an ID used by tools to identify a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] toolsId - Returns the ID used by tools.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ */
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
+
+/**
+ * @brief Returns the ID of a graph.
+ *
+ * @param [in] graph - Graph to query.
+ * @param [out] graphId - Returns the graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graph in @p graphId. The value matches the graph ID reported by
+ * #hipGraphDebugDotPrint.
+ *
+ */
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
+
+/**
+ * @brief Returns the ID of an executable graph.
+ *
+ * @param [in] graphExec - Executable graph to query.
+ * @param [out] graphId - Returns the executable graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graphExec in @p graphId.
+ *
+ */
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
 
 /**
  * @brief Remove a node from the graph.

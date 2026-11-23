@@ -117,6 +117,12 @@ struct Backend {
                                 ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
                                 std::shared_ptr<AsyncFailoverState> failover) = 0;
 
+    /// @brief Callback when Driver state refcount reaches zero, allowing the backend to perform any necessary
+    /// cleanup.
+    virtual void driver_state_teardown()
+    {
+    }
+
 protected:
     /// @brief Perform a read or write operation
     ///
@@ -161,6 +167,9 @@ protected:
     ///
     /// @return True if this BackendWithFallback can retry the IO, else False.
     virtual bool is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const = 0;
+
+    /// @brief Hook called when the IO will be retried by the fallback backend
+    virtual void on_fallback() const = 0;
 
 private:
     std::shared_ptr<Backend> fallback_backend;

@@ -63,6 +63,7 @@ set(SRC_FILES
   device/common.h
   device/common_kernel.h
   device/hierarchical_shuffle.h
+  device/kernel_profiler.cuh
   device/network/unpack/unpack.h
   device/network/unpack/unpack_defs.h
   device/ll128Layout.h
@@ -80,14 +81,15 @@ set(SRC_FILES
   device/symmetric/all_gather.cuh
   device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh
+  device/symmetric/alltoall_LL.cuh
   device/symmetric/data_ops.cuh
   device/symmetric/gin_scratch.h
   device/symmetric/gin_scratch__funcs.h
   device/symmetric/gin_scratch__types.h
   device/symmetric/kernel.cuh
-  device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
+  device/symmetric/symk.cuh
   device/tdm/asyncCopy.h
   device/tdm/cachePolicy.h
   device/tdm/ll128Tdm.h
@@ -95,6 +97,15 @@ set(SRC_FILES
   device/tdm/tdmCopy.h
   device/tdm/tdmReduce.h
   device/uniform.h
+  device/general/all_gather.cuh
+  device/general/all_reduce.cuh
+  device/general/broadcast.cuh
+  device/general/flow_reduce.cuh
+  device/general/genk.cuh
+  device/general/kernel.cuh
+  device/general/reduce.cuh
+  device/general/reduce_scatter.cuh
+  device/work.cuh
   algorithms/dda/device/device_buffer.cc
   diagnostics.cc
   diagnostics.h
@@ -143,6 +154,7 @@ set(SRC_FILES
   graph/tuning.cc
   graph/xml.cc
   graph/xml.h
+  genk_runtime.cc
   group.cc
   include/BfdBacktrace.hpp
   algorithms/dda/device/CollCommon.h
@@ -158,6 +170,8 @@ set(SRC_FILES
   algorithms/dda/all_reduce/all_reduce_dda_ll.h
   algorithms/dda/all_reduce/all_reduce_dda_ll128.h
   algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128_peerpar.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll_spread.h
   algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
   algorithms/dda/alltoall/alltoall_dda.h
   algorithms/dda/alltoall/alltoall_dda_fabric.h
@@ -165,10 +179,14 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
   algorithms/dda/broadcast/broadcast_dda_fabric_ll.h
+  algorithms/dda/broadcast/broadcast_dda_fabric_ll128.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  algorithms/gin/gin_all_gather.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128_peerpar.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll_spread.h
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
@@ -187,6 +205,7 @@ set(SRC_FILES
   include/ce_fault_inject.h
   include/channel.h
   include/checks.h
+  include/coll_sizes.h
   include/coll_net.h
   include/collectives.h
   include/comm.h
@@ -204,6 +223,7 @@ set(SRC_FILES
   algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/alltoall/dda_alltoall.h
   algorithms/dda/broadcast/dda_broadcast.h
+  algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h
   algorithms/dda/dda_init_detail.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   include/debug.h
@@ -273,6 +293,7 @@ set(SRC_FILES
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
+  include/nccl_device/flow.h
   include/nccl_device/gin.h
   include/nccl_device/gin/gdaki/gin_gdaki.h
   include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
@@ -284,6 +305,7 @@ set(SRC_FILES
   # rocshmem GDA + Anvil SDMA device headers are GIN-only: appended in the
   # ENABLE_ROCSHMEM_GIN block below, not shipped by a non-GIN build.
   include/nccl_device/gin_barrier.h
+  include/nccl_device/gin_flow.h
   include/nccl_device/host.h
   include/nccl_device/impl/barrier__funcs.h
   include/nccl_device/impl/barrier__types.h
@@ -295,14 +317,26 @@ set(SRC_FILES
   include/nccl_device/impl/comm__types.h
   include/nccl_device/impl/core__funcs.h
   include/nccl_device/impl/core__types.h
+  include/nccl_device/impl/flow__funcs.h
+  include/nccl_device/impl/flow__internals.h
+  include/nccl_device/impl/flow__ll128_funcs.h
+  include/nccl_device/impl/flow__ll_funcs.h
+  include/nccl_device/impl/flow__simple_funcs.h
+  include/nccl_device/impl/flow__types.h
   include/nccl_device/impl/gin__funcs.h
   include/nccl_device/impl/gin__types.h
   include/nccl_device/impl/gin_barrier__funcs.h
   include/nccl_device/impl/gin_barrier__types.h
+  include/nccl_device/impl/gin_flow__funcs.h
+  include/nccl_device/impl/gin_flow__types.h
   include/nccl_device/impl/ll_a2a__funcs.h
   include/nccl_device/impl/ll_a2a__types.h
+  include/nccl_device/impl/ll128__types.h
+  include/nccl_device/impl/ll__types.h
   include/nccl_device/impl/lsa_barrier__funcs.h
   include/nccl_device/impl/lsa_barrier__types.h
+  include/nccl_device/impl/lsa_flow__funcs.h
+  include/nccl_device/impl/lsa_flow__types.h
   include/nccl_device/impl/multimem__funcs.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
@@ -313,6 +347,7 @@ set(SRC_FILES
   include/nccl_device/impl/vector__types.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
+  include/nccl_device/lsa_flow.h
   include/nccl_device/net_device.h
   include/nccl_device/ptr.h
   include/nccl_device/rccl_ptr.h
@@ -369,6 +404,7 @@ set(SRC_FILES
   include/param/param.h
   include/param/param_registry.h
   include/param/parser_bitset.h
+  include/param/parser_combo.h
   include/param/parser_common.h
   include/param/parser_default.h
   include/param/parser_enum.h
@@ -379,6 +415,7 @@ set(SRC_FILES
   include/plugin/env/env_v2.h
   include/plugin/gin/gin_v13.h
   include/plugin/gin/gin_v14.h
+  include/plugin/gin/gin_v15.h
   include/plugin/nccl_env.h
   include/plugin/nccl_gin.h
   include/plugin/nccl_net.h
@@ -404,16 +441,20 @@ set(SRC_FILES
   include/plugin/profiler/profiler_v5.h
   include/plugin/profiler/profiler_v6.h
   include/plugin/profiler/profiler_v7.h
+  include/plugin/profiler/profiler_v8.h
   include/plugin/rma/rma_v13.h
   include/plugin/rma/rma_v14.h
   include/plugin/rma/rma_v15.h
   include/plugin/rma/rma_v16.h
+  include/plugin/rma/rma_v17.h
   include/plugin/tuner/tuner_v2.h
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
   include/plugin/tuner/tuner_v6.h
+  include/plugin/tuner/tuner_v7.h
   include/profiler.h
+  include/profiler_event.h
   include/progress_monitor.h
   include/proxy.h
   include/proxy_diag_counters.h
@@ -445,6 +486,7 @@ set(SRC_FILES
   include/trees.h
   include/tuner.h
   include/tuning.h
+  include/tuning_mask.h
   include/utils.h
   include/warp_speed_plan.h
   init.cc
@@ -502,6 +544,7 @@ set(SRC_FILES
   plugin/gin.cc
   plugin/gin/gin_v13.cc
   plugin/gin/gin_v14.cc
+  plugin/gin/gin_v15.cc
   plugin/net.cc
   plugin/net/net_v10.cc
   plugin/net/net_v11.cc
@@ -519,11 +562,14 @@ set(SRC_FILES
   plugin/profiler/profiler_v5.cc
   plugin/profiler/profiler_v6.cc
   plugin/profiler/profiler_v7.cc
+  plugin/profiler/profiler_shim.h
+  plugin/profiler/profiler_v8.cc
   plugin/rma.cc
   plugin/rma/rma_v13.cc
   plugin/rma/rma_v14.cc
   plugin/rma/rma_v15.cc
   plugin/rma/rma_v16.cc
+  plugin/rma/rma_v17.cc
   plugin/tuner.cc
   plugin/tuner/csv_tuner.cc
   plugin/tuner/tuner_v2.cc
@@ -531,6 +577,7 @@ set(SRC_FILES
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
   plugin/tuner/tuner_v6.cc
+  plugin/tuner/tuner_v7.cc
   proxy.cc
   ras/client.cc
   ras/client_support.cc
@@ -542,6 +589,7 @@ set(SRC_FILES
   ras/diagnostics_checks_common.h
   ras/diagnostics_env.cc
   ras/diagnostics_gpu.cc
+  ras/diagnostics_net.cc
   ras/diagnostics_paths.cc
   ras/diagnostics_pci.cc
   ras/diagnostics_xid.cc
@@ -615,16 +663,24 @@ set(SRC_FILES
   tuning/collnet.cc
   tuning/cost_model.cc
   tuning/cost_model.h
+  tuning/genk_model.cc
   tuning/nvls.cc
   tuning/pat.cc
+  tuning/pipeline_model/nvls.cc
+  tuning/pipeline_model/pipeline_model.cc
+  tuning/pipeline_model/pipeline_model.h
+  tuning/pipeline_model/ring.cc
+  tuning/pipeline_model/tree.cc
+  tuning/platforms/platforms.h
+  tuning/platforms/rubin.h
   tuning/ring.cc
   tuning/sym_model.cc
   tuning/sym_model/gin.cc
   tuning/sym_model/lsa.cc
   tuning/sym_model/lsa_a2a.cc
-  tuning/sym_model/lsa_a2a.h
   tuning/sym_model/lsa_base.cc
   tuning/sym_model/model.h
+  tuning/model.h
   tuning/tree.cc
   tuning/tuning.cc
   tuning/tuning_general.cc
@@ -646,6 +702,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/gin/gin_anvil_conn_check_device.cc
+    src/algorithms/gin/sdma/gin_all_gather_sdma.cu
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
     src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
@@ -875,7 +932,7 @@ add_dependencies(hipify_all net_ib_header_symlinks rma_header_symlinks)
 # the _tmp names, but the IR bitcode wrapper (bindings/ir/nccl_device_wrapper.h)
 # is staged verbatim (not hipified) and includes "nccl_device/core.h" directly.
 # Symlink the un-suffixed names back to the _tmp outputs, same as net_ib/ and
-# rma/ above, so the EMIT_LLVM_IR build can resolve them.
+# rma/ above, so the NCCL_EMIT_LLVM_IR build can resolve them.
 set(NCCL_DEVICE_HIPIFY_DIR "${HIPIFY_DIR}/src/include/nccl_device")
 set(NCCL_DEVICE_HEADER_SYMLINKS "")
 foreach(_hdr core comm gin)
@@ -897,9 +954,11 @@ add_dependencies(hipify_all nccl_device_header_symlinks)
 # the later-listed one the _tmp name, but consumers such as alloc.h still
 # #include "utils.h", so symlink the un-suffixed names back, same as above.
 # NCCL 2.32 added transport/net_socket/common.h (included by net_socket/common.cc and rma_socket.cc).
+# NCCL 2.32.6 added tuning/model.h (included as "../model.h" by tuning/pipeline_model/*.cc), which
+# collides with the earlier-listed tuning/sym_model/model.h.
 set(COLLIDING_HEADER_SYMLINKS "")
 foreach(_hdr include/utils include/p2p include/param/common include/param/param ras/diagnostics
-        transport/net_socket/common)
+        transport/net_socket/common tuning/model)
   get_filename_component(_dir "${HIPIFY_DIR}/src/${_hdr}" DIRECTORY)
   get_filename_component(_name "${_hdr}" NAME)
   add_custom_command(
@@ -1004,6 +1063,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_gather_sdma\\.cu\\.cpp$")
   # Contains the GIN-SDMA alltoall __global__ kernel and its launch site, so it
   # needs full HIP compilation rather than --offload-host-only.
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")

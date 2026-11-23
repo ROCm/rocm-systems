@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_SCALAR_OPERAND_READ_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_SCALAR_OPERAND_READ_H_
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -18,13 +19,9 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-[[nodiscard]] inline uint32_t scalar_m0_selector(rj_code_arch_t arch) {
-  return scalar_selector_is_null(arch, kModernNullSelector) ? kModernM0Selector : kLegacyM0Selector;
-}
-
 [[nodiscard]] inline std::optional<ScalarRegisterRange>
 scalar_register_for_selector(const Wavefront &wf, uint32_t selector) {
-  const rj_code_arch_t arch = wf.cu().arch();
+  const rocjitsu::IsaFamily arch = wf.cu().arch();
   if (arch_uses_legacy_flat_scratch_sgprs(arch) && selector >= kFlatScratchSelectorFirst &&
       selector <= kFlatScratchSelectorLast)
     return ScalarRegisterRange{ScalarRegisterStorage::FLAT_SCRATCH,

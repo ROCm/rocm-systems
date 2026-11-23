@@ -9,6 +9,7 @@
 #include "dot/dot.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/sparse_layout.h"
+#include "wmma/swmmac_exact8.h"
 #include "wmma/swmmac_float_impl.h"
 
 #include <stdint.h>
@@ -36,6 +37,18 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
   // Compressed K remains contiguous for sparse DOT8 steps. Snapshot all
   // results before any stores because D can overlap A, B or the index VGPR.
   if (rocjitsu::arith::is_exact(flags)) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::swmmac_exact8_x86_64_v4(Bf8A, Bf8B, WaveSize == 64, key, dest, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::swmmac_exact8_x86_64_v3(Bf8A, Bf8B, WaveSize == 64, key, dest, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
     uint32_t result[8][32];
     for (int row = 0; row < 16; ++row) {
       for (int col = 0; col < 16; ++col) {
@@ -61,6 +74,24 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
     }
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+      rocjitsu::arith::swmmac_fp8_x86_64_v4_bf16<Bf8A, Bf8B, WaveSize>(mode, dest, a, b, index)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::swmmac8_x86_64_v4<Bf8A, Bf8B, WaveSize>(mode, dest, a, b, index);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::swmmac8_x86_64_v3<Bf8A, Bf8B, WaveSize>(mode, dest, a, b, index);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   // Loose backends share decoded FP32 operands, independent of FP8/BF8 packing.
   rocjitsu::arith::SwmmacFloatInputs input;
   for (int row = 0; row < 16; ++row) {
@@ -82,18 +113,6 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
       input.acc[row][col] = rocjitsu::arith::as_float(dest[row % 8][col + 16 * (row / 8)]);
     }
   }
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::swmmac_float_x86_64_v4<false, false>(0, dest, input, false);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::swmmac_float_x86_64_v3<false, false>(0, dest, input, false);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
   rocjitsu::arith::swmmac_float_accumulate(0, input);
   uint32_t result[8][32];
   rocjitsu::arith::swmmac_float_pack<false, false>(result, input.acc, false);

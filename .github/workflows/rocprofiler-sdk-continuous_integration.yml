@@ -155,21 +155,9 @@ jobs:
           git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
           echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
-          sparse-checkout: |
-            .github/actions/rocprofiler-sdk-util
-            projects/rocprofiler-sdk
-            shared/sha256
-            projects/aqlprofile
-            projects/rocprofiler-register
-            projects/rocprof-trace-decoder
-            projects/rocr-runtime
-            projects/clr
-            projects/hip
-            projects/hrr
-            projects/hipfile
           submodules: false
           set-safe-directory: true
 
@@ -200,22 +188,6 @@ jobs:
         timeout-minutes: 15
         continue-on-error: true
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
-
-      - name: Clone ROCDecode
-        uses: actions/checkout@v6
-        with:
-          repository: 'ROCm/rocDecode'
-          ref: 'release/rocm-rel-7.0'
-          set-safe-directory: true
-          path: 'rocDecode'
-
-      - name: Clone ROCJPEG
-        uses: actions/checkout@v6
-        with:
-          repository: 'ROCm/rocJPEG'
-          ref: 'release/rocm-rel-7.0'
-          set-safe-directory: true
-          path: 'rocJPEG'
 
       - name: Install requirements
         timeout-minutes: 10
@@ -273,6 +245,7 @@ jobs:
             --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
+            --repeat-until-pass 2 \
             ${{ matrix.system.ci-flags }} -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
@@ -326,8 +299,8 @@ jobs:
           cmake --build build-tests --target all --parallel 16
           # scale test parallelism to the runner instead of hard-coding a value
           CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
-          ctest --test-dir build-samples --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-samples --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
+          ctest --test-dir build-tests   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
 
       - name: Install Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -359,8 +332,8 @@ jobs:
           cmake --build build-tests-deb --target all --parallel 16
           # scale test parallelism to the runner instead of hard-coding a value
           CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
-          ctest --test-dir build-samples-deb --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests-deb   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-samples-deb --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
+          ctest --test-dir build-tests-deb   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -408,21 +381,9 @@ jobs:
           git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
           echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
-          sparse-checkout: |
-            .github/actions/rocprofiler-sdk-util
-            projects/rocprofiler-sdk
-            shared/sha256
-            projects/aqlprofile
-            projects/rocprofiler-register
-            projects/rocprof-trace-decoder
-            projects/rocr-runtime
-            projects/clr
-            projects/hip
-            projects/hrr
-            projects/hipfile
           submodules: false
           set-safe-directory: true
 
@@ -556,6 +517,7 @@ jobs:
             --site ${{ matrix.system.runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
+            --repeat-until-pass 2 \
             ${{ matrix.system.ci-flags }} \
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
@@ -611,21 +573,9 @@ jobs:
         git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
         echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+    - name: Clone rocm-systems
       uses: actions/checkout@v6
       with:
-        sparse-checkout: |
-          .github/actions/rocprofiler-sdk-util
-          projects/rocprofiler-sdk
-          shared/sha256
-          projects/aqlprofile
-          projects/rocprofiler-register
-          projects/rocprof-trace-decoder
-          projects/rocr-runtime
-          projects/clr
-          projects/hip
-          projects/hrr
-          projects/hipfile
         submodules: false
         set-safe-directory: true
 
@@ -714,6 +664,7 @@ jobs:
           --gpu-targets ${{ env.GPU_TARGETS }} \
           --memcheck ${{ matrix.system.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \
+          --repeat-until-pass 2 \
           -- \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \

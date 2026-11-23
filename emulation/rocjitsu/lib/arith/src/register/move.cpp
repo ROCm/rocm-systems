@@ -45,6 +45,14 @@ int rj_arith_v_mov_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
     }
     return RJ_ARITH_SUCCESS;
   }
+  if (exec_mask == UINT32_MAX) {
+    const uint32_t *src = a[0];
+    uint32_t *dst = d[0];
+    for (int lane = 0; lane < 32; ++lane) {
+      dst[lane] = src[lane];
+    }
+    return RJ_ARITH_SUCCESS;
+  }
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {
       d[0][lane] = a[0][lane];
@@ -77,6 +85,12 @@ int rj_arith_v_mov_b16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::move_half_x86_64_v4(exec_mask, instruction_flags, d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::move_half_x86_64_v3(exec_mask, instruction_flags, d[0], a[0]);

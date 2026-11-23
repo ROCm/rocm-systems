@@ -127,6 +127,8 @@ util::FailureOr<std::vector<std::vector<uint8_t>>> seed_corpus(util::DiagnosticE
   if (maybe_execution_seed.failed())
     return util::Result::failure();
   std::vector<uint8_t> execution_seed = std::move(maybe_execution_seed).value();
+  // Use compatibility semantics so the seed executes its CDNA5 WMMA prefix.
+  execution_seed[0] &= execution_fuzz::kTargetMask;
   execution_seed.insert(execution_seed.begin(), static_cast<uint8_t>(FuzzTarget::Execution));
   seeds.push_back(std::move(execution_seed));
 

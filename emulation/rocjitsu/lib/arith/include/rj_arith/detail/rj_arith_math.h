@@ -16,8 +16,8 @@ extern "C" {
 
 // Reciprocal with sticky integer divide-by-zero status. Supports ABS_A, NEG_A,
 // OMOD and CLAMP. Input/output subnormals always flush, independently of guest
-// flush flags. RDNA3 OMOD applies only when guest output flushing is enabled
-// and RJ_ARITH_FP_IEEE_MODE is clear; RDNA4 OMOD applies independently.
+// flush flags. RDNA3 OMOD applies only when RJ_ARITH_FP_IEEE_MODE is clear,
+// whatever the guest flush flags; RDNA4 OMOD applies independently.
 // RDNA3 supports RJ_ARITH_FP_DX10_CLAMP_OFF to preserve NaNs under CLAMP; RDNA4
 // rejects this flag. RDNA4 active zero/subnormal inputs generate INT_DIV0 unless clamped.
 // Existing excp_flag_user bits, including a pre-existing INT_DIV0, survive.
@@ -54,13 +54,13 @@ int rj_arith_v_rcp_iflag_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // one integer VGPR (only its low five bits select the segment), and D is an
 // FP64 VGPR pair. Only A's encoded exponent affects the lookup, including
 // for infinities and NaNs. ABS_A/NEG_A are accepted and have no effect.
-// Supports OMOD and CLAMP. Both architectures use the captured 1184-bit table. RDNA3 scales before
-// flushing the rounded result; RDNA4 OMOD flushes tiny results before and after scaling. RDNA3
-// disables OMOD when output denormals are preserved or IEEE mode is set. All three guest FP flags
-// are accepted; output flushing applies even without OMOD. Input flushing does not affect the
-// exponent lookup. APIs without _gfx12 use TRAPSTS; _gfx12 uses EXCP_FLAG_USER. Mode 3 reporting is
-// unsupported; loose calls leave FP status unchanged. Supports loose and empirical-exact semantics.
-// Never changes host FP controls. If destination VGPRs alias, the high word is written last.
+// Supports OMOD and CLAMP. Both architectures use the captured 1184-bit table, and OMOD flushes
+// tiny results before and after scaling. RDNA3 disables OMOD when output denormals are preserved
+// or IEEE mode is set. All three guest FP flags are accepted; output flushing applies even without
+// OMOD. Input flushing does not affect the exponent lookup. APIs without _gfx12 use TRAPSTS; _gfx12
+// uses EXCP_FLAG_USER. Mode 3 reporting is unsupported; loose calls leave FP status unchanged.
+// Supports loose and empirical-exact semantics. Never changes host FP controls. If destination
+// VGPRs alias, the high word is written last.
 int rj_arith_v_trig_preop_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, uint32_t *trapsts);
@@ -167,10 +167,11 @@ int rj_arith_v_cos_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *excp_flag_user);
 
 // FP32 fractional part: x - floor(x), capped below one before OMOD/CLAMP.
-// Supports A ABS/NEG, OMOD, CLAMP and guest input/output flushing in loose
-// semantics. One VGPR per operand; infinite inputs produce NaN.
-// RDNA3 ignores OMOD with IEEE mode or preserved output denormals; RDNA4 does not.
-// Required exact results and FP status reporting are unsupported.
+// Supports A ABS/NEG, OMOD, CLAMP and guest input/output flushing. One numeric
+// model serves Loose and bit-exact semantics; the gfx1201 and gfx1100 captures match
+// it, so Compatibility resolves to mode 2. One VGPR per operand; infinite inputs
+// produce NaN. RDNA3 ignores OMOD with IEEE mode or preserved output denormals; RDNA4
+// does not. FP status reporting (mode 3) is unsupported.
 int rj_arith_v_fract_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -181,9 +182,10 @@ int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 // [0.5,1); zeros and infinities pass through before output modifiers. FP32
 // quiets signaling NaNs in exact semantics on gfx12; gfx11 quiets only with IEEE set.
 // Guest input flushing is supported.
-// Supports A ABS/NEG, OMOD and CLAMP. FP32 uses one VGPR per operand and supports
-// both semantics; FP64 uses low/high VGPR pairs with loose semantics and the
-// FP64 alias contract. RDNA3 FP32 suppresses OMOD when IEEE mode is enabled or
+// Supports A ABS/NEG, OMOD and CLAMP. FP32 uses one VGPR per operand; FP64 uses
+// low/high VGPR pairs and the FP64 alias contract. Both widths support Loose and
+// bit-exact semantics (Compatibility resolves to mode 2); the gfx1201 and gfx1100
+// captures match the FP64 model. RDNA3 FP32 suppresses OMOD when IEEE mode is enabled or
 // output denormals are preserved; RDNA4 scales independently. Non-null exact
 // reporting is unsupported on both architectures; loose calls leave state alone.
 int rj_arith_v_frexp_mant_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -521,6 +523,86 @@ int rj_arith_v_log_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
 int rj_arith_v_log_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  uint32_t *excp_flag_user);
+
+// gfx942/gfx950 integral rounding and mantissa extraction share the existing
+// integer models, but always quiet NaNs independently of MODE.IEEE. OMOD remains
+// enabled only with IEEE clear and output denormals flushed. Compatibility and
+// allow-Loose use the inherited model; explicit mode 2 is unqualified and mode 3
+// FP-status reporting is unsupported. D may alias A; inactive lanes and the unselected FP16 half
+// survive.
+int rj_arith_v_trunc_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_trunc_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_ceil_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_ceil_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_floor_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_floor_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_rndne_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_rndne_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_trunc_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_trunc_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_ceil_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_ceil_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_floor_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_floor_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_rndne_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_rndne_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+
+// gfx942/gfx950 fractional part retains guest rounding and always quiets NaNs.
+// One VGPR per operand; FP16 HIGH_A/HIGH_D select halves. D may alias A.
+// Compatibility uses the inherited arithmetic without promising empirical exactness;
+// strict empirical semantics and FP-status reporting remain unsupported.
+int rj_arith_v_fract_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_fract_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_fract_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
 
 #ifdef __cplusplus
 } // extern "C"

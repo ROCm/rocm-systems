@@ -16,6 +16,23 @@ template <int M, int Batch>
 void mfma_f64_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                         const uint32_t *const *b, const uint32_t *const *c);
 
+// gfx1250 Wave32 byte matrix operands have passed public validation and metadata normalization.
+using Gfx1250IntegerBackend = void(uint64_t, bool, uint32_t *const *, const uint32_t *const *,
+                                   const uint32_t *const *, const uint32_t *const *,
+                                   const uint32_t *const *);
+template <bool Sparse> Gfx1250IntegerBackend gfx1250_integer_x86_64_v3;
+template <bool Sparse> Gfx1250IntegerBackend gfx1250_integer_x86_64_v4;
+template <bool Sparse> Gfx1250IntegerBackend gfx1250_integer_avx512vnni;
+
+template <int M, int K, bool Wmma>
+void sparse_matrix_i8_x86_64_v3(uint64_t controls, bool clamp, uint32_t *const *d,
+                                const uint32_t *const *a, const uint32_t *const *b,
+                                const uint32_t *const *index);
+template <int M, int K, bool Wmma>
+void sparse_matrix_i8_x86_64_v4(uint64_t controls, bool clamp, uint32_t *const *d,
+                                const uint32_t *const *a, const uint32_t *const *b,
+                                const uint32_t *const *index);
+
 template <int M, int K, int Batch, bool Wmma>
 void matrix_i8_x86_64_v3(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
                          const uint32_t *const *a, const uint32_t *const *b,
@@ -61,4 +78,10 @@ template <int M, int K>
 void mfma_scaled_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                            const uint32_t *const *b, const uint32_t *const *c,
                            const uint32_t *scale_a, const uint32_t *scale_b, bool clamp_overflow);
+template <int M, int K, int Bits, bool BfA, bool BfB, bool Fnuz>
+void smfmac_float_x86_64_v3(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *index, bool clamp_overflow);
+template <int M, int K, int Bits, bool BfA, bool BfB, bool Fnuz>
+void smfmac_float_x86_64_v4(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *index, bool clamp_overflow);
 } // namespace rocjitsu::arith

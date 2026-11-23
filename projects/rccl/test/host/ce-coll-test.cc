@@ -203,9 +203,9 @@ class CeCollDoneEventMicrotest : public CeCollMicrotest {
     comm_->planner.capturingGraph.graphId = ULLONG_MAX;  // not capturing
     comm_->doneEvent = doneEvent_;
     comm_->nRanks = 1;
-    comm_->devrState.lsaSize = 1;
-    comm_->devrState.lsaSelf = 0;
-    comm_->devrState.lsaRankList = lsaRankList_;
+    comm_->devrState.lsaTeamSize = 1;
+    comm_->devrState.lsaTeamSelf = 0;
+    comm_->devrState.lsaTeamRankList = lsaRankList_;
     syncWin_.userPtr = syncFlags_;
     comm_->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(&syncFlags_[0]);
     comm_->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(&syncFlags_[1]);
@@ -398,6 +398,114 @@ TEST_F(CeCollMicrotest, EnsureStaging_AlreadySetUp_ReturnsWithoutRegistering) {
   EXPECT_EQ(0, alloc_.calls);
 }
 
+// ncclCeInit on 2 ranks with ncclMemAlloc returning stale 1s, the value the first UC sync waits for.
+class CeInitMicrotest : public ::testing::Test {
+ protected:
+  static constexpr uint32_t kStaleFlag = 1;
+  struct Allocation {
+    std::vector<uint32_t> words;
+    std::vector<uint32_t> atRegistration;  // after the registration's barrier, peers may signal into the window
+    ncclWindow_vidmem vidmem{};
+    ncclDevrWindow win{};
+  };
+  // A device fill lands when its stream is synchronized. hipMemset of device memory only queues on the null stream.
+  struct Fill {
+    hipStream_t stream;
+    void* dst;
+    int value;
+    size_t bytes;
+  };
+  Allocation allocs_[2];  // the signal buffer, then the ready/complete flag window
+  int nAllocs_ = 0;
+  std::vector<Fill> queued_;
+  std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
+  ScopedHook<ncclResult_t(void**, size_t)> alloc_{g_ncclMemAlloc, [this](void** ptr, size_t size) {
+    if (nAllocs_ == 2) return ncclInternalError;
+    Allocation& a = allocs_[nAllocs_++];
+    a.words.assign((size + sizeof(uint32_t) - 1) / sizeof(uint32_t), kStaleFlag);
+    *ptr = a.words.data();
+    return ncclSuccess;
+  }};
+  ScopedHook<ncclResult_t(ncclComm*, void*, size_t, int, ncclWindow_t*)> registration_{
+      g_devrWindowRegisterInGroup, [this](ncclComm*, void* ptr, size_t, int, ncclWindow_t* win) {
+        Allocation* a = Find(ptr);
+        if (a == nullptr) return ncclInvalidArgument;
+        a->atRegistration = a->words;
+        a->win.userPtr = ptr;
+        a->vidmem.winHost = &a->win;
+        *win = &a->vidmem;
+        return ncclSuccess;
+      }};
+  ScopedHook<ncclResult_t(ncclShadowPool*, void*, void**)> toHost_{
+      g_shadowPoolToHost, [](ncclShadowPool*, void* devObj, void** hostObj) {
+        *hostObj = devObj;
+        return ncclSuccess;
+      }};
+  ScopedHook<size_t(const ncclComm*)> nonRegCap_{g_rcclCeArNonRegCap, [](const ncclComm*) { return size_t{0}; }};
+  ScopedHook<hipError_t(void*, int, size_t)> memset_{g_hipMemset, [this](void* dst, int value, size_t bytes) {
+    queued_.push_back({nullptr, dst, value, bytes});
+    return hipSuccess;
+  }};
+  ScopedHook<hipError_t(void*, int, size_t, hipStream_t)> memsetAsync_{
+      g_hipMemsetAsync, [this](void* dst, int value, size_t bytes, hipStream_t stream) {
+        queued_.push_back({stream, dst, value, bytes});
+        return hipSuccess;
+      }};
+  ScopedHook<hipError_t(hipStream_t)> streamSync_{g_hipStreamSynchronize, [this](hipStream_t stream) {
+    Land(stream);
+    return hipSuccess;
+  }};
+
+  void SetUp() override {
+    comm_->nRanks = 2;
+    // The rest of ncclCeInit: its stream and event, and the seq-number buffer it fills through a side stream.
+    g_hipStreamCreateResult = hipSuccess;
+    g_hipEventCreateResult = hipSuccess;
+    g_hipAsyncOpsResult = hipSuccess;
+    g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  }
+  void TearDown() override {
+    EXPECT_EQ(hipSuccess, hipFree(comm_->ceColl.d_barrierSync));
+    EXPECT_EQ(hipSuccess, hipFree(comm_->ceColl.ceSeqNumDev));
+    ResetHipFakes();
+  }
+  Allocation* Find(const void* ptr) {
+    for (Allocation& a : allocs_) {
+      if (!a.words.empty() && a.words.data() == ptr) return &a;
+    }
+    return nullptr;
+  }
+  void Land(hipStream_t stream) {
+    for (auto it = queued_.begin(); it != queued_.end();) {
+      if (it->stream != stream) {
+        ++it;
+        continue;
+      }
+      std::memset(it->dst, it->value, it->bytes);
+      it = queued_.erase(it);
+    }
+  }
+};
+
+TEST_F(CeInitMicrotest, StaleSyncFlags_ClearsThemBeforeRegisteringTheWindow) {
+  ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
+
+  const Allocation* flags = Find(comm_->ceColl.ceSyncWin->userPtr);
+  ASSERT_NE(nullptr, flags);
+  EXPECT_EQ(std::vector<uint32_t>(flags->words.size(), 0), flags->atRegistration)
+      << "a stale " << kStaleFlag << " lets the first UC sync pass before its peer arrives";
+}
+
+TEST_F(CeInitMicrotest, StaleSignalBuffer_ClearsIt) {
+  ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
+  Land(nullptr);
+
+  const Allocation* signal = Find(comm_->ceColl.signalBuffer);
+  ASSERT_NE(nullptr, signal);
+  EXPECT_EQ(std::vector<uint32_t>(signal->words.size(), 0), signal->words);
+  EXPECT_NE(nullptr, Find(comm_->ceColl.ceSyncWin->userPtr));
+}
+
 constexpr size_t kMiB = 1024 * 1024;
 constexpr uintptr_t kSendBase = 0x100000000000;
 constexpr uintptr_t kRecvBase = 0x200000000000;
@@ -476,6 +584,7 @@ struct RankRun {
   size_t copyStreamCopies = 0;
   size_t copyCalls = 0;
   int syncCalls = 0;
+  std::vector<uintptr_t> destinations;
   // Barriers already issued when the copy to each destination slot was enqueued; 0 for a slot with nothing to send.
   std::vector<uint32_t> slotEpochs;
 };
@@ -521,7 +630,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     g_hipEventRecord = [](hipEvent_t, hipStream_t) { return hipSuccess; };
     g_hipStreamWaitEvent = [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; };
     g_devrGetLsaRankPtr = [](ncclComm* comm, ncclDevrWindow*, size_t offset, int lsaRank, void** outPtr) {
-      if (lsaRank < 0 || lsaRank >= comm->devrState.lsaSize) {
+      if (lsaRank < 0 || lsaRank >= comm->devrState.lsaTeamSize) {
         return ncclInvalidArgument;
       }
       *outPtr = reinterpret_cast<void*>(kPeerWindowBase + lsaRank * kPeerWindowStride + offset);
@@ -553,6 +662,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     ++current_.copies;
     current_.bytes += bytes;
     const uintptr_t addr = reinterpret_cast<uintptr_t>(dst);
+    current_.destinations.push_back(addr);
     const int nRanks = activeComm_->nRanks;
     const int dstRank =
         addr >= kPeerWindowBase ? static_cast<int>((addr - kPeerWindowBase) / kPeerWindowStride) : activeComm_->rank;
@@ -563,6 +673,9 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   std::vector<RankRun> Run(const SizeMatrix& send, uint32_t freq, ncclResult_t expected = ncclSuccess) {
     const int nRanks = static_cast<int>(send.size());
     std::vector<size_t> gathered = GatherSizes(send);
+    if (corruptGathered_) {
+      corruptGathered_(gathered);
+    }
     std::vector<int> lsaRankList(nRanks);
     for (int r = 0; r < nRanks; ++r) {
       lsaRankList[r] = r;
@@ -580,9 +693,9 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
       auto comm = std::make_unique<ncclComm>();
       comm->rank = rank;
       comm->nRanks = nRanks;
-      comm->devrState.lsaSize = nRanks;
-      comm->devrState.lsaSelf = rank;
-      comm->devrState.lsaRankList = lsaRankList.data();
+      comm->devrState.lsaTeamSize = nRanks;
+      comm->devrState.lsaTeamSelf = rank;
+      comm->devrState.lsaTeamRankList = lsaRankList.data();
       comm->symkState.hasLsaMultimem = false;
       comm->planner.capturingGraph.graphId = path == LaunchPath::kGraphCapture ? kCaptureGraphId : ULLONG_MAX;
       comm->ceColl.intraBatchSyncFreq = freq;
@@ -691,6 +804,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   ncclComm* activeComm_ = nullptr;
   size_t failCopyCall_ = 0;  // 1-based copy API call on each rank that fails; 0 never fails
   int failSyncCall_ = 0;     // 1-based hipStreamBatchMemOp call on each rank that fails; 0 never fails
+  std::function<void(std::vector<size_t>&)> corruptGathered_;  // edits the gathered matrix before any rank runs
 };
 
 TEST_P(CeAlltoAllvSyncMicrotest, Sparse16Ranks_EqualTotalsAt512MiB_EveryRankIssuesSameBarrierCount) {
@@ -829,6 +943,45 @@ TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundCopyFails_ReturnsTheErrorBeforeTheRou
   EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 1));
 }
 
+TEST_P(CeAlltoAllvSyncMicrotest, GatheredRecvSizeDisagreesWithPeerSendSize_EveryRankRejectsBeforeAnyBarrierOrCopy) {
+  const int kNRanks = 4;
+  const int kSrc = 2;
+  const int kDst = 3;
+  const SizeMatrix send = EqualTotalsMatrix(std::vector<int>(kNRanks, kNRanks), kNRanks * kMiB);
+  ASSERT_NE(send[kSrc][kDst], 0u);
+  corruptGathered_ = [&](std::vector<size_t>& gathered) {
+    ncclAlltoAllvRecvSizes(gathered.data(), kDst, kNRanks)[kSrc] = send[kSrc][kDst] + 1;
+  };
+
+  const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ, ncclInvalidUsage);
+
+  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 0));
+  for (int rank = 0; rank < kNRanks; ++rank) {
+    EXPECT_EQ(runs[rank].syncCalls, 0) << "rank " << rank;
+    EXPECT_EQ(runs[rank].copyCalls, 0u) << "rank " << rank;
+    EXPECT_EQ(runs[rank].copies, 0u) << "rank " << rank;
+  }
+}
+
+TEST_P(CeAlltoAllvSyncMicrotest, SenderWritesAtTheReceiversGatheredDisplacement) {
+  const int kNRanks = 4;
+  const int kSrc = 2;
+  const int kDst = 3;
+  const SizeMatrix send = EqualTotalsMatrix(std::vector<int>(kNRanks, kNRanks), kNRanks * kMiB);
+  size_t recvDisplacement = 0;
+  corruptGathered_ = [&](std::vector<size_t>& gathered) {
+    recvDisplacement = ++ncclAlltoAllvRecvDispls(gathered.data(), kDst, kNRanks)[kSrc];
+  };
+
+  const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ);
+
+  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 2));
+  ExpectRowsCopied(send, runs, kNRanks);
+  ExpectLaunchPathTaken(runs);
+  const uintptr_t expectedDestination = kPeerWindowBase + kDst * kPeerWindowStride + recvDisplacement;
+  EXPECT_EQ(std::count(runs[kSrc].destinations.begin(), runs[kSrc].destinations.end(), expectedDestination), 1);
+}
+
 TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundBarrierFails_ReturnsTheErrorWithoutLaunchingTheNextRound) {
   const int kNRanks = 16;
   const uint32_t kFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
@@ -847,5 +1000,125 @@ INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
                          ::testing::Values(LaunchPath::kSingleStream, LaunchPath::kMultiStream, LaunchPath::kBatchAsync,
                                            LaunchPath::kLegacyNullStream, LaunchPath::kGraphCapture),
                          LaunchPathName);
+
+struct CeBatchShape {
+  const char* name;
+  bool chunking;
+  bool intraBatchSync;
+  size_t batches;  // hipMemcpyBatchAsync calls for the two copies CeCollBatchOpsMicrotest::Launch issues
+};
+
+// Both copies fit one intra-batch sync round; the 20 MiB one spans three 8 MiB chunks.
+constexpr CeBatchShape kCeBatchShapes[] = {
+    {"single batch", false, false, 1},
+    {"intra-batch sync", false, true, 1},
+    {"round-robin chunks", true, false, 3},
+};
+
+// Every copy of a batch launch shares attrs[0]. NCCL_CE_INTRA_GPU_MEMCPY_ENABLE (default 1) asks the runtime to
+// overlap the copies with compute.
+// NCCL_CE_INTRA_GPU_MEMCPY_ENABLE=0 drops only the overlap flag from the shared attrs[0]; copies stay stream-ordered.
+class CeCollBatchOpsMicrotest : public ::testing::Test {
+ protected:
+  struct Batch {
+    size_t numAttrs;
+    size_t attrIdx;
+    bool streamOrdered;
+    bool prefersOverlap;
+  };
+
+  void SetUp() override {
+    ResetFakes();
+#ifndef CE_BATCH_ASYNC_SUPPORTED
+    GTEST_SKIP() << "hip_runtime_api.h has no hipMemcpyBatchAsync, so ce_coll.cc builds without the batch path";
+#else
+    ncclCudaDriverVersionCache = kBatchAsyncDriverVersion;
+    g_loadParam = [this](const char* env, int64_t deftVal) -> int64_t {
+      if (intraGpuMemcpyEnable_ >= 0 && std::strcmp(env, "CE_INTRA_GPU_MEMCPY_ENABLE") == 0) {
+        return intraGpuMemcpyEnable_;
+      }
+      return deftVal;
+    };
+    g_hipMemcpyBatchAsync = [this](void**, void**, size_t*, size_t, hipMemcpyAttributes* attrs, size_t* attrIdxs,
+                                   size_t numAttrs, size_t*, hipStream_t) {
+      batches_.push_back({numAttrs, attrIdxs[0], attrs[0].srcAccessOrder == hipMemcpySrcAccessOrderStream,
+                          (attrs[0].flags & hipMemcpyFlagPreferOverlapWithCompute) != 0});
+      return hipSuccess;
+    };
+#endif
+  }
+  void TearDown() override { ResetFakes(); }
+
+  static void ResetFakes() {
+    ResetHipFakes();
+    ResetNcclFakes();
+    ResetNcclStubs();
+  }
+
+  // Launches a self copy and a peer copy from one rank, outside graph capture, and returns each batch call's attrs.
+  std::vector<Batch> Launch(const CeBatchShape& shape) {
+    auto comm = std::make_unique<ncclComm>();
+    comm->nRanks = 2;
+    comm->planner.capturingGraph.graphId = ULLONG_MAX;
+    comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+    ncclCeBatchOpsParams params = {};
+    if (ncclCeInitBatchOpsParams(&params, comm->nRanks) != ncclSuccess) {
+      ADD_FAILURE() << "ncclCeInitBatchOpsParams failed";
+      return {};
+    }
+    params.srcs[0] = reinterpret_cast<void*>(kSendBase);
+    params.dsts[0] = reinterpret_cast<void*>(kRecvBase);
+    params.sizes[0] = 20 * kMiB;
+    params.srcs[1] = reinterpret_cast<void*>(kSendBase + params.sizes[0]);
+    params.dsts[1] = reinterpret_cast<void*>(kPeerWindowBase + kPeerWindowStride);
+    params.sizes[1] = 4 * kMiB;
+    params.numOps = 2;
+    params.chunking = shape.chunking;
+    params.intraBatchSync = shape.intraBatchSync;
+    ncclCeCollArgs args = {};
+    args.func = ncclFuncAllGather;
+
+    batches_.clear();
+    EXPECT_EQ(ncclSuccess, ncclCeLaunchBatchOps(comm.get(), &params, reinterpret_cast<hipStream_t>(0x5717), &args));
+    ncclCeFreeBatchOpsParams(&params);
+    return batches_;
+  }
+
+  int64_t intraGpuMemcpyEnable_ = -1;  // -1 leaves the param at its default
+  std::vector<Batch> batches_;
+};
+
+TEST_F(CeCollBatchOpsMicrotest, IntraGpuMemcpyByDefault_EveryBatchPrefersOverlapWithCompute) {
+  for (const CeBatchShape& shape : kCeBatchShapes) {
+    SCOPED_TRACE(shape.name);
+
+    const std::vector<Batch> batches = Launch(shape);
+
+    ASSERT_EQ(shape.batches, batches.size());
+    for (const Batch& batch : batches) {
+      EXPECT_EQ(1u, batch.numAttrs);
+      EXPECT_EQ(0u, batch.attrIdx);
+      EXPECT_TRUE(batch.streamOrdered);
+      EXPECT_TRUE(batch.prefersOverlap);
+    }
+  }
+}
+
+TEST_F(CeCollBatchOpsMicrotest, IntraGpuMemcpyDisabled_NoBatchPrefersOverlapWithCompute) {
+  intraGpuMemcpyEnable_ = 0;
+  for (const CeBatchShape& shape : kCeBatchShapes) {
+    SCOPED_TRACE(shape.name);
+
+    const std::vector<Batch> batches = Launch(shape);
+
+    ASSERT_EQ(shape.batches, batches.size());
+    for (const Batch& batch : batches) {
+      EXPECT_EQ(1u, batch.numAttrs);
+      EXPECT_EQ(0u, batch.attrIdx);
+      EXPECT_TRUE(batch.streamOrdered);
+      EXPECT_FALSE(batch.prefersOverlap);
+    }
+  }
+}
 
 }  // namespace

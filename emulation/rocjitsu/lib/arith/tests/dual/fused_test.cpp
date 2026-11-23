@@ -4,6 +4,8 @@
 // Tests for VOPD fused arithmetic and literal-operand wrappers.
 
 #include "dual/helpers.h"
+#include "rj_arith/detail/rj_arith_dual.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 // Check VOPD results and status against the corresponding ordinary instruction.
 TEST(DualFmacF32W32Gfx11, Arithmetic) {

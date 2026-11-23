@@ -33,13 +33,24 @@ use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;
 
 use crate::callback_arg::CallbackArg;
+use crate::events::{CallbackScope, VM_FAULT_CONDVAR};
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::queue_intercept::{InterceptQueue, QueueNotifier};
-use crate::runtime::{CallbackScope, VM_FAULT_CONDVAR, initialized_mut, lock, map_error};
 use crate::signal::AmdSignal;
+use crate::status::map_error;
 
+mod caps;
+mod mask;
+mod scratch;
+pub(crate) use mask::constrain_cu_mask;
+pub(crate) use scratch::{ScratchOptions, ScratchPolicy};
 mod create;
+mod lifecycle;
+pub(crate) use caps::aql_extensions;
+pub(crate) use lifecycle::{AqlQueueKind, AqlQueueRequest, create, destroy};
 mod event;
+mod sdma_event;
 pub(crate) use create::{create_hardware_queue, create_sdma_queue};
 pub(crate) mod index;
 #[cfg(test)]
@@ -75,7 +86,7 @@ struct QueueEventSignal {
 /// Process-shared KFD event and mailbox backing queue event signals.
 pub(crate) struct QueueEventOwner {
     /// Native event owner retained through queue callback delivery.
-    event: crate::platform::event::SignalEvent,
+    event: rocddi::device::gpu::event::SignalEvent,
     /// Mailbox address written by device-visible signals.
     mailbox: usize,
     /// Native event ID paired with that mailbox.
@@ -85,7 +96,7 @@ pub(crate) struct QueueEventOwner {
 impl QueueEventSignal {
     /// Finds or creates the shared queue error event for a native device.
     fn shared_event(
-        runtime: &mut crate::runtime::HsaState,
+        runtime: &mut crate::session::HsaSession,
     ) -> Result<Arc<QueueEventOwner>, Status> {
         let event = if let Some(event) = &runtime.queue_state.queue_event {
             event.clone()
@@ -195,7 +206,17 @@ impl QueueEventSignal {
 ///
 /// `teardown_started` makes destruction resumable: once native inactivation
 /// succeeds, a later retry proceeds directly to final queue destruction.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "native, callback, and scratch retirement obligations are independent"
+)]
 pub(crate) struct Queue {
+    /// Shared per-agent scratch policy and runtime threshold.
+    scratch_policy: Arc<ScratchPolicy>,
+    /// Start of the current idle interval used by asynchronous reclaim.
+    scratch_idle_since: Option<std::time::Instant>,
+    /// A bounded CP scratch lifetime is still retiring across worker polls.
+    scratch_reclaim_pending: bool,
     /// Direct native queue and all retained transport backing.
     pub(crate) native: RetainedQueue<QueueBacking>,
     /// Public or intercept-proxy queue pointer returned to callers.
@@ -224,6 +245,8 @@ pub(crate) struct Queue {
     pub(crate) cu_mask: Vec<u32>,
     /// Caller callback for queue errors.
     callback: QueueErrorCallback,
+    /// Memory placement of the public AQL control descriptor.
+    control_memory: QueueRingMemory,
     /// Borrowed callback argument retained through event delivery.
     callback_data: CallbackArg,
     /// Whether an observed event reported a VM fault.
@@ -238,6 +261,32 @@ pub(crate) struct Queue {
     teardown_started: bool,
 }
 
+impl Queue {
+    /// Borrows fatal queue state and scratch while the registry excludes teardown.
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<
+        (
+            rocddi::device::gpu::diagnostic::CoreQueueSnapshot<'_>,
+            Vec<rocddi::device::gpu::diagnostic::DiagnosticMemory<'_>>,
+        ),
+        rocddi::Error,
+    > {
+        self.native.inactivate()?;
+        self.inactivated = true;
+        // SAFETY: Both parts remain borrowed from the retained owner. No backing
+        // is replaced or released; capture only stops execution and reads bytes.
+        let (native, backing) = unsafe { self.native.parts_mut() };
+        let scratch = backing
+            .scratch
+            .iter()
+            .chain(&backing.uncertain_scratch)
+            .map(Allocation::diagnostic_memory)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((native.core_snapshot()?, scratch))
+    }
+}
+
 /// External GPU addresses retained by the native queue through retirement.
 pub(crate) struct QueueBacking {
     /// Inactive signal owned by this queue backing.
@@ -246,22 +295,6 @@ pub(crate) struct QueueBacking {
     scratch: Option<Allocation>,
     /// Uncertain scratch owned by this queue backing.
     uncertain_scratch: Vec<Allocation>,
-}
-
-impl Queue {
-    /// Publishes a proxy handle only after its control and forwarding worker
-    /// are ready. Queue event callbacks read these fields under the runtime
-    /// lock, so they cannot observe a partially installed proxy.
-    pub(crate) fn attach_intercept(
-        &mut self,
-        public_handle: usize,
-        callback: QueueErrorCallback,
-        callback_data: CallbackArg,
-    ) {
-        self.public_handle = public_handle;
-        self.callback = callback;
-        self.callback_data = callback_data;
-    }
 }
 
 /// Whether scratch lifecycle events may use a public queue handle.
@@ -340,6 +373,7 @@ pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Err
 
 /// Destroys runtime SDMA queue and releases its owned resources.
 pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), rocddi::Error> {
+    stop_queue_event_worker(&queue.event_alive, &mut queue.event_worker)?;
     destroy_native_queue(&mut queue.native, &mut queue.teardown_started, &mut || {})
 }
 
@@ -522,14 +556,36 @@ struct SdmaQueueControl {
 
 const _: () = assert!(std::mem::offset_of!(SdmaQueueControl, header) == SDMA_QUEUE_HANDLE_BIT);
 
+/// Backing for an SDMA header, retained through queue and callback retirement.
+enum SdmaControlStorage {
+    /// Ordinary host descriptor with the SDMA handle tag alignment.
+    System {
+        /// Stable aligned host descriptor.
+        _backing: Box<SdmaQueueControl>,
+    },
+    /// Coherent CPU-visible device-local descriptor requested by the caller.
+    DeviceLocal {
+        /// Mapped allocation retaining the local descriptor.
+        _backing: Allocation,
+    },
+}
+
 /// One SDMA public handle borrowing the ring and indices of its native owner.
 pub(crate) struct SdmaQueue {
     /// Direct native queue and its retained transport backing.
     pub(crate) native: rocddi::device::gpu::queue::Queue,
     /// Public HSA control prefix and borrowed index addresses.
-    _control: Box<SdmaQueueControl>,
+    _control: SdmaControlStorage,
     /// Doorbell signal retained while producers may use it.
     _doorbell: Box<AmdSignal>,
+    /// Stops native event observation before the descriptor can be released.
+    event_alive: Arc<AtomicBool>,
+    /// Worker joined before queue teardown or callback data may expire.
+    event_worker: Option<JoinHandle<()>>,
+    /// Caller-owned error callback and its retained argument.
+    callback: QueueErrorCallback,
+    /// Borrowed callback data, valid through the final joined invocation.
+    callback_data: CallbackArg,
     /// HSA GPU agent that owns this queue.
     pub(crate) agent: HsaAgent,
     /// Native queue ID used for error reporting.
@@ -565,7 +621,7 @@ pub(crate) struct QueueState {
     pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
     /// Public counted queue pointers already released by the caller.
     pub(crate) released_counted_queues: HashSet<usize>,
-    /// Maximum counted queues accepted by this HSA generation.
+    /// Maximum counted hardware queues per agent and priority.
     pub(crate) counted_queue_limit: usize,
     /// Ring size selected for counted hardware queues.
     pub(crate) counted_queue_size: u32,
@@ -573,7 +629,7 @@ pub(crate) struct QueueState {
 
 impl QueueState {
     /// Initializes empty queue registries and the next queue ID.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(counted_queue_limit: usize) -> Self {
         Self {
             next_queue_id: 0,
             queue_event: None,
@@ -586,7 +642,7 @@ impl QueueState {
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
             released_counted_queues: HashSet::new(),
-            counted_queue_limit: 4,
+            counted_queue_limit,
             counted_queue_size: 16_384,
         }
     }
@@ -610,8 +666,36 @@ impl QueueState {
                 workers.push(worker);
             }
         }
+        for queue in self.sdma_queues.values_mut() {
+            queue.event_alive.store(false, Ordering::Release);
+            if let Some(worker) = queue.event_worker.take() {
+                workers.push(worker);
+            }
+        }
         let intercepts = self.intercept_queues.values().cloned().collect();
         (workers, intercepts)
+    }
+
+    /// Stops native consumption while retaining public descriptors for tool
+    /// destruction. All host producers must already have been stopped/joined.
+    pub(crate) fn stop_native_for_tool_cleanup(&mut self) -> Result<(), Status> {
+        for queue in self.queues.values_mut() {
+            if !queue.teardown_started {
+                queue.native.inactivate().map_err(map_error)?;
+                queue.teardown_started = true;
+                queue.inactivated = true;
+            }
+        }
+        for queue in self.sdma_queues.values_mut() {
+            if !queue.teardown_started {
+                queue.native.inactivate().map_err(map_error)?;
+                queue.teardown_started = true;
+            }
+        }
+        for queue in self.soft_queues.values_mut() {
+            queue.inactivate();
+        }
+        Ok(())
     }
 
     /// Stops every public queue before its native backing can be released.
@@ -654,11 +738,11 @@ impl QueueState {
 /// Allocates scratch for runtime use.
 fn allocate_scratch(
     device: &Device,
-    gpu: GpuInfo,
+    gpu: &GpuInfo,
     private_segment_size: u32,
     lanes_per_wave: u32,
 ) -> Result<(Allocation, QueueScratch), Status> {
-    let plan = plan_scratch(gpu, private_segment_size, lanes_per_wave).map_err(map_error)?;
+    let plan = plan_scratch(*gpu, private_segment_size, lanes_per_wave).map_err(map_error)?;
     let allocation = device
         .gpu()
         .and_then(|gpu| gpu.allocate_queue_scratch(plan.byte_length))
@@ -674,7 +758,7 @@ fn allocate_scratch(
 }
 
 /// Reads the dispatch private-segment requirement from a native queue.
-fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
+fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64, u32)> {
     let info = queue.native.info();
     let packet_count = info.ring_size_bytes / AQL_PACKET_BYTES as u64;
     if packet_count == 0
@@ -703,49 +787,70 @@ fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
         let slot = usize::try_from(slot).ok()?;
         let byte_offset = slot.checked_mul(AQL_PACKET_BYTES)?;
         let packet_address = info.ring_host_address.checked_add(byte_offset)?;
-        let packet = packet_address as *const HsaKernelDispatchPacket;
-        // SAFETY: Queue transport retains the aligned packet ring. An acquire
-        // load of the published header makes the packet body visible.
-        let header = unsafe { &*std::ptr::addr_of!((*packet).header).cast::<AtomicU16>() }
-            .load(Ordering::Acquire);
-        if header & AQL_PACKET_TYPE_MASK != AQL_PACKET_TYPE_KERNEL_DISPATCH {
-            continue;
-        }
-        // SAFETY: The stopped queue retains this complete dispatch packet;
-        // its named field is aligned and published before the header.
-        let private = unsafe { std::ptr::addr_of!((*packet).private_segment_size).read_volatile() };
-        if private != 0 {
-            return Some((private, read + offset));
+        // SAFETY: The stopped native queue retains the complete packet slot.
+        if let Some((private, group)) = unsafe { dispatch_scratch_requirements(packet_address) } {
+            return Some((private, read + offset, group));
         }
     }
     None
 }
 
+/// Reads scratch requirements from ordinary or AMD extended dispatch packets.
+///
+/// # Safety
+/// The caller retains one aligned, published 64-byte packet while its queue is
+/// stopped; its producer must have finished writing the body before the header.
+unsafe fn dispatch_scratch_requirements(address: usize) -> Option<(u32, u32)> {
+    let packet = address as *const HsaKernelDispatchPacket;
+    // SAFETY: Caller retains the aligned header and observes producer release.
+    let header = unsafe { &*std::ptr::addr_of!((*packet).header).cast::<AtomicU16>() }
+        .load(Ordering::Acquire);
+    if header & AQL_PACKET_TYPE_MASK != AQL_PACKET_TYPE_KERNEL_DISPATCH {
+        if header & AQL_PACKET_TYPE_MASK != 0 {
+            return None;
+        }
+        // AMD vendor Format3/4 shares workgroup and private-size field offsets
+        // with an ordinary dispatch; format lives in byte2, not the HSA type.
+        let format = unsafe { (address as *const u8).add(2).read_volatile() };
+        if !matches!(format, 3 | 4) {
+            return None;
+        }
+    }
+    // SAFETY: All formats accepted above share these aligned, published fields.
+    let private = unsafe { std::ptr::addr_of!((*packet).private_segment_size).read_volatile() };
+    if private == 0 {
+        return None;
+    }
+    let group = unsafe {
+        u32::from(std::ptr::addr_of!((*packet).workgroup_size_x).read_volatile())
+            .checked_mul(u32::from(
+                std::ptr::addr_of!((*packet).workgroup_size_y).read_volatile(),
+            ))?
+            .checked_mul(u32::from(
+                std::ptr::addr_of!((*packet).workgroup_size_z).read_volatile(),
+            ))?
+    };
+    (group != 0).then_some((private, group))
+}
+
 /// Finds the native queue key corresponding to a public queue pointer.
-pub(crate) fn hardware_queue_key(
-    runtime: &crate::runtime::HsaState,
-    queue: *const HsaQueue,
-) -> Option<usize> {
+pub(crate) fn hardware_queue_key(state: &QueueState, queue: *const HsaQueue) -> Option<usize> {
     let key = queue as usize;
-    if let Some(intercept) = runtime.queue_state.intercept_queues.get(&key) {
+    if let Some(intercept) = state.intercept_queues.get(&key) {
         return Some(intercept.lower);
     }
-    runtime.queue_state.counted_queues.get(&key).map_or_else(
-        || runtime.queue_state.queues.contains_key(&key).then_some(key),
+    state.counted_queues.get(&key).map_or_else(
+        || state.queues.contains_key(&key).then_some(key),
         |queue| Some(queue.hardware_queue),
     )
 }
 
 /// Builds the pool key used to share counted hardware queues.
-pub(crate) fn counted_pool_key(
-    runtime: &crate::runtime::HsaState,
-    queue: *const HsaQueue,
-) -> Option<(u64, u32)> {
+pub(crate) fn counted_pool_key(state: &QueueState, queue: *const HsaQueue) -> Option<(u64, u32)> {
     let key = queue as usize;
-    runtime.queue_state.counted_queues.get(&key).map_or_else(
+    state.counted_queues.get(&key).map_or_else(
         || {
-            runtime
-                .queue_state
+            state
                 .queues
                 .get(&key)
                 .and_then(|queue| queue.counted_pool_key)
@@ -755,13 +860,10 @@ pub(crate) fn counted_pool_key(
 }
 
 /// Checks whether a public queue pointer is still registered.
-pub(crate) fn queue_known(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> bool {
+pub(crate) fn queue_known(state: &QueueState, queue: *const HsaQueue) -> bool {
     !queue.is_null()
-        && (hardware_queue_key(runtime, queue).is_some()
-            || runtime
-                .queue_state
-                .soft_queues
-                .contains_key(&(queue as usize)))
+        && (hardware_queue_key(state, queue).is_some()
+            || state.soft_queues.contains_key(&(queue as usize)))
 }
 
 /// Selects the least-used live hardware queue in a counted pool.
@@ -869,3 +971,55 @@ pub(crate) unsafe fn copy_queue_create_mask(
 
 #[cfg(test)]
 mod tests;
+
+/// Intersects HSA's packet-count policy with provider byte geometry.
+pub(crate) fn aql_queue_limits(info: &rocddi::topology::GpuInfo) -> Option<(u32, u32)> {
+    let controls = info.queues.aql?;
+    if !controls.ring_alignment.is_power_of_two() {
+        return None;
+    }
+    let minimum = controls
+        .minimum_ring_bytes
+        .max(controls.ring_alignment)
+        .div_ceil(64)
+        .max(64)
+        .checked_next_power_of_two()?;
+    let maximum = (controls.maximum_ring_bytes / 64).min(131_072);
+    if maximum < minimum {
+        return None;
+    }
+    let maximum = 1_u64 << maximum.ilog2();
+    Some((u32::try_from(minimum).ok()?, u32::try_from(maximum).ok()?))
+}
+
+/// Selects a valid cooperative ring while retaining HSA's preferred size.
+pub(crate) fn cooperative_queue_size(info: &rocddi::topology::GpuInfo) -> Option<u32> {
+    let controls = info.queues.aql?;
+    if !controls.cooperative || !controls.multiple_producers {
+        return None;
+    }
+    let (minimum, maximum) = aql_queue_limits(info)?;
+    Some(256_u32.clamp(minimum, maximum))
+}
+
+#[cfg(test)]
+mod capability_tests {
+    #[test]
+    fn hsa_ring_limits_intersect_provider_geometry() {
+        let mut info = rocddi::topology::GpuInfo::default();
+        assert_eq!(super::aql_queue_limits(&info), None);
+        info.queues.aql = Some(rocddi::topology::GpuUserQueueCapabilities {
+            minimum_ring_bytes: 1 << 20,
+            maximum_ring_bytes: 3 << 20,
+            ring_alignment: 1 << 20,
+            ..rocddi::topology::GpuUserQueueCapabilities::default()
+        });
+        assert_eq!(super::aql_queue_limits(&info), Some((16384, 32768)));
+        assert_eq!(super::cooperative_queue_size(&info), None);
+        if let Some(controls) = &mut info.queues.aql {
+            controls.cooperative = true;
+            controls.multiple_producers = true;
+        }
+        assert_eq!(super::cooperative_queue_size(&info), Some(16384));
+    }
+}

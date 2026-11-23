@@ -12,24 +12,11 @@
 /// Adapted from rocjitsu lib/util/include/util/amdgpu_trig.h.
 
 #include "common/bits.h"
-#include "common/uint128.h"
 #include "math/trig_coefficients.h"
 
 #include <cstdint>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::trig {
-
-using U128 = Uint128;
-
-// Return the number of significant bits, with zero mapped to zero.
-inline unsigned bit_width(uint64_t value) {
-  unsigned width = 0;
-  while (value) {
-    ++width;
-    value >>= 1;
-  }
-  return width;
-}
 
 struct Coefficient {
   int32_t constant;
@@ -38,16 +25,11 @@ struct Coefficient {
   int32_t cubic;
 };
 
-// Round an unsigned fixed-point integer right shift to nearest, ties to even.
-inline uint64_t round_even(U128 value, unsigned shift) {
-  if (!shift) {
-    return static_cast<uint64_t>(value);
-  }
-  U128 whole = value >> shift;
-  U128 rest = value & ((U128{1} << shift) - 1);
-  U128 midpoint = U128{1} << (shift - 1);
-  return static_cast<uint64_t>(whole +
-                               (rest > midpoint || (rest == midpoint && ((whole & 1) != 0))));
+// Round to nearest, ties to even. All callers retain at least one guard bit,
+// and their bounded products leave room to add the rounding bias.
+inline uint64_t round_even(uint64_t value, unsigned shift) {
+  uint64_t half = uint64_t{1} << (shift - 1);
+  return (value + (half - 1) + ((value >> shift) & 1)) >> shift;
 }
 
 // Convert a positive fixed-point result to FP32 with truncation.
@@ -55,11 +37,10 @@ inline uint32_t fixed_to_float(uint64_t value, unsigned fractional) {
   if (!value) {
     return 0;
   }
-  const unsigned leading = static_cast<unsigned>(bit_width(value)) - 1;
-  const uint32_t mantissa =
-      static_cast<uint32_t>(leading >= 23 ? value >> (leading - 23) : value << (23 - leading));
-  const int exponent = static_cast<int>(leading) - static_cast<int>(fractional) + 127;
-  return (static_cast<uint32_t>(exponent) << 23) | (mantissa & 0x7fffff);
+  const unsigned zeros = static_cast<unsigned>(countl_zero(value));
+  const uint32_t significand = static_cast<uint32_t>((value << zeros) >> 40);
+  const uint32_t exponent = 127 + 63 - zeros - fractional;
+  return ((exponent - 1) << 23) + significand;
 }
 
 // Round the linear coordinate while saturating the low twenty bits.
@@ -150,18 +131,16 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
     uint32_t square_input = (fraction - unsigned(reflected)) >> 7;
 
     // Every interval has a nonpositive quadratic correction. Keep its
-    // magnitude unsigned so the wide-integer fallback follows the same path.
+    // magnitude unsigned when applying the rounded coefficient.
     // The inner coefficient retains eighteen coordinate bits. Cosine uses
     // the ones-complement distance from the right endpoint. Round the
     // coefficient to seven fractional bits in its table units (Q33 overall).
-    uint32_t inner_coordinate = c.cubic <= 0 ? fraction - unsigned(reflected)
-                                             : (1u << 24) - fraction + unsigned(reflected) - 1;
-    inner_coordinate &= ~63u;
-    uint64_t inner_value =
-        c.cubic <= 0 ? static_cast<uint64_t>(-int64_t{c.quadratic} * (int64_t{1} << 24) -
-                                             int64_t{c.cubic} * inner_coordinate)
-                     : static_cast<uint64_t>(-int64_t{c.quadratic + c.cubic} * (int64_t{1} << 24) +
-                                             int64_t{c.cubic} * inner_coordinate);
+    uint32_t inner_coordinate = (fraction - unsigned(reflected)) & ~63u;
+    // For a positive cubic, complementing the coordinate before discarding
+    // six bits is equivalent to subtracting one additional 64-unit step.
+    inner_coordinate += c.cubic > 0 ? 64 : 0;
+    uint64_t inner_value = static_cast<uint64_t>(-int64_t{c.quadratic} * (int64_t{1} << 24) -
+                                                 int64_t{c.cubic} * inner_coordinate);
     uint64_t staged_inner = round_even(inner_value, 17);
 
     // Sine near zero retains more product bits. The zero-origin interval
@@ -184,11 +163,12 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
           static_cast<int64_t>((uint64_t{static_cast<uint32_t>(c.linear)} * linear_input) >>
                                (50 + offset_shift - linear_precision));
 
-      // Truncate the square before multiplying by the rounded coefficient.
+      // Only the first two sine intervals reach this product. Their rounded
+      // coefficient fits 20 bits and their truncated square fits 34 bits.
       unsigned square_precision = rocjitsu::arith::minimum(34u, 24 + normalization);
       uint64_t staged_square = (uint64_t{square_input} * square_input) >> (34 - square_precision);
-      int64_t quadratic = -static_cast<int64_t>(round_even(
-          U128{staged_inner} * staged_square, 33 + square_precision - quadratic_precision));
+      int64_t quadratic = -static_cast<int64_t>(
+          round_even(staged_inner * staged_square, 33 + square_precision - quadratic_precision));
       int64_t sum = (int64_t{c.constant} << (quadratic_precision - 26)) +
                     (linear << (quadratic_precision - linear_precision)) + quadratic;
       result = fixed_to_float(static_cast<uint64_t>(sum), quadratic_precision);

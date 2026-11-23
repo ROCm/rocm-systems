@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -42,6 +43,7 @@ public:
               SdmaPacketDialect dialect, SdmaPacketCallbacks callbacks,
               SdmaQueueProgressObserver progress_observer)
       : address_space_lease_(std::move(retained_address_space)),
+        producer_ingress_(callbacks.admit_memory_ingress),
         ring_consumer_(gpu_vm, std::move(config.ring), dialect, std::move(callbacks)),
         process_id_(config.context.process_id), queue_id_(config.context.queue_id),
         producer_pointer_address_(config.producer_pointer_address),
@@ -55,6 +57,7 @@ private:
   friend class SdmaQueueScheduler;
 
   GpuVmBindingLease address_space_lease_;
+  SdmaMemoryIngressHandler producer_ingress_;
   SdmaRingConsumer ring_consumer_;
   uint32_t process_id_ = 0;
   uint32_t queue_id_ = 0;
@@ -268,6 +271,11 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
       condition_.notify_all();
       return status;
     }
+
+    // The worker can retain a QueueRecord after publishing service_active_=false.
+    // Cancel its deferred owner effect before detach reports force-close done.
+    if (force)
+      queue->ring_consumer_.cancel_in_flight();
 
     Slot &slot = slots_[handle.slot_];
     slot.queue.reset();
@@ -517,8 +525,25 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
     if (synchronize_publication) {
       // The doorbell remains the execution bound. This acquire load exists only
       // to pair with the producer's release-store of its canonical write pointer.
-      const AtomicLoadResult write_pointer = gpu_vm_.atomic_load(
-          queue->address_space_lease_.handle(), queue->producer_pointer_address_, sizeof(uint64_t));
+      AtomicLoadResult write_pointer;
+      if (queue->producer_ingress_) {
+        const std::optional<GpuVmAccess> access =
+            gpu_vm_.snapshot(queue->address_space_lease_.handle());
+        if (!access) {
+          write_pointer.outcome = VmAccessOutcome::Revoked;
+        } else {
+          const std::array spans{MemoryIngressSpan{queue->producer_pointer_address_,
+                                                   sizeof(uint64_t), VmAccessKind::Read}};
+          MemoryIngressAdmission admitted = queue->producer_ingress_(*access, spans);
+          write_pointer =
+              admitted.outcome == VmAccessOutcome::Complete
+                  ? access->atomic_load(queue->producer_pointer_address_, sizeof(uint64_t))
+                  : AtomicLoadResult{.outcome = admitted.outcome};
+        }
+      } else {
+        write_pointer = gpu_vm_.atomic_load(queue->address_space_lease_.handle(),
+                                            queue->producer_pointer_address_, sizeof(uint64_t));
+      }
       if (write_pointer.outcome == VmAccessOutcome::Complete) {
         const std::lock_guard lock(mutex_);
         queue->synchronized_cursor_ = std::max(queue->synchronized_cursor_, producer);
