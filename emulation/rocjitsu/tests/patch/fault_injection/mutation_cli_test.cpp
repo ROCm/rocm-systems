@@ -203,8 +203,7 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
               std::string::npos);
     EXPECT_NE(stdout_.find("members=" + members + "\n"), std::string::npos);
   }
-  const std::string target(
-      default_isa_target_registry().find_gpu_target(row.target)->code_object_id);
+  const std::string target(default_isa_target_registry().find_target(row.target)->id);
   for (const std::string mode : {"default", "ordinal", "exact"}) {
     SCOPED_TRACE(mode);
     const size_t ordinal = mode == "default" ? 0 : 1;
@@ -270,8 +269,7 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 10);
   EXPECT_EQ(capabilities.find("LdsWrongAddress"), std::string::npos);
   for (const FaultMutationCapability &capability : fault_mutation_capabilities()) {
-    const std::string target(
-        default_isa_target_registry().find_gpu_target(capability.target)->code_object_id);
+    const std::string target(default_isa_target_registry().find_target(capability.target)->id);
     EXPECT_NE(capabilities.find("kind=DropBarrier target=" + target +
                                 " wave=" + std::to_string(capability.wave_size)),
               std::string::npos);
@@ -504,9 +502,8 @@ TEST_F(FaultMutationCli, RejectsTrapBarriersBeforeSelectingUserBarrier) {
       const std::vector<uint8_t> image =
           test::make_barrier_elf_for_target(row, {signal, wait, test::kSignal, test::kWait,
                                                   checked_encoding(build_s_endpgm(row.arch))});
-      const std::string_view diagnostic = row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id == -4
-                                              ? "invalid scalar source selector"
-                                              : "trap-only";
+      const std::string_view diagnostic =
+          row.arch == IsaFamily::Rdna4 && id == -4 ? "invalid scalar source selector" : "trap-only";
       write(input_, image);
       expect_rejected({"--input", input_.string(), "--kernel", "test_kernel", "--list"});
       EXPECT_NE(stderr_.find(diagnostic), std::string::npos) << stderr_;

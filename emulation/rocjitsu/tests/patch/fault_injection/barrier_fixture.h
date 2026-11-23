@@ -33,7 +33,7 @@ constexpr uint32_t kMov = 0xbe800081u;
 inline std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
   // RDNA3 generated test_encodings.h: s_waitcnt and full s_barrier differ
   // from CDNA. Offset 4/16 barriers surround unchanged waits and s_mov_b32.
-  if (row.arch == ROCJITSU_CODE_ARCH_RDNA3)
+  if (row.arch == IsaFamily::Rdna3)
     return {0xbf890000u, 0xbfbd0000u, kMov,
             0xbf890000u, 0xbfbd0000u, checked_encoding(build_s_endpgm(row.arch))};
   const uint32_t wait = row.split ? kWaitDscnt : 0xbf8c0000u;
@@ -48,8 +48,7 @@ inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row
                                                         std::vector<uint32_t> words,
                                                         bool siblings = false) {
   constexpr uint32_t kSecondEntryByteOffset = 256;
-  const IsaGpuTargetDescription *binding =
-      default_isa_target_registry().find_gpu_target(row.target);
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target(row.target);
   if (!binding)
     return {};
   if (siblings) {
@@ -85,7 +84,7 @@ inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row
 }
 
 inline std::vector<uint8_t> make_out_of_range_second_member_elf() {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr IsaFamily arch = IsaFamily::Cdna5;
   std::vector<uint32_t> words(32767, checked_encoding(build_s_nop(0, arch)));
   words[0] = kSignal;
   words[1] = kWait;

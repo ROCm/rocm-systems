@@ -30,7 +30,7 @@ expected_drop_image(const FaultMutationContext &context, const DropBarrierSelect
       default_isa_target_registry().find(context.source().target_id());
   if (!target)
     return std::nullopt;
-  const FailureOr<uint32_t> nop = build_s_nop(0, target->architecture_id);
+  const FailureOr<uint32_t> nop = build_s_nop(0, target->family);
   if (nop.failed())
     return std::nullopt;
   std::vector<test::ExpectedReplacement> edits;
@@ -41,7 +41,7 @@ expected_drop_image(const FaultMutationContext &context, const DropBarrierSelect
     edits.push_back(
         {.offset = member.offset, .expected = member.bytes, .replacement = std::move(replacement)});
   }
-  return test::expected_replacement_image(context.source(), edits, target->architecture_id);
+  return test::expected_replacement_image(context.source(), edits, target->family);
 }
 
 inline std::vector<uint8_t> expected_drop_for_test(const FaultMutationContext &context,

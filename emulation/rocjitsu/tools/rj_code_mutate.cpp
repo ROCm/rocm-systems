@@ -130,10 +130,9 @@ int run(int argc, char **argv) {
   }
   if (argc == 2 && std::string_view(argv[1]) == "--capabilities") {
     for (const FaultMutationCapability &capability : fault_mutation_capabilities()) {
-      const IsaGpuTargetDescription *target =
-          default_isa_target_registry().find_gpu_target(capability.target);
-      std::cout << "kind=DropBarrier target=" << target->code_object_id
-                << " wave=" << capability.wave_size << " form="
+      const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
+      std::cout << "kind=DropBarrier target=" << target->id << " wave=" << capability.wave_size
+                << " form="
                 << (capability.form == StaticBarrierForm::BuiltinSplitPair ? "split-pair"
                                                                            : "full-singleton")
                 << " admission=" << capability.admission << '\n';
@@ -201,16 +200,16 @@ int run(int argc, char **argv) {
   const FailureOr<FaultBarrierInventory> inventory = discover_drop_barriers(context, kernel, error);
   if (inventory.failed())
     return reject(error, "discovery");
-  const IsaGpuTargetDescription *target =
-      default_isa_target_registry().find_gpu_target(context.source().target_id());
-  if (!target_assertion.empty() && target_assertion != target->code_object_id)
+  const IsaTargetBinding *target =
+      default_isa_target_registry().find_target(context.source().target_id());
+  if (!target_assertion.empty() && target_assertion != target->id)
     return reject("target assertion does not match source ELF identity");
   if (list) {
     size_t logical_ordinal = 0;
     for (const StaticBarrier &barrier : inventory.value().barriers()) {
       std::cout << "ordinal=" << logical_ordinal++ << " exact=" << barrier.members.front().offset
-                << " target=" << target->code_object_id
-                << " section=" << inventory.value().section().index << " form="
+                << " target=" << target->id << " section=" << inventory.value().section().index
+                << " form="
                 << (barrier.form == StaticBarrierForm::BuiltinSplitPair ? "split-pair"
                                                                         : "full-singleton")
                 << " id=" << barrier.barrier_id << " scope="
@@ -258,7 +257,7 @@ int run(int argc, char **argv) {
   std::cerr.flush();
   if (!std::cerr)
     return 3;
-  std::cout << "kind=DropBarrier target=" << target->code_object_id
+  std::cout << "kind=DropBarrier target=" << target->id
             << " exact=" << selection.value().barrier().members.front().offset
             << " logical_mutations=" << mutant.value().logical_mutation_count
             << " members=" << selection.value().barrier().members.size()
