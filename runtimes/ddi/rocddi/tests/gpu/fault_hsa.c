@@ -41,7 +41,8 @@ int main(int argc, char **argv) {
     if (queue)
       return 6;
   } else {
-    uint32_t mask = 1;
+    // GFX12 schedules paired CUs; reach ioctl fault injection with a valid mask.
+    uint32_t mask = 3;
     hsa_amd_queue_create_desc_t desc = {0};
     desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
     desc.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;

@@ -4,6 +4,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "test_paths.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -62,7 +63,7 @@ void cpu_matmul(const float *A, const float *B, float *C, unsigned N) {
 // Helpers.
 
 std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   std::vector<std::unique_ptr<Instruction>> insts;
 
   for (const auto *sec : co.text_sections()) {
@@ -364,7 +365,7 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
   static_assert(maybe_s_endpgm.succeeded());
   constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm.value();
 
@@ -424,7 +425,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
   static_assert(maybe_s_endpgm_2.succeeded());
   constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm_2.value();
 

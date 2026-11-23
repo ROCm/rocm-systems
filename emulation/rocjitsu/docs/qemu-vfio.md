@@ -31,13 +31,11 @@ IOVA is denied rather than reinterpreted as ordinary guest RAM. GPU peer
 effects cross the modeled local fabric. Ordinary guest RAM uses its usual
 descriptor-backed VFIO-user DMA map and never routes through the GPU fabric.
 
-The active libvfio-user source carries only a generic fix for the upper
-address register of a sub-4-GiB 64-bit BAR. A former nonstandard peer
-transport is removed from the active source and launch path. Runs that
-depended on it are historical controls, not evidence for the current
-stock-transport gate. The peer endpoint does not advertise AtomicOp
-completion; peer BAR atomics are rejected. The selected
-stock driver emits UC peer PTEs, so cacheable peer coherence is a later gate.
+A former nonstandard peer transport is removed from the active source and
+launch path. Runs that depended on it are historical controls, not evidence
+for the current stock-transport gate. The peer endpoint does not advertise
+AtomicOp completion; peer BAR atomics are rejected. The selected stock
+driver emits UC peer PTEs, so cacheable peer coherence is a later gate.
 
 ## GPU VM hardware path
 
@@ -120,6 +118,11 @@ cacheable coherence, or the four-guest same-host RCCL exit gate below. The
   libvfio-user and json-c dependencies are already available locally.
 - Optional access to `/dev/kvm`. The launcher falls back to TCG.
 
+If you set `FETCHCONTENT_SOURCE_DIR_LIBVFIO-USER`, use the revision pinned in
+`cmake/rj_libvfio_user.cmake` or a checkout that preserves the upper address
+bits of sub-4-GiB 64-bit BARs, because this override bypasses the dependency
+pin and CMake does not update the supplied sources.
+
 Check the QEMU capabilities before building a guest:
 
 ```bash
@@ -152,6 +155,23 @@ The build also produces the profile-specific IP-discovery generator at:
 ```text
 build-vfio/tools/rj-ip-discovery/rj-ip-discovery
 ```
+
+If reconfiguration reports `Failed to unstash changes`, cached dependency
+sources may contain changes from an earlier build. Leave the old dependency
+directory intact, including its `.git` directory, local edits, and stashes,
+and retry with fresh build and `FETCHCONTENT_BASE_DIR` directories:
+
+```bash
+cmake -S . -B tmp/build-vfio-clean -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DROCJITSU_ENABLE_VFIO=ON \
+  -DFETCHCONTENT_BASE_DIR="$PWD/tmp/vfio-deps-clean"
+cmake --build tmp/build-vfio-clean --target rocjitsu_bin rj_ip_discovery
+```
+
+Choose unused directory names and use the executables under the new build
+directory. The old sources remain available for recovering edits; inspect
+both `git status` and `git stash list` there before removing them.
 
 ## Prepare compatible guest artifacts
 

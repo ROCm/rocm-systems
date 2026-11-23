@@ -29,6 +29,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -88,33 +89,33 @@ std::array<uint32_t, 2> build_carry(int arch, bool wide) {
 // Older profiles share arithmetic but retain their own opcodes and wave rules.
 TEST(CdnaIntegerArith, OlderProfilesMasksAliasesAndSelectors) {
   struct Family {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const IsaExecutionBackend *backend;
     std::array<uint16_t, 4> opcodes;
     uint16_t sdwa_and;
   };
   const Family families[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1,
+      {rocjitsu::IsaFamily::Cdna1,
        &cdna1::execution_backend(),
        {cdna1::kVAddI32Vop3, cdna1::kVFfbhI32Vop3, cdna1::kVAlignbitB32Vop3,
         cdna1::kVMbcntHiU32B32Vop3},
        cdna1::kVAndB32Vop2},
-      {ROCJITSU_CODE_ARCH_CDNA2,
+      {rocjitsu::IsaFamily::Cdna2,
        &cdna2::execution_backend(),
        {cdna2::kVAddI32Vop3, cdna2::kVFfbhI32Vop3, cdna2::kVAlignbitB32Vop3,
         cdna2::kVMbcntHiU32B32Vop3},
        cdna2::kVAndB32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA1,
+      {rocjitsu::IsaFamily::Rdna1,
        &rdna1::execution_backend(),
        {rdna1::kVAddNcI32Vop3, rdna1::kVFfbhI32Vop3, rdna1::kVAlignbitB32Vop3,
         rdna1::kVMbcntHiU32B32Vop3},
        rdna1::kVAndB32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA2,
+      {rocjitsu::IsaFamily::Rdna2,
        &rdna2::execution_backend(),
        {rdna2::kVAddNcI32Vop3, rdna2::kVFfbhI32Vop3, rdna2::kVAlignbitB32Vop3,
         rdna2::kVMbcntHiU32B32Vop3},
        rdna2::kVAndB32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rocjitsu::IsaFamily::Rdna3_5,
        &rdna3_5::execution_backend(),
        {rdna3_5::kVAddNcI32Vop3, rdna3_5::kVClsI32Vop3, rdna3_5::kVAlignbitB32Vop3,
         rdna3_5::kVMbcntHiU32B32Vop3},
@@ -314,9 +315,9 @@ TEST(CdnaIntegerArith, DecodedMasksAliasesAndCarry) {
                                         : arch == 1 ? &cdna4::execution_backend()
                                                     : &cdna5::execution_backend());
       ComputeUnitCore::Config config{};
-      config.arch = arch == 0   ? ROCJITSU_CODE_ARCH_CDNA3
-                    : arch == 1 ? ROCJITSU_CODE_ARCH_CDNA4
-                                : ROCJITSU_CODE_ARCH_CDNA5;
+      config.arch = arch == 0   ? rocjitsu::IsaFamily::Cdna3
+                    : arch == 1 ? rocjitsu::IsaFamily::Cdna4
+                                : rocjitsu::IsaFamily::Cdna5;
       config.arithmetic = {semantics};
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 104;

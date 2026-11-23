@@ -4,6 +4,7 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -1834,6 +1835,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
     Gfx1250Sim sim;
     ASSERT_NO_FATAL_FAILURE(sim.initialize());
     auto &observer = install_tensor_dma_issue_observer(sim);
+    auto &arrivals = add_lds_barrier_arrival_recorder(*sim.plugin_group);
     auto *cu = sim.cu();
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
@@ -1865,6 +1867,18 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTilesArriveAtTheirBarrierOnceAndNullTenso
               c.arrives ? kArrivedOnce : kUnarrived);
     ASSERT_EQ(observer.issues.size(), 1u);
     EXPECT_TRUE(observer.issues[0].lds_ranges.empty());
+    // The arrival is reported exactly when it happens.
+    std::vector<LdsBarrierArrivalRecorder::Arrival> expected_arrivals;
+    if (c.arrives)
+      expected_arrivals.push_back(
+          {.observation = {.source = amdgpu::LdsBarrierArrivalObservation::Source::TensorDma,
+                           .cell_address = wf->lds_base() + kBarrierLdsAddr,
+                           .old_state = kUnarrived,
+                           .new_state = kArrivedOnce,
+                           .phase_completed = false},
+           .wave = wf,
+           .wave_state = amdgpu::WfState::RUNNING});
+    EXPECT_EQ(arrivals.arrivals, expected_arrivals);
     EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLdsSentinel);
     EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kGlobalSentinel);
   }
@@ -3411,7 +3425,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitIsNoOpForSingleWaveWorkgroup) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
@@ -3439,7 +3453,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterSignalQuorum) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
@@ -3608,6 +3622,279 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleArrivals) {
       amdgpu::lds_barrier_cell_update_arrive(reserved | amdgpu::lds_barrier_cell_init_state(2));
   EXPECT_EQ(reserved_state & amdgpu::kLdsBarrierCellReservedMask, reserved);
   EXPECT_EQ(amdgpu::lds_barrier_cell_init_count(reserved_state), 1ull);
+}
+
+// Whether an arrival meets the barrier is the roll-under test of CDNA5 ISA
+// 15.15: bit WIDTH-1 of the 32-bit subtraction result, with WIDTH=29. The
+// states and updates are those DsAtomicBarrierArriveSubtractsLowDwordAndReturnsOldCell
+// checks the cell contents for.
+TEST(Gfx1250ExecutionTest, LdsBarrierCellArriveCompletesPhaseOnRollUnder) {
+  struct Case {
+    uint64_t state;
+    uint32_t update;
+    bool completes;
+  };
+  constexpr Case kCases[] = {
+      {0x0000000300000000ull, 2, true},            // 0 - 2: rolls under.
+      {0x0000000320000002ull, 5, true},            // 2 - 5 borrows from a nonzero phase.
+      {0x0000000300000000ull, 0x20000000u, false}, // Result 0xe0000000: bit 28 clear.
+      {0x0000000300000000ull, 0x10000001u, false}, // Result 0xefffffff: bit 28 clear.
+      {0x0000000310000000ull, 0, true},            // Zero update, bit 28 already set.
+      {0x0000000200000002ull, 1, false},           // 2 - 1: one arrival still pending.
+      {0x0000000200000002ull, 0, false},           // Zero update, nothing pending rolls.
+  };
+  for (const Case &c : kCases) {
+    SCOPED_TRACE(testing::Message() << std::hex << c.state << " - " << c.update);
+    EXPECT_EQ(amdgpu::lds_barrier_cell_arrive_completes_phase(c.state, c.update), c.completes);
+  }
+
+  // A cell for two arrivals per phase completes on every second arrival.
+  uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+  for (const bool completes : {false, true, false, true}) {
+    EXPECT_EQ(amdgpu::lds_barrier_cell_arrive_completes_phase(state), completes);
+    state = amdgpu::lds_barrier_cell_update_arrive(state);
+  }
+  // A cell for one arrival per phase completes on each.
+  EXPECT_TRUE(
+      amdgpu::lds_barrier_cell_arrive_completes_phase(amdgpu::lds_barrier_cell_init_state(1)));
+}
+
+/// One wave with a 256-byte LDS allocation, for executing the DS barrier
+/// arrive instructions directly. VGPR 0 holds each lane's cell address and
+/// VGPRs 2-3 its 64-bit update value; the RTN form returns to VGPRs 4-5.
+struct LdsBarrierArriveTest : testing::Test {
+  using Source = amdgpu::LdsBarrierArrivalObservation::Source;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    cu = sim.cu();
+    wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+    wf->set_lds_size(256);
+  }
+
+  void set_lane(uint32_t lane, uint32_t cell, uint32_t update = 1) {
+    const uint32_t base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base, lane, cell);
+    cu->write_vgpr(base + 2, lane, update);
+    cu->write_vgpr(base + 3, lane, 0);
+  }
+
+  void set_cell(uint32_t cell, uint64_t state) { cu->lds().write64(wf->lds_base() + cell, state); }
+
+  /// Execute ds_atomic_barrier_arrive_rtn_b64 for the lanes in `exec`.
+  void arrive_rtn(uint64_t exec) {
+    wf->set_exec(exec);
+    const auto words = cdna5::build_vds(cdna5::kDsAtomicBarrierArriveRtnB64Vds,
+                                        {.addr = 0, .data0 = 2, .vdst = 4});
+    auto inst = std::make_unique<cdna5::DsAtomicBarrierArriveRtnB64Vds>(words.data());
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  }
+
+  /// Execute ds_atomic_async_barrier_arrive_b64 for the lanes in `exec`.
+  void arrive_async(uint64_t exec) {
+    wf->set_exec(exec);
+    const auto words = cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds, {.addr = 0});
+    auto inst = std::make_unique<cdna5::DsAtomicAsyncBarrierArriveB64Vds>(words.data());
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  }
+
+  /// The arrival the hook should report for an arrival at `cell` that finds
+  /// it in `old_state`.
+  LdsBarrierArrivalRecorder::Arrival arrival(Source source, uint32_t cell, uint64_t old_state,
+                                             bool completed, uint32_t update = 1) const {
+    return {.observation = {.source = source,
+                            .cell_address = wf->lds_base() + cell,
+                            .old_state = old_state,
+                            .new_state = amdgpu::lds_barrier_cell_update_arrive(old_state, update),
+                            .phase_completed = completed},
+            .wave = wf,
+            .wave_state = amdgpu::WfState::RUNNING};
+  }
+
+  Gfx1250Sim sim;
+  amdgpu::ComputeUnitCore *cu = nullptr;
+  amdgpu::Wavefront *wf = nullptr;
+};
+
+// Each active lane of ds_atomic_barrier_arrive_rtn_b64 arrives once: an LDS
+// atomic operates per thread unless stated otherwise (CDNA5 ISA 11.2.1, "DS_APPEND
+// and DS_CONSUME are unusual in that they modify only a single LDS location,
+// not one per thread"). The ISA does not order the lanes; the simulator
+// arrives in lane order. Three lanes arrive at one cell that needs two
+// arrivals per phase, so the second completes a phase and the third starts
+// the next.
+TEST_F(LdsBarrierArriveTest, RtnArriveReportsEachActiveLaneInLaneOrder) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t first = amdgpu::lds_barrier_cell_init_state(2);
+  const uint64_t second = amdgpu::lds_barrier_cell_update_arrive(first);
+  const uint64_t third = amdgpu::lds_barrier_cell_update_arrive(second);
+  set_cell(kCell, first);
+  for (uint32_t lane = 0; lane < 3; ++lane)
+    set_lane(lane, kCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b111));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::DsAtomic, kCell, first, /*completed=*/false),
+                         arrival(Source::DsAtomic, kCell, second, /*completed=*/true),
+                         arrival(Source::DsAtomic, kCell, third, /*completed=*/false)}));
+}
+
+// A lane's update value comes from its own DATA0 (CDNA5 ISA 11.2.2). An update
+// of zero reads the cell without arriving, and is still reported.
+TEST_F(LdsBarrierArriveTest, RtnArriveUsesEachLanesUpdateValue) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t first = amdgpu::lds_barrier_cell_init_state(3);
+  const uint64_t second = amdgpu::lds_barrier_cell_update_arrive(first, 2);
+  set_cell(kCell, first);
+  set_lane(0, kCell, /*update=*/2);
+  set_lane(1, kCell, /*update=*/0);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b11));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::DsAtomic, kCell, first, /*completed=*/false, 2),
+                         arrival(Source::DsAtomic, kCell, second, /*completed=*/false, 0)}));
+}
+
+// ds_atomic_async_barrier_arrive_b64 arrives once per active lane, like other
+// LDS atomics, with a fixed update of one: its DATA0 is "unused ... (value is
+// 1)" (CDNA5 ISA 11.2.2). A cell that needs one arrival per phase completes a
+// phase on each.
+TEST_F(LdsBarrierArriveTest, AsyncArriveReportsAsyncSource) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t first = amdgpu::lds_barrier_cell_init_state(1);
+  const uint64_t second = amdgpu::lds_barrier_cell_update_arrive(first);
+  set_cell(kCell, first);
+  // The async form ignores DATA0.
+  set_lane(0, kCell, /*update=*/7);
+  set_lane(1, kCell, /*update=*/7);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_async(0b11));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::AsyncDsAtomic, kCell, first, /*completed=*/true),
+                         arrival(Source::AsyncDsAtomic, kCell, second, /*completed=*/true)}));
+}
+
+// Each lane arrives at the cell its own address names.
+TEST_F(LdsBarrierArriveTest, LanesArriveAtTheirOwnCells) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kFirstCell = 64;
+  constexpr uint32_t kSecondCell = 128;
+  const uint64_t two = amdgpu::lds_barrier_cell_init_state(2);
+  const uint64_t one = amdgpu::lds_barrier_cell_init_state(1);
+  set_cell(kFirstCell, two);
+  set_cell(kSecondCell, one);
+  set_lane(0, kFirstCell);
+  set_lane(1, kSecondCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b11));
+
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector{arrival(Source::DsAtomic, kFirstCell, two, /*completed=*/false),
+                         arrival(Source::DsAtomic, kSecondCell, one, /*completed=*/true)}));
+}
+
+// With EXEC zero no lane arrives, so nothing is reported and the cell is
+// unchanged.
+TEST_F(LdsBarrierArriveTest, ExecZeroArriveReportsNothing) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim);
+  constexpr uint32_t kCell = 64;
+  const uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+  set_cell(kCell, state);
+  set_lane(0, kCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0));
+  ASSERT_NO_FATAL_FAILURE(arrive_async(0));
+
+  EXPECT_TRUE(recorder.arrivals.empty());
+  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kCell), state);
+}
+
+// A plugin that does not opt in is never called, and the arrival still
+// updates the cell.
+TEST_F(LdsBarrierArriveTest, ArrivalIsNotReportedToAPluginThatDoesNotObserveIt) {
+  auto &recorder = install_lds_barrier_arrival_recorder(sim, /*wants_hook=*/false);
+  constexpr uint32_t kCell = 64;
+  const uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+  set_cell(kCell, state);
+  set_lane(0, kCell);
+
+  ASSERT_NO_FATAL_FAILURE(arrive_rtn(0b1));
+  ASSERT_NO_FATAL_FAILURE(arrive_async(0b1));
+
+  EXPECT_TRUE(recorder.arrivals.empty());
+  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kCell),
+            amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_update_arrive(state)));
+}
+
+// A tensor DMA instruction whose descriptor requests it arrives once, when the
+// transfer completes (CDNA5 ISA 10.11.3): after the issue observation and the
+// transfer's LDS writes, and before the completed-access observation. "The
+// EXEC mask is ignored: tensor instructions are issued no matter if EXEC==0 or
+// not" (CDNA5 ISA 10.11.1), so the arrival is reported with EXEC zero too.
+TEST_F(LdsBarrierArriveTest, TensorTransferArrivesAfterItIssuesAndMovesItsData) {
+  using Hook = LdsBarrierArrivalRecorder::Hook;
+  constexpr uint64_t kGlobal = 0x1a0000;
+  constexpr uint32_t kCell = 64;
+  constexpr uint32_t kLoaded = 0x12345678u;
+  constexpr uint32_t kStored = 0x9abcdef0u;
+  struct Case {
+    bool store;
+    uint64_t exec;
+  };
+  constexpr Case kCases[] = {{.store = false, .exec = 1},
+                             {.store = true, .exec = 1},
+                             {.store = false, .exec = 0},
+                             {.store = true, .exec = 0}};
+  for (const auto [store, exec] : kCases) {
+    SCOPED_TRACE(testing::Message() << (store ? "store" : "load") << ", EXEC " << exec);
+    auto &recorder = install_lds_barrier_arrival_recorder(sim);
+    wf->set_exec(exec);
+    const uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+    set_cell(kCell, state);
+    write_global_u32(*sim.memory, kGlobal, kLoaded);
+    cu->lds().write32(wf->lds_base(), kStored);
+
+    // One 4-byte element at LDS offset 0, with the arrival enabled. In
+    // descriptor group 1 (CDNA5 ISA 10.11.4), data_size is bits 17:16 (2 is 4
+    // bytes), atomic_barrier_enable is bit 18, atomic_barrier_address is bits
+    // 47:32 and holds the cell's 64-bit-aligned LDS address without its three
+    // low bits, tensor_dim0 starts at bit 48 and tile_dim0 at bit 112.
+    write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+    write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18));
+    write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (kCell >> 3));
+    write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+    // tensor_load_to_lds and tensor_store_from_lds with descriptor group 0 in
+    // SGPRs 0-3 and group 1 in SGPRs 12-19; the last word's bytes are VADDR0 to
+    // VADDR3. Groups 2 and 3 are NULL: "These fields recognize NULL as 0x7C"
+    // (CDNA5 ISA 10.11.1).
+    const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                           0x7c7c0c00u};
+    auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+
+    // The transfer happened, so the arrival below followed it.
+    if (store)
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kStored);
+    else
+      EXPECT_EQ(cu->lds().read32(wf->lds_base()), kLoaded);
+    EXPECT_EQ(recorder.arrivals,
+              (std::vector{arrival(Source::TensorDma, kCell, state, /*completed=*/false)}));
+    EXPECT_EQ(recorder.hooks,
+              (std::vector{Hook::TensorIssued, Hook::Arrived, Hook::TensorMemoryAccess}));
+  }
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {

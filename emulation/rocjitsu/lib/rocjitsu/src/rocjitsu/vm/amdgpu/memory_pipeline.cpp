@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -553,10 +554,10 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
     const auto &status = *d.image_status;
     const uint64_t misses = status.written_misses();
     const uint64_t warnings = status.written_warnings();
-    if (warnings && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-                     wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
+    if (warnings && (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+                     wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5))
       wf.set_mode_raw(wf.mode_raw() | (1u << 10)); // MODE.LOD_CLAMPED is sticky.
-    if (warnings && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+    if (warnings && wf.cu().arch() == rocjitsu::IsaFamily::Rdna4)
       wf.set_gfx12_excp_flag_user_extra_raw(wf.gfx12_excp_flag_user_extra_raw() | (1u << 31));
     const uint32_t data_words = d.destination_vgpr_count();
     for (uint64_t lanes = misses | warnings; lanes; lanes &= lanes - 1) {
@@ -1580,10 +1581,14 @@ VmAccessOutcome execute_atomic_rmw(
 }
 
 /// @brief Perform a per-lane atomic RMW on LDS memory.
+/// @details `arrival_observer`, when set, is the issuing wave of a barrier
+/// arrive whose arrivals a plugin observes; each lane's arrival is reported to
+/// it once the cell is updated.
 void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
                             const std::array<uint64_t, 64> &per_lane_addr,
                             const std::vector<uint8_t> &store_data,
-                            std::vector<uint8_t> &response_data, uint64_t lane_mask) {
+                            std::vector<uint8_t> &response_data, uint64_t lane_mask,
+                            Wavefront *arrival_observer) {
   const uint32_t esz = d.elem_size;
   response_data.resize(d.wf_size * esz);
   const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
@@ -1669,6 +1674,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
     } else if (esz == 8) {
       uint64_t old_val = lds->read64(addr);
       uint64_t new_val;
+      bool completes_phase = false;
       if (d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
         // The returning DS instruction supplies UPDATE_VAL.b32 in the low DWORD
         // of DATA0. An asynchronous arrival has a fixed update of one.
@@ -1676,6 +1682,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
         if (store_data.size() >= lane * src_stride + sizeof(update))
           std::memcpy(&update, &store_data[lane * src_stride], sizeof(update));
         new_val = lds_barrier_cell_update_arrive(old_val, update);
+        completes_phase = lds_barrier_cell_arrive_completes_phase(old_val, update);
       } else if (fp_operation) {
         uint64_t source_bits = 0, compare_bits = 0;
         std::memcpy(&source_bits, &store_data[lane * src_stride], 8);
@@ -1693,6 +1700,18 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
       }
       lds->write64(addr, new_val);
       std::memcpy(&response_data[lane * 8], &old_val, 8);
+      // Each arrival is reported with the cell already updated. Of the two
+      // barrier arrives, the one on ASYNCcnt is the async form.
+      if (arrival_observer) {
+        using Source = LdsBarrierArrivalObservation::Source;
+        arrival_observer->cu().report_lds_barrier_arrival(
+            {.source = d.wait_counter_type == WaitCounterType::ASYNCCNT ? Source::AsyncDsAtomic
+                                                                        : Source::DsAtomic,
+             .cell_address = static_cast<uint32_t>(addr),
+             .old_state = old_val,
+             .new_state = new_val,
+             .phase_completed = completes_phase});
+      }
     }
   }
 }
@@ -1726,14 +1745,14 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
                         const std::array<uint64_t, 64> &addresses, uint64_t lane_mask,
                         const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
-  const bool rdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool rdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
   const auto window = ds_address_window(d, wf, lds.size_bytes());
   const bool native_ds = d.flat_local_lane_mask == 0 && !d.gds_m0 && !d.gds;
   const auto arch = wf.cu().arch();
   const bool full_tuple = native_ds && checks_entire_native_ds_address(arch);
   const uint32_t bytes_per_lane = d.num_elems * d.elem_size;
   const bool gfx12_native =
-      native_ds && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5);
+      native_ds && (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5);
   const uint32_t granule = gfx12_native && d.atomic_op == AtomicOp::NONE
                                ? (d.is_load ? std::min(d.elem_size, 4u) : 1u)
                                : d.elem_size;
@@ -1769,7 +1788,11 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
   lane_mask &= ~rejected;
   d.address_range_violation_lanes |= rejected & reporting_lanes;
   if (d.atomic_op != AtomicOp::NONE)
-    execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
+    execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask,
+                           d.atomic_op == AtomicOp::BARRIER_ARRIVE &&
+                                   wf.cu().observes_lds_barrier_arrival()
+                               ? &wf
+                               : nullptr);
   else if (!ordinary) {
     if (d.is_load)
       lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
@@ -1866,8 +1889,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
     return VmAccessOutcome::Faulted;
   if (d.rejects_private_atomic(request_lanes)) {
     const auto arch = wf.cu().arch();
-    if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-        arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) {
+    if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5 &&
+        arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5) {
       wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue,
                                             "64-bit FLAT atomic addressing private memory");
       return VmAccessOutcome::Malformed;
@@ -2279,7 +2302,7 @@ bool prepare_ordered_count(Wavefront &wf, VectorMemState &d, uint32_t offset0, u
 }
 
 void LocalMemPipeline::capture_gds_violations(VectorMemState &data, const Wavefront &wf) {
-  assert(data.gds_m0 && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2);
+  assert(data.gds_m0 && wf.cu().arch() == rocjitsu::IsaFamily::Rdna2);
   const auto window = ds_address_window(data, wf, GwsDevice::kGfx10GdsSizeKiB * 1024u);
   const uint64_t bytes = data.elem_size * (data.atomic_op == AtomicOp::NONE ? data.num_elems : 1u);
   const auto capture = [&](const auto &addresses, uint64_t lanes) {
@@ -2334,9 +2357,9 @@ VmAccessOutcome GwsDevice::execute_gds(VectorMemState &d, Wavefront &wf) {
   return VmAccessOutcome::Complete;
 }
 
-bool native_ds_atomic_misaligned(const VectorMemState &d, rj_code_arch_t arch,
+bool native_ds_atomic_misaligned(const VectorMemState &d, rocjitsu::IsaFamily arch,
                                  uint64_t request_lanes) {
-  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+  if ((arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5) ||
       d.flat_local_lane_mask || d.lds_stack_inputs || d.gds || d.atomic_op == AtomicOp::NONE ||
       !d.elem_size)
     return false;

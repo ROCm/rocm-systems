@@ -328,6 +328,7 @@ if(BUILD_TESTS)
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
     TransportEncryptionTests.cpp
+    TopoCpuArchTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
@@ -848,6 +849,7 @@ if(BUILD_TESTS)
       CeAllReduceEligibilityTests.cpp
       CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      GinAllGatherEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
       EnqueueTests.cpp

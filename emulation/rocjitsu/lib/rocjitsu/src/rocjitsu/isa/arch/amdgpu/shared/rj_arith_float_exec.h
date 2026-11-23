@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -545,7 +546,7 @@ inline void execute_float_binary32_with_writer(Wavefront &wave, FloatBinary32Fun
     if (::rocjitsu::arith::mul_f32_compatibility_staged(
             flags, wave.exec(), write_mask, wave.wf_size(), rdna3, uint32_t(modifiers), &output,
             &a.data, &b.data, &causes,
-            wave.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5) != RJ_ARITH_SUCCESS) {
+            wave.cu().arch() == rocjitsu::IsaFamily::Cdna5) != RJ_ARITH_SUCCESS) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
       return;
     }
