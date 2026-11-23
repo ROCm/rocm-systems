@@ -11474,19 +11474,21 @@ TEST(ArithBridgeTest, CdnaFloatingMfmaUsesLibraryPolicyAndAccumulatorBank) {
         auto decoder = Decoder::create(config.arch);
         auto instruction = decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
-        const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+        const bool unsupported =
+            semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus && !(test.fp8 && !cdna4);
         recorder->writes.clear();
-        EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
-        if (exact) {
+        EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(),
+                  !unsupported);
+        if (unsupported) {
           EXPECT_TRUE(recorder->writes.empty());
         }
         for (uint32_t reg = 0; reg < 4; ++reg) {
           for (uint32_t lane = 0; lane < 64; ++lane) {
             EXPECT_EQ(cu->read_vgpr(dst + reg, lane),
-                      exact ? 0xdeadbeefU
-                            : std::bit_cast<uint32_t>(test.fp8 ? (cdna4 ? 128.0f : 32.0f)
-                                                               : (test.fp32 ? 1.0f : 4.0f) *
-                                                                     float(53 + reg)));
+                      unsupported ? 0xdeadbeefU
+                                  : std::bit_cast<uint32_t>(test.fp8 ? (cdna4 ? 128.0f : 32.0f)
+                                                                     : (test.fp32 ? 1.0f : 4.0f) *
+                                                                           float(53 + reg)));
           }
         }
         if (cdna4 && !acc_cd && semantics == ArithmeticSemantics::Loose) {
@@ -15963,6 +15965,81 @@ TEST(ArithBridgeTest, Gfx1250DualMulRejectsUnqualifiedStatus) {
     EXPECT_EQ(f.cu->read_vgpr(f.base() + 9, 0), 0x3c003c00U);
     EXPECT_EQ(f.wave->trapsts(), 0x10U);
     EXPECT_EQ(f.wave->pending_alu_causes(), 0U);
+  }
+}
+
+TEST(ArithBridgeTest, Gfx942MfmaExactUsesGroupedRounding) {
+  for (auto semantics :
+       {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+        ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+        ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical}) {
+    BridgeFixture fixture(rocjitsu::IsaFamily::Cdna3, 64, {semantics}, 32);
+    ASSERT_NE(fixture.wave, nullptr);
+    fixture.wave->set_exec(0); // MFMA participates as a whole wave, independent of EXEC.
+    const auto base = fixture.base();
+    for (uint32_t reg = 0; reg < 24; ++reg) {
+      for (uint32_t lane = 0; lane < 64; ++lane) {
+        fixture.cu->write_vgpr(base + reg, lane, 0);
+      }
+    }
+    // Truncation drops -1.5*2^-25 before adding it to 1. Sequential FMA does not.
+    fixture.cu->write_vgpr(base, 0, 0x3c00U | uint32_t(util::f32_to_f16(0x1.8p-13f)) << 16);
+    fixture.cu->write_vgpr(base + 4, 0, 0x3c00U | uint32_t(util::f32_to_f16(-0x1p-12f)) << 16);
+    auto words = cdna3::build_vop3p_mfma(cdna3::kVMfmaF324x4x416bF16Vop3pMfma,
+                                         {.vdst = 16, .src0 = 256, .src1 = 260, .src2 = 128});
+    auto decoded = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    ASSERT_TRUE(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded());
+    const bool approximate =
+        semantics == ArithmeticSemantics::Compatibility || semantics == ArithmeticSemantics::Loose;
+    EXPECT_EQ(fixture.cu->read_vgpr(base + 16, 0), approximate ? 0x3f7fffffU : 0x3f800000U);
+  }
+}
+
+TEST(ArithBridgeTest, Gfx942MfmaFp16OvflRestrictsOnlyExactQualification) {
+  for (bool bf16 : {false, true}) {
+    for (bool overflow : {false, true}) {
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                             ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+                             ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                             ArithmeticSemantics::BitExactEmpirical}) {
+        BridgeFixture fixture(rocjitsu::IsaFamily::Cdna3, 64, {semantics}, 32);
+        ASSERT_NE(fixture.wave, nullptr);
+        fixture.wave->set_mode_raw(overflow ? Wavefront::FP16_OVFL_BIT : 0);
+        const auto base = fixture.base();
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          for (uint32_t reg = 0; reg < 2; ++reg) {
+            fixture.cu->write_vgpr(base + reg, lane, bf16 ? 0x7f7f7f7fU : 0x3c003c00U);
+            fixture.cu->write_vgpr(base + 4 + reg, lane, 0x40004000U);
+          }
+          for (uint32_t reg = 0; reg < 4; ++reg) {
+            fixture.cu->write_vgpr(base + 16 + reg, lane, 0xdeadbeefU);
+          }
+        }
+        auto words = cdna3::build_vop3p_mfma(bf16 ? cdna3::kVMfmaF324x4x416bBf16Vop3pMfma
+                                                  : cdna3::kVMfmaF324x4x416bF16Vop3pMfma,
+                                             {.vdst = 16, .src0 = 256, .src1 = 260, .src2 = 128});
+        auto decoded = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(decoded.succeeded());
+        const bool rejected =
+            overflow && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                         semantics == ArithmeticSemantics::BitExactEmpirical);
+        fixture.recorder->writes.clear();
+        EXPECT_EQ(fixture.cu->execute_instruction(decoded.value().get(), *fixture.wave).succeeded(),
+                  !rejected);
+        if (rejected) {
+          EXPECT_TRUE(fixture.recorder->writes.empty());
+        }
+        // FP16_OVFL must not turn the inherited gfx942 BF16 infinity into saturated finite output.
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(fixture.cu->read_vgpr(base + 16 + reg, lane), rejected ? 0xdeadbeefU
+                                                                    : bf16   ? 0x7f800000U
+                                                                             : 0x41000000U);
+          }
+        }
+      }
+    }
   }
 }
 
