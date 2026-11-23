@@ -1,12 +1,15 @@
-# GIN/RMA: per-segment registration and segmented work requests
+# GIN/RMA: per-segment registration and RMA rounds
 
-GIN on the host-proxy type posts every put, get, signal and flush through an RMA backend, so multi-segment support for GIN is a host-side change in that backend. This doc covers the classic backend `ncclRmaIbProxy` (`net_ib/gin.cc`, layer 05, [PR 10884](https://github.com/ROCm/rocm-systems/pull/10884)) and the parts IB-CAST shares with it; IB-CAST's own differences are in [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md). It also covers the device-runtime pieces that DeepEP windows need: the window gates and the host owner DMA-BUF path.
+> [!NOTE]
+> Old stack, layer 05 ([PR 10884](https://github.com/ROCm/rocm-systems/pull/10884)), at the wire tip `ba3ab26f30a7`. The 11-04 version of this note described a 16-segment cap, a fixed-size consensus record with `segOff[17]`, one flush read per segment and send-queue credits; all four are gone. In the planned design the core part of this layer (window gates, owner fd, in-flight cap) is fork 1 and the classic RMA backend moves into the IB-MSEG plugin in fork 4; see [the fork plugin](multi_segment_fork_plugin.md).
+
+GIN on the host-proxy type posts every put, get, signal and flush through an RMA backend, so multi-segment support for GIN is a host-side change in that backend. This doc covers the classic backend `ncclRmaIbProxy` (`net_ib/gin.cc`) and the parts IB-CAST shares with it; IB-CAST's own differences are in [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md). It also covers the device-runtime pieces that DeepEP windows need: the window gates, the in-flight cap and the host owner DMA-BUF path.
 
 ## Why GIN is different from P2P
 
-A GIN window is symmetric: one collective registers it on every rank, and each rank keeps a table of every peer's per-segment base addresses and rkeys. So the remote layout is known at registration, and no CTS or side table is involved. Registration counts the segments, registers one MR per segment, checks through the [consensus record](#consensus) that every rank succeeded with the same segment count and a valid `segOff` table, and then allgathers the per-segment addresses and rkeys, indexed `rank * nSegments + segment`.
+A GIN window is symmetric: one collective registers it on every rank, and each rank keeps a table of every peer's per-segment offsets, base addresses and rkeys. So the remote layout is known at registration, and no CTS is involved. Registration counts the segments, registers one MR per segment, checks through the [consensus exchange](#consensus) that every rank succeeded with the same segment count, and then allgathers the tables.
 
-The data path sends every operation through one builder that splits at local and remote boundaries. Each side uses its own rank's `segOff` row, so ranks may have different segment sizes as long as the counts match:
+Each side of a transfer splits on its own rank's offsets, so ranks may have different segment sizes as long as the counts match:
 
 ```mermaid
 %% caption: Two ranks with equal segment counts but different segment sizes
@@ -15,14 +18,14 @@ sequenceDiagram
  participant R0 as rank 0, 4 MiB GPU then 2 MiB CPU
  participant R1 as rank 1, 2 MiB GPU then 4 MiB CPU
  end
- R0->>R1: allgather nSegments 2 and segOff
+ R0->>R1: allgather status and nSegments 2
  Note over R0,R1: counts match, sizes differ
- R0->>R1: iput 6 MiB, split on rank 0's row locally and rank 1's row remotely
+ R0->>R1: iput 6 MiB, split on rank 0's offsets locally and rank 1's remotely
 ```
 
 ## Thread hierarchy mapping
 
-A GIN operation starts in a GPU thread group and ends as work requests on a QP. Only lane 0 of the cooperative group (`coop.thread_rank() == 0`) writes the 128-byte descriptor into the per-peer ring in host-pinned memory; the kernel chooses the context through the `ncclGin` context index (`ginContextCount` defaults to 4). The host proxy progress thread polls every context and peer and calls the RMA backend, which posts on that context's QP to the peer. Multi-segment support changes only the last step: the backend splits the operation into one WR per slice. Same-node peers use LSA loads and stores and never reach the proxy.
+A GIN operation starts in a GPU thread group and ends as work requests on a QP. Only lane 0 of the cooperative group writes the 128-byte descriptor into the per-peer ring in host-pinned memory; the kernel chooses the context through the `ncclGin` context index. The host proxy progress thread polls every context and peer and calls the RMA backend, which posts on that context's QP to the peer. Multi-segment support changes only the last step. Same-node peers use LSA loads and stores and never reach the proxy.
 
 ```mermaid
 %% caption: Thread hierarchy mapping from a GPU thread group to a QP on the NIC
@@ -31,12 +34,12 @@ flowchart TD
   direction LR
   grid["grid"] --> block["block"] --> coop["cooperative group"]
  end
- gpu --> lane["lane 0 of the group picks the context and writes a 128-byte descriptor"]
+ gpu --> lane["lane 0 writes a 128-byte descriptor"]
  lane --> ring["per-peer ring in host-pinned memory"]
- ring --> poll["host proxy thread polls every context and peer"]
+ ring --> poll["host proxy thread polls contexts and peers"]
  poll --> rma["RMA backend: iput, iputSignal, iget, iflush"]
- rma --> split["context QP to the peer: one WR per slice, per-segment keys"]
- split --> done["NIC completion advances the counter and consumer index"]
+ rma --> split["rounds of per-segment WRs on the context QP"]
+ split --> done["NIC completion advances the counter"]
  gpu -.->|"same node"| lsa["LSA loads and stores, no proxy"]
  classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
  classDef rma fill:#f5ebfb,stroke:#af52de,color:#1d1d1f
@@ -52,149 +55,132 @@ flowchart TD
 
 ## Code layout and dispatch
 
-Develop's `gin.cc` keeps its single-MR bodies. Each entry point starts with a one-line dispatch into a separate `RCCL:`-marked function in the same file, taken only when `rcclRmaMultiSegEnabled()` is true:
+With the switch on, `ncclRmaIbProxyInit` installs the multi-segment entries (`rcclRmaIbProxyInstallMultiSeg`): every MR and data operation takes the `rcclRmaIbProxy*` body, because the multi-segment handle has its own layout. A one-segment handle runs develop's single-MR body through the handle's embedded `single` MR (`rcclRmaIbProxyUseSingle`).
 
 | Develop function (`net_ib/gin.cc`) | Multi-segment body |
 |---|---|
-| `ncclRmaIbProxyConnect` | `rcclRmaIbProxyConnectFinish`, which allocates `regConsensus` |
-| `ncclRmaIbProxyRegMrSymDmaBuf`, `ncclRmaIbProxyDeregMrSym` | `rcclRmaIbProxyRegMrSymDmaBuf`, `rcclRmaIbProxyDeregMrSym` |
-| `ncclRmaIbProxyIPut`, `IGet`, `IPutSignal`, `IFlush` | `rcclRmaIbProxyIPut`, `IGet`, `IPutSignal`, `IFlush` |
-| `ncclRmaIbProxyTest` | `rcclRmaIbProxyTestFailed`, for a request marked `NCCL_NET_IB_REQ_FAILED` |
-| close | `free(cComm->regConsensus)` |
+| `ncclRmaIbProxyConnect` | `rcclRmaIbProxyConnectFinish`, which allocates `regRecords` |
+| `RegMrSymDmaBuf`, `RegMrSym`, `DeregMrSym` | `rcclRmaIbProxyRegMrSymDmaBuf`, `rcclRmaIbProxyRegMrSym`, `rcclRmaIbProxyDeregMrSym` |
+| `IPut`, `IGet`, `IPutSignal`, `IFlush` | `rcclRmaIbProxyIPut`, `IGet`, `IPutSignal`, `IFlush` |
+| `Test` | `rcclRmaIbProxyTestFailed`, for a request marked `NCCL_NET_IB_REQ_FAILED` |
+| close | `free(cComm->regRecords)` |
 
-IB-CAST `net_ib_cast/gin.cc` has the same shape with `rcclIbCastRmaIbProxy*` bodies. The limits and integer helpers both backends use are in the dependency-free `net_ib/rma_multiseg.h`: the segment and WR limits, the QP depths, `rcclRmaMultiSegEnabled`, and helpers such as `ncclRmaSegmentSliceBytes`, `ncclRmaWrIsSignaled`, `ncclRmaSignalOffsetValid`, `ncclRmaSegmentCountsMatch`, `ncclRmaSegOffTableValid`, `ncclRmaSegIndexOf`, `ncclRmaCompletePostedRequest`, `ncclRmaWrCreditsAvailable` and `ncclRmaDevSlotOf`. They are host-unit-tested in `test/RmaSegmentMathTests.cpp`.
+The pieces both IB plugins share are in `src/transport/`:
+
+| Header | Contents |
+|---|---|
+| `rccl_mseg.h` | segment limits (`RCCL_IB_SEG_PROTOCOL_MAX`, `RCCL_IB_REG_SEG_DEFAULT`, `rcclIbRegSegCap`, `rcclIbSegCountSupported`), `rcclIbSegTable`, `rcclIbSegCursor`, `rcclIbSegIndexOf`, `RCCL_IB_SGE_MAX_BYTES` |
+| `rccl_mseg_rma.h` | RMA limits, `rcclRmaSegTableFits`, `rcclRmaInflightRequestsCap`, `rcclRmaCompletePostedRequest`, `rcclRmaDevSlotOf`, `rcclRmaSegMrTag`, `rcclRmaMrSegmentCount` |
+| `rccl_mseg_rma_round.h` | rounds and per-peer queues |
+| `rccl_mseg_sym.h` | `rcclIbSegSymRecord`, `rcclIbSegSymTable`, `rcclIbSegSymAgree`, `rcclIbSegSymExchange` |
+| `rccl_mseg_export.h`, `rccl_mseg_reg.h`, `rccl_mseg_wr.h` | per-segment export, register and deregister, `rcclIbSegAppendWrs` |
+
+Classic-only glue is in `net_ib/ib_multiseg.h` (`ncclIbMultiSegOk`, `NCCL_RMA_IB_WR_BATCHSIZE` 64, the `rcclRmaIbProxy*` declarations).
 
 ## Handle
 
 ```c
-struct rcclRmaIbProxySegMrHandle {           // IB-CAST: IbCastRmaProxySegMrHandle
+struct rcclRmaIbProxySegMrHandle {      // IB-CAST: IbCastRmaProxySegMrHandle
+  uint32_t tag;                         // rcclRmaSegMrTag, asserted at offset 0
   int nSegments;
-  size_t segOff[NCCL_RMA_MAX_SEGMENTS + 1];  // local map: segOff[0] = 0, segOff[nSegments] = size
-  struct ncclIbMrHandle* mrHandle[NCCL_RMA_MAX_SEGMENTS];
-  uintptr_t* base_vas;                       // [rank * nSegments + seg]
-  uint32_t*  rkeys;                          // [(rank * nSegments + seg) * MAX_DEVS + slot]
-  size_t* rankSegOff;                        // [rank * (MAX_SEGMENTS + 1)], every rank's segOff row
-  // IB-CAST only: int* ibDevNs;             // [rank * MAX_DEVS + slot], physical ibDevN or -1
+  size_t* segOff;                       // nSegments + 1, from the walked count
+  void** mrHandle;                      // one ncclIbMrHandle per segment
+  struct rcclIbSegSymTable sym;         // every rank's offsets, VAs and per-port rkeys
+  int flushSeg;                         // first device segment, or -1 if all host
+  struct ncclRmaIbProxyMrHandle single; // nSegments == 1: develop's layout over mrHandle[0]
 };
 ```
 
-Develop's `ncclRmaIbProxyMrHandle` stays the single-MR handle and is used only with the switch off. The multi-segment handle carries a tag (`rcclRmaSegMrTag`) so tests can read its segment count with `rcclRmaIbProxyMrSegmentCount`. Classic indexes rkeys by the QP's `remDevIdx`; IB-CAST translates a physical `ibDevN` to a registration slot.
+Tests read the segment count through `rcclRmaMrSegmentCount`, which checks the tag, so the same check works on both backends. Classic indexes rkeys by the QP's `remDevIdx`; IB-CAST translates a physical `ibDevN` to a registration slot.
 
 ## Registration
 
 ```text
-count segments: ncclCuMemGetAddressRange -> nSeg   (NCCL_PTR_CUDA with cuMem on, export gate compiled in)
-nSeg > NCCL_RMA_MAX_SEGMENTS: local failure, still exchanged below
-nSeg == 1: reuse the caller's fd (fd == -1 falls back to ibv_reg_mr)
+count segments: ncclCuMemGetAddressRange -> nSeg
+nSeg outside rcclIbSegCountSupported, or table too big (rcclRmaSegTableFits), or past max_mr: local failure, still exchanged
+nSeg == 1: reuse the caller's fd
 for each segment s:
     cuMemGetAddressRange -> segBase, segSize
     inSeg   = (segBase == 0) ? segSize : segSize - (segPtr - segBase)
     thisLen = min(remaining, inSeg)
-    fd = host owner fd for this VA if one is published, else export [page of segPtr, segPtr + thisLen) in whole pages
-    register one MR per device at DMA-BUF offset 0; close an exported fd
+    fd = owner fd for this VA if one is published, else export whole pages
+    register one MR per device through rcclIbSegRegister
 bytes left after nSeg segments: local failure
-consensus gather, checks, second gather, then VA and rkey gathers (next section)
+consensus exchange, then the table gathers
 ```
 
-The export covers whole pages because the MR spans whole pages at offset 0. A local failure never returns before the first gather; it is recorded in the consensus record so every rank fails together.
+The export covers whole pages and the MR offset is the page-aligned distance from the segment base. A local failure never returns before the first gather. Classic also rejects a multi-segment registration when `NCCL_DMABUF_ENABLE` is off.
 
 ## Consensus
 
-Each rank exchanges one fixed-size record, so a rank that failed halfway through enumeration still meets its peers in the collective:
-
-- Classic: `ncclRmaIbProxyRegistration { status, nSegments, segOff[NCCL_RMA_MAX_SEGMENTS + 1] }`.
-- IB-CAST: `IbCastRmaProxyRegistration` adds `magic` 0x524d5347 and `version` 1, checked on every record so a future same-size revision fails collectively instead of being misread.
-
-The gather target `regConsensus` is per communicator, `nranks` records allocated with `ncclIbMalloc` (page-aligned, because the allgather registers whole pages) in the connect finish function, only with the switch on, and freed on close. Registration therefore has nothing to allocate before its first collective.
+Each rank allgathers a `rcclIbSegSymRecord {status, nSegments}` into `regRecords`, which `rcclRmaIbProxyConnectFinish` allocated for `nranks` records, so registration has nothing to allocate before its first collective. `rcclIbSegSymExchange` fails every rank on any failed status or unequal count, and then gathers each rank's offsets, segment VAs and keys into the symmetric table. IB-CAST gathers one more record with `magic`, `version` and `ibDevNs`.
 
 ```mermaid
-%% caption: Consensus: every rank gathers the fixed-size record, then succeeds or fails together
+%% caption: Consensus: every rank gathers the record, then succeeds or fails together
 sequenceDiagram
  box rgb(245,235,251) RMA
  participant R as rank r
- participant C as regConsensus<br/>gather
+ participant C as regRecords gather
  end
  R->>R: count segments, register one MR per segment, record any local failure
- R->>C: allgather the fixed-size record
- C-->>R: every rank's status, nSegments, segOff
- alt any failed status, unequal counts, or invalid segOff table
+ R->>C: allgather status and nSegments
+ C-->>R: every rank's record
+ alt any failed status or unequal counts
  rect rgb(255,236,235)
  R->>R: registration fails on every rank
  end
  else all records agree
  rect rgb(232,248,236)
- R->>R: copy every rank's row into rankSegOff, allocate tables
- R->>C: gather the record again with the allocation status
- R->>C: allgather per-segment VAs and rkeys
+ R->>C: allgather offsets, VAs and rkeys
  end
  end
 ```
-
-The checks are `ncclRmaSegmentCountsMatch` (equal `nSegments` in 1..16) and `ncclRmaSegOffTableValid` (starts at 0, never decreases), because those tables feed unsigned offset math.
 
 ## Segmented WR builder
 
-`ncclRmaBuildSegmentedWrs` (IB-CAST `IbCastRmaBuildSegmentedWrs`) walks the transfer and cuts each slice at the nearer of the local and remote boundary:
+`rcclRmaBuildSegmentedWrs` walks the transfer with `rcclIbSegCursor` over the local and remote rank's offsets and emits slices with the shared `rcclIbSegAppendWrs`, each cut at the nearer of the two boundaries and at `RCCL_IB_SGE_MAX_BYTES`. Out-of-range transfers are rejected before any WR is posted (`rcclRmaRangeOk`).
 
-```c
-while (rem > 0) {
-  if (ncclRmaDataWrBudgetFull(n, maxWr)) return ncclInternalError;     // 64 data WRs
-  int rs = ncclRmaSegOf(remoteH, remoteRank, rOff);                    // remote rank's row
-  size_t remoteRemaining = rOffs[rs + 1] - rOff;
-  if (flushSge == NULL) {                                              // put or get
-    ls = ncclRmaSegOf(localH, localRank, lOff);
-    localRemaining = lOffs[ls + 1] - lOff;
-  }
-  size_t chunk = flushSge == NULL ? ncclRmaSegmentSliceBytes(rem, localRemaining, remoteRemaining)
-                                  : min(rem, remoteRemaining);         // slices also clamp to UINT32_MAX
-  wr[n].wr.rdma.remote_addr = remoteH->base_vas[remoteRank * nSeg + rs] + (rOff - rOffs[rs]);
-  wr[n].wr.rdma.rkey = ncclRmaRemoteRkey(remoteH, remoteRank, rs, qp->remDevIdx);
-  if (flushSge != NULL) { sge[n] = *flushSge; sge[n].length = 1; }   // flush: 1 byte per segment
-  else sge[n] = { local address in segment ls, chunk, localH->mrHandle[ls]->mrs[qp->devIndex]->lkey };
-  if (n > 0) wr[n - 1].next = &wr[n];
-  lOff += chunk; rOff += chunk; rem -= chunk; n++;
-}
-```
+- **Put and get** use one lkey and one rkey per slice.
+- **IPutSignal** adds one `IBV_WR_ATOMIC_FETCH_AND_ADD` on the segment holding `signalOff`, which must be 8-byte aligned and inside one segment (`rcclRmaSignalOffsetValid`); it rides the last round.
+- **Flush** is one 1-byte read of `flushSeg`. A read cannot pass earlier posted writes, so one read flushes the window; a window that is all host memory posts nothing.
+- **Signaling.** Each round signals only its last WR.
 
-- **Put and get** use one lkey and one rkey per slice; the two sides split on their own rows. At most `NCCL_RMA_MAX_DATA_WRS` (64) slices; more is rejected before posting.
-- **IPutSignal** posts the put slices unsignaled, then one `IBV_WR_ATOMIC_FETCH_AND_ADD` on the segment that holds `signalOff`, which `ncclRmaSignalOffsetValid` requires to be 8-byte aligned and inside one segment. Only the atomic is signaled; the slot bound is 65.
-- **Flush** runs the builder in flush mode against the rank's own window: one 1-byte `RDMA_READ` per segment into a fixed scratch, at most `NCCL_RMA_MAX_FLUSH_WRS` (16), so one flush fences writes to every segment.
-- **Signaling.** Every chain signals only its last WR, so one completion retires it.
-- **Batching.** Classic queues chains through its WR batch (`NCCL_RMA_IB_WR_BATCHSIZE`); a chain longer than the batch posts directly after the pending batch, so WRs reach the QP in request-id order.
-- **Zero-size operations** post no WR. Classic ties such an operation to its predecessor's sequence id; IB-CAST completes it on its first `Test()`.
+## Rounds
+
+An operation wider than one round no longer fails. `rccl_mseg_rma_round.h` posts at most `NCCL_RMA_MAX_DATA_WRS` (64) data WRs per round, and the next round once the plugin reports the previous one done. Operations queue per peer in request order (`rcclRmaRoundQueue`), so a later operation never passes an earlier one; behind a queued operation every operation queues, including single-MR ones. The plugin supplies the hooks (`rcclRmaIbRoundBuild`, `rcclRmaIbRoundOutstanding`, `rcclRmaIbRoundPost`, `rcclRmaIbRoundRetire`, `rcclRmaIbRoundFailed`).
 
 ```mermaid
-%% caption: Segmented WR builder: slice, bound check, and final-WR signaling
+%% caption: RMA rounds: one op posted in rounds of at most 64 data WRs
 flowchart TD
- t["transfer of size bytes"] --> b["ncclRmaBuildSegmentedWrs"]
- b --> s["slice: min of local bound, remote bound, UINT32_MAX"]
- s --> more{"more than 64 slices?"}
- more -->|yes| rej["reject before posting"]
- more -->|no| sig["post chain, signal only the final WR"]
+ op["operation"] --> q{"peer queue empty?"}
+ q -->|no| enq["queue behind earlier ops"]
+ q -->|yes| b["build up to 64 WRs"]
+ enq --> b
+ b --> p["post, signal the last WR"]
+ p --> d{"bytes left?"}
+ d -->|yes| w["wait for the round to complete"]
+ w --> b
+ d -->|no| done["request completes after its last round"]
  classDef rma fill:#f5ebfb,stroke:#af52de,color:#1d1d1f
  classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
- classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
- class t,b,s rma
- class sig okpath
- class rej failpath
+ class op,q,enq,b,p,d,w rma
+ class done okpath
 ```
 
-## Credits
+A chain with nothing queued ahead posts at once (`rcclRmaIbProxyPostChain`): data chains go through the classic WR batch (`NCCL_RMA_IB_WR_BATCHSIZE`), flushes post directly. The proxy rings its pending batch before it publishes a queued request, so a doorbell failure leaves nothing queued.
 
-A chain of up to 65 WRs holds that many send-queue slots until its signaled completion. Both backends therefore reserve send-queue capacity before posting, so a burst of maximum-width operations waits instead of overflowing the QP.
-
-Classic (`rcclRmaWrCreditsReserve`) tracks posted and completed request sequence numbers per peer and per queue. If the chain does not fit within the QP's created depth, it first flushes the pending WR batch, then polls the CQ (yielding when nothing completed) until enough completes. It has no deadline: a WR that never completes surfaces as an error completion once the HCA's retries run out, and the wait returns `ncclRemoteError`. A chain wider than the QP itself is an internal error. IB-CAST uses a per-comm counter with a bounded wait instead; see [IB-CAST credits](multi_segment_netib_cast_gin.md#credits).
+**Queues and in-flight cap.** With multi-segment chains possible (switch on, `NCCL_DMABUF_ENABLE=1`, IB or IB-CAST proxy backend), `rcclRmaProxyMaxInflightRequests` (`rccl_dev_runtime.cc`) caps each peer and context at `NCCL_RMA_MAX_INFLIGHT_REQUESTS` (32). The GIN and RMA proxies log an INFO line when this lowers `NCCL_GIN_PROXY_QUEUE_SIZE` or the per-peer request count. The RMA send QP is `NCCL_RMA_SEND_QP_WRS` = 32 × 65 = 2080, only on RMA comms (`rcclIbSendQpWrs(isRma)`). The 11-04 WR credit scheme (`rcclRmaWrCreditsReserve`) is gone.
 
 ## Prefix post and completion
 
-If `ibv_post_send` accepts only a prefix of a chain, the request is kept and the call returns success, so callers that `NCCLCHECK` it still reach `Test()` and drain the completion. If the accepted prefix stops before the signaled tail, no completion will come, so the request is marked FAILED and `Test()` reports the error. Only a post that accepted nothing frees the slot and returns the error; classic also returns the sequence id with `ncclRmaReleaseSeqId`. The rule is `ncclRmaCompletePostedRequest`, applied by classic in `ncclRmaFinishPostedRequest`.
+If `ibv_post_send` accepts only a prefix of a round, the request is kept so `Test()` drains it. If the accepted prefix stops before the signaled tail, no completion will come, so the request is marked FAILED and `Test()` reports the error. Only a post that accepted nothing frees the slot and returns the error; classic also returns the sequence id with `rcclRmaReleaseSeqId`. The rule is `rcclRmaCompletePostedRequest`, applied by classic in `rcclRmaFinishPostedRequest`.
 
 ```mermaid
 %% caption: Prefix post: which requests are kept, failed, or freed
 flowchart TD
  p["ibv_post_send"] --> q{"any WR accepted?"}
  q -->|no| f["free slot, return the error"]
- q -->|yes| k["keep request, return success"]
+ q -->|yes| k["keep the request"]
  k --> tail{"signaled tail accepted?"}
  tail -->|yes| t["Test drains the completion"]
  tail -->|no| fl["mark FAILED, Test reports the error"]
@@ -206,28 +192,28 @@ flowchart TD
 
 ## Deregistration and rollback
 
-`rcclRmaIbProxyDeregMrSym` deregisters every `mrHandle[s]`, then frees `base_vas`, `rkeys` and `rankSegOff`. The registration failure path deregisters only the handles that completed, never a half-built one, and frees the tables and the handle once.
+`rcclRmaIbProxyDeregMrSym` deregisters every segment (`rcclRmaDeregOneSegment` through `rcclIbSegDeregister`) and frees the table and handle (`rcclRmaIbProxySegMrHandleFree`). The registration failure path deregisters only completed segments and frees once.
 
 ## Window gates
 
 `dev_runtime.cc` decides per window whether a multi-segment window reaches these backends. The inputs are communicator-wide, so every rank takes the same branch.
 
-- `rcclDevrRmaRegistersMultiSegment` holds when the switch is on, the RMA backend is `ncclRmaIbProxy` or `IbCastRmaIbProxy`, every rank has the same segment count, and the count is at most 16. `symMemoryRegisterRma` registers a single-segment window always, a multi-segment window only under this gate, and otherwise skips RMA registration with an INFO line.
-- `rcclDevrGinRegistersMultiSegment` also requires every active GIN backend to be the proxy type. `symMemoryRegisterGin` fails a device-only multi-segment window with `ncclInvalidUsage` when it does not hold. A window that contains host segments keeps develop's per-segment GIN path and needs `NCCL_DMABUF_ENABLE=1`.
+- `rcclDevrRmaRegistersMultiSegment` holds when the switch is on, `NCCL_DMABUF_ENABLE=1`, the RMA backend is `ncclRmaIbProxy` or `IbCastRmaIbProxy`, every rank has the same segment count, and `rcclRmaSegTableFits(nRanks, count)` holds. `symMemoryRegisterRma` registers a single-segment window always, a multi-segment window only under this gate, and otherwise skips RMA registration with an INFO line.
+- `rcclDevrGinRegistersMultiSegment` also requires every active GIN backend to be the proxy type. `symMemoryRegisterGin` fails a device-only multi-segment window with `ncclInvalidUsage` when it does not hold. A window that contains host segments keeps develop's per-segment GIN path.
 
 ```mermaid
 %% caption: Window gates: which multi-segment windows reach the RMA backend
 flowchart TD
  w["multi-segment window"] --> sys{"contains host segments?"}
- sys -->|yes| dev["develop per-segment GIN path, needs DMA-BUF"]
- sys -->|no| g{"switch on, proxy GIN over IB or IB-CAST RMA, equal counts, at most 16?"}
+ sys -->|yes| dev["develop per-segment GIN path"]
+ sys -->|no| g{"switch, DMA-BUF, IB proxy, equal counts, table fits?"}
  g -->|yes| mrs["per-segment MRs in the RMA backend"]
- g -->|no| inv["GIN: ncclInvalidUsage; RMA: skip registration"]
+ g -->|no| inv["GIN fails, RMA skips"]
  classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
  classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
  classDef stagepath fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
  classDef failpath fill:#ffeceb,stroke:#ff3b30,color:#1d1d1f
- class w gin
+ class w,sys,g gin
  class mrs okpath
  class dev stagepath
  class inv failpath
@@ -235,28 +221,28 @@ flowchart TD
 
 ## Host owner DMA-BUF
 
-A hybrid DeepEP window maps one private GPU segment plus one host segment per local rank; every rank imports the other ranks' host segments. The importing process cannot get a DMA-BUF for an imported host segment: on ROCm both `hipMemGetHandleForAddressRange` on the imported range and `hipMemExportToShareableHandle` on the imported handle return invalid argument. The owner's POSIX fd is already a DMA-BUF that `ibv_reg_dmabuf_mr` accepts in any process, so RCCL registers imported host segments from it.
+A hybrid DeepEP window maps one private GPU segment plus one host segment per local rank; every rank imports the other ranks' host segments. The importing process cannot get a DMA-BUF for an imported host segment, but the owner's POSIX fd is already a DMA-BUF that `ibv_reg_dmabuf_mr` accepts in any process, so RCCL registers imported host segments from it. The path runs only with `NCCL_SYM_REUSE_SYSMEM_HANDLES=1`.
 
 | Step | Where | What |
 |---|---|---|
-| Export | `symMemoryMapLsaTeam` (`dev_runtime.cc`) | Each rank exports its own host segment before the intranode allgather; a successful export sets `hostExportable` in its message and keeps the fd. The flag is set before the ROCM-29810 type rewrite. |
-| Keep or fetch | `symMemoryGetHostOwnerFd` | An exporter keeps its own fd in `ncclDevrMemory::hostOwnerFds`. Another rank asks the first `hostExportable` rank through `ncclProxyClientGetFdBlocking`. With no exporter there is no fallback, because that proxy would repeat the failed export and never reply; the segment then has no published fd. |
+| Export | `symMemoryMapLsaTeam` (`dev_runtime.cc`) | Each rank exports its own host segment before the intranode allgather; a successful export sets `hostExportable` in its message and keeps the fd. |
+| Keep or fetch | `symMemoryGetHostOwnerFd` | An exporter keeps its own fd. Another rank asks the first LSA rank with `hostExportable`. With no exporter there is no fallback, because that proxy would repeat the failed export and never reply. |
+| Agree | `hostOwnerFdStatus`, gathered as `ownerFdStatus` in `symMemoryObtain` | A rank-local fetch or allocation failure is gathered before the collective GIN/RMA registration, so every rank fails together. |
 | Publish | `symMemoryPublishHostOwnerFds`, `rcclHostSegmentFdRegister` (`rccl_dev_runtime.cc`) | A mutex-protected process-wide table maps VA ranges to fds. |
-| Register | `rcclRmaIbProxyRegMrSymDmaBuf` and the IB-CAST twin | `rcclHostSegmentFdLookup` runs before exporting; the MR offset is the page-aligned distance from the segment base. GIN stores the segment as `CU_MEM_LOCATION_TYPE_HOST_NUMA`, because the imported handle reads as device (ROCM-29810). |
-| Lifetime | `symMemoryCloseHostOwnerFds` | Fds live as long as the backing memory, because a later GIN enable re-registers it; they are removed and closed in `symMemoryDestroy` and on obtain failure. |
+| Register | `rcclRmaIbProxyRegMrSymDmaBuf` and the IB-CAST twin | `rcclHostSegmentFdLookup` runs before exporting. GIN stores the segment as `CU_MEM_LOCATION_TYPE_HOST_NUMA`, because the imported handle reads as device (ROCM-29810). |
+| Lifetime | `symMemoryCloseHostOwnerFds` | Fds live as long as the backing memory; they are closed in `symMemoryDestroy` and on obtain failure. |
 
-The GIN proxy forwards `regMrSymDmaBuf` to the RMA backend, which uses the owner fd. rocSHMEM GDA and Anvil SDMA accept the call but ignore the fd, so hybrid windows on those backends need their own work ([proposal](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md)). NET/IB P2P never registers a buffer with host segments (`register.cc` skips it and the transfer stages). The supported hybrid contract and its tests are in [testing](multi_segment_testing.md#hybrid-deepep-windows).
+Fork 1 changes the fetch rule: an importer borrows an fd only when exactly one LSA rank can export, and removes the ROCM-29810 TODO. rocSHMEM GDA and Anvil SDMA accept `regMrSymDmaBuf` but ignore the fd ([proposal](multi_segment_gin_rocshmem_gda_and_anvil_sdma.md)). NET/IB P2P never registers a buffer with host segments. The hybrid contract and its tests are in [testing](multi_segment_testing.md#hybrid-deepep-windows).
 
 ## Symbol index
 
 | Concern | Symbols |
 |---|---|
-| Dispatch | `rcclRmaMultiSegEnabled`, `rcclRmaIbProxy*`, `rcclRmaIbProxyTestFailed` (`net_ib/gin.cc`) |
-| Handle and lookup | `rcclRmaIbProxySegMrHandle`, `ncclRmaSegOf`, `ncclRmaRankOff`, `ncclRmaRemoteRkey`, `rcclRmaSegMrTag`, `rcclRmaIbProxyMrSegmentCount` |
-| Consensus | `ncclRmaIbProxyRegistration`, `ncclGinIbCollComm::regConsensus` (`net_ib/gin.h`), `rcclRmaIbProxyConnectFinish` |
-| Builder and post | `ncclRmaBuildSegmentedWrs`, `ncclRmaIbProxyQueueWrs`, `ncclRmaPostWrs`, `ncclRmaFinishPostedRequest` |
-| Credits | `rcclRmaWrCreditsReserve`, `ncclRmaWrCredits*` (`rma_multiseg.h`) |
-| Limits | `NCCL_RMA_MAX_SEGMENTS` (16), `NCCL_RMA_MAX_DATA_WRS` (64), `NCCL_RMA_MAX_SIGNAL_WRS` (65), `NCCL_RMA_MAX_FLUSH_WRS` (16, per operation; not the flush QP depth), `NCCL_RMA_SEND_QP_WRS` |
-| Window gates | `rcclDevrRmaRegistersMultiSegment`, `rcclDevrGinRegistersMultiSegment`, `rcclDevrGinSegmentRegType` (`rccl_dev_runtime.cc`) |
+| Dispatch | `rcclRmaIbProxyInstallMultiSeg`, `rcclRmaIbProxyUseSingle`, `rcclRmaIbProxyTestFailed` (`net_ib/gin.cc`); `rcclRmaMultiSegEnabled` (`rccl_mseg_rma.h`) |
+| Handle and lookup | `rcclRmaIbProxySegMrHandle`, `rcclRmaSegOf`, `rcclRmaRankOff`, `rcclRmaRemoteRkey`, `rcclRmaRangeOk` (`net_ib/gin.cc`); `rcclRmaSegMrTag`, `rcclRmaMrSegmentCount` (`rccl_mseg_rma.h`) |
+| Consensus | `rcclIbSegSymRecord`, `rcclIbSegSymExchange` (`rccl_mseg_sym.h`); `regRecords` (`net_ib/gin.h`); `rcclRmaIbProxyConnectFinish`, `rcclRmaRegAllGather` |
+| Builder and rounds | `rcclRmaBuildSegmentedWrs`, `rcclRmaIbRound*`, `rcclRmaIbProxyStartRequest`, `rcclRmaIbProxyPostChain`, `rcclRmaIbProxyEnqueue`, `rcclRmaIbProxySubmit`, `rcclRmaIbProxyQueueWrs`, `rcclRmaFinishPostedRequest` (`net_ib/gin.cc`); `rcclRmaRoundOp`, `rcclRmaRoundQueue`, `rcclRmaRoundHooks` (`rccl_mseg_rma_round.h`) |
+| Limits | `NCCL_RMA_MAX_DATA_WRS` (64), `NCCL_RMA_MAX_SIGNAL_WRS` (65), `NCCL_RMA_MAX_REQUESTS` (256), `NCCL_RMA_MAX_INFLIGHT_REQUESTS` (32), `NCCL_RMA_SEND_QP_WRS` (2080), `RCCL_RMA_SEG_TABLE_MAX_ENTRIES` (2^20) |
+| Window gates | `rcclDevrRmaRegistersMultiSegment`, `rcclDevrGinRegistersMultiSegment`, `rcclRmaProxyMaxInflightRequests` (`rccl_dev_runtime.cc`) |
 | Host owner fd | `symMemoryGetHostOwnerFd`, `symMemoryPublishHostOwnerFds`, `symMemoryCloseHostOwnerFds`, `rcclHostSegmentFdRegister`, `rcclHostSegmentFdLookup` |
-| Tests | `test/RmaSegmentMathTests.cpp`, `test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp` |
+| Tests | `test/RmaSegmentMathTests.cpp`, `test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp`, host suites under `test/host/transport/net_ib/` and `test/host/gin/` |

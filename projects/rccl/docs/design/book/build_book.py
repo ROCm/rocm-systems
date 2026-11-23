@@ -34,6 +34,8 @@ PARTS: list[tuple[str, list[tuple[str, str]]]] = [
         ("multi_segment_overview.md", "Overview (start here)"),
         ("multi_segment_current.md", "Current behavior and invariants"),
         ("multi_segment_sync_and_removal.md", "Upstream sync impact and removal plan"),
+        ("multi_segment_review_feedback.md", "Review feedback and status"),
+        ("multi_segment_fork_plugin.md", "IB-MSEG fork plugin (planned replacement)"),
     ]),
     ("Part II — Design per transport layer", [
         ("multi_segment_gin_rma.md", "Classic GIN / RMA"),
@@ -43,12 +45,13 @@ PARTS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     ("Part III — Testing and related designs", [
         ("multi_segment_testing.md", "Testing and validation"),
+        ("multi_segment_validation_plan.md", "Validation plan"),
         ("multi_segment_gin_rocshmem_gda_and_anvil_sdma.md", "rocSHMEM GDA and Anvil SDMA (proposed)"),
     ]),
-    ("Part IV — Follow-up designs", [
-        ("multi_segment_varseg.md", "Register past 16 segments"),
-        ("multi_segment_sidetable_first_reg.md", "Side table on first registration"),
-        ("multi_segment_flush_read_collapse.md", "Flush read collapse"),
+    ("Part IV — Earlier follow-up designs (history)", [
+        ("multi_segment_varseg.md", "Register past 16 segments (implemented differently)"),
+        ("multi_segment_sidetable_first_reg.md", "Side table on first registration (superseded)"),
+        ("multi_segment_flush_read_collapse.md", "Flush read collapse (superseded)"),
     ]),
     ("Part V — Reference", [
         ("multi_segment_code_map.md", "Code map"),

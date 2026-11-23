@@ -4,15 +4,15 @@ With the switch on, every advertising NET/IB connection reserves a side table of
 
 *Terms, diagram colors and callout boxes follow the [overview](multi_segment_overview.md#color-legend).*
 
-> [!NOTE]
-> **Status:** design only. The tree reserves the side table at connect whenever the rank advertises `NCCL_IB_CAP_MULTISEG`. The classic commit would go on layer 06 (`users/atulkulk/mseg/06-classic-netib-multisegment`) and the CAST commit on 08 (`users/atulkulk/mseg/08-cast-netib-multisegment`), followed by a restack.
+> [!WARNING]
+> **Status (2026-11-23): superseded, not implemented, kept as history.** AICOMRCCL-3125 was skipped. The one-write CTS on 06 and then 08 removed the side table: the receiver's layout now travels in front of the CTS entries in the same RDMA write, so there is no separate table, MR or follow-up handshake to defer. An advertising P2P comm instead uses 2048-byte CTS slots, 384 KiB more per side than develop, and GIN and RMA comms never advertise. See [classic NET/IB P2P](multi_segment_netib_wire.md#data-structures) and [review feedback](multi_segment_review_feedback.md#aleksandr). The body below describes the 11-04 tree.
 
 ## What connect does today
 
 The side-table layout and the CTS rules are in [classic NET/IB P2P](multi_segment_netib_wire.md#data-structures). The parts that matter here are the following.
 
-- **Classic sender.** `ncclIbSendCommAllocCts` (`net_ib/connect.cc`) allocates one page-aligned block of `NCCL_IB_CTS_FIFO_BYTES`. When `ncclIbAdvertiseMultiSeg()` is true it appends `NCCL_IB_SEG_LAYOUT_FIFO_BYTES` and points `segLayoutFifo` at the second part. One MR covers the block, and its rkey goes in `ncclIbConnectionMetadata`.
-- **CAST sender.** In the docs worktree source, `segLayoutFifo` is a member embedded right after `ctsFifo` (a `static_assert` in `common_cast.h`). The covering MR extends over it only when `IbCastAdvertiseMultiSeg()` is true. The wire tip has since moved CAST to the same heap block as classic.
+- **Classic sender.** `ncclIbSendCommAllocCts` (`net_ib/connect.cc`) allocates one page-aligned block of `NCCL_IB_CTS_FIFO_BYTES`. When `ncclIbCommAdvertisesMultiSeg` is true (the switch is on and the comm is not a GIN or RMA comm) it appends `NCCL_IB_SEG_LAYOUT_FIFO_BYTES` and points `segLayoutFifo` at the second part. One MR covers the block, and its rkey goes in `ncclIbConnectionMetadata`.
+- **CAST sender.** `IbCastSendCommAllocCts` (`net_ib_cast/connect.cc`) does the same with `IB_CAST_CTS_FIFO_BYTES` and `IB_CAST_SEG_LAYOUT_FIFO_BYTES`, gated by `IbCastCommAdvertisesMultiSeg`, so an RMA pair allocates no side table.
 - **Receiver.** Only if the peer advertised, accept allocates `remSegLayout` (256 slots by 8 receives of 704 bytes, about 1.4 MiB). It sets `remSegLayout->addr` to the peer's CTS address plus the CTS size and registers `segLayoutFifoMr` over `remSegLayout->elems` with `IBV_ACCESS_LOCAL_WRITE`. That MR is the local source of the side-table RDMA write. Classic reads `peerCaps` from the trailer unmasked. CAST forces `peerCaps` to 0 when the local switch is off, so a switched-off rank neither writes nor waits on a side table.
 - **Depths.** The sender data QP depth, the extra CTS WRs (`NET_IB_MAX_REQUESTS * (resiliency ? 1 : 2)`) and the flush QP depth are chosen in the same connect, from the advertise bit.
 
@@ -61,7 +61,7 @@ flowchart TD
 - Connect with the switch on still sends the capability trailer, so the peer knows a table may appear. The CTS MR covers only `ctsFifo`. The receiver does not allocate `remSegLayout` or register `segLayoutFifoMr`. QP depths stay at the multi-segment values, because they cannot grow later.
 - Add one helper, `ncclIbEnsureSegLayout` (CAST `IbCastEnsureSegLayout`). On the send comm, the first multi-segment registration allocates `segLayoutFifo`, registers its MR and sends `{addr, rkey}` on the existing connect socket. On the receive comm, the first caller allocates `remSegLayout`, registers `segLayoutFifoMr` and installs the exchanged address; it does not use the CTS address plus the CTS size. A second caller on either side returns without allocating.
 - Until the exchange completes, a multi-segment receive registration returns `ncclInvalidUsage`, the same decline as a missing capability, and the collective stages. A single-segment buffer never waits. The send side still succeeds, matching `OldPeer_SingleRkeyCrossBoundaryTransfer`: the decline is receive-only.
-- Close and the connect error path free a late sender block and a late `remSegLayout` and deregister any MR that was created. CAST's embedded array needs no free, only the late MR and the follow-up.
+- Close and the connect error path free a late sender block and a late `remSegLayout` and deregister any MR that was created. CAST frees the same way, because its side table is part of the same heap block.
 - Mark the helper and both call sites with `// RCCL:` comments.
 
 ```mermaid
@@ -81,7 +81,7 @@ sequenceDiagram
 
 - The 64-byte CTS slot, `NCCL_IB_CTS_NREQS_SIDE_TABLE` and the `ncclIbConnectionMetadata` layout. The address goes in a follow-up message on the connect socket, not in a new metadata field.
 - `ncclIbSegLayout` (704 bytes) and the capability trailer, which still means "advertises" and not "table already registered".
-- GIN and RMA, which have no CTS side table.
+- GIN and RMA comms, which never advertise the capability and never allocate a side table (`rcclIbMarkGinListen` on classic, the RMA pair check on CAST).
 - Flush reads, which stay one per overlapped segment until [flush read collapse](multi_segment_flush_read_collapse.md) lands.
 - The HIP default of `NCCL_MULTI_SEGMENT_REGISTER`, the hybrid `hipMemUnmap` teardown and the host-owner DMA-BUF fd path.
 

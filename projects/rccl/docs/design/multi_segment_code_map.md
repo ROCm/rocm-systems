@@ -2,7 +2,10 @@
 
 This doc lists the code the multi-segment stack adds or changes, one table per source file, grouped by the layer that introduced it. Use it to find where a behavior lives, which pull request owns it, and which design section explains it. The design docs stay concise and link here instead of naming every function.
 
-Line numbers are at the wire tip `6e4efc95f2b4` (`multi-segment-dmabuf-cast-gin`), the top of the open stack, and drift as the code changes; search by symbol when they do. "New" means the stack adds the symbol; "changed" means it edits a develop symbol, usually through a one-line `// RCCL:` hook. The layer is the first branch whose copy of the symbol differs from develop. Abbreviations are defined in the [overview terms](multi_segment_overview.md#terms).
+Line numbers are at the old-stack wire code tip `ac1de99e4627` (tests tip `ba3ab26f30a7`) on develop `c43b4a9e7307`, as of 2026-11-23, and drift as the code changes; search by symbol when they do. "New" means the stack adds the symbol; "changed" means it edits a develop symbol, usually through a one-line `// RCCL:` hook. The layer is the first branch whose copy of the symbol differs from develop. The last column quotes the code comment next to the symbol, where there is one. Abbreviations are defined in the [overview terms](multi_segment_overview.md#terms).
+
+> [!NOTE]
+> The 11-04 version of this map named files that no longer exist: `net_ib/rma_multiseg.h` and `net_ib/multiseg.h` became the shared `transport/rccl_mseg*.h` headers and `net_ib/ib_multiseg.h`; `rccl_ib_multiseg.h` became `rccl_mseg_reg.h`; `net_ib_cast/p2p_multiseg_cast.*` and `rccl_reg_multiseg_cast.cc` were folded into the shared `transport/rccl_p2p_multiseg.*` and into `net_ib_cast/p2p.cc`, `reg.cc` and `ib_cast_multiseg.h`. In the IB-MSEG fork the same code moves into `net_ib_multiseg/`; see [the fork plugin](multi_segment_fork_plugin.md#forks).
 
 ## How the layers connect
 
@@ -18,11 +21,11 @@ flowchart TD
  netreg --> proxy["proxy calls regMrDmaBuf with fd -1 (06)"]
  proxy --> classicreg["classic: one MR per segment (06)"]
  proxy --> castreg["IB-CAST: one MR per segment (08)"]
- rmareg --> classicrma["classic RMA: consensus, split WRs, credits (05)"]
- rmareg --> castrma["IB-CAST RMA: consensus, split WRs, credits (wire)"]
+ rmareg --> classicrma["classic RMA: consensus, split WRs, rounds (05)"]
+ rmareg --> castrma["IB-CAST RMA: consensus, split WRs, rounds (wire)"]
  ginreg --> classicrma
- classicreg --> classicp2p["classic P2P: side table, segmented send, flush (06)"]
- castreg --> castp2p["IB-CAST P2P: side table, segmented send, flush (08)"]
+ classicreg --> classicp2p["classic P2P: one-write CTS, sliced send, one-read flush (06)"]
+ castreg --> castp2p["IB-CAST P2P: same builder, one group at a time (08)"]
  classDef gin fill:#e5f1ff,stroke:#007aff,color:#1d1d1f
  classDef rma fill:#f5ebfb,stroke:#af52de,color:#1d1d1f
  classDef netib fill:#e0f5f8,stroke:#008299,color:#1d1d1f
@@ -38,11 +41,12 @@ flowchart TD
 | Layer | Pull request | Branch (`users/atulkulk/mseg/...`) | Tables |
 |---|---|---|---|
 | 02, 03 | merged | `02-amd-host-vmm-compat`, `03-registration-range` | [Merged layers](#merged-layers-02-and-03) |
-| 05 | [PR 10884](https://github.com/ROCm/rocm-systems/pull/10884) | `05-gin-rma-multisegment` | [Dev runtime and GIN](#layer-05-dev-runtime-and-gin-host), [classic RMA](#layer-05-classic-gin-and-rma) |
+| 05 | [PR 10884](https://github.com/ROCm/rocm-systems/pull/10884) | `05-gin-rma-multisegment` | [GIN/RMA, registration and shared headers](#layer-05-ginrma-registration-and-shared-headers) |
 | 06 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | `06-classic-netib-multisegment` | [Classic NET/IB P2P](#layer-06-classic-netib-p2p) |
-| 07 | [PR 10890](https://github.com/ROCm/rocm-systems/pull/10890) | `07-hybrid-stress-ci` | [Tests](#tests-and-runner-configs) only |
+| 07 | [PR 10890](https://github.com/ROCm/rocm-systems/pull/10890) | folded into 05 and 06 | [Tests](#tests-and-runner-configs) only |
 | 08 | [PR 10889](https://github.com/ROCm/rocm-systems/pull/10889) | `08-cast-netib-multisegment` | [IB-CAST P2P](#layer-08-ib-cast-p2p) |
-| wire | [PR 10888](https://github.com/ROCm/rocm-systems/pull/10888) | `multi-segment-dmabuf-cast-gin` | [IB-CAST GIN and RMA](#wire-ib-cast-gin-and-rma) |
+| wire | [PR 10888](https://github.com/ROCm/rocm-systems/pull/10888) | `multi-segment-dmabuf-cast-gin` | [IB-CAST GIN/RMA](#wire-ib-cast-ginrma) |
+| 09 | open, `users/bdoganca/mseg/09-mseg-tests-coverage` | `09-tests-local` | [Tests](#tests-and-runner-configs) only |
 
 ## Merged layers 02 and 03
 
@@ -50,313 +54,727 @@ Design: [Current contract, registration](multi_segment_current.md#registration) 
 
 | Symbol | File:line | Layer | Role |
 |---|---|---|---|
-| `rcclDevrProbeNonSymWindow` | `rccl_dev_runtime.cc:27` | 02 | Classifies a non-symmetric window and rejects host VMM across the LSA team. |
-| `rcclDevrGinSegmentRegType` | `rccl_dev_runtime.cc:120` | 02 | Chooses the GIN pointer type and whether DMA-BUF registration is needed for a window with host segments. |
+| `rcclDevrProbeNonSymWindow` | `rccl_dev_runtime.cc:22` | 02 | Classifies a non-symmetric window and rejects host VMM across the LSA team. |
+| `rcclDevrGinSegmentRegType` | `rccl_dev_runtime.cc:115` | 02 | Chooses the GIN pointer type and whether DMA-BUF registration is needed for a window with host segments. |
 | `ncclSymIsHostSegment` | `dev_runtime.cc:50` | 02 | True for a host (or host NUMA) memory location; picks the host pointer type. |
 | `NCCL_CUMEM_HOST_GATE` | `include/rocmwrap.h:84` | 02 | Compile-time gate for host VMM: needs both the host-location probe and a supported HIP version. |
-| `ncclReg::rcclNet` | `include/register.h:63` | 03 | Cached NET segment count and all-peers flag, kept in an RCCL block at the end of the record. |
-| `rcclNetRegSegmentCount` | `rccl_wrap.cc:2481` | 03 | Counts physical segments over the whole registration record and caches the result; with the switch off, a multi-segment record skips NET registration. |
-| `rcclNetGraphRegSegmentCount` | `rccl_wrap.cc:2495` | 03 | Same count for the graph path's reused record. |
-| `rcclNetRegCommit` | `rccl_wrap.cc:2504` | 03 | Sets `rcclNet.allPeers` only when every peer registered. |
-| `netRegisterBuffer` | `transport/net.cc:2282` | 03 | Develop's local NET registration; calls the 03 count hook. |
-| `ncclNetGraphRegisterBuffer` | `transport/net.cc:2396` | 03 | Develop's graph NET registration; calls the graph count hook. |
+| `ncclReg::rcclNet` | `include/register.h:65` | 03 | Cached NET segment count and all-peers flag, kept in an RCCL block at the end of the record. |
+| `rcclNetRegSegmentCount` | `rccl_wrap.cc:3087` | 03 | Counts physical segments over the whole registration record and caches the result; with the switch off, a multi-segment record skips NET registration. |
+| `rcclNetGraphRegSegmentCount` | `rccl_wrap.cc:3101` | 03 | Same count for the graph path's reused record. |
+| `rcclNetRegCommit` | `rccl_wrap.cc:3110` | 03 | Sets `rcclNet.allPeers` only when every peer registered. |
+| `netRegisterBuffer` | `transport/net.cc:2490` | 03 | Develop's local NET registration; calls the 03 count hook. |
+| `ncclNetGraphRegisterBuffer` | `transport/net.cc:2604` | 03 | Develop's graph NET registration; calls the graph count hook. |
 
-## Layer 05: dev runtime and GIN host
+## Layer 05: GIN/RMA, registration and shared headers
 
-Design: [GIN/RMA window gates](multi_segment_gin_rma.md#window-gates) and [host owner DMA-BUF](multi_segment_gin_rma.md#host-owner-dma-buf).
+### `dev_runtime.cc`
 
-### `dev_runtime.cc` and `dev_runtime_internal.h`
-
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `symLsaMessage` | 389 | changed | Carries a flag that this rank holds the creating POSIX fd for a host segment. |
-| `symMemoryImportAndMapSegmentsForRank` | 457 | changed | Notes that an imported host handle cannot export a DMA-BUF, so NIC registration needs the owner's fd. |
-| `symMemoryGetHostOwnerFd` | 490 | new | Fetches the owner's POSIX fd for an imported host segment from the rank that exported it; no fallback when no rank exported. |
-| `symMemoryPublishHostOwnerFds` | 509 | new | Publishes the owner fds by local VA so per-segment RMA registration can find them. |
-| `symMemoryCloseHostOwnerFds` | 518 | new | Deregisters and closes the published owner fds. |
-| `symMemoryMapLsaTeam` | 529 | changed | Collects owner fds while mapping the LSA team; rank-local failures are returned after the intra-node barrier so peers do not wait. |
-| `symMemoryRegisterGin` | 901 | changed | Fails closed unless the GIN backend registers per segment, records imported host segments as host, and passes `multiSegment` and the owner fd to `ncclGinRegister`. |
-| `symMemoryRegisterRma` | 984 | changed | Registers the RMA window only when `rcclDevrRmaRegistersMultiSegment` holds; inputs are communicator-wide, so every rank takes the same branch. |
-| `symMemoryUnregister` | 998 | changed | Deregisters the RMA window only if it was registered. |
-| `symMemoryObtain` | 1047 | changed | Records `minGlobalNumSegments` across ranks; RMA needs the same count everywhere. |
-| `symMemoryDestroy` | 1287 | changed | Closes the owner fds published for the window. |
-| `ncclDevrMemory` | `dev_runtime_internal.h:64` | changed | Adds `minGlobalNumSegments` (line 85) and `hostOwnerFds` (line 95). |
+| `symLsaMessage` | 483 | changed | 1 when this rank holds the creating POSIX fd for the segment. |
+| `symMemoryEnsureHostOwnerFds` | 583 | new function | lazily make the per-segment owner-fd table, every entry -1. |
+| `symMemoryGetHostOwnerFd` | 591 | new function | an imported host handle cannot export a DMA-BUF, so NIC registration uses the owner's POSIX fd. |
+| `symMemoryPublishHostOwnerFds` | 608 | new function | publishes the owner fds by VA so per-segment RMA registration can find them. |
+| `symMemoryCloseHostOwnerFds` | 617 | new function |  |
+| `symMemoryMapLsa` | 634 | changed |  |
+| `symMemoryRegisterGin` | 984 | changed | one HIP DMA-BUF covers only the first segment; |
+| `symMemoryRegisterRma` | 1067 | changed | inputs are communicator-wide, so every rank takes the same branch and skips registration together. |
+| `symMemoryUnregister` | 1083 | changed |  |
+| `symMemoryObtain` | 1167 | changed | re-gathered after the LSA map; |
+| `symMemoryDestroy` | 1424 | changed | close the owner fds published for this window. |
 
-### `rccl_dev_runtime.cc` and `include/rccl_common.h`
+### `dev_runtime_internal.h`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `rcclDevrRmaRegistersMultiSegment` | 135 | new | True when the switch is on, the RMA backend is the classic or IB-CAST proxy, every rank has the same count, and the count is at most 16. |
-| `rcclDevrGinRegistersMultiSegment` | 143 | new | Adds that every active GIN backend is the proxy; other GIN backends take the window as one MR. |
-| `rcclHostSegmentFd` | 154 | new | Table entry mapping a host segment VA range to its owner's fd. |
-| `rcclHostSegmentFdRegister` | 163 | new | Adds an entry. |
-| `rcclHostSegmentFdDeregister` | 168 | new | Removes an entry. |
-| `rcclHostSegmentFdLookup` | 179 | new | Finds the fd for a VA and dups it, so the publisher can close its own copy. |
-| Gate declarations | `include/rccl_common.h:490–492` | new | Declare `rcclDevrRmaRegistersMultiSegment`, `rcclDevrGinRegistersMultiSegment` and the host-segment fd table helpers. |
+| `ncclDevrMemory` | 63 | changed | min(numSegments) across all communicator ranks |
 
-### GIN host interface
+### `gin/gin_host.cc`
 
-| Symbol | File:line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `ncclGinRegister` | `gin/gin_host.cc:561` | changed | Takes `multiSegment` and a caller-supplied DMA-BUF fd, which covers imported host segments the runtime cannot export. |
-| `ncclGinProxyRegMrSymDmaBuf` | `gin/gin_host_proxy.cc:487` | new | Proxy GIN registration with a caller-supplied DMA-BUF fd, wired into the proxy vtable. |
-| `ncclGinDevCommSetup`, `ncclGinRegister` | `include/gin/gin_host.h:90`, `:99` | changed | Declarations with the `multiSegment` and `dmabufFd` arguments; `gin_host_win_stub.h` and `os/windows_stubs.cc` carry matching stubs. |
+| `ncclGinRegister` | 686 | changed | an imported host segment cannot be exported here; |
 
-## Layer 05: classic GIN and RMA
+### `gin/gin_host_proxy.cc`
 
-Design: [GIN/RMA](multi_segment_gin_rma.md): [handle](multi_segment_gin_rma.md#handle), [registration](multi_segment_gin_rma.md#registration), [consensus](multi_segment_gin_rma.md#consensus), [segmented WR builder](multi_segment_gin_rma.md#segmented-wr-builder), [credits](multi_segment_gin_rma.md#credits), [prefix post](multi_segment_gin_rma.md#prefix-post-and-completion).
-
-### `transport/net_ib/rma_multiseg.h` (shared by classic and IB-CAST)
-
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `NCCL_RMA_MAX_SEGMENTS` | 22 | new | 16, the per-buffer segment cap; asserted equal to `NCCL_IB_MAX_SEGMENTS`. |
-| `NCCL_RMA_MAX_DATA_WRS` | 27 | new | 64 data WRs per operation; a chain past it fails closed. |
-| `NCCL_RMA_MAX_SIGNAL_WRS` | 28 | new | 65: the data WRs plus the signal WR. |
-| `NCCL_RMA_MAX_FLUSH_WRS` | 29 | new | 16: one flush read per segment for one operation (not the flush QP depth). |
-| `NCCL_RMA_SEND_QP_WRS` | 31 | new | Classic sender QP depth, 2568; `connect.cc` asserts it equals `NCCL_IB_MAX_SEND_WRS`. On 05 alone it is 577. |
-| `ncclRmaSegmentSliceBytes` | 38 | new | Bytes the next WR may move: the minimum of the remaining length and both segments' remaining bytes. |
-| `ncclRmaDataWrBudgetFull` | 46 | new | True when a chain has used its data WR budget. |
-| `ncclRmaCountPairedDataWrs` | 52 | new | Counts the WRs to move a size inside one local and one remote segment (only `UINT32_MAX` SGE splits). |
-| `ncclRmaSegIndexOf` | 67 | new | Segment index for an offset in a `segOff` table. |
-| `ncclRmaNextSlice` | 77 | new | Size of the next WR and the segments it lands in; shared by the builder and the counter. |
-| `ncclRmaCountLayoutDataWrs` | 90 | new | Counts the WRs for explicit local and remote `segOff` tables; returns `maxWr + 1` if the chain does not fit. |
-| `ncclRmaWrIsSignaled` | 107 | new | Only the last WR of a chain is signaled. |
-| `ncclRmaWrCredits` and `NCCL_RMA_CREDIT_IDS` | 117–118 | new | Per-peer send-queue credit ring indexed by request id. |
-| `ncclRmaWrCreditsAvailable`, `Release`, `InUse`, `Record` | 111–140 | new | Credit ring arithmetic. |
-| `ncclRmaPrefixPostLostSignaledTail` | 148 | new | True when `ibv_post_send` accepted a prefix that did not include the signaled last WR. |
-| `ncclRmaSignalOffsetValid` | 152 | new | Checks the signal offset fits the window. |
-| `ncclRmaSegmentCountsMatch` | 158 | new | Every rank has the same count in `[1, 16]`; terminal sizes may differ. |
-| `ncclRmaSegOffTableValid` | 163 | new | A peer `segOff` table starts at 0 and never decreases. |
-| `ncclRmaPeerSegOff` | 172 | new | Per-rank `segOff` from the registration allgather, falling back to the local table. |
-| `ncclRmaPostedWrCount` | 186 | new | Counts the WRs the HCA accepted when `ibv_post_send` fails at `bad_wr`. |
-| `ncclRmaRegistrationHandleReady` | 198 | new | A failed handle allocation must not read `segOff` before the status allgather. |
-| `ncclRmaPostedRequestStatus`, `ncclRmaCompletePostedRequest` | 204, 212 | new | Keep-or-free decision after a post: nothing posted frees the slot; a prefix keeps the request; a lost tail marks it failed. |
-| `ncclRmaReleaseSeqId` | 223 | new | A freed request returns its sequence id only if no later request took one. |
-| `rcclRmaIbProxy*` declarations | 234–241 | new | Declarations of the classic multi-segment op bodies for the hooks in `gin.cc`. |
-| `rcclRmaMrSegmentCount` | 252 | new | Segment count of a tagged handle, or 0 for the single-MR layout. |
+| `ncclGinProxyRegMrSymDmaBuf` | 523 | new function | registers with a caller-supplied DMA-BUF fd, e.g. |
+| `ncclGinProxyCreateContext` | 547 | changed |  |
 
-### `transport/net_ib/gin.cc`
+### `include/alloc.h`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `ncclRmaIbProxyCtx` | 446 | changed | Adds the per-peer send and flush credit tables. |
-| `ncclRmaIbProxyCommitWrs` | 492 | changed | Waits on the CQ when segment-split chains fill the send queue before the proxy's request cap. |
-| `ncclRmaIbProxyGetSendComm` | 509 | new | Send comm for a peer and context. |
-| `rcclRmaWrCreditsGet`, `rcclRmaWrCreditsFree` | 514, 523 | new | Allocate on first use and free the credit tables. |
-| `rcclRmaIbProxyPollSeq` | 534 | new | Advances the completed sequence from up to four CQEs, as `Test()` does. |
-| `rcclRmaWrCreditsReserve` | 552 | new | Waits until a chain fits the peer's send or flush queue at the depth the QP was created with. |
-| `ncclRmaIbProxyCreateContext`, `DestroyContext` | 600, 676 | changed | Record `nranks` for the credit tables and free them after the QPs. |
-| `ncclRmaIbProxyConnect`, `ncclGinIbCloseColl` | 423, 271 | changed | Allocate and free the per-rank registration consensus records. |
-| `rcclRmaIbProxySegMrHandle` | 775 | new | Multi-segment handle: tag, segment count, per-segment MRs, per-rank `segOff`, VAs and rkeys. |
-| `rcclRmaIbProxyMrSegmentCount` | 796 | new | Test accessor for the handle's segment count. |
-| `ncclRmaIbProxyRegistration` | 800 | new | Fixed-size consensus record: status, segment count and `segOff`. |
-| `ncclRmaRkeyIndex`, `RemoteRkey`, `RankOff`, `SegOf`, `MrBytes`, `RangeOk` | 806–826 | new | Handle indexing helpers for rkeys, per-rank offsets and range checks. |
-| `ncclRmaBuildSegmentedWrs` | 843 | new | Builds a chained WR list split at local and remote boundaries; flush mode emits one read per touched remote segment. |
-| `ncclRmaPostWrs` | 909 | new | Posts a chain and reports how many WRs were accepted. |
-| `ncclRmaStampSendWrs`, `ncclRmaIbProxyQueueWrs` | 926, 935 | new | Stamp ids and queue a chain behind earlier batched WRs. |
-| `ncclRmaFinishPostedRequest` | 961 | new | Applies the keep-or-free rule after a post. |
-| `rcclRmaIbProxyConnectFinish` | 975 | new | Connect-time setup so registration cannot fail locally before its first collective. |
-| `rcclRmaIbProxyRegMrSymDmaBuf` | 991 | new | Per-segment DMA-BUF registration: consensus allgather, per-segment MRs (owner fd for imported host segments), then VA and rkey exchange. |
-| `rcclRmaIbProxyDeregMrSym` | 1203 | new | Deregisters every segment MR and frees the handle. |
-| `rcclRmaIbProxyIPut`, `IGet`, `IPutSignal` | 1223, 1276, 1330 | new | Split operations at segment boundaries; the signal rides the last WR, and a prefix post keeps the request. |
-| `rcclRmaIbProxyIFlush` | 1428 | new | One read per touched segment, so a GPUDirect flush covers the whole window. |
-| `rcclRmaIbProxyTestFailed` | 1484 | new | Completes a request whose signaled tail never posted as an error. |
-| `rcclRmaIbProxyUseSingle` | 1491 | new | A one-segment handle uses develop's op body through the embedded single MR. |
-| `ncclRmaIbProxyRegMrSymDmaBuf`, `DeregMrSym` | 702, 740 | changed | Hooks into the per-segment bodies when the switch is on. |
-| `ncclRmaIbProxyIPut`, `IGet`, `IPutSignal`, `IFlush` | 1503–1783 | changed | Multi-segment handles take the split path; one segment keeps develop's body. |
-| `ncclRmaIbProxyTest` | 1711 | changed | Rings a deferred doorbell and completes a failed request as an error. |
-| `ncclGinIbCollComm` | `net_ib/gin.h:15` | changed | Holds the per-rank consensus records. |
+| `ncclCuMemIsSysmemSegment` | 920 | new function |  |
+| `ncclCuMemGetAddressRange` | 925 | changed |  |
 
-### Classic queue pairs and registration touched by 05
+### `include/rccl_common.h`
 
-| Symbol | File:line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `ncclIbQp::maxSendWrs` | `net_ib/common.h:349` | changed | Send-queue depth requested at creation; credits stop there. |
-| `ncclIbQpCreate` | `net_ib/connect.cc:488` | changed | Records `maxSendWrs`. |
-| `ncclIbSenderQpsCreate` | `net_ib/connect.cc:756` | changed | Sizes the sender QP for multi-segment chains. |
-| `ncclIbSenderQpsToRts`, `ncclIbReceiverQpsCreateToRts` | `net_ib/connect.cc:845`, `:1282` | changed | Reject a peer device index outside the device table, because it indexes the RMA rkey tables. |
-| `ncclIbCreateFlushQp` | `net_ib/connect.cc:1434` | changed | On 05, adds the RMA flush WRs (528) while multi-segment RMA is on; from 06 the depth comes from `ncclIbFlushQpSendDepth`, and the switch off keeps 512. |
-| `ncclIbConnectionMetadata` | `net_ib/connect.h:51` | changed | Notes that the capability rides in `devName`, so the struct stays the upstream size. |
-| `ncclIbRegMrDmaBufInternal2`, `Internal` | `net_ib/reg.cc:13`, `:74` | changed | The failure path releases MRs created before a later device fails; a real fd stays one MR. |
-| `ncclIbDeregMrInternal` | `net_ib/reg.cc:197` | changed | Deregisters one MR per segment. |
+| `rcclDevrGinSegmentRegType` | 530 | changed |  |
 
-## Layer 06: classic NET/IB P2P
+### `rccl_dev_runtime.cc`
 
-Design: [Classic NET/IB P2P](multi_segment_netib_wire.md): [data structures](multi_segment_netib_wire.md#data-structures), [registration](multi_segment_netib_wire.md#registration), [data path](multi_segment_netib_wire.md#data-path), [flush](multi_segment_netib_wire.md#flush), [queue sizing](multi_segment_netib_wire.md#queue-sizing), [compatibility](multi_segment_netib_wire.md#compatibility).
-
-### `transport/net.cc` and `transport/rccl_ib_multiseg.h`
-
-| Symbol | File:line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `sendProxyRegBuffer`, `recvProxyRegBuffer` | `transport/net.cc:2438`, `:2530` | changed | Call the plugin's `regMrDmaBuf` with `fd = -1` for a multi-segment buffer, asking for one MR per segment. |
-| `ncclIbRegMrDmaBufMultiSeg` | `transport/rccl_ib_multiseg.h:16` | new | Private declaration of the classic per-segment registration (not part of the plugin API). |
+| `rcclDevrRmaRegistersMultiSegment` | 130 | new function |  |
+| `rcclRmaProxyMaxInflightRequests` | 139 | new function |  |
+| `rcclDevrGinRegistersMultiSegment` | 145 | new function |  |
+| `rcclHostSegmentFd` | 156 | new type |  |
+| `rcclHostSegmentFdRegister` | 165 | new function |  |
+| `rcclHostSegmentFdDeregister` | 170 | new function |  |
+| `rcclHostSegmentFdLookup` | 181 | new function | Returns the published fd, valid until its window is torn down; |
 
-### `transport/net_ib/multiseg.h` (shared by classic and IB-CAST)
+### `rma/rma_proxy_launch.cc`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `NCCL_IB_MAX_SEGMENTS` | 27 | new | 16, the P2P segment cap. |
-| `NCCL_IB_CAP_MULTISEG`, `NCCL_IB_CONNECT_CAPS_MAGIC` | 33–34 | new | Connect-time capability bit and the magic of the trailer that carries it. |
-| `ncclIbConnectCapsTrailer`, `ncclIbSetConnectCaps`, `ncclIbGetConnectCaps` | 36–49 | new | Trailer in the reserved tail of `devName`, so the connect metadata keeps its legacy size. |
-| `NCCL_IB_CTS_NREQS_SIDE_TABLE`, `ncclIbCtsNreqs`, `ncclIbCtsHasSideTable` | 59–65 | new | Bit in each CTS entry's `nreqs` that says the receiver also wrote the side table. |
-| `ncclIbSideTableReady` | 70 | new | False means retry: no table, no peer capability or no side bit yet. |
-| `ncclIbDeclineMultiSegRegistration` | 82 | new | A receive multi-segment registration is declined unless the peer can parse the side table. |
-| `ncclIbSegmentIndexForRange` | 93 | new | Segment that fully contains a range, or -1. |
-| `ncclIbSegmentsUniform` | 113 | new | True when every interior segment equals the largest one. |
-| `ncclIbCtsRemoteLayoutValid` | 128 | new | Validates a peer side-table layout: count in range, device index in range, offsets increasing. |
-| `ncclIbSegmentsOverlappingRange` | 144 | new | Indices of the segments a range touches. |
-| `ncclIbSegSlice`, `ncclIbSplitTransferAtOffsets` | 181, 210 | new | Splits a transfer at local and remote segment offsets into WR slices. |
-| `ncclIbSegmentForOffset`, `ncclIbSegmentForZeroLengthOffset` | 190, 199 | new | Segment for an offset; a 0-byte write at the end of the last segment uses that segment. |
-| `ncclIbBytesRemainingInSegment` | 245 | new | Remaining bytes in a segment, guarding a host VMM base of 0. |
-| `ncclIbFlushQpSendDepth` | 251 | new | Flush QP depth: steps × receives × segments with the capability, otherwise the legacy depth. |
-
-### `transport/net_ib/common.h`
-
-| Symbol | Line | Kind | Role |
-|---|---|---|---|
-| `NCCL_IB_CTS_FIFO_BYTES`, `NCCL_IB_SEG_LAYOUT_FIFO_BYTES` | 310–311 | new | Sizes of the sender CTS FIFO and the side table that follows it in one block. |
-| `NCCL_IB_MAX_WRS_PER_SEND` | 316 | new | Worst-case WRs for one multi-receive send on one QP. |
-| `NCCL_IB_MAX_SEND_WRS` | 319 | new | `2 * 256 + NCCL_STEPS * 257` = 2568, the classic sender depth. |
-| `ncclIbRequest`, `ncclIbMrHandle` | 223, 405 | changed | Per-segment MRs and lkeys; `mrs[]` aliases segment 0. |
-| `ncclIbSendComm`, `ncclIbRemCtsFifo`, `ncclIbRecvComm` | 562, 628, 672 | changed | Side table, its shadow and MR, and the receiver's local source of the side-table write. |
+| `ncclRmaProxyPutBuildOp` | 61 | changed | a window whose RMA registration was skipped has no handle; |
 
 ### `transport/net_ib/connect.cc`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `ncclIbSendCommAllocCts` | 21 | new | Allocates the CTS FIFO and, only when advertising, the side table in one page-aligned block. |
-| `ncclIbConnectImpl`, `ncclIbAcceptImpl` | 914, 1536 | changed | Exchange the capability and create the CTS queue with room for the side-table WRs. |
-| `ncclIbCloseSend`, `ncclIbCloseRecv` | 2021, 2061 | changed | Free the CTS block and deregister the side-table MR. |
+| `rcclIbSendQpWrs` | 54 | new function | sender QP depth. |
+| `ncclIbSenderQpsCreate` | 874 | changed | full RMA chains with multi-segment on. |
+| `ncclIbSenderQpsToRts` | 962 | changed | the peer sends devIndex, and it indexes remDevs and the RMA rkey tables, filled up to its ndevs. |
+| `ncclIbReceiverQpsCreateToRts` | 1420 | changed | the peer sends devIndex, and it indexes remDevs and the RMA rkey tables, filled up to its ndevs. |
+| `ncclIbCreateFlushQp` | 1569 | changed | loopback flush QP, so local and remote device indices are this recv device. |
+
+### `transport/net_ib/gin.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclGinIbCloseColl` | 296 | changed | rcclRmaIbProxyConnectFinish allocated the per-rank registration records. |
+| `rcclRmaIbProxyInstallMultiSeg` | 455 | new function | multi-segment MR handles have their own layout, so every MR and data op takes the multi-segment entry. |
+| `ncclRmaIbProxyInit` | 465 | changed | the switch is process-wide; |
+| `ncclRmaIbProxyConnect` | 497 | changed |  |
+| `ncclRmaIbProxyCtx` | 518 | changed | multi-segment ops wider than one round, per peer. |
+| `ncclRmaIbProxyPostBatch` | 529 | changed | reset even on failure, so a later post cannot resend WRs the HCA accepted. |
+| `ncclRmaIbProxyCreateContext` | 577 | changed | the per-peer round queues are nranks long. |
+| `ncclRmaIbProxyDestroyContext` | 671 | changed |  |
+| `rcclRmaIbProxySegMrHandle` | 770 | new type |  |
+| `rcclRmaIbProxyMrSegmentCount` | 789 | new function | tests read nSegments from the handle. |
+| `rcclRmaRemoteRkey` | 793 | new function |  |
+| `rcclRmaRankOff` | 797 | new function |  |
+| `rcclRmaSegOf` | 801 | new function |  |
+| `rcclRmaRangeOk` | 805 | new function |  |
+| `rcclRmaBuildSegmentedWrs` | 810 | new function | keys and per-rank bases stay here; |
+| `rcclRmaIbProxyQueueWrs` | 875 | new function | queue a chain behind earlier batched WRs. |
+| `rcclRmaFinishPostedRequest` | 900 | new function | free the request and its id if nothing posted. |
+| `rcclRmaIbProxyStartRequest` | 916 | new function | take a request for a multi-segment chain and stamp its WRs. |
+| `rcclRmaIbProxyQueueRequest` | 938 | new function | queue a started request's chain and finish it. |
+| `rcclRmaIbRoundBuild` | 951 | new function | this plugin's half of a multi-segment round. |
+| `rcclRmaIbRoundPost` | 962 | new function |  |
+| `rcclRmaIbRoundRetire` | 968 | new function |  |
+| `rcclRmaIbRoundFailed` | 975 | new function |  |
+| `rcclRmaIbProxyQueueOf` | 984 | new function | a flush is one read posted at once, so only sends queue. |
+| `rcclRmaIbProxyPeerBusy` | 989 | new function | behind a queued op every op queues, so a single-MR op cannot complete ahead of it. |
+| `rcclRmaIbProxyPostChain` | 994 | new function | one chain with nothing queued ahead: batched for data, posted at once for a flush. |
+| `rcclRmaIbProxyEnqueue` | 1008 | new function | queue an op behind the peer's earlier ones. |
+| `rcclRmaIbProxySubmit` | 1037 | new function | post a multi-segment op as one chain when it fits in one round with nothing queued ahead, otherwise round by round from the peer's queue. |
+| `rcclRmaDeregOneSegment` | 1054 | new function | the RMA segment handle is an ncclIbMrHandle, so the plugin's deregMr releases it whole. |
+| `rcclRmaIbProxySegMrHandleFree` | 1059 | new function | release the first nRegistered segment MRs through the shared deregister, then free the handle. |
+| `rcclRmaRegAllGather` | 1071 | new function |  |
+| `rcclRmaIbProxyConnectFinish` | 1076 | new function |  |
+| `rcclRmaIbProxyRegMrSymDmaBuf` | 1090 | new function | one DMA-BUF MR per physical segment, then one consensus record per rank. |
+| `rcclRmaIbProxyDeregMrSym` | 1234 | new function | release every segment MR, not only the first. |
+| `rcclRmaIbProxyUseSingle` | 1252 | new function | a one-segment handle uses the single-MR op body through the embedded single MR. |
+| `rcclRmaIbProxyRegMrSym` | 1263 | new function |  |
+| `rcclRmaIbProxyIPut` | 1269 | new function | split the put at segment boundaries and keep the request if a prefix posted. |
+| `rcclRmaIbProxyIGet` | 1297 | new function | split the get at segment boundaries and keep the request if a prefix posted. |
+| `rcclRmaIbProxyIPutSignal` | 1329 | new function | the signal rides the last segment WR, so a split put still signals once. |
+| `rcclRmaIbProxyIFlush` | 1382 | new function | a PCIe read cannot pass the posted writes ahead of it, so one read of any device segment flushes them all. |
+| `rcclRmaIbProxyTestFailed` | 1418 | new function | a signaled tail that never posted has no CQE. |
+| `ncclRmaIbProxyIPut` | 1424 | new function |  |
+| `ncclRmaIbProxyIGet` | 1476 | new function |  |
+| `ncclRmaIbProxyIPutSignal` | 1526 | new function |  |
+| `ncclRmaIbProxyTest` | 1612 | changed | a request whose signaled tail never posted completes as an error. |
+
+### `transport/net_ib/gin.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclGinIbCollComm` | 15 | changed | per-rank registration records (status and segment layout); |
+
+### `transport/net_ib/ib_multiseg.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclIbMultiSegOk` | 18 | new function | one connect-time decision. |
+| `NCCL_RMA_MAX_IB_WRS_PER_OP` | 23 | new macro | a put with signal is two WRs. |
+| `NCCL_RMA_IB_WR_BATCHSIZE` | 24 | new macro |  |
+| `rcclRmaReleaseSeqId` | 27 | new function | a freed request returns its sequence id only if no later request took one. |
+| `rcclRmaIbProxyRegMrSym` | 33 | new function |  |
+| `rcclRmaIbProxyRegMrSymDmaBuf` | 35 | new function |  |
+| `rcclRmaIbProxyIPut` | 38 | new function |  |
+| `rcclRmaIbProxyIGet` | 40 | new function |  |
+| `rcclRmaIbProxyIPutSignal` | 43 | new function |  |
+
+### `transport/net_ib/init.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclIbInitDevices` | 553 | changed |  |
 
 ### `transport/net_ib/reg.cc`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `rcclIbRegMrDmaBufFromRange` | 108 | new | `regMrDmaBuf` with `fd < 0`: the offset carries the export flags and the segment count. |
-| `ncclIbRegMrDmaBuf` | 185 | changed | `fd < 0` registers one MR per segment; a real fd stays one MR. |
-| `ncclIbRegMrDmaBufMultiSeg` | 220 | new | Exports and registers each segment and builds the multi-segment handle. |
-| `rcclIbDeregMrMultiSeg`, `ncclIbDeregMr` | 274, 290 | new, changed | Deregister every segment MR, then free the handle. |
+| `rcclIbMrAdmit` | 65 | new function |  |
+| `ncclIbRegMrDmaBufInternal` | 78 | changed |  |
+
+### `transport/rccl_mseg.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `RCCL_IB_SGE_MAX_BYTES` | 17 | new const | ibv_sge::length is 32 bits, so a slice stops there. |
+| `RCCL_IB_SEG_PROTOCOL_MAX` | 21 | new macro | protocol ceiling on segments per registration, the P2P IPC limit (NCCL_P2P_MAX_PHYSICAL_SEGMENTS). |
+| `RCCL_IB_REG_SEG_DEFAULT` | 23 | new macro | default local cap; |
+| `rcclIbRegSegCapFrom` | 25 | new function |  |
+| `rcclIbSegTable` | 35 | new type | base is the VA of byte 0. |
+| `rcclIbSegSlice` | 41 | new type |  |
+| `rcclIbSegCursor` | 50 | new type | localSeg/remoteSeg advance only forward. |
+| `rcclIbSegIndexOf` | 59 | new function | Last segment when off is past the end. |
+| `rcclIbSegCursorInit` | 67 | new function |  |
+| `rcclIbSegCursorNext` | 79 | new function | 1 and a filled slice, or 0 when nothing remains or the offset is past a table. |
+
+### `transport/rccl_mseg_export.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclIbSegWalkState` | 25 | new type | Walk position plus the local layout it fills: segOff[s + 1] is the end of segment s, vas[s] its start. |
+| `rcclIbSegExport` | 34 | new type | One segment's export. |
+| `rcclIbSegExportClose` | 42 | new function |  |
+| `rcclIbSegExportNext` | 50 | new function | Exports the segment at w->ptr over the whole pages the MR spans; |
+| `rcclIbSegExportIsHost` | 77 | new function | An owner-published fd is always a host segment; |
+| `rcclIbSegWalkAdvance` | 85 | new function | Records segment seg after it registered and moves the walk past it. |
+| `ncclResult_t` | 95 | new function | The plugin's DMA-BUF registration; |
+| `rcclIbSegRegCtx` | 98 | new type |  |
+| `rcclIbSegRegOne` | 108 | new function | One segment of the walk. |
+
+### `transport/rccl_mseg_reg.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclIbSegRegOps` | 18 | new type |  |
+| `rcclIbSegDeregister` | 24 | new function | Skips NULL slots, clears each slot it releases, and returns the first deregister error. |
+| `rcclIbSegRegister` | 39 | new function | On failure, releases every slot in [0, index] through deregOne, including a handle regOne stored before failing. |
+| `rcclIbSegWalkBytes` | 53 | new function | addrs[n], lens[n], offs[n], fds[n] in one zeroed block. |
+| `rcclIbSegWalk` | 59 | new type |  |
+| `rcclIbSegWalkBind` | 67 | new function | block is rcclIbSegWalkBytes(n) bytes and malloc-aligned. |
+| `ncclIbRegMrDmaBufMultiSeg` | 81 | new function | classic net entry, one dma-buf MR per physical segment when the export fd is -1. |
+| `IbCastRegMrDmaBufMultiSeg` | 84 | new function | CAST entry, same walk. |
+
+### `transport/rccl_mseg_rma.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `RCCL_RMA_SEG_TABLE_MAX_ENTRIES` | 21 | new macro | every rank holds every rank's RMA segment table (48 bytes per entry), so RMA bounds ranks x segments. |
+| `rcclRmaSegTableFits` | 22 | new function |  |
+| `NCCL_RMA_MAX_DATA_WRS` | 29 | new macro | One round of a multi-segment op: up to NCCL_RMA_MAX_DATA_WRS data WRs, plus the signal on the last round. |
+| `NCCL_RMA_MAX_SIGNAL_WRS` | 30 | new macro |  |
+| `NCCL_RMA_MAX_REQUESTS` | 32 | new macro | Live request ids per IB comm. |
+| `NCCL_RMA_MAX_INFLIGHT_REQUESTS` | 34 | new macro | With multi-segment on, the RMA and GIN proxies keep at most this many requests in flight per peer and context. |
+| `NCCL_RMA_SEND_QP_WRS` | 36 | new macro | Sender QP depth with RMA multi-segment on: every in-flight request may have one full round posted. |
+| `rcclRmaSegIndexOf` | 42 | new function | Offsets at or past the terminal size clamp to the last segment. |
+| `rcclRmaWrIsSignaled` | 47 | new function |  |
+| `rcclRmaInflightRequestsCap` | 52 | new function | Requests a proxy keeps in flight per peer: the cap when the backend takes multi-segment chains, else its own limit. |
+| `rcclRmaPrefixPostLostSignaledTail` | 57 | new function | true when ibv_post_send accepted a prefix that did not include the signaled last WR. |
+| `rcclRmaSignalOffsetValid` | 61 | new function |  |
+| `rcclRmaOffsetRangeOk` | 66 | new function |  |
+| `rcclRmaDevSlotOf` | 74 | new function | Maps a physical ibDevN to its registration slot (recvComm device order, which a peer QP's HCA may not follow). |
+| `rcclRmaPeerSegOff` | 84 | new function | per-rank segOff table from registration allgather, nSegments + 1 entries per rank; |
+| `rcclRmaPostedWrCount` | 91 | new function | WRs the HCA accepted from a next-linked chain of nWr when ibv_post_send fails at badWr (NULL: the whole chain). |
+| `rcclRmaCompletePostedRequest` | 104 | new function | Keep-or-free after ibv_post_send: free the slot only if nothing posted, and mark FAILED if the signaled tail was lost or the doorbell failed. |
+| `rcclRmaMrSegmentCount` | 124 | new function | Segment count, or 0 when the handle is empty or is the single-MR layout. |
+
+### `transport/rccl_mseg_rma_round.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclRmaRoundOp` | 22 | new type |  |
+| `rcclRmaRoundQueue` | 41 | new type |  |
+| `rcclRmaRoundQueues` | 48 | new type | Per-peer queues of one context, nranks long; |
+| `rcclRmaRoundHooks` | 53 | new type | The plugin's half of a round. |
+| `rcclRmaStampWrs` | 70 | new function | Every WR carries the request's wrId; |
+| `rcclRmaPostWrs` | 78 | new function | ibv_post_send can fail after accepting a prefix, whose unsignaled WRs then need the request; |
+| `rcclRmaRoundClampWindow` | 94 | new function | A partial round touches at most maxWr segments on each side, so the key windows clamp to that. |
+| `rcclRmaRoundDataOp` | 101 | new function |  |
+| `rcclRmaRoundSetSignal` | 119 | new function | An atomic add of `add` at remoteAddr; |
+| `rcclRmaRoundQueueOf` | 135 | new function |  |
+| `rcclRmaRoundPush` | 142 | new function | Appends op; |
+| `rcclRmaRoundPop` | 151 | new function |  |
+| `rcclRmaRoundDrop` | 159 | new function | Unlinks req's op, if queued, before the plugin frees req. |
+| `rcclRmaRoundQueuesFree` | 172 | new function |  |
+| `rcclRmaRoundFillNode` | 182 | new function | Copies op into a node the plugin allocated, ready to push. |
+| `rcclRmaRoundAppendSignal` | 190 | new function |  |
+| `rcclRmaRoundBuild` | 201 | new function | The op's next round into wr/sge (NCCL_RMA_MAX_SIGNAL_WRS long); |
+| `rcclRmaRoundFirst` | 220 | new function | The first round, built on a copy of op. |
+| `rcclRmaRoundPostNext` | 232 | new function | Posts the head's next round. |
+| `rcclRmaRoundPump` | 253 | new function | Posts rounds from the head until one is in flight or the queue is empty. |
+| `rcclRmaRoundTailDone` | 267 | new function | For plugins that complete a round by its tail CQE: true if that CQE ends req's in-flight round, which frees the head for its next round without completing req. |
+
+### `transport/rccl_mseg_sym.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclIbSegSymTable` | 21 | new type | per-rank layout of a symmetric multi-segment registration, shared by every backend that splits operations at segment boundaries. |
+| `rcclIbSegSymRecord` | 28 | new type | Consensus record per rank; |
+| `rcclIbSegSymVa` | 35 | new function |  |
+| `rcclIbSegSymKey` | 39 | new function |  |
+| `rcclIbSegSymTableFree` | 44 | new function |  |
+| `rcclIbSegSymAgree` | 54 | new function | Gathers one status per rank; |
+| `rcclIbSegSymExchange` | 72 | new function | every rank calls this after its local walk, even after a local failure, so all ranks fail together. |
+
+### `transport/rccl_mseg_wr.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclIbSegWrIn` | 26 | new type | Returns the WR count, or -1 if the chain exceeds maxWr or runs past a table. |
+| `rcclIbSegAppendWrs` | 39 | new function |  |
+
+## Layer 06: classic NET/IB P2P
+
+### `include/plugin/nccl_net.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `NCCL_PTR_DMABUF_MULTISEG` | 29 | new macro |  |
+
+### `transport/net.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclNetPluginMultiSeg` | 465 | new function | fd -1 is only for a plugin that walks a multi-segment buffer itself. |
+| `sendProxyRegBuffer` | 2646 | changed | fd -1 and the export flags in offset. |
+| `recvProxyRegBuffer` | 2737 | changed | fd -1 and the export flags in offset. |
+
+### `transport/net_ib/common.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclIbRequestCompletionRecord` | 207 | changed | defined below with one MR per segment. |
+| `ncclIbRequest` | 225 | changed | segmented send reads per-segment lkeys from this handle. |
+| `ncclIbCtsSlot` | 305 | new type | advertising slots. |
+| `NCCL_IB_CTS_FIFO_BYTES` | 314 | new macro | byte size of the legacy CTS FIFO, and of one advertising slot array. |
+| `NCCL_IB_CTS_SLOTS_BYTES` | 315 | new macro |  |
+| `rcclIbSendQpState` | 318 | new type | a segmented send posts one slice of each receive per QP and resumes on a later test. |
+| `rcclIbSendCursor` | 320 | new type | slots post in fifo order. |
+| `ncclIbMrHandle` | 419 | changed | per-segment MRs; |
+| `ncclIbSendComm` | 578 | changed |  |
+| `ncclIbRecvComm` | 688 | changed | local combined slots when the peer advertised. |
+| `ncclIbListenComm` | 747 | changed | set by rcclIbMarkGinListen; |
+
+### `transport/net_ib/connect.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclIbCacheMultiSegOk` | 18 | new function | cached once per comm. |
+| `ncclIbSendCommAllocCts` | 27 | new function | one page-aligned block. |
+| `ncclIbSendCommFreeCts` | 42 | new function | the CTS block is one allocation, either the legacy FIFO or the combined slots. |
+| `ncclIbHandle` | 147 | changed | set by rcclIbMarkGinListen; |
+| `rcclIbMarkGinListen` | 853 | new function |  |
+| `ncclIbConnectImpl` | 1031 | changed | combined CTS slots only when advertising. |
+| `ncclIbAcceptImpl` | 1763 | changed |  |
+| `ncclIbCloseSend` | 2259 | changed | read layouts' MRs go before their PDs. |
+| `ncclIbCloseRecv` | 2301 | changed | combined CTS slots, only for a multi-seg peer. |
+
+### `transport/net_ib/connect.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclIbConnectionMetadata` | 51 | changed | RCCL_IB_CAP_MULTISEG when this peer's CTS carries the layout prefix. |
+
+### `transport/net_ib/gin.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclGinIbGdakiListen` | 352 | changed | GIN comms skip the multi-segment side table. |
+| `ncclRmaIbProxyListen` | 491 | new function |  |
+
+### `transport/net_ib/init.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclIbGetPhysProperties` | 829 | changed | fd -1 walks one MR per physical segment. |
 
 ### `transport/net_ib/p2p.cc`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `ncclIbMrForRange` | 92 | new | MR whose segment contains a range. |
-| `ncclIbCtsRemoteMultiSeg` | 100 | new | True when the side-table slot matches this CTS and has more than one segment. |
-| `ncclIbQpChunkSize` | 111 | new | Per-QP chunk size, as `ncclIbMultiSend` computes it. |
-| `ncclIbMultiSendSegmented` | 122 | new | Segmented send: splits each request at local and remote boundaries, uses each segment's keys, and signals only the tail. |
-| `rcclIbMultiSendNeedsSegmented` | 400 | new | Chooses the segmented builder when any buffer spans segments. |
-| `rcclIbIsendSideTableReady` | 409 | new | Waits for the side-table index to match this CTS before sending. |
-| `rcclIbPostFifoSideWr` | 428 | new | Chains the unsignaled side-table write before the CTS WR. |
-| `rcclIbIrecvCheckHandle` | 456 | new | Rejects a null handle or missing per-device MR before the CTS rkey load. |
-| `rcclIbIrecvFillSideTable` | 470 | new | Writes the receiver's segment layout into the side table. |
-| `rcclIbCtsFlagSideTable` | 497 | new | Sets the side-table bit in the CTS entry. |
-| `rcclIbIflushNeedsMultiSeg`, `rcclIbIflushMultiSeg` | 502, 510 | new | Direct-GDR flush with one read per receive per touched segment. |
-| `ncclIbMultiSend`, `ncclIbIsend` | 666, 886 | changed | Hook the segmented builder and ignore the side-table bit in the request count. |
-| `ncclIbPostFifo`, `ncclIbIrecv`, `ncclIbIflush` | 1036, 1119, 1264 | changed | Hook the side-table write, the handle check and the multi-segment flush. |
+| `rcclIbSendHoldSlice` | 89 | new function | a slice post holds one more event per request on its device until its signaled write completes. |
+| `ncclIbMultiSend` | 93 | changed | ignore the side-table bit in the count. |
+| `rcclIbSendResume` | 317 | new function | post the next slice on each QP whose last slice completed. |
+| `rcclIbSendProgress` | 348 | new function |  |
+| `ncclIbIsend` | 365 | changed |  |
+| `ncclIbPostFifo` | 528 | changed |  |
+| `ncclIbIrecv` | 612 | changed |  |
+| `ncclIbIflush` | 759 | changed | one read fences the device. |
+| `ncclIbCompletionEventProcess` | 1045 | changed | a send comm reads only referenced segment layouts. |
+| `ncclIbTest` | 1182 | changed | a completion may have freed a QP of a send still posting slices. |
+
+### `transport/net_ib/p2p_multiseg.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ncclIbMrForRange` | 20 | new function | the MR covering [addr, addr+len) on devIndex: mrs[devIndex] for a single-segment handle, else the containing segment's MR, or NULL when the range crosses a segment boundary. |
+| `rcclIbCtsRemoteLayout` | 27 | new function | this CTS entry's layout prefix, or NULL when the write did not include one. |
+| `ncclIbCtsRemoteMultiSeg` | 37 | new function | true when this CTS entry carries more than one segment inline or by reference. |
+| `rcclIbBuildRemoteSegmentLayout` | 43 | new function | remote table from the inline or referenced layout, else one segment from the CTS slot. |
+| `rcclIbSegSendNextWr` | 54 | new function |  |
+| `rcclIbAppendSegmentedRequestWrs` | 65 | new function | one data slice from off, inside one local and one remote segment, via rcclIbSegAppendWrs; |
+| `rcclIbSegSendSizesWr` | 142 | new function | the sizes record for a multi-recv or non-BY_INDEX receiver, at comm->wrs[w]. |
+| `rcclIbAppendSegmentedTailWr` | 154 | new function | final WR carrying the WRITE_WITH_IMM, mirroring ncclIbMultiSend's lastWr: this QP's flush flag (after a plain sizes write), a dedicated sizes/imm WR, or the last data WR. |
+| `rcclIbFillSendWrs` | 203 | new function | one QP's next post. |
+| `rcclIbSendSliceDone` | 237 | new function | true for the signaled slice of the slot still posting, which lets that QP post its next slice. |
+| `rcclIbMultiSendNeedsSegmented` | 250 | new function | segmented builder when any request's local or remote buffer spans several segments. |
+| `rcclIbPrepareCtsWrite` | 259 | new function | one CTS WR. |
+| `rcclIbIrecvCheckHandle` | 283 | new function | a NULL handle or per-device MR would be dereferenced for the CTS rkey. |
+| `rcclIbIrecvFillSideTable` | 297 | new function |  |
+| `rcclIbLayoutReadStamp` | 309 | new function |  |
+| `rcclIbLayoutReadArg` | 313 | new type |  |
+| `rcclIbLayoutReadQp` | 319 | new function | layout reads post on the QP of the slot's first request. |
+| `rcclIbSendLayoutsReady` | 335 | new function | true once every layout the slot references is read; |
+| `rcclIbSendLayoutReadDone` | 344 | new function |  |
+| `rcclIbCtsFlagSideTable` | 356 | new function | set the side-table bit so the sender reads the layout prefix. |
+| `rcclIbIflushNeedsMultiSeg` | 361 | new function | flush splits when any non-empty receive spans segments. |
+| `rcclIbIflushScratchpadWrite` | 370 | new function | fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a dummy payload into it before the read. |
+| `rcclIbIflushAddRead` | 382 | new function |  |
+| `rcclIbIflushAppendReads` | 391 | new function | one read fences the device. |
+| `rcclIbIflushChainReads` | 416 | new function | make the reads one RDMA_READ chain into the flush sge, signaling only the last. |
+| `rcclIbIflushMultiSeg` | 429 | new function | ncclIbIflush with one RDMA read. |
+
+### `transport/net_ib/p2p_multiseg.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclIbWriteChunkAlignment` | 17 | new const | segmented chunk alignment; |
+| `rcclIbFillSendWrs` | 27 | new function | one QP's next post: one slice of each receive, advancing off[]. |
+| `rcclIbSendCtsRow` | 39 | new function | CTS row for this slot. |
+| `rcclIbRecvCtsRow` | 47 | new function |  |
+| `rcclIbCtsLayout` | 52 | new function | request r's layout, packed immediately before the CTS row. |
+| `rcclIbIrecvFillSideTable` | 63 | new function |  |
+
+### `transport/net_ib/reg.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclIbCountRangeSegments` | 111 | new function | fd < 0 walks one MR per segment. |
+| `rcclIbRegMrDmaBufFromRange` | 131 | new function |  |
+| `ncclIbRegMrDmaBuf` | 198 | changed | fd < 0 registers one MR per physical segment. |
+| `rcclIbMultiSegRegCtx` | 232 | new type | one slot per (segment, device) for rcclIbSegRegister and rcclIbSegDeregister, laid out like segMrs. |
+| `rcclIbMultiSegRegOne` | 241 | new function |  |
+| `rcclIbMultiSegDeregOne` | 254 | new function |  |
+| `rcclIbMrHandleFreeSegments` | 262 | new function | free the counted segment arrays and the handle; |
+| `rcclIbMrHandlePublishLayout` | 268 | new function | a receive overlapping more than RCCL_IB_CTS_INLINE_SEGS segments sends a reference to this layout. |
+| `ncclIbRegMrDmaBufMultiSeg` | 278 | new function | one MR per segment. |
+| `rcclIbDeregMrMultiSeg` | 335 | new function | mrs[] aliases segment 0, so it is freed via segMrs here (do not double-free). |
+| `ncclIbDeregMr` | 349 | changed | multi-segment handles own one MR per segment, not mrs[] alone. |
+
+### `transport/rccl_p2p_multiseg.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `rcclIbSegMrInit` | 17 | new function |  |
+| `rcclIbSegMrFreeArrays` | 32 | new function |  |
+| `rcclIbSegMrPublishLayout` | 43 | new function |  |
+| `rcclIbSegMrFreeLayout` | 61 | new function |  |
+| `rcclIbSegLayoutFill` | 79 | new function |  |
+| `rcclIbSegTableSingle` | 130 | new function |  |
+| `rcclIbSegTableLocal` | 143 | new function |  |
+| `rcclIbSegTableInline` | 161 | new function |  |
+| `rcclIbLayoutCacheEntry` | 194 | new type |  |
+| `rcclIbLayoutRead` | 203 | new function | post one signaled read of a referenced layout into entry e. |
+| `rcclIbLayoutsReady` | 253 | new function |  |
+| `rcclIbLayoutReadDone` | 290 | new function |  |
+| `rcclIbLayoutCacheFree` | 305 | new function |  |
+| `rcclIbSegTableReferenced` | 319 | new function |  |
+
+### `transport/rccl_p2p_multiseg.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `RCCL_IB_MSEG_MAX_DEVS` | 27 | new macro | the IB plugins' NCCL_IB_MAX_DEVS_PER_NIC and NCCL_NET_IB_MAX_RECVS; |
+| `RCCL_IB_MSEG_MAX_RECVS` | 28 | new macro |  |
+| `RCCL_IB_CTS_INLINE_SEGS` | 33 | new macro | segments a CTS carries inline; |
+| `RCCL_IB_CAP_MULTISEG` | 36 | new macro | bit in the connect metadata caps. |
+| `NCCL_IB_CTS_NREQS_SIDE_TABLE` | 40 | new macro | set in every CTS entry's nreqs when the write includes the layout prefix. |
+| `ncclIbDeclineMultiSegRegistration` | 47 | new function | a recv multi-segment registration is usable only if the peer can parse the CTS side table. |
+| `ncclIbSegmentIndexForRange` | 53 | new function | index of the segment that fully contains [addr, addr+len), or -1 when addr is outside every segment or the range crosses a boundary. |
+| `ncclIbCtsRemoteLayoutValid` | 70 | new function | peer CTS side table is usable iff nSegments is in [1, maxSegments], remDevIdx is in range, segStart is strictly increasing, and every rkey is nonzero. |
+| `rcclIbLayoutBlobBytes` | 83 | new function | published layout, {va0, off[nSeg + 1], rkeys[ndevs][nSeg]}; |
+| `rcclIbLayoutBlobRkeys` | 87 | new function |  |
+| `rcclIbLayoutBlobValid` | 92 | new function | a read layout is usable iff its offsets start at 0 and increase and every rkey is nonzero. |
+| `ncclIbSegmentForZeroLengthOffset` | 108 | new function | Segment whose rkey a 0-byte RDMA_WRITE at `off` uses: the one holding off, or the last segment at its exclusive end. |
+| `ncclIbBytesRemainingInSegment` | 116 | new function | host VMM can report base 0; |
+| `rcclIbSegLayoutRef` | 121 | new type | where the sender reads a registration's whole layout (rcclIbLayoutBlob*) with one RDMA read. |
+| `ncclIbSegLayout` | 131 | new type | layout carried in front of one slot's CTS entries; |
+| `rcclIbSegMr` | 148 | new type | a registration's segments, embedded in each IB plugin's MR handle. |
+| `rcclIbSegMrAt` | 162 | new function |  |
+| `rcclIbSegLayoutFill` | 178 | new function | fills one receive's layout prefix from its registration. |
+| `rcclIbSendSegTable` | 185 | new type | one side's segment table for a request. |
+| `rcclIbSegTableLocal` | 200 | new function | the local table from the send handle (NULL or single-segment gives one segment). |
+| `rcclIbSegTableInline` | 203 | new function | the remote table from an inline layout; |
+| `RCCL_IB_LAYOUT_CACHE_ENTRIES` | 209 | new macro | referenced layouts read from the receiver. |
+| `rcclIbLayoutState` | 210 | new type |  |
+| `rcclIbLayoutCacheEntry` | 211 | new type |  |
+| `rcclIbLayoutCache` | 223 | new type |  |
+| `rcclIbLayoutReadQp` | 229 | new type | the QP a layout read posts on, chosen by the plugin. |
+| `rcclIbLayoutsReady` | 242 | new function | *ready once every referenced layout in sides[0..n) is read; |
+| `rcclIbSegTableReferenced` | 248 | new function | the remote table from a referenced layout the sender already read; |
 
 ## Layer 08: IB-CAST P2P
 
-Design: [IB-CAST P2P](multi_segment_netib_cast.md): [differences from classic](multi_segment_netib_cast.md#differences-from-classic), [declines](multi_segment_netib_cast.md#when-multi-segment-is-declined), [connect and CTS](multi_segment_netib_cast.md#connect-and-the-32-byte-cts), [data path](multi_segment_netib_cast.md#data-path), [failure handling](multi_segment_netib_cast.md#failure-handling).
+### `transport/net_ib_cast/common_cast.h`
 
-### `transport/net_ib_cast/common_cast.h` and `connect_cast.h`
-
-| Symbol | File:line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `WR_IMM_SIZE_BITS`, `WR_IMM_SEGMENTED_FLAG`, `WR_IMM_SPLIT_DATA_FLAG` | `net_ib_cast/common_cast.h:217–221` | changed, new | Size bits drop from 23 to 22 to make room for the segmented-send flag in the immediate. |
-| `NCCL_NET_IB_REQ_FAILED` | `net_ib_cast/common_cast.h:295` | new | Request type for a send or flush whose signaled tail never posted. |
-| `NCCL_IB_MAX_WRS_PER_SEND`, `NCCL_IB_MAX_SEND_WRS` | `net_ib_cast/common_cast.h:499–502` | new | 769 = `2 * 256 + 257`: the legacy budget plus one segmented group, since only one is admitted at a time. |
-| `ncclIbRequest`, `ncclIbMrHandle`, `ncclIbSendComm`, `ncclIbRecvComm`, `ncclIbRemCtsFifo` | `net_ib_cast/common_cast.h:393–858` | changed | Per-segment MRs, side table and shadow, as in classic. |
-| `IB_CAST_CTS_FIFO_BYTES`, `IB_CAST_SEG_LAYOUT_FIFO_BYTES` | `net_ib_cast/common_cast.h:793–794` | new | Sizes of the 32-byte CTS FIFO and the side table. |
-| `IbCastRequestHasEvents` | `net_ib_cast/common_cast.h:933` | new | True while a request still has completions pending. |
-| `ncclIbConnectionMetadata` | `net_ib_cast/connect_cast.h:108` | changed | With the switch off, keeps the legacy metadata, CTS MR and QP depths. |
-| `IbCastCommAdvertisesMultiSeg` | `net_ib_cast/connect_cast.h:148` | new | RMA comms never post a CTS, so they skip the side table and the capability. |
-| `IbCastQpCreateAttrInitSharing`, `IbCastFlushQpSendDepth` | `net_ib_cast/connect_cast.h:155`, `:164` | changed, new | Flush QP depth for a direct-GDR flush posted on every proxy step. |
+| `WR_IMM_SIZE_BITS` | 234 | new macro |  |
+| `WR_IMM_SEGMENTED_FLAG` | 237 | new macro |  |
+| `WR_IMM_SPLIT_DATA_FLAG` | 238 | new macro |  |
+| `NCCL_NET_IB_REQ_FAILED` | 316 | new macro |  |
+| `ncclIbRequestCompletionRecord` | 395 | changed |  |
+| `ncclIbRequest` | 414 | changed |  |
+| `ncclIbCtsSlot` | 510 | new type | advertising slots. |
+| `rcclIbCastSendQpState` | 519 | new type | a segmented send posts one slice of each receive per QP and resumes on a later test. |
+| `rcclIbCastSendPost` | 521 | new type | what every post of one slot needs. |
+| `rcclIbCastSendCursor` | 531 | new type | the one segmented slot still posting; |
+| `ncclIbMrHandle` | 655 | changed | per-segment MRs; |
+| `ncclIbSendComm` | 792 | changed | legacy FIFO when this rank does not advertise. |
+| `IB_CAST_CTS_FIFO_BYTES` | 850 | new macro |  |
+| `IB_CAST_CTS_SLOTS_BYTES` | 852 | new macro |  |
+| `ncclIbRecvComm` | 908 | changed | local source of a long CTS write. |
+| `IbCastRequestHasEvents` | 985 | new function |  |
 
 ### `transport/net_ib_cast/connect.cc`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `IbCastBuildDataQpCreateAttr`, `IbCastSenderQpsCreate` | 601, 1028 | changed | Sender data QP sized for one segmented group; the switch off keeps 512. |
-| `IbCastSendCommAllocCts`, `IbCastQpSharingSenderRegisterPrimary` | 1381, 1341 | new, changed | CTS and side table in one page-aligned block, also under QP sharing. |
-| `IbCastConnectImpl`, `IbCastAccept` | 1393, 2314 | changed | Exchange the capability; with the switch off or an RMA peer, ignore the peer's capability. |
-| `IbCastReceiverQpsCreateToRts` | 1845 | changed | Room for the side-table WR chained before each CTS WR. |
-| `IbCastInitCommDevBase`, `IbCastDestroyBase` | 183, 208 | changed | Protection-domain reference counting and CQ teardown hardening. |
-| `IbCastCloseSend`, `IbCastCloseRecvCommDevResources`, `IbCastCloseRecv` | 2793, 2875, 2887 | changed | Free the CTS block, the side-table MR and the remote layout. |
+| `IbCastInitCommDevBase` | 186 | changed |  |
+| `IbCastDestroyBase` | 211 | changed |  |
+| `IbCastSendCommAllocCts` | 1407 | new function | one page-aligned block. |
+| `IbCastSendCommFreeCts` | 1421 | new function |  |
+| `IbCastReceiverQpsCreateToRts` | 1880 | changed |  |
+| `IbCastAccept` | 2348 | changed |  |
+| `IbCastCloseSend` | 2829 | changed | read layouts' MRs go before their PDs. |
+| `IbCastCloseRecv` | 2922 | changed |  |
 
-### `transport/net_ib_cast/reg.cc` and `rccl_reg_multiseg_cast.cc`
+### `transport/net_ib_cast/connect_cast.h`
 
-| Symbol | File:line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `IbCastRegMrDmaBufFromRange` | `net_ib_cast/reg.cc:110` | new | `regMrDmaBuf` with `fd < 0`, as in classic. |
-| `IbCastRegMrDmaBuf`, `IbCastRegMrDmaBufInternal`, `IbCastDeregMr` | `net_ib_cast/reg.cc:187`, `:73`, `:220` | changed | Hooks for per-segment registration and deregistration; `Internal` keeps develop's allocation and failure path. |
-| `IbCastRegMrDmaBufMultiSeg` | `net_ib_cast/rccl_reg_multiseg_cast.cc:18` | new | Exports and registers each segment. |
-| `rcclIbCastDeregMrMultiSeg` | `net_ib_cast/rccl_reg_multiseg_cast.cc:84` | new | Frees every segment MR; `mrs[]` aliases segment 0. |
+| `ncclIbConnectionMetadata` | 108 | changed | RCCL_IB_CAP_MULTISEG when this peer's CTS carries the layout prefix. |
+| `IbCastMultiSegScopeOk` | 150 | new function | the one cached decision. |
+| `IbCastMultiSegAdvertise` | 154 | new function | CTS layout and the capability bit. |
+| `IbCastMultiSegOk` | 157 | new function |  |
+
+### `transport/net_ib_cast/ib_cast_multiseg.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `ctsFifoHasLayout` | 16 | new function |  |
+| `IbCastSendCtsRow` | 21 | new function | CTS row for this slot. |
+| `IbCastRecvCtsRow` | 25 | new function |  |
+| `IbCastCtsLayout` | 30 | new function | request r's layout, packed immediately before the CTS row. |
+| `rcclIbCastIrecvCheckHandle` | 48 | new function |  |
+| `rcclIbCastIrecvFillSideTable` | 50 | new function |  |
+| `rcclIbCastSendDefer` | 55 | new function |  |
+
+### `transport/net_ib_cast/init.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `IbCastInitDevices` | 439 | changed |  |
+| `IbCastGetPhysProperties` | 840 | changed | fd -1 walks one MR per physical segment. |
 
 ### `transport/net_ib_cast/p2p.cc`
 
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `IbCastCtsRemoteMultiSeg` | 109 | new | True when the peer's side-table slot has more than one segment. |
-| `IbCastMultiSendSegmented` | 116 | new | Segmented send for IB-CAST, publishing the full logical size before the immediate. |
-| `rcclIbCastMultiSendNeedsSegmented`, `rcclIbCastSendIsSegmented` | 414, 423 | new | Choose and identify the segmented builder. |
-| `IbCastHasOtherSegmentedSend` | 428 | new | Admission gate: one segmented group in flight at a time. |
-| `IbCastWaitSideTable`, `rcclIbCastIsendWaitSideTable` | 442, 470 | new | Bounded wait for the side table, so a peer that never writes it fails instead of hanging. |
-| `rcclIbCastPostFifoSideWr` | 480 | new | Chains the side-table write before the CTS WR. |
-| `rcclIbCastIrecvCheckHandle`, `rcclIbCastIrecvFillSideTable` | 501, 539 | new | Validate every handle before taking a request; fill the side table. |
-| `rcclIbCastImmSegmented` | 565 | new | True for a segmented send's immediate (by-index completions use the published size). |
-| `rcclIbCastIflushNeedsMultiSeg`, `rcclIbCastIflushMultiSeg` | 569, 577 | new | Multi-segment direct-GDR flush; only the tail read is signaled. |
-| `IbCastMultiSend`, `IbCastIsend`, `IbCastPostFifo`, `IbCastIrecv`, `IbCastIflush` | 736–1474 | changed | Hooks for the segmented send, side-table wait and write, handle check and flush. |
-| `IbCastRequestComplete`, `IbCastCompletionEventByOrder`, `IbCastCompletionEventProcess`, `IbCastTest` | 1634–1992 | changed | Handle `NCCL_NET_IB_REQ_FAILED` and segmented immediates in completion processing. |
+| `IbCastGetNumWqeSplits` | 104 | new function | WRs needed to split every write in the chain that is longer than IbCastMaxPostSendBytes. |
+| `IbCastPostDataWithinCap` | 117 | new function | posts the contiguous chain rcclIbCastFillSendWrs built in comm->wrs, so it covers segmented slices and the sizes or adaptive-routing tail too. |
+| `IbCastCtsRemoteLayout` | 193 | new function | this CTS entry's layout prefix, or NULL when the write did not include one. |
+| `IbCastCtsRemoteMultiSeg` | 203 | new function | true when this CTS entry carries more than one segment inline or by reference. |
+| `rcclIbCastBuildRemoteSegmentLayout` | 209 | new function | remote table from the inline or referenced layout, else one segment from the CTS slot. |
+| `rcclIbCastAppendRequestWrs` | 229 | new function | one data slice from off, inside one local and one remote segment, via rcclIbSegAppendWrs; |
+| `rcclIbCastRangeSplits` | 292 | new function |  |
+| `rcclIbCastSignalWr` | 304 | new function | wr_id and signal of the WR that ends a post. |
+| `rcclIbCastFillSendWrs` | 328 | new function | one QP's next post. |
+| `rcclIbCastHoldSlice` | 382 | new function | a post that ends on a slice holds one event per request on that device until the slice completes. |
+| `rcclIbCastSendResume` | 387 | new function | post the next slice on each QP whose last slice completed. |
+| `rcclIbCastLayoutReadArg` | 422 | new type |  |
+| `rcclIbCastLayoutReadQp` | 428 | new function | layout reads post on the first QP of the slot's first request. |
+| `rcclIbCastSendLayoutsReady` | 442 | new function | true once every layout the slot references is read; |
+| `rcclIbCastSendLayoutReadDone` | 453 | new function |  |
+| `rcclIbCastSendLayoutCacheFree` | 457 | new function |  |
+| `rcclIbCastSendDefer` | 462 | new function | hold a matched slot until its referenced layouts are read; |
+| `rcclIbCastSendProgress` | 473 | new function |  |
+| `rcclIbCastSendSliceDone` | 494 | new function | true for the signaled slice of the slot still posting, which lets that QP post its next slice. |
+| `rcclIbCastMultiSendNeedsSegmented` | 506 | new function |  |
+| `rcclIbCastSendIsSegmented` | 513 | new function |  |
+| `rcclIbCastHasOtherSegmentedSend` | 517 | new function |  |
+| `rcclIbCastPrepareCtsWrite` | 528 | new function |  |
+| `rcclIbCastIrecvCheckHandle` | 541 | new function |  |
+| `rcclIbCastIrecvFillSideTable` | 583 | new function | a receive inside one segment sends the short CTS with that segment's rkeys; |
+| `rcclIbCastCtsFlagLayout` | 596 | new function |  |
+| `rcclIbCastImmSegmented` | 600 | new function |  |
+| `rcclIbCastIflushNeedsMultiSeg` | 604 | new function |  |
+| `rcclIbCastMrForRange` | 611 | new function |  |
+| `rcclIbCastIflushMultiSeg` | 618 | new function | one read of the first byte of the last non-zero receive. |
+| `IbCastMultiSend` | 698 | changed |  |
+| `IbCastIsend` | 958 | changed |  |
+| `IbCastPostFifo` | 1177 | changed |  |
+| `IbCastIrecv` | 1277 | changed |  |
+| `IbCastIflush` | 1423 | changed |  |
+| `IbCastRequestComplete` | 1591 | changed |  |
+| `IbCastCompletionEventByOrder` | 1678 | changed |  |
+| `IbCastCompletionEventProcess` | 1800 | changed | a send comm reads only referenced segment layouts. |
+| `IbCastTest` | 1959 | changed |  |
 
-## Wire: IB-CAST GIN and RMA
+### `transport/net_ib_cast/p2p_cast.h`
 
-Design: [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md): [handle and indexing](multi_segment_netib_cast_gin.md#handle-and-indexing), [registration](multi_segment_netib_cast_gin.md#registration), [data path](multi_segment_netib_cast_gin.md#data-path), [credits](multi_segment_netib_cast_gin.md#credits), [error completions](multi_segment_netib_cast_gin.md#error-completions).
-
-### Shared additions in `transport/net_ib/rma_multiseg.h`
-
-| Symbol | Line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `NCCL_RMA_MAX_INFLIGHT_REQUESTS` | 34 | new | 256, equal to `NET_IB_MAX_REQUESTS`; `common_cast.h` asserts it. |
-| `NCCL_RMA_MAX_SEND_QP_WRS`, `NCCL_RMA_MAX_FLUSH_QP_WRS` | 35, 36 | new | IB-CAST RMA depths: 575 (`2*256 + 65 - 2`) and 271. |
-| `ncclRmaOffsetRangeOk` | 177 | new | Range check against a `segOff` table, shared by both plugins. |
-| `ncclRmaDevSlotOf`, `ncclRmaRkeyIbDevN` | 267, 278 | new | Translate a QP's physical device to the registration's device slot when looking up rkeys. |
+| `ctsFifoNreqs` | 74 | changed | the layout-prefix bit rides above the receive count. |
+| `ctsFifoTag` | 102 | changed | multi-segment CTS rows and hooks. |
 
-### `transport/net_ib_cast/gin.cc`, `gin_cast.h` and resiliency
+### `transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc`
 
-| Symbol | File:line | Kind | Role |
+| Symbol | Line | Kind | Code comment |
 |---|---|---|---|
-| `IbCastRmaIbProxyCtx`, `CastIbGinCollComm` | `net_ib_cast/gin.cc:395`, `net_ib_cast/gin_cast.h:15` | changed | Credit state and per-rank consensus records. |
-| `IbCastRmaIbProxyConnect`, `IbCastGinIbCloseColl` | `net_ib_cast/gin.cc:384`, `:239` | changed | Finish connect setup and free the consensus records. |
-| `IbCastRmaProxySegMrHandle` | `net_ib_cast/gin.cc:408` | new | IB-CAST multi-segment handle; carries `rcclRmaSegMrTag` so `rcclRmaMrSegmentCount` reads it. |
-| `IBCAST_RMA_REGISTRATION_MAGIC`, `VERSION`, `IbCastRmaProxyRegistration` | `net_ib_cast/gin.cc:429–431` | new | Fixed-size consensus record with magic and version, so mismatched layouts fail collectively. |
-| `IbCastRmaRkeyIndex`, `RemoteRkey`, `DevSlot`, `RankOff`, `SegOf`, `MrBytes`, `RangeOk` | `net_ib_cast/gin.cc:439–464` | new | Handle indexing helpers. |
-| `IbCastRmaBuildSegmentedWrs` | `net_ib_cast/gin.cc:478` | new | Segmented WR builder for IB-CAST (paired and flush modes). |
-| `rcclIbCastRmaIbProxyConnectFinish` | `net_ib_cast/gin.cc:555` | new | Connect-time setup; the switch off keeps the single-MR path. |
-| `rcclIbCastRmaIbProxyRegMrSymDmaBuf`, `rcclIbCastRmaIbProxyDeregMrSym` | `net_ib_cast/gin.cc:570`, `:778` | new | Per-segment registration with consensus, and deregistration. |
-| `IbCastRmaIbProxyGetSendComm`, `GetRecvComm` | `net_ib_cast/gin.cc:797`, `:806` | new | Comm lookup for a peer and context. |
-| `IbCastRmaRefundWrs`, `AccountCompletion`, `PollCq`, `CreditTimeoutNs`, `ReserveWrs`, `ReleaseWrs` | `net_ib_cast/gin.cc:816–928` | new | Completion-driven credits; the reserve timeout outlasts the HCA's own retries. |
-| `IbCastRmaPostWrs`, `CompletePostedRequest`, `ReservePostComplete` | `net_ib_cast/gin.cc:935–972` | new | Post a chain and apply the keep-or-free rule; a rejected tail marks the request failed. |
-| `rcclIbCastRmaIbProxyIPut`, `IGet`, `IPutSignal`, `IFlush`, `Test` | `net_ib_cast/gin.cc:985–1207` | new | Split operation bodies and their completion test. |
-| `IbCastRmaIbProxyRegMrSymDmaBuf`, `DeregMrSym`, `IPut`, `IGet`, `IPutSignal`, `Test`, `IFlush` | `net_ib_cast/gin.cc:1329–1635` | changed | Hooks: multi-segment handles take the split path; one segment keeps develop's body; a lost tail completes as an error. |
-| `IbCastRmaAbandonDeviceRequests` | `net_ib_cast/p2p_resiliency_recovery_ainic.cc:24` | new | Port recovery drops RMA requests on the failed device and returns their credits. |
-| `IbCastPortRecoveryQpsRestoreAinic` | `net_ib_cast/p2p_resiliency_recovery_ainic.cc:41` | changed | Abandons those requests and recreates the flush QP at `IbCastFlushQpSendDepth`. |
+| `IbCastPortRecoveryQpsRestoreAinic` | 35 | changed |  |
+
+### `transport/net_ib_cast/reg.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `IbCastRegMrDmaBufInternal` | 70 | changed |  |
+| `IbCastCountRangeSegments` | 107 | new function | fd < 0 walks one MR per segment. |
+| `IbCastRegMrDmaBufFromRange` | 127 | new function |  |
+| `IbCastRegMrDmaBuf` | 187 | changed | fd < 0 registers one MR per physical segment. |
+| `rcclIbCastMrAdmit` | 199 | new function |  |
+| `rcclIbCastMultiSegRegCtx` | 230 | new type | one slot per segment. |
+| `IbCastCommMultiSegScopeOk` | 239 | new function |  |
+| `rcclIbCastMultiSegRegOne` | 243 | new function |  |
+| `rcclIbCastMultiSegDeregOne` | 249 | new function |  |
+| `IbCastMrHandleFreeSegments` | 268 | new function | free the counted segment arrays and the handle; |
+| `rcclIbCastMrHandlePublishLayout` | 274 | new function | a receive overlapping more than RCCL_IB_CTS_INLINE_SEGS segments sends a reference to this layout. |
+| `IbCastRegMrDmaBufMultiSeg` | 284 | new function | one MR per segment. |
+| `rcclIbCastDeregMrMultiSeg` | 349 | new function | mrs[] aliases segment 0, so it is freed via segMrs here (do not double-free). |
+| `IbCastDeregMr` | 366 | changed |  |
+
+## Wire: IB-CAST GIN/RMA
+
+### `transport/net_ib_cast/connect.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `IbCastBuildDataQpCreateAttr` | 601 | changed | the RMA proxy keeps NCCL_RMA_MAX_INFLIGHT_REQUESTS chains per peer; |
+| `IbCastSenderQpsCreate` | 1026 | changed |  |
+
+### `transport/net_ib_cast/gin.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `IbCastGinIbCloseColl` | 289 | changed |  |
+| `IbCastRmaIbProxyGetProperties` | 426 | changed |  |
+| `IbCastRmaIbProxyConnect` | 434 | changed |  |
+| `IbCastRmaProxySegMrHandle` | 456 | new type |  |
+| `IBCAST_RMA_REGISTRATION_MAGIC` | 474 | new macro | Gathered after the shared exchange; |
+| `IBCAST_RMA_REGISTRATION_VERSION` | 475 | new macro |  |
+| `IbCastRmaProxyRegistration` | 476 | new type |  |
+| `IbCastRmaRemoteRkey` | 482 | new function |  |
+| `IbCastRmaDevSlot` | 486 | new function |  |
+| `IbCastRmaRankOff` | 491 | new function |  |
+| `IbCastRmaSegOf` | 495 | new function |  |
+| `IbCastRmaRangeOk` | 499 | new function |  |
+| `IbCastRmaCapWrs` | 505 | new function | split slices longer than IbCastMaxPostSendBytes. |
+| `IbCastRmaBuildSegmentedWrs` | 549 | new function | device slots and keys stay here; |
+| `IbCastRmaSegMrHandleFree` | 627 | new function | release the first nRegistered segment MRs through the shared deregister, then free the handle. |
+| `IbCastRmaRegAllGather` | 638 | new function |  |
+| `rcclIbCastRmaIbProxyConnectFinish` | 643 | new function |  |
+| `rcclIbCastRmaIbProxyRegMrSymDmaBuf` | 661 | new function |  |
+| `rcclIbCastRmaIbProxyDeregMrSym` | 814 | new function |  |
+| `IbCastRmaIbProxyGetSendComm` | 820 | new function |  |
+| `IbCastRmaIbProxyGetRecvComm` | 829 | new function |  |
+| `IbCastRmaAccountCompletion` | 839 | new function |  |
+| `kIbCastRmaRemoteDev` | 851 | new const | the RMA proxy connects one QP, to the peer's device 0; |
+| `IbCastRmaPollCq` | 853 | new function |  |
+| `IbCastRmaCompletePostedRequest` | 905 | new function | Nothing posted frees the slot; |
+| `IbCastRmaPostComplete` | 919 | new function |  |
+| `rcclIbCastRmaRoundBuild` | 928 | new function | this plugin's half of a multi-segment round. |
+| `rcclIbCastRmaRoundDev` | 936 | new function |  |
+| `rcclIbCastRmaRoundOutstanding` | 941 | new function | Only the hold is left once the round in flight completes. |
+| `rcclIbCastRmaRoundPost` | 945 | new function |  |
+| `rcclIbCastRmaRoundRetire` | 955 | new function |  |
+| `rcclIbCastRmaRoundFailed` | 965 | new function |  |
+| `rcclIbCastRmaStartRequest` | 973 | new function |  |
+| `rcclIbCastRmaPostChain` | 993 | new function | one chain with nothing queued ahead posts at once. |
+| `rcclIbCastRmaEnqueue` | 1005 | new function | queue an op behind the peer's earlier ones; |
+| `rcclIbCastRmaSubmit` | 1030 | new function | post a multi-segment op as one chain when it fits in one round with nothing queued ahead, otherwise round by round from the peer's queue. |
+| `rcclIbCastRmaIbProxyIPut` | 1042 | new function |  |
+| `rcclIbCastRmaIbProxyIGet` | 1064 | new function |  |
+| `rcclIbCastRmaIbProxyIPutSignal` | 1087 | new function |  |
+| `rcclIbCastRmaIbProxyTest` | 1140 | new function |  |
+| `rcclIbCastRmaIbProxyIFlush` | 1183 | new function |  |
+| `IbCastRmaIbProxyCreateContext` | 1219 | changed |  |
+| `IbCastRmaIbProxyDestroyContext` | 1297 | changed |  |
+| `IbCastRmaIbProxyRegMrSymDmaBuf` | 1322 | changed | one DMA-BUF MR per physical segment. |
+| `IbCastRmaIbProxyDeregMrSym` | 1350 | changed | release every segment MR; |
+| `IbCastRmaIbProxyTest` | 1612 | changed | a lost signaled tail completes as an error. |
+| `IbCastRmaIbProxyIFlush` | 1673 | changed | multi-segment reads one device segment; |
+
+### `transport/net_ib_cast/gin_cast.h`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `CastIbGinCollComm` | 15 | changed |  |
+
+### `transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc`
+
+| Symbol | Line | Kind | Code comment |
+|---|---|---|---|
+| `IbCastRmaAbandonDeviceRequests` | 23 | new function | A destroyed QP drops its outstanding WRs, so fail the in-flight requests rather than letting Test() wait for CQEs that will never come. |
+
+
+## IB-MSEG fork counterparts
+
+In the [fork plugin](multi_segment_fork_plugin.md) the same pieces live in fork-local files inside `src/transport/net_ib_multiseg/`, with `_mseg` header names. Line counts are at the `users/atulkulk/netib-mseg/04-rma-gin-multiseg` tip; symbols inside the copied `net_ib` files carry the `IbMseg` prefix from `rename_map.txt`.
+
+| Old stack | Fork file | Lines | Added in fork |
+|---|---|---|---|
+| `transport/rccl_mseg.h` | `transport/rccl_mseg.h` (core: the cap) and `net_ib_multiseg/seg_mseg.h` | 22, 92 | 1, 3 |
+| `transport/rccl_mseg_rma.h` | `transport/rccl_mseg_rma.h` (core: table fit, in-flight cap) and `net_ib_multiseg/seg_rma_mseg.h` | 33, 101 | 1, 4 |
+| `transport/rccl_mseg_export.h`, `rccl_mseg_reg.h`, `rccl_mseg_sym.h`, `rccl_mseg_wr.h` | `seg_export_mseg.h`, `seg_reg_mseg.h`, `seg_sym_mseg.h`, `seg_wr_mseg.h` | 93, 84, 108, 73 | 3 and 4 |
+| `transport/rccl_mseg_rma_round.h` | `seg_rma_round_mseg.h` | 241 | 4 |
+| `transport/rccl_p2p_multiseg.h`, `rccl_p2p_multiseg.cc` | `seg_p2p_mseg.h`, `seg_p2p.cc` | 276, 342 | 3 |
+| `transport/net_ib/p2p_multiseg.h`, `p2p_multiseg.cc`, `ib_multiseg.h` | `p2p_multiseg_mseg.h`, `p2p_multiseg.cc`, `ib_multiseg_mseg.h` | 73, 368, 49 | 3 |
+| hooks in `net_ib/*.cc` | edits in place in the fork's copied `p2p.cc`, `connect.cc`, `reg.cc`, `gin.cc`, `init.cc` | — | 3 and 4 |
+| (none) | `test/host/transport/derived_transport_tests.cmake` and `net_ib_multiseg/host_tests.cmake` | — | 4 |
+| (none) | `tools/scripts/net_ib_multiseg/sync.py`, `rename_map.txt`, `BASELINE`, `check_symbols.sh` | — | 2 |
 
 ## Tests and runner configs
 
-Design: [Testing](multi_segment_testing.md).
+Design: [Testing](multi_segment_testing.md). Counts are at the wire tests tip.
 
 | File | Suites | Covers |
 |---|---|---|
-| `test/RegistrationMPITests.cpp` | `UBR_MultiSegment` (15 tests) | End-to-end registration: NET segment count, GIN and LSA windows, hybrid host and device windows, switch off. |
-| `test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp` | `RmaMultiSegmentMPITest`, `RmaMultiSegmentPostMPITest` | RMA put, get, signal and flush across segments; WR batching, send-queue capacity, rejected ops, registration churn. |
-| `test/transport/NetIbMPI/NetIbMultiSegmentMPITests.cpp` | `NetIbMultiSegmentMPITest` | Classic and IB-CAST P2P across segments: side table, flush and switch off. |
-| `test/NetIbMultiSegmentUnitTests.cpp` | `NetIbMultiSeg`, `NetIbSplit`, `NetIbCtsLayout`, `NetIbSideTable` | Boundary math, splitting and CTS layout checks in `multiseg.h`. |
-| `test/RmaSegmentMathTests.cpp` | `RmaSegmentMathTest` | WR counting, credits and keep-or-free rules in `rma_multiseg.h`. |
-| `test/transport/NetIbCast/NetIbCastMultiplaneTests.cpp` | `NetIbCastSegmentedSendPrefix`, `NetIbCastSideTable`, `NetIbCastFlushPrefix` | IB-CAST prefix posts, side table and flush. |
-| `test/transport/NetIb/NetIbSegmentedSendPrefixTests.cpp` | `NetIbSegmentedSendPrefix` | Classic segmented-send prefix posts. |
-| `test/host/dev-runtime-test.cc` | `SymMemoryMapLsaTeamTest`, `SymMemoryRegisterGinElasticTest`, `SymMemoryRegisterRmaTest` | Host owner fd, GIN and RMA window gates with host fakes. |
+| `test/RegistrationMPITests.cpp` | `UBR_MultiSegment` (18 tests) | End-to-end registration: NET segment count, GIN and LSA windows, hybrid host and device windows, switch off. |
+| `test/transport/RmaMPI/RmaMultiSegmentMPITests.cpp` | `RmaMultiSegmentMPITest` (32), `RmaMultiSegmentPostMPITest` (13) | RMA put, get, signal and flush across segments; DeepEP and hybrid windows; WR batching, the in-flight cap, rejected ops, registration churn. |
+| `test/transport/NetIbMPI/NetIbMultiSegmentMPITests.cpp` | `NetIbMultiSegmentMPITest` (22) | Classic and IB-CAST P2P across segments: layouts, flush, GDR flush flag, old peer and switch off. |
+| `test/NetIbMultiSegmentUnitTests.cpp` | `NetIbMultiSeg`, `NetIbCtsLayout`, `NetIbLayoutBlob` (23) | Peer-cap decline, segment selection, CTS layout and blob checks in `rccl_p2p_multiseg.h`. |
+| `test/RmaSegmentMathTests.cpp` | `RmaSegmentMathTest` (34), `RmaRoundTest` (7) | WR counting, the cursor, the count check, the in-flight cap, device slots, keep-or-free rules and rounds in `rccl_mseg*.h`. |
+| `test/transport/NetIb/NetIbSegmentedSendPrefixTests.cpp` | `NetIbSegmentedSendPrefix`, `NetIbSegmentedFlushPrefix`, `NetIbSegmentedHooks` (56) | Classic slice posts, resume, the one-read flush and every P2P hook. |
+| `test/transport/NetIbCast/NetIbCastMultiSegTests.cpp` | `NetIbCastSegmentedSendPrefix`, `NetIbCastFlushPrefix`, `NetIbCastSegmentedFlush`, `NetIbCastSegmentedHooks`, `NetIbCastSideTable` (56) | IB-CAST posts, deferred slots, flush, hooks, scope and combined CTS slots. |
+| `test/host/dev-runtime-test.cc` | `SymMemoryMapLsaTeamTest`, `SymMemoryRegisterGinTest`, `SymMemoryRegisterGinElasticTest`, `SymMemoryRegisterRmaTest`, `RmaProxyInflightCapTest` | Host owner fd, GIN and RMA window gates and the in-flight cap with host fakes. |
+| `test/host/transport/net_ib/*-test.cc` | `NetIbRegMicrotest`, `NetIbRegRangeMicrotest`, `NetIbConnectMultiSegMicrotest`, `NetIbConnectMultiSegOk`, `NetIbGinMicrotest`, `NetIbP2pMicrotest` | Classic registration unwinding, connect and listen marks, the cached `multiSegOk`, flush post error. |
+| `test/host/transport/net_ib_cast/*-test.cc` | `NetIbCastReg*Microtest`, `NetIbCastP2p*Microtest`, `NetIbCastConnectTest`, `NetIbCastConnectMultiSegMicrotest`, `NetIbCastGin*Microtest` | IB-CAST registration, FAILED drain, connect pairs and depths, RMA registration, rounds and post path. |
+| `test/host/p2p-resiliency-recovery-ainic-test.cc` | `P2pResiliencyRecoveryAinicRmaMicrotest` | AINIC restore of RMA requests. |
 | `test/ce/CeMPITests.cpp` | `CeMPI_AllGather`, `CeMPI_AlltoAll` (`MultiNodeHierarchical*`) | Hierarchical CE over two-segment windows. |
 | `test/common/HybridVmmHelpers.hpp`, `MultiSegmentVmmHelpers.hpp` | helpers | Allocate hybrid host and device VMM windows and free them collectively. |
-| `tools/scripts/test_runner/configs/*.json` | runner jobs | The multi-segment suites per platform; `check_test_filters.py` fails a filter that matches no test. |
+| `tools/scripts/test_runner/configs/*.json` | runner jobs | The multi-segment suites per platform; `check_test_filters.py` fails a filter that matches no test. The job-by-config matrix is in `~/ginocc/sw/docs_update_1123/oldstack_runner_jobs.md`. |
+
+Per layer, the code commit and the tests commit add these test definitions: 05 96 and 51, 06 24 and 99, 08 21 and 59, wire 44 and 0. The coverage PR (09) moves the `UBR_MultiSegment` cases to `test/multisegment/MultiSegmentRegistrationMPITests.cpp` and `MultiSegmentCollectiveMPITests.cpp` with the fixture in `MultiSegmentTestFixture.hpp`, and adds `CeMPI_MultiSegment` to `test/ce/CeMPITests.cpp`; it is still based on the 11-04 stack. Its tests are listed in the [validation plan](multi_segment_validation_plan.md#coverage-pr-tests).

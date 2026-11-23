@@ -4,12 +4,12 @@ A multi-segment direct-GDR flush posts one `RDMA_READ` per overlapped segment on
 
 *Terms, diagram colors and callout boxes follow the [overview](multi_segment_overview.md#color-legend).*
 
-> [!NOTE]
-> **Status:** design only. The classic commit would go on layer 06 and the CAST twin on 08, then restack. Put the helper in both transports, not only CAST. GIN flush is not part of the first patch.
+> [!WARNING]
+> **Status (2026-11-23): superseded, not implemented, kept as history.** Aleksandr's review asked for one flush read instead of one per segment, and AICOMRCCL-3123 is answered by that change: the P2P flush now posts one read per device, of the first byte of the last non-empty receive (or develop's scratchpad read), on 06 and then 08, and the GIN flush reads one byte of the first device segment. With one read there is nothing to collapse. See [classic NET/IB P2P](multi_segment_netib_wire.md#flush) and [review feedback](multi_segment_review_feedback.md#aleksandr). The body below describes the 11-04 tree.
 
 ## What the flush posts today
 
-With `RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0` (direct GDR), classic `rcclIbIflushMultiSeg` (`net_ib/p2p.cc`) builds `flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS]` (128 entries). For a multi-segment handle it calls `ncclIbSegmentsOverlappingRange` and posts `segMrs[seg][i]->rkey` at the first byte of each overlap. A single-segment handle posts one read through `ncclIbMrForRange`. Only the last read is signaled. CAST `IbCastIflush` (`net_ib_cast/p2p.cc`) builds the same chain, with `mhandle->mrs[i]` on the single-segment arm. The scratchpad path (`useGpuFlushMem`) posts one write and one read of the flush buffer and never walks segments. Eight 128-read chains are why the advertised P2P flush QP depth is 1024.
+With `RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0` (direct GDR), classic `rcclIbIflushMultiSeg` (`net_ib/p2p_multiseg.cc`) builds `flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS]` (128 entries). For a multi-segment handle it calls `ncclIbSegmentsOverlappingRange` and posts `segMrs[seg][i]->rkey` at the first byte of each overlap. A single-segment handle posts one read through `ncclIbMrForRange`. Only the last read is signaled. CAST `rcclIbCastIflushMultiSeg` (`net_ib_cast/p2p_multiseg_cast.cc`), called from `IbCastIflush`, builds the same chain, with `mhandle->mrs[i]` on the single-segment arm. The scratchpad path (`useGpuFlushMem`) posts one write and one read of the flush buffer and never walks segments. Eight 128-read chains are why the advertised P2P flush QP depth is 1024.
 
 ```mermaid
 %% caption: Reads one flush posts today, per NIC of the receive comm

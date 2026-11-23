@@ -5,7 +5,7 @@ Today a buffer whose walk returns more than 16 physical segments cannot register
 *Terms, diagram colors and callout boxes follow the [overview](multi_segment_overview.md#color-legend).*
 
 > [!IMPORTANT]
-> **Status:** design only, not in the open stack. Do not change `ncclIbSegLayout` or `NCCL_IB_MAX_SEGMENTS` inside layers 06, 08 or wire. The 16-entry slot is the CTS side-table wire format (`sizeof` is 704, asserted in `common.h`), so changing it reopens all three branches. The work lands as two later pull requests: the first branches from 06 after it lands and changes classic NET/IB; the second branches from the wire tip and changes CAST P2P, classic GIN and CAST GIN together.
+> **Status (2026-11-23): implemented in a different form, this design is kept as history.** The cap was removed inside layers 05, 06, 08 and wire under AICOMRCCL-3124, not in two later pull requests. What landed: registration tables sized from the walked count with `rcclIbSegCountSupported` as the one check (step 11a); RMA posted in rounds of at most 64 data WRs with 32 requests in flight instead of deeper queues (11b); P2P sends posted one slice per QP per progress call (11c); a CTS layout prefix that carries only the overlapping segments, up to four inline or by reference (11d). There is no `NCCL_IB_CAP_VARSEG` bit; the one capability is `RCCL_IB_CAP_MULTISEG`, and the 704-byte side-table entry is gone. The limits are 8192 segments by protocol and a local cap of 1024 (`RCCL_IB_MAX_REG_SEGMENTS`). See the [current contract](multi_segment_current.md#limits) and [review feedback](multi_segment_review_feedback.md#aleksandr). The body below describes the 11-04 tree and the plan as it was then.
 
 ## Problem
 
@@ -87,7 +87,7 @@ struct ncclIbMrHandle {
 
 | Queue | Today (switch on) | With this design |
 |---|---|---|
-| Classic P2P send | 2568 | `2 * NET_IB_MAX_REQUESTS` = 512 |
+| Classic P2P send | 2576 | `2 * NET_IB_MAX_REQUESTS` = 512 |
 | CAST P2P send | 769 | 512 |
 | Classic RMA send | same QP as P2P send | 512 |
 | CAST RMA send | 575 | `2 * NCCL_RMA_MAX_INFLIGHT_REQUESTS` = 512 |
@@ -147,7 +147,7 @@ Classic (first PR, files under `src/transport/net_ib/`):
 | `common.h` | `ncclIbSegLayout` becomes a fixed header plus a heap record array; `ncclIbMrHandle` arrays become counted pointers; `NCCL_IB_MAX_SEND_WRS` is `2 * NET_IB_MAX_REQUESTS`; `NCCL_IB_MAX_WRS_PER_SEND` is removed |
 | `reg.cc` | Accept any `nSeg >= 1`; allocate `segStart`, `segLen` and `segMrs` with `ncclCalloc`; free them in `rcclIbDeregMrMultiSeg` |
 | `connect.cc` | Allocate and register the record buffer only when the new bit is advertised and publish it only to a peer that set it; `max_send_wr` is 512 on the advertised path too |
-| `p2p.cc` | Heap the per-request VA and rkey arrays; post one slice per receive and resume; the flush list is `NCCL_NET_IB_MAX_RECVS` long |
+| `p2p_multiseg.cc` | Heap the per-request VA and rkey arrays; post one slice per receive and resume; the flush list is `NCCL_NET_IB_MAX_RECVS` long |
 
 ```cpp
 if (nSeg < 1) return ncclInvalidUsage;
@@ -163,7 +163,7 @@ CAST P2P and both GIN paths (second PR):
 | `net_ib_cast/common_cast.h`, `reg.cc` | Same header and record split and counted allocation as classic |
 | `net_ib_cast/rccl_reg_multiseg_cast.cc` | Remove the `nSeg > NCCL_IB_MAX_SEGMENTS` decline |
 | `net_ib_cast/connect.cc`, `connect_cast.h` | Record MR only when advertising both bits; `IbCastFlushQpSendDepth` returns 256 for P2P and RMA comms (the 1024 and 271 arms go) |
-| `net_ib_cast/p2p.cc` | Same one-slice post; `lVA`, `rVA`, `starts`, `rkeys` and `flushSeg` become counted allocations. `IbCastWaitSideTable` already returns after 2 s; a partial post continues on a later call and must not treat the timeout as success |
+| `net_ib_cast/p2p_multiseg_cast.cc` | Same one-slice post; `lVA`, `rVA`, `starts`, `rkeys` and `flushSeg` become counted allocations. `IbCastWaitSideTable` already returns after 2 s; a partial post continues on a later call and must not treat the timeout as success |
 | `net_ib/rma_multiseg.h` | Drop the RMA segment and WR caps; `NCCL_RMA_SEND_QP_WRS` is `2 * NET_IB_MAX_REQUESTS`; CAST `NCCL_RMA_MAX_SEND_QP_WRS` is `2 * NCCL_RMA_MAX_INFLIGHT_REQUESTS` |
 | `net_ib/gin.cc`, `net_ib_cast/gin.cc` | Heap `segOff`, `mrHandle`, `localVas` and `localRkeys`; `rankSegOff` stride is `nSeg + 1`; fill 64 slices, post, resume; remove the fail-closed check at `NCCL_RMA_MAX_DATA_WRS` |
 | `net_ib/connect.cc` | `ncclIbFlushQpSendDepth` returns 512 |

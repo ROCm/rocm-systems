@@ -1,134 +1,96 @@
 # IB-CAST P2P: the same wire format on the CAST engine
 
-IB-CAST P2P (`net_ib_cast`, layer 08, [PR 10889](https://github.com/ROCm/rocm-systems/pull/10889)) uses the same design as [classic NET/IB P2P](multi_segment_netib_wire.md): one MR per segment, an unchanged CTS, a side table behind `NCCL_IB_CAP_MULTISEG`, and writes split at local and remote boundaries. This doc covers only what differs on IB-CAST: the 32-byte inline CTS, the QP scheduler, the declines, the failure handling, and a set of connect hardening fixes. IB-CAST GIN/RMA is a separate path with no CTS; see [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
+> [!NOTE]
+> Old stack, layer 08 ([PR 10889](https://github.com/ROCm/rocm-systems/pull/10889)), at the wire tip `ba3ab26f30a7`. The 11-04 version of this note described a side table written for every slot, a 2 s side-table wait, a copied segmented builder in `p2p_multiseg_cast.cc` and a separate `rccl_reg_multiseg_cast.cc`; all of these are gone. In the planned design IB-CAST returns to develop and its multi-segment support is rebuilt inside the IB-MSEG plugin in forks 5 and 6, which are planned; see [the fork plugin](multi_segment_fork_plugin.md#fork-6-ib-cast-multi-segment-planned).
+
+IB-CAST P2P (`net_ib_cast`) uses the design of [classic NET/IB P2P](multi_segment_netib_wire.md): one MR per segment, the layout prefix in the same write as the CTS, inline or referenced layouts, and one slice per QP per progress call. Both plugins share `transport/rccl_p2p_multiseg.{h,cc}`, `rccl_mseg.h`, `rccl_mseg_wr.h` and `rccl_mseg_reg.h`. This doc covers only what differs on IB-CAST: the multi-segment scope, one segmented group at a time, the BY_INDEX completion flag, the per-WR cap, and the open review items. IB-CAST GIN/RMA is a separate path with no CTS; see [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
 
 ## Differences from classic
 
 | Aspect | Classic | IB-CAST |
 |---|---|---|
-| CTS entry | 64 bytes | 64 bytes, or 32 bytes packed inside the 64-byte row on AINIC (`IbCastAinicCtsInlineData`) |
-| Side table written | only for slots with a multi-segment receive, flagged in `nreqs` | for every slot to a capable peer, unless CTS offload is on; no `nreqs` flag |
-| Sender wait for the side table | until every `idx` matches | up to 2 s (`IbCastWaitSideTable`), then `ncclRemoteError` |
-| Segmented groups in flight | no gate; sender QP 2568 | one at a time (`IbCastHasOtherSegmentedSend`); sender QP 769 |
-| Sizes WR | when `nreqs > 1` or matching is not by index | always, with `WR_IMM_SEGMENTED_FLAG` in the immediate |
-| Declines | receiver, for a peer without the capability | also both sides under CTS offload, BY_ORDER or QP sharing |
-| Peer capability with the switch off | recorded | masked to 0 |
-| Partial post | request kept for `Test()` | request kept if it has events, else freed; see [failure handling](#failure-handling) |
+| Scope | P2P, switch on, no resiliency (`ncclIbMultiSegOk`) | also no CTS offload, no BY_ORDER, no QP sharing (`IbCastMultiSegScopeOk`), cached as `multiSegScopeOk` |
+| Receiver's CTS stride | from the peer's raw `caps` | from `peerCaps`, masked by its own scope (open item) |
+| Segmented slots in flight | FIFO order through the send cursor | one segmented group at a time (`rcclIbCastHasOtherSegmentedSend`); a later slot returns `*request = NULL` |
+| Referenced layouts | read before `ncclIbMultiSend` | slot deferred (`rcclIbCastSendDefer`) and posted from `rcclIbCastSendProgress` once read |
+| Sizes WR | `nreqs > 1`, or split and not BY_INDEX | `nreqs > 1` or the request was split; under BY_INDEX a split sets `WR_IMM_SEGMENTED_FLAG` (bit 22) |
+| Per-WR cap | none | slices split at `IbCastMaxPostSendBytes` (`IbCastPostDataWithinCap`) |
+| Flush QP | 512 | 256, develop's depth |
+| AINIC inline CTS | not used | not excluded from the scope (open item) |
 
-The handle (`ncclIbMrHandle` with `nSegments`, `segStart`, `segLen`, `segMrs`, `mrs[]` aliasing segment 0) and the side entry (`ncclIbSegLayout`, 704 bytes) are copies of classic's, because IB-CAST does not include `net_ib/common.h`. The boundary math comes from the shared `net_ib/multiseg.h`.
+## Scope
 
-## When multi-segment is declined
+`IbCastMultiSegScopeOk(useCtsOffload, scheme, qpSharing, resiliency)` (`connect_cast.h`) is computed once per comm at connect, before the CTS allocation, and logged in one INFO line. Capability and CTS slots come from `IbCastMultiSegAdvertise(multiSegScopeOk, isRma)`, which also requires the switch and a non-RMA comm. `IbCastRegMrDmaBufMultiSeg` (`net_ib_cast/reg.cc`) declines a multi-segment registration with `ncclInvalidUsage` when:
 
-`IbCastRegMrDmaBufMultiSeg` (`net_ib_cast/rccl_reg_multiseg_cast.cc`) returns `ncclInvalidUsage` for `nSegments > 1`, with one INFO line listing its inputs, and the collective stages:
+- the count fails `rcclIbSegCountSupported` or `rcclIbCastMrAdmit`;
+- the comm's scope fails, on either side;
+- the comm is a receiver and the peer lacks the capability.
 
-```c
-if (useCtsOffload || base->recvMatchingScheme == BY_ORDER || IbCastQpSharingEnabled() ||
-    (!base->isSend && ncclIbDeclineMultiSegRegistration(peerCaps, nSeg)))
-  return ncclInvalidUsage;
-```
+The scope exclusions exist because the segmented send cannot serve them:
 
-The first three apply on both sides because the segmented send engine cannot serve them:
-
-- **CTS offload.** The NIC owns the CTS and never reads a side table, and a sender under offload would post one SGE with segment 0's lkey over the whole buffer.
-- **BY_ORDER matching.** The receiver adds each immediate's `byte_len`, but a segmented send's immediate rides the 4-byte-per-request sizes write, so a receive would report its size plus 4 bytes per QP.
-- **QP sharing.** Shared QPs need a `commId` in the immediate and a per-QP WR budget; segmented sends carry neither.
-
-The last applies on the receive side only, as on classic: the side table describes the receiver, and a sender splits locally onto the receiver's single rkey. This also covers a local switch-off, because `peerCaps` is then 0.
+- **CTS offload.** The NIC owns the CTS and never reads a layout.
+- **BY_ORDER matching.** The receiver adds each immediate's `byte_len`, but a split send's size rides the sizes write. AINIC defaults to BY_ORDER, so multi-segment on AINIC needs `NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=0`.
+- **QP sharing.** Shared QPs need a `commId` in the immediate and a per-QP WR budget.
+- **Resiliency.** Resiliency replays a whole slot, which a send resumed across progress calls cannot do yet.
 
 ```mermaid
 %% caption: When IB-CAST declines multi-segment registration
 flowchart TD
- a["NET registration, N segments"] --> p{"plugin handles fd = -1?"}
+ a["NET registration, N segments"] --> p{"fd -1 and plugin bit?"}
  p -->|no| dec["decline, staging"]
- p -->|yes| u{"walk covers the range and segments are uniform?"}
- u -->|no| dec
- u -->|yes| off{"CTS offload, BY_ORDER, QP sharing, or receiver whose peer lacks the capability?"}
- off -->|yes| dec
- off -->|no| m["one MR per segment per device"]
+ p -->|yes| c{"count within cap and max_mr?"}
+ c -->|no| dec
+ c -->|yes| s{"scope ok?"}
+ s -->|no| dec
+ s -->|yes| r{"receiver and peer lacks the capability?"}
+ r -->|yes| dec
+ r -->|no| m["one MR per segment per device"]
  classDef ibcast fill:#fff1e0,stroke:#ff9500,color:#1d1d1f
  classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
  classDef stagepath fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
- class a,p,u,off ibcast
+ class a,p,c,s,r ibcast
  class m okpath
  class dec stagepath
 ```
 
-`IbCastRegMrDmaBuf` (`net_ib_cast/reg.cc`) routes `fd == -1` to `IbCastRegMrDmaBufFromRange`, which mirrors classic's range walk. Develop's `IbCastRegMrDmaBufInternal` keeps its `malloc` and failure path; the stack only zeroes the handle and sets `nSegments = 1`. A failure on a later device still leaves the earlier devices' MRs registered, as on develop (AICOMRCCL-3093, Won't Do: error path only). `IbCastDeregMr` forwards a multi-segment handle to `rcclIbCastDeregMrMultiSeg`.
-
-## Connect and the 32-byte CTS
-
-`IbCastAdvertiseMultiSeg()` (`connect_cast.h`) gates the capability. When it is true, both sides write the `devName` trailer, the covering MR is `sizeof(ctsFifo) + sizeof(segLayoutFifo)`, and the receiver sets `remSegLayout.addr = remMeta.addr + sizeof(ctsFifo)`. The peer's caps are read into `peerCaps` only when the local switch is on, so a switched-off rank neither writes nor waits on a side table. Two `static_assert`s in `connect_cast.h` pin the metadata: `ndevs` follows `addr`, and `devName` keeps its offset, because the trailer position is wire format.
-
-`segLayoutFifo` is `static_assert`ed right after `ctsFifo`. With AINIC inline CTS, the 32-byte packed entries live inside the 64-byte-typed `ctsFifo` rows; the side table still starts after the whole `ctsFifo` object, and `ctsFifoIdx` reads `idx` through either layout. The side WR is never `IBV_SEND_INLINE`, and `max_inline_data` is unchanged.
-
-The receiver allocates `remSegLayout` and registers `segLayoutFifoMr` per device (`IBV_ACCESS_LOCAL_WRITE` only) only for a capable peer; they are released in `IbCastCloseRecvCommDevResources` and `IbCastCloseRecv`.
+`IbCastRegMrDmaBuf` routes `fd == -1` to `IbCastRegMrDmaBufFromRange`, which mirrors classic's walk, and registration goes through `rcclIbSegRegister` with `rcclIbCastMultiSegRegOne`. `rcclIbCastDeregMrMultiSeg` frees a multi-segment handle.
 
 ## Data path
 
-**Receiver.** Before taking a request, `rcclIbCastIrecvCheckHandle` validates every handle: count in range, every MR present, and for a multi-segment handle contiguous non-empty segments that cover the receive range. `rcclIbCastIrecvFillSideTable` fills `remSegLayout->elems[slot][i]` for a capable peer with CTS offload off, including `nSegments = 0` for a single-segment receive, with `idx` last, so the sender can always wait on it. `IbCastPostFifo` chains the side write before the CTS write. If filling or posting the CTS fails, no completion can name the request, so `irecv` records a fatal error, frees the request and returns the error.
+**Receiver.** `rcclIbCastIrecvCheckHandle` validates every handle before taking a request. `rcclIbCastIrecvFillSideTable` fills each receive's layout prefix for a capable peer; `rcclIbCastCtsFlagLayout` sets bit 15 and `rcclIbCastPrepareCtsWrite` starts the CTS write at the prefix.
 
-**Sender.** Once CTS slot 0's `idx` is visible, `IbCastIsend`:
+**Sender.** `IbCastIsend` bounds `nreqs` to 1 to `NCCL_NET_IB_MAX_RECVS`. A request is segmented when CTS offload is off and either the local handle or the remote layout spans more than one segment (`rcclIbCastSendIsSegmented`). A segmented request returns `*request = NULL` while another slot's segmented group is in flight. Once every request of the slot has matched, the slot posts through `IbCastMultiSend`, or defers until its referenced layouts are read.
 
-1. rejects `nreqs` outside `[1, NCCL_NET_IB_MAX_RECVS]` with `ncclInternalError`;
-2. for a capable peer, waits up to 2 s for every side entry (`rcclIbCastIsendWaitSideTable`), then returns `ncclRemoteError`;
-3. marks the request segmented when CTS offload is off and either the local handle or `IbCastCtsRemoteMultiSeg` is multi-segment, and defers it (`*request = NULL`) while another slot's segmented group is in flight;
-4. resets `send.sentData` for every request and stores the handle in `send.mh`.
+**Builder.** Develop's `IbCastMultiSend` loop calls `rcclIbCastFillSendWrs` for every non-offload chain; only a segmented send writes the cursor (`rcclIbCastSendCursor`), and `rcclIbCastSendResume` posts later slices. The CAST scheduler still picks the per-QP chunk; the fill cuts it at local and remote boundaries with the shared cursor. `IbCastPostDataWithinCap` splits any WR above `IbCastMaxPostSendBytes` on the stack before posting.
 
-**Segmented builder.** `IbCastMultiSend` hands the slot to `IbCastMultiSendSegmented` when `rcclIbCastMultiSendNeedsSegmented` holds. For each QP it takes the chunk the CAST scheduler chose, then splits it with `ncclIbSplitTransferAtOffsets` from independent local and remote cursors, after validating the remote layout with `ncclIbCtsRemoteLayoutValid`. Cutting the chunk instead of shrinking it matters: shrinking a straddling chunk to one segment would make the scheduler under-send or livelock. A zero-length chunk takes its rkey from `ncclIbSegmentForZeroLengthOffset`, the same key classic picks. The builder reloads and re-bounds `nreqs` before use.
+**Completion size.** Under BY_INDEX the immediate holds `rxReqIndex`, `WR_IMM_SPLIT_DATA_FLAG` with more than one QP, and `WR_IMM_SEGMENTED_FLAG` when the request was split; the receiver skips adding `byte_len` for a single receive when `rcclIbCastImmSegmented` sees the flag.
 
-**Completion size.** The segmented path always appends the sizes write, which carries the immediate: under BY_INDEX it holds `rxReqIndex`, `WR_IMM_SEGMENTED_FLAG` (0x00400000) and, with more than one QP, `WR_IMM_SPLIT_DATA_FLAG`. The receiver skips adding `byte_len` for a single receive when `rcclIbCastImmSegmented` sees the flag.
-
-**Flush.** `IbCastIflush` hands the call to `rcclIbCastIflushMultiSeg` when a non-empty receive has a multi-segment handle. It validates every receive, then posts one read per overlapped segment on every device, with only the last read of each device's chain signaled. With the default scratchpad flush it posts develop's write and read instead. The loopback flush QP is `IbCastFlushQpSendDepth`: 1024 for a P2P comm with the switch on, 271 for an RMA comm, 256 with the switch off; the AINIC recovery path rebuilds it with the same helper.
+**Flush.** `rcclIbCastIflushMultiSeg` posts one read per device: the scratchpad read when that flush is on, else the first byte of the last non-empty receive with its segment's rkey.
 
 ## Failure handling
 
-- **Send.** A builder that fails stops at the first failing QP and frees that QP's scheduler remap entry. `IbCastIsend` goes to `isendFail`, which records a fatal error and drops `events[devIndex]` for every QP whose `sentData` is still false. A QP whose post accepted a prefix but not the signaled tail leaves `sentData` clear, since no completion will come. Requests that still have events (`IbCastRequestHasEvents`) become `NCCL_NET_IB_REQ_FAILED` so `Test()` drains them; the rest are freed.
-- **Flush.** A failed `ibv_post_send` on any device, even after a prefix, goes to `iflushFail`. The request is kept as FAILED only if earlier devices already hold events; otherwise it is freed and the error returned.
-- **Host coverage.** `test/transport/NetIbCast/NetIbCastMultiplaneTests.cpp` holds the prefix-post and side-table fixtures.
+- **Send.** A slice whose post failed drops the event it held on that QP (`rcclIbCastHoldSlice`), so the request fails through `Test()` instead of waiting. A deferred slot that fails to post records a fatal error.
+- **Test.** A FAILED request reports `ncclSystemError`.
+- **Close.** The layout cache's MRs are freed before their PDs (`rcclIbCastSendLayoutCacheFree`).
 
-```mermaid
-%% caption: IB-CAST P2P send with the side slot, and failure handling
-sequenceDiagram
- box rgb(255,241,224) IB-CAST
- participant Rc as IbCastIrecv
- participant Side as side slot at the sender
- participant Sn as IbCastIsend
- participant Sg as IbCastMultiSend<br/>Segmented
- participant Q as QP and NIC
- end
- Rc->>Rc: validate every handle
- Rc->>Side: side write, unsignaled, never inline
- Rc->>Sn: CTS write with segment 0 rkeys
- Sn->>Sn: bound nreqs to 1..8
- Sn->>Side: wait up to 2 s for every side idx
- rect rgb(255,236,235)
- Note over Sn: timeout returns ncclRemoteError
- end
- Sn->>Sn: mark segmented, defer if another group is in flight
- loop per scheduler chunk
- Sg->>Q: split at local and remote offsets, one WR per slice
- end
- Sg->>Q: sizes write carries the immediate
-```
+The connect and teardown hardening that layer 08 carried on 11-04 (PD reference only after a successful `ibv_alloc_pd`, a partly built base safe to destroy) is not on the 08 tip; it is the standalone branch `users/atulkulk/fix/ibcast-failed-pd-ref`.
 
-## Connect and teardown hardening
+## Open items
 
-Layer 08 also fixes IB-CAST connect paths that multi-segment testing exposed:
+From the local Argus pass of 2026-11-14, still present at the wire tip. All three are carried to fork 6 instead of being fixed on 08:
 
-- `IbCastInitCommDevBase` takes a PD reference only after `wrap_ibv_alloc_pd` succeeds.
-- `IbCastDestroyBase` destroys the CQ only if it exists, returns early when no PD was taken, and clears `cq`, `pd` and the device PD after release, so it is safe on a partly built base.
-- `IbCastAccept` initializes the socket before publishing `rComm` and sends every failure through `fail`, which closes a published comm and frees it otherwise.
+1. **Inline CTS scope.** `IbCastMultiSegScopeOk` does not exclude AINIC inline CTS (`IbCastAinicCtsInlineData`). A P2P comm with offload off but inline CTS on can advertise and register multi-segment, while the inline CTS carries only segment 0's rkey and no prefix (`ctsFifoHasLayout` returns false).
+2. **Receiver stride.** The receiver allocates combined slots only when `peerCaps` has the bit, and `peerCaps` is masked by the receiver's own scope. A sender that advertises facing a receiver whose scope fails writes at a 2048-byte stride the receiver does not use. Classic reads the stride from the peer's raw `caps`.
+3. **Resume bound.** `rcclIbCastSendResume` reads `nreqs` from the peer-written CTS row without the 1 to 8 bound that `IbCastIsend` applies.
 
 ## File map
 
 | File | Change |
 |---|---|
-| `net_ib_cast/common_cast.h` | composite handle, `segLayoutFifo` after `ctsFifo`, `peerCaps`, `remSegLayout`, `segLayoutFifoMr`, `NCCL_IB_MAX_SEND_WRS` (769), `WR_IMM_SEGMENTED_FLAG`, `NCCL_NET_IB_REQ_FAILED`; includes `net_ib/multiseg.h` |
-| `net_ib_cast/connect_cast.h`, `connect.cc` | `IbCastAdvertiseMultiSeg`, `IbCastFlushQpSendDepth`, covering MR, switch-gated QP depths, `remSegLayout` for a capable peer, hardening fixes |
-| `net_ib_cast/reg.cc` | zeroed handle with `nSegments = 1` in develop's registration, `fd == -1` route to `IbCastRegMrDmaBufFromRange`, dereg hook |
-| `net_ib_cast/rccl_reg_multiseg_cast.cc` | `IbCastRegMrDmaBufMultiSeg` with the declines, `rcclIbCastDeregMrMultiSeg` |
-| `net_ib_cast/p2p.cc` | one-line hooks plus `IbCastCtsRemoteMultiSeg`, `IbCastMultiSendSegmented`, `rcclIbCastMultiSendNeedsSegmented`, `rcclIbCastSendIsSegmented`, `IbCastHasOtherSegmentedSend`, `IbCastWaitSideTable`, `rcclIbCastPostFifoSideWr`, `rcclIbCastIrecvCheckHandle`, `rcclIbCastIrecvFillSideTable`, `rcclIbCastImmSegmented`, `rcclIbCastIflushMultiSeg` |
-| `net_ib_cast/p2p_resiliency_recovery_ainic.cc` | flush QP rebuilt with `IbCastFlushQpSendDepth` |
-| `transport/rccl_ib_multiseg.h` | declarations of `IbCastRegMrDmaBufMultiSeg` and `rcclIbCastDeregMrMultiSeg` |
+| `net_ib_cast/ib_cast_multiseg.h` | CTS row and layout accessors, hook declarations |
+| `net_ib_cast/common_cast.h` | `ncclIbCtsSlot`, `IB_CAST_CTS_SLOTS_BYTES`, `WR_IMM_SEGMENTED_FLAG`, `rcclIbCastSendCursor`, `multiSegScopeOk`, `peerCaps`, the layout cache, `rcclIbCastMrAdmit` declaration |
+| `net_ib_cast/connect_cast.h`, `connect.cc` | `IbCastMultiSegScopeOk`, `IbCastMultiSegAdvertise`, `IbCastSendCommAllocCts`, `meta.caps`, CTS slots for a capable peer |
+| `net_ib_cast/reg.cc` | `IbCastRegMrDmaBufFromRange`, `IbCastRegMrDmaBufMultiSeg`, `rcclIbCastMrAdmit`, layout publish, `rcclIbCastDeregMrMultiSeg` |
+| `net_ib_cast/p2p.cc` | `rcclIbCastFillSendWrs`, send cursor and resume, defer and progress, CTS write, irecv hooks, `IbCastPostDataWithinCap`, `rcclIbCastIflushMultiSeg` |
 
-The MPI helper `RegisterMultiSegmentMr(comm, buf, isCast, mhandle)` must pick `IbCastRegMrDmaBufMultiSeg` for IB-CAST: the IB-CAST comm layout differs from classic, so the classic helper skips multi-segment registration and can crash on the single-segment path. Tests and runner jobs for this path are in [testing](multi_segment_testing.md#classic-and-ib-cast-p2p).
+The MPI helper `RegisterMultiSegmentMr(comm, buf, isCast, mhandle)` must pick `IbCastRegMrDmaBufMultiSeg` for IB-CAST, because the IB-CAST comm layout differs from classic. Tests and runner jobs for this path are in [testing](multi_segment_testing.md#classic-and-ib-cast-p2p).

@@ -2,6 +2,8 @@
 
 > [!NOTE]
 > Proposed design, not implemented. "Current code" is develop at `0d3cab4b1568` (2026-10-28); the multi-segment stack does not change either backend. This revision follows the GDA and Anvil changes merged through 2026-10-27 and corrects the first draft, which missed that develop already splits windows with host segments for every GIN backend.
+>
+> Not re-checked on 2026-11-23. Where this note says "2 to 16 segments", "more than 16 segments", "side table" or "credit counter", it describes the 11-04 stack; the old stack now accepts up to `rcclIbRegSegCap` segments (1024 by default) and has neither a side table nor credits ([current contract](multi_segment_current.md#limits)). The proposal itself is unchanged.
 
 The host-proxy GIN type registers per physical segment through its RMA backend ([GIN/RMA](multi_segment_gin_rma.md)). The two AMD device-initiated GIN backends are rocSHMEM GDA (`NCCL_GIN_TYPE=6`) and Anvil SDMA (`NCCL_GIN_TYPE=7`); both plugins compile only with `ENABLE_ROCSHMEM_GIN`. This doc records what develop already does for multi-segment windows on those two backends, what is still missing, and the proposed changes. Tickets: AIRUNTIME-2351, AICOMRCCL-1526 follow-on.
 
