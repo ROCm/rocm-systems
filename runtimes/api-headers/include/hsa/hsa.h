@@ -4275,10 +4275,6 @@ typedef enum {
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p profile is invalid, or
  * @p executable is NULL.
- *
- * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
- * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
- * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_executable_create(
     hsa_profile_t profile,
@@ -4803,10 +4799,6 @@ typedef struct hsa_executable_symbol_s {
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p symbol_name is NULL, or
  * @p symbol is NULL.
- *
- * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
- * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
- * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_executable_get_symbol(
     hsa_executable_t executable,
@@ -5385,10 +5377,6 @@ hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_deserialize(
  * initialized.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT @p code_object is invalid.
- *
- * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
- * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
- * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_destroy(
     hsa_code_object_t code_object);
@@ -5529,10 +5517,6 @@ hsa_status_t HSA_API HSA_DEPRECATED hsa_code_object_get_info(
  * executable have different machine models or profiles).
  *
  * @retval ::HSA_STATUS_ERROR_FROZEN_EXECUTABLE @p executable is frozen.
- *
- * @retval HSA_STATUS_ERROR_NOT_SUPPORTED This function is deprecated and no
- * longer implemented. It always returns this status (defined in hsa_ext_amd.h)
- * without performing any operation. Use the replacement named above.
  */
 hsa_status_t HSA_API HSA_DEPRECATED hsa_executable_load_code_object(
     hsa_executable_t executable,

@@ -1533,6 +1533,14 @@ hsa_status_t hsa_isa_compatible(hsa_isa_t, hsa_isa_t, bool*) {
 
 //===--- Code Objects (deprecated) ----------------------------------------===//
 
+namespace {
+
+amd::hsa::code::AmdHsaCodeManager* GetCodeManager() {
+  return core::Runtime::runtime_singleton_->code_manager();
+}
+
+}  // namespace anonymous
+
 /* deprecated */
 hsa_status_t hsa_code_object_serialize(
     hsa_code_object_t,
@@ -1546,9 +1554,22 @@ hsa_status_t hsa_code_object_deserialize(void*, size_t, const char*, hsa_code_ob
   return DeprecatedApiStatus();
 }
 
-/* deprecated */
-hsa_status_t hsa_code_object_destroy(hsa_code_object_t) {
-  return DeprecatedApiStatus();
+hsa_status_t hsa_code_object_destroy(hsa_code_object_t code_object) {
+  TRY;
+  IS_OPEN();
+
+  void* code_object_data = reinterpret_cast<void*>(code_object.handle);
+  if (!code_object_data) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  if (!GetCodeManager()->Destroy(code_object)) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  HSA::hsa_memory_free(code_object_data);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
 }
 
 /* deprecated */
@@ -1647,10 +1668,32 @@ hsa_status_t hsa_code_object_reader_destroy(hsa_code_object_reader_t code_object
   CATCH;
 }
 
-/* deprecated */
-hsa_status_t hsa_executable_create(hsa_profile_t, hsa_executable_state_t, const char*,
-                                   hsa_executable_t*) {
-  return DeprecatedApiStatus();
+hsa_status_t hsa_executable_create(hsa_profile_t profile, hsa_executable_state_t executable_state,
+                                   const char* options, hsa_executable_t* executable) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PROFILE(profile);
+  IS_BAD_EXECUTABLE_STATE(executable_state);
+  IS_BAD_PTR(executable);
+
+  // Invoke non-deprecated API.
+  hsa_status_t status = HSA::hsa_executable_create_alt(
+      profile, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, options, executable);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+
+  Executable* exec = Executable::Object(*executable);
+  if (!exec) {
+    return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
+  }
+
+  if (executable_state == HSA_EXECUTABLE_STATE_FROZEN) {
+    exec->Freeze(nullptr);
+  }
+
+  return HSA_STATUS_SUCCESS;
+  CATCH;
 }
 
 hsa_status_t hsa_executable_create_alt(
@@ -1689,10 +1732,34 @@ hsa_status_t hsa_executable_destroy(hsa_executable_t executable) {
   CATCH;
 }
 
-/* deprecated */
-hsa_status_t hsa_executable_load_code_object(hsa_executable_t, hsa_agent_t, hsa_code_object_t,
-                                             const char*) {
-  return DeprecatedApiStatus();
+hsa_status_t hsa_executable_load_code_object(hsa_executable_t executable, hsa_agent_t agent,
+                                             hsa_code_object_t code_object, const char* options) {
+  TRY;
+  IS_OPEN();
+
+  Executable* exec = Executable::Object(executable);
+  if (!exec) {
+    return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
+  }
+
+  void* code_object_p = reinterpret_cast<void*>(code_object.handle);
+  if (!code_object_p) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  CodeObjectReaderImpl reader;
+  // Deprecated API has no length. ElfSize(..., 0) does not index header
+  // tables; size is the SHT and PHDR spans from ELF header fields.
+  size_t code_object_size = amd::elf::ElfSize(code_object_p, 0);
+  if (code_object_size == 0) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  hsa_status_t status = reader.SetMemory(code_object_p, code_object_size);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+
+  return exec->LoadCodeObject(agent, code_object, code_object_size, options, reader.GetUri());
+  CATCH;
 }
 
 hsa_status_t hsa_executable_load_program_code_object(hsa_executable_t executable,
@@ -1843,10 +1910,33 @@ hsa_status_t hsa_executable_validate_alt(hsa_executable_t executable, const char
   CATCH;
 }
 
-/* deprecated */
-hsa_status_t hsa_executable_get_symbol(hsa_executable_t, const char*, const char*, hsa_agent_t,
-                                       int32_t, hsa_executable_symbol_t*) {
-  return DeprecatedApiStatus();
+hsa_status_t hsa_executable_get_symbol(hsa_executable_t executable, const char* module_name,
+                                       const char* symbol_name, hsa_agent_t agent,
+                                       int32_t call_convention, hsa_executable_symbol_t* symbol) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(symbol_name);
+  IS_BAD_PTR(symbol);
+
+  std::string mangled_name(symbol_name);
+  if (mangled_name.empty()) {
+    return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
+  }
+  if (module_name && !std::string(module_name).empty()) {
+    mangled_name.insert(0, "::");
+    mangled_name.insert(0, std::string(module_name));
+  }
+
+  Executable* exec = Executable::Object(executable);
+  if (!exec) {
+    return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
+  }
+
+  // Invoke non-deprecated API.
+  return HSA::hsa_executable_get_symbol_by_name(
+      executable, mangled_name.c_str(),
+      exec->IsProgramSymbol(mangled_name.c_str()) ? nullptr : &agent, symbol);
+  CATCH;
 }
 
 hsa_status_t hsa_executable_get_symbol_by_name(
