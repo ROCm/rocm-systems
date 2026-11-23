@@ -1665,6 +1665,11 @@
           "test_filter": "AllReduce.ManagedMem"
         },
         {
+          "name": "DdaAllReduceFabricLL128PeerPar",
+          "description": "DDA LL128 peer-parallel AllReduce one-shot and two-shot kernels on gfx1250, with the b128 user-buffer path",
+          "test_filter": "DdaAllReduceFabricLL128PeerPar.*"
+        },
+        {
           "name": "AllReduce.Channels",
           "description": "AllReduce channels",
           "test_filter": "AllReduce.Channels"
@@ -2976,7 +2981,7 @@
       "num_nodes": 1,
       "num_gpus": 8,
       "timeout": 300,
-      "description": "gfx1250 AlltoAll on the DDA fabric tiers at 4016 B, 64 KiB and 512 KiB per peer: in place at fp32 offsets 0, 4 and 16 bytes, bf16 +2 and fp8 +1, and out of place at 1- and 2-byte send and receive offsets. Every case checks that the call takes the tier the aligned buffer takes and that every received byte is exact; a size the arch table does not send to a DDA tier is passed over, and ranks skip off gfx1250. DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 column serves several peers.",
+      "description": "gfx1250 AlltoAll at 4016 B, 64 KiB and 512 KiB per peer. Out of place, at 1- and 2-byte send and receive offsets, every case checks that the call takes the DDA tier the aligned buffer takes and that every received byte is exact; in place, at fp32 offsets 0, 4 and 16 bytes, bf16 +2 and fp8 +1, every case checks that the call takes Direct p2p. A size the arch table does not send to a DDA tier is passed over, and ranks skip off gfx1250. DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 column serves several peers.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -2984,13 +2989,39 @@
       "tests": [
         {
           "name": "DdaAlltoAllInPlace_OffsetsStayOnDda_8rank",
-          "description": "AlltoAll at buffer offsets down to 1 byte, in and out of place, stays on DDA LL or LL128 with exact data (8 ranks)",
+          "description": "AlltoAll at buffer offsets down to 1 byte stays on DDA LL or LL128 with exact data out of place and takes Direct p2p in place (8 ranks)",
           "test_filter": "DdaAlltoAllInPlaceMPI.OffsetsStayOnDda"
         },
         {
           "name": "DdaAlltoAllPeerColumns_ColumnsServeSeveralPeers_8rank",
           "description": "AlltoAll LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each block column serves several peers, with exact data (8 ranks)",
           "test_filter": "DdaAlltoAllPeerColumnsMPI.ColumnsServeSeveralPeers"
+        }
+      ]
+    },
+    "dda_alltoall_ll_bank_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "gfx1250 AlltoAll DDA LL on one communicator with the other DDA LL and LL128 tiers, which share its scratch banks and epoch, checking every element. Ranks skip off gfx1250 or when the arch table selects none of the tiers.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "DdaAlltoAllLLBank_AfterAllReduceLL128_8rank",
+          "description": "The largest AllReduce LL128 call, then AlltoAll LL twice so the AllReduce alternates banks, with exact data (8 ranks)",
+          "test_filter": "DdaAlltoAllLLBankMPI.AlltoAllLLAfterAllReduceLL128KeepsData"
+        },
+        {
+          "name": "DdaAlltoAllLLBank_InterleavedWithAllGatherLL128AndAllReduceLL_8rank",
+          "description": "AlltoAll LL interleaved with AllGather LL128 and AllReduce LL, with exact data (8 ranks)",
+          "test_filter": "DdaAlltoAllLLBankMPI.InterleavedWithAllGatherLL128AndAllReduceLLKeepsData"
         }
       ]
     },
@@ -5286,6 +5317,11 @@
           "name": "DDA_Fabric_ReduceScatter_GridStride",
           "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
           "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL128_Suite",
+          "description": "DDA fabric ReduceScatter LL128 suite: out-of-place, in-place, repeated and bf16 calls, plus shards that end one 16 B chunk into a partial last slice (small and near the cap, fp32 and both fp8 types) with a guard tail and a check of the kernel each size picks",
+          "test_filter": "DdaMPI_ReduceScatterLL128.*"
         }
       ]
     },
@@ -5478,6 +5514,77 @@
     },
     "dda_fabric_broadcast_8rank": {
       "extends": "dda_fabric_broadcast_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "dda_fabric_broadcast_ll128_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1",
+        "RCCL_DDA_BC": "1",
+        "RCCL_DDA_LL_THRESHOLD": "0",
+        "RCCL_DDA_LL128_THRESHOLD": "2097152",
+        "RCCL_DDA_LL128_BC_FANOUT": "1"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_AllRootsOutOfPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, fanOut=1, out of place",
+          "test_filter": "DdaMPI_BroadcastLL128.AllRootsOutOfPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_AllRootsInPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, fanOut=1, in place",
+          "test_filter": "DdaMPI_BroadcastLL128.AllRootsInPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_PartialLastChunk",
+          "description": "DDA fabric Broadcast LL128 two-shot: partial last chunk (5.5 slices), fanOut=1",
+          "test_filter": "DdaMPI_BroadcastLL128.PartialLastChunk"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_BackToBackNoSync",
+          "description": "DDA fabric Broadcast LL128 two-shot: seven back-to-back launches, fanOut=1",
+          "test_filter": "DdaMPI_BroadcastLL128.BackToBackNoSync"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_AllRootsOutOfPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, default fanOut=0, out of place",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.AllRootsOutOfPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_AllRootsInPlace",
+          "description": "DDA fabric Broadcast LL128 two-shot: every root, default fanOut=0, in place",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.AllRootsInPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_PartialLastChunk",
+          "description": "DDA fabric Broadcast LL128 two-shot: partial last chunk, default fanOut=0",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.PartialLastChunk"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_DefaultFanOut_BackToBackNoSync",
+          "description": "DDA fabric Broadcast LL128 two-shot: seven back-to-back launches, default fanOut=0",
+          "test_filter": "DdaMPI_BroadcastLL128DefaultFanOut.BackToBackNoSync"
+        }
+      ]
+    },
+    "dda_fabric_broadcast_ll128_2rank": {
+      "extends": "dda_fabric_broadcast_ll128_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_broadcast_ll128_4rank": {
+      "extends": "dda_fabric_broadcast_ll128_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_broadcast_ll128_8rank": {
+      "extends": "dda_fabric_broadcast_ll128_base",
       "num_ranks": 8,
       "num_gpus": 8
     }
@@ -5947,8 +6054,14 @@
     },
     {
       "name": "DDA AlltoAll In-Place - 8-Rank (gfx1250 buffer offsets)",
-      "description": "gfx1250 AlltoAll at any buffer offset, in place and out of place, stays on DDA LL or LL128 with exact data, also with several peers per LL128 column, single node",
+      "description": "gfx1250 AlltoAll at any buffer offset stays on DDA LL or LL128 with exact data out of place, also with several peers per LL128 column, and takes Direct p2p in place, single node",
       "config": "dda_alltoall_inplace_mpi_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA AlltoAll LL Banks - 8-Rank (gfx1250 shared scratch banks)",
+      "description": "gfx1250 AlltoAll DDA LL alternating with AllReduce LL128, AllGather LL128 and AllReduce LL on one communicator keeps exact data in both scratch banks, single node",
+      "config": "dda_alltoall_ll_bank_mpi_8rank",
       "enabled": true
     },
     {
@@ -6325,6 +6438,24 @@
       "name": "DDA Fabric Broadcast LL/LL128 - 8-Rank",
       "description": "DDA fabric Broadcast one-shot data checks on 8 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_broadcast_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL128 - 2-Rank",
+      "description": "DDA fabric Broadcast LL128 two-shot data checks on 2 GPUs (fanOut=1 and default). Requires gfx1250 with MNNVL fabric DDA under UT_DDA_FABRIC_REQUIRE_INIT=1.",
+      "config": "dda_fabric_broadcast_ll128_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL128 - 4-Rank",
+      "description": "DDA fabric Broadcast LL128 two-shot data checks on 4 GPUs (fanOut=1 and default). Requires gfx1250 with MNNVL fabric DDA under UT_DDA_FABRIC_REQUIRE_INIT=1.",
+      "config": "dda_fabric_broadcast_ll128_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL128 - 8-Rank",
+      "description": "DDA fabric Broadcast LL128 two-shot data checks on 8 GPUs (fanOut=1 and default). Requires gfx1250 with MNNVL fabric DDA under UT_DDA_FABRIC_REQUIRE_INIT=1.",
+      "config": "dda_fabric_broadcast_ll128_8rank",
       "enabled": true
     }
   ]

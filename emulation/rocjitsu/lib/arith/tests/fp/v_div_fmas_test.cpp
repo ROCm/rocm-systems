@@ -4,6 +4,7 @@
 // Tests for conditionally scaled division FMA and FP-status expectations.
 
 #include "fp/div_fmas_test.h"
+#include "fp/div_omod_gfx11_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
@@ -219,4 +220,174 @@ TEST(FpDivFmas, TininessAfterRounding) {
   check_tiny<32, 64>(rj_arith_v_div_fmas_f32_w64, tiny_cases_f32);
   check_tiny<64, 32>(rj_arith_v_div_fmas_f64_w32, tiny_cases_f64);
   check_tiny<64, 64>(rj_arith_v_div_fmas_f64_w64, tiny_cases_f64);
+}
+
+namespace {
+
+using rocjitsu::arith::test::DivOmodGfx11;
+
+// W7900 (gfx1100, ROCm 7.2) wave32 lanes captured on 2026-11-18 with the omod3 probe: the hardware
+// MODE word is written per lane (rounding, denormals, DX10_CLAMP, IEEE), VCC is set per wave.
+// OMOD is active only with output denormals flushed and IEEE clear; the result rounds at normal
+// precision, is scaled, and overflows per the guest rounding: infinity for nearest and the
+// rounding toward the sign, max-finite otherwise. A denormal result becomes +0 before the scale,
+// while the smallest normal halved keeps its sign. Signaling NaNs pass through; CLAMP applies last.
+//
+// The rows above the separator all hold an operand outside the exact AVX-512 backend's admitted
+// exponent range, so they exercise the scalar model. The rows below it keep every operand inside
+// that range, so with VCC clear they reach the backend this change newly selects: a product that
+// rounds differently under each guest mode, the same product scaled up and down, an output
+// modifier dropped because output denormals are preserved, and the zero-sign rule that makes an
+// exact -0 come back as +0 once a modifier scales it.
+const DivOmodGfx11 omod_lanes_f32[] = {
+    {"mul2 overflow nearest", 0x100, 0x7f000000, 0x3f800000, 0, 0x7f800000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round up", 0x101, 0x7f000000, 0x3f800000, 0, 0x7f800000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round down", 0x102, 0x7f000000, 0x3f800000, 0, 0x7f7fffff, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow toward zero", 0x103, 0x7f000000, 0x3f800000, 0, 0x7f7fffff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 with input denormals allowed", 0x110, 0x7f000000, 0x3f800000, 0, 0x7f800000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with output denormals", 0x130, 0x7f000000, 0x3f800000, 0, 0x7f000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with IEEE", 0x300, 0x7f000000, 0x3f800000, 0, 0x7f000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul4 overflow nearest", 0x100, 0x7e800000, 0x3f800000, 0, 0x7f800000, RJ_ARITH_ALU_OMOD_4},
+    {"mul4 overflow round down", 0x102, 0x7e800000, 0x3f800000, 0, 0x7f7fffff, RJ_ARITH_ALU_OMOD_4},
+    {"div2 flushes the smallest normal", 0x100, 0x00800000, 0x3f800000, 0, 0x00000000,
+     RJ_ARITH_ALU_OMOD_HALF},
+    {"div2 keeps the flushed sign", 0x100, 0x80800000, 0x3f800000, 0, 0x80000000,
+     RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 of a tiny negative product is +0", 0x110, 0x80000001, 0x3f800000, 0, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 round-down carry reaches the smallest normal", 0x102, 0x9a200000, 0x1a000000, 0x807fffff,
+     0x81000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 nearest flushes the same product", 0x100, 0x9a200000, 0x1a000000, 0x807fffff, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 toward zero flushes the same product", 0x103, 0x9a200000, 0x1a000000, 0x807fffff,
+     0x00000000, RJ_ARITH_ALU_OMOD_2},
+    // 2^-126 * (1 - 2^-24) is exact at normal precision and below the smallest normal, so OMOD
+    // gives +0; rounding on the subnormal grid would reach the smallest normal and double it.
+    {"mul2 of a tie below the smallest normal rounds at normal precision", 0x100, 0x00800000,
+     0x3f7fffff, 0, 0x00000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the same tie round up", 0x101, 0x00800000, 0x3f7fffff, 0, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the same tie after VCC scaling", 0x100, 0x20800000, 0x3f7fffff, 0, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2, true},
+    {"mul2 keeps a signaling NaN", 0x100, 0x7f800001, 0x3f800000, 0, 0x7f800001,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 after VCC scaling overflows nearest", 0x100, 0x7f000000, 0x3f800000, 0x40000000,
+     0x7f800000, RJ_ARITH_ALU_OMOD_2, true},
+    {"mul2 after VCC scaling overflows toward zero", 0x103, 0x7f000000, 0x3f800000, 0x40000000,
+     0x7f7fffff, RJ_ARITH_ALU_OMOD_2, true},
+    {"mul2 clamp after overflow", 0x100, 0x7f000000, 0x3f800000, 0, 0x3f800000,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp of a negative overflow", 0x100, 0xff000000, 0x3f800000, 0, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp of a NaN with DX10_CLAMP", 0x100, 0x7f800001, 0x3f800000, 0, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp keeps a NaN without DX10_CLAMP", 0x000, 0x7f800001, 0x3f800000, 0, 0x7f800001,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+
+    // Operands inside the exact backend's admitted exponent range; VCC is clear in all of them.
+    {"mul2 round down", 0x102, 0x436a3cd0, 0xb75bb10b, 0x42bff051, 0x433feebe, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of exact -0", 0x100, 0x80000000, 0x3f800000, 0x80000000, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 round up", 0x101, 0x3fc00001, 0x40200003, 0x3f000001, 0x41080004, RJ_ARITH_ALU_OMOD_2},
+    {"div2 nearest", 0x100, 0x3fc00001, 0x40200003, 0x3f000001, 0x40080003, RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 ignored with output denormals", 0x130, 0x3fc00001, 0x40200003, 0x3f000001, 0x40880003,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul4 round up", 0x101, 0x3f7fffff, 0x3f7fffff, 0x33800000, 0x40800000, RJ_ARITH_ALU_OMOD_4},
+};
+
+const DivOmodGfx11 omod_lanes_f64[] = {
+    {"mul2 overflow nearest", 0x100, 0x7fe0000000000000, 0x3ff0000000000000, 0, 0x7ff0000000000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round up", 0x104, 0x7fe0000000000000, 0x3ff0000000000000, 0, 0x7ff0000000000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round down", 0x108, 0x7fe0000000000000, 0x3ff0000000000000, 0,
+     0x7fefffffffffffff, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow toward zero", 0x10c, 0x7fe0000000000000, 0x3ff0000000000000, 0,
+     0x7fefffffffffffff, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 with input denormals allowed", 0x140, 0x7fe0000000000000, 0x3ff0000000000000, 0,
+     0x7ff0000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with output denormals", 0x180, 0x7fe0000000000000, 0x3ff0000000000000, 0,
+     0x7fe0000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with IEEE", 0x300, 0x7fe0000000000000, 0x3ff0000000000000, 0, 0x7fe0000000000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul4 overflow nearest", 0x100, 0x7fd0000000000000, 0x3ff0000000000000, 0, 0x7ff0000000000000,
+     RJ_ARITH_ALU_OMOD_4},
+    {"mul4 overflow round down", 0x108, 0x7fd0000000000000, 0x3ff0000000000000, 0,
+     0x7fefffffffffffff, RJ_ARITH_ALU_OMOD_4},
+    {"div2 flushes the smallest normal", 0x100, 0x0010000000000000, 0x3ff0000000000000, 0,
+     0x0000000000000000, RJ_ARITH_ALU_OMOD_HALF},
+    {"div2 keeps the flushed sign", 0x100, 0x8010000000000000, 0x3ff0000000000000, 0,
+     0x8000000000000000, RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 of a tiny negative product is +0", 0x140, 0x8000000000000001, 0x3ff0000000000000, 0,
+     0x0000000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 round-down carry reaches the smallest normal", 0x108, 0x9e54000000000000,
+     0x1e60000000000000, 0x800fffffffffffff, 0x8020000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 nearest flushes the same product", 0x100, 0x9e54000000000000, 0x1e60000000000000,
+     0x800fffffffffffff, 0x0000000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 toward zero flushes the same product", 0x10c, 0x9e54000000000000, 0x1e60000000000000,
+     0x800fffffffffffff, 0x0000000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of a tie below the smallest normal rounds at normal precision", 0x100,
+     0x0010000000000000, 0x3fefffffffffffff, 0, 0x0000000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the same tie round up", 0x104, 0x0010000000000000, 0x3fefffffffffffff, 0,
+     0x0000000000000000, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 keeps a signaling NaN", 0x100, 0x7ff0000000000001, 0x3ff0000000000000, 0,
+     0x7ff0000000000001, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 after VCC scaling overflows nearest", 0x100, 0x7fe0000000000000, 0x3ff0000000000000,
+     0x4000000000000000, 0x7ff0000000000000, RJ_ARITH_ALU_OMOD_2, true},
+    {"mul2 after VCC scaling overflows toward zero", 0x10c, 0x7fe0000000000000, 0x3ff0000000000000,
+     0x4000000000000000, 0x7fefffffffffffff, RJ_ARITH_ALU_OMOD_2, true},
+    {"div2 after VCC scaling down", 0x100, 0x3810000000000000, 0x3fefffffffffffff, 0,
+     0x2fffffffffffffff, RJ_ARITH_ALU_OMOD_HALF, true},
+    {"mul2 clamp after overflow", 0x100, 0x7fe0000000000000, 0x3ff0000000000000, 0,
+     0x3ff0000000000000, RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp of a negative overflow", 0x100, 0xffe0000000000000, 0x3ff0000000000000, 0,
+     0x0000000000000000, RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp keeps a NaN without DX10_CLAMP", 0x000, 0x7ff0000000000001, 0x3ff0000000000000, 0,
+     0x7ff0000000000001, RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+};
+
+} // namespace
+
+// Active RDNA3 OMOD is accepted in strict exact and reproduces the W7900 lanes at every CPU level.
+TEST(FpDivFmasGfx11, CapturedOutputModifiers) {
+  using rocjitsu::arith::test::check_div_fmas_omod_gfx11;
+  check_div_fmas_omod_gfx11<32, 32>(rj_arith_v_div_fmas_f32_w32, omod_lanes_f32);
+  check_div_fmas_omod_gfx11<64, 32>(rj_arith_v_div_fmas_f32_w64, omod_lanes_f32);
+  check_div_fmas_omod_gfx11<32, 64>(rj_arith_v_div_fmas_f64_w32, omod_lanes_f64);
+  check_div_fmas_omod_gfx11<64, 64>(rj_arith_v_div_fmas_f64_w64, omod_lanes_f64);
+}
+
+// W7900 wave32 capture: lane 19 alone holds the smallest normal, which div:2 flushes while every
+// other lane halves 1.0, so the flushed lane sits in a later SIMD chunk. Wave64 repeats it in
+// lane 51.
+template <int Lanes, typename Call> static void check_omod_flushed_lane(Call call) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      Registers<8, Lanes> r;
+      for (int lane = 0; lane < Lanes; ++lane) {
+        r.v[0][lane] = lane % 32 == 19 ? 0x00800000U : 0x3f800000U;
+        r.v[2][lane] = 0x3f800000U;
+        r.v[4][lane] = 0;
+      }
+      ASSERT_EQ(call(cpu | semantics | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                     ~WaveMask<Lanes>(0), RJ_ARITH_ALU_OMOD_HALF, r.v + 6, r.v, r.v + 2, r.v + 4,
+                     WaveMask<Lanes>(0), nullptr),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < Lanes; ++lane) {
+        EXPECT_EQ(r.v[6][lane], lane % 32 == 19 ? 0x00000000U : 0x3f000000U)
+            << std::hex << cpu << '/' << semantics << " lane " << std::dec << lane;
+      }
+    }
+  }
+}
+
+TEST(FpDivFmasGfx11, OmodFlushedLaneKeepsItsOperands) {
+  check_omod_flushed_lane<32>(rj_arith_v_div_fmas_f32_w32);
+  check_omod_flushed_lane<64>(rj_arith_v_div_fmas_f32_w64);
 }

@@ -78,8 +78,8 @@ int main(void) {
     int backing = 0;
     REQUIRE(hsa_signal_create(1, 0, NULL, &signals[0]) == HSA_STATUS_SUCCESS);
     REQUIRE(hsa_signal_create(1, 0, NULL, &signals[1]) == HSA_STATUS_SUCCESS);
-    /* KFD offers only best-effort placement. Reject before accepting work or
-       changing either signal, even with a dependency that is not yet ready. */
+    /* This CPU-only runtime has no active migration provider. Reject before
+       accepting work or changing either signal, including a pending dependency. */
     REQUIRE(hsa_amd_svm_prefetch_async(&backing, sizeof(backing), cpu.agent, 1,
                                       &signals[0], signals[1]) ==
             HSA_STATUS_ERROR_NOT_SUPPORTED);

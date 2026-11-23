@@ -19,6 +19,7 @@ SNopSopp::SNopSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_NOP);
 }
 
 namespace detail {
@@ -39,6 +40,7 @@ SSethaltSopp::SSethaltSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SETHALT);
 }
 
 namespace detail {
@@ -59,6 +61,7 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SLEEP);
 }
 
 namespace detail {
@@ -79,6 +82,7 @@ SMonitorSleepSopp::SMonitorSleepSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_MONITOR_SLEEP);
 }
 
 namespace detail {
@@ -99,6 +103,7 @@ SClauseSopp::SClauseSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_CLAUSE);
 }
 
 namespace detail {
@@ -120,6 +125,7 @@ SSetVgprMsbSopp::SSetVgprMsbSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= XCNT_DRAIN;
+  set_amdgpu_operation(amdgpu::Operation::S_SET_VGPR_MSB);
 }
 
 namespace detail {
@@ -140,6 +146,7 @@ SDelayAluSopp::SDelayAluSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_DELAY_ALU);
 }
 
 namespace detail {
@@ -160,6 +167,7 @@ SWaitAluSopp::SWaitAluSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_ALU);
 }
 
 namespace detail {
@@ -178,6 +186,7 @@ SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_IDLE);
 }
 
 namespace detail {
@@ -200,6 +209,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   flags_ |= XCNT_DRAIN;
   flags_ |= SOFTWARE_TRAP;
   flags_ |= WRITES_PC;
+  set_amdgpu_operation(amdgpu::Operation::S_TRAP);
 }
 
 namespace detail {
@@ -219,6 +229,7 @@ SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_ROUND_MODE);
 }
 
 namespace detail {
@@ -238,6 +249,7 @@ SDenormModeSopp::SDenormModeSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_DENORM_MODE);
 }
 
 namespace detail {
@@ -260,6 +272,7 @@ SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= XCNT_DRAIN;
   flags_ |= BARRIER;
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER_WAIT);
 }
 
 namespace detail {
@@ -281,6 +294,7 @@ SBarrierLeaveSopp::SBarrierLeaveSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER_LEAVE);
 }
 
 namespace detail {
@@ -299,6 +313,7 @@ SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SCodeEndSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_CODE_END);
 }
 
 namespace detail {
@@ -320,6 +335,7 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_BRANCH);
 }
 
 namespace detail {
@@ -349,6 +365,7 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_SCC0);
 }
 
 namespace detail {
@@ -379,6 +396,7 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_SCC1);
 }
 
 namespace detail {
@@ -409,6 +427,7 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_VCCZ);
 }
 
 namespace detail {
@@ -439,6 +458,7 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_VCCNZ);
 }
 
 namespace detail {
@@ -469,6 +489,7 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_EXECZ);
 }
 
 namespace detail {
@@ -499,6 +520,7 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_EXECNZ);
 }
 
 namespace detail {
@@ -523,6 +545,7 @@ SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM);
 }
 
 namespace detail {
@@ -541,6 +564,7 @@ SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM_SAVED);
 }
 
 namespace detail {
@@ -559,6 +583,7 @@ SWakeupSopp::SWakeupSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SWakeupSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_WAKEUP);
 }
 
 namespace detail {
@@ -578,6 +603,7 @@ SSetprioSopp::SSetprioSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_SETPRIO);
 }
 
 namespace detail {
@@ -602,6 +628,7 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= XCNT_DRAIN;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSG);
 }
 
 namespace detail {
@@ -627,6 +654,7 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= XCNT_DRAIN;
   flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSGHALT);
 }
 
 namespace detail {
@@ -647,6 +675,7 @@ SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_INCPERFLEVEL);
 }
 
 namespace detail {
@@ -667,6 +696,7 @@ SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_DECPERFLEVEL);
 }
 
 namespace detail {
@@ -688,6 +718,7 @@ STtracedataSopp::STtracedataSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_TTRACEDATA);
 }
 
 namespace detail {
@@ -708,6 +739,7 @@ STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_TTRACEDATA_IMM);
 }
 
 namespace detail {
@@ -726,6 +758,7 @@ SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SIcacheInvSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_ICACHE_INV);
 }
 
 namespace detail {
@@ -745,6 +778,7 @@ SSetprioIncWgSopp::SSetprioIncWgSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_SETPRIO_INC_WG);
 }
 
 namespace detail {
@@ -766,6 +800,7 @@ SWaitLoadcntSopp::SWaitLoadcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_LOADCNT);
 }
 
 namespace detail {
@@ -787,6 +822,7 @@ SWaitStorecntSopp::SWaitStorecntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_STORECNT);
 }
 
 namespace detail {
@@ -808,6 +844,7 @@ SWaitXcntSopp::SWaitXcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_XCNT);
 }
 
 namespace detail {
@@ -828,6 +865,7 @@ SWaitDscntSopp::SWaitDscntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_DSCNT);
 }
 
 namespace detail {
@@ -848,6 +886,7 @@ SWaitKmcntSopp::SWaitKmcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_KMCNT);
 }
 
 namespace detail {
@@ -868,6 +907,7 @@ SWaitLoadcntDscntSopp::SWaitLoadcntDscntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_LOADCNT_DSCNT);
 }
 
 namespace detail {
@@ -889,6 +929,7 @@ SWaitStorecntDscntSopp::SWaitStorecntDscntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_STORECNT_DSCNT);
 }
 
 namespace detail {
@@ -910,6 +951,7 @@ SWaitAsynccntSopp::SWaitAsynccntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_ASYNCCNT);
 }
 
 namespace detail {
@@ -931,6 +973,7 @@ SWaitTensorcntSopp::SWaitTensorcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_TENSORCNT);
 }
 
 namespace detail {
