@@ -561,11 +561,12 @@ write_otf2(const output_config&                                          cfg,
 
     struct evt_data
     {
-        rocprofiler_callback_phase_t phase      = ROCPROFILER_CALLBACK_PHASE_NONE;
-        std::string_view             name       = {};
-        const location_base*         location   = nullptr;
-        uint64_t                     timestamp  = 0;
-        OTF2_AttributeList*          attributes = nullptr;
+        rocprofiler_callback_phase_t phase       = ROCPROFILER_CALLBACK_PHASE_NONE;
+        std::string_view             name        = {};
+        const location_base*         location    = nullptr;
+        uint64_t                     timestamp   = 0;
+        OTF2_AttributeList*          attributes  = nullptr;
+        bool                         zero_length = false;
     };
 
     auto _data     = std::deque<evt_data>{};
@@ -577,13 +578,25 @@ write_otf2(const output_config&                                          cfg,
         return create_attribute_list<category_t>();
     };
 
+    auto add_region = [&_data](std::string_view     name,
+                               const location_base* location,
+                               uint64_t             start,
+                               uint64_t             end,
+                               OTF2_AttributeList*  attributes) {
+        const bool zero_length = (start == end);
+        _data.emplace_back(evt_data{
+            ROCPROFILER_CALLBACK_PHASE_ENTER, name, location, start, attributes, zero_length});
+        _data.emplace_back(
+            evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT, name, location, end, nullptr, zero_length});
+    };
+
     // trace events
     {
         auto callbk_name_info = sdk::get_callback_tracing_names();
 
         auto add_event_data = [&buffer_names,
                                &_hash_data,
-                               &_data,
+                               &add_region,
                                &tool_metadata,
                                &thread_event_info,
                                &get_attr](const auto* _inp, auto _attrib) {
@@ -613,16 +626,11 @@ write_otf2(const output_config&                                          cfg,
 
                 auto& _evt_info = thread_event_info.at(itr.thread_id);
                 _evt_info.event_count += 1;
-                _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
-                                            name,
-                                            _evt_info.get_location(),
-                                            itr.start_timestamp,
-                                            get_attr(_attrib)});
-                _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
-                                            name,
-                                            _evt_info.get_location(),
-                                            itr.end_timestamp,
-                                            nullptr});
+                add_region(name,
+                           _evt_info.get_location(),
+                           itr.start_timestamp,
+                           itr.end_timestamp,
+                           get_attr(_attrib));
             }
         };
 
@@ -643,16 +651,11 @@ write_otf2(const output_config&                                          cfg,
         auto& _evt_info = thread_event_info.at(itr.thread_id);
         _evt_info.event_count += 1;
 
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.start_timestamp,
-                                    get_attr(sdk::category::rocdecode_api{})});
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.end_timestamp,
-                                    nullptr});
+        add_region(name,
+                   _evt_info.get_location(),
+                   itr.start_timestamp,
+                   itr.end_timestamp,
+                   get_attr(sdk::category::rocdecode_api{}));
     }
 
     for(auto itr : *memory_copy_data)
@@ -667,16 +670,11 @@ write_otf2(const output_config&                                          cfg,
         auto& _evt_info = agent_memcpy_info.at(itr.thread_id).at(itr.dst_agent_id);
         _evt_info.event_count += 1;
 
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.start_timestamp,
-                                    get_attr(sdk::category::memory_copy{})});
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.end_timestamp,
-                                    nullptr});
+        add_region(name,
+                   _evt_info.get_location(),
+                   itr.start_timestamp,
+                   itr.end_timestamp,
+                   get_attr(sdk::category::memory_copy{}));
     }
 
     for(auto itr : *memory_allocation_data)
@@ -691,16 +689,11 @@ write_otf2(const output_config&                                          cfg,
         auto& _evt_info = agent_memalloc_info.at(itr.thread_id).at(itr.agent_id);
         _evt_info.event_count += 1;
 
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.start_timestamp,
-                                    get_attr(sdk::category::memory_allocation{})});
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.end_timestamp,
-                                    nullptr});
+        add_region(name,
+                   _evt_info.get_location(),
+                   itr.start_timestamp,
+                   itr.end_timestamp,
+                   get_attr(sdk::category::memory_allocation{}));
     }
 
     for(auto itr : *kernel_dispatch_data)
@@ -720,23 +713,24 @@ write_otf2(const output_config&                                          cfg,
         auto& _evt_info = agent_dispatch_info.at(itr.thread_id).at(info.agent_id).at(info.queue_id);
         _evt_info.event_count += 1;
 
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.start_timestamp,
-                                    get_attr(sdk::category::kernel_dispatch{})});
-        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
-                                    name,
-                                    _evt_info.get_location(),
-                                    itr.end_timestamp,
-                                    nullptr});
+        add_region(name,
+                   _evt_info.get_location(),
+                   itr.start_timestamp,
+                   itr.end_timestamp,
+                   get_attr(sdk::category::kernel_dispatch{}));
     }
 
-    std::sort(_data.begin(), _data.end(), [](const evt_data& lhs, const evt_data& rhs) {
-        if(lhs.timestamp != rhs.timestamp) return (lhs.timestamp < rhs.timestamp);
-        if(lhs.phase != rhs.phase) return (lhs.phase > rhs.phase);
-        return (*lhs.location < *rhs.location);
-    });
+    // stable_sort keeps a zero-length region's Enter ahead of its own Exit
+    auto tie_order = [](const evt_data& v) {
+        if(v.zero_length) return 1;
+        return (v.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) ? 0 : 2;
+    };
+    std::stable_sort(
+        _data.begin(), _data.end(), [&tie_order](const evt_data& lhs, const evt_data& rhs) {
+            if(lhs.timestamp != rhs.timestamp) return (lhs.timestamp < rhs.timestamp);
+            if(tie_order(lhs) != tie_order(rhs)) return (tie_order(lhs) < tie_order(rhs));
+            return (*lhs.location < *rhs.location);
+        });
 
     for(const auto& itr : _data)
     {
