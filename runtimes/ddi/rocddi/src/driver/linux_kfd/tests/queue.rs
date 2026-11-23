@@ -25,6 +25,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[path = "queue_context.rs"]
 mod queue_context;
+#[path = "queue_legacy_gfx942.rs"]
+mod queue_legacy_gfx942;
 
 static FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -85,6 +87,7 @@ fn native_node() -> sysfs::KfdNode {
             wavefront_size: 32,
             xcc_count: 1,
             shader_engine_count_per_xcc: 2,
+            local_data_share_byte_length: 65536,
             context_size: 65536,
             control_stack_size: 4096,
             sdma_engines: 2,

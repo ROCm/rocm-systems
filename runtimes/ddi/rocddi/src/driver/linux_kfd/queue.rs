@@ -6,6 +6,10 @@
 //! mapping would violate the kernel contract. Compute queues also retain EOP
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
+mod legacy_gfx942;
+
+use legacy_gfx942::legacy_gfx942_sizes;
+
 use super::target::KfdTargetProfile;
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
@@ -1392,16 +1396,9 @@ fn gfx9_saved_waves(
 
 fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStorage, Error> {
     let xcc_count = properties.xcc_count;
-    let context_size = properties.context_size;
-    let control_stack_size = properties.control_stack_size;
-    if xcc_count == 0
-        || properties.compute_units == 0
-        || properties.compute_units % xcc_count != 0
-        || context_size == 0
-        || context_size % 4096 != 0
-        || control_stack_size < 40
-        || control_stack_size % 4096 != 0
-        || control_stack_size > context_size
+    let mut context_size = properties.context_size;
+    let mut control_stack_size = properties.control_stack_size;
+    if xcc_count == 0 || properties.compute_units == 0 || properties.compute_units % xcc_count != 0
     {
         return Err(error(
             ErrorKind::Unsupported,
@@ -1416,6 +1413,21 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
             .checked_mul(properties.maximum_wave_count_per_compute_unit)
             .ok_or_else(|| error(ErrorKind::DriverContract, "KFD wave count overflows"))?
     };
+    if context_size == 0 && control_stack_size == 0 {
+        (context_size, control_stack_size) =
+            legacy_gfx942_sizes(properties, compute_units_per_xcc, saved_waves)?;
+    }
+    if context_size == 0
+        || context_size % 4096 != 0
+        || control_stack_size < 40
+        || control_stack_size % 4096 != 0
+        || control_stack_size > context_size
+    {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "KFD did not report usable queue context-save sizes",
+        ));
+    }
     let debug_size = saved_waves
         .checked_mul(32)
         .and_then(|bytes| bytes.checked_add(63))
