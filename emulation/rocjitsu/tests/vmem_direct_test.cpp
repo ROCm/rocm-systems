@@ -128,6 +128,46 @@ TEST_F(VmemDirectTest, LoadsContiguousAndReorderedLanes) {
     EXPECT_EQ(lane_word(lane), lane < 16 ? host_word(addrs[lane]) : 0u) << lane;
 }
 
+TEST_F(VmemDirectTest, SharedOperandLoadsReadEachOperandOnce) {
+  // Uniform, half-wave group broadcast, and four operands with unaligned,
+  // partially overlapping addresses; each lane gets its own operand.
+  const std::array<std::array<uint64_t, 4>, 3> operands = {{
+      {kBase + 0x40, 0, 0, 0},
+      {kBase + 0x80, kBase + 0x1000, 0, 0},
+      {kBase + 0x3, kBase + 0x5, kBase + 0xffe, kBase + 0x2001},
+  }};
+  const std::array<uint32_t, 3> counts = {1, 2, 4};
+  for (size_t shape = 0; shape < operands.size(); ++shape) {
+    for (const uint32_t num_elems : {1u, 2u, 4u}) {
+      const uint32_t stride = 4 * num_elems;
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        addrs[lane] = operands[shape][counts[shape] == 2 ? lane / 16 : lane % counts[shape]];
+      data.fill(0xEE);
+      backing.copies = 0;
+      const uint64_t lanes = UINT32_MAX & ~uint64_t{0x10};
+      ASSERT_EQ(access(true, lanes, 4, num_elems), VmAccessOutcome::Complete);
+      EXPECT_EQ(backing.copies, static_cast<int>(counts[shape]));
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        for (uint32_t byte = 0; byte < stride; ++byte)
+          EXPECT_EQ(data[lane * stride + byte],
+                    lane == 4 ? 0xEE : backing.host[addrs[lane] - kBase + byte])
+              << shape << " " << num_elems << " " << lane << " " << byte;
+    }
+  }
+  // Five distinct operands take the general path; a shared operand outside
+  // the extent declines before any copy.
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    addrs[lane] = kBase + (lane % 5) * 8;
+  backing.copies = 0;
+  ASSERT_EQ(access(true, UINT32_MAX), VmAccessOutcome::Complete);
+  EXPECT_GT(backing.copies, 5);
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    addrs[lane] = lane < 16 ? kBase : kBase + kExtentBytes - 2;
+  backing.copies = 0;
+  EXPECT_FALSE(access(true, UINT32_MAX));
+  EXPECT_EQ(backing.copies, 0);
+}
+
 TEST_F(VmemDirectTest, StoresWholeElementsOfEveryActiveLane) {
   for (uint32_t lane = 0; lane < 32; ++lane) {
     addrs[lane] = kBase + 0x400 + lane * 16;
