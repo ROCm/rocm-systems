@@ -1657,11 +1657,13 @@ static CaseResult runOneCase(const TestCase& tc, TestEnv* env) {
     r = reshard(env->stream);
   }
 
-  if (r != ncclSuccess) {
+  /* A reshard error can be rank-local: agree on it before returning, or the ranks that
+   * succeeded wait in the barrier/allreduce below while the failed ones move on. */
+  if (env->allreduceMinInt(env, (r == ncclSuccess) ? 1 : 0) == 0) {
     if (window != nullptr) {
       TEST_NCCL_COMM_CHECK(env->comm, ncclCommWindowDeregister(env->comm, window));
     }
-    return makeFail("reshard call returned error");
+    return makeFail((r != ncclSuccess) ? "reshard call returned error" : "reshard call failed on another rank");
   }
 
   if (testUsesNonBlockingComm()) {
