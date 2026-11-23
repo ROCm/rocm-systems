@@ -194,7 +194,7 @@ Record a baseline once for each GPU and memory type, using a known-good build:
 test/perf_regression.py --mem-type 1 --save-baseline
 ```
 
-`--save-baseline` measures every stream (averaging `--runs` runs each), so it cannot be
+`--save-baseline` measures every stream (averaging `--runs` runs each). It cannot be
 combined with `--quick`: later runs compare only the streams that are in the baseline. It
 refuses to overwrite an existing file unless `--force` is given. Besides `File` and `FPS`,
 the CSV records the codec, memory type, GPU, time and `ROCM_PATH`, so you can tell later
