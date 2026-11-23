@@ -36,6 +36,7 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -72,6 +73,7 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -108,6 +110,7 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -144,6 +147,7 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -180,6 +184,7 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -216,6 +221,7 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -252,6 +258,7 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -288,6 +295,7 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -324,6 +332,7 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   vsrc.set_register_byte_mask(0x1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
@@ -361,6 +370,7 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   vsrc.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
@@ -398,6 +408,7 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -434,6 +445,7 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -470,6 +482,7 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -506,6 +519,7 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -542,6 +556,7 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -585,6 +600,7 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -628,6 +644,7 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -671,6 +688,7 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -714,6 +732,7 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -757,6 +776,7 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
@@ -800,6 +820,7 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   vsrc.set_register_byte_mask(0x4);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
@@ -838,6 +859,7 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
   if (inst_.saddr != 124 && inst_.saddr != 127)
     src_operands_[num_src_++] = &saddr;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   vsrc.set_register_byte_mask(0xc);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED},

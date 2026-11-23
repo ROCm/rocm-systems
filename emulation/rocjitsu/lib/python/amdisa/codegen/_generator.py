@@ -15901,6 +15901,14 @@ class CodeGenerator:
                         'ds_swizzle',
                         'ds_write_addtid',
                     )
+                    # FLAT, GLOBAL and SCRATCH loads and stores list every VGPR
+                    # they access, like buffer ones; block transfers select
+                    # theirs from M0 and keep the full check.
+                    direct_memory = direct_memory or (
+                        _mem_sem
+                        and _mem_sem.semantic_class in ('flat_load', 'flat_store')
+                        and '_BLOCK' not in inst.name
+                    )
                     if (
                         self.isa_spec.arch_name in ('cdna2', 'rdna1', 'rdna2', 'rdna4')
                         and inst_sem
@@ -16055,10 +16063,18 @@ class CodeGenerator:
                         )
                         and 'FORMAT' not in inst.name
                         and inst.name not in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
-                        and not inst.name.startswith('FLAT_')
+                        and (
+                            not inst.name.startswith('FLAT_')
+                            or 'seg' in inst_field_names
+                        )
                         and not (_mem_sem.d16_hi or _mem_sem.d16_lo)
                     ):
-                        result_guards = [
+                        # A FLAT encoding with a segment field is a global or
+                        # scratch load unless SEG selects FLAT, whose address
+                        # may route to LDS on a second counter.
+                        result_guards = (
+                            ['inst_.seg != 0'] if inst.name.startswith('FLAT_') else []
+                        ) + [
                             f'!inst_.{field}'
                             for field in ('lds', 'tfe', 'gds')
                             if field in inst_field_names
