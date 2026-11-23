@@ -77,6 +77,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_device_get_all()`, `rdc_group_get_all_ids()` and `rdc_group_field_get_all_ids()` with a NULL list, and `rdc_policy_get()` with NULL `policies`, return `RDC_ST_BAD_PARAMETER` instead of crashing when there is anything to write. With `rdcd`, `rdc_device_topology_get()` and `rdc_link_status_get()` return it for NULL `results`, as they did without `rdcd`, instead of crashing on every reply that they accept.
 
+- With `rdcd`, `rdc_group_field_get_info()` returns `RDC_FI_INVALID` for a field that the client does not know, such as one that a newer `rdcd` added, and `rdc_field_get_latest_value()` and `rdc_field_get_value_since()` return `RDC_ST_CLIENT_ERROR` for a value of another field than the one requested.
+
 - `rdc_job_get_stats()` and `rdc_policy_get()` with `rdcd` no longer report more GPUs, processes, or policies than the `rdcd` reply carries, or read past the entries it carries.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.
