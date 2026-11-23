@@ -19,7 +19,7 @@ struct ManagedRange {
 }
 
 /// Finds a complete managed reservation without manufacturing backing.
-fn managed_range(runtime: &HsaState, address: u64, size: u64) -> Result<ManagedRange, Status> {
+fn managed_range(runtime: &HsaSession, address: u64, size: u64) -> Result<ManagedRange, Status> {
     let address_host = usize::try_from(address).map_err(|_| INVALID_ARGUMENT)?;
     let size_host = usize::try_from(size).map_err(|_| INVALID_ARGUMENT)?;
     let (&base, reservation) = runtime
@@ -69,9 +69,27 @@ pub(crate) fn committed_range(ranges: &[(usize, usize)], address: usize) -> Opti
         .find(|&(start, size)| address >= start && address - start < size)
 }
 
+/// Requires exclusive backing changes only for bytes not already committed.
+fn registration_needs_commit(
+    ranges: &[(usize, usize)],
+    address: usize,
+    size: usize,
+    borrowed: bool,
+) -> Result<bool, Status> {
+    if committed_range(ranges, address)
+        .is_some_and(|(start, length)| size <= length - (address - start))
+    {
+        return Ok(false);
+    }
+    if borrowed {
+        return Err(OUT_OF_RESOURCES);
+    }
+    Ok(true)
+}
+
 /// Commits only runtime-owned anonymous memory, preserving its reservation.
 fn commit_managed(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     service: &MemoryAdvice,
     range: ManagedRange,
 ) -> Result<(), Status> {
@@ -99,7 +117,7 @@ fn commit_managed(
 /// Makes a managed reservation host-backed before KFD consumes its SVM policy.
 /// External memory and registered VMEM remain owned by their existing paths.
 pub(crate) fn commit_registration(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     service: &MemoryAdvice,
     address: u64,
     size: u64,
@@ -132,8 +150,20 @@ pub(crate) fn commit_registration(
         return Ok(());
     }
     let range = managed_range(runtime, address, size)?;
-    if runtime.memory_state.copy_borrowed(range.reservation) {
-        return Err(OUT_OF_RESOURCES);
+    let reservation = runtime
+        .memory_state
+        .vmem_reservations
+        .get(&range.reservation)
+        .ok_or(INVALID_ALLOCATION)?;
+    if !registration_needs_commit(
+        &reservation.svm_ranges,
+        range.address as usize,
+        range.size as usize,
+        runtime.memory_state.copy_borrowed(range.reservation),
+    )? {
+        // Native policy can change while asynchronous work retains the range.
+        // Avoid re-protecting its already committed host backing.
+        return Ok(());
     }
     commit_managed(runtime, service, range)
 }
@@ -204,7 +234,12 @@ pub(crate) unsafe fn submit_discard(
         {
             return INVALID_ARGUMENT;
         }
-        if !runtime.gpus.first().is_some_and(|gpu| gpu.xnack_enabled) {
+        if !runtime
+            .agents
+            .gpus
+            .first()
+            .is_some_and(|gpu| gpu.xnack_enabled)
+        {
             return XNACK_DISABLED;
         }
         if (dependency_count == 0) != dependencies.is_null()
@@ -287,7 +322,7 @@ pub(crate) unsafe fn submit_discard(
             ranges.push(range);
         }
         for &agent in agents {
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             let location = match svm_location_from_agent(runtime, &service, agent, false) {
@@ -295,19 +330,19 @@ pub(crate) unsafe fn submit_discard(
                 Err(status) => return status,
             };
             locations.push(location);
-            devices.push(runtime.gpus[index].device.clone());
+            devices.push(runtime.agents.gpus[index].device.clone());
         }
         handles.extend_from_slice(dependencies);
         if completion.handle != 0 {
             handles.push(completion);
         }
         runtime.memory_state.reap_finished_workers();
-        let stop = runtime.operation_stop();
-        let cleanup = match runtime.inherit_cleanup() {
+        let stop = runtime.control.operation_stop();
+        let cleanup = match runtime.control.inherit_cleanup() {
             Ok(cleanup) => cleanup,
             Err(status) => return status,
         };
-        let health = runtime.health.clone();
+        let health = runtime.control.health.clone();
         let mut pending = match PendingAsyncRetention::new(
             &mut runtime.signal_state,
             &mut runtime.memory_state,
@@ -326,36 +361,37 @@ pub(crate) unsafe fn submit_discard(
         let worker = match thread::Builder::new()
             .name("rocddi-svm-discard".into())
             .spawn(move || {
-                let _lease = cleanup.map(crate::runtime::ApiLeaseScope::enter);
-                let _devices = devices;
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                    || -> Result<(), Status> {
-                        if !wait_async_dependencies(&worker_handles[..dependency_len], &stop) {
-                            return Err(ERROR);
-                        }
-                        for (index, &range) in ranges.iter().enumerate() {
-                            if stop.load(Ordering::Acquire) {
+                crate::admission::ApiLeaseScope::run_optional(cleanup, || {
+                    let _devices = devices;
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        || -> Result<(), Status> {
+                            if !wait_async_dependencies(&worker_handles[..dependency_len], &stop) {
                                 return Err(ERROR);
                             }
-                            {
-                                let mut guard = lock()?;
-                                let runtime = initialized_mut(&mut guard)?;
-                                commit_managed(runtime, &service, range)?;
+                            for (index, &range) in ranges.iter().enumerate() {
+                                if stop.load(Ordering::Acquire) {
+                                    return Err(ERROR);
+                                }
+                                {
+                                    let mut guard = lock()?;
+                                    let runtime = initialized_mut(&mut guard)?;
+                                    commit_managed(runtime, &service, range)?;
+                                }
+                                discard_range(&service, range, locations.get(index).copied())?;
                             }
-                            discard_range(&service, range, locations.get(index).copied())?;
-                        }
-                        Ok(())
-                    },
-                ));
-                let retain = result.is_err();
-                if retain {
-                    health.quarantine();
-                }
-                for range in &ranges {
-                    release_async_resources(&[], &[Some(range.reservation)], retain);
-                }
-                finish_async_signal(completion, matches!(result, Ok(Ok(()))));
-                release_async_resources(&worker_handles, &[], false);
+                            Ok(())
+                        },
+                    ));
+                    let retain = result.is_err();
+                    if retain {
+                        health.quarantine();
+                    }
+                    for range in &ranges {
+                        release_async_resources(&[], &[Some(range.reservation)], retain);
+                    }
+                    finish_async_signal(completion, matches!(result, Ok(Ok(()))));
+                    release_async_resources(&worker_handles, &[], false);
+                })
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
@@ -382,5 +418,33 @@ mod tests {
         assert_eq!(committed_range(&ranges, 0x5000), None);
         merge_committed(&mut ranges, 0x3000, 0x1000);
         assert_eq!(ranges, [(0x1000, 0x4000)]);
+    }
+
+    #[test]
+    fn committed_registration_does_not_require_exclusive_backing_access() {
+        let ranges = [(0x1000, 0x2000), (0x4000, 0x1000)];
+        for borrowed in [false, true] {
+            for (address, size) in [(0x1000, 0x2000), (0x2000, 0x1000), (0x4000, 0x1000)] {
+                assert_eq!(
+                    registration_needs_commit(&ranges, address, size, borrowed),
+                    Ok(false)
+                );
+            }
+        }
+        for (address, size) in [
+            (0x1000, 0x3000),
+            (0x2000, 0x3000),
+            (0x3000, 0x1000),
+            (0x5000, 0x1000),
+        ] {
+            assert_eq!(
+                registration_needs_commit(&ranges, address, size, true),
+                Err(OUT_OF_RESOURCES)
+            );
+            assert_eq!(
+                registration_needs_commit(&ranges, address, size, false),
+                Ok(true)
+            );
+        }
     }
 }

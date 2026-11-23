@@ -29,15 +29,16 @@ namespace rocjitsu::plugins::race_detector {
 /// preserving their IDs and captured instructions until barrier retirement.
 ///
 /// An event is trimmable when it can never be accessed again:
-///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
+///   - RETIRED events (retired via retireEvent once every other wave has
+///     acquired them through a barrier).
 ///   - WAVE_COMPLETE events without LDS intervals: non-LDS events, and LDS
 ///     events that touch no LDS bytes, such as a tensor transfer that moves no
 ///     data. These have left all per-wave and per-register lists and were never
-///     added to ldsWriteEvents/ldsReadEvents; retireEvent is a no-op for them,
-///     so they don't need to wait for s_barrier.
+///     indexed for LDS checks; retireEvent is a no-op for them,
+///     so they don't need to wait for a barrier.
 ///   - WAVE_COMPLETE LDS events with intervals are NOT trimmable until
-///     retired, because retireEvent must still remove them from
-///     ldsWriteEvents/ldsReadEvents and adjust byte counts.
+///     retired, because other waves still check them and retireEvent must still
+///     adjust byte counts.
 ///
 /// Trimming is attempted every kTrimAttemptInterval allocations. The
 /// trimmable prefix is scanned and erased only if it covers at least half
@@ -68,6 +69,19 @@ class EventRegistry {
     // Younger counter-only units in this FIFO, before its next tracked event.
     std::array<uint8_t, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> followingUnits{};
     ConditionalVgprWrite feedback{};
+    bool hasLdsSourceReads = false;
+    /// The owning wave's barrier epoch when the event's LDS access completed,
+    /// or 0 until it has. The wave's next barrier signal or barrier-cell
+    /// arrival releases the event to other waves.
+    uint32_t releaseEpoch = 0;
+    /// Set when an LDS barrier arrival that the event's LDS access is ordered
+    /// before handed it off while the access was in flight (see RaceDetector,
+    /// LDS barrier cells): the kind of that arrival and the owning wave's
+    /// handoff epoch of that kind. Only arrivals of that kind carry the
+    /// handoff, so it is kept apart from `releaseEpoch`, which every release
+    /// of the wave carries.
+    std::optional<BarrierCellArrival> handoffKind = std::nullopt;
+    uint32_t handoffEpoch = 0;
   };
 
 public:
@@ -159,7 +173,18 @@ public:
     e.status = e.ldsPublished ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE;
   }
 
-  /// Transition → RETIRED (s_barrier flushed this event).
+  /// Hand an event whose LDS access is in flight off to other waves, at an LDS
+  /// barrier arrival of `kind` in the owning wave's handoff epoch `epoch` of
+  /// that kind.
+  void markHandedOff(EventId id, BarrierCellArrival kind, uint32_t epoch) {
+    auto &e = get(id);
+    assert(e.status == EventStatus::ACTIVE && e.releaseEpoch == 0);
+    assert(!e.handoffKind);
+    e.handoffKind = kind;
+    e.handoffEpoch = epoch;
+  }
+
+  /// Transition → RETIRED (no wave can still race with this event).
   void markRetired(EventId id) {
     if (id.value < base_offset_) {
       completed_lds_.erase(id.value);
@@ -278,10 +303,15 @@ public:
   bool atomicLdsElementMatches(EventId id, uint8_t bytes) const {
     return bytes != 0 && get(id).ldsAccess.aligned_atomic_bytes == bytes;
   }
+  /// A barrier arrival updates its cell atomically, so no read can race with
+  /// it and it is not kept as a write. It is kept as a read, which a
+  /// non-atomic write of the cell races with.
   bool writesLds(EventId id) const {
     const auto &e = get(id);
-    return e.ldsAccess.read_modify_write || isToLds(e.type);
+    return !e.ldsAccess.barrier_arrive && (e.ldsAccess.read_modify_write || isToLds(e.type));
   }
+  /// Whether the event is an arrival at an LDS barrier cell.
+  bool barrierArrive(EventId id) const { return get(id).ldsAccess.barrier_arrive; }
   MemoryOrderClass ldsOrder(EventId id) const {
     const auto &e = get(id);
     return e.ldsAccess.order(e.writeOrder.completion);
@@ -337,6 +367,15 @@ public:
       if (bytes & (1u << byte))
         it->lanes[byte] |= lanes;
   }
+  /// Record the owning wave's barrier epoch at which the event's LDS access
+  /// completed.
+  void setReleaseEpoch(EventId id, uint32_t epoch) { get(id).releaseEpoch = epoch; }
+  uint32_t releaseEpoch(EventId id) const { return get(id).releaseEpoch; }
+  /// The kind of barrier arrival that handed the event off while its LDS
+  /// access was in flight, if one did, and the owning wave's handoff epoch of
+  /// that kind.
+  std::optional<BarrierCellArrival> handoffKind(EventId id) const { return get(id).handoffKind; }
+  uint32_t handoffEpoch(EventId id) const { return get(id).handoffEpoch; }
 
   uint64_t registerLanes(EventId id, uint32_t reg, uint8_t bytes = 0xf) const {
     const auto &event = get(id);
@@ -369,6 +408,9 @@ public:
     event.ldsIntervals = std::move(intervals);
   }
 
+  void markLdsSourceReads(EventId id) { get(id).hasLdsSourceReads = true; }
+  bool hasLdsSourceReads(EventId id) const { return get(id).hasLdsSourceReads; }
+
   // -- Test helpers --
 
   /// Number of events currently stored (live + not-yet-trimmed dead).
@@ -400,7 +442,7 @@ private:
     if (e.status == EventStatus::RETIRED)
       return true;
     return e.status == EventStatus::WAVE_COMPLETE &&
-           (isWaveLocal(e.type) || e.ldsIntervals.empty());
+           (isWaveLocal(e.type) || (e.ldsIntervals.empty() && !e.hasLdsSourceReads));
   }
 
   void tryTrimEvents() {

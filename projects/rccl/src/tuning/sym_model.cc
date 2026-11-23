@@ -18,18 +18,18 @@
 #include <algorithm>
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
+extern int64_t ncclParamSymAgHierCtas();
 
 static constexpr float disableTime = 1.e30f;
 
 int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
-  int maxBlocks = ncclSymkMaxBlocks;
-  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST) {
-    maxBlocks = ncclSymkAgHierMaxBlocks;
-  }
+  bool hier = kernelId == ncclSymkKernelId_AllGather_HierLsaST;
+  int maxBlocks = hier ? ncclSymkAgHierMaxBlocksLimit() : ncclSymkMaxBlocks;
   if (kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
     maxBlocks = ncclSymkAgHierTmaMaxBlocks;
   }
   int64_t nUserCTAs = ncclParamSymCTAs();
+  if (hier && nUserCTAs < 1) nUserCTAs = ncclParamSymAgHierCtas();
   if (nUserCTAs < 1) return 0;
   if (nUserCTAs > maxBlocks) return maxBlocks;
   return static_cast<int>(nUserCTAs);
@@ -59,7 +59,7 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
   struct ncclComm* comm = inputs->comm;
   return kernelId == ncclSymkKernelId_AllGather_LL && ncclSymkIsGfx950(comm) &&
          !rcclSymkFuncForced(comm, inputs->func) && (valid_kmask >> ncclSymkKernelId_AllGather_ST & 1) &&
-         (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) & 1) &&
+         inputs->tuningMask.test(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) &&
          (inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg) &&
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
@@ -84,7 +84,7 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
     ncclSymkKernelMask bits;
     bool has(int id) const { return bits >> id & 1; }
   };
-  const AllowMask allowed{valid_kmask & ncclSymkKernelMask(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET)};
+  const AllowMask allowed{valid_kmask & rcclSymkMaskFromTuning(inputs->tuningMask)};
   int st = allowed.has(vecSt) ? vecSt : tmaSt;
   int hier = allowed.has(vecHier) ? vecHier : tmaHier;
   bool hasSt = allowed.has(st);
@@ -137,7 +137,7 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   ncclSymkKernelMask valid_kmask = inputs->symkMaskCache != 0
     ? inputs->symkMaskCache
     : ncclSymkMask(inputs->comm, inputs->func, inputs->devRedOp, inputs->datatype,
-                   inputs->countMax, inputs->symAligned16B);
+                   inputs->countMax, inputs->symAligned16B, inputs->ginWindowsUnregistered);
   ncclSymkKernelMask window_optional_kmask = ncclSymkLLKernelMask() | ncclGenkKernelMask();
   // Kernels that don't support grouping -- these are symmetric LL kernels.
   ncclSymkKernelMask ungrouped_kmask = ncclSymkLLKernelMask() & ~ncclGenkKernelMask();

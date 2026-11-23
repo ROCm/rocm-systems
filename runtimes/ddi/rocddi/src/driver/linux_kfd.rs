@@ -356,6 +356,53 @@ pub(crate) struct DeviceState {
 }
 
 impl DeviceState {
+    pub(crate) fn core_snapshot(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreDeviceSnapshot, Error> {
+        let kfd = self.vm.kfd();
+        let runtime = kfd
+            .core_runtime_info()
+            .map_err(|source| native_error("KFD core runtime info", source))?;
+        let aperture = kfd
+            .apertures()
+            .map_err(|source| native_error("KFD core apertures", source))?
+            .into_iter()
+            .find(|entry| entry.gpu_id == self.native.gpu_id)
+            .ok_or_else(|| error(ErrorKind::DeviceLost, "missing core device aperture"))?;
+        let debug = self.native.debug;
+        let device = crate::device::gpu::diagnostic::CoreDeviceInfo {
+            exception_status: 0,
+            lds_base: aperture.lds_base,
+            lds_limit: aperture.lds_limit,
+            scratch_base: aperture.scratch_base,
+            scratch_limit: aperture.scratch_limit,
+            gpuvm_base: aperture.gpuvm_base,
+            gpuvm_limit: aperture.gpuvm_limit,
+            gpu_id: self.native.gpu_id,
+            gfx_target_version: self.native.queues.gfx_target,
+            array_count: self.native.queues.shader_engine_count_per_xcc
+                * debug.simd_arrays_per_engine,
+            num_xcc: self.native.queues.xcc_count,
+            location_id: debug.location_id,
+            vendor_id: debug.vendor_id,
+            device_id: debug.device_id,
+            revision_id: debug.revision_id,
+            subsystem_vendor_id: debug.subsystem_vendor_id,
+            subsystem_device_id: debug.subsystem_device_id,
+            fw_version: debug.fw_version,
+            simd_count: debug.simd_count,
+            max_waves_per_simd: debug.max_waves_per_simd,
+            simd_arrays_per_engine: debug.simd_arrays_per_engine,
+            capability: debug.capability,
+            debug_prop: debug.debug_prop,
+        };
+        Ok(crate::device::gpu::diagnostic::CoreDeviceSnapshot {
+            version: [self.vm.version.major, self.vm.version.minor],
+            runtime,
+            device,
+        })
+    }
+
     pub(crate) fn debugger_registration_matches(
         &self,
         address: usize,

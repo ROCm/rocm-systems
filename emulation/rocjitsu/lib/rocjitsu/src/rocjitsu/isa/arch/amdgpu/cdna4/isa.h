@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 
 #include <cstdint>
@@ -50,7 +51,7 @@ struct Isa : amdgpu::CdnaIsaBase {
 
 } // namespace cdna4
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_CDNA4> {
+template <> struct IsaTrait<rocjitsu::IsaFamily::Cdna4> {
   using type = cdna4::Isa;
 };
 

@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -34,7 +35,6 @@
 #include <memory>
 #include <semaphore>
 #include <set>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -43,9 +43,10 @@ using namespace rocjitsu;
 namespace mc = amdgpu::matrix_coexecution;
 
 TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalidation) {
-  if (!amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   decoder->enable_pool();
   amdgpu::MmaAdmissionCache cache;
   amdgpu::GpuMemory memory("admission");
@@ -97,9 +98,10 @@ TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalida
 }
 
 TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
-  if (!amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   constexpr uint64_t pc = 0x490000;
   for (unsigned hazard = 0; hazard != 5; ++hazard) {
     amdgpu::MmaAdmissionCache cache;
@@ -132,9 +134,10 @@ TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
 }
 
 TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
-  if (!amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   constexpr uint64_t pc = 0x4a0000;
   for (bool hazard : {false, true}) {
     amdgpu::MmaAdmissionCache cache;
@@ -180,12 +183,16 @@ static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                           rdna4::Isa>::supports_async_execution);
 
 TEST(MatrixCoexecutionTest, SelectsOnlySupportedLargeMatrixInstructions) {
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x64_fp8_fp8"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x128_bf8_bf8"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_32x16x128_f4"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x32_f16"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x128_f8f6f4"));
-  EXPECT_FALSE(mc::async_candidate("v_add_f32"));
+  using amdgpu::Operation;
+  for (Operation operation : {
+           Operation::V_WMMA_F32_16X16X64_FP8_FP8,
+           Operation::V_WMMA_F32_16X16X128_BF8_BF8,
+           Operation::V_WMMA_F32_32X16X128_F4,
+           Operation::V_WMMA_F32_16X16X32_F16,
+           Operation::V_WMMA_F32_16X16X128_F8F6F4,
+           Operation::V_ADD_F32,
+       })
+    EXPECT_FALSE(mc::async_candidate(mma_test::PolicyInstruction(operation)));
 }
 
 TEST(MatrixCoexecutionTest, BatchOverlapsEightCallbacksAndJoinsBeforeReturning) {
@@ -220,7 +227,7 @@ TEST(MatrixCoexecutionTest, IssueMatchesSerialForLargeShapesAndHazards) {
       amdgpu::L2Cache l2("matrix_test_l2");
       amdgpu::ComputeUnitCore::Config config{};
       config.async_resources = std::make_shared<mc::ExecutionResources>(4);
-      config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      config.arch = rocjitsu::IsaFamily::Cdna5;
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 128;
@@ -254,7 +261,7 @@ TEST(MatrixCoexecutionTest, IssueMatchesSerialForLargeShapesAndHazards) {
                                       .src1 = 288,
                                       .src2 = static_cast<uint16_t>(256u + dst),
                                       .opsel_hi = 3});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       std::unique_ptr<Instruction> ai(decode_valid(*decoder, a.data()));
       std::unique_ptr<Instruction> bi(decode_valid(*decoder, b.data()));
       seed();
@@ -297,7 +304,7 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
         amdgpu::L2Cache l2("wide_l2");
         amdgpu::ComputeUnitCore::Config config{};
         config.async_resources = std::make_shared<mc::ExecutionResources>(4);
-        config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        config.arch = rocjitsu::IsaFamily::Cdna5;
         config.num_wf_slots = 1;
         config.sgprs_per_wf = 106;
         config.vgprs_per_wf = 128;
@@ -314,7 +321,7 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
         for (unsigned r = 0; r != 48; ++r)
           for (unsigned lane = 0; lane != 32; ++lane)
             cu->write_vgpr(base + r, lane, 0x01234567u ^ (r * 0x07654321u + lane * 0x01234567u));
-        auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+        auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
         const auto submitted = amdgpu::async_execution::stats.mma;
         for (unsigned i = 0; i != words.size(); ++i) {
           if (issue) {
@@ -349,7 +356,7 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
 }
 
 TEST(AsyncInstructionQueueTest, FootprintResolvesInlineConstantsAndPackedHalfAliases) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto encoding = cdna5::build_vop3(cdna5::kVAlignbitB32Vop3,
                                           {.vdst = 8, .src0 = 264, .src1 = 264, .src2 = 128 + 27});
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.data()));
@@ -395,7 +402,7 @@ TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial)
     l2.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config config{};
     config.async_resources = std::make_shared<mc::ExecutionResources>(4);
-    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.arch = rocjitsu::IsaFamily::Cdna5;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 128;
@@ -425,7 +432,7 @@ TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial)
         cu->step();
       EXPECT_EQ(wf->pc, end);
     } else {
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
       for (unsigned i = 0; i != program.size();) {
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, program.data() + i));
@@ -483,26 +490,6 @@ TEST(MatrixCoexecutionTest, SharedPoolDoesNotWaitForBusyHelpersAndReusesThemAcro
   EXPECT_EQ(context.finished.load(), 4u);
   EXPECT_EQ(mma_test::execute_independent(pool, fallback, &context), 1u);
   EXPECT_EQ(context.finished.load(), 6u);
-}
-
-TEST(MatrixCoexecutionTest, SharedPoolReleasesClaimsAfterHelperAndInlineFailures) {
-  mc::SharedPool pool(1);
-  Instruction failure("failure", [](Instruction &, void *) {
-    throw std::runtime_error("injected shared helper failure");
-  });
-  Instruction increment("increment", [](Instruction &, void *opaque) {
-    ++*static_cast<std::atomic<unsigned> *>(opaque);
-  });
-  std::atomic<unsigned> finished{0};
-  std::array<Instruction *, 2> instructions{&failure, &increment};
-  EXPECT_THROW(mma_test::execute_independent(pool, instructions, &finished), std::runtime_error);
-  EXPECT_EQ(finished.load(), 1u);
-  std::swap(instructions[0], instructions[1]);
-  EXPECT_THROW(mma_test::execute_independent(pool, instructions, &finished), std::runtime_error);
-  EXPECT_EQ(finished.load(), 2u);
-  instructions.fill(&increment);
-  EXPECT_EQ(mma_test::execute_independent(pool, instructions, &finished), 1u);
-  EXPECT_EQ(finished.load(), 4u);
 }
 
 TEST(MatrixCoexecutionTest, SharedPoolHandlesConcurrentIssuersAndZeroCapacity) {
@@ -592,7 +579,7 @@ TEST(MatrixCoexecutionTest, SharedPoolIssuersReusePreferredHelpers) {
       }
       for (unsigned i = 0; i != width; ++i)
         if (tickets[i]) {
-          EXPECT_FALSE(pool.finish(tickets[i]));
+          EXPECT_TRUE(pool.finish(tickets[i]).succeeded());
           used.insert(ids[i]);
         }
     }
@@ -625,12 +612,12 @@ TEST(MatrixCoexecutionTest, SharedPoolClaimsAndReclaimsCapacityAcrossBitmapWords
       const auto extra = pool.submit(record, &extra_id);
       EXPECT_FALSE(extra);
       if (extra) {
-        EXPECT_FALSE(pool.finish(extra));
+        EXPECT_TRUE(pool.finish(extra).succeeded());
       }
       std::set<std::thread::id> used;
       for (unsigned i = 0; i != capacity; ++i)
         if (tickets[i]) {
-          EXPECT_FALSE(pool.finish(tickets[i]));
+          EXPECT_TRUE(pool.finish(tickets[i]).succeeded());
           used.insert(ids[i]);
         }
       EXPECT_EQ(used.size(), capacity);
@@ -665,7 +652,7 @@ TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
         // finish: a locked instruction could mask the publication race.
         const mc::SharedPool::Ticket ticket = pool.submit(increment, &value);
         if (ticket) {
-          if (pool.finish(ticket))
+          if (pool.finish(ticket).failed())
             progress[i].matched = false;
           ++progress[i].offloads;
         } else {
@@ -826,7 +813,7 @@ TEST(AsyncInstructionQueueTest, RejectsFullPoolWithoutTakingInstructionOwnership
 }
 
 struct ExtendedMmaCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   std::vector<uint32_t> words;
   uint32_t input;
   bool mfma;
@@ -835,28 +822,28 @@ struct ExtendedMmaCase {
 };
 std::vector<ExtendedMmaCase> extended_mma_cases() {
   std::vector<ExtendedMmaCase> cases;
-  auto add = [&](rj_code_arch_t arch, auto words, uint32_t input, unsigned wmma_k,
+  auto add = [&](rocjitsu::IsaFamily arch, auto words, uint32_t input, unsigned wmma_k,
                  unsigned mfma_family = 0) {
     cases.push_back(
         {arch, {words.begin(), words.end()}, input, mfma_family != 0, wmma_k, mfma_family});
   };
   for (auto opcode : {cdna5::kVWmmaF3216x16x32F16Vop3p, cdna5::kVWmmaF3216x16x32Bf16Vop3p})
-    add(ROCJITSU_CODE_ARCH_CDNA5,
+    add(rocjitsu::IsaFamily::Cdna5,
         cdna5::build_vop3p(opcode,
                            {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}),
         opcode == cdna5::kVWmmaF3216x16x32F16Vop3p ? 0x3c003c00u : 0x3f803f80u, 32);
   for (unsigned format = 0; format != 5; ++format)
     for (bool inline_scale : {false, true})
-      add(ROCJITSU_CODE_ARCH_CDNA5,
+      add(rocjitsu::IsaFamily::Cdna5,
           mma_test::make_cdna5_wmma_scale_words(format, format, inline_scale ? 128 : 448,
                                                 inline_scale ? 128 : 449),
           format == 4 ? 0x22222222u : 0x38383838u, 128);
   for (auto opcode : {rdna4::kVWmmaF3216x16x16F16Vop3p, rdna4::kVWmmaF3216x16x16Bf16Vop3p})
-    add(ROCJITSU_CODE_ARCH_RDNA4,
+    add(rocjitsu::IsaFamily::Rdna4,
         rdna4::build_vop3p(opcode,
                            {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}),
         opcode == rdna4::kVWmmaF3216x16x16F16Vop3p ? 0x3c003c00u : 0x3f803f80u, 16);
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4})
     for (auto opcode : {cdna4::kVMfmaF3232x32x42bF16Vop3pMfma,
                         cdna4::kVMfmaF3216x16x44bF16Vop3pMfma, cdna4::kVMfmaF324x4x416bF16Vop3pMfma,
                         cdna4::kVMfmaF3232x32x8F16Vop3pMfma, cdna4::kVMfmaF3216x16x16F16Vop3pMfma})
@@ -869,7 +856,7 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
                     opcode == cdna4::kVMfmaF3216x16x16F16Vop3pMfma
                 ? 4
                 : 1);
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4})
     for (auto opcode :
          {cdna4::kVMfmaF3232x32x12bF32Vop3pMfma, cdna4::kVMfmaF3216x16x14bF32Vop3pMfma})
       for (uint8_t acc : {0, 1})
@@ -879,14 +866,14 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
             0x3f800000, 0, 1);
   for (auto opcode : {cdna4::kVMfmaF3232x32x16F16Vop3pMfma, cdna4::kVMfmaF3216x16x32F16Vop3pMfma})
     for (uint8_t acc : {0, 1})
-      add(ROCJITSU_CODE_ARCH_CDNA4,
+      add(rocjitsu::IsaFamily::Cdna4,
           cdna4::build_vop3p_mfma(
               opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
           0x3c003c00, 0, 4);
   // Ordinary FP8/BF8, including mixed inputs and both accumulator banks.
   for (unsigned opcode = 112; opcode != 120; ++opcode)
     for (uint8_t acc : {0, 1})
-      add(ROCJITSU_CODE_ARCH_CDNA4,
+      add(rocjitsu::IsaFamily::Cdna4,
           cdna4::build_vop3p_mfma(
               opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
           0x38383838, 0, 8);
@@ -894,7 +881,7 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
   for (unsigned opcode : {45, 46})
     for (uint8_t format = 0; format != 5; ++format)
       for (uint8_t acc : {0, 1})
-        add(ROCJITSU_CODE_ARCH_CDNA4,
+        add(rocjitsu::IsaFamily::Cdna4,
             cdna4::build_vop3p_mfma(opcode, {.vdst = 64,
                                              .cbsz = format,
                                              .acc_cd = acc,
@@ -905,7 +892,7 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
             0x38383838, 0, 2);
   for (unsigned opcode : {45, 46})
     for (bool inline_scale : {false, true})
-      add(ROCJITSU_CODE_ARCH_CDNA4,
+      add(rocjitsu::IsaFamily::Cdna4,
           mma_test::make_cdna4_mfma_scale_words(opcode, 1, inline_scale ? 242 : 448,
                                                 inline_scale ? 242 : 449, 0, 0, 4, 4, 64, 256, 288,
                                                 320),
@@ -986,7 +973,7 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
         memory.write32(pc + 4 * i, program[i]);
       const auto end = pc + 4 * program.size();
       const auto branch = c.mfma ? cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 0xffff})
-                          : c.arch == ROCJITSU_CODE_ARCH_RDNA4
+                          : c.arch == rocjitsu::IsaFamily::Rdna4
                               ? rdna4::build_sopp(rdna4::kSBranchSopp, {.simm16 = 0xffff})
                               : cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff});
       memory.write32(end, branch[0]);

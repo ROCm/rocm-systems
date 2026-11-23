@@ -11,7 +11,7 @@
 #include "os.h"          // strncasecmp (portable across Linux/Windows)
 #include <cstring>       // strlen
 
-#define ALGBIT(p) NCCL_TUNING_BIT(p)
+#define ALGBIT(p) rcclTuningMask::bit(p)
 #define GENBIT(a, p) ALGBIT((a) * NCCL_NUM_PROTOCOLS + (p))
 #define SYMBIT(k) ALGBIT(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + (k))
 #define F_AR (1u << ncclFuncAllReduce)
@@ -25,6 +25,7 @@
 // src/tuning/cost_model.cc modelMap[] (collMask mirrors modelMap[].enabled[func]):
 //   general    -> bit (algo*NCCL_NUM_PROTOCOLS + proto), the [0, NCCL_TUNING_SYM_KERNEL_ID_OFFSET) space
 //   Symk, Genk -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId)
+//   RCCL Symk  -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), after NCCL's ids
 // Commented rows are algo/proto combinations that do not exist today; they mark where a
 // future kernel would slot into the tuning-id space.
 // IMPORTANT: this table must be consistent with the modelMap in src/tuning/cost_model.cc
@@ -62,10 +63,7 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   {"SYMK_ST",                SYMBIT(ncclSymkKernelId_AllGather_ST),                    F_AG, -1, -1, ncclSymkKernelId_AllGather_ST},
   {"SYMK_TmaSTMC",           SYMBIT(ncclSymkKernelId_AllGather_TmaSTMC),               F_AG, -1, -1, ncclSymkKernelId_AllGather_TmaSTMC},
   {"SYMK_STMC",              SYMBIT(ncclSymkKernelId_AllGather_STMC),                  F_AG, -1, -1, ncclSymkKernelId_AllGather_STMC},
-  {"SYMK_RailRing_LsaST",    SYMBIT(ncclSymkKernelId_AllGather_RailRing_LsaST),        F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaST},
   {"SYMK_RailRing_LsaSTMC",  SYMBIT(ncclSymkKernelId_AllGather_RailRing_LsaSTMC),      F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaSTMC},
-  {"SYMK_HierLsaST",         SYMBIT(ncclSymkKernelId_AllGather_HierLsaST),             F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaST},
-  {"SYMK_HierLsaTmaST",      SYMBIT(ncclSymkKernelId_AllGather_HierLsaTmaST),          F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaTmaST},
   // Symmetric ReduceScatter kernels
   {"SYMK_LL",                SYMBIT(ncclSymkKernelId_ReduceScatter_LL),                F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LL},
   {"SYMK_TmaLD",             SYMBIT(ncclSymkKernelId_ReduceScatter_TmaLD),             F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_TmaLD},
@@ -92,39 +90,55 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   {"GENK_RING_LL128",        SYMBIT(ncclSymkKernelId_ReduceScatter_Ring_LL128),         F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_LL128},
   {"GENK_RING_LL128",        SYMBIT(ncclSymkKernelId_Broadcast_Ring_LL128),             F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_LL128},
   {"GENK_RING_LL128",        SYMBIT(ncclSymkKernelId_Reduce_Ring_LL128),                F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_LL128},
+  // RCCL's kernels follow NCCL's.
+  {"SYMK_RailRing_LsaST",    SYMBIT(ncclSymkKernelId_AllGather_RailRing_LsaST),        F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaST},
+  {"SYMK_HierLsaST",         SYMBIT(ncclSymkKernelId_AllGather_HierLsaST),             F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaST},
+  {"SYMK_HierLsaTmaST",      SYMBIT(ncclSymkKernelId_AllGather_HierLsaTmaST),          F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaTmaST},
 };
 // clang-format on
 static constexpr int algRegistryCount = (int)(sizeof(algRegistry) / sizeof(algRegistry[0]));
 
+// [RCCL] A row's bit must be its tuning id, as modelMap[] and the tuner index by it.
+static constexpr bool rowBitsAreTuningIds() {
+  for (int i = 0; i < algRegistryCount; i++) {
+    const ncclAlgRegEntry& e = algRegistry[i];
+    int id =
+      e.symkKernelId >= 0 ? NCCL_TUNING_SYM_KERNEL_ID_OFFSET + e.symkKernelId : e.algo * NCCL_NUM_PROTOCOLS + e.proto;
+    if (e.mask != rcclTuningMask::bit(id)) return false;
+  }
+  return true;
+}
+static_assert(rowBitsAreTuningIds(), "An algorithm registry row's bit is not its tuning id");
+
 // OR of every selectable algorithm (the real rows) -- the base the parser negates ('^') against.
 // The registry is compile-time constant, so this reduces to a single constant (no runtime loop).
-static constexpr ncclTuningMask_t computeAllAlgBits() {
-  ncclTuningMask_t m = 0;
+static constexpr rcclTuningMask computeAllAlgBits() {
+  rcclTuningMask m{};
   for (int i = 0; i < algRegistryCount; i++) m |= algRegistry[i].mask;
   return m;
 }
-static constexpr ncclTuningMask_t kAllAlgBits = computeAllAlgBits();
+static constexpr rcclTuningMask kAllAlgBits = computeAllAlgBits();
 
-ncclTuningMask_t ncclAlgAllBits() {
+rcclTuningMask ncclAlgAllBits() {
   return kAllAlgBits;
 }
 
-ncclTuningMask_t ncclAlgTagMask(const char* tag) {
-  if (tag == NULL || tag[0] == '\0') return 0;
+rcclTuningMask ncclAlgTagMask(const char* tag) {
+  if (tag == NULL || tag[0] == '\0') return rcclTuningMask();
   // A tag matches a registry name only from its start (case-insensitive), so "RING" selects
   // RING_LL/LL128/SIMPLE but not SYMK_RailRing_LsaSTMC, while "NVLS" still spans NVLS_SIMPLE and
   // NVLSTREE_SIMPLE. strncasecmp over the tag length is that prefix test: a shorter name hits its
   // '\0' before the tag ends and compares unequal.
   size_t tagLen = strlen(tag);
-  ncclTuningMask_t m = 0;
+  rcclTuningMask m{};
   for (int i = 0; i < algRegistryCount; i++) {
     if (strncasecmp(algRegistry[i].name, tag, tagLen) == 0) m |= algRegistry[i].mask;
   }
   return m;
 }
 
-ncclTuningMask_t ncclAlgValidForFuncMask(ncclFunc_t func) {
-  ncclTuningMask_t m = 0;
+rcclTuningMask ncclAlgValidForFuncMask(ncclFunc_t func) {
+  rcclTuningMask m{};
   for (int i = 0; i < algRegistryCount; i++) {
     if (algRegistry[i].collMask & (1u << func)) m |= algRegistry[i].mask;
   }

@@ -35,20 +35,39 @@ class GpuVmAccess;
 class GpuVmAccessState;
 class GpuVmTransferBatch;
 class DeviceCacheMaintenanceLease;
+struct CacheMaintenanceResult;
 class VmTransferEffectGate;
 
 /// @brief Acquire a move-only cache lease for one tokenized data step.
 /// @details Acquisition runs without the VM state lock. A local backing step
 /// keeps the lease through its effect; a deferred request releases it before
 /// submission or polling.
-using VmTransferMaintenance = std::function<util::FailureOr<DeviceCacheMaintenanceLease>()>;
+using VmTransferMaintenance = std::function<util::FailureOr<CacheMaintenanceResult>()>;
 
 /// @brief Cache immutable VM snapshots for one bounded execution quantum.
 /// @details Nested guards share the outer cache. Borrowed objects remain alive
 /// until the outer guard exits, but each operation independently checks and
 /// leases its access state. Revoked entries are skipped on subsequent lookups.
 class GpuVmAccessBatchGuard {
+  class Cache;
+
 public:
+  /// @brief Bound synchronous execution caches to the call instead of its host thread.
+  /// @details Engine workers keep their persistent cache outside this scope.
+  class ScopedCache {
+  public:
+    ScopedCache();
+    ~ScopedCache();
+    ScopedCache(const ScopedCache &) = delete;
+    ScopedCache &operator=(const ScopedCache &) = delete;
+
+  private:
+    // Lazily allocated snapshots used by this host call's execution batches.
+    std::unique_ptr<Cache> cache_;
+    // Borrowed enclosing scope, restored when this call returns.
+    std::unique_ptr<Cache> *previous_;
+  };
+
   GpuVmAccessBatchGuard();
   ~GpuVmAccessBatchGuard();
 
@@ -61,6 +80,10 @@ public:
 
 private:
   friend class GpuVm;
+
+  static Cache &thread_cache();
+  // Borrowed host-call cache owner, or null for ordinary engine-worker caching.
+  inline static thread_local std::unique_ptr<Cache> *scoped_cache_ = nullptr;
 
   [[nodiscard]] static const GpuVmAccess *find_snapshot(const GpuVm *vm, AddressSpaceHandle handle);
   [[nodiscard]] static const GpuVmAccess *find_snapshot_vmid(const GpuVm *vm, uint32_t vmid);

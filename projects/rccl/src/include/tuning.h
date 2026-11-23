@@ -13,6 +13,7 @@
 #include "nccl_tuner.h"
 #include "sym_kernels.h"
 #include "ce_coll.h"
+#include "tuning_mask.h"
 
 #define NCCL_TUNING_SYM_KERNEL_ID_OFFSET (NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS)
 #define NCCL_TUNING_CE_METHOD_ID_OFFSET (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_Count)
@@ -28,12 +29,20 @@ static inline int ncclTuningFuncIndex(ncclFunc_t func) {
   return func == ncclFuncAlltoAll ? NCCL_NUM_FUNCTIONS : -1;
 }
 
-#define NCCL_TUNING_MASK_GENERAL_KERNELS (NCCL_TUNING_BIT(NCCL_TUNING_SYM_KERNEL_ID_OFFSET) - 1)
+#define NCCL_TUNING_MASK_GENERAL_KERNELS rcclTuningMask::range(0, NCCL_TUNING_SYM_KERNEL_ID_OFFSET)
 #define NCCL_TUNING_MASK_SYM_KERNELS \
-  (NCCL_TUNING_BIT(NCCL_TUNING_CE_METHOD_ID_OFFSET) - 1 - NCCL_TUNING_MASK_GENERAL_KERNELS)
-#define NCCL_TUNING_MASK_CE (NCCL_TUNING_BIT(NCCL_TUNING_COUNT) - NCCL_TUNING_BIT(NCCL_TUNING_CE_METHOD_ID_OFFSET))
-#define NCCL_TUNING_MASK_ALL (NCCL_TUNING_BIT(NCCL_TUNING_COUNT) - 1)
-static_assert(NCCL_TUNING_COUNT < 8 * sizeof(ncclTuningMask_t), "Tuning masks cannot represent every tuning entry");
+  rcclTuningMask::range(NCCL_TUNING_SYM_KERNEL_ID_OFFSET, NCCL_TUNING_CE_METHOD_ID_OFFSET)
+#define NCCL_TUNING_MASK_CE rcclTuningMask::range(NCCL_TUNING_CE_METHOD_ID_OFFSET, NCCL_TUNING_COUNT)
+#define NCCL_TUNING_MASK_ALL rcclTuningMask::range(0, NCCL_TUNING_COUNT)
+static_assert(NCCL_TUNING_COUNT <= rcclTuningMask::kBits, "Tuning masks cannot represent every tuning entry");
+
+static inline constexpr rcclTuningMask rcclTuningMaskFromSymk(ncclSymkKernelMask kernels) {
+  return rcclTuningMask::fromWord(kernels, NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+}
+// Only the symmetric kernel ids of t: general and CE tuning ids are dropped.
+static inline constexpr ncclSymkKernelMask rcclSymkMaskFromTuning(rcclTuningMask t) {
+  return (t & NCCL_TUNING_MASK_SYM_KERNELS).word(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+}
 
 #define NCCL_TUNING_ENTRY_INIT_VALUE -1
 #define NCCL_TUNING_RESULT_INIT \
@@ -69,7 +78,7 @@ struct ncclTuningResult_t {
 
 struct ncclTuningInput_t {
   struct ncclComm* comm;
-  ncclTuningMask_t tuningMask;
+  rcclTuningMask tuningMask;
   ncclFunc_t func;
   ncclRedOp_t redOp;
   ncclDevRedOp_t devRedOp;
@@ -84,12 +93,14 @@ struct ncclTuningInput_t {
   int collNetSupport;
   int nvlsSupport;
   bool symAligned16B; // Check for TMA eligibility in sym scheduler
+  // A user window was left without GIN segments. Symk GIN kernels must not run.
+  bool ginWindowsUnregistered;
   int captured;
   int inPlace;
   int minCTAs;  // resolved lower CTA bound (env > per-call > comm)
   int maxCTAs;  // resolved upper CTA bound (env > per-call > comm)
   int CTAPolicy;   // resolved effective CTAPolicy (per-call)
-  ncclTuningMask_t algMask; // [RCCL] per-call algSelection mask, 0 for none (ncclCollConfigGetAlgMask)
+  rcclTuningMask algMask; // [RCCL] per-call algSelection mask, empty for none (ncclCollConfigGetAlgMask)
   int chunkSteps;
   int sliceSteps;
   // [RCCL] Cached ncclSymkMask() result; set once per ncclTuningCompute() invocation.

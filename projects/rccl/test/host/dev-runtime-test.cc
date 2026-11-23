@@ -2030,8 +2030,10 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
 }
 
-// A device-only multi-segment window is rejected before any GIN registration
-// whatever NCCL_MULTI_SEGMENT_REGISTER says; a single-segment window still registers.
+// A device-only multi-segment window is left unregistered with GIN, whatever
+// NCCL_MULTI_SEGMENT_REGISTER says, so one such window does not reject every
+// other GIN user. A GIN-only window has no fallback and still fails. A
+// single-segment window still registers.
 TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegistering) {
   // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
@@ -2040,14 +2042,22 @@ TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegister
                  });
 
   mem.maxGlobalNumSegments = 2;
-  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(mem.numGinSegments, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
   {
     ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
-    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+    EXPECT_EQ(mem.numGinSegments, 0);
   }
+  EXPECT_EQ(reg.calls, 0);
+
+  mem.winFlags = NCCL_WIN_GIN_ONLY;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
   EXPECT_EQ(reg.calls, 0);
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 
+  mem.winFlags = 0;
   mem.maxGlobalNumSegments = 1;
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
@@ -2991,6 +3001,30 @@ TEST_F(SymMemoryObtainTest, DestroyIsIdempotent) {
   EXPECT_EQ(unmap.calls, unmaps);
 }
 
+// A registration that owns RCCL-created memory gives its allocTracker bytes back exactly once.
+TEST_F(SymMemoryObtainTest, DestroyReleasesOwnedTrackerBytesOnce) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, reinterpret_cast<void*>(0x100000),
+                            /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_NE(mem, nullptr);
+  EXPECT_EQ(mem->allocTrackedBytes, 0u);  // a user window owns nothing
+  mem->allocTrackedBytes = 4096;
+  allocTracker[comm->cudaDev].totalAlloc = 1;
+  allocTracker[comm->cudaDev].totalAllocSize = 4096;
+
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
+
+  symMemoryDestroy(comm, mem);  // stale pointer: no second untrack
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
+}
+
 TEST_F(SymMemoryObtainTest, DestroyIsIdempotentWhileAnotherMemoryIsLinked) {
   hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   struct ncclDevrMemory* first = nullptr;
@@ -3132,6 +3166,39 @@ TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegmentPerBac
     EXPECT_EQ(first.memType, hipMemLocationTypeDevice) << "backend " << backend;
     EXPECT_EQ(second.segmentSize, 8192u) << "backend " << backend;
     EXPECT_EQ(second.memType, kLocHostNuma) << "backend " << backend;
+  }
+}
+
+// Branch: GIN on, so window (b, s) gets backend b's ginDevWins slice of segment s, never ginHostWins.
+TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_CopiesEachBackendsDeviceWindows) {
+  comm->devrState.ginEnabled = true;
+  static_assert(NCCL_GIN_MAX_CONNECTIONS <= 16, "Connection tokens must fit within each backend's stride");
+  static_assert(NCCL_GIN_MAX_ACTIVE_BACKENDS <= 16, "Backend tokens must fit within each segment's stride");
+  auto devToken = [](int seg, int backend, int conn) {
+    return reinterpret_cast<ncclGinWindow_t>(uintptr_t{0x10000} + seg * 0x1000 + backend * 0x100 + conn * 0x10);
+  };
+  auto hostToken = [](int seg, int backend, int conn) {
+    return reinterpret_cast<void*>(uintptr_t{0x900000} + seg * 0x1000 + backend * 0x100 + conn * 0x10);
+  };
+  for (int s = 0; s < mem.numGinSegments; s++) {
+    for (int b = 0; b < NCCL_GIN_MAX_ACTIVE_BACKENDS; b++) {
+      for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+        ginInfos[s].ginDevWins[b * NCCL_GIN_MAX_CONNECTIONS + i] = devToken(s, b, i);
+        // Host handles get distinct values so copying the wrong array shows up.
+        ginInfos[s].ginHostWins[b * NCCL_GIN_MAX_CONNECTIONS + i] = hostToken(s, b, i);
+      }
+    }
+  }
+
+  ASSERT_EQ(Alloc(), ncclSuccess);
+  ASSERT_NE(dev, nullptr);
+  for (int b = 0; b < NCCL_GIN_MAX_ACTIVE_BACKENDS; b++) {
+    for (int s = 0; s < mem.numGinSegments; s++) {
+      const ncclSegmentWindow& win = dev[b * mem.numGinSegments + s];
+      for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+        EXPECT_EQ(win.ginWins[i], devToken(s, b, i)) << "backend " << b << " segment " << s << " conn " << i;
+      }
+    }
   }
 }
 
@@ -6780,6 +6847,20 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
 }
 
+// nLsaTeams comes from the topology, so a property query leaves device-runtime state (bigSize) untouched.
+TEST_F(CommQueryPropertiesTest, NLsaTeams_DoesNotInitialiseDeviceRuntime) {
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           *g = 4096;
+                           return hipSuccess;
+                         });
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.nLsaTeams, 1);  // all 8 ranks on node 0
+  EXPECT_EQ(granularity.calls, 0);
+  EXPECT_EQ(comm->devrState.bigSize, 0u);
+}
+
 // A caller that JIT-compiles its device code must allocate the devComm in the
 // runtime layout, so it is told the runtime's size, not its own headers'.
 TEST_F(CommQueryPropertiesTest, Caller231_ReportsRuntimeDevCommSize) {
@@ -7419,9 +7500,8 @@ TEST(GinContextCount, ZeroRequest_PromotedToConnectionCount) {
 // resource-window sizing that follows it, up to the cuMemCreate call. A devcomm
 // that asks for no resources has no window to create, so its build completes.
 //
-// The rest of the devcomm build -- GIN activation, symmetric-memory window
-// creation, GIN window registration, barriers -- is not covered here beyond a
-// failed GIN activation. The capture-mode test below is the one exception: it
+// The rest of the devcomm build is covered only where a late-stage failure must
+// unwind it (the LateStageFailure* tests) and by the capture-mode test, which
 // reaches ncclGinDevCommSetup and stops there.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
@@ -7535,6 +7615,62 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   EXPECT_EQ(Create(), ncclInvalidArgument);
 }
 
+// Branch: a create that fails after ncclGinDevCommSetup succeeded releases the GIN
+// contexts exactly once, passing the devComm setup filled in, then clears its
+// GIN fields so ncclDevCommDestroy does not free them again.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureFreesGinDevComm) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const* dc) {
+                       EXPECT_EQ(dc->ginHandles[0], reinterpret_cast<void*>(0xACE));
+                       return ncclSuccess;
+                     });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 1);
+  EXPECT_EQ(outDevComm.ginContextCount, 0u);
+  EXPECT_EQ(outDevComm.ginHandles[0], nullptr);
+}
+
+// Control: without GIN, setup never runs and the same failure must not free.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureWithoutGinDoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(streamCreate.calls, 1);
+  EXPECT_EQ(ginFree.calls, 0);
+}
+
+// Branch: a setup that records contexts and then fails must not free; the guard
+// is setup success, not ginContextCount.
+TEST_F(DevrCommCreateInternalTest, GinSetupFailsAfterRecordingContexts_DoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  ScopedHook ginSetup(g_devrGinDevCommSetup,
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevResourceRequirements*,
+                         struct ncclGinBarrierReq const*, int, struct ncclDevComm* devComm, uint32_t,
+                         struct ncclDevCommCompat const*) {
+                        devComm->ginContextCount = 1;
+                        devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
+                        return ncclSystemError;
+                      });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 0);
+}
+
 // ginSignalCount stays at its initializer value of 0. The barrier fakes also
 // zero their ginSignalCount, so ginSignalTotal stays 0 and the signal-region
 // sizing is not taken. Setup fails before the resource window is created.
@@ -7584,6 +7720,7 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnableClear_PassesGate) {
 // request. Stop at cuMemCreate after recording its requested size to avoid
 // constructing the unrelated symmetric-memory window.
 TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseSetupsRoundedContextCount) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   // 4 discriminates: the selected backend (3 connections) rounds it to 6.
   reqs.ginContextCount = 4;
@@ -7610,6 +7747,87 @@ TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseSetupsRoundedContextCount
   EXPECT_EQ(create.calls, 1);
   // ROUNDUP(4, 3) = 6 contexts; shadow and Anvil regions each use 6 * 1 * 8 bytes.
   EXPECT_EQ(allocationSize, 96u);
+  // A failed cuMemCreate is never counted.
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+}
+
+// The resource window is counted once cuMemCreate succeeds, and a failure before its
+// registration takes ownership releases both the handle and the count.
+TEST_F(DevrCommCreateInternalTest, ResourceWindow_CountedAtCreateAndReleasedWhenObtainFails) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
+  ncclDevResourceRequirements res{};
+  res.bufferSize = 4096;
+  reqs.resourceRequirementsList = &res;
+
+  const auto kHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+  size_t createdSize = 0;
+  ScopedHook create(g_hipMemCreate, [&](hipMemGenericAllocationHandle_t* handle, size_t size,
+                                        const hipMemAllocationProp*, unsigned long long) {
+    *handle = kHandle;
+    createdSize = size;
+    return hipSuccess;
+  });
+  // symMemoryObtain's segment-info exchange is the first gather after the create.
+  auto gatherBeforeCreate = g_devrBootstrapAllGather;
+  uint64_t countedAtObtain = 0;
+  ScopedHook gather(g_devrBootstrapAllGather, [&](void* state, void* data, int size) {
+    if (createdSize == 0) return gatherBeforeCreate(state, data, size);
+    countedAtObtain = allocTracker[comm->cudaDev].totalAllocSize;
+    return ncclSystemError;
+  });
+  int releases = 0;
+  ScopedHook release(g_hipMemRelease, [&](hipMemGenericAllocationHandle_t handle) {
+    if (handle == kHandle) releases++;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_EQ(create.calls, 1);
+  ASSERT_GT(createdSize, 0u);
+  EXPECT_EQ(countedAtObtain, createdSize);
+  EXPECT_EQ(releases, 1);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
+}
+
+// Once its registration owns the handle, the resource window's count comes back when the
+// registration is dropped: here the window's shadow allocation fails right after the obtain.
+TEST_F(DevrCommCreateInternalTest, ResourceWindow_ReleasedWithItsRegistrationWhenWindowCreateFails) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
+  ncclDevResourceRequirements res{};
+  res.bufferSize = 4096;
+  reqs.resourceRequirementsList = &res;
+  comm->devrState.bigSize = 1 << 20;  // room in the big space for symMemoryObtain
+
+  const auto kHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+  size_t createdSize = 0;
+  ScopedHook create(g_hipMemCreate, [&](hipMemGenericAllocationHandle_t* handle, size_t size,
+                                        const hipMemAllocationProp*, unsigned long long) {
+    *handle = kHandle;
+    createdSize = size;
+    return hipSuccess;
+  });
+  auto allocBeforeCreate = g_devrShadowPoolAlloc;
+  uint64_t countedAtWindowCreate = 0;
+  ScopedHook shadowAlloc(g_devrShadowPoolAlloc,
+                         [&](ncclShadowPool* pool, size_t size, void** dev, void** host, hipStream_t stream) {
+                           if (createdSize == 0) return allocBeforeCreate(pool, size, dev, host, stream);
+                           countedAtWindowCreate = allocTracker[comm->cudaDev].totalAllocSize;
+                           return ncclSystemError;
+                         });
+  int releases = 0;
+  ScopedHook release(g_hipMemRelease, [&](hipMemGenericAllocationHandle_t handle) {
+    if (handle == kHandle) releases++;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  ASSERT_GT(createdSize, 0u);
+  EXPECT_EQ(countedAtWindowCreate, createdSize);
+  EXPECT_EQ(releases, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
 }
 
 // Branch: GIN connect fails. GIN must stay unlatched so the next create

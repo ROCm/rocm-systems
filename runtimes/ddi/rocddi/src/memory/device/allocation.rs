@@ -244,6 +244,17 @@ impl Allocation {
         self.inner.info()
     }
 
+    /// Borrows retained memory for a fatal diagnostic, including after a VM fault.
+    /// Unmapped private VRAM has no CPU alias and must be recorded as unavailable.
+    ///
+    /// # Errors
+    /// Rejects released, uncertain, MMIO, or unsupported backing.
+    pub fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.inner.diagnostic_memory()
+    }
+
     /// Offset of this allocation's logical base into an identified backing.
     /// For a page-cover registration, add the returned caller-pointer offset.
     /// Absence means that the provider has no external backing-offset metadata.

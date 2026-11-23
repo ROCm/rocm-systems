@@ -9,22 +9,23 @@
 
 #include "nccl.h"
 #include "nccl_common.h" // ncclFunc_t
+#include "tuning_mask.h"
 #include <stdint.h>
 
 // One row per selectable algorithm. name is the selection key, matched as a case-insensitive
-// prefix. mask == NCCL_TUNING_BIT(cost-model tuning id): general ids precede Symk/Genk ids.
+// prefix. mask == {cost-model tuning id}: general ids precede Symk/Genk ids.
 struct ncclAlgRegEntry {
   const char* name;
-  ncclTuningMask_t mask;
+  rcclTuningMask mask;
   uint32_t collMask;   // OR of (1u << ncclFunc_t)
   int16_t algo;        // NCCL_ALGO_* for general rows, else -1
   int16_t proto;       // NCCL_PROTO_* for general rows, else -1
   int16_t symkKernelId; // ncclSymkKernelId for Symk/Genk rows, else -1
 };
 
-ncclTuningMask_t ncclAlgAllBits();                         // OR of all selectable rows (parser '^' base)
-ncclTuningMask_t ncclAlgTagMask(const char* tag);         // case-insensitive name-prefix match; 0 == unknown
-ncclTuningMask_t ncclAlgValidForFuncMask(ncclFunc_t func);
+rcclTuningMask ncclAlgAllBits();                     // OR of all selectable rows (parser '^' base)
+rcclTuningMask ncclAlgTagMask(const char* tag);     // case-insensitive name-prefix match; empty == unknown
+rcclTuningMask ncclAlgValidForFuncMask(ncclFunc_t func);
 const char* ncclAlgNameForGeneral(int algo, int proto); // introspection (NULL if none)
 const char* ncclAlgNameForSymk(int symkKernelId);
 

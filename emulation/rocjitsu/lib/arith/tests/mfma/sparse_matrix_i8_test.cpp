@@ -41,8 +41,19 @@ template <int M, int K, bool Wmma = false> void arithmetic(Entry entry) {
     input[Dest][lane] = lane % 2 ? 0x7fffffffU : 0x80000000U;
   }
   const auto levels = supported_cpu_levels();
-  for (uint64_t controls :
-       Wmma ? std::array<uint64_t, 4>{0, 3, 64, 65} : std::array<uint64_t, 4>{0, 8, 1, 127}) {
+  const auto control_cases = [] {
+    if constexpr (Wmma) {
+      return std::array<uint64_t, 6>{0,
+                                     3,
+                                     64,
+                                     65,
+                                     RJ_ARITH_SWMMAC_INDEX_KEY_1 | 2,
+                                     RJ_ARITH_SWMMAC_INDEX_KEY_1 | RJ_ARITH_WMMA_CLAMP | 3};
+    } else {
+      return std::array<uint64_t, 4>{0, 8, 1, 127};
+    }
+  }();
+  for (uint64_t controls : control_cases) {
     for (int aliasing_offset : {0, A, Index, Dest}) {
       // D is an input too: the reference must use the accumulator at the selected alias.
       uint32_t expected[D][L];
@@ -62,8 +73,12 @@ template <int M, int K, bool Wmma = false> void arithmetic(Entry entry) {
               if constexpr (Wmma) {
                 al = row + 16 * (ck / 16 % 2);
                 ae = ck / 32 * 16 + ck % 16;
-                selected =
-                    int(input[Index + (ck % 32) / 16][row + 16 * (ck / 32)] >> (2 * (ck % 16)) & 3);
+                uint32_t metadata = input[Index + (ck % 32) / 16][row + 16 * (ck / 32)];
+                if (controls & RJ_ARITH_SWMMAC_INDEX_KEY_1) {
+                  // The high bank shifts down, leaving repeated zero selectors above it.
+                  metadata >>= 16;
+                }
+                selected = int(metadata >> (2 * (ck % 16)) & 3);
               } else {
                 int nibble;
                 if constexpr (M * K < 2048) {

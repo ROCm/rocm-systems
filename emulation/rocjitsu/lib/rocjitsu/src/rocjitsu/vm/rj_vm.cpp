@@ -6,8 +6,10 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/amdgpu/legacy_address_space.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/gpu_info.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
@@ -27,7 +29,6 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <cstring>
 #include <memory>
-#include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -232,23 +233,18 @@ rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id, rj
                                   rj_vm_t **vm) {
   if (!json_path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  try {
-    util::StringDiagnostic diagnostic;
-    auto loaded = config::load_config_for_node(json_path, rocjitsu::kEmbeddedSchema,
-                                               node_id ? node_id : "", diagnostic.emitter());
-    if (loaded.failed()) {
-      util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_INVALID_FILE;
-    }
-    const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
-                                           ROCJITSU_STATUS_INVALID_FILE);
-    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
-      util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
-    return status;
-  } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create_for_node failed: ", e.what());
+  util::StringDiagnostic diagnostic;
+  auto loaded = config::load_config_for_node(json_path, rocjitsu::kEmbeddedSchema,
+                                             node_id ? node_id : "", diagnostic.emitter());
+  if (loaded.failed()) {
+    util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
+  const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
+                                         ROCJITSU_STATUS_INVALID_FILE);
+  if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+    util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
+  return status;
 }
 
 rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_t **vm) {
@@ -259,23 +255,18 @@ rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node
                                               rj_vm_mode_t mode, rj_vm_t **vm) {
   if (!json || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  try {
-    util::StringDiagnostic diagnostic;
-    auto loaded = config::load_config_from_string_for_node(
-        json, rocjitsu::kEmbeddedSchema, node_id ? node_id : "", diagnostic.emitter());
-    if (loaded.failed()) {
-      util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_INVALID_ARGUMENT;
-    }
-    const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
-                                           ROCJITSU_STATUS_INVALID_ARGUMENT);
-    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
-      util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
-    return status;
-  } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create_from_string_for_node failed: ", e.what());
+  util::StringDiagnostic diagnostic;
+  auto loaded = config::load_config_from_string_for_node(
+      json, rocjitsu::kEmbeddedSchema, node_id ? node_id : "", diagnostic.emitter());
+  if (loaded.failed()) {
+    util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
+  const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
+                                         ROCJITSU_STATUS_INVALID_ARGUMENT);
+  if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+    util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
+  return status;
 }
 
 rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char *plugin_dir) {
@@ -341,6 +332,9 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
   if (vm->engine_config.num_threads != 1)
     return ROCJITSU_STATUS_UNSUPPORTED;
 
+  const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const SimulatedKfd::ScopedIngressCache ingress_cache;
+  const amdgpu::GpuVmAccessBatchGuard::ScopedCache execution_cache;
   bool any_active = vm->engine->step();
   if (vm->engine->exit_code() != 0)
     return ROCJITSU_STATUS_ERROR;
@@ -355,6 +349,9 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
 
+  const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const SimulatedKfd::ScopedIngressCache ingress_cache;
+  const amdgpu::GpuVmAccessBatchGuard::ScopedCache execution_cache;
   auto exit = vm->engine->run();
 
   if (ticks_executed)
@@ -381,47 +378,36 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
   // opening the output file rather than silently dropping other GPU state.
   if (vm->vm && vm->vm->num_socs() > 1)
     return ROCJITSU_STATUS_UNSUPPORTED;
-  try {
-    auto engine_config = vm->engine_config;
-    if (engine_config.num_threads == vm->loaded.execution_threads.engines)
-      engine_config.num_threads = vm->loaded.requested_engine_threads;
-    util::StringDiagnostic diagnostic;
-    if (config::save_checkpoint(path, *vm->soc, tick, engine_config,
-                                vm->loaded.cpu_dispatch_threads, diagnostic.emitter(),
-                                vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
-                                vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads)
-            .failed()) {
-      util::Logger::warn("rj_vm_save_checkpoint failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_ERROR;
-    }
-    return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &error) {
-    // Serialization still allocates and calls library code that may throw.
-    util::Logger::warn("rj_vm_save_checkpoint failed: ", error.what());
+  auto engine_config = vm->engine_config;
+  if (engine_config.num_threads == vm->loaded.execution_threads.engines)
+    engine_config.num_threads = vm->loaded.requested_engine_threads;
+  util::StringDiagnostic diagnostic;
+  if (config::save_checkpoint(path, *vm->soc, tick, engine_config, vm->loaded.cpu_dispatch_threads,
+                              diagnostic.emitter(), vm->loaded.cpu_thread_budget,
+                              vm->loaded.thread_allocations, vm->loaded.legacy_auto_dispatch,
+                              vm->loaded.async_helper_threads)
+          .failed()) {
+    util::Logger::warn("rj_vm_save_checkpoint failed: ", diagnostic.message());
     return ROCJITSU_STATUS_ERROR;
   }
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
   if (!path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  try {
-    util::StringDiagnostic diagnostic;
-    util::FailureOr<config::LoadedConfig> loaded =
-        config::restore_checkpoint(path, diagnostic.emitter());
-    if (loaded.failed()) {
-      util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_INVALID_FILE;
-    }
-    const auto status = create_from_loaded(loaded.value(), RJ_VM_MODE_DEFAULT, vm,
-                                           diagnostic.emitter(), ROCJITSU_STATUS_INVALID_FILE);
-    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
-      util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
-    return status;
-  } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_restore_checkpoint failed: ", e.what());
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<config::LoadedConfig> loaded =
+      config::restore_checkpoint(path, diagnostic.emitter());
+  if (loaded.failed()) {
+    util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
+  const auto status = create_from_loaded(loaded.value(), RJ_VM_MODE_DEFAULT, vm,
+                                         diagnostic.emitter(), ROCJITSU_STATUS_INVALID_FILE);
+  if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+    util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
+  return status;
 }
 
 namespace {
@@ -463,6 +449,10 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
     }
   }
 
+  // Queue creation may translate GPU memory on the embedding thread. A
+  // persistent TLS cache would retain this DSO until that host thread exits.
+  const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const SimulatedKfd::ScopedIngressCache ingress_cache;
   cmd->result =
       driver->ioctl(process_id, cmd->cmd, cmd->buf, &cmd->in_mem_handle, cmd->in_proc_handle);
   cmd->shared_handle = -1;
@@ -594,18 +584,14 @@ rj_status_t rj_vm_gpu_id(rj_vm_t *vm, uint32_t *gpu_id) {
 rj_status_t rj_vm_topology_path(rj_vm_t *vm, const char **path) {
   if (!vm || !path || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  static thread_local std::string cached_path;
-  cached_path = vm->vm->driver()->topology_path();
-  *path = cached_path.c_str();
+  *path = vm->vm->driver()->topology().path().c_str();
   return ROCJITSU_STATUS_SUCCESS;
 }
 
 rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path) {
   if (!vm || !path || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  static thread_local std::string cached_drm;
-  cached_drm = vm->vm->driver()->topology().drm_path();
-  *path = cached_drm.c_str();
+  *path = vm->vm->driver()->topology().drm_path().c_str();
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -659,6 +645,8 @@ rj_status_t rj_vm_map_shared_mem(rj_handle_t handle, rj_vm_map_t *map) {
       !map->length || map->offset < 0 || static_cast<uint64_t>(map->offset) % page ||
       map->length > SIZE_MAX - static_cast<uint64_t>(map->offset))
     return ROCJITSU_STATUS_ERROR;
+  // Borrowed shared mappings may precede every VM constructor.
+  libc_passthrough().resolve();
   const auto mapping_lock = host_mapping_lock().lock_exclusive();
   if (check_memory_backing_size(handle, static_cast<size_t>(map->offset) +
                                             static_cast<size_t>(map->length)) != 0) {

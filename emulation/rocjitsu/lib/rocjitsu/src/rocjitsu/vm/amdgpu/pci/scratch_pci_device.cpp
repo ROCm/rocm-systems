@@ -72,8 +72,10 @@ void ScratchPciDevice::dma_unmap(const simdojo::DmaRegion & /*region*/) {
   }
 }
 
-void ScratchPciDevice::reset(simdojo::ResetKind /*kind*/) {
+util::Result ScratchPciDevice::reset(simdojo::ResetKind /*kind*/,
+                                     util::DiagnosticEmitter /*diag*/) {
   std::ranges::fill(storage_, std::byte{0});
+  return util::Result::success();
 }
 
 } // namespace rocjitsu

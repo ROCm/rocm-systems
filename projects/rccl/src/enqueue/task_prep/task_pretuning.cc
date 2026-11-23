@@ -72,6 +72,8 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
                     (ncclNvlsSupported(raw->opDev.op, raw->datatype) || raw->func == ncclFuncAllGather);
   in->symAligned16B = ncclSymAligned16B(raw->func, comm->rank, raw->sendbuff, raw->recvbuff, sendWin, recvWin,
                                         raw->count * ncclTypeSize(raw->datatype));
+  in->ginWindowsUnregistered =
+    ncclDevrWindowMissingGinSegments(sendWin) || ncclDevrWindowMissingGinSegments(recvWin);
 
   // Registration covers the user buffers, whose element type is unchanged by
   // the byte normalization above.
@@ -97,6 +99,7 @@ static ncclResult_t fillSendRecvTuningInput(struct ncclComm* comm, struct ncclRa
 
   in->comm = comm;
   in->tuningMask = NCCL_TUNING_MASK_ALL;
+  in->ginWindowsUnregistered = false;
   in->func = raw->func;
   in->datatype = raw->datatype;
   in->count = raw->count;
@@ -114,6 +117,7 @@ static ncclResult_t fillSendRecvTuningInput(struct ncclComm* comm, struct ncclRa
 static ncclResult_t fillRmaTuningInput(struct ncclComm* comm, struct ncclRawTaskRma* raw, ncclTuningInput_t* in) {
   in->comm = comm;
   in->tuningMask = NCCL_TUNING_MASK_ALL;
+  in->ginWindowsUnregistered = false;
   in->func = raw->func;
   in->nWorks = 1;
   in->numPipeOps = 1;
@@ -138,6 +142,7 @@ static ncclResult_t fillAllGatherVTuningInput(struct ncclComm* comm, struct nccl
 
   in->comm = comm;
   in->tuningMask = NCCL_TUNING_MASK_ALL;
+  in->ginWindowsUnregistered = false;
   in->func = ncclFuncAllGatherV;
   in->datatype = raw->datatype;
   in->nWorks = 1;

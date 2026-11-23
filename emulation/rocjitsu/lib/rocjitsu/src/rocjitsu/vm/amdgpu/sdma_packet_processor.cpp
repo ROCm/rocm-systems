@@ -684,10 +684,10 @@ private:
     return callbacks_.admit_memory_ingress(*access_, spans);
   }
 
-  util::FailureOr<SdmaCacheLease> acquire_write_cache_maintenance() const {
+  util::FailureOr<CacheMaintenanceResult> acquire_write_cache_maintenance() const {
     if (callbacks_.acquire_cache_maintenance)
       return callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate);
-    return SdmaCacheLease{};
+    return CacheMaintenanceResult{};
   }
 
   SdmaPacketExecutionOutcome atomic_fetch_add(Operation &operation, uint64_t address,
@@ -927,6 +927,8 @@ private:
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
       if (cache_lease.failed())
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+        return SdmaPacketExecutionOutcome::Unavailable;
       const SdmaPacketExecutionOutcome outcome = atomic_fetch_add(
           operation, operation.signal_address, uint64_t{0} - operation.signal_data);
       if (outcome != SdmaPacketExecutionOutcome::Complete)
@@ -1049,6 +1051,8 @@ private:
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
       if (cache_lease.failed())
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+        return SdmaPacketExecutionOutcome::Unavailable;
       const SdmaPacketExecutionOutcome outcome =
           atomic_fetch_add(operation, operation.address, operation.value);
       if (outcome != SdmaPacketExecutionOutcome::Complete)
@@ -1063,6 +1067,8 @@ private:
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
       if (cache_lease.failed())
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+        return SdmaPacketExecutionOutcome::Unavailable;
       const VmAccessOutcome outcome =
           access_->atomic_store(operation.mailbox, sizeof(uint64_t), operation.event_id);
       if (outcome != VmAccessOutcome::Complete)
@@ -1095,6 +1101,8 @@ private:
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
       if (cache_lease.failed())
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+        return SdmaPacketExecutionOutcome::Unavailable;
       std::memcpy(operation.scratch.data(), &operation.value,
                   static_cast<std::size_t>(operation.count));
       const VmAccessOutcome outcome = access_->write(
@@ -1153,6 +1161,8 @@ private:
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
       if (cache_lease.failed())
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+        return SdmaPacketExecutionOutcome::Unavailable;
       if (!operation.timestamp_captured) {
         operation.value = callbacks_.timestamp ? callbacks_.timestamp() : 0;
         operation.timestamp_captured = true;
@@ -1171,18 +1181,22 @@ private:
       const uint32_t inv = gfx1250 ? ((1u << 14) | (1u << 13)) : ((1u << 30) | (1u << 29));
       if ((operation.value32 & wb) != 0) {
         if (callbacks_.acquire_cache_maintenance) {
-          util::FailureOr<SdmaCacheLease> lease =
+          util::FailureOr<CacheMaintenanceResult> lease =
               callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate);
           if (lease.failed())
             return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+          if (lease.value().outcome == CacheMaintenanceOutcome::Retry)
+            return SdmaPacketExecutionOutcome::Unavailable;
           state_->operation_committed = true;
         }
       } else if ((operation.value32 & inv) != 0) {
         if (callbacks_.acquire_cache_maintenance) {
-          util::FailureOr<SdmaCacheLease> lease =
+          util::FailureOr<CacheMaintenanceResult> lease =
               callbacks_.acquire_cache_maintenance(SdmaCacheOperation::Invalidate);
           if (lease.failed())
             return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+          if (lease.value().outcome == CacheMaintenanceOutcome::Retry)
+            return SdmaPacketExecutionOutcome::Unavailable;
           state_->operation_committed = true;
         }
       }
@@ -1271,19 +1285,7 @@ private:
       Operation *operation = &*state_->operation;
       const std::size_t dwords = operation->dwords;
       const Kind kind = operation->kind;
-      SdmaPacketExecutionOutcome outcome;
-      try {
-        outcome = execute(*operation, frame);
-      } catch (const CacheMaintenanceUnavailable &) {
-        // Tokenized writes update io_progress after each committed physical
-        // span. A later maintenance refusal can unwind before execute() gets
-        // to copy that progress into the packet-level committed flag.
-        if (operation->io_progress != 0 &&
-            (kind == Kind::Write || kind == Kind::Fill ||
-             (kind == Kind::Copy && operation->destination_index != 0)))
-          state_->operation_committed = true;
-        return result(SdmaPacketExecutionOutcome::Unavailable);
-      }
+      const SdmaPacketExecutionOutcome outcome = execute(*operation, frame);
       if (outcome == SdmaPacketExecutionOutcome::Unavailable) {
         return result(outcome);
       }

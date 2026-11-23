@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/result.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -12,22 +13,21 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
 
-amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+amdgpu::SdmaPacketDialect sdma_dialect(rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return amdgpu::SdmaPacketDialect::Gfx1250;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna4)
     return amdgpu::SdmaPacketDialect::Rdna4;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+  if (arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+      arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Rdna2) {
     return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
   }
   return amdgpu::SdmaPacketDialect::Legacy;
@@ -35,7 +35,7 @@ amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
 
 } // namespace
 
-SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
+SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rocjitsu::IsaFamily arch)
     : simdojo::CompositeComponent(std::move(name)), arch_(arch),
       sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
       queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this), memory_(memory) {
@@ -160,7 +160,7 @@ bool SoC::set_memory(amdgpu::GpuMemory *memory) {
     iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);
   }
   // Create a standalone HBM controller for the config-loader path where the
-  // parameterized constructor (which creates it) was not used.
+  // configured factory (which creates it) was not used.
   if (memory && !hbm_standalone_ && iods_.empty())
     hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory, &gpu_vm_);
   return true;
@@ -182,11 +182,16 @@ void SoC::wire_backing(simdojo::Topology &topo) {
   }
 }
 
-SoC::SoC(std::string name, const Config &config)
-    : simdojo::CompositeComponent(std::move(name)), arch_(config.arch),
-      exec_mode_(config.exec_mode),
-      sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
-      queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this) {
+std::unique_ptr<SoC> SoC::create(std::string name, const Config &config,
+                                 util::DiagnosticEmitter emit_error) {
+  auto soc = std::make_unique<SoC>(std::move(name), nullptr, config.arch);
+  if (soc->configure(config, emit_error).failed())
+    return nullptr;
+  return soc;
+}
+
+util::Result SoC::configure(const Config &config, util::DiagnosticEmitter emit_error) {
+  exec_mode_ = config.exec_mode;
   set_weight(0); // Structural container, not a work-producing component.
   auto soc_name = this->name();
 
@@ -213,8 +218,10 @@ SoC::SoC(std::string name, const Config &config)
     // Create XCDs, each assigned to its parent IOD.
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
-                                        config.arch, memory_, config.exec_mode, cache_coherence_);
+          amdgpu::Xcd::create(soc_name + ".xcd" + std::to_string(i), config.xcd, config.arch,
+                              memory_, config.exec_mode, cache_coherence_, emit_error);
+      if (!xcd_ptr)
+        return util::Result::failure();
       xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
       xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
       xcds_.push_back(xcd_ptr.get());
@@ -225,8 +232,10 @@ SoC::SoC(std::string name, const Config &config)
     hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_, &gpu_vm_);
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
-                                        config.arch, memory_, config.exec_mode, cache_coherence_);
+          amdgpu::Xcd::create(soc_name + ".xcd" + std::to_string(i), config.xcd, config.arch,
+                              memory_, config.exec_mode, cache_coherence_, emit_error);
+      if (!xcd_ptr)
+        return util::Result::failure();
       xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
       xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
       xcds_.push_back(xcd_ptr.get());
@@ -240,9 +249,10 @@ SoC::SoC(std::string name, const Config &config)
     for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_scratch_slots_per_cu(config.scratch_slots_per_cu);
     });
+  return util::Result::success();
 }
 
-util::Result SoC::set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
+util::Result SoC::set_arch(rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error) {
   if (!sdma_queue_scheduler_.set_packet_dialect(sdma_dialect(arch)))
     return emit_error.emit() << "SoC architecture cannot change while copy queues are active";
   arch_ = arch;
@@ -329,9 +339,9 @@ void SoC::flush_all() {
     i->msc()->flush_all();
 }
 
-void SoC::initialize() {
+util::Result SoC::initialize(util::DiagnosticEmitter emit_error) {
   if (!cache_coherence_->has_legacy_maintenance_backing())
-    throw std::logic_error("SoC cache hierarchy lacks legacy maintenance backing");
+    return emit_error.emit() << "SoC cache hierarchy lacks legacy maintenance backing";
 
   // Let every XCD's command processor see its siblings, so a queue marked for
   // fan-out can split its dispatches across the whole device. Each CP's rank is
@@ -356,7 +366,7 @@ void SoC::initialize() {
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
     // Create the HBM controller lazily if set_memory() was called but the
-    // parameterized constructor (which creates it) was not used.
+    // configured factory (which creates it) was not used.
     if (!hbm_standalone_ && memory_)
       hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_, &gpu_vm_);
     if (hbm_standalone_) {
@@ -370,7 +380,7 @@ void SoC::initialize() {
         }
       }
     }
-    return;
+    return util::Result::success();
   }
 
   auto &topo = engine()->topology();
@@ -405,6 +415,7 @@ void SoC::initialize() {
       link_ba->set_exec_mode(exec_mode_);
     }
   }
+  return util::Result::success();
 }
 
 const std::vector<amdgpu::ComputeUnitCore *> &SoC::all_cus() {

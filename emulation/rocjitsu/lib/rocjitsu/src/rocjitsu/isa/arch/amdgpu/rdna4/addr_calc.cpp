@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -248,7 +249,7 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
                                                                 index, offset, *soffset, lane);
     if (!amdgpu::addr_calc::rdna_buffer_range_check_lane(
             d, lane, mode, stride, records, address.index, offset, *soffset, address.swizzled,
-            per_element, ROCJITSU_CODE_ARCH_RDNA4)) {
+            per_element, rocjitsu::IsaFamily::Rdna4)) {
       d.lane_mask &= ~(uint64_t{1} << lane);
       d.per_lane_addr[lane] = 0;
     } else {
