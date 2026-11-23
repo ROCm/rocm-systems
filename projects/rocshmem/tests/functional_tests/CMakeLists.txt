@@ -144,6 +144,19 @@ target_link_options(
     $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
 )
 
+# ASAN instrumentation of the many templated test kernels can grow this
+# executable past the +/-2GB R_X86_64_PC32 relocation range and fail its link.
+# This option drops ASAN from the test sources only (host and device);
+# librocshmem.a stays instrumented, and the link still pulls in the ASAN
+# runtime for it. Mixing instrumented and uninstrumented code in one process
+# is a supported ASAN configuration; bugs inside the test code itself are no
+# longer caught at the point of fault.
+# option(ROCSHMEM_FUNCTIONAL_TESTS_DISABLE_ASAN
+#   "Disable ASAN instrumentation for the functional test sources only" OFF)
+if(ASAN)
+  target_compile_options(${PROJECT_NAME} PRIVATE -fno-sanitize=address)
+endif()
+
 ###############################################################################
 # DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
 ###############################################################################
