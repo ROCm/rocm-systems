@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -879,12 +880,12 @@ TEST(BinaryTranslatorE2E, WriteTranslatedElfToFile) {
   e_flags = (e_flags & ~0xFFu) | 0x4E;
   std::memcpy(elf_1201.data() + 48, &e_flags, 4);
 
-  const char *out_path = "/tmp/vector_add_gfx1201.co";
-  FILE *f = fopen(out_path, "wb");
+  const auto out_path = std::filesystem::temp_directory_path() / "vector_add_gfx1201.co";
+  FILE *f = fopen(out_path.c_str(), "wb");
   ASSERT_NE(f, nullptr);
   fwrite(elf_1201.data(), 1, elf_1201.size(), f);
   fclose(f);
-  printf("  Wrote translated ELF to %s (%zu bytes)\n", out_path, elf_1201.size());
+  printf("  Wrote translated ELF to %s (%zu bytes)\n", out_path.c_str(), elf_1201.size());
 }
 
 TEST(BinaryTranslatorE2E, DumpTranslation) {

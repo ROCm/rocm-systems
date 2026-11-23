@@ -301,18 +301,6 @@ uint32_t rj_code_inst_size(const rj_code_inst_t *inst) {
   return static_cast<uint32_t>(reinterpret_cast<const Instruction *>(inst)->size());
 }
 
-uint32_t rj_code_inst_flags(const rj_code_inst_t *inst) {
-  if (!inst)
-    return 0;
-  const auto *i = reinterpret_cast<const Instruction *>(inst);
-  uint32_t flags = 0;
-  if (i->is_branch())
-    flags |= RJ_CODE_INST_BRANCH;
-  if (i->is_memory_op())
-    flags |= RJ_CODE_INST_MEMORY_OP;
-  return flags;
-}
-
 rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint32_t buf_size) {
   if (!inst || !buf || buf_size == 0)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
