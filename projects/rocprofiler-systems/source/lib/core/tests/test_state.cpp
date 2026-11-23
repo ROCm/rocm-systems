@@ -5,11 +5,16 @@
 
 #include <gtest/gtest.h>
 
+#include <barrier>
+#include <cstdlib>
+#include <new>
 #include <stdexcept>
 #include <thread>
 
 namespace
 {
+thread_local bool g_fail_next_allocation = false;
+
 using process_state       = rocprofsys::state::process;
 using thread_state        = rocprofsys::state::thread;
 using process_state_value = process_state::State;
@@ -29,6 +34,30 @@ protected:
     void TearDown() override { thread_state::set(thread_state_value::enabled); }
 };
 }  // namespace
+
+void*
+operator new(std::size_t size)
+{
+    if(g_fail_next_allocation)
+    {
+        g_fail_next_allocation = false;
+        throw std::bad_alloc{};
+    }
+    if(void* ptr = std::malloc(size)) return ptr;
+    throw std::bad_alloc{};
+}
+
+void
+operator delete(void* ptr) noexcept
+{
+    std::free(ptr);
+}
+
+void
+operator delete(void* ptr, std::size_t) noexcept
+{
+    std::free(ptr);
+}
 
 TEST_F(ProcessStateTest, default_state_is_pre_init)
 {
@@ -57,6 +86,44 @@ TEST_F(ProcessStateTest, reset_bypasses_validation_and_returns_to_pre_init)
     auto const _prior = process_state::reset();
     EXPECT_EQ(_prior, process_state_value::finalized);
     EXPECT_EQ(process_state::get(), process_state_value::pre_init);
+}
+
+TEST_F(ProcessStateTest, racing_setters_never_lower_the_state)
+{
+    constexpr size_t k_iterations = 20'000;
+    constexpr size_t k_parties    = 3;
+
+    std::barrier sync{ k_parties };
+
+    auto setter = [&](process_state_value value) {
+        for(size_t i = 0; i < k_iterations; ++i)
+        {
+            sync.arrive_and_wait();
+            try
+            {
+                process_state::set(value);
+            } catch(const std::runtime_error&)
+            {}
+            sync.arrive_and_wait();
+        }
+    };
+
+    std::thread activator(setter, process_state_value::active);
+    std::thread finalizer(setter, process_state_value::finalized);
+
+    size_t lowered = 0;
+    for(size_t i = 0; i < k_iterations; ++i)
+    {
+        process_state::reset();
+        sync.arrive_and_wait();
+        sync.arrive_and_wait();
+        if(process_state::get() != process_state_value::finalized) ++lowered;
+    }
+    activator.join();
+    finalizer.join();
+
+    EXPECT_EQ(lowered, 0U) << "set(finalized) always runs, so the final state must be "
+                              "finalized; active means set(active) lowered it";
 }
 
 TEST_F(ThreadStateTest, default_state_is_enabled)
@@ -134,6 +201,36 @@ TEST_F(ThreadStateTest, state_is_thread_local)
            "spawning thread's state";
     EXPECT_EQ(thread_state::get(), thread_state_value::internal)
         << "the spawning thread's state must be unaffected by the child thread";
+}
+
+TEST_F(ThreadStateTest, failed_push_leaves_state_unchanged)
+{
+    constexpr size_t k_reserved_depth = 32;
+
+    thread_state_value state_after_failed_push = thread_state_value::enabled;
+    bool               push_threw              = false;
+
+    std::thread worker([&]() {
+        for(size_t i = 0; i < k_reserved_depth; ++i)
+            thread_state::push(thread_state_value::internal);
+
+        thread_state::set(thread_state_value::enabled);
+        g_fail_next_allocation = true;
+        try
+        {
+            thread_state::push(thread_state_value::internal);
+        } catch(const std::bad_alloc&)
+        {
+            push_threw = true;
+        }
+        g_fail_next_allocation  = false;
+        state_after_failed_push = thread_state::get();
+    });
+    worker.join();
+
+    ASSERT_TRUE(push_threw) << "33rd push must reallocate the history and hit bad_alloc";
+    EXPECT_EQ(state_after_failed_push, thread_state_value::enabled)
+        << "a push that throws must not change the thread state";
 }
 
 TEST(StateFormatterTest, process_lifecycle_state)
