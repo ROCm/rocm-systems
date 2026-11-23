@@ -52,6 +52,7 @@ L1VectorCache::L1VectorCache(L2Cache *l2, MemoryTransactionPolicy transactions)
     : l2_(l2), transactions_(transactions),
       registered_domain_(l2_ ? l2_->coherence_domain() : nullptr),
       coherence_epoch_(registered_domain_ ? registered_domain_->current_epoch() : 0) {
+  cache_.enable_region_residency();
   if (registered_domain_)
     registered_domain_->register_l1_vector_cache(this);
 }

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -200,6 +201,34 @@ public:
       tag.valid_bytes[word + 1] |= util::mask<uint64_t>(size - first_size);
   }
 
+  /// @brief Count resident lines per hashed address region from now on.
+  /// @details Lets a writer that bypasses this cache ask whether it may hold a
+  /// copy of a range. Call before the cache is shared; until then may_hold()
+  /// answers conservatively.
+  void enable_region_residency() {
+    residency_.enable();
+    residency_.generation.store(validity_generation_, std::memory_order_relaxed);
+  }
+
+  /// @brief Whether a line overlapping [address, address + size) may be resident.
+  /// @details Regions hash, so a true answer may be spurious. Allocation counts
+  /// a line (sequentially consistent) before its caller fills it, so a writer
+  /// that stores to backing and then sees false knows any later fill reads the
+  /// stored bytes.
+  [[nodiscard]] bool may_hold(uint64_t address, uint64_t size) const {
+    if (!residency_ || size == 0)
+      return true;
+    const uint64_t generation = residency_.generation.load(std::memory_order_seq_cst);
+    const uint64_t last = (address + size - 1) >> kResidencyRegionShift;
+    for (uint64_t region = address >> kResidencyRegionShift; region <= last; ++region) {
+      const uint64_t slot =
+          residency_[region & (kResidencyRegions - 1)].load(std::memory_order_seq_cst);
+      if ((slot >> 32) == generation && static_cast<uint32_t>(slot) != 0)
+        return true;
+    }
+    return false;
+  }
+
   /// @brief Look up an address in the cache.
   ///
   /// @param addr The memory address to look up.
@@ -301,6 +330,7 @@ public:
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
         policy_.access(set, w);
+        note_resident(addr);
         if (evicted_tag)
           *evicted_tag = {};
         return {&t, line_data(set, w)};
@@ -312,6 +342,8 @@ public:
     auto &vt = tag_at(set, victim_way);
     if (evicted_tag)
       *evicted_tag = vt;
+    note_resident(addr);
+    note_released(line_address_of(vt, set));
     // Clean victims need no writeback, so their bytes are never consumed.
     if (evicted_data && vt.dirty)
       std::memcpy(evicted_data, line_data(set, victim_way), LINE_SIZE);
@@ -384,6 +416,13 @@ public:
     tag.coherence = CoherenceState::INVALID;
   }
 
+  /// Invalidate a known resident way of @p addr and release its region residency.
+  void invalidate_resident(CacheTag &tag, uint64_t addr) {
+    if (is_valid(tag))
+      note_released(addr);
+    invalidate_tag(tag);
+  }
+
   /// @brief Invalidate the cache line for an address (if present).
   /// @param addr The memory address whose cache line to invalidate.
   /// @param vmid Owning process address space.
@@ -397,6 +436,7 @@ public:
       auto &t = tag_at(set, w);
       if (is_valid(t) && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
+        note_released(addr);
         invalidate_tag(t);
         return;
       }
@@ -414,7 +454,25 @@ public:
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (is_valid(t) && t.tag == tag) {
+        note_released(addr);
         invalidate_tag(t);
+      }
+    }
+  }
+
+  /// @brief Invalidate clean lines for an address across all address spaces.
+  void invalidate_clean_all_vmids(uint64_t addr) {
+    const uint32_t set = set_index(addr);
+    if (!touched_sets_[set])
+      return;
+    const uint64_t tag = tag_bits(addr);
+    for (uint32_t w = 0; w < Associativity; ++w) {
+      auto &t = tag_at(set, w);
+      if (is_valid(t) && t.tag == tag && !t.dirty) {
+        note_released(addr);
+        t.coherence_epoch = 0;
+        t.valid = 0;
+        t.coherence = CoherenceState::INVALID;
       }
     }
   }
@@ -426,13 +484,19 @@ public:
   void invalidate_all(std::optional<uint32_t> vmid = std::nullopt) {
     if (!vmid) {
       std::fill(touched_sets_.begin(), touched_sets_.end(), uint8_t{0});
-      if (++validity_generation_ != 0)
+      if (++validity_generation_ != 0) {
+        residency_.generation.store(validity_generation_, std::memory_order_seq_cst);
         return;
+      }
       // A wrapped generation would revive lines left from an older one.
       if (tags_.materialized())
         for (size_t i = 0; i < static_cast<size_t>(NumSets) * Associativity; ++i)
           tags_[i].valid = 0;
       validity_generation_ = 1;
+      if (residency_)
+        for (uint32_t region = 0; region < kResidencyRegions; ++region)
+          residency_[region].store(0, std::memory_order_relaxed);
+      residency_.generation.store(validity_generation_, std::memory_order_seq_cst);
       return;
     }
     for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {
@@ -450,6 +514,8 @@ public:
           auto &t = tag_at(s, w);
           if (t.vmid != *vmid)
             continue;
+          if (is_valid(t))
+            note_released(line_address_of(t, s));
           invalidate_tag(t);
         }
       }
@@ -471,6 +537,7 @@ public:
       for (uint32_t way = 0; way < Associativity; ++way) {
         CacheTag &tag = tag_at(set, way);
         if (is_valid(tag) && !tag.dirty && matches(tag)) {
+          note_released(line_address_of(tag, set));
           tag.coherence_epoch = 0;
           tag.valid = 0;
           tag.coherence = CoherenceState::INVALID;
@@ -801,6 +868,33 @@ private:
 
   bool is_valid(const CacheTag &tag) const { return tag.valid == validity_generation_; }
 
+  uint64_t line_address_of(const CacheTag &tag, uint32_t set) const {
+    return (tag.tag << (LineSizeBits + log2_sets())) | (static_cast<uint64_t>(set) << LineSizeBits);
+  }
+
+  void note_resident(uint64_t address) {
+    if (!residency_)
+      return;
+    auto &slot = residency_[(address >> kResidencyRegionShift) & (kResidencyRegions - 1)];
+    const uint64_t generation = validity_generation_;
+    uint64_t value = slot.load(std::memory_order_relaxed);
+    uint64_t next;
+    do {
+      next = (value >> 32) == generation ? value + 1 : (generation << 32) | 1;
+    } while (!slot.compare_exchange_weak(value, next, std::memory_order_seq_cst));
+  }
+
+  void note_released(uint64_t address) {
+    if (!residency_)
+      return;
+    auto &slot = residency_[(address >> kResidencyRegionShift) & (kResidencyRegions - 1)];
+    const uint64_t generation = validity_generation_;
+    uint64_t value = slot.load(std::memory_order_relaxed);
+    while ((value >> 32) == generation && static_cast<uint32_t>(value) != 0 &&
+           !slot.compare_exchange_weak(value, value - 1, std::memory_order_seq_cst)) {
+    }
+  }
+
   CacheTag &tag_at(uint32_t set, uint32_t way) {
     return tags_[static_cast<size_t>(set) * Associativity + way];
   }
@@ -829,6 +923,38 @@ private:
   std::vector<uint8_t> touched_sets_;
   // Tags whose token differs are invalid. Zero is never current.
   uint16_t validity_generation_ = 1;
+  // Optional resident-line counts per hashed region. Each slot holds the
+  // validity generation in its high half, so full invalidation zeroes every
+  // count without touching them; readers use the published generation copy.
+  static constexpr unsigned kResidencyRegionShift = 16;
+  static constexpr uint32_t kResidencyRegions = 4096;
+  class RegionResidency {
+  public:
+    RegionResidency() = default;
+    RegionResidency(const RegionResidency &other) { *this = other; }
+    RegionResidency &operator=(const RegionResidency &other) {
+      if (this != &other) {
+        slots_.reset();
+        if (other.slots_) {
+          enable();
+          for (uint32_t region = 0; region < kResidencyRegions; ++region)
+            slots_[region].store(other.slots_[region].load(std::memory_order_relaxed),
+                                 std::memory_order_relaxed);
+        }
+        generation.store(other.generation.load(std::memory_order_relaxed),
+                         std::memory_order_relaxed);
+      }
+      return *this;
+    }
+    void enable() { slots_ = std::make_unique<std::atomic<uint64_t>[]>(kResidencyRegions); }
+    explicit operator bool() const { return slots_ != nullptr; }
+    std::atomic<uint64_t> &operator[](uint32_t region) const { return slots_[region]; }
+    std::atomic<uint64_t> generation{1};
+
+  private:
+    std::unique_ptr<std::atomic<uint64_t>[]> slots_;
+  };
+  RegionResidency residency_;
 };
 
 } // namespace simdojo

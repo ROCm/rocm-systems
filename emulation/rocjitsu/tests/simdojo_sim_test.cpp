@@ -2836,6 +2836,56 @@ TEST(CacheVmidTest, EvictedDataIsCopiedOnlyForDirtyVictims) {
   EXPECT_FALSE(std::ranges::all_of(evicted_data, [](uint8_t b) { return b == 0xA5; }));
 }
 
+TEST(CacheResidencyTest, CountsResidentLinesPerRegion) {
+  TestCache cache;
+  EXPECT_TRUE(cache.may_hold(0x10000, 4)); // Untracked caches answer conservatively.
+  cache.enable_region_residency();
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(TestCache::LINE_SIZE) * 4;
+  constexpr uint64_t kA = 0x10000, kB = kA + kSetStride, kC = 0x40000;
+  EXPECT_FALSE(cache.may_hold(kA, 4));
+  cache.allocate(kA, 1);
+  cache.allocate(kB, 2);
+  EXPECT_TRUE(cache.may_hold(kA, 4));
+  EXPECT_TRUE(cache.may_hold(kA - 8, 16)); // A range spanning into the region.
+  EXPECT_FALSE(cache.may_hold(kC, 4));
+  cache.invalidate(kA, 1);
+  EXPECT_TRUE(cache.may_hold(kA, 4)); // kB shares kA's region.
+  cache.invalidate(kB, 2);
+  EXPECT_FALSE(cache.may_hold(kA, 4));
+
+  // Eviction moves the count from the victim's region to the new line's.
+  cache.allocate(kA, 1);
+  cache.allocate(kB, 1);
+  cache.allocate(kC + 0x1000 - 0x1000 % kSetStride + kA % kSetStride, 1);
+  EXPECT_TRUE(cache.may_hold(kC, 0x1000));
+  cache.invalidate_clean_if([](const CacheTag &) { return true; });
+  EXPECT_FALSE(cache.may_hold(kA, 4));
+  EXPECT_FALSE(cache.may_hold(kC, 0x1000));
+}
+
+TEST(CacheResidencyTest, FullAndScopedInvalidationReleaseRegions) {
+  TestCache cache;
+  cache.enable_region_residency();
+  cache.allocate(0x20000, 1);
+  cache.allocate(0x30000, 2);
+  cache.invalidate_all(/*vmid=*/1);
+  EXPECT_FALSE(cache.may_hold(0x20000, 4));
+  EXPECT_TRUE(cache.may_hold(0x30000, 4));
+  cache.invalidate_all();
+  EXPECT_FALSE(cache.may_hold(0x30000, 4));
+  cache.allocate(0x30000, 2);
+  for (uint32_t i = 0; i <= UINT16_MAX; ++i)
+    cache.invalidate_all();
+  EXPECT_FALSE(cache.may_hold(0x30000, 4));
+  cache.allocate(0x30000, 2);
+  EXPECT_TRUE(cache.may_hold(0x30000, 4));
+  TestCache copy(cache);
+  EXPECT_TRUE(copy.may_hold(0x30000, 4));
+  cache.invalidate_clean_all_vmids(0x30000);
+  EXPECT_FALSE(cache.may_hold(0x30000, 4));
+  EXPECT_TRUE(copy.may_hold(0x30000, 4));
+}
+
 TEST(CacheVmidTest, LineDataForReadReturnsMatchingVmidData) {
   TestCache cache;
   constexpr uint64_t kAddr = 0x10000;

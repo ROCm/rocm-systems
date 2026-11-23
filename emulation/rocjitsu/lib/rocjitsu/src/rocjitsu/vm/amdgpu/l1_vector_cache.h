@@ -44,6 +44,12 @@ public:
   explicit L1VectorCache(L2Cache *l2 = nullptr, MemoryTransactionPolicy transactions = {});
 
   MemoryTransactionPolicy transaction_policy() const { return transactions_; }
+  /// @brief Whether a line of [address, address + size) may be resident.
+  /// @details Only this CU fills its L1, so the issuing thread's answer holds
+  /// until it fills again; other threads only discard lines.
+  [[nodiscard]] bool may_hold(uint64_t address, uint64_t size) const {
+    return cache_.may_hold(address, size);
+  }
   ~L1VectorCache();
 
   L1VectorCache(const L1VectorCache &) = delete;
