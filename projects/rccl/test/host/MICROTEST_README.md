@@ -149,9 +149,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   See `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroCeColl`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
   `CeCollMicrotest.*`, `CeInitMicrotest.*`, `LaunchPaths/CeAlltoAllvSyncMicrotest.*` and
-  `CeBatchOpsMicrotest.*`, all in `ce-coll-test.cc`. The `rccl-UnitTestsMicroInit` cleanup-order oracle needs the
-  fake `ncclCeFinalize` in `fakes/nccl_stubs.cc`, which this target drops via
-  `RCCL_STUBS_OMIT_ncclCeFinalize`.
+  `CeCollBatchOpsMicrotest.*`, all in `ce-coll-test.cc`. The `rccl-UnitTestsMicroInit`
+  cleanup-order oracle needs the fake `ncclCeFinalize` in `fakes/nccl_stubs.cc`, which
+  this target drops via `RCCL_STUBS_OMIT_ncclCeFinalize`.
 - **`rccl-UnitTestsMicroMiscCrypt`** — `misc/crypt.cc` (via `CRYPT_CC_PATH`, from
   `misc/crypt-test.cc`); suite `Crypt*`. See `test_categories_micro_misc.yaml`.
 - **`rccl-UnitTestsMicroMiscStrongstream`** — `misc/strongstream.cc` (via

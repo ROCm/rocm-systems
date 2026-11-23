@@ -1005,7 +1005,7 @@ struct CeBatchShape {
   const char* name;
   bool chunking;
   bool intraBatchSync;
-  size_t batches;  // hipMemcpyBatchAsync calls for the two copies CeBatchOpsMicrotest::Launch issues
+  size_t batches;  // hipMemcpyBatchAsync calls for the two copies CeCollBatchOpsMicrotest::Launch issues
 };
 
 // Both copies fit one intra-batch sync round; the 20 MiB one spans three 8 MiB chunks.
@@ -1018,7 +1018,7 @@ constexpr CeBatchShape kCeBatchShapes[] = {
 // Every copy of a batch launch shares attrs[0]. NCCL_CE_INTRA_GPU_MEMCPY_ENABLE (default 1) asks the runtime to
 // overlap the copies with compute.
 // NCCL_CE_INTRA_GPU_MEMCPY_ENABLE=0 drops only the overlap flag from the shared attrs[0]; copies stay stream-ordered.
-class CeBatchOpsMicrotest : public ::testing::Test {
+class CeCollBatchOpsMicrotest : public ::testing::Test {
  protected:
   struct Batch {
     size_t numAttrs;
@@ -1088,7 +1088,7 @@ class CeBatchOpsMicrotest : public ::testing::Test {
   std::vector<Batch> batches_;
 };
 
-TEST_F(CeBatchOpsMicrotest, IntraGpuMemcpyByDefault_EveryBatchPrefersOverlapWithCompute) {
+TEST_F(CeCollBatchOpsMicrotest, IntraGpuMemcpyByDefault_EveryBatchPrefersOverlapWithCompute) {
   for (const CeBatchShape& shape : kCeBatchShapes) {
     SCOPED_TRACE(shape.name);
 
@@ -1104,7 +1104,7 @@ TEST_F(CeBatchOpsMicrotest, IntraGpuMemcpyByDefault_EveryBatchPrefersOverlapWith
   }
 }
 
-TEST_F(CeBatchOpsMicrotest, IntraGpuMemcpyDisabled_NoBatchPrefersOverlapWithCompute) {
+TEST_F(CeCollBatchOpsMicrotest, IntraGpuMemcpyDisabled_NoBatchPrefersOverlapWithCompute) {
   intraGpuMemcpyEnable_ = 0;
   for (const CeBatchShape& shape : kCeBatchShapes) {
     SCOPED_TRACE(shape.name);
