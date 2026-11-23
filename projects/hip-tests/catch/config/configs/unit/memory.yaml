@@ -499,9 +499,6 @@ memory:
   Unit_hipMallocManaged_DeviceContextChange:
     <<: *level_default
     requires: [managed_memory, multi_gpu]
-    disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "AIRUNTIME-2744 - disabled on Windows; gfx1201 (amd_windows) self-skips because the GPU does not support managed memory, gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [multigpu, P1, managed_memory]
   Unit_hipManagedMultiGpuVaConsistency_MultiDevice:
     <<: *level_default

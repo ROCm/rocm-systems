@@ -117,9 +117,6 @@ graph:
   Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg:
     <<: *level_default
     requires: [p2p]
-    disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged"
     tags: [lifecycle, multigpu]
   Unit_hipGraphInstantiateWithFlags_StreamCapture:
     <<: *level_default
