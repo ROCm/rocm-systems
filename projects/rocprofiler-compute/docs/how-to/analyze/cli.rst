@@ -618,6 +618,7 @@ Interactive Roofline HTML:
 * Use the *AI axis* selector to choose one memory level per kernel, *All peaks* to plot every level at once, or *Limited by* to show each kernel's limiting memory-level point (falling back to its leftmost point when no memory-level limiter is available).
   Isolating one kernel shows it across all available memory levels.
 * Use the *Precision* selector to choose one or more arithmetic precision's peak roofline to display on the plot.
+  On AMD Instinct MI350 Series, FP4 and FP6 share one ceiling, *Peak MFMA-F6F4 (FP6/FP4)*: one hardware counter counts FP4 and FP6 matrix operations together, so their throughput can't be told apart.
 * Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.
 * Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.
 * Drag to pan, scroll to zoom, double-click or use *Reset zoom* to re-frame the chart, use *Export PNG* to save the current view, and use *Theme toggle* to switch between light and dark modes.

@@ -11,6 +11,7 @@ import json
 import math
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Dict, List, Tuple
 
 import plotly.graph_objects as go
@@ -124,6 +125,35 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     names = {trace.name for trace in fig.data}
     assert names.issuperset(drawn)
     assert names.isdisjoint(not_drawn)
+
+
+def test_fp4_and_fp6_share_one_f6f4_ceiling(tmp_path: Path) -> None:
+    """On gfx950 one counter counts FP6 and FP4 MFMA work, so both precisions draw
+    the mixed-precision F6F4 ceiling: one line, named for both, shown when either
+    is selected."""
+    columns = {"HBMBw": 500, "L2Bw": 500, "L1Bw": 500, "LDSBw": 500}
+    columns.update(MFMAF4Flops=4000, MFMAF6Flops=6000, MFMAF6F4Flops=8000)
+    (tmp_path / "roofline.csv").write_text(
+        f"device,{','.join(columns)}\n0,{','.join(map(str, columns.values()))}\n",
+        encoding="utf-8",
+    )
+    mspec = SimpleNamespace(gpu_model="mi350", gpu_series="mi350", gpu_arch="gfx950")
+    parameters = {
+        "workload_dir": str(tmp_path),
+        "device_id": 0,
+        "is_standalone": True,
+        "matrix_ops_type": "MFMA",
+    }
+    roofline = Roofline(argparse.Namespace(), mspec, parameters)
+    flops_figure = roofline.generate_plot("FP4", fig=None)
+    flops_figure = roofline.generate_plot("FP6", fig=flops_figure)
+    figure, view_model = roofline._combined_html_figure(None, flops_figure)
+
+    assert [
+        (trace["label"], trace["peakPerf"], trace["dtypes"])
+        for trace in view_model.compute_traces
+    ] == [("Peak MFMA-F6F4 (FP6/FP4)", 8000, ["FP4", "FP6"])]
+    assert view_model.precisions == ["FP4", "FP6"]
 
 
 CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}
@@ -659,7 +689,7 @@ def test_standalone_figure_opens_on_only_the_default_precisions(
         for trace in view_model.compute_traces
     }
     assert drawn == {
-        trace["label"]: trace["dtype"] in selected
+        trace["label"]: bool(selected.intersection(trace["dtypes"]))
         for trace in view_model.compute_traces
     }
 
@@ -674,7 +704,7 @@ def test_standalone_roofs_open_at_the_selected_cap(benchmarked_roofline) -> None
     top_peak = max(
         trace["peakPerf"]
         for trace in view_model.compute_traces
-        if trace["dtype"] in selected
+        if selected.intersection(trace["dtypes"])
     )
     assert top_peak < max(peaks), "expected a taller unselected ceiling"
 
