@@ -683,12 +683,12 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsDoNotReserveUnusedHelpers) {
     config::ExecutionThreadAllocation helper_budget;
     ASSERT_TRUE(resolve_valid_execution_threads(helper_budget, settings, 128));
     EXPECT_EQ(helper_budget.helpers, 0u);
-    settings.request.helpers = 8; // Explicit requests also remain inactive.
-    config::ExecutionThreadAllocation disabled;
-    ASSERT_TRUE(resolve_valid_execution_threads(disabled, settings, 128));
-    EXPECT_EQ(disabled.engines, 8u);
-    EXPECT_EQ(disabled.dispatch, (std::vector<uint32_t>{max_cpu - 7}));
-    EXPECT_EQ(disabled.helpers, 0u);
+    settings.request.helpers = 8; // Explicit requests are honored where async MMA is supported.
+    config::ExecutionThreadAllocation requested;
+    ASSERT_TRUE(resolve_valid_execution_threads(requested, settings, 128));
+    EXPECT_EQ(requested.engines, 8u);
+    EXPECT_EQ(requested.dispatch, (std::vector<uint32_t>{max_cpu - 7}));
+    EXPECT_EQ(requested.helpers, cdna5 ? 0u : 8u);
   }
 }
 

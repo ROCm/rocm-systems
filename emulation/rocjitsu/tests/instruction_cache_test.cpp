@@ -1906,7 +1906,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadPreservesFullFetchValidatio
   }
 }
 
-TEST(InstructionCacheCuTest, TranslatedLookaheadKeepsMigratedMfmaOnIssuer) {
+TEST(InstructionCacheCuTest, TranslatedLookaheadOffloadsMfmaAfterCodeChange) {
   for (const bool refresh_hint : {false, true}) {
     SCOPED_TRACE(refresh_hint);
     GpuVm gpu_vm;
@@ -1928,8 +1928,8 @@ TEST(InstructionCacheCuTest, TranslatedLookaheadKeepsMigratedMfmaOnIssuer) {
     fixture.cu()->step();
     ASSERT_EQ(wf->pc, kCodeBase + 4);
 
-    // Migrated MFMAs stay on the issuer even with a fresh admission hint. Both compute a 16x16
-    // matrix of 32s from packed half-precision ones and an inline zero accumulator.
+    // The rewritten block computes from the new code with a stale or fresh hint. Both compute a 16x16 matrix of 32s from packed half-precision ones and an inline
+    // zero accumulator.
     std::array<uint32_t, 5> program{};
     for (unsigned index = 0; index != 2; ++index) {
       const auto words = cdna4::build_vop3p_mfma(
@@ -1960,7 +1960,11 @@ TEST(InstructionCacheCuTest, TranslatedLookaheadKeepsMigratedMfmaOnIssuer) {
     for (unsigned steps = 0; wf->pc < kCodeBase + 16 && steps != 3; ++steps)
       fixture.cu()->step();
     EXPECT_EQ(wf->pc, kCodeBase + 16);
-    EXPECT_EQ(amdgpu::async_execution::stats.mma, submitted);
+    // A stale non-candidate hint issues the first MFMA synchronously.
+    if (refresh_hint)
+      EXPECT_GT(amdgpu::async_execution::stats.mma, submitted);
+    else
+      EXPECT_EQ(amdgpu::async_execution::stats.mma, submitted);
     for (const unsigned dst : {64u, 80u})
       for (unsigned reg = 0; reg != 4; ++reg)
         for (unsigned lane = 0; lane != 64; ++lane)
