@@ -450,15 +450,77 @@ void MemoryAllocationTest::MemoryBasicAllocationAndFree(hsa_agent_t agent,
     err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
                                       &max_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    const size_t max_alloc_size = max_size;
     max_size = (max_size > kMemoryAllocSize) ? kMemoryAllocSize : max_size;
 
-    char *memoryPtr;
-    err = hsa_amd_memory_pool_allocate(pool, max_size , 0,
-                                       reinterpret_cast<void**>(&memoryPtr));
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-    if (memoryPtr) {
-      err = hsa_amd_memory_pool_free(memoryPtr);
+    auto free_pool = [](void* p) {
+      if (p != nullptr) EXPECT_EQ(hsa_amd_memory_pool_free(p), HSA_STATUS_SUCCESS);
+    };
+
+    for (uint32_t flags : {0u, uint32_t(HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)}) {
+      void* memoryPtr = nullptr;
+      err = hsa_amd_memory_pool_allocate(pool, max_size, flags, &memoryPtr);
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+      ASSERT_NE(memoryPtr, nullptr);
+      ASSERT_EQ(hsa_amd_memory_pool_free(memoryPtr), HSA_STATUS_SUCCESS);
+    }
+
+    // With fragment allocation enabled, the recommended granule for a local
+    // pool is the fragment allocator's block size. Exercise executable
+    // allocations at and immediately above that boundary so both the fragment
+    // and direct allocation/free paths run.
+    hsa_amd_memory_pool_location_t location;
+    ASSERT_EQ(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_LOCATION, &location),
+              HSA_STATUS_SUCCESS);
+    if (location == HSA_AMD_MEMORY_POOL_LOCATION_GPU) {
+      ASSERT_GT(pool_i.alloc_rec_granule, 0u);
+      ASSERT_GT(pool_i.alloc_granule, 0u);
+      ASSERT_LE(pool_i.alloc_rec_granule, max_alloc_size);
+      ASSERT_LE(pool_i.alloc_granule, max_alloc_size - pool_i.alloc_rec_granule);
+
+      void* fragment_ptr = nullptr;
+      ASSERT_EQ(hsa_amd_memory_pool_allocate(pool, pool_i.alloc_rec_granule,
+                                             HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &fragment_ptr),
+                HSA_STATUS_SUCCESS);
+      std::unique_ptr<void, decltype(free_pool)> fragment_allocation(fragment_ptr, free_pool);
+      ASSERT_NE(fragment_ptr, nullptr);
+
+      const size_t direct_size = pool_i.alloc_rec_granule + pool_i.alloc_granule;
+      void* direct_ptr = nullptr;
+      ASSERT_EQ(hsa_amd_memory_pool_allocate(pool, direct_size,
+                                             HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &direct_ptr),
+                HSA_STATUS_SUCCESS);
+      std::unique_ptr<void, decltype(free_pool)> direct_allocation(direct_ptr, free_pool);
+      ASSERT_NE(direct_ptr, nullptr);
+
+      direct_allocation.reset();
+      fragment_allocation.reset();
+    }
+
+    // Keep ordinary and executable allocations live together, then free them
+    // out of order. The runtime must retain each fragment's identity and bounds.
+    std::vector<std::unique_ptr<void, decltype(free_pool)>> allocations;
+    for (size_t i = 0; i < 64; ++i) {
+      const size_t bytes = pool_i.alloc_granule * (1 + i % 3);
+      const uint32_t flags = i % 2 ? HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG : 0;
+      void* p = nullptr;
+      ASSERT_EQ(hsa_amd_memory_pool_allocate(pool, bytes, flags, &p), HSA_STATUS_SUCCESS);
+      allocations.emplace_back(p, free_pool);
+      ASSERT_NE(p, nullptr);
+      hsa_amd_pointer_info_t info{};
+      info.size = sizeof(info);
+      ASSERT_EQ(hsa_amd_pointer_info(p, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+      EXPECT_EQ(info.agentBaseAddress, p);
+      EXPECT_GE(info.sizeInBytes, bytes);
+    }
+    for (size_t i = 0; i < allocations.size(); i += 2) allocations[i].reset();
+    for (size_t i = 1; i < allocations.size(); i += 2) {
+      hsa_amd_pointer_info_t info{};
+      info.size = sizeof(info);
+      ASSERT_EQ(hsa_amd_pointer_info(allocations[i].get(), &info, nullptr, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(info.agentBaseAddress, allocations[i].get());
+      EXPECT_GE(info.sizeInBytes, pool_i.alloc_granule * (1 + i % 3));
     }
   }
   return;
