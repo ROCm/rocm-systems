@@ -31,11 +31,11 @@ from format_yaml import normalize_equation
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Make src/ importable.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from rocprof_compute_soc.metric_library import loader  # noqa: E402
-from utils.metrics.expression import build_eval_string  # noqa: E402
-from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_common import canonical_config_arch  # noqa: E402
-from utils.utils_counter_defs import counter_to_block  # noqa: E402
+from rocprof_compute_soc.metric_library import loader
+from utils.metrics.expression import build_eval_string
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import canonical_config_arch
+from utils.utils_counter_defs import counter_to_block
 
 # Categories named after panels, not hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
@@ -137,9 +137,8 @@ def canonical_formula(equation: object) -> Optional[str]:
 def arch_ceilings(arch: str) -> Set[str]:
     """Return the measured roofline ceilings of any device of arch."""
     ceilings: Set[str] = set()
-    for device in mi_gpu_specs.get_roofline_archs():
-        if canonical_config_arch(device) == arch:
-            ceilings.update(mi_gpu_specs.get_roofline_columns(device))
+    for device in _member_archs(arch):
+        ceilings.update(mi_gpu_specs.get_roofline_columns(device))
     return ceilings
 
 
