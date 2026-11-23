@@ -521,6 +521,7 @@ add_executable(
     cdna_integer_arith_test.cpp
     older_scalar_integer_test.cpp
     older_fp_class_compare_test.cpp
+    older_integer_compare_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp

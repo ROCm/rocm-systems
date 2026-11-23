@@ -21,13 +21,9 @@ void dpp8_x86_64_v4(uint32_t exec_mask, uint32_t selectors, bool fi, uint32_t *o
                                 _mm512_set1_epi32(7));
   index = _mm512_or_si512(index, _mm512_setr_epi32(0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8));
   for (int lane = 0; lane < 32; lane += 16) {
-    auto value = _mm512_permutexvar_epi32(index, _mm512_loadu_si512(a + lane));
-    if (!fi) {
-      auto lane_exec_mask =
-          _mm512_and_si512(_mm512_srlv_epi32(_mm512_set1_epi32(int(exec_mask >> lane)), index),
-                           _mm512_set1_epi32(1));
-      value = _mm512_and_si512(value, _mm512_sub_epi32(_mm512_setzero_si512(), lane_exec_mask));
-    }
+    auto source =
+        _mm512_maskz_loadu_epi32(fi ? __mmask16(0xffff) : __mmask16(exec_mask >> lane), a + lane);
+    auto value = _mm512_permutexvar_epi32(index, source);
     _mm512_storeu_si512(reinterpret_cast<__m512i *>(out + lane), value);
   }
 }
@@ -69,19 +65,13 @@ uint32_t dpp16_x86_64_v4(uint32_t exec_mask, uint32_t control, uint32_t valid_ro
                          uint32_t *out, const uint32_t *a) {
   auto positions = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
   auto index0 = dpp16_index(control, positions);
-  auto bits = _mm512_setr_epi32(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192,
-                                16384, 32768);
   uint32_t readable = 0;
   for (int lane = 0; lane < 32; lane += 16) {
-    auto index = index0;
-    auto value = _mm512_permutexvar_epi32(index, _mm512_loadu_si512(a + lane));
-    auto valid =
-        _mm512_cmpeq_epi32_mask(_mm512_and_si512(_mm512_set1_epi32(int(valid_row)), bits), bits);
-    if (!fi) {
-      auto lane_exec_mask =
-          _mm512_and_si512(_mm512_srlv_epi32(_mm512_set1_epi32(int(exec_mask >> lane)), index),
-                           _mm512_set1_epi32(1));
-      valid &= _mm512_cmpneq_epi32_mask(lane_exec_mask, _mm512_setzero_si512());
+    auto value = _mm512_permutexvar_epi32(index0, _mm512_loadu_si512(a + lane));
+    __mmask16 valid = __mmask16(valid_row);
+    if (!fi && exec_mask != UINT32_MAX) {
+      auto active = _mm512_movm_epi32(__mmask16(exec_mask >> lane));
+      valid &= _mm512_movepi32_mask(_mm512_permutexvar_epi32(index0, active));
     }
     value = _mm512_maskz_mov_epi32(valid, value);
     readable |= uint32_t(valid) << lane;

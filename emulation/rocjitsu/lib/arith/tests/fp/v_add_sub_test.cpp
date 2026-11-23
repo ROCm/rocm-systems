@@ -309,12 +309,12 @@ TEST(FpAddF64, GuestRounding) {
                 {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL,
                  0x7fefffffffffffffULL}}};
   for (const auto &sample : cases) {
-    for (auto call : {rj_arith_v_add_f64_w32, rj_arith_v_add_f64_w32_gfx12}) {
-      check_binary64_rounding<32>(call, sample.a, sample.b, sample.expected);
-    }
-    for (auto call : {rj_arith_v_add_f64_w64, rj_arith_v_add_f64_w64_gfx12}) {
-      check_binary64_rounding<64>(call, sample.a, sample.b, sample.expected);
-    }
+    check_binary64_rounding<32>(rj_arith_v_add_f64_w32, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<32>(rj_arith_v_add_f64_w32_gfx12, sample.a, sample.b, sample.expected);
+    check_binary64_rounding<64>(rj_arith_v_add_f64_w64, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<64>(rj_arith_v_add_f64_w64_gfx12, sample.a, sample.b, sample.expected);
   }
 }
 
@@ -429,11 +429,36 @@ TEST(FpAddSubF16Gfx11, CapturedClampedNans) {
   check_captured_gfx11<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_clamp_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 FP64 ADD NaN lanes.
+// Compatibility and strict exact reproduce captured gfx1100 FP64 ADD NaN lanes.
 TEST(FpAddF64Gfx11, CapturedNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 64>(rj_arith_v_add_f64_w32, add_f64_lanes);
-  check_captured_gfx11<64, 64>(rj_arith_v_add_f64_w64, add_f64_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_add_f64_w32, add_f64_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_add_f64_w64, add_f64_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) Track C hw1100-wide corpus (2026-11-18), MODE.IEEE clear, denormals
+// kept: min normal + -1.0 rounds to -1.0 only to nearest and toward -inf; toward +inf and zero
+// give the predecessor. A kernel that ignores guest rounding fails two of the four rows.
+const CapturedGfx11 add_f64_rounding_lanes[] = {
+    {"MinNormalMinusOneNearest", 0, 0x1f0, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbff0000000000000},
+    {"MinNormalMinusOneRoundUp", 0, 0x1f5, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbfefffffffffffff},
+    {"MinNormalMinusOneRoundDown", 0, 0x1fa, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbff0000000000000},
+    {"MinNormalMinusOneRoundZero", 0, 0x1ff, 0x0010000000000000, 0xbff0000000000000, 0,
+     0xbfefffffffffffff},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce captured gfx1100 FP64 ADD directed rounding.
+TEST(FpAddF64Gfx11, CapturedDirectedRounding) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_add_f64_w32, add_f64_rounding_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_add_f64_w64, add_f64_rounding_lanes);
 }
 
 // Expected causes retain the inherited bridge classifiers, including their
