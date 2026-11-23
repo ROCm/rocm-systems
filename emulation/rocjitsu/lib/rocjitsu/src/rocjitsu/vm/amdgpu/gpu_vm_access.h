@@ -30,6 +30,8 @@
 
 namespace rocjitsu::amdgpu {
 
+class VmDirectBacking;
+
 class GpuVm;
 class GpuVmAccess;
 class GpuVmAccessState;
@@ -862,6 +864,8 @@ public:
     return std::nullopt;
   }
   [[nodiscard]] VmLocalGrantView local_grant_view(uint64_t address, size_t size) const;
+  /// @brief The binding's direct host access, or null when it has none.
+  [[nodiscard]] const VmDirectBacking *direct_backing() const;
   [[nodiscard]] bool supports_translated_local_cache() const;
   /// Saturating count of admitted cache writes and atomics under this root.
   /// Invalidation and pinned snapshots share the count; explicit root

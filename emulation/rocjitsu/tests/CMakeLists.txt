@@ -563,6 +563,7 @@ add_executable(
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
+    vmem_direct_test.cpp
     l2_maintenance_mutex_test.cpp
     l2_shard_epoch_test.cpp
     instruction_cache_test.cpp

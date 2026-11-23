@@ -623,6 +623,11 @@ std::optional<uint64_t> GpuVmAccess::local_grant_generation(uint64_t address, si
   return access_state_ ? access_state_->local_generation(address, size) : std::nullopt;
 }
 
+const VmDirectBacking *GpuVmAccess::direct_backing() const {
+  return access_state_ && access_state_->translator ? access_state_->translator->direct_backing()
+                                                    : nullptr;
+}
+
 VmLocalGrantView GpuVmAccess::local_grant_view(uint64_t address, size_t size) const {
   if (!access_state_ || !access_state_->local_grants)
     return {};

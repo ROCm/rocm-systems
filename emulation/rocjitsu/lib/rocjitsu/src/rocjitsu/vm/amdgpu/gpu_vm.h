@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
+#include "rocjitsu/vm/amdgpu/vm_direct_backing.h"
 #include "rocjitsu/vm/canonical_line_freshness.h"
 #include "util/distributed_shared_mutex.h"
 
@@ -94,6 +95,8 @@ public:
   /// checks without reentering frontend policy. Implementations with live grants
   /// must leave this false for the binding's whole lifetime.
   [[nodiscard]] virtual bool execute_admission_is_fixed() const { return false; }
+  /// Optional host access to whole local extents of this binding.
+  virtual const VmDirectBacking *direct_backing() const { return nullptr; }
   /// Optional versioned, uniformly cacheable local grants for every access kind.
   /// The epoch lives as long as the translator. Saturation disables all reuse.
   virtual const VmLocalGrants *local_grants() const { return nullptr; }

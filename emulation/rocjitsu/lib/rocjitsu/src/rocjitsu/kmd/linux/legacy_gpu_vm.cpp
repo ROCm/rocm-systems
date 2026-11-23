@@ -41,7 +41,8 @@ public:
 } // namespace
 
 class LegacyGpuVmAdapter::Binding final : public AddressSpaceTranslator,
-                                          public PhysicalMemoryAccess {
+                                          public PhysicalMemoryAccess,
+                                          public VmDirectBacking {
 public:
   Binding(std::shared_ptr<GpuMemory> memory, uint32_t vmid,
           const LegacyAddressSpaceRegistration &registration,
@@ -111,6 +112,44 @@ public:
                             uint64_t end) const override {
     return page_policies_ && address_space_->local_ingress_mapped(
                                  spans, begin, end, vmid_, original_request_mutex_, page_policies_);
+  }
+
+  const VmDirectBacking *direct_backing() const override {
+#if defined(RJ_GPU_MEMORY_WITH_ASAN) || defined(RJ_GPU_MEMORY_WITH_TSAN)
+    // Allocator queries and race annotations must see every access; keep those routed.
+    return nullptr;
+#else
+    return page_policies_ && original_request_mutex_ ? this : nullptr;
+#endif
+  }
+
+  uint64_t generation() const override { return page_policies_->generation(); }
+
+  std::optional<LegacyLocalExtent> extent(uint64_t address, uint64_t generation) const override {
+    return address_space_->local_extent(address, vmid_, original_request_mutex_, page_policies_,
+                                        generation);
+  }
+
+  bool run_admitted(uint64_t generation, void (*fn)(void *), void *context) const override {
+    if (!page_policies_->try_acquire(generation))
+      return false;
+    struct Admission {
+      const LegacyPageTableCacheState &state;
+      ~Admission() { state.release(); }
+    } admission{*page_policies_};
+    const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+    fn(context);
+    return true;
+  }
+
+  std::optional<VmRawBackingWriteGate::Permit> begin_write(uint64_t address,
+                                                           std::size_t size) const override {
+    return try_begin_raw_write(address, size);
+  }
+
+  bool copy(uint64_t address, uint8_t *host, void *local, std::size_t size, bool into_memory,
+            bool guarded) const override {
+    return address_space_->copy_local_backing(address, host, local, size, into_memory, guarded);
   }
 
   const VmLocalGrants *local_grants() const override {

@@ -694,6 +694,16 @@ public:
                const std::shared_ptr<LegacyPageTableCacheState> &policies,
                uint64_t generation) const;
 
+  /// @brief Copy one span resolved from a local extent.
+  /// @pre The caller holds the extent generation's admission and a shared
+  /// host-mapping lease. Each memory transaction keeps its backing stripe locks.
+  /// @returns false when a @p guarded copy took a host fault.
+  bool copy_local_backing(uint64_t address, uint8_t *host, void *local, size_t size,
+                          bool into_memory, bool guarded) const {
+    return guarded ? copy_backing_bytes<true>(address, host, local, size, into_memory)
+                   : copy_backing_bytes<false>(address, host, local, size, into_memory);
+  }
+
   /// @brief Return whether a GPU VA has a VMID page-table mapping.
   bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)

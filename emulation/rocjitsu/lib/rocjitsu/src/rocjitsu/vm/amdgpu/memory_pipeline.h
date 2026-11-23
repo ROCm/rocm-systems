@@ -252,6 +252,9 @@ public:
       : MemoryPipeline(WaitCounterType::VMCNT), l1_(l1), l2_(l2) {}
 
   void set_l2(L2Cache *l2) { l2_ = l2; }
+  /// @brief Let admitted plain local requests bypass the cache model.
+  /// @details Only functional CUs may enable this: timing models observe the caches.
+  void set_direct_backing(bool enabled) { direct_backing_ = enabled; }
   /// @brief Use KFD's owning-GPU prepared boundary for local vector atomics.
   /// @details A retired frontend may decline VMID-zero work so the standalone
   /// boundary remains usable after KFD teardown.
@@ -279,6 +282,7 @@ private:
   L2Cache *l2_;
   PreparedAtomicBoundaryHandler prepared_atomic_boundary_handler_;
   LocalRangeHandler local_range_handler_;
+  bool direct_backing_ = false;
 };
 
 /// @brief Local memory pipeline (LDS).

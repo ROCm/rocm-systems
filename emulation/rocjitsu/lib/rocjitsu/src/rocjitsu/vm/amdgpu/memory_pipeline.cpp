@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/vmem_direct.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -2304,6 +2305,32 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
         return outcome;
     }
     return VmAccessOutcome::Complete;
+  }
+
+  // Admitted local requests of a functional, unobserved CU may bypass the
+  // cache model; any extent, MTYPE, residency or admission doubt declines
+  // before an effect and the request continues below.
+  if (direct_backing_ && local_range_admitted && plain_lanes && !swizzled_lanes &&
+      !wf.raw_cu().debug_active() && wf.raw_cu().plugin_group().empty() &&
+      std::ranges::all_of(d.element_lane_masks.view(),
+                          [&](uint64_t mask) { return (mask & plain_lanes) == plain_lanes; })) {
+    if (const VmDirectBacking *backing = d.translated.access->direct_backing()) {
+      if (d.is_load)
+        d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
+      const DirectVectorRequest request{
+          .addrs = d.per_lane_addr.data(),
+          .lanes = plain_lanes,
+          .wf_size = d.wf_size,
+          .elem_size = d.elem_size,
+          .num_elems = d.num_elems,
+          .instruction_mtype = d.mtype,
+          .transactions = l1_->transaction_policy(),
+          .data = d.is_load ? d.response_data.data() : d.store_data.data(),
+          .is_load = d.is_load,
+      };
+      if (const auto outcome = try_direct_vector_access(request, *backing, *l1_, *l2_))
+        return *outcome;
+    }
   }
 
   if (d.is_load) {

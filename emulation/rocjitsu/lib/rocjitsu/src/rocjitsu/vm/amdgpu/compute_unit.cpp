@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/vmem_direct.h"
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
@@ -568,6 +569,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
         switch (exec_mode) {
         case simdojo::ExecMode::FUNCTIONAL:
           compute_unit = create_functional_cu<Isa>(std::move(name), config, memory, l2);
+          compute_unit->global_mem_pipeline_.set_direct_backing(vmem_direct_enabled());
           return util::Result::success();
         case simdojo::ExecMode::CLOCKED:
           compute_unit = std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
