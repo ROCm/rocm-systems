@@ -55,6 +55,65 @@ impl QueueFaultDiagnostic {
     }
 }
 
+/// Original failure retained until scratch polling releases the registry lock.
+enum ScratchReclaimFailure {
+    /// Runtime registry failure already expressed as an HSA status.
+    Status(Status),
+    /// Native error whose original details remain available for diagnostics.
+    Native(rocddi::Error),
+}
+
+impl From<Status> for ScratchReclaimFailure {
+    fn from(status: Status) -> Self {
+        Self::Status(status)
+    }
+}
+
+impl From<rocddi::Error> for ScratchReclaimFailure {
+    fn from(error: rocddi::Error) -> Self {
+        Self::Native(error)
+    }
+}
+
+impl ScratchReclaimFailure {
+    /// Reports a terminal reclaim failure before its original status translation.
+    fn emit(&self, queue: usize) {
+        // A fork-inherited process must not access environment or I/O locks.
+        if !crate::platform::process_is_current() {
+            return;
+        }
+        if std::env::var_os("ROCDDI_HSA_QUEUE_DIAGNOSTICS").is_none_or(|value| value != "1") {
+            return;
+        }
+        // SAFETY: The queue worker retains the public header through delivery.
+        let queue_id = unsafe { (*(queue as *const HsaQueue)).id };
+        match self {
+            Self::Status(status) => {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "rocddi HSA queue: origin=scratch_reclaim; queue_id={queue_id}; status=0x{status:08x}",
+                );
+            }
+            Self::Native(error) => {
+                let _ = writeln!(
+                    std::io::stderr().lock(),
+                    "rocddi HSA queue: origin=scratch_reclaim; queue_id={queue_id}; kind={:?}; native={:?}; error={error}",
+                    error.kind(),
+                    error.native_status(),
+                );
+            }
+        }
+    }
+
+    /// Selects the same HSA status as the original terminal reclaim path.
+    fn into_status(self) -> Status {
+        match self {
+            Self::Status(status) => status,
+            Self::Native(error) => map_error(error),
+        }
+    }
+}
+
 /// Queue error callback detached from the registry lock before invocation.
 struct PendingCallback {
     /// Application callback to invoke synchronously.
@@ -356,7 +415,7 @@ fn scratch_reclaim_result(
     result: Result<(), rocddi::Error>,
     available: impl FnOnce() -> bool,
     pending: &mut bool,
-) -> Result<bool, Status> {
+) -> Result<bool, rocddi::Error> {
     match result {
         Ok(()) => {
             *pending = false;
@@ -371,12 +430,12 @@ fn scratch_reclaim_result(
             *pending |= error.kind() == rocddi::ErrorKind::Busy;
             Ok(false)
         }
-        Err(error) => Err(map_error(error)),
+        Err(error) => Err(error),
     }
 }
 
 /// Reclaims over-limit or idle scratch, preserving backing on every failure.
-fn reclaim_idle_scratch(key: usize, stop: &AtomicBool) -> Result<(), Status> {
+fn reclaim_idle_scratch(key: usize, stop: &AtomicBool) -> Result<(), ScratchReclaimFailure> {
     let mut guard = lock()?;
     let Some(runtime) = guard.as_mut() else {
         return Ok(());
@@ -391,7 +450,7 @@ fn reclaim_idle_scratch(key: usize, stop: &AtomicBool) -> Result<(), Status> {
     {
         return Ok(());
     }
-    let (read, write) = queue.native.progress().map_err(map_error)?;
+    let (read, write) = queue.native.progress()?;
     if read == 0 {
         return Ok(());
     }
@@ -446,18 +505,18 @@ fn reclaim_idle_scratch(key: usize, stop: &AtomicBool) -> Result<(), Status> {
 /// Runs one reclaim poll and ends the worker on a terminal failure, even when
 /// no application callback is registered. Notification occurs after polling
 /// releases the registry lock and only while callback delivery is still live.
-fn reclaim_and_notify(
-    reclaim: impl FnOnce() -> Result<(), Status>,
-    notify: impl FnOnce(Status),
+fn reclaim_and_notify<Failure>(
+    reclaim: impl FnOnce() -> Result<(), Failure>,
+    notify: impl FnOnce(Failure),
     stop: &AtomicBool,
     alive: &AtomicBool,
 ) -> bool {
     if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
         return false;
     }
-    if let Err(status) = reclaim() {
+    if let Err(failure) = reclaim() {
         if !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-            notify(status);
+            notify(failure);
         }
         return false;
     }
@@ -564,7 +623,9 @@ pub(super) fn queue_event_worker(
             reclaim_check = std::time::Instant::now();
             if !reclaim_and_notify(
                 || reclaim_idle_scratch(key, stop),
-                |status| {
+                |failure| {
+                    failure.emit(key);
+                    let status = failure.into_status();
                     let callback = lock()
                         .ok()
                         .and_then(|guard| pending_callback(guard.as_ref()?, key, status));
@@ -620,6 +681,23 @@ mod tests {
                 }
                 .emit((&raw const queue) as usize, delivery);
             }
+            for (failure, expected) in [
+                (ScratchReclaimFailure::Status(NOT_SUPPORTED), NOT_SUPPORTED),
+                (
+                    ScratchReclaimFailure::Native(rocddi::Error::DriverOperation {
+                        kind: rocddi::ErrorKind::Driver,
+                        operation: "injected scratch reclaim",
+                        status: rocddi::NativeStatus {
+                            domain: rocddi::NativeStatusDomain::Firmware,
+                            code: 0x8000_000d,
+                        },
+                    }),
+                    ERROR,
+                ),
+            ] {
+                failure.emit((&raw const queue) as usize);
+                assert_eq!(failure.into_status(), expected);
+            }
             return;
         }
         // Subprocesses exercise the production environment lookup and stderr
@@ -651,6 +729,8 @@ mod tests {
                 concat!(
                     "rocddi HSA queue: origin=cp_inactive_signal; queue_id=18446744073709551615; raw=0x8000000000001000; status=0x00001000; delivery=callback\n",
                     "rocddi HSA queue: origin=kfd_error_event; queue_id=18446744073709551615; raw=0x4000000000000004; status=0x00001003; delivery=detected\n",
+                    "rocddi HSA queue: origin=scratch_reclaim; queue_id=18446744073709551615; status=0x0000002f\n",
+                    "rocddi HSA queue: origin=scratch_reclaim; queue_id=18446744073709551615; kind=Driver; native=Some(NativeStatus { domain: Firmware, code: 2147483661 }); error=injected scratch reclaim failed: Firmware status 0x8000000d\n",
                 )
             } else {
                 ""
@@ -671,7 +751,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let alive = AtomicBool::new(true);
         let mut pending = false;
-        let mut notifications = Vec::new();
+        let mut notifications: Vec<Status> = Vec::new();
         for (result, expected_pending, expected_released) in [
             (Err(error(ErrorKind::Unsupported)), false, false),
             (Err(error(ErrorKind::Busy)), true, false),
@@ -679,7 +759,8 @@ mod tests {
         ] {
             assert!(reclaim_and_notify(
                 || {
-                    let released = scratch_reclaim_result(result, || true, &mut pending)?;
+                    let released =
+                        scratch_reclaim_result(result, || true, &mut pending).map_err(map_error)?;
                     assert_eq!(released, expected_released);
                     Ok(())
                 },
@@ -698,17 +779,20 @@ mod tests {
             (ErrorKind::ResourceExhausted, true, OUT_OF_RESOURCES),
             (ErrorKind::Busy, false, RESOURCE_BUSY),
             (ErrorKind::Unsupported, false, NOT_SUPPORTED),
+            (ErrorKind::Driver, true, ERROR),
+            (ErrorKind::DeviceLost, false, ERROR),
         ] {
             for has_callback in [false, true] {
                 let stop = AtomicBool::new(false);
                 let alive = AtomicBool::new(true);
                 let mut polls = 0;
-                let mut notifications = Vec::new();
+                let mut notifications: Vec<Status> = Vec::new();
                 let mut pending = false;
                 while reclaim_and_notify(
                     || {
                         polls += 1;
-                        scratch_reclaim_result(Err(error(kind)), || available, &mut pending)?;
+                        scratch_reclaim_result(Err(error(kind)), || available, &mut pending)
+                            .map_err(map_error)?;
                         Ok(())
                     },
                     |status| {

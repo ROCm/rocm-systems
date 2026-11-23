@@ -180,6 +180,45 @@ pub(super) fn hardware_exception_event(
     }
 }
 
+/// Reports the DDI-normalized event already received by the system worker.
+fn emit_system_event_diagnostic(event: DeviceEvent) {
+    // A fork-inherited process must not access environment or I/O locks.
+    if !crate::platform::process_is_current() {
+        return;
+    }
+    if std::env::var_os("ROCDDI_HSA_QUEUE_DIAGNOSTICS").is_none_or(|value| value != "1") {
+        return;
+    }
+    // These fields have already passed through the driver's normalization.
+    // Diagnostic I/O cannot replace the original system event or abort policy.
+    match event {
+        DeviceEvent::GpuMemoryFault(fault) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "rocddi HSA system: origin=ddi_gpu_memory_fault; endpoint_id={:?}; virtual_address=0x{:016x}; page_not_present={}; read_only={}; no_execute={}; imprecise={}; cause={:?}",
+                fault.endpoint_id,
+                fault.virtual_address,
+                fault.page_not_present,
+                fault.read_only,
+                fault.no_execute,
+                fault.imprecise,
+                fault.cause,
+            );
+        }
+        DeviceEvent::GpuHardwareException(exception) => {
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "rocddi HSA system: origin=ddi_gpu_hardware_exception; endpoint_id={:?}; origin_id={:?}; scope={:?}; memory_lost={}; cause={:?}",
+                exception.endpoint_id,
+                exception.origin_id,
+                exception.scope,
+                exception.memory_lost,
+                exception.cause,
+            );
+        }
+    }
+}
+
 /// Receives native device events and dispatches HSA callbacks.
 pub(super) fn system_event_worker(
     mut subscription: DeviceEventSubscription,
@@ -210,6 +249,7 @@ fn system_event_worker_with(
         };
         match wait(Duration::from_millis(1)) {
             Ok(Some(DeviceEvent::GpuMemoryFault(fault))) => {
+                emit_system_event_diagnostic(DeviceEvent::GpuMemoryFault(fault));
                 retry_delay = Duration::from_millis(1);
                 driver_failures = 0;
                 let notification = {
@@ -279,6 +319,7 @@ fn system_event_worker_with(
                 }
             }
             Ok(Some(DeviceEvent::GpuHardwareException(exception))) => {
+                emit_system_event_diagnostic(DeviceEvent::GpuHardwareException(exception));
                 retry_delay = Duration::from_millis(1);
                 driver_failures = 0;
                 let notification = {
@@ -339,6 +380,68 @@ fn system_event_worker_with(
 #[cfg(test)]
 mod worker_tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn system_event_diagnostics_require_exact_opt_in_and_preserve_observations() {
+        const CHILD: &str = "ROCDDI_TEST_SYSTEM_DIAGNOSTIC_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            emit_system_event_diagnostic(DeviceEvent::GpuMemoryFault(GpuMemoryFault {
+                endpoint_id: None,
+                virtual_address: u64::MAX,
+                page_not_present: true,
+                read_only: false,
+                no_execute: true,
+                imprecise: true,
+                cause: GpuMemoryFaultCause::Other,
+            }));
+            emit_system_event_diagnostic(DeviceEvent::GpuHardwareException(GpuHardwareException {
+                endpoint_id: Some([1; 16]),
+                origin_id: Some(rocddi::device::event::DeviceEventOriginId::from_driver_key(
+                    u64::MAX,
+                )),
+                scope: rocddi::device::event::GpuResetScope::Other,
+                memory_lost: true,
+                cause: GpuResetCause::Other,
+            }));
+            return;
+        }
+        // Subprocesses exercise the production environment lookup and stderr
+        // writer without mutating the multithreaded test runner's environment.
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some("01"),
+            Some("1 "),
+            Some("1"),
+        ] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "runtime::events::worker_tests::system_event_diagnostics_require_exact_opt_in_and_preserve_observations",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env_remove("ROCDDI_HSA_QUEUE_DIAGNOSTICS");
+            if let Some(value) = value {
+                command.env("ROCDDI_HSA_QUEUE_DIAGNOSTICS", value);
+            }
+            let output = command.output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let expected = if value == Some("1") {
+                concat!(
+                    "rocddi HSA system: origin=ddi_gpu_memory_fault; endpoint_id=None; virtual_address=0xffffffffffffffff; page_not_present=true; read_only=false; no_execute=true; imprecise=true; cause=Other\n",
+                    "rocddi HSA system: origin=ddi_gpu_hardware_exception; endpoint_id=Some([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]); origin_id=Some(DeviceEventOriginId(18446744073709551615)); scope=Other; memory_lost=true; cause=Other\n",
+                )
+            } else {
+                ""
+            };
+            assert_eq!(String::from_utf8(output.stderr).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn repeated_driver_errors_latch_only_system_event_failure() {
