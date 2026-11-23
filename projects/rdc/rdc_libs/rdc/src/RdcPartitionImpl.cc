@@ -49,6 +49,9 @@ rdc_status_t RdcPartitionImpl::rdc_instance_profile_get_impl(
   // Pass the full entity index (not info.device_index) to keep the flat/socket dispatch
   // correct for partition instances in CPX.
   amdsmi_status_t ret = get_processor_handle_from_id(entity_index, &proc_handle);
+  if (ret == AMDSMI_STATUS_NOT_FOUND) {
+    return RDC_ST_NOT_FOUND;  // a GPU that AMD SMI cannot identify, or a partition instance of one
+  }
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return RDC_ST_UNKNOWN_ERROR;
   }

@@ -33,7 +33,7 @@ def test_limited_set_basic():
     assert ls.add("SQ_INSTS") is False  # capacity exhausted
     assert ls.add("SQ_WAVES") is True  # duplicate ok
     assert ls.avail == 0
-    assert ls.elements == ["SQ_WAVES", "SQ_BUSY"]
+    assert list(ls.elements) == ["SQ_WAVES", "SQ_BUSY"]
 
 
 def test_limited_set_tcc_channel_coalescing():
@@ -61,7 +61,7 @@ def test_counter_file_exposes_name_attribute(perfmon_config):
     for block, limited_set in cf.blocks.items():
         assert isinstance(limited_set, LimitedSet)
         assert limited_set.avail == perfmon_config[block]
-        assert limited_set.elements == []
+        assert list(limited_set.elements) == []
 
 
 def test_counter_file_add_and_block_mapping(perfmon_config):

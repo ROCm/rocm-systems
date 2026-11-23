@@ -188,8 +188,9 @@ TEST(FieldValues, AFailedFetchLeavesADefinedValue) {
   });
 }
 
-// RDC_HEALTH_EEPROM_CONFIG_VALID: 1 when AMD SMI validates the EEPROM, else 0. (amd-smi
-// does not implement the check yet: it reports AMDSMI_STATUS_NOT_SUPPORTED.)
+// RDC_HEALTH_EEPROM_CONFIG_VALID: 1 when AMD SMI validates the EEPROM, 0 when it finds it
+// corrupted; any other error fails the read. (amd-smi does not implement the check yet: it
+// reports AMDSMI_STATUS_NOT_SUPPORTED.)
 TEST(FieldValues, EepromValidityIsOneOrZero) {
   with_fake({}, [](RdcMetricFetcherImpl& fetcher) {
     rdc_field_value value = dirty_value();
@@ -201,8 +202,18 @@ TEST(FieldValues, EepromValidityIsOneOrZero) {
   with_fake({{"RDC_FAKE_FAIL", "amdsmi_gpu_validate_ras_eeprom=" + corrupted}},
             [](RdcMetricFetcherImpl& fetcher) {
               rdc_field_value value = dirty_value();
+              EXPECT_EQ(fetcher.fetch_smi_field(0, RDC_HEALTH_EEPROM_CONFIG_VALID, &value),
+                        RDC_ST_OK);
+              EXPECT_EQ(value.status, AMDSMI_STATUS_SUCCESS);
+              EXPECT_EQ(value.type, INTEGER);
+              EXPECT_EQ(value.value.l_int, 0);
+            });
+  with_fake({{"RDC_FAKE_FAIL", "amdsmi_gpu_validate_ras_eeprom=AMDSMI_STATUS_NOT_SUPPORTED"}},
+            [](RdcMetricFetcherImpl& fetcher) {
+              rdc_field_value value = dirty_value();
               EXPECT_NE(fetcher.fetch_smi_field(0, RDC_HEALTH_EEPROM_CONFIG_VALID, &value),
                         RDC_ST_OK);
+              EXPECT_NE(value.status, AMDSMI_STATUS_SUCCESS);
               EXPECT_EQ(value.type, INTEGER);
               EXPECT_EQ(value.value.l_int, 0);
             });
@@ -269,6 +280,46 @@ TEST(FieldValues, PartitionClocksSkipUnavailableReadings) {
             });
 }
 
+// A partition averages its share of the GPU's clock readings, in order: with 8 readings
+// and 2 partitions, 4 each; with 3 partitions, 2 each, and the 2 left over count for none.
+TEST(FieldValues, PartitionClocksAverageTheirShare) {
+  const char* clocks = "1000,1010,1020,1030,1100,1110,1120,1130";
+  const std::vector<std::pair<const char*, std::vector<int64_t>>> splits = {
+      {"2", {1015, 1115}}, {"3", {1005, 1025, 1105}}};
+  for (const auto& split : splits) {
+    SCOPED_TRACE(std::string(split.first) + " partitions");
+    with_fake({{"RDC_FAKE_GPUS", "1"},
+               {"RDC_FAKE_PARTITIONS", split.first},
+               {"RDC_FAKE_GFXCLKS", clocks}},
+              [&split](RdcMetricFetcherImpl& fetcher) {
+                for (uint32_t p = 0; p < split.second.size(); ++p) {
+                  SCOPED_TRACE("partition " + std::to_string(p));
+                  rdc_field_value value = dirty_value();
+                  ASSERT_EQ(fetcher.fetch_smi_field(partition(0, p), RDC_FI_GPU_CLOCK, &value),
+                            RDC_ST_OK);
+                  EXPECT_EQ(value.value.l_int, split.second[p] * kHzPerMHz);
+                }
+              });
+  }
+}
+
+// A reading of 0 MHz counts like any other: only UINT16_MAX marks a clock that is not there.
+TEST(FieldValues, APartitionClockReadingOfZeroCounts) {
+  with_fake({{"RDC_FAKE_GPUS", "1"},
+             {"RDC_FAKE_PARTITIONS", "2"},
+             {"RDC_FAKE_GFXCLKS", "0,0,1020,1030,1100,1110,1120,1130"}},
+            [](RdcMetricFetcherImpl& fetcher) {
+              const int64_t expected[] = {(0 + 0 + 1020 + 1030) / 4, 1115};
+              for (uint32_t p = 0; p < 2; ++p) {
+                SCOPED_TRACE("partition " + std::to_string(p));
+                rdc_field_value value = dirty_value();
+                ASSERT_EQ(fetcher.fetch_smi_field(partition(0, p), RDC_FI_GPU_CLOCK, &value),
+                          RDC_ST_OK);
+                EXPECT_EQ(value.value.l_int, expected[p] * kHzPerMHz);
+              }
+            });
+}
+
 // More CPER entries than the headers buffer holds, which amd-smi never reports:
 // only the buffer's entries are read. Under AddressSanitizer, a read past it is
 // reported.
@@ -290,6 +341,41 @@ TEST(FieldValues, CperEntriesStopAtTheBuffer) {
     ASSERT_EQ(fetcher.fetch_smi_field(0, RDC_FI_AFID, &value), RDC_ST_OK);
     EXPECT_EQ(value.type, STRING);
     EXPECT_STREQ(value.value.str, "N/A");  // the fake's record has no AFID
+  });
+}
+
+// AMD SMI checks a CPER record's own length against the bytes RDC says the record has: from
+// the record's start to the end of what AMD SMI wrote, not the length the record claims.
+TEST(FieldValues, ACperRecordIsReadOnlyWithinTheData) {
+  const Knobs records = {{"RDC_FAKE_CPER_COUNT", "2"}, {"RDC_FAKE_CPER_AFID", "7"}};
+  with_fake(records, [](RdcMetricFetcherImpl& fetcher) {
+    rdc_field_value value = dirty_value();
+    ASSERT_EQ(fetcher.fetch_smi_field(0, RDC_FI_AFID, &value), RDC_ST_OK);
+    EXPECT_STREQ(value.value.str, "7:CORRECTED,7:CORRECTED");
+  });
+  // From its start, the first record has 256 bytes of data, the second 128.
+  Knobs partly = records;
+  partly.emplace_back("RDC_FAKE_CPER_LENGTH", "200");
+  with_fake(partly, [](RdcMetricFetcherImpl& fetcher) {
+    rdc_field_value value = dirty_value();
+    ASSERT_EQ(fetcher.fetch_smi_field(0, RDC_FI_AFID, &value), RDC_ST_OK);
+    EXPECT_STREQ(value.value.str, "7:CORRECTED");
+  });
+  Knobs longer = records;
+  longer.emplace_back("RDC_FAKE_CPER_LENGTH", "4096");  // the 2 records are 256 bytes
+  with_fake(longer, [](RdcMetricFetcherImpl& fetcher) {
+    rdc_field_value value = dirty_value();
+    ASSERT_EQ(fetcher.fetch_smi_field(0, RDC_FI_AFID, &value), RDC_ST_OK);
+    EXPECT_STREQ(value.value.str, "N/A");
+  });
+  // AMD SMI reports 100 bytes of data: the first record does not fit in them, and the second
+  // starts past them, so RDC reads neither.
+  Knobs fewer = records;
+  fewer.emplace_back("RDC_FAKE_CPER_BYTES", "100");
+  with_fake(fewer, [](RdcMetricFetcherImpl& fetcher) {
+    rdc_field_value value = dirty_value();
+    ASSERT_EQ(fetcher.fetch_smi_field(0, RDC_FI_AFID, &value), RDC_ST_OK);
+    EXPECT_STREQ(value.value.str, "N/A");
   });
 }
 

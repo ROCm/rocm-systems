@@ -17,6 +17,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -35,7 +36,7 @@ namespace {
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
-size_t count_text_mnemonic(const rocjitsu::AmdGpuCodeObject &co, rj_code_arch_t arch,
+size_t count_text_mnemonic(const rocjitsu::AmdGpuCodeObject &co, rocjitsu::IsaFamily arch,
                            std::string_view mnemonic) {
   auto decoder = rocjitsu::Decoder::create(arch);
   if (!decoder)
@@ -159,8 +160,8 @@ cfg_block_counts_by_kernel(const rocjitsu::AmdGpuCodeObject &co,
     return counts;
 
   const auto *text = co.text_sections()[0];
-  rocjitsu::KernelDescriptorTranslator source_parser(ROCJITSU_CODE_ARCH_CDNA4,
-                                                     ROCJITSU_CODE_ARCH_CDNA3);
+  rocjitsu::KernelDescriptorTranslator source_parser(rocjitsu::IsaFamily::Cdna4,
+                                                     rocjitsu::IsaFamily::Cdna3);
   const auto source_kernels = source_parser.translate_image(
       {reinterpret_cast<const uint8_t *>(co.image_data()), co.image_size()}, text->sectionOffset(),
       text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
@@ -173,12 +174,12 @@ cfg_block_counts_by_kernel(const rocjitsu::AmdGpuCodeObject &co,
     entries.insert(kernel.entry_text_offset);
   }
 
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna4);
   if (!decoder)
     return counts;
 
   auto blocks =
-      rocjitsu::build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
+      rocjitsu::build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna4, kernel_entry_leaders);
 
   for (const char *name : kernel_names) {
     const auto *kernel = kernel_translation_by_name(source_kernels, co, name);
@@ -213,8 +214,8 @@ TEST(BinaryTranslatorE2E, TranslatesRealMultiKernelSharedSwappcCodeObject) {
   EXPECT_NE(co->kernel_descriptor_offset("multikernel_indirect_branch_scall"), 0u);
 
   const auto *text = co->text_sections()[0];
-  rocjitsu::KernelDescriptorTranslator source_parser(ROCJITSU_CODE_ARCH_CDNA4,
-                                                     ROCJITSU_CODE_ARCH_CDNA3);
+  rocjitsu::KernelDescriptorTranslator source_parser(rocjitsu::IsaFamily::Cdna4,
+                                                     rocjitsu::IsaFamily::Cdna3);
   const auto source_kernels = source_parser.translate_image(
       {reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size()},
       text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
@@ -223,20 +224,20 @@ TEST(BinaryTranslatorE2E, TranslatesRealMultiKernelSharedSwappcCodeObject) {
 
   // Kernels A-E all call the same noinline helper, and kernel A calls it twice.
   // Those shared-helper edges are compiler-emitted `s_swappc_b64` instructions.
-  const size_t source_swappc = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_swappc_b64");
-  const size_t source_setpc = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_setpc_b64");
-  const size_t source_call = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64");
+  const size_t source_swappc = count_text_mnemonic(*co, rocjitsu::IsaFamily::Cdna4, "s_swappc_b64");
+  const size_t source_setpc = count_text_mnemonic(*co, rocjitsu::IsaFamily::Cdna4, "s_setpc_b64");
+  const size_t source_call = count_text_mnemonic(*co, rocjitsu::IsaFamily::Cdna4, "s_call_b64");
   EXPECT_GE(source_swappc, 6u);
   EXPECT_GE(source_setpc, 3u);
   EXPECT_GE(source_call, 3u);
 
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  rocjitsu::BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna3);
   auto result = translator.translate(*co);
 
   ASSERT_FALSE(result.elf_bytes.empty());
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
-  EXPECT_EQ(result.host_arch, ROCJITSU_CODE_ARCH_CDNA3);
+  EXPECT_EQ(result.host_arch, rocjitsu::IsaFamily::Cdna3);
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated.is_valid());
@@ -248,10 +249,11 @@ TEST(BinaryTranslatorE2E, TranslatesRealMultiKernelSharedSwappcCodeObject) {
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_e"), 0u);
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_setpc"), 0u);
   EXPECT_NE(translated.kernel_descriptor_offset("multikernel_indirect_branch_scall"), 0u);
-  EXPECT_EQ(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_swappc_b64"), 0u)
+  EXPECT_EQ(count_text_mnemonic(translated, rocjitsu::IsaFamily::Cdna3, "s_swappc_b64"), 0u)
       << "in-range recovered swappc targets should patch to direct s_call_b64 windows";
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_setpc_b64"), source_setpc);
-  EXPECT_GE(count_text_mnemonic(translated, ROCJITSU_CODE_ARCH_CDNA3, "s_call_b64"),
+  EXPECT_GE(count_text_mnemonic(translated, rocjitsu::IsaFamily::Cdna3, "s_setpc_b64"),
+            source_setpc);
+  EXPECT_GE(count_text_mnemonic(translated, rocjitsu::IsaFamily::Cdna3, "s_call_b64"),
             source_call + source_swappc);
 
   ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
@@ -269,8 +271,8 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
   ASSERT_FALSE(co->text_sections().empty());
 
   const auto *text = co->text_sections()[0];
-  rocjitsu::KernelDescriptorTranslator source_parser(ROCJITSU_CODE_ARCH_CDNA4,
-                                                     ROCJITSU_CODE_ARCH_CDNA3);
+  rocjitsu::KernelDescriptorTranslator source_parser(rocjitsu::IsaFamily::Cdna4,
+                                                     rocjitsu::IsaFamily::Cdna3);
   const auto source_kernels = source_parser.translate_image(
       {reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size()},
       text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
@@ -281,10 +283,10 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
   for (const auto &kernel : source_kernels)
     kernel_entries.push_back(kernel.entry_text_offset);
 
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   auto blocks =
-      rocjitsu::build_valid_blocks(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entries);
+      rocjitsu::build_valid_blocks(*co, *decoder, rocjitsu::IsaFamily::Cdna4, kernel_entries);
   ASSERT_FALSE(blocks.empty());
 
   size_t recovered_swappc_blocks = 0;
@@ -330,7 +332,7 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
   // finds in .text -- the three RJ_STATIC_SCALL_ISLAND sites -- came back as a
   // direct-call terminator, each already checked above to be a tail transfer
   // whose syntactic s_branch continuation is dead.
-  const size_t source_call = count_text_mnemonic(*co, ROCJITSU_CODE_ARCH_CDNA4, "s_call_b64");
+  const size_t source_call = count_text_mnemonic(*co, rocjitsu::IsaFamily::Cdna4, "s_call_b64");
   EXPECT_GE(source_call, 3u) << "fixture should carry the RJ_STATIC_SCALL_ISLAND sites";
   EXPECT_GE(recovered_swappc_blocks, 6u);
   EXPECT_GE(recovered_setpc_blocks, 3u);
@@ -350,8 +352,8 @@ TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel)
   ASSERT_FALSE(co->text_sections().empty());
 
   const auto *text = co->text_sections()[0];
-  rocjitsu::KernelDescriptorTranslator source_parser(ROCJITSU_CODE_ARCH_CDNA4,
-                                                     ROCJITSU_CODE_ARCH_CDNA3);
+  rocjitsu::KernelDescriptorTranslator source_parser(rocjitsu::IsaFamily::Cdna4,
+                                                     rocjitsu::IsaFamily::Cdna3);
   const auto source_kernels = source_parser.translate_image(
       {reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size()},
       text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
@@ -365,10 +367,10 @@ TEST(BinaryTranslatorE2E, CountsRealMultiKernelIndirectBranchCfgBlocksPerKernel)
     entries.insert(kernel.entry_text_offset);
   }
 
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   auto blocks =
-      rocjitsu::build_valid_blocks(*co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entry_leaders);
+      rocjitsu::build_valid_blocks(*co, *decoder, rocjitsu::IsaFamily::Cdna4, kernel_entry_leaders);
   ASSERT_FALSE(blocks.empty());
 
   struct ExpectedKernelCfg {

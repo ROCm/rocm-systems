@@ -99,7 +99,7 @@ struct Entry {
     /// Debugger-visible record remains fixed while its owning Box moves.
     map: LinkMap,
     /// Retains the native URI independently of the loader's query metadata.
-    _uri: CString,
+    uri: CString,
 }
 
 impl Entry {
@@ -119,7 +119,7 @@ impl Entry {
                 next: AtomicUsize::new(0),
                 previous: AtomicUsize::new(0),
             },
-            _uri: uri,
+            uri,
         }))
     }
 
@@ -203,7 +203,47 @@ pub(crate) struct ExecutableDebugInfo {
     published: bool,
 }
 
+/// Borrows the process-lifetime rendezvous for a diagnostic.
+pub(crate) fn diagnostic_record()
+-> Result<rocddi::device::gpu::diagnostic::DiagnosticMemory<'static>, rocddi::Error> {
+    // SAFETY: The static record is ordinary process-lifetime memory.
+    unsafe {
+        rocddi::device::gpu::diagnostic::DiagnosticMemory::borrow(
+            &_amdgpu_r_debug,
+            record_address() as u64,
+            Some(record_address()),
+            std::mem::size_of::<RuntimeDebugRecord>() as u64,
+        )
+    }
+}
+
 impl ExecutableDebugInfo {
+    /// Retains the linked native records and URI bytes while dumping them.
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<Vec<rocddi::device::gpu::diagnostic::DiagnosticMemory<'_>>, rocddi::Error> {
+        let mut memory = Vec::new();
+        for entry in &self.entries {
+            // SAFETY: Every entry and URI is owned by this executable; capture
+            // holds the HSA registry lock against unlink and release.
+            unsafe {
+                memory.push(rocddi::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                    self,
+                    entry.address() as u64,
+                    Some(entry.address()),
+                    std::mem::size_of::<LinkMap>() as u64,
+                )?);
+                memory.push(rocddi::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                    self,
+                    entry.uri.as_ptr() as u64,
+                    Some(entry.uri.as_ptr() as usize),
+                    entry.uri.as_bytes_with_nul().len() as u64,
+                )?);
+            }
+        }
+        Ok(memory)
+    }
+
     /// Completes all fallible preparation before native executable freeze begins.
     pub(crate) fn prepare(
         &mut self,

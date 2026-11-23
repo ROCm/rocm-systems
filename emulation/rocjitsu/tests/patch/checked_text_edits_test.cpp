@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "../dbi_test_util.h"
 #include "../elf_test_support.h"
@@ -33,7 +34,7 @@
 
 namespace rocjitsu {
 namespace {
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
 // gfx1200 / RDNA4, with the kernel entry at .text offset 0. All offsets below
 // are text-relative; the ELF builder's file layout is a separate coordinate system.
 //
@@ -64,8 +65,8 @@ std::vector<uint8_t> make_mixed_width_kernel_elf() {
 std::vector<uint8_t> make_branch_to_earlier_section_elf(uint32_t branch) {
   constexpr uint64_t kEarlyAddress = 0x200;
   constexpr uint64_t kTextAddress = 0x300;
-  constexpr util::FailureOr<uint32_t> kNop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA2);
-  constexpr util::FailureOr<uint32_t> kEndpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA2);
+  constexpr util::FailureOr<uint32_t> kNop = build_s_nop(0, rocjitsu::IsaFamily::Rdna2);
+  constexpr util::FailureOr<uint32_t> kEndpgm = build_s_endpgm(rocjitsu::IsaFamily::Rdna2);
   static_assert(kNop.succeeded() && kEndpgm.succeeded());
   const std::array<uint32_t, 2> words = {kNop.value(), branch};
   std::vector<uint8_t> names = {'\0'};
@@ -288,7 +289,7 @@ std::vector<uint8_t> with_text_symbol(uint64_t start, uint64_t size, bool reloca
 // per-site eligibility and the reference checks performed on the final batch.
 void expect_reference_result(const std::vector<uint8_t> &image, uint64_t anchor,
                              std::optional<uint64_t> rejected_reference,
-                             rj_code_arch_t arch = kArch) {
+                             rocjitsu::IsaFamily arch = kArch) {
   const std::vector<uint8_t> original_image = image;
   const AmdGpuCodeObject object(image.data(), image.size());
   ASSERT_TRUE(object.is_valid());
@@ -403,7 +404,7 @@ TEST(CheckedTextEdits, InstrumentorChecksDirectReferencesIncludingUnreachableBra
 }
 
 TEST(CheckedTextEdits, PreservesBranchToEarlierExecutableSection) {
-  constexpr rj_code_arch_t kRdna2 = ROCJITSU_CODE_ARCH_RDNA2;
+  constexpr rocjitsu::IsaFamily kRdna2 = rocjitsu::IsaFamily::Rdna2;
   // The branch at 0x304 uses next PC 0x308: (0x200 - 0x308) / 4 = -66.
   const util::FailureOr<uint32_t> branch = build_s_branch(-66, kRdna2);
   ASSERT_TRUE(branch.succeeded());
@@ -461,10 +462,10 @@ TEST(CheckedTextEdits, PreservesBranchToEarlierExecutableSection) {
 
 TEST(CheckedTextEdits, RejectsBranchWhoseVirtualAddressUnderflows) {
   // Unlike an address before .text, (0x308 + -195 * 4) = -4 cannot be a VA.
-  const util::FailureOr<uint32_t> branch = build_s_branch(-195, ROCJITSU_CODE_ARCH_RDNA2);
+  const util::FailureOr<uint32_t> branch = build_s_branch(-195, rocjitsu::IsaFamily::Rdna2);
   ASSERT_TRUE(branch.succeeded());
   const std::vector<uint8_t> image = make_branch_to_earlier_section_elf(branch.value());
-  expect_reference_result(image, 0, 0, ROCJITSU_CODE_ARCH_RDNA2);
+  expect_reference_result(image, 0, 0, rocjitsu::IsaFamily::Rdna2);
 }
 
 TEST(CheckedTextEdits, BranchReferencesCheckEachVirtualAddressAddition) {
@@ -519,12 +520,12 @@ TEST(CheckedTextEdits, BranchReferencesCheckEachVirtualAddressAddition) {
        .displacement_dwords = 0,
        .destination = std::nullopt},
   }};
-  const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  const std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   ASSERT_NE(decoder, nullptr);
   for (const AddressCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     const util::FailureOr<uint32_t> branch =
-        build_s_branch(test_case.displacement_dwords, ROCJITSU_CODE_ARCH_RDNA2);
+        build_s_branch(test_case.displacement_dwords, rocjitsu::IsaFamily::Rdna2);
     ASSERT_TRUE(branch.succeeded());
     const uint32_t word = branch.value();
     DecodeResult decoded = decoder->decode_window(std::span(&word, 1), test_case.source_offset);
@@ -651,7 +652,7 @@ TEST(CheckedTextEdits, UnknownMachineUsesTheSameCallerArchitectureForValidationA
 }
 
 TEST(CheckedTextEdits, ConcreteVariantDecoderIsUsedForSourceAndFinalAnchor) {
-  constexpr rj_code_arch_t kCdna5 = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily kCdna5 = rocjitsu::IsaFamily::Cdna5;
   const util::FailureOr<uint32_t> endpgm = build_s_endpgm(kCdna5);
   ASSERT_TRUE(endpgm.succeeded());
   // Same public LLVM gfx1251 encoding as the probe mismatch regression:
@@ -682,7 +683,7 @@ TEST(CheckedTextEdits, ConcreteVariantDecoderIsUsedForSourceAndFinalAnchor) {
 }
 
 TEST(CheckedTextEdits, ChecksDecodedDebugBranchDestinations) {
-  constexpr rj_code_arch_t kCdna3 = ROCJITSU_CODE_ARCH_CDNA3;
+  constexpr rocjitsu::IsaFamily kCdna3 = rocjitsu::IsaFamily::Cdna3;
   const util::FailureOr<uint32_t> endpgm = build_s_endpgm(kCdna3);
   ASSERT_TRUE(endpgm.succeeded());
   // The patch spans [4,12). Its literal at offset 8 is the only interior target.
@@ -707,15 +708,15 @@ TEST(CheckedTextEdits, ChecksDecodedDebugBranchDestinations) {
 }
 
 TEST(CheckedTextEdits, ChecksDecodedSubvectorLoopDestinations) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     SCOPED_TRACE(arch);
-    const uint32_t machine = arch == ROCJITSU_CODE_ARCH_RDNA1 ? EF_AMDGPU_MACH_AMDGCN_GFX1010
-                                                              : EF_AMDGPU_MACH_AMDGCN_GFX1030;
+    const uint32_t machine = arch == rocjitsu::IsaFamily::Rdna1 ? EF_AMDGPU_MACH_AMDGCN_GFX1010
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX1030;
     const std::array<uint16_t, 2> opcodes =
-        arch == ROCJITSU_CODE_ARCH_RDNA1
+        arch == rocjitsu::IsaFamily::Rdna1
             ? std::array{rdna1::kSSubvectorLoopBeginSopk, rdna1::kSSubvectorLoopEndSopk}
             : std::array{rdna2::kSSubvectorLoopBeginSopk, rdna2::kSSubvectorLoopEndSopk};
-    const uint16_t literal_operand = arch == ROCJITSU_CODE_ARCH_RDNA1
+    const uint16_t literal_operand = arch == rocjitsu::IsaFamily::Rdna1
                                          ? static_cast<uint16_t>(rdna1::OPR_SRC_SRC_LITERAL)
                                          : static_cast<uint16_t>(rdna2::OPR_SRC_SRC_LITERAL);
     const util::FailureOr<uint32_t> move = build_s_mov_b32(0, literal_operand, arch);
