@@ -4,6 +4,7 @@
 // Sparse signed-byte SMFMAC and mixed-signedness gfx1250 SWMMAC dispatch.
 #include "common/internal.h"
 #include "mfma/backends.h"
+#include "mfma/gfx1250_integer_dispatch.h"
 #include "mfma/sparse_integer.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
@@ -35,6 +36,10 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
       selected[reg] = shifted[reg];
     }
     index = selected;
+  }
+  if constexpr (Wmma) {
+    dispatch_gfx1250_integer<true>(flags, controls, clamp, d, a, b, d, index);
+    return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   // The 16-column K=128 tile reduces faster in two AVX2 halves.
