@@ -2882,12 +2882,10 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first);
   if (!plan)
     return false;
+  // An exhausted pool still replays: each chain that finds no helper runs on
+  // the issuer, which keeps the saved fetch, decode and scoreboard work.
   auto &pool = async_pool();
   const bool inline_only = mma_plan::inline_only();
-  if (!inline_only && !pool.available()) {
-    ++cache.stats.pool_full;
-    return false;
-  }
 
   // Inline steps can touch new registers while helpers run. Allocate all lazy
   // chunks before the first job can race with that allocation. Chunks stay
