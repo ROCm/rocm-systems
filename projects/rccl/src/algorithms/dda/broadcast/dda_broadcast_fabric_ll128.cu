@@ -9,6 +9,7 @@
 #include "algorithms/dda/broadcast/dda_broadcast.h"
 
 #include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h"
+#include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot_warpspec.h"
 #include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "checks.h"
@@ -29,6 +30,7 @@ constexpr size_t kDdaLL128BcTwoShotMin = 256ULL * 1024;
 
 RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", kDdaLL128BcDefaultThreads);
 RCCL_PARAM(DdaLL128BcFanOut, "DDA_LL128_BC_FANOUT", 0);
+RCCL_PARAM(DdaLL128BcWarpSpecK, "DDA_LL128_BC_WARP_SPEC_K", 0);
 
 namespace {
 
@@ -115,6 +117,30 @@ static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, 
   const size_t cs = ddaLL128BcTwoShotChunkSlices(slices, comm->nRanks);
   const unsigned bpp = ddaLL128BlocksPerPeer(cs, warps, nPeers, (size_t)nBlocksMax);
   return std::make_pair(dim3((unsigned)nPeers, bpp), dim3(threads));
+}
+
+
+static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128WarpSpecGeom(ncclComm* comm, size_t totalBytes, int kWarpsPerPeer) {
+  const int archThreadsRaw = rcclDdaFabricBcLL128Threads(comm);
+  const unsigned archThreads = archThreadsRaw > 0 ? (unsigned)archThreadsRaw : 0;
+  const bool envSet = (getenv("RCCL_DDA_LL128_BC_THREADS") != nullptr);
+  const unsigned threads = envSet ? ddaLL128BcThreads()
+                         : (archThreads > 0 ? archThreads : kDdaLL128BcDefaultThreads);
+  const int nwarps = (int)threads / (int)kDdaLL128Warp;
+  const int nPeers = comm->nRanks - 1;
+
+  int k = kWarpsPerPeer;
+  if (k < 1) k = 1;
+  if (k > nwarps) k = nwarps;
+
+  const int peersPerBlock = nwarps / k;
+  const unsigned gridCols = (unsigned)((nPeers + peersPerBlock - 1) / peersPerBlock);
+
+  const size_t slices = ddaLL128Slices(totalBytes);
+  const size_t cs = ddaLL128BcTwoShotChunkSlices(slices, comm->nRanks);
+  int nBlocksMax = (int)ncclBroadcastDdaBlockBudget(comm);
+  const unsigned bpp = ddaLL128BlocksPerPeer(cs, (size_t)k, (int)gridCols, (size_t)nBlocksMax);
+  return std::make_pair(dim3(gridCols, bpp), dim3(threads));
 }
 
 } // namespace
@@ -234,17 +260,37 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
     const dda::common::DdaKernelParams params{comm->abortFlagDev};
     const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
 
-    hipExtLaunchKernelGGL(
-      (dda::common::ddaBroadcastFabricLL128TwoShot<0>),
-      grid, block, 0, stream,
-      /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
-      peers,
-      static_cast<int8_t*>(recvbuff),
-      static_cast<const int8_t*>(sendbuff),
-      bytes,
-      comm->rank, nRanks, root,
-      epochDev, epochLen,
-      slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut());
+    const int warpSpecK = (int)rcclParamDdaLL128BcWarpSpecK();
+    if (warpSpecK > 0) {
+      auto [wsGrid, wsBlock] = ddaBroadcastFabricLL128WarpSpecGeom(comm, bytes, warpSpecK);
+      INFO(NCCL_COLL,
+           "DDA fabric Broadcast LL128 two-shot WARP-SPEC: nRanks=%d root=%d bytes=%zu slices=%zu chunkSlices=%zu "
+           "grid=%ux%u block=%u bankSize=%zu fanOut=%d kWarpsPerPeer=%d",
+           nRanks, root, bytes, slices, cs, wsGrid.x, wsGrid.y, wsBlock.x, bank, (int)rcclParamDdaLL128BcFanOut(), warpSpecK);
+      hipExtLaunchKernelGGL(
+        (dda::common::ddaBroadcastFabricLL128TwoShotWarpSpec<0>),
+        wsGrid, wsBlock, 0, stream,
+        /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
+        peers,
+        static_cast<int8_t*>(recvbuff),
+        static_cast<const int8_t*>(sendbuff),
+        bytes,
+        comm->rank, nRanks, root,
+        epochDev, epochLen,
+        slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut(), warpSpecK);
+    } else {
+      hipExtLaunchKernelGGL(
+        (dda::common::ddaBroadcastFabricLL128TwoShot<0>),
+        grid, block, 0, stream,
+        /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
+        peers,
+        static_cast<int8_t*>(recvbuff),
+        static_cast<const int8_t*>(sendbuff),
+        bytes,
+        comm->rank, nRanks, root,
+        epochDev, epochLen,
+        slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut());
+    }
   }
 
   CUDACHECK(cudaGetLastError());
