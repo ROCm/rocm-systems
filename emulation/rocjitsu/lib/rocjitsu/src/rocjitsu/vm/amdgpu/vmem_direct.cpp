@@ -163,6 +163,102 @@ std::optional<VmAccessOutcome> try_direct_shared_load(const DirectVectorRequest 
   return VmAccessOutcome::Complete;
 }
 
+// Loads whose lanes leave gaps or repeat inside a few transactions (stride-2
+// dwords, grouped gathers, overlapping half-waves) read each touched
+// transaction's span once and fill lanes from it; the coalescer would emit
+// one run, extent check and stripe lock per lane.
+constexpr uint32_t kMaxLineGroups = 8;
+
+struct LineGroups {
+  std::array<uint64_t, kMaxLineGroups> base;
+  std::array<uint32_t, kMaxLineGroups> lo;
+  std::array<uint32_t, kMaxLineGroups> hi;
+  uint32_t count = 0;
+};
+
+// Whether every active operand lies inside one of at most kMaxLineGroups
+// transactions, with at least two lanes per transaction on average, and the
+// lanes are not already one lane-ordered contiguous run.
+bool find_line_groups(const uint64_t *addrs, uint64_t lanes, uint32_t stride,
+                      uint32_t transaction_bytes, LineGroups &groups) {
+  const uint64_t mask = ~uint64_t{transaction_bytes - 1};
+  bool contiguous = true;
+  uint64_t previous = 0;
+  bool first = true;
+  for (uint64_t remaining = lanes; remaining; remaining &= remaining - 1) {
+    const uint64_t address = addrs[std::countr_zero(remaining)];
+    if (address > UINT64_MAX - stride || (address & mask) != ((address + stride - 1) & mask))
+      return false;
+    contiguous &= first || address == previous + stride;
+    first = false;
+    previous = address;
+    const uint64_t base = address & mask;
+    const uint32_t offset = static_cast<uint32_t>(address - base);
+    uint32_t i = 0;
+    while (i < groups.count && groups.base[i] != base)
+      ++i;
+    if (i == groups.count) {
+      if (groups.count == kMaxLineGroups)
+        return false;
+      groups.base[i] = base;
+      groups.lo[i] = offset;
+      groups.hi[i] = offset + stride;
+      ++groups.count;
+      continue;
+    }
+    groups.lo[i] = std::min(groups.lo[i], offset);
+    groups.hi[i] = std::max(groups.hi[i], offset + stride);
+  }
+  return !contiguous && static_cast<uint32_t>(std::popcount(lanes)) >= 2 * groups.count;
+}
+
+std::optional<VmAccessOutcome>
+try_direct_line_grouped_load(const DirectVectorRequest &request, const LineGroups &groups,
+                             uint32_t stride, const VmDirectBacking &backing, const L2Cache &l2) {
+  const uint64_t generation = backing.generation();
+  std::array<std::array<uint8_t, kMaxMemoryTransactionBytes>, kMaxLineGroups> staged;
+  std::array<VmDirectBacking::Copy, kMaxLineGroups> copies;
+  bool guarded = false;
+  std::optional<LegacyLocalExtent> extent;
+  for (uint32_t i = 0; i < groups.count; ++i) {
+    const uint64_t address = groups.base[i] + groups.lo[i];
+    const uint32_t size = groups.hi[i] - groups.lo[i];
+    if (!extent || !extent->contains(address, size)) {
+      extent = backing.extent(address, generation);
+      if (!extent || !extent->contains(address, size))
+        return std::nullopt;
+      const Mtype mtype = effective_mtype(request.instruction_mtype, extent->mtype);
+      if (mtype == Mtype::UC || mtype == Mtype::CC)
+        return std::nullopt;
+    }
+    guarded |= extent->owner != LegacyHostExtentOwner::DriverSealedRam;
+    copies[i] = {address, extent->host(address), staged[i].data() + groups.lo[i], size};
+  }
+  if (l2.has_unpublished_lines())
+    return std::nullopt;
+  SharedTransfer transfer{backing, std::span(copies.data(), groups.count), guarded};
+  if (!backing.run_admitted(
+          generation,
+          [](void *context) {
+            auto &transfer = *static_cast<SharedTransfer *>(context);
+            transfer.completed = transfer.backing.copy(transfer.copies, false, transfer.guarded);
+          },
+          &transfer) ||
+      !transfer.completed)
+    return std::nullopt;
+  const uint64_t mask = ~uint64_t{request.transactions.bytes() - 1};
+  for (uint64_t remaining = request.lanes; remaining; remaining &= remaining - 1) {
+    const uint32_t lane = std::countr_zero(remaining);
+    const uint64_t base = request.addrs[lane] & mask;
+    uint32_t i = 0;
+    while (groups.base[i] != base)
+      ++i;
+    std::memcpy(request.data + lane * stride, staged[i].data() + (request.addrs[lane] - base),
+                stride);
+  }
+  return VmAccessOutcome::Complete;
+}
+
 } // namespace
 
 std::optional<VmAccessOutcome> try_direct_vector_access(const DirectVectorRequest &request,
@@ -175,6 +271,10 @@ std::optional<VmAccessOutcome> try_direct_vector_access(const DirectVectorReques
     SharedOperands shared;
     if (find_shared_operands(request.addrs, request.lanes, shared))
       return try_direct_shared_load(request, shared, stride, backing, l2);
+    LineGroups groups;
+    if (find_line_groups(request.addrs, request.lanes, stride, request.transactions.bytes(),
+                         groups))
+      return try_direct_line_grouped_load(request, groups, stride, backing, l2);
   }
   // Resolve every transaction before any effect. Resolution may take
   // page-table locks, so it must finish before the admission is held.

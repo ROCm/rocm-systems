@@ -154,18 +154,56 @@ TEST_F(VmemDirectTest, SharedOperandLoadsReadEachOperandOnce) {
               << shape << " " << num_elems << " " << lane << " " << byte;
     }
   }
-  // Five distinct operands take the general path; a shared operand outside
-  // the extent declines before any copy.
+  // Five distinct operands in one transaction read that span once; a shared
+  // operand outside the extent declines before any copy.
   for (uint32_t lane = 0; lane < 32; ++lane)
     addrs[lane] = kBase + (lane % 5) * 8;
   backing.copies = 0;
   ASSERT_EQ(access(true, UINT32_MAX), VmAccessOutcome::Complete);
-  EXPECT_GT(backing.copies, 5);
+  EXPECT_EQ(backing.copies, 1);
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(lane_word(lane), host_word(addrs[lane])) << lane;
   for (uint32_t lane = 0; lane < 32; ++lane)
     addrs[lane] = lane < 16 ? kBase : kBase + kExtentBytes - 2;
   backing.copies = 0;
   EXPECT_FALSE(access(true, UINT32_MAX));
   EXPECT_EQ(backing.copies, 0);
+}
+
+TEST_F(VmemDirectTest, LineGroupedLoadsReadEachTransactionSpanOnce) {
+  struct Shape {
+    const char *name;
+    uint64_t (*address)(uint32_t lane);
+    int copies;
+    uint64_t lanes = UINT32_MAX & ~uint64_t{0x8};
+  };
+  const std::array<Shape, 4> shapes = {{
+      {"stride2", [](uint32_t lane) { return kBase + 0x200 + lane * 8; }, 2},
+      {"grouped",
+       [](uint32_t lane) { return kBase + 0x1000 + (lane / 8) * 0x400 + (lane % 8) * 4; }, 4},
+      {"reversed pairs", [](uint32_t lane) { return kBase + 0x2080 + (31 - lane) / 2 * 4; }, 1},
+      // A contiguous wave straddling a transaction stays one coalesced run.
+      {"contiguous", [](uint32_t lane) { return kBase + 0x340 + lane * 4; }, 1, UINT32_MAX},
+  }};
+  for (const Shape &shape : shapes) {
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      addrs[lane] = shape.address(lane);
+    data.fill(0xEE);
+    backing.copies = 0;
+    ASSERT_EQ(access(true, shape.lanes), VmAccessOutcome::Complete) << shape.name;
+    EXPECT_EQ(backing.copies, shape.copies) << shape.name;
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      EXPECT_EQ(lane_word(lane), (shape.lanes >> lane & 1) ? host_word(addrs[lane]) : 0xEEEEEEEEu)
+          << shape.name << " " << lane;
+  }
+  // An operand straddling a transaction keeps the coalesced runs.
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    addrs[lane] = kBase + 0x7e + lane * 8;
+  backing.copies = 0;
+  ASSERT_EQ(access(true, UINT32_MAX), VmAccessOutcome::Complete);
+  EXPECT_GT(backing.copies, 2);
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(lane_word(lane), host_word(addrs[lane])) << lane;
 }
 
 TEST_F(VmemDirectTest, StoresWholeElementsOfEveryActiveLane) {
