@@ -49,24 +49,24 @@ from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
 from utils.analysis_views import (
     MAIN_COLUMNS,
-    METRIC_TABLE,
     NO_VALUE,
     TABLE_CONFIG_KEYS,
-    load_views,
-    panel_aliases,
-    row_metric_ids,
     views_to_panel_configs,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
+    METRIC_TABLE,
     PLACEHOLDER_RANGE_KEY,
     ROOFLINE_PANEL_ID,
     canonical_config_arch,
     format_row_id,
     get_arch_panel_id_to_alias,
     load_panel_configs,
+    load_views,
+    panel_aliases,
     parse_sets_yaml,
+    row_metric_ids,
 )
 from utils.utils_counter_defs import Collectables, metric_value_keys
 

@@ -15,13 +15,11 @@ from conftest import ProfileModeImportGuard
 
 from rocprof_compute_soc.metric_library import loader
 from utils.analysis_views import (
-    iter_view_rows,
-    load_views,
     view_metric_errors,
     view_schema_errors,
     views_to_panel_configs,
 )
-from utils.utils_common import metric_ids_by_name
+from utils.utils_common import iter_view_rows, load_views, metric_ids_by_name
 
 ARCH = "gfx942"
 # gfx942's compute.ipc_issued per kernel: the per-dispatch partners of its summed

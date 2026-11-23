@@ -7,10 +7,11 @@ A view is one panel of one arch. Its table rows name metric library ids: the lib
 holds formulas, units, peaks and descriptions, and a row only sets how the panel shows
 its metric (label, rounding, measured peak, literal column values).
 
-Each metric library arch has one view file per panel in views/<arch>/; BUILT_IN_VIEWS
-adds the panels every arch shows from the workload's CSV files. The panel id comes
-from the file name (0300_memory_chart.yaml is panel 300), table and row ids from their
-position (301 is the first table, 3.1.0 its first row).
+Each metric library arch has one view file per panel in views/<arch>/, which
+utils_common.load_views() reads, with BUILT_IN_VIEWS for the panels every arch shows
+from the workload's CSV files. The panel id comes from the file name
+(0300_memory_chart.yaml is panel 300), table and row ids from their position (301 is
+the first table, 3.1.0 its first row).
 
 views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
 analysis_configs/. Until the cutover, analyze reads only the built-in top stats view
@@ -19,30 +20,30 @@ Standard library and vendored YAML only, because profile imports this module.
 """
 
 import ast
-import copy
-import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
-import config
 from utils.metrics.expression import (
     AGGREGATION_FUNCTIONS,
     format_equation,
     parse_equation,
 )
 from utils.utils_common import (
+    BUILT_IN_VIEWS,
+    METRIC_TABLE,
     PLACEHOLDER_RANGE_KEY,
-    canonical_config_arch,
-    format_row_id,
-    load_yaml,
+    RAW_CSV_TABLE,
+    VIEW_FILE_RE,
+    iter_view_rows,
     mapping_field_errors,
+    numbered_view_tables,
+    row_metric_ids,
+    view_table_render,
 )
 from utils.utils_counter_defs import per_dispatch_partner, summed_collectables
 
 # Table kinds, which are also the panel configs' data source keys.
-METRIC_TABLE = "metric_table"
-RAW_CSV_TABLE = "raw_csv_table"
 RENDERS = (METRIC_TABLE, RAW_CSV_TABLE, "pc_sampling_table")
 # Columns that show a row's own formula.
 MAIN_COLUMNS = ("avg", "value", "expr")
@@ -76,67 +77,6 @@ ROW_FIELDS = (
 NO_VALUE = "None"
 # The row "peak" that shows the measured peak instead of the theoretical one.
 EMPIRICAL_PEAK = "empirical"
-VIEW_FILE_RE = re.compile(r"^(\d\d00)_[a-z0-9_]+\.yaml$")
-# The panel --list-stats shows.
-TOP_STATS_PANEL_ID = 0
-# The views every arch has, by panel id. They show the workload's CSV files,
-# not metrics.
-BUILT_IN_VIEWS: Dict[int, Dict[str, Any]] = {
-    TOP_STATS_PANEL_ID: {
-        "view": "Top Stats",
-        "alias": "topstats",
-        "tables": [
-            {
-                "render": RAW_CSV_TABLE,
-                "title": "Top Kernels",
-                "source": "pmc_kernel_top.csv",
-            },
-            {
-                "render": RAW_CSV_TABLE,
-                "title": "Dispatch List",
-                "source": "pmc_dispatch_info.csv",
-            },
-        ],
-    },
-    100: {
-        "view": "System Info",
-        "alias": "sysinfo",
-        "tables": [
-            {
-                "render": RAW_CSV_TABLE,
-                "title": "System Info",
-                "source": "sysinfo.csv",
-                "columnwise": True,
-            }
-        ],
-    },
-}
-
-
-def read_view_files(arch: str) -> Dict[Path, Any]:
-    """Return arch's view file documents by path, in file name order."""
-    arch_dir = config.analysis_views_dir / canonical_config_arch(arch)
-    return {path: load_yaml(path) for path in sorted(arch_dir.glob("*.yaml"))}
-
-
-def load_views(arch: str) -> "OrderedDict[int, Dict[str, Any]]":
-    """Return arch's views, built-in ones included, sorted by panel id."""
-    return views_from_files(read_view_files(arch))
-
-
-def views_from_files(documents: Dict[Path, Any]) -> "OrderedDict[int, Dict[str, Any]]":
-    """Return the built-in views and those of read_view_files(), sorted by panel id."""
-    views = copy.deepcopy(BUILT_IN_VIEWS)
-    views.update((view_panel_id(path.name), view) for path, view in documents.items())
-    return OrderedDict(sorted(views.items()))
-
-
-def view_panel_id(file_name: str) -> int:
-    """Return the panel id of a view file name, e.g. 300 for 0300_memory_chart.yaml."""
-    match = VIEW_FILE_RE.match(file_name)
-    if match is None:
-        raise ValueError(f"{file_name}: not a view file name")
-    return int(match.group(1))
 
 
 def views_to_panel_configs(
@@ -156,33 +96,6 @@ def views_to_panel_configs(
         (panel_id, _panel_config(panel_id, views[panel_id], metrics, partners))
         for panel_id in sorted(views)
     )
-
-
-def panel_aliases(views: Dict[int, Dict[str, Any]]) -> Dict[str, str]:
-    """Return panel number -> -b alias, "" for none, of an arch's views."""
-    return {
-        str(panel_id // 100): view.get("alias") or ""
-        for panel_id, view in views.items()
-    }
-
-
-def iter_view_rows(
-    views: Dict[int, Dict[str, Any]],
-) -> Iterator[Tuple[str, Dict[str, Any]]]:
-    """Yield each metric table row of an arch's views with its numeric id."""
-    for panel_id, view in views.items():
-        for table_id, table in _numbered_tables(panel_id, view):
-            if _render(table) != METRIC_TABLE:
-                continue
-            for index, row in enumerate(table["metrics"]):
-                yield format_row_id(table_id, index), row
-
-
-def row_metric_ids(row: Dict[str, Any]) -> List[str]:
-    """Return the metric ids a row shows: its metric, or each column's."""
-    if "metric" in row:
-        return [row["metric"]]
-    return [metric_id for metric_id in row.get("columns", {}).values() if metric_id]
 
 
 def row_label(row: Dict[str, Any], metrics: Dict[str, Dict[str, Any]]) -> str:
@@ -234,18 +147,6 @@ def _per_dispatch_partners(collectables: Dict[str, str]) -> Dict[str, Optional[s
     }
 
 
-def _render(table: Dict[str, Any]) -> str:
-    return table.get("render", METRIC_TABLE)
-
-
-def _numbered_tables(
-    panel_id: int, view: Dict[str, Any]
-) -> Iterator[Tuple[int, Dict[str, Any]]]:
-    """Yield each table of a view with its table id: the panel id plus its position."""
-    for index, table in enumerate(view["tables"]):
-        yield panel_id + index + 1, table
-
-
 def _panel_config(
     panel_id: int,
     view: Dict[str, Any],
@@ -256,8 +157,12 @@ def _panel_config(
         "id": panel_id,
         "title": view["view"],
         "data source": [
-            {_render(table): _table_config(table_id, table, metrics, partners)}
-            for table_id, table in _numbered_tables(panel_id, view)
+            {
+                view_table_render(table): _table_config(
+                    table_id, table, metrics, partners
+                )
+            }
+            for table_id, table in numbered_view_tables(panel_id, view)
         ],
         "metrics_description": _panel_descriptions(view, metrics),
     }
@@ -405,7 +310,7 @@ def _table_shape_errors(table: object) -> List[str]:
     if not isinstance(table, dict):
         return ["a table must be a mapping"]
     errors = mapping_field_errors(table, ("title",), TABLE_FIELDS)
-    render = _render(table)
+    render = view_table_render(table)
     if render not in RENDERS:
         errors.append(f"render {render!r} is not one of {RENDERS}")
     if render == METRIC_TABLE:

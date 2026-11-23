@@ -28,12 +28,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import config
 from rocprof_compute_soc.metric_library import loader
-from utils.analysis_views import (
-    read_view_files,
-    view_metric_errors,
-    view_schema_errors,
-    views_from_files,
-)
+from utils.analysis_views import view_metric_errors, view_schema_errors
+from utils.utils_common import read_view_files, views_from_files
 
 
 def validate() -> List[str]:
