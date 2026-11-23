@@ -486,7 +486,7 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 64));
   EXPECT_EQ(loaded.execution_threads.engines, 8u);
-  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{25}));
   EXPECT_EQ(loaded.execution_threads.helpers, 0u);
   ASSERT_NE(loaded.async_resources, nullptr);
   EXPECT_EQ(loaded.async_resources->helpers(), 0u);
@@ -519,7 +519,7 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
   ASSERT_TRUE(test::load_valid_config_from_string(json, untouched, 64));
   EXPECT_EQ(untouched.cpu_thread_budget, 32u);
   EXPECT_EQ(untouched.execution_threads.engines, 8u);
-  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{25}));
   EXPECT_EQ(untouched.execution_threads.helpers, 0u);
 }
 
@@ -635,8 +635,8 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
     auto settings = std::move(settings_result).value();
     settings.request.helpers = 0;
     for (Case c : {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u},
-                   Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, cdna5 ? 25u : 17u},
-                   Case{40, 8, cdna5 ? 33u : 17u}, Case{48, 8, cdna5 ? 33u : 17u}}) {
+                   Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, 25},
+                   Case{40, 8, cdna5 ? 33u : 25u}, Case{48, 8, cdna5 ? 41u : 25u}}) {
       SCOPED_TRACE(name);
       SCOPED_TRACE(c.budget);
       settings.request.budget = c.budget;
@@ -653,24 +653,25 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsDoNotReserveUnusedHelpers) {
   for (const char *name : {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
-    const uint32_t max_cpu = cdna5 ? 40 : 24;
+    const uint32_t max_cpu = cdna5 ? 48 : 32;
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
         std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
         settings_diagnostic.emitter());
     ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
     auto settings = std::move(settings_result).value();
+    ASSERT_FALSE(settings.choices.empty());
+    EXPECT_EQ(settings.choices.back().helpers, 0u);
     for (uint32_t affinity = 1; affinity <= 128; ++affinity) {
       config::ExecutionThreadAllocation plan;
       ASSERT_TRUE(resolve_valid_execution_threads(plan, settings, affinity));
       ASSERT_EQ(plan.dispatch.size(), 1u);
       const auto cpu = plan.engines + plan.dispatch[0] - 1;
       EXPECT_LE(cpu, std::min(affinity, max_cpu));
-      EXPECT_LE(cpu + plan.helpers, std::min(affinity, max_cpu + 8));
       EXPECT_EQ(plan.helpers, 0u);
       if (affinity >= 24) {
         EXPECT_EQ(plan.engines, 8u);
-        const uint32_t expected_cpu = cdna5 && affinity >= 32 ? (affinity >= 40 ? 40 : 32) : 24;
+        const uint32_t expected_cpu = std::min(affinity / 8 * 8, max_cpu);
         EXPECT_EQ(cpu, expected_cpu);
       }
     }

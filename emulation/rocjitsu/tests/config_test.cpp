@@ -4407,7 +4407,7 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
 TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   config::LoadedConfig source;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", source, 48));
-  ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{33}));
+  ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{41}));
   auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
   ASSERT_EQ(source_cu->num_wf_slots(), 64u);
   ASSERT_EQ(source_cu->scratch_slots_per_cu(), 32u);
@@ -4436,7 +4436,7 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   EXPECT_EQ(restored.execution_threads.dispatch, source.execution_threads.dispatch);
   EXPECT_EQ(restored.execution_threads.helpers, source.execution_threads.helpers);
   restored.apply_cpu_dispatch_threads();
-  EXPECT_EQ(restored.soc()->dispatch_threads(), 33u);
+  EXPECT_EQ(restored.soc()->dispatch_threads(), source.execution_threads.dispatch.front());
   ASSERT_EQ(restored.soc()->num_xcds(), 8u);
   for (auto *xcd : restored.soc()->xcds()) {
     auto *cp = xcd->command_processor();
