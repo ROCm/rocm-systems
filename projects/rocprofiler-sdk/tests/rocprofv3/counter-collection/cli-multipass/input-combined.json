@@ -3,7 +3,9 @@
         {
             "pmc": [
                 "GRBM_GUI_ACTIVE"
-            ]
+            ],
+            "output_directory": "@_combined_shared_output@",
+            "output_file": "out"
         }
     ]
 }
