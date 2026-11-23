@@ -43,7 +43,7 @@ class Keys:
 
 
 # Version of the layout format; README.md says when to bump it
-LAYOUT_VERSION = "1.0.0"
+LAYOUT_VERSION = "1.1.0"
 
 # Each Keys lists every key in file order, then the keys a file may leave out
 LAYOUT_KEYS = Keys(("archs", "description", "scope", "blocks", "arrows"))

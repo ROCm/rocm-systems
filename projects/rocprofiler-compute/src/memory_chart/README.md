@@ -152,7 +152,8 @@ stores it with each layout in the analysis database. It follows semantic version
 Bump it in the same change that changes the format:
 
 - MAJOR: a field is renamed or removed, or its meaning changes.
-- MINOR: an optional field is added.
+- MINOR: an optional field is added, or a field is allowed in more places (1.1.0:
+  `bar` in `list` blocks).
 - PATCH: a fix that changes no field.
 
 ## Adding an architecture
