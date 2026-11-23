@@ -384,6 +384,283 @@ TEST(KernelOwnershipTest, FreshPcBuilderAfterIndirectCallProvesActualOwners) {
   EXPECT_EQ(ownership.value().owners_at(772)->size(), 2u);
 }
 
+TEST(KernelOwnershipTest, SignedTemplateRequiresClosedArithmeticArmEntries) {
+  for (bool padded : {false, true}) {
+    for (size_t scenario = 0; scenario < 6; ++scenario) {
+      SCOPED_TRACE(padded);
+      SCOPED_TRACE(scenario);
+      const bool alternate_entry = scenario == 1;
+      const uint16_t temporary = scenario == 4 ? 8 : scenario == 5 ? 9 : 12;
+      const uint32_t target = padded ? 64 : 52;
+      const uint32_t add_arm = padded ? 40 : 36;
+      const uint32_t other_target = padded ? 768 : 512;
+      std::vector<uint32_t> words(196, build_s_nop(0, kArch).value());
+      const std::vector<uint32_t> prefix = {
+          pack_sop1(0x1c, 8, 0),
+          pack_sop2(2, temporary, 255, 132),
+          target - 8,
+          pack_sopc(3, scenario == 3 ? 13 : temporary, 128),
+          pack_sopp(scenario == 2 ? 4 : 5, static_cast<uint16_t>((add_arm - 20) / 4)),
+          pack_sop1(0x30, temporary, temporary),
+          pack_sop2(1, 8, 8, temporary),
+          pack_sop2(5, 9, 9, 128),
+          build_s_setpc_b64(8, kArch).value(),
+      };
+      std::ranges::copy(prefix, words.begin());
+      words[add_arm / 4] = pack_sop2(0, 8, 8, temporary);
+      words[add_arm / 4 + 1] = pack_sop2(4, 9, 9, 128);
+      words[add_arm / 4 + 2] = build_s_setpc_b64(8, kArch).value();
+      const std::array<uint32_t, 2> store =
+          cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 2, .data0 = 3});
+      for (uint32_t site : {target, other_target}) {
+        words[site / 4] = store[0];
+        words[site / 4 + 1] = store[1];
+        words[site / 4 + 2] = build_s_endpgm(kArch).value();
+      }
+      if (alternate_entry) {
+        write_pc_builder(words, 256, 8, other_target);
+        words[68] = build_s_mov_b32(12, 128, kArch).value();
+        words[69] =
+            build_s_branch(static_cast<int16_t>((static_cast<int32_t>(add_arm) - 280) / 4), kArch)
+                .value();
+      } else {
+        words[64] = build_s_endpgm(kArch).value();
+      }
+      const std::vector<uint8_t> image = two_owner_image(words, 256);
+      const std::shared_ptr<const AmdGpuCodeObject> source =
+          std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+      std::string error;
+      const FailureOr<KernelOwnership> ownership =
+          KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+      if (scenario != 0) {
+        EXPECT_TRUE(ownership.failed());
+      } else {
+        ASSERT_TRUE(ownership.succeeded()) << error;
+        ASSERT_TRUE(ownership.value().owners_at(target));
+        EXPECT_EQ(ownership.value().owners_at(target)->size(), 1u);
+      }
+    }
+  }
+}
+
+TEST(KernelOwnershipTest, RejectsUnprovedBuilderEnteringAnotherCallee) {
+  for (bool loop_backedge : {false, true}) {
+    SCOPED_TRACE(loop_backedge);
+    std::vector<uint32_t> words(196, build_s_nop(0, kArch).value());
+    write_pc_builder(words, 0, 8, 768);
+    write_pc_builder(words, 16, 10, 512);
+    words[8] = build_s_swappc_b64(30, 10, kArch).value();
+    write_pc_builder(words, 36, 10, 640);
+    words[13] = build_s_swappc_b64(30, 10, kArch).value();
+    words[14] = build_s_endpgm(kArch).value();
+    words[64] = build_s_branch(128, kArch).value();
+    write_pc_builder(words, 512, 8, 772);
+    words[132] = build_s_setpc_b64(30, kArch).value();
+    words[160] = build_s_cbranch_scc0(1);
+    words[161] = build_s_setpc_b64(30, kArch).value();
+    if (loop_backedge)
+      words[162] = build_s_cbranch_scc0(-3);
+    words[163] = build_s_setpc_b64(8, kArch).value();
+    words[192] = build_s_endpgm(kArch).value();
+    const std::array<uint32_t, 2> store =
+        cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 2, .data0 = 3});
+    words[193] = store[0];
+    words[194] = store[1];
+    words[195] = build_s_endpgm(kArch).value();
+    const std::vector<uint8_t> image = two_owner_image(words, 256);
+    const std::shared_ptr<const AmdGpuCodeObject> source =
+        std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+    std::string error;
+    const FailureOr<KernelOwnership> ownership =
+        KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+    EXPECT_TRUE(ownership.failed());
+  }
+}
+
+TEST(KernelOwnershipTest, SplitPcAdjustmentRequiresMatchingHighHalfAndCarry) {
+  struct Case {
+    uint32_t start = 0;
+    uint16_t low_op = cdna4::kSAddU32Sop2;
+    uint32_t low = 508;
+    uint16_t high_op = cdna4::kSAddcU32Sop2;
+    uint32_t high = 0;
+    bool gap = false;
+    bool overwrite_scc = false;
+    bool finish = true;
+    bool proved = true;
+  };
+  const std::array<Case, 11> cases = {{
+      {},
+      {.high = 0xffffffffu, .proved = false},
+      {.high_op = cdna4::kSSubbU32Sop2, .proved = false},
+      {.start = 512, .low = 0xfffffe00u, .high = 0xffffffffu},
+      {.start = 512, .low = 0xfffffe00u, .proved = false},
+      {.start = 512, .low_op = cdna4::kSSubU32Sop2, .low = 512, .high_op = cdna4::kSSubbU32Sop2},
+      {.low_op = cdna4::kSSubU32Sop2,
+       .low = 0xfffffe04u,
+       .high_op = cdna4::kSSubbU32Sop2,
+       .high = 0xffffffffu},
+      {.low_op = cdna4::kSAddI32Sop2, .proved = false},
+      {.gap = true},
+      {.overwrite_scc = true, .proved = false},
+      {.finish = false, .proved = false},
+  }};
+  for (size_t index = 0; index < cases.size(); ++index) {
+    SCOPED_TRACE(index);
+    const Case &test = cases[index];
+    std::vector<uint32_t> words(144, build_s_nop(0, kArch).value());
+    words[64] = build_s_endpgm(kArch).value();
+    const uint32_t target = test.start == 0 ? 512 : 4;
+    words[target / 4] = build_s_endpgm(kArch).value();
+    if (test.start != 0)
+      words[0] = build_s_branch(127, kArch).value();
+    size_t cursor = test.start / 4;
+    words[cursor++] = build_s_getpc_b64(8, kArch).value();
+    words[cursor++] = pack_sop2(test.low_op, 8, 8, 255);
+    words[cursor++] = test.low;
+    if (test.gap)
+      words[cursor++] = build_s_mov_b32(20, 128, kArch).value();
+    if (test.overwrite_scc)
+      words[cursor++] = build_s_cmp_lg_u32(128, 129, kArch).value();
+    if (test.finish) {
+      words[cursor++] = pack_sop2(test.high_op, 9, 9, 255);
+      words[cursor++] = test.high;
+    }
+    words[cursor] = build_s_setpc_b64(8, kArch).value();
+    const std::vector<uint8_t> image = two_owner_image(words, 256);
+    const std::shared_ptr<const AmdGpuCodeObject> source =
+        std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+    std::string error;
+    const FailureOr<KernelOwnership> ownership =
+        KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+    if (test.proved) {
+      ASSERT_TRUE(ownership.succeeded()) << error;
+      ASSERT_TRUE(ownership.value().owners_at(target));
+      EXPECT_EQ(ownership.value().owners_at(target)->size(), 1u);
+    } else {
+      EXPECT_TRUE(ownership.failed());
+    }
+  }
+}
+
+TEST(KernelOwnershipTest, TemporaryPcAdjustmentRequiresProvedSignAndRegisters) {
+  for (bool subtract : {false, true}) {
+    for (size_t scenario = 0; scenario < 4; ++scenario) {
+      const uint16_t temporary = scenario == 1 ? 8 : scenario == 2 ? 9 : 12;
+      const bool negative = subtract != (scenario == 3);
+      SCOPED_TRACE(subtract);
+      SCOPED_TRACE(scenario);
+      std::vector<uint32_t> words(144, build_s_nop(0, kArch).value());
+      words[64] = build_s_endpgm(kArch).value();
+      const uint32_t target = negative ? 4 : 512;
+      words[target / 4] = build_s_endpgm(kArch).value();
+      if (negative)
+        words[0] = build_s_branch(127, kArch).value();
+      size_t cursor = negative ? 128 : 0;
+      words[cursor++] = build_s_getpc_b64(8, kArch).value();
+      words[cursor++] = pack_sop2(cdna4::kSAddI32Sop2, temporary, 255, 132);
+      words[cursor++] = negative ? 0xfffffdfcu : 504;
+      if (subtract)
+        words[cursor++] = pack_sop1(0x30, temporary, temporary);
+      words[cursor++] =
+          pack_sop2(subtract ? cdna4::kSSubU32Sop2 : cdna4::kSAddU32Sop2, 8, 8, temporary);
+      words[cursor++] =
+          pack_sop2(subtract ? cdna4::kSSubbU32Sop2 : cdna4::kSAddcU32Sop2, 9, 9, 128);
+      words[cursor] = build_s_setpc_b64(8, kArch).value();
+      const std::vector<uint8_t> image = two_owner_image(words, 256);
+      const std::shared_ptr<const AmdGpuCodeObject> source =
+          std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+      std::string error;
+      const FailureOr<KernelOwnership> ownership =
+          KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+      if (scenario == 0) {
+        ASSERT_TRUE(ownership.succeeded()) << error;
+        ASSERT_TRUE(ownership.value().owners_at(target));
+        EXPECT_EQ(ownership.value().owners_at(target)->size(), 1u);
+      } else {
+        EXPECT_TRUE(ownership.failed());
+      }
+    }
+  }
+}
+
+TEST(KernelOwnershipTest, PendingCarryCannotCrossTemporaryAdjustment) {
+  std::vector<uint32_t> words(144, build_s_nop(0, kArch).value());
+  words[0] = build_s_branch(127, kArch).value();
+  words[2] = build_s_endpgm(kArch).value();
+  words[64] = build_s_endpgm(kArch).value();
+  const std::vector<uint32_t> builder = {
+      build_s_getpc_b64(8, kArch).value(),
+      pack_sop2(cdna4::kSAddU32Sop2, 8, 8, 255),
+      0xfffffe00u,
+      pack_sop2(cdna4::kSAddI32Sop2, 12, 255, 132),
+      0,
+      pack_sop2(cdna4::kSAddU32Sop2, 8, 8, 12),
+      pack_sop2(cdna4::kSAddcU32Sop2, 9, 9, 128),
+      pack_sop2(cdna4::kSAddcU32Sop2, 9, 9, 255),
+      0xffffffffu,
+      build_s_setpc_b64(8, kArch).value(),
+  };
+  std::ranges::copy(builder, words.begin() + 128);
+  const std::vector<uint8_t> image = two_owner_image(words, 256);
+  const std::shared_ptr<const AmdGpuCodeObject> source =
+      std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+  std::string error;
+  const FailureOr<KernelOwnership> ownership =
+      KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+  EXPECT_TRUE(ownership.failed());
+}
+
+TEST(KernelOwnershipTest, Gfx1250PcTemporaryMustBeWritableSgpr) {
+  constexpr IsaFamily arch = IsaFamily::Cdna5;
+  for (bool split : {false, true}) {
+    for (uint8_t temporary : {12, 124}) {
+      SCOPED_TRACE(split);
+      SCOPED_TRACE(static_cast<unsigned>(temporary));
+      std::vector<uint32_t> words(144, build_s_nop(0, arch).value());
+      words[64] = build_s_endpgm(arch).value();
+      words[128] = build_s_endpgm(arch).value();
+      std::vector<uint32_t> builder = {
+          build_s_getpc_b64(8, arch).value(),
+          cdna5::build_sop2(cdna5::kSAddCoI32Sop2,
+                            {.ssrc0 = 255, .ssrc1 = 132, .sdst = temporary})[0],
+          504,
+      };
+      if (split) {
+        const std::vector<uint32_t> subtract = {
+            cdna5::build_sopc(cdna5::kSCmpGeI32Sopc, {.ssrc0 = temporary, .ssrc1 = 128})[0],
+            cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = 4})[0],
+            cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = temporary, .sdst = temporary})[0],
+            cdna5::build_sop2(cdna5::kSSubCoU32Sop2,
+                              {.ssrc0 = 8, .ssrc1 = temporary, .sdst = 8})[0],
+            cdna5::build_sop2(cdna5::kSSubCoCiU32Sop2, {.ssrc0 = 9, .ssrc1 = 128, .sdst = 9})[0],
+            build_s_setpc_b64(8, arch).value(),
+        };
+        builder.insert(builder.end(), subtract.begin(), subtract.end());
+      }
+      builder.push_back(
+          cdna5::build_sop2(cdna5::kSAddCoU32Sop2, {.ssrc0 = 8, .ssrc1 = temporary, .sdst = 8})[0]);
+      builder.push_back(
+          cdna5::build_sop2(cdna5::kSAddCoCiU32Sop2, {.ssrc0 = 9, .ssrc1 = 128, .sdst = 9})[0]);
+      builder.push_back(build_s_setpc_b64(8, arch).value());
+      std::ranges::copy(builder, words.begin());
+      const std::vector<uint8_t> image = two_owner_image(words, 256, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+      const std::shared_ptr<const AmdGpuCodeObject> source =
+          std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+      std::string error;
+      const FailureOr<KernelOwnership> ownership =
+          KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX1250, error);
+      if (temporary == 12) {
+        ASSERT_TRUE(ownership.succeeded()) << error;
+        ASSERT_TRUE(ownership.value().owners_at(512));
+        EXPECT_EQ(ownership.value().owners_at(512)->size(), 1u);
+      } else {
+        EXPECT_TRUE(ownership.failed());
+      }
+    }
+  }
+}
+
 TEST(KernelOwnershipTest, RejectsDroppedTargetInAnotherExecutableSection) {
   std::vector<uint32_t> words(256, build_s_nop(0, kArch).value());
   words[0] = build_s_cbranch_scc0(7); // 0 -> 32.

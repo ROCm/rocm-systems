@@ -20,6 +20,10 @@
 namespace rocjitsu {
 
 bool uses_kernarg_preload_firmware_skip(rocjitsu::IsaFamily arch) {
+  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
+  // compatibility window: old firmware enters at the descriptor entry and
+  // compatible firmware enters 256 bytes later. GFX1250 supports preloading in
+  // hardware but has one entry, exactly as specified by the descriptor.
   return arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
 }
 

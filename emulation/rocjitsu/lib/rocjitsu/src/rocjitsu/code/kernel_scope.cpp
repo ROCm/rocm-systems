@@ -379,26 +379,44 @@ static FailureOr<ProvedReturns> proved_call_return_offsets(std::span<BasicBlock 
 
 namespace {
 
-bool pc_builder_crosses_call(const BasicBlock &producer, const BasicBlock &consumer) {
+enum class PcBuilderInputProof { Proved, MissingPath, CrossesCall };
+
+PcBuilderInputProof
+pc_builder_input_proof(const std::unordered_set<const BasicBlock *> &producers,
+                       const BasicBlock &consumer,
+                       const std::unordered_set<uint64_t> &hardware_entries,
+                       const std::unordered_set<const BasicBlock *> &call_entries) {
   // Recovery keeps useful builder edges across syntactic call continuations,
   // but ownership additionally needs proof that the callee preserved the pair.
-  // Stop at the producer: executing getpc again refreshes the value, including
+  // Stop at any complete producer: a shared target may have one per kernel.
+  // Executing getpc again refreshes the value, including
   // on loop backedges. Inspect predecessor edges so the consumer's own call
   // does not invalidate the target it reads before entering its callee.
   std::vector<const BasicBlock *> pending = {&consumer};
   std::unordered_set<const BasicBlock *> visited;
+  bool reached_producer = false;
   while (!pending.empty()) {
     const BasicBlock *block = pending.back();
     pending.pop_back();
-    if (block == &producer || !visited.insert(block).second)
+    if (producers.contains(block)) {
+      reached_producer = true;
       continue;
+    }
+    if (!visited.insert(block).second)
+      continue;
+    // Call edges are separate from ordinary predecessors, even when a callee
+    // also has a loop backedge. Losing that incoming path is not a proof.
+    if (call_entries.contains(block))
+      return PcBuilderInputProof::CrossesCall;
+    if (hardware_entries.contains(block->start_offset()) || block->predecessors().empty())
+      return PcBuilderInputProof::MissingPath;
     for (const BasicBlock *predecessor : block->predecessors()) {
       if (!predecessor->call_edges().empty())
-        return true;
+        return PcBuilderInputProof::CrossesCall;
       pending.push_back(predecessor);
     }
   }
-  return false;
+  return reached_producer ? PcBuilderInputProof::Proved : PcBuilderInputProof::MissingPath;
 }
 
 std::optional<uint64_t> file_backed_address(std::span<const Elf64_Phdr> segments, uint64_t offset,
@@ -619,6 +637,10 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
   const BlockPositionIndex positions = build_block_position_index(blocks);
   result.offsets_ = index;
   std::unordered_set<uint64_t> all_entries;
+  std::unordered_set<const BasicBlock *> call_entries;
+  for (const std::unique_ptr<BasicBlock> &block : blocks)
+    for (const BasicBlock::CallEdge &call : block->call_edges())
+      call_entries.insert(call.callee);
   for (const std::vector<uint64_t> &roots : kernel_roots) {
     if (roots.empty())
       return reject("kernel has no hardware roots");
@@ -665,6 +687,7 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
         if (returns.value().offsets.contains(instruction.src_loc()))
           continue;
         bool recovered = false;
+        std::unordered_set<const BasicBlock *> producers;
         for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
           if (fixup.source_call_offset != instruction.src_loc())
             continue;
@@ -673,12 +696,19 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
               target->start_offset() != fixup.source_target_offset)
             return reject("incomplete indirect ownership");
           const BasicBlock *producer = block_for_offset(index, fixup.source_getpc_offset);
-          if (!producer || pc_builder_crosses_call(*producer, *block))
-            return reject("call-carried PC builder requires callee preservation proof");
+          if (!producer)
+            return reject("recovered target lacks incoming-path proof");
+          producers.insert(producer);
           recovered = true;
         }
         if (!recovered)
           return reject("unresolved indirect ownership");
+        const PcBuilderInputProof proof =
+            pc_builder_input_proof(producers, *block, all_entries, call_entries);
+        if (proof == PcBuilderInputProof::CrossesCall)
+          return reject("call-carried PC builder requires callee preservation proof");
+        if (proof != PcBuilderInputProof::Proved)
+          return reject("recovered target lacks incoming-path proof");
       }
     }
     FlowStorage flow = {.blocks = scope,
