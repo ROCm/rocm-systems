@@ -8,11 +8,11 @@
 RDC components
 ***************
 
-The components of the RDC tool are illustrated in the following figure.
+RDC consists of four main components: the RDC (API) library, the RDC daemon (``rdcd``), the RDC command-line tool (``rdci``), and the AMDSMI library. The following figure illustrates these components and the surrounding architecture they interact with.
 
 .. figure:: ../data/install_components.png
 
-    High-level diagram of RDC components
+    High-level diagram of RDC components and the surrounding architecture
 
 RDC (API) library
 -----------------
