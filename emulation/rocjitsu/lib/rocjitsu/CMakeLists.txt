@@ -31,11 +31,6 @@ target_include_directories(
 )
 
 option(
-    RJ_BUILD_FAULT_INJECTION
-    "Build the offline fault-injection library, CLI, and tests"
-    OFF
-)
-option(
     RJ_BUILD_CONSAN_COMPILER
     "Build the experimental offline ConSan compiler"
     OFF

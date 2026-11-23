@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/cli.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
@@ -14,22 +15,24 @@
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
 using namespace rocjitsu;
 
 constexpr size_t kMaxImageBytes = 256 * 1024 * 1024;
-constexpr std::string_view kUsage =
-    "Usage: rj_code_mutate --input FILE --kernel ENTRY [--kind DropBarrier]\n"
-    "       --list | --output NEW-FILE [--exact TEXT-OFFSET] [--ordinal N]\n"
-    "       [--target GFX-NAME]\n"
-    "       rj_code_mutate --capabilities | --help\n\n"
+namespace cli = rocjitsu::cli;
+
+constexpr std::string_view kMutationHelp =
+    "\n"
     "List complete logical barriers for the exact kernel entry in this input.\n"
     "Mutate one barrier with DropBarrier (the only available kind). --exact is\n"
     "the first member's .text-relative byte offset from --list, decimal or 0x hex.\n"
@@ -46,16 +49,58 @@ constexpr std::string_view kUsage =
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
 
-bool parse_number(std::string_view text, uint64_t &number) {
-  int base = 10;
-  if (text.starts_with("0x")) {
-    text.remove_prefix(2);
-    base = 16;
-  }
+util::FailureOr<uint64_t> parse_number(std::string_view text, util::DiagnosticEmitter diagnostic) {
+  if (!text.starts_with("0x"))
+    return cli::parse_uint(text, diagnostic);
+  text.remove_prefix(2);
+  uint64_t number = 0;
   const std::from_chars_result parsed =
-      std::from_chars(text.data(), text.data() + text.size(), number, base);
-  return !text.empty() && parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
+      std::from_chars(text.data(), text.data() + text.size(), number, 16);
+  if (text.empty() || parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+    return diagnostic.emit() << "expected an unsigned decimal or 0x hexadecimal integer";
+  return number;
 }
+
+// Mutation requests reject repeated options and empty values rather than using
+// the shared parser's last-value-wins policy, which could silently select a new site.
+template <typename T> class MutationFlag final : public cli::Flag {
+public:
+  explicit MutationFlag(cli::FlagInfo info) : Flag(std::move(info)) {}
+  const std::optional<T> &value() const { return value_; }
+  bool allows_switch_mode() const override { return std::is_same_v<T, bool>; }
+  std::string format_value() const override {
+    if (!value_)
+      return "unset";
+    if constexpr (std::is_same_v<T, std::string>)
+      return *value_;
+    else if constexpr (std::is_same_v<T, bool>)
+      return *value_ ? "true" : "false";
+    else
+      return std::to_string(*value_);
+  }
+
+private:
+  util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
+    if (value_)
+      return diagnostic.emit() << "duplicate option";
+    if (text.empty() || text.starts_with("--"))
+      return diagnostic.emit() << "requires a nonempty value";
+    if constexpr (std::is_same_v<T, std::string>) {
+      value_ = std::string(text);
+    } else if constexpr (std::is_same_v<T, bool>) {
+      if (text != "true")
+        return diagnostic.emit() << "expected a bare switch or '=true'";
+      value_ = true;
+    } else {
+      const util::FailureOr<uint64_t> number = parse_number(text, diagnostic);
+      if (number.failed())
+        return util::Result::failure();
+      value_ = number.value();
+    }
+    return util::Result::success();
+  }
+  std::optional<T> value_;
+};
 
 // Exclusive creation also protects aliases and destinations created after argument parsing.
 // A failed write/close removes our incomplete output and never reports a mutant.
@@ -124,11 +169,81 @@ int finish_stdout() {
 }
 
 int run(int argc, char **argv) {
-  if (argc == 2 && std::string_view(argv[1]) == "--help") {
-    std::cout << kUsage;
+  cli::Command command("rj_code_mutate");
+  command.set_positional_usage("");
+  auto input_flag =
+      std::make_shared<MutationFlag<std::string>>(cli::FlagInfo{.name = "--input",
+                                                                .aliases = {},
+                                                                .description = "Input code object",
+                                                                .value_placeholder = "FILE"});
+  auto kernel_flag = std::make_shared<MutationFlag<std::string>>(
+      cli::FlagInfo{.name = "--kernel",
+                    .aliases = {},
+                    .description = "Exact descriptor-derived entry",
+                    .value_placeholder = "ENTRY"});
+  auto output_flag = std::make_shared<MutationFlag<std::string>>(
+      cli::FlagInfo{.name = "--output",
+                    .aliases = {},
+                    .description = "Create a new mutant file",
+                    .value_placeholder = "NEW-FILE"});
+  auto kind_flag = std::make_shared<MutationFlag<std::string>>(
+      cli::FlagInfo{.name = "--kind",
+                    .aliases = {},
+                    .description = "Mutation kind (default: DropBarrier)",
+                    .value_placeholder = "KIND"});
+  auto target_flag = std::make_shared<MutationFlag<std::string>>(
+      cli::FlagInfo{.name = "--target",
+                    .aliases = {},
+                    .description = "Assert the source target",
+                    .value_placeholder = "GFX-NAME"});
+  auto exact_flag = std::make_shared<MutationFlag<uint64_t>>(
+      cli::FlagInfo{.name = "--exact",
+                    .aliases = {},
+                    .description = "Exact first-member .text byte offset",
+                    .value_placeholder = "TEXT-OFFSET"});
+  auto ordinal_flag = std::make_shared<MutationFlag<uint64_t>>(
+      cli::FlagInfo{.name = "--ordinal",
+                    .aliases = {},
+                    .description = "Logical barrier ordinal (default: 0)",
+                    .value_placeholder = "N"});
+  auto list_flag = std::make_shared<MutationFlag<bool>>(
+      cli::FlagInfo{.name = "--list",
+                    .aliases = {},
+                    .description = "List complete barriers for this entry",
+                    .value_mode = cli::ValueMode::Switch});
+  auto capabilities_flag = std::make_shared<MutationFlag<bool>>(
+      cli::FlagInfo{.name = "--capabilities",
+                    .aliases = {},
+                    .description = "List supported target/wave forms and exit",
+                    .value_mode = cli::ValueMode::Switch});
+  auto help_flag =
+      std::make_shared<MutationFlag<bool>>(cli::FlagInfo{.name = "--help",
+                                                         .aliases = {},
+                                                         .description = "Show help and exit",
+                                                         .value_mode = cli::ValueMode::Switch});
+  auto report = [](std::string_view message) { std::cerr << message << '\n'; };
+  util::DiagnosticEmitter diagnostic(report);
+  if (command
+          .add_flags("Mutation",
+                     {input_flag, kernel_flag, output_flag, kind_flag, target_flag, exact_flag,
+                      ordinal_flag, list_flag},
+                     diagnostic)
+          .failed() ||
+      command.add_flags("Information", {capabilities_flag, help_flag}, diagnostic).failed())
+    return 2;
+  const std::vector<std::string_view> arguments(argv + 1, argv + argc);
+  const util::FailureOr<cli::ParsedArguments> parsed = cli::parse(command, arguments, diagnostic);
+  if (parsed.failed())
+    return 2;
+  if (!parsed.value().positional.empty() || parsed.value().saw_separator)
+    return reject("positional arguments are not supported");
+  if ((help_flag->value() || capabilities_flag->value()) && argc != 2)
+    return reject("--help and --capabilities must be used alone");
+  if (help_flag->value()) {
+    std::cout << cli::format_help(command) << kMutationHelp;
     return finish_stdout();
   }
-  if (argc == 2 && std::string_view(argv[1]) == "--capabilities") {
+  if (capabilities_flag->value()) {
     for (const FaultMutationCapability &capability : fault_mutation_capabilities()) {
       const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
       std::cout << "kind=DropBarrier target=" << target->id << " wave=" << capability.wave_size
@@ -139,59 +254,28 @@ int run(int argc, char **argv) {
     }
     return finish_stdout();
   }
-  const char *input = nullptr;
-  const char *output = nullptr;
-  std::string_view kernel, kind = "DropBarrier", target_assertion;
-  std::optional<uint64_t> exact;
-  size_t ordinal = 0;
-  bool list = false;
-  std::vector<std::string_view> seen;
-  for (int index = 1; index < argc; ++index) {
-    const std::string_view option(argv[index]);
-    if (std::ranges::find(seen, option) != seen.end())
-      return reject("duplicate option: " + std::string(option));
-    seen.push_back(option);
-    if (option == "--list") {
-      list = true;
-      continue;
-    }
-    if (option != "--input" && option != "--output" && option != "--kernel" && option != "--kind" &&
-        option != "--target" && option != "--exact" && option != "--ordinal")
-      return reject("unknown option: " + std::string(option));
-    if (++index == argc || std::string_view(argv[index]).empty() ||
-        std::string_view(argv[index]).starts_with("--"))
-      return reject("missing value for " + std::string(option));
-    const std::string_view value(argv[index]);
-    if (option == "--input")
-      input = argv[index];
-    else if (option == "--output")
-      output = argv[index];
-    else if (option == "--kernel")
-      kernel = value;
-    else if (option == "--kind")
-      kind = value;
-    else if (option == "--target")
-      target_assertion = value;
-    else {
-      uint64_t number = 0;
-      if (!parse_number(value, number) || (option == "--ordinal" && number > SIZE_MAX))
-        return reject("invalid unsigned integer for " + std::string(option));
-      if (option == "--exact")
-        exact = number;
-      else
-        ordinal = static_cast<size_t>(number);
-    }
-  }
-  if (!input || kernel.empty() ||
-      (list ? output != nullptr || exact.has_value() ||
-                  std::ranges::find(seen, "--ordinal") != seen.end()
-            : output == nullptr)) {
-    std::cerr << kUsage;
+  const std::string input = input_flag->value().value_or("");
+  const std::string output = output_flag->value().value_or("");
+  const std::string kernel = kernel_flag->value().value_or("");
+  const std::string kind = kind_flag->value().value_or("DropBarrier");
+  const std::string target_assertion = target_flag->value().value_or("");
+  const std::optional<uint64_t> exact = exact_flag->value();
+  const uint64_t requested_ordinal = ordinal_flag->value().value_or(0);
+  if (requested_ordinal > SIZE_MAX)
+    return reject("invalid unsigned integer for --ordinal");
+  const size_t ordinal = static_cast<size_t>(requested_ordinal);
+  const bool list = list_flag->value().value_or(false);
+  if (input.empty() || kernel.empty() ||
+      (list ? output_flag->value().has_value() || exact.has_value() ||
+                  ordinal_flag->value().has_value()
+            : output.empty())) {
+    std::cerr << cli::format_help(command) << kMutationHelp;
     return reject("require input, exact kernel, and either --list or --output");
   }
   if (kind != "DropBarrier")
-    return reject("unsupported mutation kind: " + std::string(kind));
-  const util::FailureOr<std::vector<char>> bytes = detail::read_file_bytes(input, kMaxImageBytes);
+    return reject("unsupported mutation kind: " + kind);
+  const util::FailureOr<std::vector<char>> bytes =
+      detail::read_file_bytes(input.c_str(), kMaxImageBytes);
   if (bytes.failed() || bytes.value().empty())
     return reject("cannot read bounded input code object (regular file, 1..256 MiB)");
   const FaultMutationContext context(
@@ -248,7 +332,7 @@ int run(int argc, char **argv) {
   const FailureOr<DropBarrierResult> mutant = apply_drop_barrier(context, selection.value(), error);
   if (mutant.failed())
     return reject(error, "mutation");
-  if (!write_new_file(output, mutant.value().image)) {
+  if (!write_new_file(output.c_str(), mutant.value().image)) {
     std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
     return 3;
   }

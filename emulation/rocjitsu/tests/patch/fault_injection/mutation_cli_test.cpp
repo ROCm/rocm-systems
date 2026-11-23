@@ -104,7 +104,7 @@ protected:
     EXPECT_GE(err, 0);
     const pid_t child = fork();
     if (child == 0) {
-      if (dup2(out, STDOUT_FILENO) < 0 || dup2(err, STDERR_FILENO) < 0)
+      if (chdir(root_.c_str()) != 0 || dup2(out, STDOUT_FILENO) < 0 || dup2(err, STDERR_FILENO) < 0)
         _exit(126);
       close(out);
       close(err);
@@ -292,6 +292,125 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
     expect_rejected(args(options));
   expect_rejected({});
   expect_rejected({"--input", input_.string(), "--output", output_.string()});
+}
+
+TEST_F(FaultMutationCli, EqualsSyntaxPreservesSelectionAndSummary) {
+  const test::DropTargetRow &row = test::kDropRows[4];
+  const std::vector<uint8_t> image =
+      test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
+  write(input_, image);
+  const FaultMutationContext context(image);
+  FaultMutationError error;
+  const FailureOr<FaultBarrierInventory> inventory =
+      discover_drop_barriers(context, "test_kernel", error);
+  ASSERT_TRUE(inventory.succeeded()) << error.message;
+  ASSERT_EQ(inventory.value().barriers().size(), 2u);
+  const StaticBarrier &barrier = inventory.value().barriers()[1];
+  ASSERT_EQ(barrier.members.size(), 2u);
+  const std::string target(default_isa_target_registry().find_target(row.target)->id);
+  ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--list"}), 0)
+      << stderr_;
+  const std::string listing = stdout_;
+  ASSERT_EQ(invoke({"--input=" + input_.string(), "--kernel=test_kernel", "--kind=DropBarrier",
+                    "--target=" + target, "--list=true"}),
+            0)
+      << stderr_;
+  EXPECT_EQ(stdout_, listing);
+  EXPECT_TRUE(stderr_.empty());
+  EXPECT_FALSE(std::filesystem::exists(output_));
+  const FailureOr<DropBarrierSelection> selection =
+      select_drop_barrier(inventory.value(), {.exact = std::nullopt, .ordinal = 1}, error);
+  ASSERT_TRUE(selection.succeeded()) << error.message;
+  const FailureOr<DropBarrierResult> library =
+      apply_drop_barrier(context, selection.value(), error);
+  ASSERT_TRUE(library.succeeded()) << error.message;
+  for (const std::string &exact : {std::to_string(barrier.members.front().offset),
+                                   std::format("{:#x}", barrier.members.front().offset)}) {
+    SCOPED_TRACE(exact);
+    ASSERT_EQ(invoke({"--input=" + input_.string(), "--kernel=test_kernel", "--kind=DropBarrier",
+                      "--target=" + target, "--output=" + output_.string(), "--exact=" + exact,
+                      "--ordinal=0"}),
+              0)
+        << stderr_;
+    const std::vector<uint8_t> mutant = read(output_);
+    EXPECT_EQ(mutant, library.value().image);
+    EXPECT_EQ(stdout_,
+              std::format("kind=DropBarrier target={} exact={} logical_mutations=1 members={} "
+                          "output_bytes={}\n",
+                          target, barrier.members.front().offset, barrier.members.size(),
+                          mutant.size()));
+    EXPECT_TRUE(test::matches_drop_output(context, selection.value(), mutant, error).succeeded())
+        << error.message;
+    EXPECT_EQ(read(input_), image);
+    std::filesystem::remove(output_);
+  }
+}
+
+TEST_F(FaultMutationCli, SharedParserRejectsAmbiguousAndMalformedArguments) {
+  const test::DropTargetRow &row = test::kDropRows[4];
+  const std::vector<uint8_t> image =
+      test::make_barrier_elf_for_target(row, test::make_barrier_words(row));
+  write(input_, image);
+  const std::vector<std::vector<std::string>> rejected_arguments = {
+      args({"--ordinal=0", "--ordinal", "1"}),
+      args({"--kernel=test_kernel"}),
+      {"--input", input_.string(), "--kernel", "test_kernel", "--list", "--list=true"},
+      {"--help", "--help=true"},
+      args({"--exact"}),
+      {"--input", input_.string(), "--kernel", "test_kernel", "--output", "--list"},
+      args({"--target="}),
+      args({"--ordinal="}),
+      args({"--exact="}),
+      args({"--unknown=value"}),
+      args({"unexpected"}),
+      args({"--", "--unknown"}),
+      args({"--help"}),
+      args({"--capabilities"}),
+      {"--help", "--capabilities"},
+      {"--capabilities", "--help"},
+      {"--help", "--unknown"},
+      {"--help", "unexpected"},
+      args({"--help=false"}),
+      args({"--capabilities=0"}),
+      args({"--list=false"}),
+      {"--input", input_.string(), "--kernel", "test_kernel", "--list", "--ordinal=0"},
+      {"--input", input_.string(), "--kernel", "test_kernel", "--list", "--exact=0"},
+      args({"--ordinal=18446744073709551616"}),
+      args({"--exact=0x10000000000000000"}),
+      args({"--exact=-0"}),
+      args({"--ordinal=1junk"})};
+  for (const std::vector<std::string> &arguments : rejected_arguments) {
+    SCOPED_TRACE(::testing::PrintToString(arguments));
+    expect_rejected(arguments);
+    EXPECT_FALSE(std::filesystem::exists(root_ / "--list"));
+    EXPECT_EQ(read(input_), image);
+  }
+  for (const std::string exact : {"18446744073709551615", "0xffffffffffffffff"}) {
+    SCOPED_TRACE(exact);
+    expect_rejected(args({"--exact=" + exact, "--ordinal=0"}));
+    EXPECT_NE(stderr_.find("selection failed: code=InvalidParameters offset=18446744073709551615 "),
+              std::string::npos)
+        << stderr_;
+    EXPECT_EQ(read(input_), image);
+  }
+}
+
+TEST_F(FaultMutationCli, GeneratedHelpListsRegisteredFlagsAndValuePlaceholders) {
+  ASSERT_EQ(invoke({"--help"}), 0) << stderr_;
+  const std::string help = stdout_;
+  for (const std::string_view entry :
+       {"--input FILE\n", "--output NEW-FILE\n", "--kernel ENTRY\n", "--kind KIND\n",
+        "--target GFX-NAME\n", "--exact TEXT-OFFSET\n", "--ordinal N\n", "--list\n",
+        "--capabilities\n", "--help\n"}) {
+    SCOPED_TRACE(entry);
+    EXPECT_NE(help.find(entry), std::string::npos) << help;
+  }
+  EXPECT_TRUE(stderr_.empty());
+  EXPECT_FALSE(std::filesystem::exists(output_));
+  ASSERT_EQ(invoke({"--help=true"}), 0) << stderr_;
+  EXPECT_EQ(stdout_, help);
+  EXPECT_TRUE(stderr_.empty());
+  EXPECT_FALSE(std::filesystem::exists(output_));
 }
 
 TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
