@@ -20,18 +20,18 @@ static std::string removeWhitespace(const char* sel) {
   return out;
 }
 
-ncclResult_t ncclAlgParse(const char* sel, uint64_t* outMask) {
-  *outMask = 0;
+ncclResult_t ncclAlgParse(const char* sel, rcclTuningMask* outMask) {
+  *outMask = rcclTuningMask();
   if (sel == NULL) return ncclSuccess;
   std::string s = removeWhitespace(sel);   // strtok_r mutates this buffer in place
   if (s.empty()) return ncclSuccess;
 
-  const uint64_t all = ncclAlgAllBits();
-  uint64_t mask = 0;
+  const rcclTuningMask all = ncclAlgAllBits();
+  rcclTuningMask mask{};
   char* termSave;
   for (char* term = strtok_r(&s[0], ",", &termSave);        // ',' = OR
        term != NULL; term = strtok_r(NULL, ",", &termSave)) {
-    uint64_t termMask = all;
+    rcclTuningMask termMask = all;
     int factorCount = 0;
     char* facSave;
     for (char* factor = strtok_r(term, "+", &facSave);       // '+' = AND
@@ -39,13 +39,13 @@ ncclResult_t ncclAlgParse(const char* sel, uint64_t* outMask) {
       bool neg = factor[0] == '^';                           // '^' negates
       const char* tag = neg ? factor + 1 : factor;
       if (tag[0] == '\0') return ncclInvalidArgument;        // bare '^'
-      uint64_t tm = ncclAlgTagMask(tag);
-      if (tm == 0) return ncclInvalidArgument;               // unknown tag
+      rcclTuningMask tm = ncclAlgTagMask(tag);
+      if (tm.none()) return ncclInvalidArgument;             // unknown tag
       termMask &= neg ? (all & ~tm) : tm;
       factorCount++;
     }
     if (factorCount == 0) return ncclInvalidArgument;        // term was only '+', e.g. "a,+,b"
-    if (termMask == 0) return ncclInvalidArgument;           // contradictory term
+    if (termMask.none()) return ncclInvalidArgument;         // contradictory term
     mask |= termMask;
   }
   *outMask = mask;

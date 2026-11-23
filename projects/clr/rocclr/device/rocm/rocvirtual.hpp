@@ -281,6 +281,8 @@ class VirtualGPU : public device::VirtualDevice {
   //! signal is proven free before its reuse.
   class HwQueueTracker {
    public:
+    static constexpr uint32_t kInvalidAbceRing = std::numeric_limits<uint32_t>::max();
+
     HwQueueTracker(const VirtualGPU& gpu) : gpu_(gpu) {}
 
     virtual ~HwQueueTracker();
@@ -314,11 +316,15 @@ class VirtualGPU : public device::VirtualDevice {
     void ProcessSignalTiming(ProfilingSignal* signal);
 
     //! Update current active engine
-    void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
+    void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) {
+      engine_ = engine;
+      abce_ring_ = kInvalidAbceRing;
+    }
     HwQueueEngine GetActiveEngine() const { return engine_; }
 
     //! Returns the last submitted signal for a wait
-    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute);
+    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute,
+                                             uint32_t abce_ring = kInvalidAbceRing);
 
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
     virtual void ResetCurrentSignal() = 0;
@@ -337,6 +343,21 @@ class VirtualGPU : public device::VirtualDevice {
 
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
+
+    //! Keeps a submitted signal from being rearmed until ReleaseHeldSignals
+    virtual void HoldSignal(ProfilingSignal* /*signal*/) {}
+
+    //! Mark for ReleaseHeldSignals: number of signals currently held
+    virtual size_t HeldSignalCount() const { return 0; }
+
+    //! Drops the HoldSignal references taken since mark once their waits have been captured
+    virtual void ReleaseHeldSignals(size_t /*mark*/ = 0) {}
+
+    //! Keeps the pins and the held signals until the queue retires the packets submitted so far
+    virtual void KeepUntilRetired(const std::vector<void*>& pins);
+
+    //! Most signals a caller may acquire before submitting the ops that use them
+    virtual size_t MaxUnsubmittedSignals() const { return std::numeric_limits<size_t>::max(); }
 
    protected:
     //! Returns the signal attributes for the requested scope and updates interrupt
@@ -409,6 +430,7 @@ class VirtualGPU : public device::VirtualDevice {
     void ReleaseAllPins();
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
+    uint32_t abce_ring_ = kInvalidAbceRing;  //!< Exact coordinator ring for the last ABCE copy
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
     std::stack<ProfilingSignal*> signal_pool_;       //!< The pool of free signals without interrupt
     std::vector<ProfilingSignal*> signal_list_;      //!< The pool of all signals for processing
@@ -501,6 +523,13 @@ class VirtualGPU : public device::VirtualDevice {
     void NoteQueueDrained() override;
     bool WaitCurrent() override;
     void ResetCurrentSignal() override;
+    //! The ring starts with this many slots and never shrinks, so a chunk can't wrap onto its own
+    //! unsubmitted signals
+    size_t MaxUnsubmittedSignals() const override { return ROC_SIGNAL_POOL_SIZE; }
+    void HoldSignal(ProfilingSignal* signal) override;
+    size_t HeldSignalCount() const override { return held_signals_.size(); }
+    void ReleaseHeldSignals(size_t mark = 0) override;
+    void KeepUntilRetired(const std::vector<void*>& pins) override;
 
    private:
     void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;
@@ -601,6 +630,7 @@ class VirtualGPU : public device::VirtualDevice {
     //! Retired signals swapped out while shared, oldest first. Reusing them avoids destroying and
     //! recreating device-memory signals.
     std::deque<ProfilingSignal*> parked_signals_;
+    std::vector<ProfilingSignal*> held_signals_;   //!< References taken by HoldSignal
     ProfilingSignal* unflushed_store_ = nullptr;  //!< Last direct store not yet flushed
     hsa_signal_value_t unflushed_value_ = 0;      //!< Value of unflushed_store_
   };
@@ -1030,6 +1060,9 @@ class VirtualGPU : public device::VirtualDevice {
  private:
   //! Release pinned memory after previously submitted work on the queue has completed.
   void SchedulePinnedMemoryRelease(amd::HostQueue& queue, std::vector<amd::Memory*> pinned_memory);
+
+  //! Apply and consume a pending system-scope request without changing queue fence state.
+  void applySystemScopeRequest(uint16_t& header);
 
   //! Apply fence-scope adjustments to the AQL header (system scope promotion,
   //! consecutive-system-scope optimization, fence_state_ tracking).

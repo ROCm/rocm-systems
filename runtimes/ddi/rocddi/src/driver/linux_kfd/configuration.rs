@@ -233,7 +233,7 @@ mod tests {
     fn configuration_is_fixed_after_a_local_context_is_opened() {
         let mut driver = LinuxKfdDriver::new();
         driver.configure(requested_configuration()).unwrap();
-        let kfd = super::super::sys::Kfd::new(
+        let kfd = super::super::connection::Kfd::new(
             std::fs::File::open("/dev/null").unwrap(),
             ProcessIdentity::capture().unwrap(),
         );

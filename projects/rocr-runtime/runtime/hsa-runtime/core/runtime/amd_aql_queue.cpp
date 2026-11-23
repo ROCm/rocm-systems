@@ -329,6 +329,10 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Queue event handler failed registration.\n");
     exceptionState = ERROR_HANDLER_DONE;
+
+    // This agent has no second-level trap handler, so report it on the first
+    // queue built on it rather than on every hsa_init.
+    agent_->WarnIfNoSecondLevelTrapHandler();
   }
 
   // Allocate IB for icache flushes.
@@ -646,7 +650,8 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
         agent_->node_id());
   }
 
-  assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
+  // Leave ring_buf_ null so the caller can fail the queue creation
+  if (ring_buf_ == nullptr) return;
   if (ring_buf_metadata_alloc_bytes_)
     ring_buf_metadata_ = reinterpret_cast<uint8_t*>(ring_buf_) + ring_buf_alloc_bytes_;
 

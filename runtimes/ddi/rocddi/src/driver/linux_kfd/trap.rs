@@ -210,7 +210,7 @@ impl LinuxKfdDriver {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
-    use super::super::{ProcessSlot, ProcessState, sys, sysfs, uapi};
+    use super::super::{ProcessSlot, ProcessState, connection, sysfs, uapi};
     use super::*;
     use crate::device::gpu::profiling::linux::ProcessTrap;
     use crate::device::{Device, DeviceResources};
@@ -272,11 +272,11 @@ mod tests {
             let observed_failure = fail_bind.clone();
             let disables = Arc::new(AtomicUsize::new(0));
             let observed_disables = disables.clone();
-            let mut kfd = sys::Kfd::with_hook(
+            let mut kfd = connection::Kfd::with_hook(
                 File::open("/dev/null").unwrap(),
                 Arc::new(move |call| {
                     match call {
-                        sys::Call::Allocate(args) => {
+                        connection::Call::Allocate(args) => {
                             assert_eq!(
                                 args.flags,
                                 uapi::GTT
@@ -290,17 +290,19 @@ mod tests {
                             args.mmap_offset = 0;
                             observed_allocations.fetch_add(1, Ordering::Relaxed);
                         }
-                        sys::Call::Map(args, ids) => {
+                        connection::Call::Map(args, ids) => {
                             assert_eq!(ids, &[42]);
                             args.success = args.count;
                         }
-                        sys::Call::Unmap(args, _) if allow_cleanup => args.success = args.count,
-                        sys::Call::Free(_) if allow_cleanup => {
+                        connection::Call::Unmap(args, _) if allow_cleanup => {
+                            args.success = args.count;
+                        }
+                        connection::Call::Free(_) if allow_cleanup => {
                             observed_frees.fetch_add(1, Ordering::Relaxed);
                         }
-                        sys::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
-                        sys::Call::DestroyEvent(_) => {}
-                        sys::Call::SetTrapHandler(args) => {
+                        connection::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
+                        connection::Call::DestroyEvent(_) => {}
+                        connection::Call::SetTrapHandler(args) => {
                             assert_eq!(args.gpu_id, 42);
                             assert_ne!(args.tba_address, 0);
                             assert_eq!(args.tma_address, 0);
@@ -311,7 +313,7 @@ mod tests {
                                 ));
                             }
                         }
-                        sys::Call::RuntimeEnable(args) => {
+                        connection::Call::RuntimeEnable(args) => {
                             if args.mode_mask == 0 {
                                 observed_disables.fetch_add(1, Ordering::Relaxed);
                             }
@@ -360,6 +362,7 @@ mod tests {
 
     fn node() -> sysfs::KfdNode {
         sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
             host_atomics: false,
             node: 1,
             gpu_id: 42,

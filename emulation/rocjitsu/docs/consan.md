@@ -94,12 +94,9 @@ encodings too narrow for the requested sizes reject preparation before artifact
 publication. ConSan keeps its own target, argument, and launch admission checks.
 
 The compiled probes use [`DeviceWaveState`](../lib/rocjitsu/src/rocjitsu/code/patch/consan/wave_state.h)
-for explicit memory-backed sequence and loss counters. Each wave exclusively
-owns its counters in runtime-owned storage retained through dispatch completion.
-`probes.hip` supplies their locations within the wave's report row; the helper
-is independent of the row and record layouts. `prepare.cpp` requests full EXEC
-for every probe call, and only lane zero writes the counters. Counter values
-persist in memory across calls rather than in implicit register state.
+for counters owned by each wave. State persists in runtime-owned memory across
+probe calls until dispatch completion, so repeated execution does not depend on
+values surviving in implicit registers.
 
 ### Execution and capture
 
@@ -160,18 +157,21 @@ original code-object files nor live HSA state.
 ## Available analysis
 
 `LdsRaceDetection` is the only implemented analysis. It checks ordinary native
-32-bit LDS reads/writes at naturally aligned addresses, using the same
-observations for two checks:
+LDS reads/writes at naturally aligned addresses, using the same observations
+for two checks. All supported targets admit ordinary single-range b16, b32,
+b64, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
+gfx1250 wave32.
 
 | Check | What it reports |
 | --- | --- |
-| Cross-wave conflict | Address-group records from different waves access the same LDS word, with at least one write. Read/read pairs do not conflict. |
-| Same-instruction ordinary-store collision | Multiple lanes of one store observation write the same LDS word. |
+| Cross-wave conflict | Address-group records from different waves access overlapping half-open byte ranges, with at least one write. Read/read pairs do not conflict. |
+| Same-instruction ordinary-store collision | Multiple lanes of one store observation write the same LDS range. |
 
 ### Analysis and admission
 
-Preparation accepts a limited instruction/access subset without relevant guest
-synchronization; unsupported forms, barriers, and atomics are rejected. Exact
+Preparation accepts a limited instruction/access subset with no synchronization,
+or qualified full-workgroup barriers on the supported target/wave profiles.
+Other barrier forms and atomics are rejected. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
 and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp).
 
@@ -179,19 +179,125 @@ The input code object must contain exactly one kernel, matching the requested
 entry. Selecting an entry does not exclude sibling kernels from this requirement;
 provide a code object containing only the selected kernel.
 
-Recording is bounded and does not provide a full execution history. Broader
-access forms, synchronization analysis, and application integration require
-extensions.
+The forms are `ds_store_b16`, `ds_load_u16`, `ds_load_i16`, and
+`ds_store_b32/b64/b128` or `ds_load_b32/b64/b128` on gfx1100/gfx1201/gfx1250.
+gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
+The b16 loads write a whole 32-bit result with unsigned or signed extension. Access probes
+capture addresses before an aliased load can overwrite them, record actual byte
+widths and byte immediates, and preserve every guest result word. b8/b96,
+partial-register subword loads, dual-range, transpose, FLAT, and atomic forms
+remain unsupported. The existing minimum fixed LDS extent remains four bytes.
+
+Access widths are measured in bytes. `NativeLdsAccess::width` and
+`SiteFacts::width` default to zero, meaning unspecified and invalid. Producers
+must explicitly supply 2, 4, 8, or 16; zero never implies b32 or a zero-length
+access. Manifest admission rejects zero, and a committed observation must match
+its site's width. An all-zero uncommitted report slot still represents vacant
+storage, not an access.
+
+Range admission checks bounds by subtraction before calculating ends. Diagnosis
+sweeps checked ranges, retaining grouped counts for identical ranges, excluding
+Read/Read and same-wave pairs, and treating adjacent ranges as disjoint. Natural
+alignment and the admitted widths bound active range shapes. Widths share the
+same four-address-group quota, loss rules, exact collision masks, and qualified
+barrier certificates. The compatibility token/options reject older b32-only
+producer interpretations and target-specific width restrictions.
+
+### Workgroups and synchronization
+
+LDS belongs to a workgroup. Observations are kept separate by run, dispatch,
+workgroup and wave, so equal LDS offsets in different workgroups cannot form
+conflicts. Each workgroup's synchronization evidence is also independent.
+All supported target/wave profiles admit up to sixteen complete 1D workgroups,
+including partial final waves. Multi-group launches require the original
+kernel's workgroup-X input, which entry snapshots preserve before guest
+instructions can overwrite it.
+
+Barrier qualification recognizes an original LDS drain followed by a
+full-workgroup barrier: `s_barrier` on gfx942/gfx950/gfx1100, or a matching
+signal/wait pair on gfx1201/gfx1250. It requires at least two waves per workgroup.
+Legacy barriers require an original `s_waitcnt` with a zero LGKM threshold
+immediately before `s_barrier`. Preparation rejects sequences with an intervening
+instruction, including a global store or `s_waitcnt_vscnt`, even if an earlier
+wait drained LDS.
+Split-barrier drains may use `s_wait_dscnt` or a combined load/DS or store/DS
+wait, provided the DS threshold is zero. The additional load/store threshold
+may be nonzero.
+In acyclic flow, every path to an exit must pass through each barrier group.
+A barrier loop may instead use one basic block with a conditional self-backedge
+and a forward exit, with all barrier groups inside that block. A preheader may
+bypass the loop for zero iterations. These restrictions give every completed
+iteration the same static barrier order without assuming uniform trip counts.
+
+A static LDS instruction can execute many times. Within a wave, its site and
+dynamic access sequence identify one execution; all address groups from that
+execution share the sequence. A separate phase counts completed guest barrier
+waits. For example, a producer/consumer loop needs two kinds of ordering:
+
+```text
+producer store(i) -> B0(i) -> consumer load(i) -> B1(i) -> producer store(i+1)
+```
+
+B0 publishes the producer's value before the consumer reads it. B1 lets the
+consumer finish before the producer reuses the location. Distinguishing each
+barrier's occurrence prevents a completion from another iteration from being
+used as evidence for either relationship.
+
+The analyzer derives ordering from matching barrier completions supplied by
+every required wave, including waves with no retained LDS accesses. Probes
+record completion only after the unchanged guest wait; probe execution and
+numeric phase differences alone cannot establish synchronization. Access
+positions must agree with both the qualified program and retained completions.
+
+For a conflicting cross-wave pair, the result is:
+
+- **Ordered:** a common completion places one access before the other.
+- **Unordered:** both accesses lie in the same closed synchronization interval.
+  Matching adjacent completions bound that interval; entry and a fully validated
+  exit can supply the first and last boundaries. In the no-synchronization
+  profile, qualification itself rules out ordering between valid endpoints.
+- **Unresolved:** missing or contradictory evidence prevents either conclusion.
+  A contradictory access position cannot be certified using another boundary.
+
+### Bounded recording and coverage
+
+Recording retains representatives within fixed storage. In repeated profiles,
+each wave and site has four immutable access banks. An address group selects
+`ctz(mask) % 4`, using its lowest active lane; the first record claims that bank.
+Later attempts count as loss even if another bank is empty. Thus four banks do
+not guarantee four iterations: repeated lane-0 accesses all select bank zero.
+Other sites retain their own capacity. A probe also examines at most four
+distinct addresses per instruction.
+
+Each wave separately retains its first sixteen barrier completions. Later
+barriers continue executing and contribute synchronization loss without
+overwriting earlier witnesses. Sequence, phase and loss counters saturate
+rather than wrap; a saturated access phase has unknown ordering position.
+The [saved contract](../lib/rocjitsu/src/rocjitsu/code/consan/contract.h) defines
+the shared record layout and capacity rules.
+
+Loss limits coverage to the retained observations and synchronization intervals.
+It does not revoke a conclusion whose required evidence remains valid: an
+early closed interval can still confirm an unordered pair after later journal
+loss. Same-instruction store collisions use exact address and lane-mask evidence
+independently of barrier position. Capacity loss is reported separately from
+malformed-evidence integrity issues.
+
+The analyzer keeps ordered, confirmed unordered, and unresolved pairs separate.
+Only confirmed conflicts contribute to the findings exit status; incomplete
+coverage alone does not. Always inspect `coverage_complete` alongside findings.
+Zero findings with missing evidence does not establish that unobserved accesses
+were safe.
 
 ## How to use
 
 This example runs a **gfx1250 wave32** assembly fixture with 64 threads in one
-workgroup through the rocJitsu simulator; no physical gfx1250 GPU is required.
+workgroup through the rocjitsu simulator; no physical gfx1250 GPU is required.
 The AMDHSA code-object-v5 image, entry, target, and wave mode must match the
 simulator configuration. A runner option does not change an image's wave mode.
 
 The [controlled HSA runner](../tests/patch/consan/consan_hsa_runner.cpp) supplies this
-fixture's argument bindings, controlled queue, nonoverlapping one-workgroup
+fixture's argument bindings, controlled queue, nonoverlapping bounded 1D
 launch, and explicit finish protocol. It is the example application, not a
 general application launcher; other integrations must meet the runtime
 admission conditions linked above.
@@ -304,6 +410,7 @@ conflict was found; exit 0 means no findings were observed. The result includes:
   "target": 1250,
   "wave_size": 32,
   "cross_wave_pairs": 1,
+  "ordered_pairs": 0,
   "collision_groups": 0,
   "coverage_complete": true
 }
@@ -384,7 +491,7 @@ A new analysis primarily extends **compiler facts/probes and offline diagnosis**
 together. Define its question, scope, required evidence, and behavior under loss:
 
 - **Compiler:** select operations and lower probes while preserving guest state
-  and executing each original operation once. Reuse rocJitsu's code-object
+  and executing each original operation once. Reuse rocjitsu's code-object
   parsing, ISA decoders/builders, and ELF rewriting/relocation through the
   [shared DBI machinery](dbi-design.md).
 - **Offline analyzer:** qualify the saved evidence and implement checks,
@@ -407,3 +514,47 @@ matching physical hardware. Required simulator cases must execute without skips;
 physical cases skip when the requested HSA agent is unavailable. Runtime-stage
 scenarios remain available without building the analyzer. Keep simulator and
 physical-target evidence distinct.
+
+Barrier tests check publication and reuse independently by removing each
+barrier and checking the resulting unordered pair. Output preservation alone
+does not show that a wait blocked an early consumer, so the
+[simulator controls](../tests/patch/consan/bootstrap_sim_test.cpp) also delay the
+producer and compare synchronized and unsynchronized execution. Removing only
+the prepared guest wait while retaining its callback checks that instrumentation
+does not substitute for guest synchronization. These scheduling controls provide
+simulator evidence; physical hardware may schedule unsynchronized accesses
+differently.
+
+## Fault injection
+
+The independent offline fault-injection library can remove a qualified complete
+barrier from an AMDGPU code object. It uses Instrumentor's instruction-replacement
+path and does not require the ConSan compiler, runtime, or analyzer. See
+[Fault injection](fault-injection.md) for its architecture, library interface,
+current features, target/wave coverage, and limitations.
+
+Treat the mutant as a new original image: perform a **fresh ConSan prepare**,
+then execution/capture → analyze. Do not reuse pristine prepared artifacts or
+capture bindings. Drop uses branch-to-NOP trampolines, so emitted ELF file
+offsets and CFG block boundaries can differ from the pristine image. Preparation
+must discover the mutant's entries and instructions. Preparation may reject a
+target or program profile that the mutation library admits.
+
+Fresh preparation currently requires a **single-kernel code object**. A
+sibling-preserving multi-kernel mutant cannot use this path. Remaining barriers
+must satisfy ConSan's qualified gfx1250 wave32 workgroup-barrier profile; other
+barrier forms remain unsupported. The mutant must also satisfy ConSan's other
+target, entry, instruction, native-LDS and resource restrictions, enforced by
+[input qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/input.cpp) and
+the [LDS classifier](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp).
+Acyclic trampoline returns can be admitted. Apart from ConSan's qualified
+conditional single-block barrier loop, CFG cycles remain rejected. Native LDS
+access PCs must increase along each path within an iteration; the qualified
+loop uses repeated epochs. Mutation admission and detector admission remain
+independent decisions.
+
+Mutation success reports emission after input qualification. It establishes
+neither execution nor detector qualification: removing a barrier does not prove
+that a race occurs, that a particular execution observes it, or that ConSan
+reports it. Qualify those stages separately using the normal capture and analysis
+workflow.

@@ -43,6 +43,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/untracked_memory.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
@@ -855,7 +856,8 @@ WriteInterceptor(const void* packets,
                                       .group_segment_size   = pkt_info.group_segment_size,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
-                                      .reserved_padding     = {0}}};
+                                      .reserved_padding     = {0}},
+                                  ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE};
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -1190,14 +1192,17 @@ WriteInterceptor(const void* packets,
             // which of those it hit.
             const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
 
-            // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
-            // application data, so decline replay. Close the CONFIG sequence, free our drain
-            // signal, and run this dispatch once still under the writer lock with its original
-            // completion signal, then return.
-            if(!snapshot.ok)
+            // Snapshot incomplete, or checked kernel arguments identify memory outside it:
+            // restoring only part of what the passes write would corrupt application data, so
+            // decline replay. Close the CONFIG sequence, free our drain signal, and run this
+            // dispatch once still under the writer lock with its original completion signal, then
+            // return.
+            if(!snapshot.ok || !kernel_replay::untracked_memory::can_replay_dispatch(
+                                   dispatch_pkt.kernel_dispatch, snapshot))
             {
-                LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; running "
-                                           "this dispatch once without replay";
+                if(!snapshot.ok)
+                    LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; "
+                                               "running this dispatch once without replay";
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
                 if(drain_signal != null_hsa_signal)
@@ -1258,9 +1263,10 @@ WriteInterceptor(const void* packets,
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
                 // would submit the next pass over corrupted memory and (because the final pass
                 // skips restore) would also leave that corruption visible to the application.
-                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
-                    "kernel replay: restore failed between passes (partial host->device copy); "
-                    "aborting rather than continuing with corrupted device memory");
+                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot))
+                    << fmt::format("kernel replay: restore failed between passes (partial "
+                                   "host->device copy); aborting rather than continuing with "
+                                   "corrupted device memory");
             }
 
             kernel_replay::execute_config_phase_exit(

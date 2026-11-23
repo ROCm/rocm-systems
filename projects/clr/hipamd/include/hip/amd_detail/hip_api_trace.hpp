@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 42
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 44
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -88,6 +88,8 @@ typedef hipError_t (*t_hipArrayGetDescriptor)(HIP_ARRAY_DESCRIPTOR* pArrayDescri
                                               hipArray_t array);
 typedef hipError_t (*t_hipArrayGetInfo)(hipChannelFormatDesc* desc, hipExtent* extent,
                                         unsigned int* flags, hipArray_t array);
+typedef hipError_t (*t_hipArrayGetPlane)(hipArray_t* pPlaneArray, hipArray_t hArray,
+                                         unsigned int planeIdx);
 typedef hipError_t (*t_hipBindTexture)(size_t* offset, const textureReference* tex,
                                        const void* devPtr, const hipChannelFormatDesc* desc,
                                        size_t size);
@@ -1214,6 +1216,9 @@ typedef hipError_t (*t_hipGraphNodeGetLocalId)(hipGraphNode_t node, unsigned int
 typedef hipError_t (*t_hipGraphNodeGetToolsId)(hipGraphNode_t node, unsigned long long* toolsId);
 typedef hipError_t (*t_hipGraphGetId)(hipGraph_t graph, unsigned int* graphId);
 typedef hipError_t (*t_hipGraphExecGetId)(hipGraphExec_t graphExec, unsigned int* graphId);
+typedef hipError_t (*t_hipDeviceGetExecAffinitySupport)(int* pi, hipExecAffinityType type,
+                                                        hipDevice_t dev);
+
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1899,8 +1904,14 @@ struct HipDispatchTable {
   t_hipGraphGetId hipGraphGetId_fn;
   t_hipGraphExecGetId hipGraphExecGetId_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 43
+  t_hipDeviceGetExecAffinitySupport hipDeviceGetExecAffinitySupport_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
+  t_hipArrayGetPlane hipArrayGetPlane_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
 
   // ******************************************************************************************* //
   //

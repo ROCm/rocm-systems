@@ -84,6 +84,14 @@ constexpr uint64_t RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK = 3ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16 = 1ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16 = 2ULL << 26;
 
+// FP32 intermediate rounding for mixed instructions that round again to FP16.
+// Uses the same enumeration as FP_ROUND_MASK, which controls the final result.
+// Availability is instruction-specific; no host FP controls are changed.
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_MASK = 3ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_UP = 1ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_DOWN = 2ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_ZERO = 3ULL << 28;
+
 // Status codes returned by instruction emulation functions.
 constexpr int RJ_ARITH_SUCCESS = 0;
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS = 1;
@@ -234,6 +242,9 @@ constexpr uint32_t RJ_ARITH_MIX_BF16_C = 1U << 15;
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.
 uint64_t rj_arith_init_cpu_flags(void);
+
+// Limit detected CPU flags to the highest compiled level at or below max_level.
+uint64_t rj_arith_limit_cpu_flags(uint64_t detected_flags, uint64_t max_level);
 
 // Returns a static CPU-level name, ignoring bits outside RJ_ARITH_CPU_MASK.
 // Unknown levels return "unknown". The returned string must not be modified.

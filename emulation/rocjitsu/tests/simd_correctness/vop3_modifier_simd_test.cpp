@@ -11,6 +11,7 @@
 /// modifier combination over normal/NaN/Inf/denormal/signed-zero inputs.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/simd.h"
 
@@ -157,10 +158,10 @@ double ref_dst(double v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
 TEST(Vop3ModifierPolicy, NanClampFollowsArchitectureAndDx10Mode) {
   using rocjitsu::amdgpu::floating_clamp_nan_to_zero;
 
-  EXPECT_FALSE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, false));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, true));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_RDNA4, false));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA5, false));
+  EXPECT_FALSE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna4, true));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Rdna4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna5, false));
 }
 
 TEST(Vop3ModifierPolicy, ScalarClampHandlesQuietSignalingNanAndSignedZero) {

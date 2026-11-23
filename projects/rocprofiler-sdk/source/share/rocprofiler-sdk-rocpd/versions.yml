@@ -51,6 +51,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.6/data_views.sql
       rocpd_summary_views: versions/3.0.6/summary_views.sql
     - version: "3.1.0"
+      rocpd_metadata: versions/3.1.0/rocpd_metadata.sql
+      rocpd_tables: versions/3.1.0/rocpd_tables.sql
+      rocpd_views: versions/3.1.0/rocpd_views.sql
+      rocpd_indexes: versions/3.1.0/rocpd_indexes.sql
+      rocpd_data_views: versions/3.1.0/data_views.sql
+      rocpd_summary_views: versions/3.1.0/summary_views.sql
+    - version: "3.1.1"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -104,3 +111,7 @@ rocprofiler-sdk-rocpd:
 # - Populated rocpd_info_code_object.storage_type (column present since 3.0.1)
 # - rocpd_info_code_object.extdata records content_hash for code objects decoded
 #   during PC sampling
+
+# Version 3.1.1
+# - rocpd_kernel_dispatch: added pipe_id column (hardware pipe, -1 if unknown)
+# - Added pipe_id to kernels data view

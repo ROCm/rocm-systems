@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <memory>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -60,6 +61,20 @@ static const std::unordered_map<rdc_field_t, amdsmi_event_type_t> rdc_evnt_2_smi
     {RDC_EVNT_XGMI_4_THRPUT, AMDSMI_EVNT_XGMI_DATA_OUT_4},
     {RDC_EVNT_XGMI_5_THRPUT, AMDSMI_EVNT_XGMI_DATA_OUT_5},
 };
+
+// amd-smi reports a value it cannot read as the maximum of the value's type.
+template <typename T>
+static bool smi_not_available(T v) {
+  static_assert(std::is_unsigned_v<T>, "amd-smi marks unsigned values only");
+  return v == std::numeric_limits<T>::max();
+}
+
+// smi_not_available() for a uint32_t field amd-smi copies from a uint16_t gpu_metrics field:
+// such a field can hold the uint16_t maximum, as older amd-smi did for power. Only for values
+// that stay far below 65535: percentages, W, MHz, counts.
+static bool smi_not_available_from_u16(uint32_t v) {
+  return smi_not_available(v) || v == std::numeric_limits<uint16_t>::max();
+}
 
 RdcMetricFetcherImpl::RdcMetricFetcherImpl() : task_started_(true) {
   // kick off another thread for async fetch
@@ -112,7 +127,10 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
 
   amdsmi_processor_handle processor_handle = nullptr;
   err = get_processor_handle_from_id(gpu_index, &processor_handle);
-  assert(err == AMDSMI_STATUS_SUCCESS);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
+    return;
+  }
 
   // because RDC already had an established order that is different from amd-smi : map blocks to
   // fields manually
@@ -301,12 +319,17 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   uint64_t correctable_count = 0;
   uint64_t uncorrectable_count = 0;
+  bool counted = false;  // a block reported its counts
   amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
 
   amdsmi_processor_handle processor_handle = nullptr;
   err = get_processor_handle_from_id(gpu_index, &processor_handle);
 
   if (!value) {
+    return;
+  }
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
     return;
   }
   // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
@@ -324,10 +347,12 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
     if (err == AMDSMI_STATUS_SUCCESS) {
       correctable_count += ec.correctable_count;
       uncorrectable_count += ec.uncorrectable_count;
+      counted = true;
     }
   }
 
-  value->status = AMDSMI_STATUS_SUCCESS;
+  // Without a count from any block, as on GPUs without ECC, report N/A rather than 0 errors.
+  value->status = counted ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
   value->type = INTEGER;
   if (field_id == RDC_FI_ECC_CORRECT_TOTAL) {
     value->value.l_int = correctable_count;
@@ -343,7 +368,10 @@ void RdcMetricFetcherImpl::get_ecc_deferred(uint32_t gpu_index, rdc_field_t fiel
 
   amdsmi_processor_handle processor_handle = nullptr;
   amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
-  assert(err == AMDSMI_STATUS_SUCCESS);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
+    return;
+  }
 
   auto field_to_block_de = [](rdc_field_t field) -> amdsmi_gpu_block_t {
     switch (field) {
@@ -420,8 +448,13 @@ void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_
 
   amdsmi_processor_handle processor_handle = nullptr;
   amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
+    return;
+  }
 
   uint64_t deferred_count = 0;
+  bool counted = false;  // a block reported its counts
   // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
   for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
@@ -433,10 +466,11 @@ void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_
     err = amdsmi_get_gpu_ecc_count(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &ec);
     if (err == AMDSMI_STATUS_SUCCESS) {
       deferred_count += ec.deferred_count;
+      counted = true;
     }
   }
 
-  value->status = AMDSMI_STATUS_SUCCESS;
+  value->status = counted ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
   value->type = INTEGER;
   value->value.l_int = deferred_count;
 }
@@ -569,7 +603,9 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
   for (; ite != bulk_fields.end(); ite++) {
     amdsmi_gpu_metrics_t gpu_metrics;
     amdsmi_processor_handle processor_handle = nullptr;
-    rs = get_processor_handle_from_id(ite->first, &processor_handle);
+    if (get_processor_handle_from_id(ite->first, &processor_handle) != AMDSMI_STATUS_SUCCESS) {
+      continue;  // an unavailable GPU: its fields are fetched one by one and read nothing
+    }
 
     rs = amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
     if (rs != AMDSMI_STATUS_SUCCESS) {
@@ -585,15 +621,20 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
       value.field_value.status = AMDSMI_STATUS_SUCCESS;
       value.field_value.ts = cur_time;
 
+      // A value amd-smi does not have is left out here, as for a power of 0, and fetched one
+      // by one.
       switch (field_id) {
         case RDC_FI_GPU_CLOCK:  // current_gfxclk * 1000000
+          if (smi_not_available(gpu_metrics.current_gfxclk)) continue;
           value.field_value.value.l_int =
               static_cast<int64_t>(gpu_metrics.current_gfxclk) * 1000000;
           break;
         case RDC_FI_MEMORY_TEMP:  // temperature_mem * 1000
+          if (smi_not_available(gpu_metrics.temperature_mem)) continue;
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.temperature_mem) * 1000;
           break;
         case RDC_FI_GPU_TEMP:  // temperature_edge * 1000
+          if (smi_not_available(gpu_metrics.temperature_edge)) continue;
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.temperature_edge) * 1000;
           break;
         case RDC_FI_POWER_USAGE:  // average_socket_power
@@ -617,6 +658,7 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
           value.field_value.value.l_int *= 1000000;
           break;
         case RDC_FI_GPU_UTIL:  // average_gfx_activity
+          if (smi_not_available(gpu_metrics.average_gfx_activity)) continue;
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.average_gfx_activity);
           break;
         default:
@@ -700,6 +742,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       return;
     }
 
+    // Map a narrower field's "not available" maximum to uint64_t's maximum.
+    auto widen = [](auto v) -> uint64_t {
+      return smi_not_available(v) ? std::numeric_limits<uint64_t>::max() : v;
+    };
     const std::unordered_map<rdc_field_t, uint64_t> rdc_field_to_gpu_metrics = {
         {RDC_FI_XGMI_0_READ_KB, gpu_metrics.xgmi_read_data_acc[0]},
         {RDC_FI_XGMI_1_READ_KB, gpu_metrics.xgmi_read_data_acc[1]},
@@ -726,10 +772,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         {RDC_FI_GFX_ACTIVITY_ACC, gpu_metrics.gfx_activity_acc},
         {RDC_FI_MEM_ACTIVITY_ACC, gpu_metrics.mem_activity_acc},
         {RDC_FI_ACCUMULATION_COUNTER, gpu_metrics.accumulation_counter},
-        {RDC_FI_GPU_GFX_BUSY_INST,
-         static_cast<uint64_t>(gpu_metrics.xcp_stats[0].gfx_busy_inst[0])},
-        {RDC_FI_GPU_VCN_BUSY_INST, static_cast<uint64_t>(gpu_metrics.xcp_stats[0].vcn_busy[0])},
-        {RDC_FI_GPU_JPEG_BUSY_INST, static_cast<uint64_t>(gpu_metrics.xcp_stats[0].jpeg_busy[0])},
+        {RDC_FI_GPU_GFX_BUSY_INST, widen(gpu_metrics.xcp_stats[0].gfx_busy_inst[0])},
+        {RDC_FI_GPU_VCN_BUSY_INST, widen(gpu_metrics.xcp_stats[0].vcn_busy[0])},
+        {RDC_FI_GPU_JPEG_BUSY_INST, widen(gpu_metrics.xcp_stats[0].jpeg_busy[0])},
     };
 
     // In gpu_metrics,the max value means not supported
@@ -772,7 +817,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+        if (smi_not_available_from_u16(engine_usage.umc_activity)) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+        }
       }
       break;
     }
@@ -804,9 +853,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       // Instantaneous UMC controller activity. On some ASICs this only reflects
       // compute-shader memory traffic and reads zero under DMA/copy traffic.
       double activity_pct = 0.0;
+      bool have_activity = false;
       if (metrics_status == AMDSMI_STATUS_SUCCESS &&
           gpu_metrics.average_umc_activity != kU16NotSupported) {
         activity_pct = static_cast<double>(gpu_metrics.average_umc_activity);
+        have_activity = true;
       }
 
       // Prefer the memory-activity accumulator when available: unlike the
@@ -819,10 +870,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         std::lock_guard<std::mutex> lock(mem_activity_mutex_);
         auto prev = mem_activity_cache_.find(gpu_index);
         const bool have_prev = prev != mem_activity_cache_.end();
+        bool have_rate = false;
         activity_pct = derive_mem_activity_percent(
             activity_pct, have_prev, have_prev ? prev->second.mem_activity_acc : 0,
             have_prev ? prev->second.firmware_timestamp : 0, gpu_metrics.mem_activity_acc,
-            gpu_metrics.firmware_timestamp);
+            gpu_metrics.firmware_timestamp, &have_rate);
+        have_activity = have_activity || have_rate;
         // Only advance the cache with a newer firmware sample: the metrics read
         // happens before the lock, so concurrent fetches can take the lock out of
         // firmware-timestamp order and would otherwise cache an older sample last.
@@ -841,6 +894,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
               : 0;
       // Don't mask a metrics-fetch failure with vram-info success.
       value->status = (metrics_status != AMDSMI_STATUS_SUCCESS) ? metrics_status : vram_status;
+      if (value->status == AMDSMI_STATUS_SUCCESS && !have_activity) {
+        value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      }
       break;
     }
     case RDC_FI_GPU_MEMORY_FREE: {
@@ -919,18 +975,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       }
       break;
     }
-    case RDC_FI_GPU_COUNT: {
-      const auto& table = get_flat_gpu_table();
-      value->type = INTEGER;
-      // An empty table means SMI init / socket enumeration failed; surface that as an
-      // error instead of silently reporting a count of 0.
-      if (table.empty()) {
-        value->status = AMDSMI_STATUS_NOT_INIT;
-      } else {
-        value->status = AMDSMI_STATUS_SUCCESS;
-        value->value.l_int = static_cast<int64_t>(table.size());
-      }
-    } break;
+    case RDC_FI_GPU_COUNT:  // answered by fetch_smi_field() before any GPU lookup
+      break;
     case RDC_FI_GPU_PARTITION_COUNT: {
       // Only some drivers fill the gpu_metrics partition count (none that publish
       // gpu_metrics v1.9), so take the count from the GPU's partition profile, as
@@ -1007,7 +1053,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_clk_freq(processor_handle, clk_type, &f);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = f.frequency[f.current];
+        // current is UINT32_MAX when no level is current, as for a power-gated clock domain.
+        if (f.current < f.num_supported && f.current < AMDSMI_MAX_NUM_FREQUENCIES) {
+          value->value.l_int = static_cast<int64_t>(f.frequency[f.current]);
+        } else {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        }
       }
       break;
     }
@@ -1034,7 +1085,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_clock_info(processor_handle, clk_type, &clk_info);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(clk_info.clk) * 1000000;
+        if (smi_not_available_from_u16(clk_info.clk)) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = static_cast<int64_t>(clk_info.clk) * 1000000;
+        }
       }
       break;
     }
@@ -1043,7 +1098,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(engine_usage.gfx_activity);
+        if (smi_not_available_from_u16(engine_usage.gfx_activity)) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = static_cast<int64_t>(engine_usage.gfx_activity);
+        }
       }
       break;
     }
@@ -1385,40 +1444,42 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = Smi2RdcError(ret);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
+        // amd-smi reports a counter the GPU does not provide as UINT64_MAX.
+        uint64_t raw = std::numeric_limits<uint64_t>::max();
         switch (field_id) {
           case RDC_HEALTH_POWER_THROTTLE_TIME:
-            value->value.l_int = static_cast<int64_t>(violation_status.acc_ppt_pwr);
+            raw = violation_status.acc_ppt_pwr;
             break;
           case RDC_HEALTH_THERMAL_THROTTLE_TIME:
           case RDC_HEALTH_SOCKET_THRM_ACC:  // alias — same underlying acc_socket_thrm counter
-            value->value.l_int = static_cast<int64_t>(violation_status.acc_socket_thrm);
+            raw = violation_status.acc_socket_thrm;
             break;
           case RDC_HEALTH_VIOLATION_COUNTER:
-            value->value.l_int = static_cast<int64_t>(violation_status.acc_counter);
+            raw = violation_status.acc_counter;
             break;
           case RDC_HEALTH_PROCHOT_RESIDENCY_ACC:
-            value->value.l_int = static_cast<int64_t>(violation_status.acc_prochot_thrm);
+            raw = violation_status.acc_prochot_thrm;
             break;
           case RDC_HEALTH_PROCHOT_RESIDENCY_PCT:
-            value->value.l_int = static_cast<int64_t>(violation_status.per_prochot_thrm);
+            raw = violation_status.per_prochot_thrm;
             break;
           case RDC_HEALTH_PPT_RESIDENCY_PCT:
-            value->value.l_int = static_cast<int64_t>(violation_status.per_ppt_pwr);
+            raw = violation_status.per_ppt_pwr;
             break;
           case RDC_HEALTH_SOCKET_THRM_PCT:
-            value->value.l_int = static_cast<int64_t>(violation_status.per_socket_thrm);
+            raw = violation_status.per_socket_thrm;
             break;
           case RDC_HEALTH_VR_THRM_ACC:
-            value->value.l_int = static_cast<int64_t>(violation_status.acc_vr_thrm);
+            raw = violation_status.acc_vr_thrm;
             break;
           case RDC_HEALTH_VR_THRM_PCT:
-            value->value.l_int = static_cast<int64_t>(violation_status.per_vr_thrm);
+            raw = violation_status.per_vr_thrm;
             break;
           case RDC_HEALTH_HBM_THRM_ACC:
-            value->value.l_int = static_cast<int64_t>(violation_status.acc_hbm_thrm);
+            raw = violation_status.acc_hbm_thrm;
             break;
           case RDC_HEALTH_HBM_THRM_PCT:
-            value->value.l_int = static_cast<int64_t>(violation_status.per_hbm_thrm);
+            raw = violation_status.per_hbm_thrm;
             break;
           case RDC_HEALTH_GFX_CLK_LMT_PWR_ACC:
           case RDC_HEALTH_GFX_CLK_LMT_PWR_PCT:
@@ -1428,9 +1489,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
           case RDC_HEALTH_LOW_UTIL_PCT:
           case RDC_HEALTH_GFX_CLK_LMT_TOTAL_ACC:
           case RDC_HEALTH_GFX_CLK_LMT_TOTAL_PCT: {
-            // Driver 1.8 XCP/XCC fields — max uint64 means not supported
-            const auto not_sup = std::numeric_limits<uint64_t>::max();
-            uint64_t raw = not_sup;
+            // Driver 1.8 XCP/XCC fields
             switch (field_id) {
               case RDC_HEALTH_GFX_CLK_LMT_PWR_ACC:
                 raw = violation_status.acc_gfx_clk_below_host_limit_pwr[0][0];
@@ -1459,15 +1518,15 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
               default:
                 break;
             }
-            if (raw == not_sup) {
-              value->status = AMDSMI_STATUS_NOT_SUPPORTED;
-            } else {
-              value->value.l_int = static_cast<int64_t>(raw);
-            }
             break;
           }
           default:
             break;
+        }
+        if (smi_not_available(raw)) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = static_cast<int64_t>(raw);
         }
       }
       break;
@@ -1874,6 +1933,20 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
   rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
 
+  if (field_id == RDC_FI_GPU_COUNT) {
+    // A property of the table, not of a GPU, so GPU 0 being unavailable does not matter. With
+    // no GPU, the lookup below fails as for any field.
+    std::shared_ptr<const GpuHandleTable> table = get_flat_gpu_table();
+    if (!table->empty()) {
+      value->ts = now();
+      value->field_id = field_id;
+      value->type = INTEGER;
+      value->status = AMDSMI_STATUS_SUCCESS;
+      value->value.l_int = static_cast<int64_t>(table->size());
+      return RDC_ST_OK;
+    }
+  }
+
   // Pass the full entity index, not info.device_index, so the flat/socket dispatch stays
   // correct for CPU, physical-GPU, and partition entities (matters in CPX).
   amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
@@ -1885,7 +1958,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     } else {
       info_str = std::to_string(info.device_index);
     }
-    RDC_LOG(RDC_ERROR,
+    // An unavailable GPU, or a partition instance of one, was logged once, when it became
+    // unavailable; every field it is asked for fails the same way.
+    bool unavailable = ret == AMDSMI_STATUS_NOT_FOUND;
+    RDC_LOG(unavailable ? RDC_DEBUG : RDC_ERROR,
             "Failed to get processor handle for device " << info_str << " error: " << ret);
     return Smi2RdcError(ret);
   }

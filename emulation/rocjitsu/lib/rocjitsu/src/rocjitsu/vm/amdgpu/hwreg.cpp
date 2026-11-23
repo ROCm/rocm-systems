@@ -5,6 +5,7 @@
 /// @brief Shader-visible AMDGPU hardware register access helpers.
 
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -32,6 +33,7 @@ enum class HwregState : uint8_t {
   IbSts2Gfx11,
   IbDbgGfx11,
   HwId1Gfx11,
+  HwId2Gfx11,
   GprAllocGfx11,
   LdsAllocGfx11,
   StatePrivGfx12,
@@ -41,6 +43,7 @@ enum class HwregState : uint8_t {
   XnackStatePrivGfx1250,
   XnackMaskGfx1250,
   Trapsts,
+  TrapstsGfx10,
   SimdIdCdna2,
   LocationCdna3_4,
   XccIdCdna3_4,
@@ -53,6 +56,8 @@ enum class HwregState : uint8_t {
   ShaderTmaLoGfx10,
   ShaderTmaHiGfx10,
   ShaderCyclesGfx1030,
+  ShaderCyclesLoGfx12,
+  ShaderCyclesHiGfx12,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   LdsAllocCdna,
@@ -113,6 +118,20 @@ uint32_t blocks_minus_one(uint32_t count, uint32_t block_size) {
     return 0;
   return ((count + block_size - 1u) / block_size) - 1u;
 }
+
+// SH_MEM_BASES holds aperture address bits [63:48], or [31:16] for RDNA1's
+// 32-bit flat pointers.
+uint32_t sh_mem_bases_raw(const Wavefront &wf) {
+  const unsigned shift = wf.flat_pointer32() ? 16 : 48;
+  return field_value(wf.private_aperture_base() >> shift, 0, 16) |
+         field_value(wf.shared_aperture_base() >> shift, 16, 16);
+}
+
+// RDNA1/2 TRAPSTS.DP_RATE[31:29] is a read-only property of the SIMD design.
+// Every RDNA1/2 part runs FP64 at 1/16 rate; gfx1010 and gfx1030 read 2, the
+// encoding RDNA3 documents for 1/16 rate in HW_ID1.DP_RATE.
+constexpr uint32_t kGfx10TrapstsDpRateMask = 7u << 29;
+constexpr uint32_t kGfx10TrapstsDpRate = 2u << 29;
 
 uint32_t cdna2_4_simd_id_raw(const Wavefront &wf) {
   // CDNA2/3/4 define SIMD_ID at HW_ID[5:4]. Assign permanent CU wave slots
@@ -258,7 +277,7 @@ constexpr HwregDescriptor RDNA1_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::StatusGfx10, HwregWritePolicy::Privileged},
-    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::TrapstsGfx10, HwregWritePolicy::UserWritable},
     {4, "HW_ID_LEGACY", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::LdsAllocGfx10, HwregWritePolicy::ReadOnly},
@@ -291,7 +310,7 @@ constexpr HwregDescriptor RDNA2_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::StatusGfx10, HwregWritePolicy::Privileged},
-    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::TrapstsGfx10, HwregWritePolicy::UserWritable},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::LdsAllocGfx10, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::IbStsGfx10, HwregWritePolicy::ReadOnly},
@@ -335,7 +354,7 @@ constexpr HwregDescriptor RDNA3_HWREGS[] = {
     {20, "SHADER_FLAT_SCRATCH_LO", HwregState::FlatScratchLo, HwregWritePolicy::Privileged},
     {21, "SHADER_FLAT_SCRATCH_HI", HwregState::FlatScratchHi, HwregWritePolicy::Privileged},
     {23, "HW_ID1", HwregState::HwId1Gfx11, HwregWritePolicy::ReadOnly},
-    {24, "HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {24, "HW_ID2", HwregState::HwId2Gfx11, HwregWritePolicy::ReadOnly},
     {25, "POPS_PACKER", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::ReadOnly},
     {27, "PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -349,7 +368,9 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {1, "WAVE_MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "WAVE_STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
     {4, "WAVE_STATE_PRIV", HwregState::StatePrivGfx12, HwregWritePolicy::Privileged},
-    {5, "WAVE_GPR_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    // GFX12 keeps GFX11's GPR_ALLOC layout (gc_12_0_0 SQ_WAVE_GPR_ALLOC), and
+    // its CWSR handler sizes the VGPR save from VGPR_SIZE exactly as on GFX11.
+    {5, "WAVE_GPR_ALLOC", HwregState::GprAllocGfx11, HwregWritePolicy::ReadOnly},
     {6, "WAVE_LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {10, "PERF_SNAPSHOT_DATA", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {11, "PERF_SNAPSHOT_PC_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -361,11 +382,13 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    // The RDNA4 manual omits SE_ID and DP_RATE, but gc_12_0_0 SQ_WAVE_HW_ID1
+    // keeps GFX11's layout and gfx1201 reports both there.
+    {23, "WAVE_HW_ID1", HwregState::HwId1Gfx11, HwregWritePolicy::ReadOnly},
+    {24, "WAVE_HW_ID2", HwregState::HwId2Gfx11, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {29, "SHADER_CYCLES_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {30, "SHADER_CYCLES_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {29, "SHADER_CYCLES_LO", HwregState::ShaderCyclesLoGfx12, HwregWritePolicy::ReadOnly},
+    {30, "SHADER_CYCLES_HI", HwregState::ShaderCyclesHiGfx12, HwregWritePolicy::ReadOnly},
 };
 
 constexpr HwregDescriptor GFX1250_HWREGS[] = {
@@ -402,37 +425,37 @@ template <size_t N> constexpr HwregTable make_table(const HwregDescriptor (&entr
   return {entries, N};
 }
 
-HwregTable table_for_arch(rj_code_arch_t arch) {
+HwregTable table_for_arch(rocjitsu::IsaFamily arch) {
   /*
    * \NPI new ISA architecture: define its own HwregDescriptor table with the \
    * shader HWREG inventory, modeled state, and privilege policy, then add an \
    * explicit case here.
    */
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return make_table(CDNA1_2_HWREGS<false>);
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return make_table(CDNA1_2_HWREGS<true>);
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return make_table(CDNA3_4_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return make_table(RDNA1_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return make_table(RDNA2_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return make_table(RDNA3_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return make_table(RDNA4_HWREGS);
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return make_table(GFX1250_HWREGS);
   default:
     return {nullptr, 0};
   }
 }
 
-const HwregDescriptor *find_descriptor(rj_code_arch_t arch, uint32_t id) {
+const HwregDescriptor *find_descriptor(rocjitsu::IsaFamily arch, uint32_t id) {
   HwregTable table = table_for_arch(arch);
   for (size_t i = 0; i < table.size; ++i) {
     if (table.entries[i].id == id)
@@ -464,8 +487,36 @@ bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg
   const auto arch = wf.cu().arch();
   return (state == HwregState::Status || state == HwregState::StatusGfx10 ||
           state == HwregState::Gfx11Status) &&
-         arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5 &&
+         arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5 &&
          field_intersects(decoded, 0, 1);
+}
+
+// RocJITsu issues all of a CU's waves from one slot array, so the slot is the
+// wave's only physical identity. Interleave the slots over the CU's two SIMDs:
+// slot s is wave s / 2 of SIMD s % 2. On an idle CU this matches the placement
+// gfx1100 and gfx1201 report for a CU-mode workgroup (wave w on SIMD w % 2,
+// WAVE_ID w / 2). Slot identity survives reuse and checkpoint restoration.
+// SIMD_ID[0] is the CU within the WGP and SIMD_ID[1] the SIMD within that CU.
+// DP_RATE 1 is one FP64 lane per clock per SIMD, as gfx1100 and gfx1201 report.
+uint32_t rdna3_4_hw_id1_raw(const Wavefront &wf) {
+  const auto &cu = wf.cu();
+  const uint32_t cu_index = cu.shader_array_cu_id();
+  return field_value(wf.wf_id() / 2, 0, 5) |
+         field_value((cu_index & 1u) | (wf.wf_id() % 2) << 1, 8, 2) |
+         field_value(cu_index / 2, 10, 4) | field_value(cu.shader_array_id(), 16, 1) |
+         field_value(cu.shader_engine_id(), 18, 3) | field_value(1, 29, 3);
+}
+
+// Fields past WAVE_ID need a known shader-array width with whole WGPs, and
+// every location must fit its field rather than alias another unit.
+bool rdna3_4_hw_id1_location_fits(const Wavefront &wf, const DecodedHwreg &decoded) {
+  const auto &cu = wf.cu();
+  const uint32_t width = cu.cus_per_shader_array();
+  if (field_intersects(decoded, 8, 9) && (!width || width % 2 || width > 32))
+    return false;
+  if (field_intersects(decoded, 16, 1) && cu.shader_array_id() > 1)
+    return false;
+  return !field_intersects(decoded, 18, 3) || cu.shader_engine_id() < 8;
 }
 
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
@@ -498,15 +549,15 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::IbDbgGfx11:
     raw_value = field_value(wf.wait_counters().empty(), 24, 1);
     return HwregAccessResult::Success;
-  case HwregState::HwId1Gfx11: {
-    const auto &cu = wf.cu();
-    const uint32_t index = cu.shader_array_cu_id();
-    raw_value = field_value(wf.wf_id() / 2, 0, 5) |
-                field_value(2 * (index & 1) + wf.wf_id() % 2, 8, 2) |
-                field_value(index / 2, 10, 4) | field_value(cu.shader_array_id(), 16, 1) |
-                field_value(cu.shader_engine_id(), 18, 3);
+  case HwregState::HwId1Gfx11:
+    raw_value = rdna3_4_hw_id1_raw(wf);
     return HwregAccessResult::Success;
-  }
+  case HwregState::HwId2Gfx11:
+    // Every rocjitsu wave comes from a compute queue, which a MEC (ME_ID 1 or
+    // 2) services; gfx1100 and gfx1201 report ME_ID 1 for HIP queues. Compute
+    // waves have no graphics state context, so STATE_ID is zero.
+    raw_value = field_value(1, 8, 2);
+    return HwregAccessResult::Success;
   case HwregState::IbStsGfx11: {
     const auto &counters = wf.wait_counters();
     raw_value = field_value(counters.expcnt, 0, 3) | field_value(counters.lgkmcnt, 4, 6) |
@@ -522,8 +573,7 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = static_cast<uint32_t>(wf.pc >> 32);
     return HwregAccessResult::Success;
   case HwregState::ApertureBases:
-    raw_value = field_value(wf.private_aperture_base() >> 32, 0, 16) |
-                field_value(wf.shared_aperture_base() >> 32, 16, 16);
+    raw_value = sh_mem_bases_raw(wf);
     return HwregAccessResult::Success;
   case HwregState::ShaderCycles:
     // Full-width HWREG 29 reads on W7900 wrap at bit 20.
@@ -531,8 +581,8 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::Status:
     raw_value = wf.status_raw();
-    if ((wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
-         wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)) {
+    if ((wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)) {
       // SCC, user priority and HALT are in STATE_PRIV on GFX12. Derive the
       // live STATUS fields instead of exposing their legacy backing bits.
       constexpr uint32_t external_bits =
@@ -556,8 +606,8 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     constexpr uint32_t live_fields = (1u << 6) | (1u << 8) | (15u << 9) | (1u << 16);
     raw_value =
         (wf.status_raw() & ~live_fields) | (uint32_t{wf.cu().trap_addresses().first != 0} << 6) |
-        (uint32_t{wf.exec() == 0} << 9) | (uint32_t{wf.vcc_mask() == 0} << 10) |
-        (uint32_t{wf.cu().in_multiwave_workgroup()} << 11) |
+        (uint32_t{wf.cu().shader_export_ready()} << 8) | (uint32_t{wf.exec() == 0} << 9) |
+        (uint32_t{wf.vcc_mask() == 0} << 10) | (uint32_t{wf.cu().in_multiwave_workgroup()} << 11) |
         (uint32_t{wf.state() == WfState::BARRIER} << 12) | (uint32_t{!wf.is_halted()} << 16);
     return HwregAccessResult::Success;
   }
@@ -572,12 +622,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
                 field_value(counters.lgkmcnt >> 5, 24, 1) | field_value(counters.vscnt, 26, 6);
     return HwregAccessResult::Success;
   }
-  case HwregState::ShMemBasesGfx10: {
-    const unsigned shift = wf.flat_pointer32() ? 16 : 48;
-    raw_value = field_value(wf.private_aperture_base() >> shift, 0, 16) |
-                field_value(wf.shared_aperture_base() >> shift, 16, 16);
+  case HwregState::ShMemBasesGfx10:
+    raw_value = sh_mem_bases_raw(wf);
     return HwregAccessResult::Success;
-  }
   case HwregState::ShaderTbaLoGfx10:
   case HwregState::ShaderTbaHiGfx10:
   case HwregState::ShaderTmaLoGfx10:
@@ -593,6 +640,14 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   }
   case HwregState::ShaderCyclesGfx1030:
     raw_value = wf.shader_cycles() & 0xfffffu;
+    return HwregAccessResult::Success;
+  // RDNA4 widens the counter to 64 bits, read as two halves; gfx1201 LO reads
+  // exceed the 20 bits that gfx11 keeps.
+  case HwregState::ShaderCyclesLoGfx12:
+    raw_value = static_cast<uint32_t>(wf.shader_cycles());
+    return HwregAccessResult::Success;
+  case HwregState::ShaderCyclesHiGfx12:
+    raw_value = static_cast<uint32_t>(wf.shader_cycles() >> 32);
     return HwregAccessResult::Success;
   case HwregState::StatePrivGfx12:
     raw_value = gfx12_state_priv_from_status(wf, wf.status_raw(), wf.scratch_base() != 0);
@@ -620,6 +675,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::Trapsts:
     raw_value = wf.trapsts();
+    return HwregAccessResult::Success;
+  case HwregState::TrapstsGfx10:
+    raw_value = (wf.trapsts() & ~kGfx10TrapstsDpRateMask) | kGfx10TrapstsDpRate;
     return HwregAccessResult::Success;
   case HwregState::SimdIdCdna2:
     raw_value = cdna2_4_simd_id_raw(wf);
@@ -705,6 +763,10 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     // this has to write through to wave state rather than report Unsupported.
     wf.set_trapsts(raw_value);
     return HwregAccessResult::Success;
+  case HwregState::TrapstsGfx10:
+    // gfx1010 and gfx1030 ignore S_SETREG to DP_RATE.
+    wf.set_trapsts(raw_value & ~kGfx10TrapstsDpRateMask);
+    return HwregAccessResult::Success;
   case HwregState::FlushIb:
     if (raw_value & 1u)
       wf.cu().instruction_cache().invalidate_all();
@@ -714,11 +776,14 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::IbSts2Gfx11:
   case HwregState::IbDbgGfx11:
   case HwregState::HwId1Gfx11:
+  case HwregState::HwId2Gfx11:
   case HwregState::IbStsGfx11:
   case HwregState::PcLo:
   case HwregState::PcHi:
   case HwregState::ApertureBases:
   case HwregState::ShaderCycles:
+  case HwregState::ShaderCyclesLoGfx12:
+  case HwregState::ShaderCyclesHiGfx12:
     return HwregAccessResult::ReadOnly;
   case HwregState::Gfx11Status: {
     constexpr uint32_t writable = 0x1fu | (1u << 8) | (1u << 13) | (1u << 18) | (3u << 20) |
@@ -904,7 +969,7 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   }
 
   // CDNA4 exposes the configured 48-bit TBA and TMA as low/high dword pairs.
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4 && decoded.id >= 16 && decoded.id <= 19) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna4 && decoded.id >= 16 && decoded.id <= 19) {
     const auto [tba, tma] = wf.cu().trap_addresses();
     const uint64_t address = ((decoded.id < 18 ? tba : tma) & 0x0000ffffffffffffULL) >> 8;
     const uint32_t word = static_cast<uint32_t>(address >> ((decoded.id & 1u) * 32));
@@ -941,10 +1006,21 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return HwregAccessResult::Unsupported;
   }
 
-  // DP_RATE is a physical implementation parameter, independent of CU placement.
+  // DP_RATE is a physical implementation parameter. No gfx11.5 part has been
+  // measured, so do not assume it matches gfx1100.
   if (desc->state == HwregState::HwId1Gfx11 &&
-      (field_intersects(decoded, 29, 3) ||
-       (field_intersects(decoded, 8, 13) && !wf.cu().cus_per_shader_array()))) {
+      ((field_intersects(decoded, 29, 3) && wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) ||
+       !rdna3_4_hw_id1_location_fits(wf, decoded))) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
+  // RocJITsu does not map queues onto hardware queue slots, allocate
+  // workgroup slots, or keep a hardware VMID per wave: QUEUE_ID[3:0],
+  // PIPE_ID[5:4], WG_ID[20:16] and VM_ID[27:24] have no backing.
+  constexpr uint32_t kUnbackedHwId2Bits = 0xfu | (3u << 4) | (0x1fu << 16) | (0xfu << 24);
+  if (desc->state == HwregState::HwId2Gfx11 &&
+      ((decoded.mask << decoded.offset) & kUnbackedHwId2Bits)) {
     value = 0;
     return HwregAccessResult::Unsupported;
   }

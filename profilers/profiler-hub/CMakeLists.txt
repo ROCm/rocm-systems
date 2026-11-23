@@ -83,13 +83,13 @@ set_target_properties(
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
 
+# get_storage_version() reports the library version. project() above sets
+# profiler-hub_VERSION_{MAJOR,MINOR,PATCH} from the VERSION file.
 target_compile_definitions(
     profiler-hub-objects
     PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MAJOR=${profiler-hub_VERSION_MAJOR}>
-    PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}>
-    PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}>
 )
 
@@ -482,8 +482,11 @@ file(
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
-export(PACKAGE ${PACKAGE_NAME})
+# Registry entries are for standalone builds; a parent project's build must not write one.
+if(PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+    export(PACKAGE ${PACKAGE_NAME})
+endif()
 
 # ------------------------------------------------------------ #
 # Clang-Tidy Custom Target

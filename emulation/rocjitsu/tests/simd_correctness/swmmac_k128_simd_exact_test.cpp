@@ -5,6 +5,7 @@
 /// @brief Decoded scalar-vs-AVX-512 checks for gfx1250 K=128 FP8/BF8 SWMMAC.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "../decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -68,7 +69,7 @@ constexpr std::array CASES{
 };
 
 struct SwmmacFixture : ExactFixture {
-  SwmmacFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA5, WF_SIZE) {}
+  SwmmacFixture() : ExactFixture(rocjitsu::IsaFamily::Cdna5, WF_SIZE) {}
 };
 
 struct Observation {
@@ -128,7 +129,7 @@ std::unique_ptr<Instruction> decode_case(const SwmmacCase &test, uint32_t a_off 
                                        .src0 = static_cast<uint16_t>(256 + a_off),
                                        .src1 = static_cast<uint16_t>(256 + b_off),
                                        .src2 = static_cast<uint16_t>(256 + index_off)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   if (!decoder)
     return nullptr;
   return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
