@@ -52,23 +52,20 @@ endif()
 set(HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(rocdecode QUIET)
-# The stub driver's vtable layout must match the libva rocdecode loads at runtime, so prefer the TheRock sysdeps
-# headers over the system ones.
-find_path(LIBVA_BACKEND_INCLUDE_DIR va/va_backend.h HINTS ${ROCM_PATH}/lib/rocm_sysdeps/include)
+# The stub VA driver is prebuilt by the rocdecode build and installed next to this file without its .so suffix.
+set(STUB_DRIVER_NAME rocdecstub)
+set(STUB_DRIVER_PREBUILT ${CMAKE_CURRENT_SOURCE_DIR}/${STUB_DRIVER_NAME}_drv_video.bin)
 
-if(HIP_FOUND AND rocdecode_FOUND AND LIBVA_BACKEND_INCLUDE_DIR)
+if(HIP_FOUND AND rocdecode_FOUND AND EXISTS ${STUB_DRIVER_PREBUILT})
   # libva loads <LIBVA_DRIVER_NAME>_drv_video.so from LIBVA_DRIVERS_PATH.
-  set(STUB_DRIVER_NAME rocdecstub)
-  add_library(${STUB_DRIVER_NAME}_drv_video MODULE stub_drv_video.cpp)
-  set_target_properties(${STUB_DRIVER_NAME}_drv_video PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
-  target_include_directories(${STUB_DRIVER_NAME}_drv_video PRIVATE ${LIBVA_BACKEND_INCLUDE_DIR})
+  set(STUB_DRIVER_DIR ${CMAKE_CURRENT_BINARY_DIR}/stub_driver)
+  configure_file(${STUB_DRIVER_PREBUILT} ${STUB_DRIVER_DIR}/${STUB_DRIVER_NAME}_drv_video.so COPYONLY)
 
   add_executable(${PROJECT_NAME} rocdecodeemptyvaprofiletest.cpp)
   target_link_libraries(${PROJECT_NAME} rocdecode::rocdecode hip::host ${CMAKE_DL_LIBS})
   target_compile_definitions(${PROJECT_NAME} PRIVATE
-    STUB_DRIVER_DIR="$<TARGET_FILE_DIR:${STUB_DRIVER_NAME}_drv_video>"
+    STUB_DRIVER_DIR="${STUB_DRIVER_DIR}"
     STUB_DRIVER_NAME="${STUB_DRIVER_NAME}")
-  add_dependencies(${PROJECT_NAME} ${STUB_DRIVER_NAME}_drv_video)
 else()
   message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
   if(NOT HIP_FOUND)
@@ -77,7 +74,7 @@ else()
   if(NOT rocdecode_FOUND)
     message(FATAL_ERROR "-- ERROR!: rocdecode Not Found!")
   endif()
-  if(NOT LIBVA_BACKEND_INCLUDE_DIR)
-    message(FATAL_ERROR "-- ERROR!: va/va_backend.h Not Found!")
+  if(NOT EXISTS ${STUB_DRIVER_PREBUILT})
+    message(FATAL_ERROR "-- ERROR!: prebuilt stub VA driver ${STUB_DRIVER_PREBUILT} Not Found!")
   endif()
 endif()
