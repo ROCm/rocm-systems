@@ -382,11 +382,7 @@ active_signals::sync(std::chrono::steady_clock::time_point deadline)
     if(outstanding == 0) return true;
     if(m_signal.handle == 0 || is_runtime_shutdown()) return false;
 
-#if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
-    constexpr auto timeout = std::chrono::seconds{5};
-#else
-    constexpr auto timeout = std::chrono::seconds{30};
-#endif
+    constexpr auto timeout = hsa_drain_timeout;
 
     using clock_type             = std::chrono::steady_clock;
     deadline                     = std::min(deadline, clock_type::now() + timeout);

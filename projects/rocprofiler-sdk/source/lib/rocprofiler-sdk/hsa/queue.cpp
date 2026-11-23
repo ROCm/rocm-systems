@@ -112,6 +112,8 @@ namespace hsa
 {
 namespace
 {
+constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
+
 class dispatch_time_cache
 {
     static constexpr size_t shard_count = 64;
@@ -311,7 +313,7 @@ dispatch_time_cache::query(hsa_agent_t                        agent,
         if(itr == data.end() || !itr->second.dispatch) return std::nullopt;
         const auto& value = *itr->second.dispatch;
         if(value.agent != agent) return std::nullopt;
-        if(value.pending_signal.handle != 0)
+        if(value.pending_signal != null_hsa_signal)
         {
             if(registration::get_fini_status() > 0) return std::nullopt;
             return runtime_query(agent, value.pending_signal, time);
@@ -331,8 +333,6 @@ dispatch_time_cache::clear()
     m_has_dispatches.store(false, std::memory_order_release);
     m_populated.store(false, std::memory_order_release);
 }
-
-constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 
 // The high bit closes admission; the other bits count interceptors that may use Queue state.
 constexpr auto   write_interceptors_closed = uint64_t{1} << 63;
@@ -449,7 +449,7 @@ wrap_table_func(TableT* _orig, uint64_t _tbl_instance, FuncT _impl)
     auto& _next = get_next_dispatch<TableIdx, OpIdx>();
 
     if(_func == _impl) return;
-    if(_tbl_instance == 0 && _func != _next) _next = _func;
+    if((_tbl_instance == 0 || _next == nullptr) && _func != _next) _next = _func;
 
     CHECK_NOTNULL(_next);
     _func = _impl;
@@ -634,7 +634,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     for(auto& packet : queue_info_session.packet_data)
     {
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
-        if(packet.orig_completion_signal.handle != 0)
+        if(packet.orig_completion_signal != null_hsa_signal)
             store_dispatch_time(packet.orig_completion_signal,
                                 packet.kernel_packet.kernel_dispatch.completion_signal);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);

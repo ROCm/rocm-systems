@@ -31,6 +31,7 @@
 
 #include <hsa/hsa_api_trace.h>
 
+#include <chrono>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -220,6 +221,12 @@ get_hsa_ref_count();
  * paths consult this to avoid calling into a closed runtime. Cleared by the next successful
  * hsa_init.
  */
+#if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
+constexpr auto hsa_drain_timeout = std::chrono::seconds{5};
+#else
+constexpr auto hsa_drain_timeout = std::chrono::seconds{30};
+#endif
+
 bool
 is_runtime_shutdown();
 }  // namespace hsa

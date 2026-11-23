@@ -50,6 +50,7 @@
 #include <dlfcn.h>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -555,10 +556,12 @@ should_wrap_functor(const context::context_array_t&     _contexts,
     return false;
 }
 
-auto       hsa_reference_count_value = std::atomic<int>{0};
-auto       runtime_shutdown_value    = std::atomic<bool>{false};
-std::mutex hsa_lifecycle_mutex       = {};
-uint64_t   hsa_init_epoch            = 0;
+auto hsa_reference_count_value = std::atomic<int>{0};
+auto runtime_shutdown_value    = std::atomic<bool>{false};
+auto hsa_lifecycle_mutex       = std::mutex{};
+auto hsa_shutdown_cv           = std::condition_variable{};
+auto hsa_shutdown_draining     = false;
+auto hsa_init_epoch            = uint64_t{0};
 
 hsa_status_t
 hsa_init_refcnt_impl()
@@ -600,10 +603,17 @@ hsa_shut_down_refcnt_impl()
     if(internal_threading::fork_stale()) return get_core_table()->hsa_shut_down_fn();
 
     auto lock = std::unique_lock{hsa_lifecycle_mutex};
+    hsa_shutdown_cv.wait(lock, []() { return !hsa_shutdown_draining; });
     if(hsa_reference_count_value == 0) return HSA_STATUS_SUCCESS;
     if(hsa_reference_count_value > 1) return hsa_release_reference();
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    hsa_shutdown_draining = true;
+    auto reset_draining   = common::scope_destructor{[&]() {
+        hsa_shutdown_draining = false;
+        hsa_shutdown_cv.notify_all();
+    }};
+
+    const auto deadline = std::chrono::steady_clock::now() + hsa_drain_timeout;
     bool       drained  = false;
     bool       fenced   = false;
     do
@@ -614,6 +624,7 @@ hsa_shut_down_refcnt_impl()
         lock.unlock();
         drained = queue_controller_drain_until(deadline);
         lock.lock();
+        if(hsa_reference_count_value == 0) return HSA_STATUS_SUCCESS;
         if(hsa_reference_count_value > 1) return hsa_release_reference();
 
         if(!fenced)
@@ -623,6 +634,7 @@ hsa_shut_down_refcnt_impl()
             kfd::signal_less_fence_completions();
             lock.lock();
             fenced = true;
+            if(hsa_reference_count_value == 0) return HSA_STATUS_SUCCESS;
             if(hsa_reference_count_value > 1) return hsa_release_reference();
         }
 
