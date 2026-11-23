@@ -328,6 +328,8 @@ private:
   // not make their shared register byte independently clearable.
   bool may_overlap_ = false;
   MemoryWaitShadow &pending_;
+  // Reuse classification storage for consecutive pending-result and counter-capacity checks.
+  std::vector<waitcheck_detail::ClassifiedEvent> classification_scratch_;
   std::vector<Event> events_;
   struct SupersededEvent {
     Event event;

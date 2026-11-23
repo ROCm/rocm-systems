@@ -367,16 +367,16 @@ protected:
 
   amdgpu::MemoryAccessCompletion
   complete_access(Instruction &, amdgpu::Wavefront &wave,
-                  amdgpu::MemoryAccessDeferredCompletion deferred_completion) override {
+                  const amdgpu::MemoryAccessCompletionFactory &take_completion) override {
     ++writeback_calls;
     counters_at_writeback = wave.wait_counters().vmcnt;
     if (before_completion)
       before_completion(wave);
     if (completion == amdgpu::MemoryAccessCompletion::Deferred) {
       if (complete_inline)
-        deferred_completion();
+        take_completion()();
       else
-        pending_completion_ = std::move(deferred_completion);
+        pending_completion_ = take_completion();
     }
     return completion;
   }
