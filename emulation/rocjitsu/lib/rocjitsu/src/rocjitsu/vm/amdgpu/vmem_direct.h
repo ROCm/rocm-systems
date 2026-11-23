@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
@@ -52,5 +53,16 @@ struct DirectVectorRequest {
 [[nodiscard]] std::optional<VmAccessOutcome>
 try_direct_vector_access(const DirectVectorRequest &request, const VmDirectBacking &backing,
                          const L1VectorCache &l1, L2Cache &l2);
+
+/// @brief Complete the swizzled (dword- or 16-byte-interleaved private) lanes
+/// of @p state against host backing, or decline before any effect.
+/// @details Spans are visited exactly as the cache model visits them. Spans
+/// that are consecutive in memory with equal size and a constant payload
+/// stride, such as one element of every lane of an interleaved scratch
+/// access, move as one run. The same extent, MTYPE, residency, permit,
+/// admission and fault rules as try_direct_vector_access() apply.
+[[nodiscard]] std::optional<VmAccessOutcome>
+try_direct_swizzled_access(const VectorMemState &state, uint64_t lanes, uint8_t *data,
+                           const VmDirectBacking &backing, const L1VectorCache &l1, L2Cache &l2);
 
 } // namespace rocjitsu::amdgpu

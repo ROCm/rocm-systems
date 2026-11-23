@@ -2181,33 +2181,43 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   // once a deferred request has been prepared.
   MemoryIngressAdmission ingress;
   bool local_range_admitted = false;
-  if (local_range_handler_ && request_lanes && !swizzled_lanes && d.atomic_op == AtomicOp::NONE &&
+  if (local_range_handler_ && request_lanes && d.atomic_op == AtomicOp::NONE &&
       d.translated.access && d.translated.access->info().legacy_cache_compatible &&
       !d.translated.peer_data_route && d.translated.requests.empty()) {
     uint64_t begin = UINT64_MAX, last = 0;
-    if (request_lanes == UINT64_MAX || request_lanes == UINT32_MAX) {
-      const unsigned lanes = request_lanes == UINT64_MAX ? 64 : 32;
+    const uint64_t box_lanes = request_lanes & ~swizzled_lanes;
+    if (box_lanes == UINT64_MAX || box_lanes == UINT32_MAX) {
+      const unsigned lanes = box_lanes == UINT64_MAX ? 64 : 32;
       for (unsigned lane = 0; lane < lanes; ++lane) {
         begin = std::min(begin, d.per_lane_addr[lane]);
         last = std::max(last, d.per_lane_addr[lane]);
       }
     } else {
-      for (uint64_t mask = request_lanes; mask; mask &= mask - 1) {
+      for (uint64_t mask = box_lanes; mask; mask &= mask - 1) {
         const uint64_t address = d.per_lane_addr[std::countr_zero(mask)];
         begin = std::min(begin, address);
         last = std::max(last, address);
       }
     }
     const uint64_t bytes = uint64_t{d.elem_size} * d.num_elems;
+    uint64_t end = box_lanes && bytes <= UINT64_MAX - last ? last + bytes : 0;
+    bool wrapped = box_lanes && bytes > UINT64_MAX - last;
+    // Interleaved private lanes reach beyond their first element's address.
+    if (swizzled_lanes)
+      d.for_each_swizzled_span(swizzled_lanes, [&](uint64_t address, uint32_t, uint32_t size) {
+        wrapped |= size > UINT64_MAX - address;
+        begin = std::min(begin, address);
+        end = std::max(end, address + size);
+      });
     // Bound speculation across inactive gaps in a strided wave. One grant and
     // a few shared local extents prove a box within an allocation; the
     // exact-lane path below handles wider requests without probing
     // unrequested pages.
     constexpr uint64_t page = IdentityAddressSpaceTranslator::kPageSize;
-    if (bytes && bytes <= UINT64_MAX - last && last + bytes - begin <= (uint64_t{1} << 16) * page) {
+    if (bytes && !wrapped && begin < end && end - begin <= (uint64_t{1} << 16) * page) {
       auto local = local_range_handler_(
           wf.process_id(), *d.translated.access,
-          {begin, last + bytes - begin, d.is_load ? VmAccessKind::Read : VmAccessKind::Write});
+          {begin, end - begin, d.is_load ? VmAccessKind::Read : VmAccessKind::Write});
       if (local && local->outcome == VmAccessOutcome::Complete) {
         ingress = std::move(*local);
         local_range_admitted = true;
@@ -2327,33 +2337,45 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
 
   // Admitted local requests of a functional, unobserved CU may bypass the
   // cache model; any extent, MTYPE, residency or admission doubt declines
-  // before an effect and the request continues below.
-  if (direct_backing_ && local_range_admitted && plain_lanes && !swizzled_lanes &&
-      !wf.raw_cu().debug_active() && wf.raw_cu().plugin_group().empty() &&
-      std::ranges::all_of(d.element_lane_masks.view(),
-                          [&](uint64_t mask) { return (mask & plain_lanes) == plain_lanes; })) {
+  // before an effect and that lane group continues below.
+  bool response_ready = false, plain_direct = false, swizzled_direct = false;
+  if (direct_backing_ && local_range_admitted && !wf.raw_cu().debug_active() &&
+      wf.raw_cu().plugin_group().empty()) {
     if (const VmDirectBacking *backing = d.translated.access->direct_backing()) {
-      if (d.is_load)
+      if (d.is_load) {
         d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
-      const DirectVectorRequest request{
-          .addrs = d.per_lane_addr.data(),
-          .lanes = plain_lanes,
-          .wf_size = d.wf_size,
-          .elem_size = d.elem_size,
-          .num_elems = d.num_elems,
-          .instruction_mtype = d.mtype,
-          .transactions = l1_->transaction_policy(),
-          .data = d.is_load ? d.response_data.data() : d.store_data.data(),
-          .is_load = d.is_load,
-      };
-      if (const auto outcome = try_direct_vector_access(request, *backing, *l1_, *l2_))
-        return *outcome;
+        response_ready = true;
+      }
+      uint8_t *data = d.is_load ? d.response_data.data() : d.store_data.data();
+      if (swizzled_lanes)
+        swizzled_direct = try_direct_swizzled_access(d, swizzled_lanes, data, *backing, *l1_,
+                                                     *l2_) == VmAccessOutcome::Complete;
+      if (plain_lanes && std::ranges::all_of(d.element_lane_masks.view(), [&](uint64_t mask) {
+            return (mask & plain_lanes) == plain_lanes;
+          })) {
+        const DirectVectorRequest request{
+            .addrs = d.per_lane_addr.data(),
+            .lanes = plain_lanes,
+            .wf_size = d.wf_size,
+            .elem_size = d.elem_size,
+            .num_elems = d.num_elems,
+            .instruction_mtype = d.mtype,
+            .transactions = l1_->transaction_policy(),
+            .data = data,
+            .is_load = d.is_load,
+        };
+        plain_direct =
+            try_direct_vector_access(request, *backing, *l1_, *l2_) == VmAccessOutcome::Complete;
+      }
+      if ((!swizzled_lanes || swizzled_direct) && (!plain_lanes || plain_direct))
+        return VmAccessOutcome::Complete;
     }
   }
 
   if (d.is_load) {
-    d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
-    if (swizzled_lanes) {
+    if (!response_ready)
+      d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
+    if (swizzled_lanes && !swizzled_direct) {
       const VmAccessOutcome outcome = l1_->load(
           d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems, d.response_data.data(),
           d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(), stride,
@@ -2361,7 +2383,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
-    if (plain_lanes) {
+    if (plain_lanes && !plain_direct) {
       const VmAccessOutcome outcome = l1_->load(
           d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.response_data.data(),
           d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(), 0,
@@ -2370,7 +2392,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
         return outcome;
     }
   } else {
-    if (swizzled_lanes) {
+    if (swizzled_lanes && !swizzled_direct) {
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
@@ -2380,7 +2402,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
-    if (plain_lanes) {
+    if (plain_lanes && !plain_direct) {
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
