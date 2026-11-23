@@ -64,6 +64,7 @@ struct IbVerbsScene {
   std::vector<ibv_cq*> polledCqs;    // every poll_cq call
   int postSendErr = 0;
   int postSendFailOnCall = 0;        // 1-based post_send call that fails with EIO; 0 for none
+  int postSendFailAcceptsWrs = 0;    // WRs a failing post_send accepts before *badWr, as a provider may
   int postRecvErr = 0;
   int pollErr = 0;
 
@@ -92,19 +93,17 @@ struct IbVerbsScene {
     IbVerbsScene* s = Of(qp->context);
     s->postSendQps.push_back(qp);
     const int err = static_cast<int>(s->postSendQps.size()) == s->postSendFailOnCall ? EIO : s->postSendErr;
-    if (err) {
-      *badWr = wr;
-      return err;
-    }
     Send send{qp, {}};
-    for (ibv_send_wr* w = wr; w; w = w->next) {
+    ibv_send_wr* w = wr;
+    for (int n = 0; w && (!err || n < s->postSendFailAcceptsWrs); w = w->next, n++) {
       Wr copy{*w, w->num_sge > 0 && w->sg_list != nullptr, {}};
       if (copy.hasSge) copy.sge = w->sg_list[0];
       send.chain.push_back(copy);
       s->posted.push_back(Flatten(qp, copy));
     }
-    s->sends.push_back(send);
-    return 0;
+    if (!err || !send.chain.empty()) s->sends.push_back(send);
+    if (err) *badWr = w;
+    return err;
   }
 
   static int PostRecv(ibv_qp* qp, ibv_recv_wr* wr, ibv_recv_wr** badWr) {
