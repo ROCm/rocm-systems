@@ -32,7 +32,7 @@ StaticBarrierMember make_barrier_member(const Instruction &instruction) {
 std::optional<StaticBarrierPolicy> static_barrier_policy(rj_code_target_id_t target,
                                                          const IsaTargetRegistry &registry) {
   const IsaTargetDescriptor *family = registry.find(target);
-  if (!family || !registry.find_gpu_target(target))
+  if (!family || !registry.find_target(target))
     return std::nullopt;
   static constexpr std::array<uint32_t, 2> rdna_waves = {32, 64};
   static constexpr std::array<uint32_t, 1> wave32 = {32};
@@ -42,20 +42,20 @@ std::optional<StaticBarrierPolicy> static_barrier_policy(rj_code_target_id_t tar
   static constexpr std::array<StaticBarrierBuiltin, 2> workgroup_and_cluster = {
       {{.id = -1, .scope = StaticBarrierScope::Workgroup},
        {.id = -3, .scope = StaticBarrierScope::Cluster}}};
-  switch (family->architecture_id) {
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  switch (family->family) {
+  case IsaFamily::Rdna3:
     return StaticBarrierPolicy{
         .form = StaticBarrierForm::FullSingleton, .wave_sizes = rdna_waves, .builtins = workgroup};
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case IsaFamily::Rdna4:
     return StaticBarrierPolicy{.form = StaticBarrierForm::BuiltinSplitPair,
                                .wave_sizes = rdna_waves,
                                .builtins = workgroup};
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case IsaFamily::Cdna5:
     return StaticBarrierPolicy{.form = StaticBarrierForm::BuiltinSplitPair,
                                .wave_sizes = wave32,
                                .builtins = workgroup_and_cluster};
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case IsaFamily::Cdna3:
+  case IsaFamily::Cdna4:
     return StaticBarrierPolicy{
         .form = StaticBarrierForm::FullSingleton, .wave_sizes = wave64, .builtins = workgroup};
   default:

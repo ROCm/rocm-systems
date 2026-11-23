@@ -238,9 +238,9 @@ Full-text source facts include unreachable references, so discovery may succeed
 while apply rejects the complete Drop batch.
 
 For ConSan use, follow the [fresh-prepare integration contract](consan.md#fault-injection).
-Fresh prepare currently requires a single-kernel image and rejects remaining
-`s_barrier*` instructions in the analyzed scope. Sibling-preserving multi-kernel
-mutants and Drops that leave another barrier in that scope cannot use this path.
+Fresh prepare currently requires a single-kernel image. Sibling-preserving
+multi-kernel mutants cannot use this path; any remaining barriers must satisfy
+ConSan's qualified gfx1250 wave32 workgroup-barrier profile.
 The mutant must also satisfy ConSan's other input restrictions; fresh preparation
 does not establish detector qualification. Mutation admission and detector
 admission are separate decisions.

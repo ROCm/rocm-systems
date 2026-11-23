@@ -127,7 +127,7 @@ TEST_P(StaticBarriersTarget, CompleteBarriersRetainFamilyAndSourceFacts) {
       row.split ? StaticBarrierForm::BuiltinSplitPair : StaticBarrierForm::FullSingleton;
   EXPECT_EQ(policy->form, form);
 
-  const uint32_t full = row.arch == ROCJITSU_CODE_ARCH_RDNA3 ? 0xbfbd0000u : 0xbf8a0000u;
+  const uint32_t full = row.arch == IsaFamily::Rdna3 ? 0xbfbd0000u : 0xbf8a0000u;
   const std::vector<uint32_t> words =
       row.split ? std::vector<uint32_t>{kMov, kSignal, kMov, kWait, kMov, kSignal, kMov, kWait}
                 : std::vector<uint32_t>{kMov, full, kMov, kMov, full};
@@ -172,7 +172,7 @@ TEST_P(StaticBarriersSplit, SemanticBuiltinIdsFollowFamilyPolicy) {
     const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(id);
     const std::vector<uint32_t> words = {signal, kMov, wait};
     BarrierProgram program;
-    if (row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id < -2) {
+    if (row.arch == IsaFamily::Rdna4 && id < -2) {
       // Those signal selectors are outside RDNA4's decoder operand domain.
       EXPECT_FALSE(program.decode(row, words));
       EXPECT_NE(program.decode_error().find("invalid scalar source selector"), std::string::npos);
@@ -218,7 +218,7 @@ TEST_P(StaticBarriersSplit, RejectsNonImmediateAndOutOfPolicyOperands) {
     const std::vector<uint32_t> words = {0xbe804e00u | selector, 0xffffffffu, kWait};
     EXPECT_FALSE(program.decode(row, words));
     const std::string_view diagnostic =
-        row.arch == ROCJITSU_CODE_ARCH_CDNA5 && selector == 255
+        row.arch == IsaFamily::Cdna5 && selector == 255
             ? "s_barrier_signal does not support 32-bit literals at .text byte offset 0"
             : "invalid scalar source selector";
     EXPECT_NE(program.decode_error().find(diagnostic), std::string::npos) << program.decode_error();
@@ -277,7 +277,7 @@ TEST_P(StaticBarriersSplit, TrapFormsCannotPrecedeAnAdmittedUserBarrier) {
     const uint32_t signal = 0xbe804e00u | static_cast<uint32_t>(192 - id);
     const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(id);
     const std::vector<uint32_t> words = {signal, wait, kSignal, kWait, kEnd};
-    if (row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id == -4) {
+    if (row.arch == IsaFamily::Rdna4 && id == -4) {
       BarrierProgram program;
       EXPECT_FALSE(program.decode(row, words));
       EXPECT_NE(program.decode_error().find("invalid scalar source selector"), std::string::npos);

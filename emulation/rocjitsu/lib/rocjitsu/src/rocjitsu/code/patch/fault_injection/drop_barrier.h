@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/analysis/static_barriers.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/result.h"
 
 #include <cstddef>
@@ -158,7 +159,7 @@ enum class FaultQualification { Unverified, Validated };
 struct FaultMutationCapability {
   FaultMutationKind kind;
   StaticBarrierForm form;
-  rj_code_arch_t architecture;
+  IsaFamily architecture;
   rj_code_target_id_t target;
   uint32_t wave_size;
   std::string_view admission;

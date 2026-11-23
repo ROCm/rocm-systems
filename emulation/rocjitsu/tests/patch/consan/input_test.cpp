@@ -583,7 +583,7 @@ TEST_F(ConSanInputFixture, LdsAccessOrderAtAJoinIncludesEveryPredecessor) {
   ASSERT_EQ(original.value().accesses.size(), 2u);
   ASSERT_EQ(original.value().accesses[0].kind, AccessKind::Write);
   ASSERT_EQ(original.value().accesses[1].kind, AccessKind::Read);
-  ASSERT_EQ(kTarget.arch, ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_EQ(kTarget.arch, IsaFamily::Rdna3);
   const AmdGpuCodeObject source(image_.data(), image_.size());
   const Section &text = *source.text_sections().front();
   const uint64_t entry = original.value().kernel.entry_text_offset;

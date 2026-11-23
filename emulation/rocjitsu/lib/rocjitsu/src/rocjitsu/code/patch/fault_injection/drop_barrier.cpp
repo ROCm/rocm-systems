@@ -203,7 +203,7 @@ std::vector<FaultMutationCapability> fault_mutation_capabilities() {
   const IsaTargetRegistry &registry = default_isa_target_registry();
   std::vector<FaultMutationCapability> capabilities;
   for (const IsaTargetDescriptor &family : registry.targets()) {
-    for (const IsaGpuTargetDescription &binding : family.gpu_targets) {
+    for (const IsaTargetBinding &binding : family.bindings) {
       const std::optional<StaticBarrierPolicy> policy =
           static_barrier_policy(binding.public_id, registry);
       if (!policy || !Decoder::create(registry, binding.public_id))
@@ -212,7 +212,7 @@ std::vector<FaultMutationCapability> fault_mutation_capabilities() {
         capabilities.push_back(
             {.kind = FaultMutationKind::DropBarrier,
              .form = policy->form,
-             .architecture = family.architecture_id,
+             .architecture = family.family,
              .target = binding.public_id,
              .wave_size = wave,
              .admission = "shared DBI ELF admission; file-backed text/descriptors; exact kernel; "
@@ -241,7 +241,7 @@ Result FaultMutationContext::analyze() const {
                   "expected little-endian AMDHSA ET_DYN ELF64");
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *target_facts = registry.find(target);
-  const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);
+  const IsaTargetBinding *binding = registry.find_target(target);
   const std::optional<StaticBarrierPolicy> policy = static_barrier_policy(target, registry);
   if (!target_facts || !binding || !policy ||
       (header.e_flags & EF_AMDGPU_MACH) != binding->elf_machine ||
@@ -293,7 +293,7 @@ Result FaultMutationContext::analyze() const {
   // Full-text structural facts cover even unreachable references. Independently
   // reconcile declared owners: a descriptor omitted by the scanner is unresolved,
   // not evidence that the owner does not exist.
-  state_->instrumentor = std::make_unique<Instrumentor>(object, target_facts->architecture_id);
+  state_->instrumentor = std::make_unique<Instrumentor>(object, target_facts->family);
   TextEditError edit_error;
   const InstructionBoundaries *boundaries =
       state_->instrumentor->instruction_boundaries(edit_error);
@@ -391,9 +391,8 @@ Result FaultMutationContext::analyze() const {
     entries.push_back(owner.entry_text_offset);
   }
   util::StringDiagnostic diagnostic;
-  FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
-      BasicBlock::build_reachable(object, *decoder, target_facts->architecture_id, entries,
-                                  diagnostic.emitter(), {}, {}, {}, target);
+  FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks = BasicBlock::build_reachable(
+      object, *decoder, target_facts->family, entries, diagnostic.emitter(), {}, {}, {}, target);
   if (blocks.failed())
     return reject(error, FaultMutationErrorCode::UnsupportedForm, diagnostic.message());
   const BlockOffsetIndex index = build_block_offset_index(blocks.value());
@@ -444,7 +443,7 @@ Result FaultMutationContext::analyze() const {
                      .entry_offset = owner.entry_text_offset,
                      .descriptor_file_offset = owner.descriptor_file_offset};
     record->source = source_;
-    const uint32_t wave = kernel_wavefront_size(target_facts->architecture_id, owner.descriptor);
+    const uint32_t wave = kernel_wavefront_size(target_facts->family, owner.descriptor);
     // The shared helper normalizes CDNA3/4 to Wave64 even if the raw Wave32 bit
     // is set. Check that bit against family policy, independently of barrier form:
     // RDNA3 full singletons admit both waves; CDNA3/4 full singletons do not.
@@ -541,7 +540,7 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
     return Result::failure();
   }
   std::unique_ptr<Instrumentor> instrumentor = std::move(fork).value();
-  const FailureOr<uint32_t> encoded_nop = build_s_nop(0, target->architecture_id);
+  const FailureOr<uint32_t> encoded_nop = build_s_nop(0, target->family);
   if (encoded_nop.failed())
     return reject(error, FaultMutationErrorCode::UnsupportedTarget,
                   "target cannot encode the Drop replacement NOP");

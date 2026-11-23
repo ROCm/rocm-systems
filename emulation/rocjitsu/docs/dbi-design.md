@@ -1039,8 +1039,9 @@ replacement-only inputs and cross-site definition deletion with independent
 memory sentinels and missing-restore/replayed-original corruption controls.
 ConSan input qualification checks actual CFG cycles rather than address order: a
 trampoline returning backward to an unvisited continuation is acyclic and accepted;
-self-loops and multi-block cycles remain rejected. ConSan still requires native
-LDS access PCs to increase along every executed path, preserving the analyzer's
+cycles remain rejected except for ConSan's qualified conditional single-block
+workgroup-barrier loop. Native LDS access PCs must increase along every path
+within an iteration; the qualified loop uses repeated epochs, preserving the analyzer's
 static site-order contract. The topological walk propagates the maximum prior
 native access PC through joins and rejects an incompatible access order without
 changing capture/facts formats. Simulation and host analysis

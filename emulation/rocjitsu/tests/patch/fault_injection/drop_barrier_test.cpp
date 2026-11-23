@@ -40,7 +40,7 @@ static_assert(std::is_same_v<decltype(std::declval<DropBarrierSelection &>().bar
 static_assert(!std::is_aggregate_v<DropBarrierSelection>);
 
 constexpr rj_code_target_id_t kTarget = ROCJITSU_CODE_TARGET_GFX1250;
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+constexpr IsaFamily kArch = IsaFamily::Cdna5;
 constexpr uint32_t kSignal = 0xbe804ec1u;
 constexpr uint32_t kWait = 0xbf94ffffu;
 constexpr uint32_t kWaitDscnt = 0xbfc60000u;
@@ -78,7 +78,7 @@ std::optional<std::vector<uint8_t>> expected_drop_image(const FaultMutationConte
       default_isa_target_registry().find(context.source().target_id());
   if (!target)
     return std::nullopt;
-  const FailureOr<uint32_t> nop = build_s_nop(0, target->architecture_id);
+  const FailureOr<uint32_t> nop = build_s_nop(0, target->family);
   if (nop.failed())
     return std::nullopt;
   std::vector<test::ExpectedReplacement> edits;
@@ -89,7 +89,7 @@ std::optional<std::vector<uint8_t>> expected_drop_image(const FaultMutationConte
     edits.push_back(
         {.offset = member.offset, .expected = member.bytes, .replacement = std::move(replacement)});
   }
-  return test::expected_replacement_image(context.source(), edits, target->architecture_id);
+  return test::expected_replacement_image(context.source(), edits, target->family);
 }
 
 std::vector<uint8_t> expected_drop_for_test(const FaultMutationContext &context,
@@ -297,7 +297,7 @@ using test::kRdna3DropRows;
 std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
   // RDNA3 generated test_encodings.h: s_waitcnt and full s_barrier differ
   // from CDNA. Offset 4/16 barriers surround unchanged waits and s_mov_b32.
-  if (row.arch == ROCJITSU_CODE_ARCH_RDNA3)
+  if (row.arch == IsaFamily::Rdna3)
     return {0xbf890000u, 0xbfbd0000u, kMov,
             0xbf890000u, 0xbfbd0000u, checked_encoding(build_s_endpgm(row.arch))};
   const uint32_t wait = row.split ? kWaitDscnt : 0xbf8c0000u;
@@ -312,8 +312,7 @@ std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row,
                                                  std::vector<uint32_t> words,
                                                  bool siblings = false) {
   constexpr uint32_t kSecondEntryByteOffset = 256;
-  const IsaGpuTargetDescription *binding =
-      default_isa_target_registry().find_gpu_target(row.target);
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target(row.target);
   if (!binding)
     return {};
   if (siblings) {
@@ -751,7 +750,7 @@ TEST_P(FaultDropBarrierFamily, StaticBarrierInLoopAndFamilySpecificForms) {
                 checked_encoding(build_s_endpgm(row.arch))}));
       const FailureOr<FaultBarrierInventory> discovered =
           discover_drop_barriers(builtin, "test_kernel", error);
-      if (id == -2 || id == -4 || (row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id == -3)) {
+      if (id == -2 || id == -4 || (row.arch == IsaFamily::Rdna4 && id == -3)) {
         EXPECT_TRUE(discovered.failed());
         EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
       } else {
@@ -774,7 +773,7 @@ TEST_P(FaultDropBarrierFamily, StaticBarrierInLoopAndFamilySpecificForms) {
       const FaultMutationContext unsupported(make_barrier_elf_for_target(row, incomplete));
       EXPECT_TRUE(discover_drop_barriers(unsupported, "test_kernel", error).failed());
     }
-  } else if (row.arch == ROCJITSU_CODE_ARCH_CDNA3 || row.arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  } else if (row.arch == IsaFamily::Cdna3 || row.arch == IsaFamily::Cdna4) {
     // CDNA's wave helper normalizes to 64; its raw Wave32 bit is still invalid.
     // RDNA3 singleton barriers admit both descriptor-selected wave modes.
     DropTargetRow wrong_wave = row;
@@ -788,7 +787,7 @@ TEST_P(FaultDropBarrierFamily, StaticBarrierInLoopAndFamilySpecificForms) {
 
 TEST(FaultDropBarrier, RejectsUndecodableUnselectedRdnaPadding) {
   for (const DropTargetRow &row : kDropRows) {
-    if (row.arch != ROCJITSU_CODE_ARCH_RDNA4)
+    if (row.arch != IsaFamily::Rdna4)
       continue;
     std::vector<uint8_t> image = make_barrier_elf_for_target(row, make_barrier_words(row), true);
     const AmdGpuCodeObject source(image.data(), image.size());
@@ -2210,7 +2209,7 @@ TEST(FaultDropBarrier, CapabilityDescribesTransformationOnly) {
   EXPECT_FALSE(static_barrier_policy(kTarget, missing));
   // The actual standalone target is linked to model-only providers.
   EXPECT_FALSE(
-      default_isa_target_registry().find_gpu_target(kTarget)->capabilities.execution_implemented);
+      default_isa_target_registry().find_target(kTarget)->capabilities.execution_implemented);
 }
 
 TEST(FaultDropBarrier, UserBuiltinIdsKeepDistinctStaticScopes) {
