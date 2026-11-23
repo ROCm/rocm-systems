@@ -40,8 +40,6 @@ class ReduceOnStreamTester : public Tester {
   explicit ReduceOnStreamTester(TesterArguments args);
   virtual ~ReduceOnStreamTester();
 
-  std::string typeName() const override { return type_name<T>(); }
-
  protected:
   virtual void resetBuffers(size_t size) override;
 

@@ -41,8 +41,6 @@ class TypedRMATester : public Tester {
   explicit TypedRMATester(TesterArguments args);
   virtual ~TypedRMATester();
 
-  std::string typeName() const override { return type_name<T>(); }
-
  protected:
   virtual void resetBuffers(size_t size) override;
 
