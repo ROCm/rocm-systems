@@ -1130,10 +1130,8 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
 // FillMemoryCommand at all, and it has no inter-row padding, so there is
 // nothing to prove the fill stayed inside the requested sub-region.
 //
-// Note on units: CLR treats `width` as BYTES (sizeBytes = width * height);
-// the D2D8/16/32 flavour only selects the fill-pattern width via elementSize,
-// despite the doxygen wording implying elements.  hipMemsetD2D32Async.cc in
-// catch/unit/memory/ likewise passes width = numW * sizeof(int).
+// Width is measured in elements; the shared row width below is measured in
+// bytes.
 // ===========================================================================
 namespace {
 constexpr size_t kD2DWidth = 32 * sizeof(int);          // 128 bytes filled per row
@@ -1210,10 +1208,15 @@ TEST_CASE("Unit_HRR_MemsetD2D_Direct", "[.][hrr-direct]") {
   // Pitched fills, kD2DWidth bytes per row only.
   HRR_HIP_CHECK(hipMemsetD2D8(dp, kD2DPitch, 0x11, kD2DWidth, kD2DRows));
   HRR_HIP_CHECK(hipMemsetD2D8Async(dp, kD2DPitch, 0x22, kD2DWidth, kD2DRows, s));
-  HRR_HIP_CHECK(hipMemsetD2D16(dp, kD2DPitch, 0x3333, kD2DWidth, kD2DRows));
-  HRR_HIP_CHECK(hipMemsetD2D16Async(dp, kD2DPitch, 0x4444, kD2DWidth, kD2DRows, s));
-  HRR_HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, 0x11223344u, kD2DWidth, kD2DRows));
-  HRR_HIP_CHECK(hipMemsetD2D32Async(dp, kD2DPitch, 0x55667788u, kD2DWidth, kD2DRows, s));
+  HRR_HIP_CHECK(hipMemsetD2D16(dp, kD2DPitch, 0x3333,
+                               kD2DWidth / sizeof(unsigned short), kD2DRows));
+  HRR_HIP_CHECK(hipMemsetD2D16Async(
+      dp, kD2DPitch, 0x4444, kD2DWidth / sizeof(unsigned short), kD2DRows, s));
+  HRR_HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, 0x11223344u,
+                               kD2DWidth / sizeof(unsigned int), kD2DRows));
+  HRR_HIP_CHECK(hipMemsetD2D32Async(dp, kD2DPitch, 0x55667788u,
+                                    kD2DWidth / sizeof(unsigned int), kD2DRows,
+                                    s));
 
   // The non-Async D2D memsets are NOT synchronous here: ihipMemset3D flips
   // isAsync true for a plain device allocation at offset 0 and enqueues on the
@@ -1222,7 +1225,8 @@ TEST_CASE("Unit_HRR_MemsetD2D_Direct", "[.][hrr-direct]") {
   // therefore mutually unordered.  Drain the device, then issue one final
   // deterministic fill and drain again, so the captured end state is unique.
   HRR_HIP_CHECK(hipDeviceSynchronize());
-  HRR_HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern, kD2DWidth, kD2DRows));
+  HRR_HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern,
+                               kD2DWidth / sizeof(unsigned int), kD2DRows));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
   // D2H the WHOLE allocation so the captured blob covers the padding too.
@@ -1274,10 +1278,15 @@ TEST_CASE("Unit_HRR_MemsetD2DPitchAlloc_Direct", "[.][hrr-direct]") {
   // matters.
   HRR_HIP_CHECK(hipMemsetD2D8(pitched, pitch, 0x11, kD2DWidth, kD2DRows));
   HRR_HIP_CHECK(hipMemsetD2D8Async(pitched, pitch, 0x22, kD2DWidth, kD2DRows, s));
-  HRR_HIP_CHECK(hipMemsetD2D16(pitched, pitch, 0x3333, kD2DWidth, kD2DRows));
-  HRR_HIP_CHECK(hipMemsetD2D16Async(pitched, pitch, 0x4444, kD2DWidth, kD2DRows, s));
-  HRR_HIP_CHECK(hipMemsetD2D32(pitched, pitch, 0x11223344u, kD2DWidth, kD2DRows));
-  HRR_HIP_CHECK(hipMemsetD2D32Async(pitched, pitch, kD2DPattern, kD2DWidth, kD2DRows, s));
+  HRR_HIP_CHECK(hipMemsetD2D16(pitched, pitch, 0x3333,
+                               kD2DWidth / sizeof(unsigned short), kD2DRows));
+  HRR_HIP_CHECK(hipMemsetD2D16Async(
+      pitched, pitch, 0x4444, kD2DWidth / sizeof(unsigned short), kD2DRows, s));
+  HRR_HIP_CHECK(hipMemsetD2D32(pitched, pitch, 0x11223344u,
+                               kD2DWidth / sizeof(unsigned int), kD2DRows));
+  HRR_HIP_CHECK(hipMemsetD2D32Async(pitched, pitch, kD2DPattern,
+                                    kD2DWidth / sizeof(unsigned int), kD2DRows,
+                                    s));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
   // Translatable destination: this is the blob replay must still validate.
@@ -1286,7 +1295,8 @@ TEST_CASE("Unit_HRR_MemsetD2DPitchAlloc_Direct", "[.][hrr-direct]") {
   const hipDeviceptr_t dp = reinterpret_cast<hipDeviceptr_t>(d);
   HRR_HIP_CHECK(hipMemsetD8(dp, kD2DSentinelByte, kD2DTotal));
   HRR_HIP_CHECK(hipDeviceSynchronize());
-  HRR_HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern, kD2DWidth, kD2DRows));
+  HRR_HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern,
+                               kD2DWidth / sizeof(unsigned int), kD2DRows));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<unsigned char> h(kD2DTotal, 0);
