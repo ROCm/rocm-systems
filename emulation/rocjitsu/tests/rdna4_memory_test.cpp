@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 
@@ -19,12 +20,12 @@ protected:
   GpuMemory memory_{"memory"};
   L2Cache l2_{"l2"};
   std::unique_ptr<ComputeUnitCore> cu_;
-  std::unique_ptr<Decoder> decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Decoder> decoder_ = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   Wavefront *wf_ = nullptr;
   void SetUp() override {
     l2_.set_backing_memory(&memory_);
     ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Rdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 64;

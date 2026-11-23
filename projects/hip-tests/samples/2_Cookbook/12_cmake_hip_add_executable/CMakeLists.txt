@@ -16,8 +16,6 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-set(CMAKE_HIP_ARCHITECTURES OFF)
-
 project(12_cmake_hip_add_executable LANGUAGES CXX)
 
 # FindHIP.cmake compatibility shim — exercises the legacy find_package(HIP MODULE)

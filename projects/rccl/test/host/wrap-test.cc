@@ -6143,10 +6143,11 @@ class RegisteredAr {
     comm_->rankToNode = rankToNode_.data();
   }
 
-  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum) {
+  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum,
+                          ncclDataType_t dtype = ncclFloat32) {
     capturing_ = capturing;
     rcclCollDecision decision{};
-    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, op,
+    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / ncclTypeSize(dtype), dtype, op,
                                                 /*stream=*/nullptr, query, /*graphCapturingHint=*/capturing,
                                                 &decision));
     return decision;
@@ -6227,8 +6228,11 @@ class RegisteredAr {
   HookFor<decltype(g_allReduceDdaFabricLLBlocks)> llBlocks_{g_allReduceDdaFabricLLBlocks, CappedReport(113u)};
   HookFor<decltype(g_allReduceDdaFabricBlocks)> vmmBlocks_{g_allReduceDdaFabricBlocks, CappedReport(112u)};
   HookFor<decltype(g_getAlgoInfo)> ringInfo_{
-      g_getAlgoInfo, [this](struct ncclComm*, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
-        task->algorithm = ringAlgo_;
+      g_getAlgoInfo, [this](struct ncclComm* comm, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
+        // A penalized FP8 ring (factor > 1) loses to Tree, as in the real planner.
+        const float fp8Factor = rcclFp8RingCostFactor(task->datatype, task->func, comm->nRanks, comm->nNodes,
+                                                      rcclDdaLL128Threshold(comm, ncclFuncAllReduce), comm->archName);
+        task->algorithm = fp8Factor > 1.0f ? NCCL_ALGO_TREE : ringAlgo_;
         task->protocol = NCCL_PROTO_LL128;
         task->nMaxChannels = ringChannels_;
         task->nWarps = ringWarps_;
@@ -6461,7 +6465,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk) 
       });
 }
 
-// Capture re-routes only where the planner runs Ring (fp8 plans Tree); the cap is Ring's packed channels and
+// Capture re-routes only where the planner runs Ring (fp8 too); the cap is Ring's packed channels and
 // max(nWarps, 3) warps.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel) {
   RUN_ISOLATED_TEST(
@@ -6482,6 +6486,10 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlanne
         d = ar.Select(16 * kMiB, true);
         EXPECT_EQ(24u, d.ddaCap.blocks) << "the channels the packed plan launches";
         EXPECT_EQ(24u, d.nMaxChannels);
+        ar.SetRanks(16);
+        d = ar.Select(16 * kMiB, true, true, ncclSum, ncclFloat8e4m3);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo) << "fp8 re-routes like float32";
+        EXPECT_EQ(24u, d.ddaCap.blocks);
       });
 }
 
@@ -6872,6 +6880,30 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CTAPolicyZeroFallsBackWhenNoCeOrGinS
         DeleteCommWithArch(comm);
       });
 }
+
+#if defined(ENABLE_ROCSHMEM_GIN)
+// GIN is checked before symk. A true eligibility seam must win, and the CTA
+// fake's channel count must be the one the decision publishes.
+TEST(WrapMicrotestIsolated, SelectAllGather_GinSdmaPreemptsSymk) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_GinSdmaPreemptsSymk",
+      []() {
+        ScopedHook ginEligible(g_allGatherGinSdmaEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*,
+                                   bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_AG_GIN_SDMA, decision.algo);
+        EXPECT_EQ(4, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+#endif
 
 // ===========================================================================
 // rcclSelectAllGather -- rccl_wrap.cc:1031-1202. Same overall shape as
@@ -10909,8 +10941,9 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPla
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    // Use a local copy with Broadcast caps zeroed to isolate the no-tier case from real table values.
     const rcclArchThresholds* real =
-      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, real);
     rcclArchThresholds table = *real;
     table.ddaLLMax[ncclFuncBroadcast] = 0;
@@ -10933,8 +10966,9 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceh
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    // Use a local copy with Broadcast caps zeroed to isolate the no-tier case from real table values.
     const rcclArchThresholds* real =
-      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, real);
     rcclArchThresholds table = *real;
     table.ddaLLMax[ncclFuncBroadcast] = 0;
@@ -10990,6 +11024,39 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaL
   });
 }
 
+// Real SPX table with RCCL_DDA_BC unset: a non-zero ddaLL128Max[Broadcast] enables the two-shot
+// tier. 256 KiB (well below the cap) picks LL128; cap + 16 bytes (above the cap) falls back to Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap", []() {
+    // llMax=-1 and ll128Max=-1 leave both RCCL_DDA_LL_THRESHOLD and RCCL_DDA_LL128_THRESHOLD
+    // unset so the selector uses the table caps rather than an env override.
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds =
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(ll128Cap, 0u);
+
+    rcclCollDecision d = PoisonedDecision();
+    // 256 KiB is well below the cap: two-shot LL128 selected.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, 256 * 1024 / sizeof(float), ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+
+    d = PoisonedDecision();
+    // cap + 16 bytes is above the cap: Ring.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
+                                  0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
 // Out of the box on DPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
 TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTierByCap", []() {
@@ -10999,20 +11066,57 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
     ncclComm* comm = MakeBroadcastComm();
     comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
     const struct {
       size_t bytes;
       int algo;
     } cases[] = {
-      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
-      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024 + 16, NCCL_ALGO_RING},
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
     };
     for (const auto& c : cases) {
       rcclCollDecision d = PoisonedDecision();
       EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
       EXPECT_EQ(c.algo, d.algo) << c.bytes;
     }
+    DeleteCommWithArch(comm);
+  });
+}
+
+// Real DPX table with RCCL_DDA_BC unset: a non-zero ddaLL128Max[Broadcast] enables the two-shot
+// tier. 256 KiB (well below the cap) picks LL128; cap + 16 bytes (above the cap) falls back to Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap", []() {
+    // llMax=-1 and ll128Max=-1 leave both RCCL_DDA_LL_THRESHOLD and RCCL_DDA_LL128_THRESHOLD
+    // unset so the selector uses the table caps rather than an env override.
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds =
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(ll128Cap, 0u);
+
+    rcclCollDecision d = PoisonedDecision();
+    // 256 KiB is well below the cap: two-shot LL128 selected.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, 256 * 1024 / sizeof(float), ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+
+    d = PoisonedDecision();
+    // cap + 16 bytes is above the cap: Ring.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
+                                  0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
     DeleteCommWithArch(comm);
   });
 }
@@ -11026,14 +11130,18 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTierByCap) {
     ncclComm* comm = MakeBroadcastComm();
     comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
     const struct {
       size_t bytes;
       int algo;
     } cases[] = {
-      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
-      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024 + 16, NCCL_ALGO_RING},
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
     };
     for (const auto& c : cases) {
       rcclCollDecision d = PoisonedDecision();

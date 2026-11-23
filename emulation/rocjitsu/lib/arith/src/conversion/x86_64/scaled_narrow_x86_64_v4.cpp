@@ -20,6 +20,9 @@ void scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSource s
   constexpr bool fp4 = Dst == ScaledNarrowDestination::Fp4;
   auto selected = _mm512_set1_epi32(int((Stochastic || fp4 ? 0xffU : 0xffffU) << shift));
   for (int lane = 0; lane < lanes; lane += 16) {
+    if (uint16_t(exec_mask >> lane) == 0) {
+      continue;
+    }
     auto av = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + lane));
     auto bv = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));
     auto old = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(d + lane));

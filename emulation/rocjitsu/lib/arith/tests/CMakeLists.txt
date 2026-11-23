@@ -22,6 +22,7 @@ endfunction()
 
 rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
 
+rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
@@ -221,7 +222,7 @@ foreach(
 endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
-foreach(family IN ITEMS alu fused dot)
+foreach(family IN ITEMS alu fused dot gfx1250)
     set(target "rj_arith_dual_${family}_test")
     rj_arith_add_test(${target} dual/${family}_test.cpp)
 endforeach()
@@ -230,7 +231,9 @@ endforeach()
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
     rj_arith_cpu_test
-    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+    PRIVATE
+        RJ_ARITH_IMPL_NAMESPACE=test_cpu
+        "$<FILTER:$<TARGET_PROPERTY:rj_arith,COMPILE_DEFINITIONS>,INCLUDE,^RJ_ARITH_HAVE_>"
 )
 add_subdirectory(headers)
 
@@ -272,6 +275,7 @@ foreach(
         class
         float_equality
         float_ordered
+        float_gfx1150
         float_unordered
 )
     set(target "rj_arith_compare_${family}_test")

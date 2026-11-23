@@ -71,8 +71,8 @@ int rj_arith_v_mul_dx9_zero_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 // RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS flushes rounded subnormals to signed zero.
 // APIs without _gfx12 use RDNA3 TRAPSTS; _gfx12 APIs use EXCP_FLAG_USER.
 // RDNA3 ignores OMOD when output denormals are preserved or IEEE mode is set;
-// RDNA4 applies OMOD independently. RDNA3 strict exact with active OMOD is
-// unsupported. Mode 3 FP status reporting is unsupported for RDNA3 and for RDNA4
+// RDNA4 applies OMOD independently. Both accept strict exact with active OMOD
+// (W7900 captures). Mode 3 FP status reporting is unsupported for RDNA3 and for RDNA4
 // with output flushing or directed rounding. Loose semantics leave FP status unchanged.
 // Active OMOD rounds at normal precision before
 // flushing tiny results to +0, then applies the output scale and clamp.
@@ -153,7 +153,7 @@ int rj_arith_v_div_fmas_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // the _gfx12 variants quiet them.
 // RDNA3 ignores OMOD unless output denormals are flushed and IEEE mode is clear.
 // RDNA4 applies OMOD independently of these guest settings. Active RDNA3 OMOD
-// supports loose semantics only; strict exact returns unsupported semantics.
+// follows the same round-then-scale model in every semantics (W7900 captures).
 // Wave64 retains the same contract with a 64-bit condition result. Inactive
 // condition bits are zero; empty EXEC writes zero. Condition is committed after
 // all VGPR writes and may share their storage, including unaligned storage.
@@ -221,9 +221,10 @@ int rj_arith_v_div_scale_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // classifier, which is not hardware-faithful with DX10_CLAMP clear. Mode 3 rejects
 // that domain with UNSUPPORTED_FP_STATUS. DX10_CLAMP set suppresses those causes.
 // RDNA3 preserves selected signaling NaNs with IEEE clear; IEEE set quiets them.
-// FP16 with active RDNA3 OMOD rejects strict numeric semantics; Compatibility
-// and mode 1 resolve to Loose. FP32/FP64 Compatibility still reports
-// INVALID.
+// FP16 with active RDNA3 OMOD (outputs flushed, IEEE clear) scales the fixed-up value
+// in every semantics: FP16_OVFL saturates the recovered overflow first, and the OMOD
+// overflow follows the guest rounding (W7900 captures). FP32/FP64 Compatibility still
+// reports INVALID.
 // Wave64 retains each format's operand layout, modifiers and exact exception
 // accumulation. FP16 supports four independent DPP rows.
 int rj_arith_v_div_fixup_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
