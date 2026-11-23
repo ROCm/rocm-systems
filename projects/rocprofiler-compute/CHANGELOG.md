@@ -11,7 +11,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Memory chart values in `--output-format db` and `csv` keep their full precision instead of whole numbers.
 
-* The Memory Chart compute unit box uses the names and units of the other panels, adds *AGPRs* where reported, and labels counts, for example `1.64e+04 instr`; only percentages have the Util, Hit and Stall colors and bars. *Wavefront Occupancy* now matches the System Speed of Light panel, so it is lower when CUs are idle.
+* Changed the Memory Chart compute unit box to match the other panels:
+  * Metric names such as *VGPRs*, *SGPRs* and *Wavefront Occupancy*, and *AGPRs* on GPUs that report them.
+  * *Wavefront Occupancy* matches the System Speed of Light panel, so it is lower when CUs are idle.
+  * Counts show their unit, for example `1.64e+04 instr`.
+  * Only percentages have the Util, Hit and Stall colors and bars.
 
 ### Removed
 
