@@ -319,10 +319,12 @@ impl HsaSession {
                 && pc_sampling_supported_by_query(device.gpu().and_then(|gpu| {
                     gpu.pc_sampling_configurations(PcSamplingConfigurationSet::Supported)
                 }));
+            let clock = Arc::new(crate::clock::GpuClock::new(device.clone()));
             pending.gpus.push(Gpu {
                 scratch: Arc::new(scratch_options.for_gpu(&info)),
                 global_cu_mask: None,
                 cp_caps: Arc::new(Mutex::new(None)),
+                clock,
                 endpoint,
                 xnack_enabled,
                 device,

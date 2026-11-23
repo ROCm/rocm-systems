@@ -1126,7 +1126,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
         if time.is_null() {
             return INVALID_ARGUMENT;
         }
-        let (device, _call, start, end) = {
+        let (clock, _call, start, end) = {
             let guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -1156,9 +1156,9 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
             let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (runtime.agents.gpus[index].device.clone(), token, start, end)
+            (runtime.agents.gpus[index].clock.clone(), token, start, end)
         };
-        let (start, end) = match crate::clock::translate_gpu_interval(&device, start, end) {
+        let (start, end) = match clock.interval(start, end) {
             Ok(interval) => interval,
             Err(status) => return status,
         };
@@ -1179,7 +1179,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
     time: *mut ProfilingTime,
 ) -> Status {
     boundary(|| {
-        let (profile, device) = {
+        let (profile, clock) = {
             let guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -1207,7 +1207,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
             let Some(profile) = runtime.signal_state.copy_profile(signal) else {
                 return ERROR;
             };
-            let device = match profile.clock {
+            let clock = match profile.clock {
                 AsyncCopyClock::System => None,
                 AsyncCopyClock::Gpu(index) => {
                     let Some(gpu) = runtime.agents.gpus.get(index) else {
@@ -1216,13 +1216,13 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
                     let Some(token) = runtime.control.inflight.enter() else {
                         return OUT_OF_RESOURCES;
                     };
-                    Some((gpu.device.clone(), token))
+                    Some((gpu.clock.clone(), token))
                 }
             };
-            (profile, device)
+            (profile, clock)
         };
-        let (start, end) = if let Some((device, _call)) = device {
-            match crate::clock::translate_gpu_interval(&device, profile.start, profile.end) {
+        let (start, end) = if let Some((clock, _call)) = clock {
+            match clock.interval(profile.start, profile.end) {
                 Ok(interval) => interval,
                 Err(status) => return status,
             }
