@@ -161,6 +161,27 @@ TEST(ConSanImageFacts, OwnsDistinctSelectedManifestsAndNativeDisposition) {
             selected_manifest(decoded.value(), 2112)->entry.original_kernarg_bytes);
 }
 
+TEST(ConSanImageFacts, NativeOwnershipRoundTripsAcrossAnotherEntry) {
+  ImageFacts image = example_image();
+  const ImageEntryFacts &selected = image.entries[1];
+  ASSERT_EQ(selected.disposition, EntryDisposition::Selected);
+  ASSERT_EQ(selected.binding.original_entry_offset, 256u);
+  ASSERT_EQ(selected.binding.prepared_entry_offset, 256u);
+
+  ImageEntryFacts &native = image.entries.back();
+  native.binding.original_entry_offset = 128;
+  native.binding.prepared_entry_offset = 128;
+  native.native_code = {{.original_offset = 128, .prepared_offset = 128, .bytes = 16},
+                        {.original_offset = 384, .prepared_offset = 384, .bytes = 16}};
+
+  util::StringDiagnostic error;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image, error.emitter());
+  ASSERT_TRUE(encoded.succeeded()) << error.message();
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), error.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error.message();
+  EXPECT_EQ(decoded.value(), image);
+}
+
 TEST(ConSanImageFacts, SuccessfulValidationEmitsNoDiagnostic) {
   std::vector<std::string> messages;
   auto collect = [&messages](std::string_view message) { messages.emplace_back(message); };
