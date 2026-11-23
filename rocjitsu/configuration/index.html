@@ -2347,23 +2347,29 @@ threads are outside this execution budget.</p>
 </tr>
 <tr>
 <td style="text-align: right;">32</td>
-<td style="text-align: right;">8/17</td>
+<td style="text-align: right;">8/25</td>
 <td style="text-align: right;">8/25</td>
 <td style="text-align: right;">1/24</td>
 </tr>
 <tr>
-<td style="text-align: right;">40 and above</td>
-<td style="text-align: right;">8/17</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">8/25</td>
 <td style="text-align: right;">8/33</td>
+<td style="text-align: right;">1/24</td>
+</tr>
+<tr>
+<td style="text-align: right;">48 and above</td>
+<td style="text-align: right;">8/25</td>
+<td style="text-align: right;">8/41</td>
 <td style="text-align: right;">1/24</td>
 </tr>
 </tbody>
 </table>
-<p>The gfx950/gfx1250 tables also contain the <a href="../async-instructions/#thread-policy">async MMA triples</a>.
-gfx950 adds eight helpers at budget 32, selecting 8/17/8; gfx1250 adds eight
-at budget 48, selecting 8/33/8. Larger hosts retain those allocations.
-<code>async_helper_threads: 0</code> retains the synchronous choices above. Desktop and MI210 tables stop at 1/24/0;
-CDNA3 stops at 8/17/0.
+<p>At their highest budget, both single-GPU server presets use eight engines.
+gfx950 adds 24 shared CU dispatch workers at budget 32 and gfx1250 adds 40
+at budget 48. All matrix handlers execute on the issuing thread.
+See the <a href="../async-instructions/#thread-policy">async MMA thread policy</a>.
+Desktop and MI210 tables stop at 1/24/0. CDNA3 stops at 8/17/0.
 A budget of 12 selects the eight-thread row.</p>
 <p>Print allocations for any target without constructing a simulated GPU:</p>
 <div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--thread-budget-table
@@ -2459,15 +2465,14 @@ selects them by the agent's GPU target and GPU count. The hardware agent format 
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
 convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
-then leave selection to rocjitsu. B includes helper slots, which become dispatch
-workers in this opt-in path: derived gfx950 tables use a budget of 32 and
-gfx1250 uses 48, while desktop and CDNA3 tables use 24.
+then leave selection to rocjitsu. Derived gfx950 tables use up to 32 threads
+and gfx1250 uses 48, while desktop and CDNA3 tables use 24.
 Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 <code>num_threads: 0</code> retains it. Profile options may override <code>cpu_thread_budget</code>,
 <code>num_threads</code>, <code>cpu_dispatch_threads</code> and <code>async_helper_threads</code>. A supplied
-config file is used verbatim. Automatic helper selection (-1) preserves the
-multi-GPU H=0 default; a positive override can enable helpers.
+config file is used verbatim. The runtime preserves explicit helper requests for checkpoints and selects
+zero effective helpers while all matrix handlers run synchronously.
 Checkpoints retain the configured requests and tables, including custom tables,
 so restore re-evaluates that policy for the receiving process's affinity. They
 preserve the user's configuration, rather than an exact host allocation or a
