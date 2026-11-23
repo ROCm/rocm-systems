@@ -225,6 +225,9 @@ public:
   explicit ScalarMemPipeline(L1ScalarCache *l1)
       : MemoryPipeline(WaitCounterType::LGKMCNT), l1_(l1) {}
 
+  /// @brief Let admitted local scalar loads read host backing directly.
+  void set_direct_backing(bool enabled) { direct_backing_ = enabled; }
+
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion
@@ -233,6 +236,7 @@ protected:
 
 private:
   L1ScalarCache *l1_;
+  bool direct_backing_ = false;
 };
 
 /// @brief Global memory pipeline (V$ → L2 → HBM).
