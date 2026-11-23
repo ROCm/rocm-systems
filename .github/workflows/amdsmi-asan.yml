@@ -325,3 +325,10 @@ jobs:
           path: ${{ env.RESULTS_DIR }}
           if-no-files-found: warn
           retention-days: 7
+
+      # The container runs as root, so it leaves root-owned files in the
+      # workspace on the host. The runner user cannot delete them, and the next
+      # job's checkout fails with EACCES.
+      - name: Restore workspace ownership
+        if: always()
+        run: chown -R --reference="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE"
