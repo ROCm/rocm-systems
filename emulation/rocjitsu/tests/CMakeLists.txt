@@ -521,6 +521,7 @@ add_executable(
     cdna_integer_arith_test.cpp
     older_scalar_integer_test.cpp
     older_fp_class_compare_test.cpp
+    older_integer_compare_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
@@ -2150,6 +2151,19 @@ if(RJ_ASAN_SHARED_LIBRARY)
 elseif(RJ_TSAN_SHARED_LIBRARY)
     set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_TSAN_SHARED_LIBRARY}:")
 endif()
+
+add_library(topology_probe_preload SHARED topology_probe_preload_test.cpp)
+rj_configure_target(topology_probe_preload TEST)
+target_link_libraries(topology_probe_preload PRIVATE ${CMAKE_DL_LIBS})
+add_test(
+    NAME RocjitsuTopologyProbeCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
+        "RJ_TOPOLOGY_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:topology_probe_preload>"
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_topology_probe_cli.py -v
+)
 
 # ROCr retains process-global allocations after HIP and DBT guest processes
 # exit. DBT guests additionally need the ASan shadow gap unprotected so ROCr can

@@ -44,6 +44,7 @@ set(rj_arith_x86_64_v3_sources
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v3.cpp
@@ -133,6 +134,8 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact8_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v3.cpp
@@ -140,6 +143,8 @@ set(rj_arith_x86_64_v3_sources
 )
 
 set(rj_arith_x86_64_v4_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_mixed_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/smfmac_float_x86_64_v4.cpp
@@ -151,6 +156,7 @@ set(rj_arith_x86_64_v4_sources
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v4.cpp
@@ -232,16 +238,21 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/packed_permute_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/permlane_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact8_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v4.cpp
 )
 
 set(rj_arith_x86_64_v4_bf16_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v4_bf16.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_fp8_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4_bf16.cpp
 )
 
 set(rj_arith_avx512vnni_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_avx512vnni.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_avx512vnni.cpp
 )
 
@@ -269,3 +280,22 @@ endfunction()
 foreach(feature IN ITEMS X86_64_V3 X86_64_V4 X86_64_V4_BF16 AVX512VNNI)
     rj_arith_add_x86_64_backend(${feature})
 endforeach()
+
+# The sparse layouts revisit packed input words. Contiguous loads and shuffles avoid
+# the repeated gathers and scatters generated for these reductions on x86-64-v4.
+if(RJ_ARITH_COMPILER_X86_64_V4)
+    check_cxx_compiler_flag(
+        "-mno-gather -mno-scatter"
+        RJ_ARITH_COMPILER_NO_GATHER_SCATTER
+    )
+    if(RJ_ARITH_COMPILER_NO_GATHER_SCATTER)
+        set_property(
+            SOURCE
+                mfma/x86_64/smfmac_float_x86_64_v4.cpp
+                mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
+                wmma/x86_64/swmmac_gfx1250_float_x86_64_v4.cpp
+            APPEND
+            PROPERTY COMPILE_OPTIONS "-mno-gather" "-mno-scatter"
+        )
+    endif()
+endif()

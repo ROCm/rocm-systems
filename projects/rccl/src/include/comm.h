@@ -305,7 +305,7 @@ struct ncclTaskColl {
   int nvlsCTAs;
   int cgaClusterSize;
   // Resolved algorithm selection, captured at append time for the same reason.
-  uint64_t algMask;    // set bit == algorithm allowed by the filter; 0 == automatic (no filter)
+  rcclTuningMask algMask; // Set bit == algorithm allowed by the filter; empty == automatic (no filter)
   int forceAlgSelection; // 1 (default) == error on unsatisfiable selection; 0 == fall back to automatic
   int CTAPolicy;  // resolved effective CTAPolicy for this task
   // Per-call profiler annotation (0 == untagged), resolved at task-append time and
