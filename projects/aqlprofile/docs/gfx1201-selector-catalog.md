@@ -18,6 +18,14 @@ prove that the generic enumeration is wrong for every IP version.
 - The companion Compute counter-definition document describes the additional
   experimental selectors and their remaining public IP/RDL reference gaps.
 
+## Names absent from the generic catalog
+
+The gfx1201 catalog also declares GL1C_GL2_REQ_READ_64B, GL2C_EA_RDREQ,
+GL2C_EA_RDREQ_256B, GL2C_EA_WRREQ and GL2C_EA_WRREQ_STALL.
+The four GL2C IDs are present in the pinned historical SDK contract.
+GL1C_GL2_REQ_READ_64B uses the additional experimental Compute contract and
+retains its public IP/RDL reference gap. The MC_WRREQ_STALL compatibility
+spelling and EA_WRREQ_STALL both select 122 in that gfx1201 contract.
 
 ## IP/RDL review scope
 
