@@ -1313,7 +1313,7 @@ write_interceptor(Queue*                                queue,
         }
     }};
 
-    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
+    using packet_writer_fn_t = std::function<void(packet_vector_t&&)>;
 
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, &deferred_completions](
                                     const rocprofiler_packet* _packets,
