@@ -133,7 +133,7 @@ jobs:
       GCC_COMPILER_VERSION: 11
 
     steps:
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & ROCDecode & ROCJPEG
+    - name: Clone rocm-systems
       uses: actions/checkout@v6
       with:
         submodules: false

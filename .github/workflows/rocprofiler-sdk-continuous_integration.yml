@@ -155,7 +155,7 @@ jobs:
           git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
           echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder & ROCDecode & ROCJPEG
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
           submodules: false
@@ -381,7 +381,7 @@ jobs:
           git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
           echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
           submodules: false
@@ -573,7 +573,7 @@ jobs:
         git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
         echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+    - name: Clone rocm-systems
       uses: actions/checkout@v6
       with:
         submodules: false

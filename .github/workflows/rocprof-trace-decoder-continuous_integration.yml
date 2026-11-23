@@ -170,7 +170,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
           submodules: false
