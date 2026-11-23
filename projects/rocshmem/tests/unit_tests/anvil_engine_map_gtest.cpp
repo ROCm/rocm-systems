@@ -69,8 +69,6 @@ TEST(AnvilEngineMap, PreferredMaskSelectsAnEvenEngine) {
   EXPECT_EQ(preferredUsableEngine(0), -1);
 }
 
-// Remote-peer queues go on the usable (even) engine carrying the fewest queues,
-// which keeps a pod's extra queues inside each engine's KFD queue limit.
 TEST(AnvilEngineMap, LeastLoadedPicksTheEvenEngineWithFewestQueues) {
   EXPECT_EQ(leastLoadedUsableEngine({3, 0, 1, 0, 2, 0, 1, 0}), 2);
   EXPECT_EQ(leastLoadedUsableEngine({4, 0, 4, 0, 4, 0, 0, 0}), 6);
@@ -85,9 +83,36 @@ TEST(AnvilEngineMap, LeastLoadedWithUnknownEngineCountUsesEngineZero) {
   EXPECT_EQ(leastLoadedUsableEngine({}), 0);
 }
 
-// Local-peer queues: MI450 reports every engine as preferred (mask 0xfff), so taking the lowest
-// preferred engine put every local queue of a 4P16G pod rank on engine 0 and exhausted its KFD
-// queues. The least loaded preferred engine spreads them.
+// Same choice as leastLoadedPreferredEngine over every even engine, including the unknown-load
+// fallback. A later edit that reintroduces a second loop has to keep these equal.
+TEST(AnvilEngineMap, LeastLoadedUsableMatchesEveryEvenEngine) {
+  const std::vector<std::vector<uint32_t>> loads = {
+      {},
+      {3, 0, 1, 0, 2, 0, 1, 0},
+      {4, 0, 4, 0, 4, 0, 0, 0},
+      {2, 0, 2, 0},
+      {1, 0, 0, 0, 0},
+  };
+  for (const auto& load : loads) {
+    EXPECT_EQ(leastLoadedUsableEngine(load), leastLoadedPreferredEngine(0x55555555u, load));
+  }
+}
+
+// Counting each choice before the next spreads a full mask across even engines.
+TEST(AnvilEngineMap, SuccessiveChannelsSpreadAcrossThePreferredMask) {
+  std::vector<uint32_t> load(12, 0);
+  std::vector<int> chosen;
+  for (int c = 0; c < 6; ++c) {
+    const int engine = leastLoadedPreferredEngine(0xfff, load);
+    chosen.push_back(engine);
+    ASSERT_GE(engine, 0);
+    ASSERT_LT(static_cast<size_t>(engine), load.size());
+    load[static_cast<size_t>(engine)] += 1;
+  }
+  EXPECT_EQ(chosen, (std::vector<int>{0, 2, 4, 6, 8, 10}));
+}
+
+// A mask that names every engine spreads by load instead of pinning engine 0.
 TEST(AnvilEngineMap, PreferredMaskWithLoadSelectsTheLeastLoadedEvenEngine) {
   EXPECT_EQ(leastLoadedPreferredEngine(0xfff, {2, 0, 2, 0, 1, 0, 2, 0, 2, 0, 2, 0}), 4);
   EXPECT_EQ(leastLoadedPreferredEngine(0xfff, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), 0);

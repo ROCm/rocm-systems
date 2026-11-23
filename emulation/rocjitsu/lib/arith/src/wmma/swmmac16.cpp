@@ -11,6 +11,7 @@
 #include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/flags.h"
 #include "wmma/sparse_layout.h"
+#include "wmma/swmmac_exact16.h"
 #include "wmma/swmmac_float_impl.h"
 
 #include <stdint.h>
@@ -48,6 +49,20 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
   // narrowing packed accumulators at each step. B negation follows compressed
   // pair position, irrespective of the selected dense element's parity.
   if (rocjitsu::arith::is_exact(flags)) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::swmmac_exact16_x86_64_v4<Bf16, WaveSize, Packed>(
+          mode, (flags & RJ_ARITH_FP16_OVFL) != 0, dest, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::swmmac_exact16_x86_64_v3<Bf16, WaveSize, Packed>(
+          mode, (flags & RJ_ARITH_FP16_OVFL) != 0, dest, a, b, index);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
     uint32_t result[Packed ? 4 : 8][32] = {};
     int key = rocjitsu::arith::SwmmacIndex<16, 32, WaveSize>::shift(mode);
     for (int row = 0; row < 16; ++row) {
@@ -96,22 +111,22 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
     }
     return RJ_ARITH_SUCCESS;
   }
-  // Decode once for loose scalar/SIMD accumulation; snapshot tied D as C.
-  rocjitsu::arith::SwmmacFloatInputs input;
-  rocjitsu::arith::swmmac16_prepare<Bf16, WaveSize, Packed>(input, mode, dest, a, b, index);
   bool saturate = (flags & RJ_ARITH_FP16_OVFL) != 0;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::swmmac_float_x86_64_v4<Bf16, Packed>(mode, dest, input, saturate);
+    rocjitsu::arith::swmmac16_x86_64_v4<Bf16, WaveSize, Packed>(mode, dest, a, b, index, saturate);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::swmmac_float_x86_64_v3<Bf16, Packed>(mode, dest, input, saturate);
+    rocjitsu::arith::swmmac16_x86_64_v3<Bf16, WaveSize, Packed>(mode, dest, a, b, index, saturate);
     return RJ_ARITH_SUCCESS;
   }
 #endif
+  // Decode once for loose scalar/SIMD accumulation; snapshot tied D as C.
+  rocjitsu::arith::SwmmacFloatInputs input;
+  rocjitsu::arith::swmmac16_prepare<Bf16, WaveSize, Packed>(input, mode, dest, a, b, index);
   if constexpr (Packed) {
     for (int row = 0; row < 16; ++row) {
       for (int col = 0; col < 16; ++col) {

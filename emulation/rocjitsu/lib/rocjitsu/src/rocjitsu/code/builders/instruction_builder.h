@@ -5,7 +5,7 @@
 /// @brief Arch-parameterized encoders for the AMDGPU scalar instructions the DBT
 ///        and DBI patchers emit.
 ///
-/// @details These helpers turn a target ISA (rj_code_arch_t) plus operands into
+/// @details These helpers turn a target ISA (rocjitsu::IsaFamily) plus operands into
 /// the raw instruction word(s) that code patching splices into a kernel. The scope
 /// is the scalar (SOP*) instruction families used by the trampoline envelope and
 /// inline patches, plus the scalar-operand and inline-constant codes they
@@ -19,7 +19,7 @@
 ///
 /// The encoding format of a family is stable across generations, but the opcodes
 /// are not. For example, s_branch is opcode 2 on GFX9 (CDNA1-4) and 32 on GFX12
-/// (RDNA4). Every build_* therefore takes rj_code_arch_t. The scalar builders
+/// (RDNA4). Every build_* therefore takes rocjitsu::IsaFamily. The scalar builders
 /// and operand lookups
 /// return failure for an unsupported architecture or an unrepresentable field;
 /// an optional diagnostic emitter receives the reason. Scalar-operand codes
@@ -34,6 +34,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -121,31 +122,31 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
+build_sopp_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t simm16,
                     const util::DiagnosticEmitter *error = nullptr) {
   if (op > 0x7Fu)
     return error != nullptr ? error->emit() << "SOPP encoding field out of range"
                             : util::Result::failure();
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_sopp(op, {.simm16 = simm16})[0];
   default:
     return error != nullptr ? error->emit() << "unsupported target architecture for SOPP encoding"
@@ -158,40 +159,40 @@ build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_sop1_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ssrc0,
+build_sop1_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16_t ssrc0,
                     const util::DiagnosticEmitter *error = nullptr) {
   if (op > 0xFFu || sdst > 0x7Fu || ssrc0 > 0xFFu)
     return error != nullptr ? error->emit() << "SOP1 encoding field out of range"
                             : util::Result::failure();
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
@@ -206,49 +207,49 @@ build_sop1_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ss
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_sop2_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1,
-                    const util::DiagnosticEmitter *error = nullptr) {
+build_sop2_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16_t ssrc0,
+                    uint16_t ssrc1, const util::DiagnosticEmitter *error = nullptr) {
   if (op > 0x5Fu || sdst > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
     return error != nullptr ? error->emit() << "SOP2 encoding field out of range"
                             : util::Result::failure();
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                     .ssrc1 = static_cast<uint8_t>(ssrc1),
                                     .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
@@ -272,40 +273,40 @@ build_sop2_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ss
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_sopc_encoding(rj_code_arch_t arch, uint16_t op, uint16_t ssrc0, uint16_t ssrc1,
+build_sopc_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t ssrc0, uint16_t ssrc1,
                     const util::DiagnosticEmitter *error = nullptr) {
   if (op > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
     return error != nullptr ? error->emit() << "SOPC encoding field out of range"
                             : util::Result::failure();
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
   default:
@@ -325,7 +326,7 @@ build_sopc_encoding(rj_code_arch_t arch, uint16_t op, uint16_t ssrc0, uint16_t s
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_sopk_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t simm16,
+build_sopk_encoding(rocjitsu::IsaFamily arch, uint16_t op, uint16_t sdst, uint16_t simm16,
                     const util::DiagnosticEmitter *error = nullptr) {
   if (op > 0x1Cu || sdst > 0x7Fu)
     return error != nullptr ? error->emit() << "SOPK encoding field out of range"
@@ -333,25 +334,25 @@ build_sopk_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t si
 #define ROCJITSU_BUILD_SOPK(isa)                                                                   \
   return isa::build_sopk(op, {.simm16 = simm16, .sdst = static_cast<uint8_t>(sdst)})[0]
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     ROCJITSU_BUILD_SOPK(cdna1);
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     ROCJITSU_BUILD_SOPK(cdna2);
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     ROCJITSU_BUILD_SOPK(cdna3);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     ROCJITSU_BUILD_SOPK(cdna4);
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     ROCJITSU_BUILD_SOPK(rdna1);
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     ROCJITSU_BUILD_SOPK(rdna2);
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     ROCJITSU_BUILD_SOPK(rdna3);
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     ROCJITSU_BUILD_SOPK(rdna3_5);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     ROCJITSU_BUILD_SOPK(rdna4);
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     ROCJITSU_BUILD_SOPK(cdna5);
   default:
     return error != nullptr
@@ -373,27 +374,27 @@ build_sopk_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t si
 /// that arch's generated OPR_SDST_M0 code so the value tracks the operand table.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint16_t>
-scalar_operand_m0(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+scalar_operand_m0(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::OPR_SDST_M0;
   default:
     return error != nullptr
@@ -410,27 +411,27 @@ scalar_operand_m0(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nu
 /// table rather than a hard-coded constant.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint16_t>
-scalar_operand_vcc_lo(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+scalar_operand_vcc_lo(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::OPR_SDST_VCC_LO;
   default:
     return error != nullptr
@@ -447,27 +448,27 @@ scalar_operand_vcc_lo(rj_code_arch_t arch, const util::DiagnosticEmitter *error 
 /// table rather than a hard-coded constant.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint16_t>
-scalar_operand_exec_lo(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+scalar_operand_exec_lo(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::OPR_SDST_EXEC_LO;
   default:
     return error != nullptr
@@ -484,27 +485,27 @@ scalar_operand_exec_lo(rj_code_arch_t arch, const util::DiagnosticEmitter *error
 /// generated code so the value tracks the operand table.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint16_t>
-scalar_inline_neg_one(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+scalar_inline_neg_one(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::OPR_SRC_NEG_INT_MIN;
   default:
     return error != nullptr
@@ -552,31 +553,31 @@ scalar_inline_neg_one(rj_code_arch_t arch, const util::DiagnosticEmitter *error 
 // exists on every generated target. Each helper still names the generated raw
 // opcode, so opcode renumbering is picked up by ISA regeneration.
 #define ROCJITSU_COMMON_OPCODE_CASES(opcode)                                                       \
-  case ROCJITSU_CODE_ARCH_CDNA1:                                                                   \
+  case rocjitsu::IsaFamily::Cdna1:                                                                 \
     return cdna1::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_CDNA2:                                                                   \
+  case rocjitsu::IsaFamily::Cdna2:                                                                 \
     return cdna2::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_CDNA3:                                                                   \
+  case rocjitsu::IsaFamily::Cdna3:                                                                 \
     return cdna3::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_CDNA4:                                                                   \
+  case rocjitsu::IsaFamily::Cdna4:                                                                 \
     return cdna4::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_RDNA1:                                                                   \
+  case rocjitsu::IsaFamily::Rdna1:                                                                 \
     return rdna1::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_RDNA2:                                                                   \
+  case rocjitsu::IsaFamily::Rdna2:                                                                 \
     return rdna2::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_RDNA3:                                                                   \
+  case rocjitsu::IsaFamily::Rdna3:                                                                 \
     return rdna3::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_RDNA3_5:                                                                 \
+  case rocjitsu::IsaFamily::Rdna3_5:                                                               \
     return rdna3_5::opcode;                                                                        \
-  case ROCJITSU_CODE_ARCH_RDNA4:                                                                   \
+  case rocjitsu::IsaFamily::Rdna4:                                                                 \
     return rdna4::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_CDNA5:                                                                   \
+  case rocjitsu::IsaFamily::Cdna5:                                                                 \
     return cdna5::opcode
 
 /// @brief Get the s_branch opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sopp_op_branch(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sopp_op_branch(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSBranchSopp);
   default:
@@ -589,7 +590,7 @@ sopp_op_branch(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullp
 /// @brief Get the s_endpgm opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sopp_op_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sopp_op_endpgm(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSEndpgmSopp);
   default:
@@ -602,7 +603,7 @@ sopp_op_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullp
 /// @brief Get the s_trap opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sopp_op_trap(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sopp_op_trap(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSTrapSopp);
   default:
@@ -615,7 +616,7 @@ sopp_op_trap(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr
 /// @brief Get the s_nop opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sopp_op_nop(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sopp_op_nop(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSNopSopp);
   default:
@@ -628,27 +629,27 @@ sopp_op_nop(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr)
 /// @brief Get the s_getpc_b64 SOP1 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop1_op_getpc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop1_op_getpc_b64(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::kSGetPcI64Sop1;
   default:
     return error != nullptr
@@ -660,27 +661,27 @@ sop1_op_getpc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nu
 /// @brief Get the s_setpc_b64 SOP1 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop1_op_setpc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop1_op_setpc_b64(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::kSSetPcI64Sop1;
   default:
     return error != nullptr
@@ -692,27 +693,27 @@ sop1_op_setpc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nu
 /// @brief Get the s_swappc_b64 SOP1 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop1_op_swappc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop1_op_swappc_b64(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::kSSwapPcI64Sop1;
   default:
     return error != nullptr
@@ -724,27 +725,27 @@ sop1_op_swappc_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = n
 /// @brief Get the s_call_b64 SOPK opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sopk_op_call_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sopk_op_call_b64(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::kSCallI64Sopk;
   default:
     return error != nullptr
@@ -756,7 +757,7 @@ sopk_op_call_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nul
 /// @brief Get the s_lshl_b32 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop2_op_lshl_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop2_op_lshl_b32(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSLshlB32Sop2);
   default:
@@ -769,7 +770,7 @@ sop2_op_lshl_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nul
 /// @brief Get the s_lshr_b32 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop2_op_lshr_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop2_op_lshr_b32(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSLshrB32Sop2);
   default:
@@ -780,15 +781,16 @@ sop2_op_lshr_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nul
 }
 
 /// @brief Get the s_delay_alu opcode for a target ISA.
-[[nodiscard]] inline constexpr util::FailureOr<uint32_t> sopp_op_delay_alu(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr util::FailureOr<uint32_t>
+sopp_op_delay_alu(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::kSDelayAluSopp;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::kSDelayAluSopp;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::kSDelayAluSopp;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::kSDelayAluSopp;
   default:
     return util::Result::failure();
@@ -798,7 +800,7 @@ sop2_op_lshr_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nul
 /// @brief Get the s_mov_b32 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop1_op_mov_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop1_op_mov_b32(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSMovB32Sop1);
   default:
@@ -811,7 +813,7 @@ sop1_op_mov_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = null
 /// @brief Get the s_mov_b64 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop1_op_mov_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop1_op_mov_b64(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSMovB64Sop1);
   default:
@@ -824,7 +826,7 @@ sop1_op_mov_b64(rj_code_arch_t arch, const util::DiagnosticEmitter *error = null
 /// @brief SOP2 opcode for s_cselect_b32 on @p arch.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sop2_op_cselect_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sop2_op_cselect_b32(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSCselectB32Sop2);
   default:
@@ -837,7 +839,7 @@ sop2_op_cselect_b32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = 
 /// @brief SOPC opcode for s_cmp_lg_u32 on @p arch.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
-sopc_op_cmp_lg_u32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+sopc_op_cmp_lg_u32(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
     ROCJITSU_COMMON_OPCODE_CASES(kSCmpLgU32Sopc);
   default:
@@ -856,7 +858,7 @@ sopc_op_cmp_lg_u32(rj_code_arch_t arch, const util::DiagnosticEmitter *error = n
 /// @returns The encoded word on success, or failure for an unsupported architecture.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_branch(int16_t offset_dwords, rj_code_arch_t arch,
+build_s_branch(int16_t offset_dwords, rocjitsu::IsaFamily arch,
                const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_branch(arch, error);
   if (op.failed())
@@ -869,7 +871,7 @@ build_s_branch(int16_t offset_dwords, rj_code_arch_t arch,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch,
+build_s_getpc_b64(uint16_t sdst, rocjitsu::IsaFamily arch,
                   const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_getpc_b64(arch, error);
   if (op.failed())
@@ -885,7 +887,7 @@ build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch,
+build_s_setpc_b64(uint16_t ssrc0, rocjitsu::IsaFamily arch,
                   const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_setpc_b64(arch, error);
   if (op.failed())
@@ -901,7 +903,7 @@ build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
+build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rocjitsu::IsaFamily arch,
                    const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_swappc_b64(arch, error);
   if (op.failed())
@@ -917,7 +919,7 @@ build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
+build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rocjitsu::IsaFamily arch,
                  const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopk_op_call_b64(arch, error);
   if (op.failed())
@@ -939,7 +941,7 @@ build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
 /// buffer is empty, or the delta is not representable by a signed 16-bit dword
 /// immediate.
 [[nodiscard]] bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
-                                             int64_t delta_bytes, rj_code_arch_t arch);
+                                             int64_t delta_bytes, rocjitsu::IsaFamily arch);
 
 /// @brief Append a canonical PC-relative target builder for a recovered branch.
 ///
@@ -956,7 +958,7 @@ build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
 ///        for it only when the window can hold it.
 /// @param error Optional borrowed diagnostic emitter, receiving at most one failure diagnostic.
 /// @returns True after appending the sequence, or false without changing @p words.
-[[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
+[[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rocjitsu::IsaFamily arch,
                                            uint16_t pc_sreg, int64_t delta,
                                            bool prefer_literal64 = false,
                                            const util::DiagnosticEmitter *error = nullptr);
@@ -968,7 +970,7 @@ build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
 /// @returns The encoded word on success, or failure for an unsupported architecture.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
+build_s_nop(uint16_t cycles = 0, rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4,
             const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_nop(arch, error);
   if (op.failed())
@@ -982,7 +984,7 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
 /// @returns The encoded word on success, or failure for an unsupported architecture.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+build_s_endpgm(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_endpgm(arch, error);
   if (op.failed())
     return util::Result::failure();
@@ -995,7 +997,7 @@ build_s_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullp
 /// @returns The encoded word on success, or failure for an unsupported architecture.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0,
+build_s_trap(rocjitsu::IsaFamily arch, uint16_t simm16 = 0,
              const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_trap(arch, error);
   if (op.failed())
@@ -1007,7 +1009,7 @@ build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0,
 /// @returns Failure when the target ISA has no s_delay_alu encoding.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 [[nodiscard]] inline constexpr util::FailureOr<uint32_t>
-build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
+build_s_delay_alu(uint16_t simm16, rocjitsu::IsaFamily arch,
                   const util::DiagnosticEmitter *error = nullptr) {
   const auto op = sopp_op_delay_alu(arch);
   if (op.failed()) {
@@ -1022,8 +1024,8 @@ build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
 ///
 /// @returns std::nullopt on an ISA that has no XCNT counter, where nothing can
 /// have required the drain in the first place.
-[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_xcnt(rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_xcnt(rocjitsu::IsaFamily arch) {
+  if (arch != rocjitsu::IsaFamily::Cdna5)
     return std::nullopt;
   return build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0).value();
 }
@@ -1033,7 +1035,7 @@ build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_mov_b32(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
+build_s_mov_b32(uint16_t sdst, uint16_t ssrc0, rocjitsu::IsaFamily arch,
                 const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_mov_b32(arch, error);
   if (op.failed())
@@ -1049,7 +1051,7 @@ build_s_mov_b32(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
+build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rocjitsu::IsaFamily arch,
                 const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop1_op_mov_b64(arch, error);
   if (op.failed())
@@ -1065,7 +1067,7 @@ build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch,
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                  const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop2_op_lshl_b32(arch, error);
   if (op.failed())
@@ -1081,7 +1083,7 @@ build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t a
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                  const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop2_op_lshr_b32(arch, error);
   if (op.failed())
@@ -1097,7 +1099,7 @@ build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t a
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                 const util::DiagnosticEmitter *error = nullptr) {
   constexpr uint16_t kSop2AddU32 = 0;
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, kSop2AddU32, sdst, ssrc0, ssrc1);
@@ -1111,7 +1113,7 @@ build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t ar
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                  const util::DiagnosticEmitter *error = nullptr) {
   constexpr uint16_t kSop2AddcU32 = 4;
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, kSop2AddcU32, sdst, ssrc0, ssrc1);
@@ -1125,7 +1127,7 @@ build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t a
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                     const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sop2_op_cselect_b32(arch, error);
   if (op.failed())
@@ -1141,7 +1143,7 @@ build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_
 /// an unrepresentable field.
 /// @param error Optional borrowed diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch,
+build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rocjitsu::IsaFamily arch,
                    const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopc_op_cmp_lg_u32(arch, error);
   if (op.failed())

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "race_test_instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <algorithm>
@@ -36,7 +37,7 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   int N = EventRegistry::kTrimAttemptInterval;
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
 
@@ -69,7 +70,7 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
   int N = EventRegistry::kTrimAttemptInterval;
   RaceDetector detector(/*nWaves=*/
                         2, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
+                        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
   const std::array obligations{rocjitsu::amdgpu::MemoryCounterObligation{
@@ -137,7 +138,7 @@ protected:
                         16,
                         Dim3d(0),
                         [this](RaceViolation v) { violations.push_back(v); },
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4),
                         1024};
   std::vector<RaceViolation> violations;
 };
@@ -151,7 +152,7 @@ TEST(EventRegistry, CompletedLdsHistoryKeepsItsProducerWhileWaitedLoadsAreTrimme
                           16,
                           Dim3d(0),
                           [&](RaceViolation v) { violations.push_back(v); },
-                          counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA2),
+                          counterCapacitiesForArch(rocjitsu::IsaFamily::Rdna2),
                           1024};
     auto &reader = detector.getWaveRaceState(0);
     if (direct_read)
@@ -245,7 +246,7 @@ std::unique_ptr<RaceDetector> makeDetector(int nWaves, std::vector<RaceViolation
   return std::make_unique<RaceDetector>(
       nWaves, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0),
       [&violations](RaceViolation v) { violations.push_back(v); },
-      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+      counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
 }
 
 /// An async store reading one tile: an LDS read on ASYNCcnt.

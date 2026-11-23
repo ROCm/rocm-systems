@@ -29,6 +29,7 @@
 #include "race_test_builder.h"
 #include "race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include <array>
@@ -80,7 +81,7 @@ TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
        MemoryOrderClass::TENSOR},
   };
   RaceDetector detector(
-      1, 8, 8, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+      1, 8, 8, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4),
       /*ldsSizeBytes=*/1024);
   for (const TestCase &test : cases) {
     SCOPED_TRACE(static_cast<int>(test.type));
@@ -188,7 +189,7 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         1, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA4), /*ldsSizeBytes=*/64 * 1024);
+        counterCapacitiesForArch(rocjitsu::IsaFamily::Rdna4), /*ldsSizeBytes=*/64 * 1024);
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 32> addresses{64, 128, 256};
     for (uint32_t reg : {1u, 2u})
@@ -238,7 +239,7 @@ TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
   std::vector<RaceViolation> violations;
   RaceDetector detector(
       2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+      counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
   for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
     IntervalSet intervals;
     intervals.append(64, 68);
@@ -270,7 +271,7 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         1, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 4> addresses{0x80000040u, UINT32_MAX, 0x7ffffffeu, 64};
     const std::array<uint32_t, 4> second_addresses{0x80000080u, UINT32_MAX, 0x7fffffffu, 96};
@@ -314,7 +315,7 @@ TEST(RaceDetector, PositiveOutOfBoundsLdsKeepsDependencies) {
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), capacity);
+        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), capacity);
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 5> addresses{capacity - 4, capacity - 2, capacity, 0x100000,
                                             0x70000000};
@@ -348,7 +349,7 @@ TEST(RaceDetector, PositiveOutOfBoundsLdsKeepsDependencies) {
 TEST(RaceDetector, LdsVectorIntervalsRetainOnlyCompleteElementsAtBackingEnd) {
   constexpr uint32_t capacity = 64 * 1024;
   RaceDetector detector(
-      1, 8, 8, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
+      1, 8, 8, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5),
       capacity);
   auto &wave = detector.getWaveRaceState(0);
   const std::array<uint32_t, 3> addresses{capacity - 8, capacity - 2, capacity};
@@ -372,7 +373,7 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
     IntervalSet intervals;
     intervals.append(std::numeric_limits<int>::min() + 64, std::numeric_limits<int>::min() + 68);
     intervals.append(64, 68);
@@ -1198,7 +1199,7 @@ TEST(RaceDetector, OrderedCountExportSourceProtectsOverlappingBytesAndLanes) {
   std::vector<RaceViolation> reports;
   RaceDetector detector(
       1, 8, 8, Dim3d(0), [&](RaceViolation v) { reports.push_back(v); },
-      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA1), 64 * 1024);
+      counterCapacitiesForArch(rocjitsu::IsaFamily::Rdna1), 64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
   constexpr uint64_t lane5 = uint64_t{1} << 5;
   wave.registerEvent(testInstruction(0), MemoryEventType::GDS_ORDERED_COUNT_SOURCE, {1}, lane5,
@@ -1481,7 +1482,7 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         1, 4, 4, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
     auto &wave = detector.getWaveRaceState(0);
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, c.obligationClass}};
@@ -1506,7 +1507,7 @@ TEST(RaceDetector, TensorDma_WaitedTransfersWithoutRangesDoNotAccumulate) {
   std::vector<RaceViolation> violations;
   RaceDetector detector(
       1, 4, 4, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+      counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
   const std::array obligations{amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT,
                                                                MemoryOrderClass::TENSOR}};
@@ -2275,7 +2276,7 @@ TEST(RaceDetector, DualAddress_CrossWaveRace) {
                         2, /*vgprCount=*/4,
                         /*sgprCount=*/4, Dim3d(0),
                         [&](RaceViolation v) { violations.push_back(v); },
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &rs = detector.getWaveRaceState(0);
   std::vector<uint32_t> firstAddrs(64, 0);
@@ -2848,7 +2849,7 @@ TEST(RaceDetector, SplitBarrier_CapacityCompletionBeforeSignalIsReleased) {
   // default ldsWrite() counts on LGKMCNT. Which counter fills does not matter
   // here: the test is that a completion by backpressure is released like one
   // by an explicit wait.
-  constexpr int kLgkmcntCapacity = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4).lgkmcnt;
+  constexpr int kLgkmcntCapacity = counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4).lgkmcnt;
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, kWave32);
   const BarrierRoundId round = RaceTestBuilder::workgroupRound(0);
   // One more write than the counter holds: issuing the last one completes
@@ -3217,7 +3218,7 @@ TEST(RaceDetector, SplitBarrier_RejectsMoreWavesThanARoundCanTrack) {
   const auto make = [](int waves) {
     RaceDetector detector(
         waves, /*vgprCount=*/1, /*sgprCount=*/1, Dim3d(0), [](RaceViolation) {},
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
   };
   EXPECT_NO_THROW(make(RaceDetector::kMaxWaves));
   EXPECT_THROW(make(RaceDetector::kMaxWaves + 1), std::length_error);
