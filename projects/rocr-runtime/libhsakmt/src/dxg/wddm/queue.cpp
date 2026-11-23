@@ -279,15 +279,32 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
 }
 
 void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
-  // This timing system is used for sleeping this Thread
-  // when one packet is invalid for about 2 seconds.
+  // When the next slot is still INVALID, spin for it only for kSpinWindow after this thread last
+  // made progress (moved its own read position), then wait on thread_cond_. The slot is either
+  // the free slot after the packets the GPU is still running (wptr > rptr until they retire,
+  // which can take as long as the kernels do) or one a producer reserved but has not published
+  // yet. A host producer publishes the header before it rings the doorbell, and RingDoorbell()
+  // notifies thread_cond_, so the wait below wakes at once for it; only device enqueue relies on
+  // the poll interval. Spinning here for up to 2 s kept a core busy for as long as the GPU was
+  // (ROCm/librocdxg#86).
   std::chrono::steady_clock::time_point start_time, time;
-  // Set the polling timeout value for 2 seconds
-  const std::chrono::milliseconds kMaxElapsed(2000);
+#ifdef _WIN32
+  // ROCr on native Windows (thunk_loader_win.cpp) is deliberately left with the 2 s window:
+  // there wait_for() cannot sleep less than a timer tick (1 ms, up to ~16 ms at the default timer
+  // resolution), which device enqueue would pay while the GPU is busy. It yields while it spins
+  // past kYieldAfter, so other threads get the core.
+  constexpr std::chrono::microseconds kSpinWindow(2000000);
+  constexpr std::chrono::microseconds kYieldAfter(50);
+#else
+  constexpr std::chrono::microseconds kSpinWindow(50);
+#endif
   // Device enqueue bumps the write index from the GPU and rings a software doorbell that is a
   // plain memory write, so nothing notifies us; poll instead of waiting forever. Back off while
-  // nothing moves so an idle queue does not wake up thousands of times per second.
+  // nothing moves so an idle queue does not wake up thousands of times per second. While the
+  // GPU still has work (wptr > rptr) a running kernel may enqueue more, so keep the interval
+  // short then; the long interval is only for an idle queue.
   constexpr std::chrono::microseconds kPollMin(50);
+  constexpr std::chrono::microseconds kPollMaxBusy(200);
   constexpr std::chrono::microseconds kPollMax(2000);
   auto poll_interval = kPollMin;
   uint64_t current_position = queue->GetAqlWriteIndex();
@@ -312,7 +329,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     } else {
       if (current_position == queue->GetAqlWriteIndex()) {
         time = std::chrono::steady_clock::now();
-        if (time - start_time > kMaxElapsed) sleep = true;
+        if (time - start_time > kSpinWindow) sleep = true;
       } else {
         start_time = std::chrono::steady_clock::now();
         current_position = queue->GetAqlWriteIndex();
@@ -320,7 +337,12 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
       }
     }
 
-    if ((queue->GetRingWptr()->load() > queue->GetRingRptr()->load()) && !sleep) continue;
+    if ((queue->GetRingWptr()->load() > queue->GetRingRptr()->load()) && !sleep) {
+#ifdef _WIN32
+      if (queue->IsInvalidPacket() && (time - start_time > kYieldAfter)) std::this_thread::yield();
+#endif
+      continue;
+    }
 
     std::unique_lock<std::mutex> lock(queue->thread_cond_lock_);
     // CPU wait for valid packet
@@ -336,7 +358,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
         memcpy(last_wait_state, state, sizeof(state));
         poll_interval = kPollMin;
       } else {
-        poll_interval = std::min(poll_interval * 2, kPollMax);
+        poll_interval = std::min(poll_interval * 2, state[0] > state[1] ? kPollMaxBusy : kPollMax);
       }
       // Submission still wakes us through notify_one; only thread_stop_ can be delayed by up
       // to one interval, which the destructor absorbs.
