@@ -1,0 +1,109 @@
+# ---------------------------------------------------------------------------
+# AMD-SMI Rust and Go bindings CI.
+#
+# Builds libamd_smi, then the Rust crate (library, examples, tests) and the Go
+# package against it. Neither needs a GPU to compile, and the Rust tests stub
+# the library calls, so this runs on a GitHub-hosted runner, which ships
+# stable Rust.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI Bindings
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
+      - '.github/workflows/amdsmi-bindings.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
+      - '.github/workflows/amdsmi-bindings.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Group by PR number so a new push supersedes the previous run. Pushes to
+  # develop fall back to the commit sha, which is unique, so post-merge runs
+  # never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  BUILD_DIR: /tmp/amdsmi-build
+  INSTALL_DIR: /tmp/amdsmi-install
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Rust and Go bindings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            projects/amdsmi
+            shared/cuid
+            shared/sha256
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config \
+            libdrm-dev libnl-3-dev libnl-genl-3-dev libmnl-dev
+          cargo --version
+
+      - name: Install Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: projects/amdsmi/go.mod
+          # No go.sum, so there is nothing to cache.
+          cache: false
+
+      # BUILD_RUST_EXAMPLES puts the crate and its examples in the default
+      # target, so this also covers the CMake integration that ships.
+      - name: Build amd-smi and the Rust crate
+        run: |
+          set -euo pipefail
+          cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+            -DBUILD_CLI=OFF \
+            -DBUILD_RUST_WRAPPER=ON \
+            -DBUILD_RUST_EXAMPLES=ON
+          cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+          cmake --install "$BUILD_DIR"
+
+      # Doc examples that touch a GPU are no_run, so they are only compiled.
+      - name: Test the Rust crate
+        working-directory: projects/amdsmi/rust-interface
+        run: |
+          set -euo pipefail
+          export AMDSMI_LIB_DIR="$BUILD_DIR/src"
+          export LD_LIBRARY_PATH="$AMDSMI_LIB_DIR"
+          cargo test --release --target-dir "$BUILD_DIR/rust-interface/target"
+
+      # goamdsmi.go hardcodes /opt/rocm; the CGO_* flags add the install tree.
+      - name: Build the Go package
+        working-directory: projects/amdsmi
+        run: |
+          set -euo pipefail
+          export CGO_CFLAGS="-I$INSTALL_DIR/include"
+          export CGO_LDFLAGS="-L$INSTALL_DIR/lib"
+          go build .
+          go vet .

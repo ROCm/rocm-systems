@@ -6,7 +6,7 @@ description = "A rust binding for the AMD System Management Interface (AMD-SMI) 
 repository = "https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/rust-interface"
 readme = "README.md"
 keywords = ["amdsmi", "rust binding"]
-license = "Copyright (c) 2019-2024 Advanced Micro Devices, Inc"
+license = "MIT"
 
 [dependencies]
 libc = "0.2"
