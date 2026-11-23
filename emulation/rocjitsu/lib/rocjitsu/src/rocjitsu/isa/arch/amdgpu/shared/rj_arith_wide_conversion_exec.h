@@ -181,10 +181,10 @@ inline void execute_wide_scaled_widen(Wavefront &wave, Binary32Function wave32,
 // Narrow 32 elements into six registers. Interleaved FP32 RNE consumes A16/B16;
 // other gfx950 forms consume A16 or A32 and optionally a stochastic seed.
 // gfx950 scale-exponent255 lanes perform no data reads or destination writes.
-// FullScale selects gfx1250: eight or 16 elements, one to three outputs, full
-// FP32 division scales and no special-scale suppression.
-template <bool Ternary, bool FullScale = false, int OutputWords = FullScale ? 3 : 6,
-          typename Wave32, typename Wave64>
+// gfx1250 narrows eight or 16 elements into one to three registers and writes
+// every active lane.
+template <bool Ternary, bool Gfx1250 = false, int OutputWords = Gfx1250 ? 3 : 6, typename Wave32,
+          typename Wave64>
 void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                                 uint32_t destination, uint32_t source_a, uint32_t source_b,
                                 uint32_t input_words, bool interleaved, const Operand *seed_operand,
@@ -201,14 +201,14 @@ void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, u
   }
   VectorInput32 scale(registers, wave, scale_operand, exec_mask);
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-    if (!FullScale && ((scale.data[lane] >> 23) & 255) == 255) {
+    if (!Gfx1250 && ((scale.data[lane] >> 23) & 255) == 255) {
       exec_mask &= ~(1ULL << lane);
     }
   }
   if (wave.instruction_execution_failed()) {
     return;
   }
-  if constexpr (!FullScale) {
+  if constexpr (!Gfx1250) {
     if (!exec_mask) {
       // Validate even when every special-scale lane suppresses its result. The
       // zero EXEC API contract permits null data pointers and performs no reads.
@@ -254,7 +254,7 @@ void execute_wide_scaled_narrow(Wavefront &wave, Wave32 wave32, Wave64 wave64, u
     return;
   }
   auto invoke = [&](uint32_t *const *d) {
-    if constexpr (FullScale) {
+    if constexpr (Gfx1250) {
       if constexpr (Ternary) {
         return wave32(flags, uint32_t(exec_mask), 0, d, a.data(), b.data(), &scale.data);
       } else {

@@ -8,6 +8,7 @@
 #include "mfma/mixed_formats.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 #if defined(__AVX2__)
+#include "mfma/x86_64/mixed_decode.h"
 #include "mfma/x86_64/reduction.h"
 #endif
 
@@ -38,7 +39,13 @@ void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *co
                        const uint32_t *const *b, const uint32_t *const *c,
                        const uint32_t *scale_a = nullptr, const uint32_t *scale_b = nullptr,
                        bool clamp_overflow = false) {
-  alignas(64) float left[M][K], right_rows[M][K], right[K][M], result[M][M];
+  alignas(64) float result[M][M];
+#if defined(__AVX2__)
+  alignas(64) float left[K][M], right[K][M];
+  mixed_x86::decode<64 / M, M>(a, int(controls & 7), false, left);
+  mixed_x86::decode<64 / M, M>(b, int(controls >> 3 & 7), false, right);
+#else
+  alignas(64) float left[M][K], right_rows[M][K], right[K][M];
   mfma_decode_mixed<M, K>(a, int(controls & 7), left);
   mfma_decode_mixed<M, K>(b, int(controls >> 3 & 7), right_rows);
   for (int k = 0; k < K; ++k) {
@@ -46,6 +53,7 @@ void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *co
       right[k][col] = right_rows[col][k];
     }
   }
+#endif
   for (int row = 0; row < M; ++row) {
     bool clamp[M];
     for (int col = 0; col < M; ++col) {
@@ -70,7 +78,7 @@ void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *co
         for (int col = 0; col < M; col += kMfmaWidth) {
           auto sum = mfma_broadcast(0.0f);
           for (int k = 32 * block; k < 32 * (block + 1); ++k) {
-            sum = mfma_multiply_add(mfma_broadcast(left[row][k]), mfma_load(right[k] + col), sum);
+            sum = mfma_multiply_add(mfma_broadcast(left[k][row]), mfma_load(right[k] + col), sum);
           }
           mfma_store(sums + col, sum);
         }
@@ -103,7 +111,7 @@ void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *co
       for (int col = 0; col < M; col += kMfmaWidth) {
         auto acc = mfma_load(result[row] + col);
         for (int k = 0; k < K; ++k) {
-          acc = mfma_multiply_add(mfma_broadcast(left[row][k]), mfma_load(right[k] + col), acc);
+          acc = mfma_multiply_add(mfma_broadcast(left[k][row]), mfma_load(right[k] + col), acc);
         }
         mfma_store(result[row] + col, acc);
       }

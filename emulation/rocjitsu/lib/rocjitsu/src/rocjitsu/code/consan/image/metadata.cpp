@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/image/metadata.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/amdhsa_metadata.h"
@@ -58,7 +59,7 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel,
   const std::optional<uint32_t> alignment = entry.integer_field(".kernarg_segment_align");
   const std::optional<uint32_t> sgprs = entry.integer_field(".sgpr_count");
   const std::optional<uint32_t> vgprs = entry.integer_field(".vgpr_count");
-  if (target->arch == ROCJITSU_CODE_ARCH_CDNA3 || target->arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (target->arch == rocjitsu::IsaFamily::Cdna3 || target->arch == rocjitsu::IsaFamily::Cdna4) {
     const uint32_t accumulator_base =
         (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
                             rocjitsu::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +

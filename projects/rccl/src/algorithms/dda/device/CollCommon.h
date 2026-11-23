@@ -671,4 +671,15 @@ __device__ __forceinline__ void ddaGridCopy16B(const void* src, void* dst, size_
   for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
 }
 
+// Workgroup barrier for LDS only: on gfx1250 __syncthreads() would also wait for every remote store in flight.
+__device__ __forceinline__ void ddaLdsBarrier() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+  __builtin_amdgcn_s_barrier();
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+  __syncthreads();
+#endif
+}
+
 } // namespace dda::common

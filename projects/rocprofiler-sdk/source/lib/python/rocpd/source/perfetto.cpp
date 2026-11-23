@@ -879,6 +879,9 @@ write_perfetto(
                 auto agent_index = agent_data.at(current.agent_abs_index).second;
                 auto _name =
                     (ocfg.kernel_rename && !current.region.empty()) ? current.region : current.name;
+                auto _pipe_id = (current.pipe_id == ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE)
+                                    ? std::nullopt
+                                    : current.pipe_id;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
                                   perfetto_session.get_static_event_name(_name),
                                   *_track,
@@ -917,6 +920,8 @@ write_perfetto(
                                           ctx, "graph_exec_id", current.graph_exec_id);
                                       rocprofiler::sdk::add_perfetto_annotation(
                                           ctx, "graph_node_id", current.graph_node_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "pipe_id", _pipe_id);
 
                                       for(auto& [counter_id, counter_value] : counter_id_value)
                                       {

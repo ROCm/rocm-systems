@@ -1,0 +1,50 @@
+{
+    "reference": "workload",
+    "run": {
+        "clean": [
+            "/tmp/rocprofsys-bench-ai_hpc_cpu_sampling_perfetto"
+        ],
+        "mode": "medium",
+        "output": "../../results/ai_hpc_sampling_perfetto/ai_hpc_cpu_sampling_perfetto.json",
+        "runs": 150
+    },
+    "tools": [
+        {
+            "name": "sampling_perfetto",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_CONFIG_FILE",
+                    "value": "../../configs/sampling_perfetto.cfg"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_MPI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-ai_hpc_cpu_sampling_perfetto"
+                }
+            ]
+        }
+    ],
+    "workload": "../../../build/ai_hpc_cpu",
+    "workload_arguments": [
+        {
+            "arg_name": "--size",
+            "value": "256"
+        },
+        {
+            "arg_name": "--iters",
+            "value": "128"
+        },
+        {
+            "arg_name": "--depth",
+            "value": "128"
+        },
+        {
+            "arg_name": "--threads",
+            "value": "16"
+        }
+    ]
+}

@@ -594,6 +594,39 @@ public:
     });
   }
 
+  // Signal and wait fire for one wave at a time, as often as its barrier
+  // instructions execute, so like the per-instruction hooks they serialize
+  // only for plugins that require serial hot hooks. Unlike those hooks they
+  // are not filtered by a plugin's per-wave subscription.
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierSignaled(wf, round);
+    });
+  }
+
+  /// Report a completed round: onAmdgpuBarrierResolved() with every wave it
+  /// notified, then onAmdgpuBarrierRoundCompleted() with those waves and the
+  /// ones whose completion bit it set, under one acquisition of the callback
+  /// lock. The simulator reports every completion through this entry.
+  void onAmdgpuBarrierRoundResolved(std::span<amdgpu::Wavefront *> notified,
+                                    std::span<amdgpu::Wavefront *> armed,
+                                    const BarrierRound &round) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierResolved(notified, round.kind);
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierRoundCompleted(notified, armed, round);
+    });
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierWaitPassed(wf, round);
+    });
+  }
+
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
 #if defined(RJ_DISABLE_INTERPOSER)
     // Explicit hosts finish VM teardown before unloading the library.

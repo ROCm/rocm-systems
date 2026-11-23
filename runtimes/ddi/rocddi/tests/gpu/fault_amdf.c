@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
   memory_desc.access_count = 1;
   memory_desc.accesses = &access;
   amdf_memory_t *scratch = NULL;
-  CHECK(api->memory_create(scope, &memory_desc, &scratch) == AMDF_STATUS_OK);
+  CHECK(api->memory_create(scope, &memory_desc, &scratch, NULL) == AMDF_STATUS_OK);
   amdf_gpu_user_queue_create_info_t queue_desc;
   INIT(queue_desc, AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO);
   queue_desc.queue_family_ordinal = family_ordinal;
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
   amdf_status_t status = gpu->user_queue_create(device, &queue_desc, &queue);
   struct fault_stats got;
   stats(&got);
-  amdf_status_t scratch_destroy = api->memory_destroy(scratch);
+  amdf_status_t scratch_destroy = api->memory_destroy(scratch, NULL);
   printf("AMDF %s status=0x%llx scratch_destroy=0x%llx creates=%u "
          "create_faults=%u destroy_faults=%u alloc=%u free=%u\n",
          argv[1], (unsigned long long)status,

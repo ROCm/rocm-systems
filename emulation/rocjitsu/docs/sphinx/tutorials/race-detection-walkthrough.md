@@ -1,23 +1,23 @@
 ---
 myst:
     html_meta:
-        "description": "Tutorial walking through race detection with rocJITsu: write a HIP kernel with a missing barrier, run it under the emulator, interpret the race report, and fix the bug."
-        "keywords": "rocJITsu, ROCm, race detection, LDS, data race, __syncthreads, barrier, GPU debugging, HIP"
+        "description": "Tutorial walking through race detection with rocjitsu: write a HIP kernel with a missing barrier, run it under the emulator, interpret the race report, and fix the bug."
+        "keywords": "rocjitsu, ROCm, race detection, LDS, data race, __syncthreads, barrier, GPU debugging, HIP"
 ---
 # Detect a missing barrier with the race detector
 
 When multiple waves in a workgroup access local data share (LDS) memory
 without proper synchronization, the values read are ambiguous. This
 tutorial walks you through writing a HIP kernel that has a missing
-`__syncthreads()` barrier, running it under the rocJITsu race detector,
+`__syncthreads()` barrier, running it under the rocjitsu race detector,
 interpreting the diagnostic output, and confirming the fix.
 
-You do not need a physical AMD GPU for this workflow. The rocJITsu
+You do not need a physical AMD GPU for this workflow. The rocjitsu
 emulator runs the kernel entirely on the CPU.
 
 ```{note}
 This tutorial uses the built-in race detector, an execution plugin that
-runs inside the rocJITsu emulator.
+runs inside the rocjitsu emulator.
 ```
 
 ## Write the kernel
@@ -90,7 +90,7 @@ errors and exits with a failure status, so a skipped detector cannot be
 mistaken for a successful race check.
 
 Launch the binary with that configuration, where `BUILD_DIR` is your
-rocJITsu build directory:
+rocjitsu build directory:
 
 ``` bash
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
