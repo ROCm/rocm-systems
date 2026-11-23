@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Memory chart values in `--output-format db` and `csv` keep their full precision instead of whole numbers.
+
 ### Removed
 
 ### Optimized
@@ -23,9 +25,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a), which was twice the real value.
 
-* Fixed the Memory Chart rounding values to whole numbers before showing them; for example, *L2 Hit* showed 34.0% for 33.6%.
-  * `--decimal` sets the decimals of the tables only.
-  * Memory chart values in `--output-format db` and `csv` keep their full precision.
+* Fixed Memory Chart values being rounded to whole numbers, for example *L2 Hit* showed 34.0% for 33.6%; `--decimal` now sets the decimals of tables only.
 
 ### Upcoming changes
 
