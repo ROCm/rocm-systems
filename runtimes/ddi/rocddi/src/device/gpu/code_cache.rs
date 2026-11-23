@@ -198,9 +198,22 @@ impl GpuDevice<'_> {
             }
             std::thread::sleep(Duration::from_micros(50));
         };
-        queue.inactivate().map_err(|error| CopyFailure {
-            error,
-            operands_may_be_live: true,
+        queue.inactivate().map_err(|mut error| {
+            if let Error::NativeOperation { operation, .. } = &mut error {
+                *operation = match (*operation, completed) {
+                    ("AMDKFD_IOC_UPDATE_QUEUE", true) => {
+                        "AMDKFD_IOC_UPDATE_QUEUE during code-cache queue inactivation (completion observed)"
+                    }
+                    ("AMDKFD_IOC_UPDATE_QUEUE", false) => {
+                        "AMDKFD_IOC_UPDATE_QUEUE during code-cache queue inactivation (wait ended without completion)"
+                    }
+                    (operation, _) => operation,
+                };
+            }
+            CopyFailure {
+                error,
+                operands_may_be_live: true,
+            }
         })?;
         // SAFETY: The sole producer has stopped and CP is inactivated. The
         // retained owner releases its IB and signal only on native success.
