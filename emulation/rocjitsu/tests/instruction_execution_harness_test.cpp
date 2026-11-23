@@ -10843,6 +10843,7 @@ TEST(HwregHelperTest, ReadsGprAllocFromWaveState) {
   enum class GprAllocLayout {
     Gfx9_10,
     Cdna3_4,
+    Gfx11_12,
   };
 
   struct GprAllocCase {
@@ -10858,6 +10859,9 @@ TEST(HwregHelperTest, ReadsGprAllocFromWaveState) {
       {rocjitsu::IsaFamily::Cdna4, "cdna4", GprAllocLayout::Cdna3_4},
       {rocjitsu::IsaFamily::Rdna1, "rdna1", GprAllocLayout::Gfx9_10},
       {rocjitsu::IsaFamily::Rdna2, "rdna2", GprAllocLayout::Gfx9_10},
+      {rocjitsu::IsaFamily::Rdna3, "rdna3", GprAllocLayout::Gfx11_12},
+      {rocjitsu::IsaFamily::Rdna3_5, "rdna3_5", GprAllocLayout::Gfx11_12},
+      {rocjitsu::IsaFamily::Rdna4, "rdna4", GprAllocLayout::Gfx11_12},
   };
 
   auto blocks_minus_one = [](uint32_t count, uint32_t block_size) {
@@ -10899,10 +10903,14 @@ TEST(HwregHelperTest, ReadsGprAllocFromWaveState) {
       expected = ((vgpr.base >> 2) & 0x3Fu) | ((blocks_minus_one(vgpr.count, 4) & 0x3Fu) << 6) |
                  (((sgpr.base >> 3) & 0x3Fu) << 18) | ((expected_sgpr_size & 0xFu) << 24);
       break;
+    case GprAllocLayout::Gfx11_12:
+      // VGPR_BASE[8:0] and VGPR_SIZE[19:12] only; SGPRs are not allocated per wave.
+      expected = ((vgpr.base >> 2) & 0x1FFu) | ((blocks_minus_one(vgpr.count, 4) & 0xFFu) << 12);
+      break;
     }
 
     uint32_t value = 0;
-    if (arch_case.layout == GprAllocLayout::Gfx9_10) {
+    if (arch_case.layout != GprAllocLayout::Cdna3_4) {
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(5), value),
                 amdgpu::HwregAccessResult::Success);
       EXPECT_EQ(value, expected);
@@ -10931,6 +10939,69 @@ TEST(HwregHelperTest, ReadsGprAllocFromWaveState) {
       first_wf->halt();
     if (!wf->is_halted())
       wf->halt();
+  }
+}
+
+TEST(HwregTest, RdnaHwId2ReportsOnlyItsBackedIdentityFields) {
+  struct HwId2Case {
+    rocjitsu::IsaFamily arch;
+    uint32_t getreg_op;
+  };
+  for (const auto &[arch, getreg_op] :
+       {HwId2Case{rocjitsu::IsaFamily::Rdna3, rdna3::kSGetregB32Sopk},
+        HwId2Case{rocjitsu::IsaFamily::Rdna3_5, rdna3_5::kSGetregB32Sopk},
+        HwId2Case{rocjitsu::IsaFamily::Rdna4, rdna4::kSGetregB32Sopk}}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory memory("rdna_hw_id2_mem");
+    amdgpu::L2Cache l2("rdna_hw_id2_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 2;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 64;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("rdna_hw_id2_cu", cfg, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    auto *wf = cu->dispatch_wf_at(1, 7, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(24)),
+                 arch == rocjitsu::IsaFamily::Rdna4 ? "WAVE_HW_ID2" : "HW_ID2");
+
+    using Result = amdgpu::HwregAccessResult;
+    // ME_ID[9:8] is 1 for a compute queue and STATE_ID[14:12] is zero; the
+    // reserved bits between and above them read zero.
+    for (const auto &[field, expected] :
+         std::array<std::pair<uint16_t, uint32_t>, 5>{{{encode_hwreg(24, 8, 2), 1},
+                                                       {encode_hwreg(24, 12, 3), 0},
+                                                       {encode_hwreg(24, 6, 10), 4},
+                                                       {encode_hwreg(24, 21, 3), 0},
+                                                       {encode_hwreg(24, 28, 4), 0}}}) {
+      SCOPED_TRACE(field);
+      uint32_t value = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value), Result::Success);
+      EXPECT_EQ(value, expected);
+      const auto words = encode_sopk(getreg_op, 4, field);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      cu->write_sgpr(wf->sgpr_alloc().base + 4, UINT32_MAX);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), expected);
+      EXPECT_EQ(amdgpu::write_hwreg_field(*wf, field, 0), Result::ReadOnly);
+    }
+    // QUEUE_ID, PIPE_ID, WG_ID and VM_ID have no backing, so any read that
+    // touches one of them, including the full register, is refused.
+    for (const uint16_t field :
+         {encode_hwreg(24), encode_hwreg(24, 0, 4), encode_hwreg(24, 4, 2), encode_hwreg(24, 3, 6),
+          encode_hwreg(24, 16, 5), encode_hwreg(24, 20, 1), encode_hwreg(24, 24, 4),
+          encode_hwreg(24, 27, 2)}) {
+      SCOPED_TRACE(field);
+      uint32_t value = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value), Result::Unsupported);
+      EXPECT_EQ(value, 0u);
+    }
+    wf->halt();
   }
 }
 

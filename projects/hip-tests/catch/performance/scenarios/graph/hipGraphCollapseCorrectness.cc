@@ -71,7 +71,7 @@ hipGraphNode_t AddKernel(hipGraph_t graph, std::vector<hipGraphNode_t> deps,
  * Correct result is out[i] == 5 for all i. Buffers are poisoned before each
  * launch, so any node running before its producer reads kPoison and fails.
  */
-TEST_CASE("Performance_Graph_CollapseCorrectness") {
+HIP_TEST_CASE(Performance_Graph_CollapseCorrectness) {
   const char* env = std::getenv("DEBUG_HIP_GRAPH_MIN_OVERLAP");
   INFO("DEBUG_HIP_GRAPH_MIN_OVERLAP=" << (env ? env : "(default)"));
 
@@ -137,7 +137,7 @@ TEST_CASE("Performance_Graph_CollapseCorrectness") {
   HIP_CHECK(hipFree(out));
 }
 
-TEST_CASE("Performance_Graph_DisabledBoundarySynchronization") {
+HIP_TEST_CASE(Performance_Graph_DisabledBoundarySynchronization) {
   const size_t bytes = static_cast<size_t>(kN) * sizeof(int);
   int *a = nullptr, *b = nullptr, *c = nullptr, *out = nullptr;
   HIP_CHECK(hipMalloc(&a, bytes));

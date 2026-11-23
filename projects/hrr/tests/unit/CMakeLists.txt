@@ -74,14 +74,15 @@ target_compile_definitions(hrr-unit-tests PRIVATE
 #     tree).
 if(TARGET hrr-playback)
   target_compile_definitions(hrr-unit-tests PRIVATE
-    HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>")
+    HRR_PLAYBACK_BIN="$<TARGET_FILE:hrr-playback>")
   add_dependencies(hrr-unit-tests hrr-playback)
 else()
   target_compile_definitions(hrr-unit-tests PRIVATE
-    HRR_PLAYBACK_EXE="hrr-playback")
+    HRR_PLAYBACK_BIN="hrr-playback")
 endif()
 
 add_test(NAME hrr-unit-tests COMMAND hrr-unit-tests)
+set_tests_properties(hrr-unit-tests PROPERTIES LABELS "cpu-only")
 
 # Handler-level tests: playback handlers and helpers in hip_playback.cpp (and
 # the generated handlers), linked in and called with crafted records or stand-ins
@@ -136,4 +137,5 @@ if(TARGET hrr-playback AND NOT WIN32)
     target_link_options(hrr-handler-tests PRIVATE -fsanitize=address)
   endif()
   add_test(NAME hrr-handler-tests COMMAND hrr-handler-tests)
+  set_tests_properties(hrr-handler-tests PROPERTIES LABELS "cpu-only")
 endif()

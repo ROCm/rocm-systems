@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 use amdsmi::{
-    AmdsmiClkInfoT, AmdsmiClkTypeT, AmdsmiEngineUsageT, AmdsmiErrorCountT, AmdsmiGpuBlockT,
-    AmdsmiPowerInfoT, AmdsmiProcessorHandle, AmdsmiStatusT,
+    AmdsmiClkInfoT, AmdsmiClkTypeT, AmdsmiDriverInfoV2T, AmdsmiDriverPackageT, AmdsmiEngineUsageT,
+    AmdsmiErrorCountT, AmdsmiGpuBlockT, AmdsmiPowerInfoT, AmdsmiProcessorHandle, AmdsmiStatusT,
 };
 use std::hint::black_box;
 use std::ptr::NonNull;
@@ -14,6 +14,9 @@ static TOTAL_ECC_COUNT_ZEROED: AtomicBool = AtomicBool::new(false);
 static ACTIVITY_ZEROED: AtomicBool = AtomicBool::new(false);
 static POWER_INFO_ZEROED: AtomicBool = AtomicBool::new(false);
 static CLOCK_INFO_ZEROED: AtomicBool = AtomicBool::new(false);
+static DRIVER_INFO_V2_ZEROED: AtomicBool = AtomicBool::new(false);
+
+const DRIVER_FULL_VERSION: &str = "6.19.14.31400000-2370381";
 
 unsafe fn is_zeroed<T>(out: *const T) -> bool {
     std::slice::from_raw_parts(out.cast::<u8>(), std::mem::size_of::<T>())
@@ -72,6 +75,24 @@ unsafe extern "C" fn amdsmi_get_clock_info(
     AmdsmiStatusT::AmdsmiStatusSuccess
 }
 
+// Like a library that fills only some fields: the rest must already be valid for Rust.
+#[no_mangle]
+unsafe extern "C" fn amdsmi_get_gpu_driver_info_v2(
+    _handle: AmdsmiProcessorHandle,
+    out: *mut AmdsmiDriverInfoV2T,
+) -> AmdsmiStatusT {
+    DRIVER_INFO_V2_ZEROED.store(is_zeroed(out), Ordering::SeqCst);
+    let info = &mut *out;
+    for (dst, src) in info
+        .driver_full_version
+        .iter_mut()
+        .zip(DRIVER_FULL_VERSION.bytes())
+    {
+        *dst = src as std::os::raw::c_char;
+    }
+    AmdsmiStatusT::AmdsmiStatusSuccess
+}
+
 #[inline(never)]
 fn dirty_stack() {
     let mut scratch = [0xA5u8; 16384];
@@ -118,4 +139,18 @@ fn clock_info_output_is_zeroed() {
     dirty_stack();
     amdsmi::amdsmi_get_clock_info(handle(), AmdsmiClkTypeT::AmdsmiClkTypeGfx).unwrap();
     assert!(CLOCK_INFO_ZEROED.load(Ordering::SeqCst));
+}
+
+// driver_package is a Rust enum, so stale stack bytes in it would be undefined behavior.
+#[test]
+fn driver_info_v2_output_is_zeroed() {
+    dirty_stack();
+    let info = amdsmi::amdsmi_get_gpu_driver_info_v2(handle()).unwrap();
+    assert!(DRIVER_INFO_V2_ZEROED.load(Ordering::SeqCst));
+    assert_eq!(info.driver_full_version(), DRIVER_FULL_VERSION);
+    assert_eq!(info.driver_build_version(), "");
+    assert_eq!(
+        info.driver_package,
+        AmdsmiDriverPackageT::AmdsmiDriverPackageNone
+    );
 }

@@ -862,6 +862,10 @@ public:
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
   uint64_t arithmetic_flags() const { return arithmetic_.flags(); }
+  bool force_scalar() const { return arithmetic_.force_scalar(); }
+
+  /// @brief Limit the host arithmetic backend on a quiescent CU before wave dispatch.
+  void limit_arithmetic_cpu_level(uint64_t max_level) { arithmetic_.limit_cpu_level(max_level); }
 
   /// @brief Lazily acquire and cache the VM helper pool.
   matrix_coexecution::SharedPool &async_pool();
@@ -2167,6 +2171,7 @@ inline rocjitsu::IsaFamily InstructionComputeUnitView::arch() const { return raw
 inline uint64_t InstructionComputeUnitView::arithmetic_flags() const {
   return raw_cu().arithmetic_flags();
 }
+inline bool InstructionComputeUnitView::force_scalar() const { return raw_cu().force_scalar(); }
 inline ImageAddressConfig InstructionComputeUnitView::image_address_config() const {
   return raw_cu().image_address_config();
 }
@@ -2240,6 +2245,13 @@ inline bool InstructionComputeUnitView::observes_tensor_dma_issue() const {
 inline void
 InstructionComputeUnitView::report_tensor_dma_issue(const TensorDmaIssueObservation &issue) {
   raw_cu().plugin_group().onAmdgpuTensorDmaIssued(issue, raw_wavefront());
+}
+inline bool InstructionComputeUnitView::observes_lds_barrier_arrival() const {
+  return raw_cu().plugin_group().observes_lds_barrier_arrival(raw_wavefront());
+}
+inline void InstructionComputeUnitView::report_lds_barrier_arrival(
+    const LdsBarrierArrivalObservation &arrival) {
+  raw_cu().plugin_group().onAmdgpuLdsBarrierArrived(arrival, raw_wavefront());
 }
 
 /// @brief Execution-mode-aware compute unit shell.
