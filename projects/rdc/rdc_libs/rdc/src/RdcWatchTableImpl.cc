@@ -1201,6 +1201,9 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
     if (!fite->second.is_watching || fite->second.last_update_time + track_freq > now) {
       continue;
     }
+    // Due again one interval from now, also when no module returns a value for it, as for a
+    // GPU that AMD SMI cannot identify: else it is asked for again on every update.
+    fite->second.last_update_time = now;
     fields.push_back({fite->first.first, fite->first.second});
   }
 

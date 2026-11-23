@@ -299,9 +299,8 @@ int main(int argc, char **argv) {
     return 2;
   }
   const auto *gpu_target =
-      rocjitsu::default_isa_target_registry().find_gpu_target_by_code_object_id(target);
-  const std::string_view decoder_target =
-      gpu_target == nullptr ? descriptor->id : gpu_target->code_object_id;
+      rocjitsu::default_isa_target_registry().find_target_by_code_object_id(target);
+  const std::string_view decoder_target = gpu_target == nullptr ? descriptor->id : gpu_target->id;
 
   const auto report_error = [](std::string_view message) {
     std::cerr << "rj_decode_fuzz: " << message << '\n';

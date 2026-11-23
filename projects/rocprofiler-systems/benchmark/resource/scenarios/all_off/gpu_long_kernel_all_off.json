@@ -1,0 +1,32 @@
+{
+    "reference": "workload",
+    "run": {
+        "clean": [
+            "/tmp/rocprofsys-bench-gpu_long_kernel_all_off"
+        ],
+        "mode": "medium",
+        "output": "../../results/all_off/gpu_long_kernel_all_off.json",
+        "runs": 150
+    },
+    "tools": [
+        {
+            "name": "all_off",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_CONFIG_FILE",
+                    "value": "../../configs/all_off.cfg"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_MPI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-gpu_long_kernel_all_off"
+                }
+            ]
+        }
+    ],
+    "workload": "../../../build/gpu_long_kernel"
+}

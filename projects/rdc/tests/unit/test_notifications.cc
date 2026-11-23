@@ -410,6 +410,41 @@ TEST_F(Notifications, AFailedStopLetsTheNextListenerEnableTheEventsAgain) {
   EXPECT_EQ(take(), (std::vector<std::string>{"init 0", "mask 0 0x1"}));
 }
 
+TEST_F(Notifications, AFailedStopIsTriedAgainByEveryCall) {
+  const std::vector<RdcFieldKey> vm = {{0, RDC_EVNT_NOTIF_VMFAULT}};
+  ASSERT_EQ(notifications_.add_event_listeners(vm), RDC_ST_OK);
+  g_smi.stop_status[0] = AMDSMI_STATUS_UNKNOWN_ERROR;
+  EXPECT_NE(notifications_.remove_event_listeners(vm), RDC_ST_OK);
+  take();
+  // GPU 0's events may still be open: a call for GPU 1 tries to stop them again, and does not
+  // log the failure as an error.
+  testing::internal::CaptureStdout();
+  const rdc_status_t status = notifications_.add_event_listeners({{1, RDC_EVNT_NOTIF_VMFAULT}});
+  const std::string out = testing::internal::GetCapturedStdout();
+  EXPECT_EQ(status, RDC_ST_OK);
+  EXPECT_FALSE(logged_error(out, "amdsmi_stop_gpu_event_notification() returned")) << out;
+  EXPECT_EQ(take(), (std::vector<std::string>{"mask 0 0x0", "stop 0", "init 1", "mask 1 0x1"}));
+  // Once a stop works, GPU 0 is left alone.
+  g_smi.stop_status[0] = AMDSMI_STATUS_SUCCESS;
+  EXPECT_EQ(notifications_.remove_event_listeners({{1, RDC_EVNT_NOTIF_VMFAULT}}), RDC_ST_OK);
+  EXPECT_EQ(take(), (std::vector<std::string>{"mask 0 0x0", "stop 0", "mask 1 0x0", "stop 1"}));
+  EXPECT_EQ(notifications_.add_event_listeners({{1, RDC_EVNT_NOTIF_VMFAULT}}), RDC_ST_OK);
+  EXPECT_EQ(take(), (std::vector<std::string>{"init 1", "mask 1 0x1"}));
+}
+
+TEST_F(Notifications, AFailedStopIsTriedAgainWhenRdcEnds) {
+  {
+    RdcNotificationImpl notifications;
+    const std::vector<RdcFieldKey> vm = {{0, RDC_EVNT_NOTIF_VMFAULT}};
+    ASSERT_EQ(notifications.add_event_listeners(vm), RDC_ST_OK);
+    g_smi.stop_status[0] = AMDSMI_STATUS_UNKNOWN_ERROR;
+    EXPECT_NE(notifications.remove_event_listeners(vm), RDC_ST_OK);
+    g_smi.stop_status[0] = AMDSMI_STATUS_SUCCESS;
+    take();
+  }
+  EXPECT_EQ(take(), (std::vector<std::string>{"mask 0 0x0", "stop 0"}));
+}
+
 TEST_F(Notifications, AFailedMaskWriteOfOneGpuStillSetsTheOthers) {
   g_smi.mask_status[0] = AMDSMI_STATUS_UNKNOWN_ERROR;
   EXPECT_NE(notifications_.add_event_listeners(

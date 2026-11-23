@@ -3,6 +3,7 @@
 
 #include "compute_unit_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
@@ -22,7 +23,7 @@ namespace {
 using namespace rocjitsu;
 
 struct PcFetchArchitecture {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   bool swap;
   const char *name;
 };
@@ -30,7 +31,7 @@ struct PcFetchArchitecture {
 class PcFetchTest : public ::testing::TestWithParam<PcFetchArchitecture> {
 protected:
   void SetUp() override {
-    const auto profile = GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
+    const auto profile = GetParam().arch == rocjitsu::IsaFamily::Rdna4
                              ? amdgpu::Gfx12VmConfig::gfx12_0()
                              : amdgpu::Gfx12VmConfig::gfx12_1();
     first_page_table_shift = 12 + 9 * (profile.page_table_levels() - 1);
@@ -144,16 +145,16 @@ protected:
 
 INSTANTIATE_TEST_SUITE_P(
     Gfx12Architectures, PcFetchTest,
-    ::testing::Values(PcFetchArchitecture{ROCJITSU_CODE_ARCH_RDNA4, false, "Gfx1201Setpc"},
-                      PcFetchArchitecture{ROCJITSU_CODE_ARCH_RDNA4, true, "Gfx1201Swappc"},
-                      PcFetchArchitecture{ROCJITSU_CODE_ARCH_CDNA5, false, "Gfx1250Setpc"},
-                      PcFetchArchitecture{ROCJITSU_CODE_ARCH_CDNA5, true, "Gfx1250Swappc"}),
+    ::testing::Values(PcFetchArchitecture{rocjitsu::IsaFamily::Rdna4, false, "Gfx1201Setpc"},
+                      PcFetchArchitecture{rocjitsu::IsaFamily::Rdna4, true, "Gfx1201Swappc"},
+                      PcFetchArchitecture{rocjitsu::IsaFamily::Cdna5, false, "Gfx1250Setpc"},
+                      PcFetchArchitecture{rocjitsu::IsaFamily::Cdna5, true, "Gfx1250Swappc"}),
     [](const ::testing::TestParamInfo<PcFetchArchitecture> &info) {
       return std::string(info.param.name);
     });
 
 TEST_P(PcFetchTest, FetchesMappedHighAddressAfterIndirectBranch) {
-  if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (GetParam().arch == rocjitsu::IsaFamily::Rdna4) {
     ASSERT_NO_FATAL_FAILURE(run_branch_and_fetch(0x0000800012345000ULL, 0x0000800012345000ULL));
     ASSERT_NO_FATAL_FAILURE(run_branch_and_fetch(0xFFFF800012345000ULL, 0x0000800012345000ULL));
     ASSERT_NO_FATAL_FAILURE(
