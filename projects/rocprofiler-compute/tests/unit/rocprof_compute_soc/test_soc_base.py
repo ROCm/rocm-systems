@@ -85,7 +85,10 @@ UNCACHED_READ_TRAFFIC_COUNTERS = [
     pytest.param(
         "gfx942",
         "TCC_EA0_RD_UNCACHED_32B_sum",
-        ("TCC_EA0_RDREQ_32B_sum + 2 * (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)"),
+        (
+            "TCC_EA0_RDREQ_32B_sum + 2 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - "
+            "TCC_EA0_RDREQ_32B_sum) + 4 * TCC_BUBBLE_sum"
+        ),
         id="gfx942",
     ),
     pytest.param(

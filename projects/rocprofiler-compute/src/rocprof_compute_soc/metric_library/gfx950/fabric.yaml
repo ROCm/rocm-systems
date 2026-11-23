@@ -142,6 +142,13 @@ fabric.remote_access_pressure_gmi:
   description: >-
     Combined GMI read and write credit stall percentage. High values indicate remote
     memory access bottleneck (multi-GPU or multi-socket).
+fabric.uncached_rd_traffic:
+  formula: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_32B_sum + 2 * TCC_EA0_RDREQ_64B_sum + 4 * TCC_EA0_RDREQ_128B_sum)
+  description: >-
+    The percent of L2-Fabric read traffic directed to an uncached memory allocation.
+    The denominator measures total read traffic in 32B units: a 32B read contributes
+    one unit, a 64B read contributes two units, and a 128B read contributes four units.
+    Uncached reads are also counted in 32B units.
 fabric.wr_hbm_stall:
   name: L2-Fabric Write Stall (HBM)
   formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
