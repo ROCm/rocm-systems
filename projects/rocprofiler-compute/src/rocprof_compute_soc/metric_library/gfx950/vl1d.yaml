@@ -61,10 +61,7 @@ vl1d.inflight_req:
   name: UTCL1 Inflight Requests
   formula: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    The sum of inflight client-to-UTCL1 translation requests per cycle, per normalization
-    unit. Measures the average number of translation requests actively being processed
-    by the UTCL1 at any given time.
+  description: The sum over cycles of inflight client-to-UTCL1 translation requests.
 vl1d.l2_rd_lat_norm:
   name: vL1D-L2 Read Latency Cycles
   formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
