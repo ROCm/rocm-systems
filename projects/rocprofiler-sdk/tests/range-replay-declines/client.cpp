@@ -163,13 +163,23 @@ tool_fini(void*)
             expect != nullptr ? expect : "<unset>",
             expect_dispatches != nullptr ? expect_dispatches : "<unset>");
 
-    auto ok = true;
-    if(expect == nullptr || std::string_view{status} != std::string_view{expect})
+    auto       ok          = true;
+    const auto expect_none = expect != nullptr && std::string_view{expect} == "NONE";
+    if(expect == nullptr || (!expect_none && std::string_view{status} != std::string_view{expect}))
     {
         fprintf(stderr, "[rr-decline] FAIL: CLOSE did not report the expected status\n");
         ok = false;
     }
-    if(g_configs.load() != 1 || g_closes.load() != 1)
+    if(expect_none)
+    {
+        if(g_configs.load() != 0 || g_closes.load() != 0 ||
+           g_status.load() != ROCPROFILER_RANGE_REPLAY_STATUS_LAST)
+        {
+            fprintf(stderr, "[rr-decline] FAIL: an invalid API call emitted range callbacks\n");
+            ok = false;
+        }
+    }
+    else if(g_configs.load() != 1 || g_closes.load() != 1)
     {
         fprintf(stderr, "[rr-decline] FAIL: expected exactly one CONFIG and one CLOSE\n");
         ok = false;
