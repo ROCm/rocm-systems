@@ -52,6 +52,11 @@ if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
+# Counts the process's KFD create-queue ioctls
+if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+  set(TEST_SRC ${TEST_SRC} hipInitQueues.cc)
+endif()
+
 add_executable(getDeviceCount EXCLUDE_FROM_ALL getDeviceCount_exe.cc)
 set_source_files_properties(getDeviceCount_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS getDeviceCount)
@@ -122,6 +127,19 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(DeviceTest hipDeviceSetGetScratchExe)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipDeviceSetGetScratchExe)
   set_source_files_properties(hipDeviceSetGetScratchExe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+endif()
+
+if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+  add_executable(hipInitQueues_Exe EXCLUDE_FROM_ALL hipInitQueues_Exe.cc)
+  set_source_files_properties(hipInitQueues_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipInitQueues_Exe ${GPGPU_LINKER_LIBRARIES} ${CMAKE_DL_LIBS})
+  # Exports its ioctl() so that it interposes the one ROCr calls
+  set_target_properties(hipInitQueues_Exe PROPERTIES ENABLE_EXPORTS ON)
+  add_dependencies(DeviceTest hipInitQueues_Exe)
+  if(TARGET hipInitQueues)  # STANDALONE_TESTS per-file target
+    add_dependencies(hipInitQueues hipInitQueues_Exe)
+  endif()
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipInitQueues_Exe)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS AND UNIX)

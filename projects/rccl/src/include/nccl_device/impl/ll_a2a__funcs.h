@@ -10,7 +10,9 @@
 #include "ll_a2a__types.h"
 #include "comm__types.h"
 #include "../utility.h"
+#ifdef __cplusplus
 #include "../rccl_ptr.h"
+#endif
 
 #if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void amdLLA2aStoreLine(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {

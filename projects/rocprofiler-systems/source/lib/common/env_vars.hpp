@@ -34,7 +34,6 @@ inline constexpr const char* PRINT_ENV          = "ROCPROFSYS_PRINT_ENV";
 
 // --- Tracing ---
 inline constexpr const char* TRACE         = "ROCPROFSYS_TRACE";
-inline constexpr const char* USE_TRACE     = "ROCPROFSYS_USE_TRACE";
 inline constexpr const char* PERFETTO_FILE = "ROCPROFSYS_PERFETTO_FILE";
 inline constexpr const char* PERFETTO_BUFFER_SIZE_KB =
     "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB";
@@ -201,8 +200,6 @@ inline constexpr const char* SAMPLING_PROCESS_DURATION =
 inline constexpr const char* USE_CAUSAL            = "ROCPROFSYS_USE_CAUSAL";
 inline constexpr const char* CAUSAL_MODE           = "ROCPROFSYS_CAUSAL_MODE";
 inline constexpr const char* CAUSAL_BACKEND        = "ROCPROFSYS_CAUSAL_BACKEND";
-inline constexpr const char* CAUSAL_VERBOSE        = "ROCPROFSYS_CAUSAL_VERBOSE";
-inline constexpr const char* CAUSAL_DEBUG          = "ROCPROFSYS_CAUSAL_DEBUG";
 inline constexpr const char* CAUSAL_BINARY_SCOPE   = "ROCPROFSYS_CAUSAL_BINARY_SCOPE";
 inline constexpr const char* CAUSAL_BINARY_EXCLUDE = "ROCPROFSYS_CAUSAL_BINARY_EXCLUDE";
 inline constexpr const char* CAUSAL_FUNCTION_SCOPE = "ROCPROFSYS_CAUSAL_FUNCTION_SCOPE";
@@ -335,8 +332,6 @@ inline constexpr const char* DEBUG_INIT            = "ROCPROFSYS_DEBUG_INIT";
 inline constexpr const char* DEBUG_FINALIZE        = "ROCPROFSYS_DEBUG_FINALIZE";
 inline constexpr const char* DEBUG_AVAIL           = "ROCPROFSYS_DEBUG_AVAIL";
 inline constexpr const char* DEBUG_MARK            = "ROCPROFSYS_DEBUG_MARK";
-inline constexpr const char* DEBUG_PIDS            = "ROCPROFSYS_DEBUG_PIDS";
-inline constexpr const char* DEBUG_TIDS            = "ROCPROFSYS_DEBUG_TIDS";
 inline constexpr const char* DEBUG_PUSH            = "ROCPROFSYS_DEBUG_PUSH";
 inline constexpr const char* DEBUG_POP             = "ROCPROFSYS_DEBUG_POP";
 inline constexpr const char* DEBUG_SAMPLING        = "ROCPROFSYS_DEBUG_SAMPLING";

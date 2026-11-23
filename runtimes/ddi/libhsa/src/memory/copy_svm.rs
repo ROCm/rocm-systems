@@ -664,7 +664,7 @@ pub(crate) fn copy_pointer_description(
     if pointer.checked_add(size).is_none() {
         return Err(INVALID_ARGUMENT);
     }
-    let description = pointer_description(runtime, pointer);
+    let description = pointer_description_for_range(runtime, pointer, size);
     if let Some(description) = &description {
         if description.pointer_type == POINTER_TYPE_RESERVED_ADDR {
             return Err(INVALID_ALLOCATION);
@@ -685,6 +685,16 @@ pub(crate) fn gpu_copy_address(
     gpu: HsaAgent,
     required_access: u32,
 ) -> Result<(u64, usize), Status> {
+    // Repeated locks can share a numeric alias but carry different GPU grants.
+    // Select one registration that covers this operation; never merge metadata.
+    let locked_description = description
+        .filter(|description| description.pointer_type == POINTER_TYPE_LOCKED)
+        .and_then(|_| {
+            runtime
+                .memory_state
+                .locked_gpu_description(pointer, size, gpu)
+        });
+    let description = locked_description.as_ref().or(description);
     let description = description.ok_or(INVALID_ALLOCATION)?;
     if !description.accessible.contains(&gpu) {
         return Err(INVALID_AGENT);
@@ -715,6 +725,27 @@ pub(crate) fn image_device_address(
     image_copy_borrow(runtime, pointer, size, agent, permission).map(|(address, _)| address)
 }
 
+/// Describes the usable pool block without changing public requested-size metadata.
+fn image_pool_description(
+    description: &PointerDescription,
+    allocation: rocddi::memory::device::AllocationInfo,
+    pointer: usize,
+) -> Option<PointerDescription> {
+    // HSA rounds pool requests before allocating through rocddi. `size` is
+    // that usable extent; `native_size` may also include provider padding.
+    let size = usize::try_from(allocation.size).ok()?;
+    if !contains(description.agent_base, size, pointer)
+        && !description
+            .host_base
+            .is_some_and(|host| contains(host, size, pointer))
+    {
+        return None;
+    }
+    let mut native = description.clone();
+    native.size = size;
+    Some(native)
+}
+
 /// Resolves image backing and the owner to retain through native retirement.
 pub(crate) fn image_copy_borrow(
     runtime: &HsaSession,
@@ -723,7 +754,20 @@ pub(crate) fn image_copy_borrow(
     agent: HsaAgent,
     permission: u32,
 ) -> Result<(u64, usize), Status> {
-    let description = copy_pointer_description(runtime, pointer, size)?;
+    pointer.checked_add(size).ok_or(INVALID_ARGUMENT)?;
+    // Image storage includes native row/slice padding. Direct pool allocations
+    // guarantee their rounded usable extent even though pointer-info reports
+    // the original request. Other allocation kinds retain their exact bounds.
+    let description = match runtime
+        .memory_state
+        .allocations
+        .values()
+        .find_map(|memory| {
+            image_pool_description(&memory.description, memory.allocation.info(), pointer)
+        }) {
+        Some(description) => Some(description),
+        None => copy_pointer_description(runtime, pointer, size)?,
+    };
     gpu_copy_address(
         runtime,
         description.as_ref(),
@@ -1781,6 +1825,61 @@ pub(crate) mod async_copy;
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_pool_backing_uses_rounded_extent_without_exposing_provider_padding() {
+        let gpu = HsaAgent {
+            handle: GPU_AGENT_BASE,
+        };
+        let description = PointerDescription {
+            pointer_type: POINTER_TYPE_HSA,
+            agent_base: 0x20_000,
+            host_base: Some(0x10_000),
+            size: 384,
+            owner: gpu,
+            global_flags: POOL_FLAG_COARSE,
+            registered: true,
+            alloc_flags: POINTER_ALLOC_NONPAGED | POINTER_ALLOC_HOST_ACCESS,
+            user_data: 0x1234,
+            accessible: vec![gpu],
+        };
+        let allocation = rocddi::memory::device::AllocationInfo {
+            device_address: 0x20_000,
+            host_address: Some(0x10_000),
+            size: 4096,
+            native_size: 8192,
+            physical_backing_id: [0; 2],
+        };
+        for base in [0x10_000, 0x20_000] {
+            let native = image_pool_description(&description, allocation, base).unwrap();
+            assert_eq!(native.offset_range(base, 512), Some(0));
+            assert_eq!(native.offset_range(base + 256, 512), Some(256));
+            assert_eq!(native.offset_range(base + 4095, 1), Some(4095));
+            assert_eq!(native.offset_range(base, 4097), None);
+            assert_eq!(native.offset_range(base + 4095, 2), None);
+            assert_eq!(native.offset_range(base, usize::MAX), None);
+            assert!(image_pool_description(&description, allocation, base + 4096).is_none());
+            assert!(image_pool_description(&description, allocation, base - 1).is_none());
+            assert_eq!(native.agent_base, description.agent_base);
+            assert_eq!(native.host_base, description.host_base);
+            assert_eq!(native.owner.handle, gpu.handle);
+            assert_eq!(native.accessible[0].handle, gpu.handle);
+            assert_eq!(native.user_data, description.user_data);
+            // Ordinary copy routing continues to use the requested extent.
+            assert_eq!(description.offset_range(base, 384), Some(0));
+            assert_eq!(description.offset_range(base, 512), None);
+        }
+        let mut info = std::mem::MaybeUninit::<HsaAmdPointerInfo>::uninit();
+        // SAFETY: The public writer initializes the complete output structure.
+        unsafe {
+            write_pointer_info(
+                info.as_mut_ptr(),
+                size_of::<HsaAmdPointerInfo>() as u32,
+                Some(&description),
+            );
+            assert_eq!(info.assume_init().size_in_bytes, 384);
+        }
+    }
 
     #[test]
     fn copy_policy_selects_compute_and_honors_forced_sdma_and_overrides() {

@@ -2030,8 +2030,10 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
 }
 
-// A device-only multi-segment window is rejected before any GIN registration
-// whatever NCCL_MULTI_SEGMENT_REGISTER says; a single-segment window still registers.
+// A device-only multi-segment window is left unregistered with GIN, whatever
+// NCCL_MULTI_SEGMENT_REGISTER says, so one such window does not reject every
+// other GIN user. A GIN-only window has no fallback and still fails. A
+// single-segment window still registers.
 TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegistering) {
   // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
@@ -2040,14 +2042,22 @@ TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegister
                  });
 
   mem.maxGlobalNumSegments = 2;
-  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(mem.numGinSegments, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
   {
     ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
-    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+    EXPECT_EQ(mem.numGinSegments, 0);
   }
+  EXPECT_EQ(reg.calls, 0);
+
+  mem.winFlags = NCCL_WIN_GIN_ONLY;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
   EXPECT_EQ(reg.calls, 0);
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 
+  mem.winFlags = 0;
   mem.maxGlobalNumSegments = 1;
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
@@ -7466,9 +7476,8 @@ TEST(GinContextCount, ZeroRequest_PromotedToConnectionCount) {
 // resource-window sizing that follows it, up to the cuMemCreate call. A devcomm
 // that asks for no resources has no window to create, so its build completes.
 //
-// The rest of the devcomm build -- GIN activation, symmetric-memory window
-// creation, GIN window registration, barriers -- is not covered here beyond a
-// failed GIN activation. The capture-mode test below is the one exception: it
+// The rest of the devcomm build is covered only where a late-stage failure must
+// unwind it (the LateStageFailure* tests) and by the capture-mode test, which
 // reaches ncclGinDevCommSetup and stops there.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
@@ -7580,6 +7589,62 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Branch: a create that fails after ncclGinDevCommSetup succeeded releases the GIN
+// contexts exactly once, passing the devComm setup filled in, then clears its
+// GIN fields so ncclDevCommDestroy does not free them again.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureFreesGinDevComm) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const* dc) {
+                       EXPECT_EQ(dc->ginHandles[0], reinterpret_cast<void*>(0xACE));
+                       return ncclSuccess;
+                     });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 1);
+  EXPECT_EQ(outDevComm.ginContextCount, 0u);
+  EXPECT_EQ(outDevComm.ginHandles[0], nullptr);
+}
+
+// Control: without GIN, setup never runs and the same failure must not free.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureWithoutGinDoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(streamCreate.calls, 1);
+  EXPECT_EQ(ginFree.calls, 0);
+}
+
+// Branch: a setup that records contexts and then fails must not free; the guard
+// is setup success, not ginContextCount.
+TEST_F(DevrCommCreateInternalTest, GinSetupFailsAfterRecordingContexts_DoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  ScopedHook ginSetup(g_devrGinDevCommSetup,
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevResourceRequirements*,
+                         struct ncclGinBarrierReq const*, int, struct ncclDevComm* devComm, uint32_t,
+                         struct ncclDevCommCompat const*) {
+                        devComm->ginContextCount = 1;
+                        devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
+                        return ncclSystemError;
+                      });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 0);
 }
 
 // ginSignalCount stays at its initializer value of 0. The barrier fakes also

@@ -5,15 +5,19 @@ import argparse
 import re
 import shlex
 import shutil
-import sys
 import time
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from ml_api_tracing.profiling.orchestrator import (
+    prepare_ml_api_trace_injection,
+    validate_ml_api_trace_attach,
+    validate_ml_api_trace_pc_sampling,
+)
+from ml_api_tracing.profiling.trace_selection import select_traced_frameworks
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -35,7 +39,6 @@ from utils.utils_common import (
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
     NoScriptInCommandError,
-    PythonScriptNotFoundError,
 )
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
@@ -93,78 +96,6 @@ def _find_python_script_index(argv: List[str]) -> Tuple[Optional[int], Optional[
             continue
         return i, None
     return None, None
-
-
-def _frameworks_to_trace(trace_ml_api: Optional[List[str]]) -> Optional[List[str]]:
-    """Return the --trace-ml-api frameworks. With no values, it traces all of them."""
-    if trace_ml_api == []:
-        return list(KNOWN_ML_API_BACKENDS)
-    return trace_ml_api
-
-
-def _prepare_ml_api_trace_injection(
-    remaining: List[str],
-    resolved_exec_path: Path,
-    is_python: bool,
-    script_index: Optional[int],
-    skip_flag: Optional[str],
-    frameworks: Set[str],
-) -> None:
-    """Insert the inject_roctx launcher into the workload command.
-
-    Modifies the ``remaining`` command list in place. The launcher is run by
-    absolute path, with the selected frameworks passed as ``--frameworks``
-    followed by each framework name, then ``--`` and the workload command. The
-    rewrite depends on the workload type:
-      1. Python interpreter — insert the launcher before the script.
-      2. Direct .py script  — prepend ``sys.executable`` and the launcher.
-      3. Other executables  — leave the command unchanged and emit a warning.
-    """
-    launch_script = (
-        Path(__file__).parent.parent / "utils" / "inject_roctx" / "launch.py"
-    )
-    if not launch_script.is_file():
-        console_error(
-            f"Cannot find inject_roctx launcher at {launch_script}. "
-            "Please verify your installation."
-        )
-
-    launcher = [
-        str(launch_script),
-        "--frameworks",
-        *sorted(frameworks),
-        "--",
-    ]
-
-    if is_python:
-        if skip_flag:
-            console_warning(
-                f"Cannot inject ROCTX markers into 'python {skip_flag}' "
-                "invocations. Launching workload as-is; "
-                "ML API tracing may have no effect."
-            )
-        elif not Path(remaining[script_index]).is_file():
-            raise PythonScriptNotFoundError(remaining[script_index])
-        else:
-            remaining[script_index:script_index] = launcher
-    elif resolved_exec_path.suffix in (".py", ".pyw", ".pyc", ".pyo"):
-        remaining[0:0] = [sys.executable, *launcher]
-    else:
-        console_warning(
-            "Command does not look like a Python entry point, "
-            "skipping ROCTX auto-injection and launching workload as-is. "
-            "Ensure the binary already initializes ROCTX markers, "
-            "otherwise ML API tracing will have no effect."
-        )
-
-    if (resolved_exec_path.parent / "_internal").is_dir():
-        console_warning(
-            "Workload appears to be a self-contained binary. "
-            "Such bundles typically ship private ROCm/HSA libraries, which "
-            "prevents ML API tracing from collecting data. "
-            "Rebuild without packaging libhsa/libhip or "
-            "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
-        )
 
 
 class RocProfCompute_Base:
@@ -237,13 +168,10 @@ class RocProfCompute_Base:
                 current.append("30")
                 args.filter_blocks = current
 
-        frameworks = _frameworks_to_trace(args.trace_ml_api)
-        if frameworks and is_only_pc_sampling(args.filter_blocks):
-            console_error(
-                "--trace-ml-api cannot be used with PC-sampling-only profiling, "
-                "which does not collect counters. Remove --trace-ml-api or add "
-                "a counter block."
-            )
+        frameworks = select_traced_frameworks(args.trace_ml_api)
+        validate_ml_api_trace_pc_sampling(
+            frameworks, is_only_pc_sampling(args.filter_blocks)
+        )
 
         if args.no_native_tool and args.iteration_multiplexing:
             console_error(
@@ -257,22 +185,7 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-        if frameworks:
-            if args.attach_pid:
-                console_error(
-                    "ML API tracing cannot be used with --attach-pid. "
-                    "ROCTX injection requires launching the workload; "
-                    "already-running processes cannot be instrumented. "
-                    "Please remove one of these options."
-                )
-
-            if args.attach_duration_msec:
-                console_error(
-                    "ML API tracing cannot be used with --attach-duration-msec. "
-                    "--attach-duration-msec only applies to --attach-pid, which "
-                    "is incompatible with ML API tracing. Please remove one of "
-                    "these options."
-                )
+        validate_ml_api_trace_attach(frameworks, args)
 
         # Each --kernel-iteration-range token must be a positive integer or a
         # range ('start:end' or 'start-end') with start <= end (1-based).
@@ -319,13 +232,13 @@ class RocProfCompute_Base:
                     raise NoScriptInCommandError(args.remaining)
 
             if frameworks:
-                _prepare_ml_api_trace_injection(
+                prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
                     script_index,
                     skip_flag,
-                    set(frameworks),
+                    frameworks,
                 )
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
@@ -361,7 +274,9 @@ class RocProfCompute_Base:
         ) as f:
             args_dict = dict(vars(self.__args))
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
-            args_dict["trace_ml_api"] = _frameworks_to_trace(args_dict["trace_ml_api"])
+            args_dict["trace_ml_api"] = select_traced_frameworks(
+                args_dict["trace_ml_api"]
+            )
             yaml.dump(args_dict, f)
 
         gen_sysinfo(

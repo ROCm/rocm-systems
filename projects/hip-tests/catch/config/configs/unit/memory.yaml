@@ -358,6 +358,9 @@ memory:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux."
     tags: [P1]
+  Unit_hipHostRegister_SharedLockDeviceSubset:
+    <<: *level_default
+    tags: [multigpu, P1]
   Unit_hipHostRegister_SameChunkRepeat:
     <<: *level_default
     tags: [alloc, P1]
@@ -871,7 +874,13 @@ memory:
     <<: *level_default
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_default
+  Unit_hipMemcpyBatchAsync_NestedBufferViews:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_LargeBatch: *level_default
+  Unit_hipMemcpyBatchAsync_D2D_BroadcastsWithShaderCopy:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts:
     <<: *level_default
     tags: [transfer]
@@ -1298,6 +1307,9 @@ memory:
   Unit_hipGetSymbolSizeAddress_Positive_Basic:
     <<: *level_default
     tags: [query, P0]
+  Unit_hipGetSymbolSizeAddress_Positive_Managed:
+    <<: *level_default
+    tags: [query, managed_memory, P0]
   Unit_hipGetSymbolAddress_Negative_Parameters: *level_default
   Unit_hipGetSymbolSize_Negative_Parameters: *level_default
   Unit_hipMemPrefetchAsync_v2_Device_Host:
@@ -1738,6 +1750,9 @@ memory:
   Unit_hipMemcpy_KernelLaunch:
     <<: *level_default
     tags: [P0]
+  Unit_hipMemcpy_LargeDeviceToDevice:
+    <<: *level_default
+    tags: [transfer, P1]
   Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem:
     <<: *level_default
     tags: [P1]
@@ -2865,6 +2880,12 @@ memory:
     <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayGetInfo_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetPlane_Negative_NotSupported:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetPlane_Negative_Parameters:
     <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayCreate_DiffSizes:

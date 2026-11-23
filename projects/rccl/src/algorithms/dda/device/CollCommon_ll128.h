@@ -47,9 +47,13 @@ struct LLLine128 {
 };
 static_assert(sizeof(LLLine128) == 128, "LLLine128 must be exactly 128 bytes");
 
+// Integer ceiling division, usable in constexpr and device code.
+template <typename T>
+__host__ __device__ constexpr T ddaCeilDiv(T a, T b) { return (a + b - 1) / b; }
+
 // Number of 128B lines needed to carry nWords 8B words (ceil).
 __host__ __device__ __forceinline__ size_t ddaLL128NumLines(size_t nWords) {
-  return (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  return ddaCeilDiv(nWords, (size_t)kDdaLL128DataElems);
 }
 
 // ---- 8B system-scope, non-tearing store/load (one word == one lane) ----
@@ -71,6 +75,14 @@ __device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint6
     if (params.abortSpinTick(spins)) return false;
   }
   return true;
+}
+
+// Wait until this wave's wire stores have completed (gfx1250; a no-op elsewhere),
+// e.g. before the kernel publishes its LL epoch.
+__device__ __forceinline__ void ddaLL128WaitStores() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  asm volatile("s_wait_storecnt 0x0" ::: "memory");
+#endif
 }
 
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
@@ -254,9 +266,10 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
-// ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
+// The loads of ddaLL128LoadRegsBatched. Call ddaLL128LoadRegsFinish once they land, so several
+// slices can have their loads in flight before any is finished.
 template <typename T, int kLineElems = kDdaLL128LineElems, bool kAligned = true, int kWarp = kDdaLL128Warp>
-__device__ __forceinline__ void ddaLL128LoadRegsBatched(
+__device__ __forceinline__ void ddaLL128LoadRegsBegin(
     uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
@@ -265,14 +278,27 @@ __device__ __forceinline__ void ddaLL128LoadRegsBatched(
     const int elt = ix * EltPer16B < eltN ? ix * EltPer16B : 0;
     ddaLL128UserLoad16B<kAligned>(src + elt, regs[2 * g], regs[2 * g + 1]);
   }
+}
+
+// The flag-lane shuffle that completes ddaLL128LoadRegsBegin.
+__device__ __forceinline__ void ddaLL128LoadRegsFinish(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flag) {
+#pragma unroll
+  for (int g = 1; g < kDdaLL128Pairs; g += 2) {  // move flag-lane data out of odd regs
+    if (flag) regs[2 * g] = regs[2 * g - 1];
+  }
+}
+
+// ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
+template <typename T, int kLineElems = kDdaLL128LineElems, bool kAligned = true, int kWarp = kDdaLL128Warp>
+__device__ __forceinline__ void ddaLL128LoadRegsBatched(
+    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+  ddaLL128LoadRegsBegin<T, kLineElems, kAligned, kWarp>(regs, src, eltN, wid, flag);
 #if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
   // Without it the scheduler moves the shuffle below up between the loads, and the
   // loads after the shuffle wait for the ones before it.
   __builtin_amdgcn_sched_barrier(0);
 #endif
-#pragma unroll
-  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
-    if (flag) regs[2 * g] = regs[2 * g - 1];
+  ddaLL128LoadRegsFinish(regs, flag);
 }
 
 // This lane's wire image of one slice: f(word, lo, hi) per 16B pair; the flag lane carries the flag in place of hi.
@@ -475,6 +501,25 @@ constexpr size_t ddaLL128SlotPayloadBytes(size_t slotWords) {
 // True for a block size the LL128 kernels accept: a multiple of the warp in [warp, 1024].
 constexpr bool ddaLL128ValidThreads(int64_t threads) {
   return threads >= kDdaLL128Warp && threads <= 1024 && threads % kDdaLL128Warp == 0;
+}
+
+// Zero one slice in local scratch after consumption to prevent stale-flag matches.
+// Must use the cooperative atomic store (not plain store) so the zero is ordered
+// with respect to the cooperative_atomic_load_8x16B used by ddaLL128PollWire.
+__device__ __forceinline__ void ddaLL128ClearWire(uint64_t* wire, int lane) {
+  (void)lane;
+#pragma unroll
+  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+    ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, 0, 0);
+}
+
+// Blocks in one peer column: a warp per slice, capped by the column's share of
+// the grid budget. Used by AllGather, Broadcast, and other fabric LL128 launchers.
+inline unsigned ddaLL128BlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap / (size_t)nPeers;
+  size_t bpp = (slices + warps - 1) / warps;
+  if (bpp > cap) bpp = cap;
+  return bpp < 1 ? 1u : (unsigned)bpp;
 }
 
 template <int kLineElems, int kWarp = kDdaLL128Warp>

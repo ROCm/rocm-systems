@@ -36,12 +36,12 @@ uint32_t float_compare_exceptions(uint64_t a, uint64_t b, bool flush, bool signa
 }
 
 // Combine less/equal/ordered masks into the requested floating-point predicate mask.
-template <unsigned Predicate>
-uint32_t float_compare_result(uint32_t less, uint32_t equal, uint32_t ordered) {
+template <unsigned Predicate, typename Mask>
+Mask float_compare_result(Mask less, Mask equal, Mask ordered) {
   // Predicates 8..15 complement the corresponding ordered predicate; NaNs then satisfy
   // unordered forms.
   constexpr unsigned base = Predicate >= CompareUnordered ? CompareTrue - Predicate : Predicate;
-  uint32_t holds;
+  Mask holds;
   if constexpr (base == CompareOrdered) {
     holds = ordered;
   } else {
@@ -51,6 +51,11 @@ uint32_t float_compare_result(uint32_t less, uint32_t equal, uint32_t ordered) {
     return ~holds;
   }
   return holds;
+}
+
+// Preserve scalar SCC callers' integer bit-0 semantics when inputs are Boolean.
+template <unsigned Predicate> uint32_t float_compare_result(bool less, bool equal, bool ordered) {
+  return float_compare_result<Predicate, uint32_t>(less, equal, ordered);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

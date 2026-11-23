@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <mutex>
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcNotification.h"
 #include "rdc_lib/rdc_common.h"
@@ -48,6 +49,9 @@ class RdcNotificationImpl : public RdcNotification {
 
  private:
   std::map<uint32_t, uint64_t> gpu_evnt_notif_masks_;
+  // The GPUs whose event notification AMD SMI started, and their handles. AMD SMI keeps each
+  // one's event file open until it is stopped, also through amdsmi_shut_down().
+  std::map<uint32_t, amdsmi_processor_handle> notif_started_;
   std::mutex notif_mutex_;
 };
 
