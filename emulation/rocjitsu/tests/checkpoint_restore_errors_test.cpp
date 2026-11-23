@@ -642,6 +642,12 @@ TEST(CheckpointRestoreErrorsTest, TotalCapacityOverflowReturnsFailure) {
   expect_restore_failure(file.path(), "Checkpoint execution capacity exceeds uint32 range");
 }
 
+TEST(CheckpointRestoreErrorsTest, InvalidComputeUnitConfigurationReturnsFailure) {
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.num_wf_slots = 33}));
+  expect_restore_failure(file.path(), "num_wf_slots exceeds the ISA maximum of 32");
+}
+
 TEST(CheckpointRestoreErrorsTest, Rdna2RestoresSharedResourcesAndRegisterBlockPlacement) {
   InvalidCheckpoint input{.arch = "rdna2",
                           .num_wf_slots = 2,

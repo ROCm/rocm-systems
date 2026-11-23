@@ -36,6 +36,9 @@ void scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledSource source,
                             int destination_shift, uint32_t *const *d, const uint32_t *a,
                             const uint32_t *b) {
   for (int lane = 0; lane < lanes; lane += 8) {
+    if (uint8_t(exec_mask >> lane) == 0) {
+      continue;
+    }
     auto raw = _mm256_srl_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane)),
                                 _mm_cvtsi32_si128(shift));
     auto exponent = _mm256_and_si256(

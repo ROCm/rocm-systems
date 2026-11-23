@@ -129,10 +129,9 @@ namespace {
                                      bool dx9_zero) {
   uint32_t repaired[16];
   _mm512_storeu_si512(repaired, result);
-  for (int i = 0; i < 16; ++i) {
-    if ((bad >> i) & 1) {
-      repaired[i] = repair_fma_f32(a[i], b[i], c[i], flags, instruction_flags, rdna3, dx9_zero);
-    }
+  for (; bad; bad &= bad - 1) {
+    int i = __builtin_ctz(bad);
+    repaired[i] = repair_fma_f32(a[i], b[i], c[i], flags, instruction_flags, rdna3, dx9_zero);
   }
   return _mm512_loadu_si512(repaired);
 }
@@ -162,6 +161,14 @@ void fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
     }
     out[k] = fma_result(aa, bb, cc, flags, instruction_flags, bad);
     if (bad) {
+      bad &= __mmask16(exec_mask >> (16 * k));
+      if (!bad) {
+        continue;
+      }
+      out[k] = fma_nan_operands(out[k], aa, bb, cc, flags, instruction_flags, rdna3, bad);
+      if (!bad) {
+        continue;
+      }
       out[k] = repair_fma(out[k], bad, flags, instruction_flags, a + 16 * k, b + 16 * k, c + 16 * k,
                           rdna3, dx9_zero);
     }

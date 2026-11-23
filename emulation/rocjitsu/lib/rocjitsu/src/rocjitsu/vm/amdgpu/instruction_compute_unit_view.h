@@ -83,6 +83,7 @@ public:
   bool debug_active() const;
   rocjitsu::IsaFamily arch() const;
   uint64_t arithmetic_flags() const;
+  bool force_scalar() const;
   uint64_t shader_cycles() const;
   ImageAddressConfig image_address_config() const;
   uint32_t cus_per_shader_array() const;
