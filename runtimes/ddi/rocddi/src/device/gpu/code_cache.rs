@@ -14,6 +14,13 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+/// Separate cache lines between the completion signal and the indirect buffer.
+const IB_ENTRY_MARKER_OFFSET: usize = 64;
+/// Separate cache line for the write following the cache command.
+const IB_EXIT_MARKER_OFFSET: usize = 128;
+/// Indirect-buffer byte offset in the retained command allocation.
+const INDIRECT_BUFFER_OFFSET: usize = 256;
+
 /// Native AMD completion signal layout; no public HSA handle is registered.
 #[repr(C, align(64))]
 struct Completion {
@@ -62,10 +69,11 @@ fn write_failure_diagnostic(
     outcome: WaitOutcome,
     (read, write): (u64, u64),
     completion: i64,
+    (entry, exit): (u32, u32),
 ) -> io::Result<()> {
     writeln!(
         output,
-        "rocddi code-cache: wait={outcome:?}; read={read}; write={write}; completion={completion}"
+        "rocddi code-cache: wait={outcome:?}; read={read}; write={write}; completion={completion}; ib_entry={entry}; ib_exit={exit}"
     )
 }
 
@@ -85,6 +93,45 @@ fn invalidate_packet(major: u32, minor: u32) -> ([u32; 8], usize) {
         words[7] = 1 | (1 << 7) | (1 << 8) | (1 << 9) | (1 << 14);
     }
     (words, count as usize)
+}
+
+/// Writes a diagnostic word using `ROCr`'s confirmed, memory-destination recipe.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "PM4 carries the aligned 64-bit address in separate low and high words"
+)]
+fn marker_packet(address: u64) -> [u32; 5] {
+    [
+        0xc003_3700,          // WRITE_DATA, five dwords.
+        (2 << 8) | (1 << 20), // TC_L2 destination, wait for write confirmation.
+        address as u32,
+        (address >> 32) as u32,
+        1,
+    ]
+}
+
+/// Keeps the normal cache command intact, optionally bracketing it with writes.
+fn publication_commands(
+    major: u32,
+    minor: u32,
+    storage_address: u64,
+    diagnostics: bool,
+) -> ([u32; 18], usize) {
+    let (invalidate, count) = invalidate_packet(major, minor);
+    let mut words = [0; 18];
+    if diagnostics {
+        words[..5].copy_from_slice(&marker_packet(
+            storage_address + IB_ENTRY_MARKER_OFFSET as u64,
+        ));
+        words[5..5 + count].copy_from_slice(&invalidate[..count]);
+        words[5 + count..10 + count].copy_from_slice(&marker_packet(
+            storage_address + IB_EXIT_MARKER_OFFSET as u64,
+        ));
+        (words, count + 10)
+    } else {
+        words[..count].copy_from_slice(&invalidate[..count]);
+        (words, count)
+    }
 }
 
 /// Wraps cache commands in the AMD AQL PM4 indirect-buffer packet.
@@ -135,11 +182,12 @@ impl GpuDevice<'_> {
         outcome: WaitOutcome,
         queue: &RetainedQueue<(crate::memory::Allocation, crate::device::Device)>,
         completion: &Completion,
+        markers: Option<(usize, usize)>,
     ) {
         let Ok(_operation) = self.driver.admit() else {
             return;
         };
-        if std::env::var_os("ROCDDI_CODE_CACHE_DIAGNOSTICS").is_some_and(|value| value == "1") {
+        if let Some((entry, exit)) = markers {
             let transport = queue.info();
             // SAFETY: Creation validated aligned 64-bit, nonwrapping AQL
             // indices, and this private owner retains both mappings until
@@ -154,11 +202,21 @@ impl GpuDevice<'_> {
                 )
             };
             let completion = completion.value.load(Ordering::Acquire);
+            // SAFETY: These aligned words occupy disjoint cache lines in the
+            // retained writable command allocation. Sample each once, without
+            // polling or requiring progress to resume.
+            let markers = unsafe {
+                (
+                    (&*(entry as *const AtomicU32)).load(Ordering::Acquire),
+                    (&*(exit as *const AtomicU32)).load(Ordering::Acquire),
+                )
+            };
             let _ = write_failure_diagnostic(
                 &mut std::io::stderr().lock(),
                 outcome,
                 progress,
                 completion,
+                markers,
             );
         }
     }
@@ -229,15 +287,27 @@ impl GpuDevice<'_> {
                 "cache command requires a shared 48-bit address",
             ));
         }
-        let (command, count) = invalidate_packet(info.gfx_major, info.gfx_minor);
-        // SAFETY: The page contains disjoint, aligned completion and IB records.
+        let diagnostics =
+            std::env::var_os("ROCDDI_CODE_CACHE_DIAGNOSTICS").is_some_and(|value| value == "1");
+        let (command, count) =
+            publication_commands(info.gfx_major, info.gfx_minor, gpu_address, diagnostics);
+        // SAFETY: Completion [0,64), optional marker words at 64 and 128,
+        // and up to 18 IB dwords at 256 fit disjointly in this >=4096-byte page.
         unsafe {
             (host as *mut Completion).write(Completion {
                 kind: 1,
                 value: AtomicI64::new(1),
                 reserved: [0; 6],
             });
-            std::ptr::copy_nonoverlapping(command.as_ptr(), (host + 256) as *mut u32, count);
+            if diagnostics {
+                ((host + IB_ENTRY_MARKER_OFFSET) as *mut AtomicU32).write(AtomicU32::new(0));
+                ((host + IB_EXIT_MARKER_OFFSET) as *mut AtomicU32).write(AtomicU32::new(0));
+            }
+            std::ptr::copy_nonoverlapping(
+                command.as_ptr(),
+                (host + INDIRECT_BUFFER_OFFSET) as *mut u32,
+                count,
+            );
         }
         // SAFETY: This method is the sole producer. The dependency bundle owns
         // every address the packet can read, even if queue creation is partial.
@@ -265,7 +335,7 @@ impl GpuDevice<'_> {
             error,
         })?;
         let transport = queue.info();
-        let ib = gpu_address + 256;
+        let ib = gpu_address + INDIRECT_BUFFER_OFFSET as u64;
         let packet = publication_packet(ib, gpu_address, count)?;
         // SAFETY: Native transport supplies an aligned writable ring and index;
         // all body and IB stores precede the release header and MMIO doorbell.
@@ -297,7 +367,13 @@ impl GpuDevice<'_> {
         };
         if outcome != WaitOutcome::Completed {
             // SAFETY: The retained dependency bundle still owns this signal.
-            self.diagnose_wait_failure(outcome, &queue, unsafe { &*(host as *const Completion) });
+            self.diagnose_wait_failure(
+                outcome,
+                &queue,
+                unsafe { &*(host as *const Completion) },
+                diagnostics
+                    .then_some((host + IB_ENTRY_MARKER_OFFSET, host + IB_EXIT_MARKER_OFFSET)),
+            );
         }
         queue
             .inactivate()
@@ -325,8 +401,9 @@ impl GpuDevice<'_> {
 #[cfg(test)]
 mod tests {
     use super::{
-        WaitOutcome, inactivation_failure, invalidate_packet, publication_packet,
-        write_failure_diagnostic,
+        Completion, IB_ENTRY_MARKER_OFFSET, IB_EXIT_MARKER_OFFSET, INDIRECT_BUFFER_OFFSET,
+        WaitOutcome, inactivation_failure, invalidate_packet, publication_commands,
+        publication_packet, write_failure_diagnostic,
     };
     use crate::{Error, ErrorKind};
     use std::io;
@@ -361,6 +438,71 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn diagnostic_stream_brackets_the_unchanged_cache_command() -> Result<(), Error> {
+        // ROCr amd_gpu_pm4.h encodes WRITE_DATA as opcode 0x37, size 5,
+        // destination TC_L2 (2 << 8), confirmation (1 << 20). Its cache
+        // commands are GFX9's seven words and GFX10+'s eight words.
+        let storage_address = 0x0000_1234_5678_9000;
+        for (major, minor, cache) in [
+            (
+                9,
+                0,
+                vec![0xc005_5800, 0x2884_0000, u32::MAX, 0xff, 0, 0, 0],
+            ),
+            (11, 0, vec![0xc006_5800, 0, u32::MAX, 0xff, 0, 0, 0, 0x4381]),
+            (
+                12,
+                5,
+                vec![0xc006_5800, 0, u32::MAX, 0xff, 0, 0, 0, 0x24001],
+            ),
+        ] {
+            let (normal, normal_count) = publication_commands(major, minor, storage_address, false);
+            assert_eq!(&normal[..normal_count], cache);
+            assert!(normal[normal_count..].iter().all(|word| *word == 0));
+
+            let (marked, marked_count) = publication_commands(major, minor, storage_address, true);
+            let mut expected = vec![0xc003_3700, 0x0010_0200, 0x5678_9040, 0x0000_1234, 1];
+            expected.extend_from_slice(&cache);
+            expected.extend_from_slice(&[0xc003_3700, 0x0010_0200, 0x5678_9080, 0x0000_1234, 1]);
+            assert_eq!(marked_count, cache.len() + 10);
+            assert_eq!(&marked[..marked_count], expected);
+            assert!(marked[marked_count..].iter().all(|word| *word == 0));
+
+            let packet = publication_packet(
+                storage_address + INDIRECT_BUFFER_OFFSET as u64,
+                storage_address,
+                marked_count,
+            )
+            .map_err(|failure| failure.error)?;
+            assert_eq!(packet[0], 0x0001_0000);
+            assert_eq!(packet[1], 0xc002_3f00);
+            assert_eq!(packet[2], 0x5678_9100);
+            assert_eq!(packet[3], 0x0000_1234);
+            assert_eq!(
+                packet[4],
+                if major == 9 { 0x0080_0011 } else { 0x0080_0012 }
+            );
+            assert_eq!(packet[5], 0xa);
+            assert_eq!(&packet[6..14], &[0; 8]);
+            assert_eq!(packet[14], 0x5678_9000);
+            assert_eq!(packet[15], 0x0000_1234);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn diagnostic_storage_is_disjoint_and_fits_the_retained_page() {
+        assert_eq!(size_of::<Completion>(), 64);
+        assert!(size_of::<Completion>() <= IB_ENTRY_MARKER_OFFSET);
+        assert_eq!(IB_ENTRY_MARKER_OFFSET % align_of::<u32>(), 0);
+        assert_eq!(IB_EXIT_MARKER_OFFSET % align_of::<u32>(), 0);
+        assert!(IB_ENTRY_MARKER_OFFSET + size_of::<u32>() <= IB_EXIT_MARKER_OFFSET);
+        assert!(IB_EXIT_MARKER_OFFSET + size_of::<u32>() <= INDIRECT_BUFFER_OFFSET);
+        assert_eq!(INDIRECT_BUFFER_OFFSET % align_of::<u32>(), 0);
+        assert!(INDIRECT_BUFFER_OFFSET + 18 * size_of::<u32>() <= 4096);
     }
 
     #[test]
@@ -408,19 +550,21 @@ mod tests {
     #[test]
     fn failure_diagnostic_records_passive_snapshot() -> io::Result<()> {
         let mut output = Vec::new();
-        write_failure_diagnostic(&mut output, WaitOutcome::Deadline, (0, 1), 1)?;
+        write_failure_diagnostic(&mut output, WaitOutcome::Deadline, (0, 1), 1, (1, 0))?;
         assert_eq!(
             output,
-            b"rocddi code-cache: wait=Deadline; read=0; write=1; completion=1\n"
+            b"rocddi code-cache: wait=Deadline; read=0; write=1; completion=1; ib_entry=1; ib_exit=0\n"
         );
         output.clear();
-        write_failure_diagnostic(&mut output, WaitOutcome::Cancelled, (1, 1), -1)?;
+        write_failure_diagnostic(&mut output, WaitOutcome::Cancelled, (1, 1), -1, (1, 1))?;
         assert_eq!(
             output,
-            b"rocddi code-cache: wait=Cancelled; read=1; write=1; completion=-1\n"
+            b"rocddi code-cache: wait=Cancelled; read=1; write=1; completion=-1; ib_entry=1; ib_exit=1\n"
         );
         let mut full = &mut [0_u8; 0][..];
-        assert!(write_failure_diagnostic(&mut full, WaitOutcome::Deadline, (0, 1), 1).is_err());
+        assert!(
+            write_failure_diagnostic(&mut full, WaitOutcome::Deadline, (0, 1), 1, (0, 0)).is_err()
+        );
         Ok(())
     }
 
