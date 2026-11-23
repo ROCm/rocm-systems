@@ -498,6 +498,7 @@ memory:
     tags: [P1, managed_memory]
   Unit_hipMallocManaged_DeviceContextChange:
     <<: *level_default
+    requires: [managed_memory, multi_gpu]
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - disabled on Windows; gfx1201 (amd_windows) self-skips because the GPU does not support managed memory, gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
@@ -744,6 +745,7 @@ memory:
     tags: [query, P0]
   Unit_hipExtMallocWithFlags_CoherentTst:
     <<: *level_default
+    requires: [managed_memory, pageable_memory_access]
     tags: [query, P1]
   Unit_hipMemsetD32_ValidBuffer:
     <<: *level_default
@@ -869,6 +871,7 @@ memory:
     tags: [transfer, image]
   Unit_hipMemcpy3DBatchAsync_PartiallyRegisteredHostSource_IsRejected:
     <<: *level_default
+    requires: [host_register]
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_default
   Unit_hipMemcpyBatchAsync_D2D_LargeBatch: *level_default
@@ -1186,6 +1189,7 @@ memory:
     tags: [alloc, P1, managed_memory]
   Unit_hipMemVmm_Basic:
     <<: *level_default
+    requires: [virtual_memory]
     disabled:
       targets: [amd_windows]
       reason: "amd_windows disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
@@ -2231,6 +2235,7 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
     <<: *level_default
+    requires: [concurrent_managed_access]
     tags: [query, managed_memory]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_default

@@ -26,7 +26,9 @@ printf:
   Unit_Printf_PrintfStar: *level_default
   Unit_Printf_PrintfManyWaves: *level_default
   Unit_Printf_PrintfWidthPrecision: *level_default
-  Unit_Printf_PrintfBasicTsts: *level_default
+  Unit_Printf_PrintfBasicTsts:
+    <<: *level_default
+    requires: [host_native_atomics]
   Unit_Printf_PrintfAltFormsTsts: *level_default
   Unit_Printf_HostcallLargeStaticTls_Positive: *level_default
   Unit_Printf_HostcallUndersizedStackRequest_Positive: *level_default

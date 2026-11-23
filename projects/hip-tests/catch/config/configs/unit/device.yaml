@@ -242,6 +242,7 @@ device:
     tags: [query, P0]
   Unit_hipDeviceGetDefaultMemPool_Positive_Basic:
     <<: *level_default
+    requires: [memory_pools]
     tags: [query, P0]
   Unit_hipDeviceGetDefaultMemPool_Negative_Parameters:
     <<: *level_default

@@ -92,6 +92,7 @@ event:
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem:
     <<: *level_default
+    requires: [large_bar]
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - intermittent segfault failure. gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs re-triage."

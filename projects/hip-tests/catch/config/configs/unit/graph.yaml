@@ -116,6 +116,7 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg:
     <<: *level_default
+    requires: [p2p]
     disabled:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged"
@@ -949,6 +950,7 @@ graph:
     tags: [node]
   Unit_hipGraphBatchMemOpNode_WriteAndWait:
     <<: *level_default
+    requires: [stream_wait_value]
     disabled:
       targets: [amd_windows, nvidia]
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged on nvidia"

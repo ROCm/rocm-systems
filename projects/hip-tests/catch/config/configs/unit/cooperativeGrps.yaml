@@ -119,9 +119,11 @@ cooperativeGrps:
     tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernel_QueueReclaim:
     <<: *level_default
+    requires: [cooperative_launch]
     tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_default
+    requires: [cooperative_multi_device_launch]
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - kernel uses runtime-sized shared memory that is not adjusted for ASAN's extra memory requirements; needs to be re-triaged."
