@@ -2525,7 +2525,7 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
+  const bool writes_mode = amdgpu::decode_hwreg_slice(hwreg).id == amdgpu::MODE_HWREG;
   if (setreg_vgpr_msb_fixup && writes_mode) {
     if (operation == amdgpu::Operation::S_SETREG_B32) {
       mode = std::nullopt;
@@ -2580,7 +2580,7 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
     enabled = std::nullopt;
     return;
   }
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(hwreg);
   const auto literal = instruction_literal(inst, text);
   enabled = literal
                 ? std::optional<bool>{((*literal >> (kGprIdxEnableBit - slice.begin)) & 1u) != 0}
