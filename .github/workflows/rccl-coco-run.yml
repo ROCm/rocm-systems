@@ -15,6 +15,13 @@ on:
         description: 'Runner label to run on.'
         type: string
         required: true
+      shared_scratch:
+        description: >-
+          Shared-filesystem scratch root when compute nodes cannot see the
+          runner workspace. Empty keeps RUNNER_TEMP.
+        type: string
+        required: false
+        default: ''
       job:
         description: 'coco job key to run.'
         type: string
@@ -127,9 +134,10 @@ jobs:
       PIP_NO_CACHE_DIR: '1'
       UV_NO_CACHE: '1'
       UV_VERSION: 0.9.26
-      # coco runs this venv on a compute node, which cannot see a TW workspace.
-      # Empty on other clusters, which keep RUNNER_TEMP.
-      COCO_SHARED_SCRATCH: ${{ startsWith(inputs.runs_on, 'tw-') && '/share_nfs/coco/ci-scratch' || '' }}
+      UV_SHA256: 30ccbf0a66dc8727a02b0e245c583ee970bdafecf3a443c1686e1b30ec4939e8
+      # coco runs this venv on a compute node, which cannot see a TW or Crusoe
+      # workspace. Empty on other clusters, which keep RUNNER_TEMP.
+      COCO_SHARED_SCRATCH: ${{ inputs.shared_scratch }}
     steps:
       # In RUNNER_TEMP, so no step deletes NFS files coco may still hold open.
       # COCO_SHARED_SCRATCH replaces it where compute nodes must run the venv.
@@ -189,10 +197,16 @@ jobs:
         run: |
           set -euo pipefail
           # Never activated; invoked by absolute path.
+          # Fetch the uv release binary directly so runners do not need python3-venv.
+          mkdir -p "${CI_SCRATCH}/uv-boot/bin"
+          tarball="${CI_SCRATCH}/uv-boot/uv.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors -o "${tarball}" \
+            "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${UV_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "${tarball}" -C "${CI_SCRATCH}/uv-boot/bin" --strip-components=1
+          rm -f "${tarball}"
           if [[ -n "${COCO_SHARED_SCRATCH}" ]]; then
-            # Runner is 3.12, compute nodes 3.10: uv-managed 3.10, non-editable install.
-            python3 -m venv "${CI_SCRATCH}/uv-boot"
-            "${CI_SCRATCH}/uv-boot/bin/python3" -m pip install --quiet "uv==${UV_VERSION}"
+            # Runner is 3.12, compute nodes 3.10/3.12: uv-managed 3.10, non-editable install.
             UV_PYTHON_INSTALL_DIR="${CI_SCRATCH}/python" \
               "${CI_SCRATCH}/uv-boot/bin/uv" venv --python-preference only-managed \
               --python 3.10 "${COCO_VENV}"
@@ -202,8 +216,8 @@ jobs:
             cp -r configs coco/configs
             "${CI_SCRATCH}/uv-boot/bin/uv" pip install --python "${COCO_VENV}/bin/python3" .
           else
-            python3 -m venv "${COCO_VENV}"
-            "${COCO_VENV}/bin/python3" -m pip install -e .
+            "${CI_SCRATCH}/uv-boot/bin/uv" venv "${COCO_VENV}"
+            "${CI_SCRATCH}/uv-boot/bin/uv" pip install --python "${COCO_VENV}/bin/python3" -e .
           fi
           # Surfaces a packaging problem here rather than after the queue.
           "${COCO_VENV}/bin/coco" --help > /dev/null
@@ -257,6 +271,11 @@ jobs:
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
         run: |
           set -euo pipefail
+          # Systemd runner services do not source /etc/profile.d/*.sh (e.g. spur.sh on Crusoe).
+          if [[ -r /etc/profile.d/spur.sh ]]; then
+            # shellcheck disable=SC1091
+            source /etc/profile.d/spur.sh
+          fi
           if [[ -z "${COCO_DATABASE_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
           fi

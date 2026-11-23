@@ -6,11 +6,12 @@
 
 /**
  * @file NetLl128MPITests.cpp
- * @brief LL128 Ring AllReduce with every ring hop on the NET transport.
+ * @brief LL128 and Simple Ring AllReduce with every ring hop on the NET transport.
  *
  * Regression test for the LL128 post-send fence: if the proxy sees the tail before every 128-byte line of the step
- * is visible, the NIC sends stale lines and the receiver polls them forever. P2P and SHM are disabled so one node is
- * enough. They are cached for the process, so run the test in its own process with both set:
+ * is visible, the NIC sends stale lines and the receiver polls them forever. The Simple case catches the same failure
+ * in Simple's end-of-step barrier. P2P and SHM are disabled so one node is enough. They are cached for the process, so
+ * run the test in its own process with both set:
  *   NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=NetLl128MPITest.*
  */
 
@@ -65,13 +66,13 @@ size_t countMismatches(const void* device, uint16_t expected)
     return static_cast<size_t>(std::count_if(host.begin(), host.end(), [=](uint16_t v) { return v != expected; }));
 }
 
-bool selectsRingLl128(ncclComm_t comm, const void* send, void* recv)
+bool selectsRing(ncclComm_t comm, const void* send, void* recv, int protocol)
 {
-    int algo = -1, protocol = -1, maxChannels = -1;
+    int algo = -1, selected = -1, maxChannels = -1;
     return rcclGetCollImplInfo(comm, ncclFuncAllReduce, kCount, ncclBfloat16, ncclSum, send, recv,
-                               /*graphCapturing=*/0, &algo, &protocol, &maxChannels)
+                               /*graphCapturing=*/0, &algo, &selected, &maxChannels)
                == ncclSuccess
-           && algo == NCCL_ALGO_RING && protocol == NCCL_PROTO_LL128;
+           && algo == NCCL_ALGO_RING && selected == protocol;
 }
 
 bool ringHopsOnGdrNet(ncclComm_t comm)
@@ -140,56 +141,66 @@ protected:
         test_comm_ = nullptr;
         return false;
     }
+
+    void runOnNet(const char* protoName, int protocol)
+    {
+        SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
+
+        MPIHelpers::MpiEnvGuard p2p("NCCL_P2P_DISABLE", "1");
+        MPIHelpers::MpiEnvGuard shm("NCCL_SHM_DISABLE", "1");
+        MPIHelpers::MpiEnvGuard algo("NCCL_ALGO", "Ring");
+        MPIHelpers::MpiEnvGuard proto("NCCL_PROTO", protoName);
+
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&send, kCount * sizeof(uint16_t)));
+        auto send_guard = makeDeviceBufferAutoGuard(send);
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recv, kCount * sizeof(uint16_t)));
+        auto recv_guard = makeDeviceBufferAutoGuard(recv);
+
+        // NCCL_PROTO is a request: the tuner drops LL128 where it is unsupported and falls back to Simple.
+        ncclComm_t comm = getActiveCommunicator();
+        if(!mpiAllRanks(selectsRing(comm, send, recv, protocol) && selectsRing(comm, recv, recv, protocol)))
+        {
+            GTEST_SKIP() << "AllReduce does not select Ring/" << protoName << " on this system";
+        }
+
+        std::vector<uint16_t> host(kCount, kBf16One);
+        ASSERT_MPI_EQ(hipSuccess,
+                      hipMemcpy(send, host.data(), kCount * sizeof(uint16_t), hipMemcpyHostToDevice));
+
+        // Ring connections are made by the first collective.
+        ASSERT_MPI_TRUE(runAllReduce(send, recv, 1));
+        if(!mpiAllRanks(ringHopsOnGdrNet(getActiveCommunicator())))
+        {
+            GTEST_SKIP() << "A ring hop is not on NET with GPU Direct RDMA: run this test in its own process with "
+                            "NCCL_P2P_DISABLE=1 and NCCL_SHM_DISABLE=1, on hosts with an RDMA NIC";
+        }
+
+        ASSERT_MPI_TRUE(runAllReduce(send, recv, kOutOfPlaceOps));
+        size_t mismatches = countMismatches(recv, bf16Bits(static_cast<float>(MPIEnvironment::world_size)));
+        EXPECT_EQ(size_t{0}, mismatches) << "out of place, rank " << MPIEnvironment::world_rank;
+        ASSERT_MPI_TRUE(mismatches == 0);
+
+        // The hang reproduced only with in-place ops, so they get the iteration budget.
+        ASSERT_MPI_TRUE(runAllReduce(recv, recv, kInPlaceOps));
+        // Each in-place sum multiplies every element by the rank count, so the result saturates at +inf.
+        mismatches = countMismatches(recv, kBf16Inf);
+        EXPECT_EQ(size_t{0}, mismatches) << "in place, rank " << MPIEnvironment::world_rank;
+        ASSERT_MPI_TRUE(mismatches == 0);
+    }
 };
 
 TEST_F(NetLl128MPITest, RingAllReduceCompletesWithEveryHopOnNet)
 {
-    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
+    runOnNet("LL128", NCCL_PROTO_LL128);
+}
 
-    MPIHelpers::MpiEnvGuard p2p("NCCL_P2P_DISABLE", "1");
-    MPIHelpers::MpiEnvGuard shm("NCCL_SHM_DISABLE", "1");
-    MPIHelpers::MpiEnvGuard algo("NCCL_ALGO", "Ring");
-    MPIHelpers::MpiEnvGuard proto("NCCL_PROTO", "LL128");
-
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
-
-    void* send = nullptr;
-    void* recv = nullptr;
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&send, kCount * sizeof(uint16_t)));
-    auto send_guard = makeDeviceBufferAutoGuard(send);
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recv, kCount * sizeof(uint16_t)));
-    auto recv_guard = makeDeviceBufferAutoGuard(recv);
-
-    // NCCL_PROTO=LL128 is a request: the tuner drops LL128 where it is unsupported and falls back to Simple.
-    ncclComm_t comm = getActiveCommunicator();
-    if(!mpiAllRanks(selectsRingLl128(comm, send, recv) && selectsRingLl128(comm, recv, recv)))
-    {
-        GTEST_SKIP() << "AllReduce does not select Ring/LL128 on this system";
-    }
-
-    std::vector<uint16_t> host(kCount, kBf16One);
-    ASSERT_MPI_EQ(hipSuccess,
-                  hipMemcpy(send, host.data(), kCount * sizeof(uint16_t), hipMemcpyHostToDevice));
-
-    // Ring connections are made by the first collective.
-    ASSERT_MPI_TRUE(runAllReduce(send, recv, 1));
-    if(!mpiAllRanks(ringHopsOnGdrNet(getActiveCommunicator())))
-    {
-        GTEST_SKIP() << "A ring hop is not on NET with GPU Direct RDMA: run this test in its own process with "
-                        "NCCL_P2P_DISABLE=1 and NCCL_SHM_DISABLE=1, on hosts with an RDMA NIC";
-    }
-
-    ASSERT_MPI_TRUE(runAllReduce(send, recv, kOutOfPlaceOps));
-    size_t mismatches = countMismatches(recv, bf16Bits(static_cast<float>(MPIEnvironment::world_size)));
-    EXPECT_EQ(size_t{0}, mismatches) << "out of place, rank " << MPIEnvironment::world_rank;
-    ASSERT_MPI_TRUE(mismatches == 0);
-
-    // The hang reproduced only with in-place ops, so they get the iteration budget.
-    ASSERT_MPI_TRUE(runAllReduce(recv, recv, kInPlaceOps));
-    // Each in-place sum multiplies every element by the rank count, so the result saturates at +inf.
-    mismatches = countMismatches(recv, kBf16Inf);
-    EXPECT_EQ(size_t{0}, mismatches) << "in place, rank " << MPIEnvironment::world_rank;
-    ASSERT_MPI_TRUE(mismatches == 0);
+TEST_F(NetLl128MPITest, RingSimpleAllReduceCompletesWithEveryHopOnNet)
+{
+    runOnNet("Simple", NCCL_PROTO_SIMPLE);
 }
 
 #endif // MPI_TESTS_ENABLED

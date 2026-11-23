@@ -387,7 +387,7 @@ public:
   ///
   /// Used by CC reads to ensure cross-XCD coherence: dirty data is
   /// written back to the backing store before the line is invalidated,
-  /// so a subsequent ensure_line() refetch gets the latest data.
+  /// so a subsequent refetch gets the latest data.
   /// @param addr Any address within the target cache line.
   VmAccessOutcome flush_line(uint64_t addr, uint32_t vmid = 0);
 
@@ -586,18 +586,25 @@ private:
   std::shared_lock<MaintenanceMutex> try_acquire_peer_cache_access();
   std::unique_lock<MaintenanceMutex> acquire_cache_maintenance();
   void synchronize_epoch_locked();
-  VmAccessOutcome cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
-                                      uint32_t vmid, uint64_t admission_generation);
-  // Store allocation leaves untouched bytes absent instead of reading backing.
-  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
-                              bool fetch_on_miss = true);
-  VmAccessOutcome discard_stale_line_locked(uint64_t addr, uint32_t vmid,
-                                            uint64_t admission_generation);
+  // Borrowed tags and bytes remain usable while the caller holds the set lock
+  // and does not replace or invalidate their way.
+  void discard_rebound_line_locked(uint64_t addr, uint32_t vmid, CacheStore::Allocation &line);
+  VmAccessOutcome lookup_line_locked(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
+                                     CacheStore::Allocation &line, bool coherent_read = false,
+                                     const VmLocalGrantView *local = nullptr);
+  VmAccessOutcome allocate_line_locked(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
+                                       CacheStore::Allocation &line);
+  VmAccessOutcome ensure_write_line_locked(uint64_t addr, uint32_t vmid,
+                                           uint64_t admission_generation,
+                                           CacheStore::Allocation &line);
+  VmAccessOutcome fill_line_locked(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
+                                   CacheStore::Allocation &line);
   [[nodiscard]] uint64_t current_cache_identity(uint32_t vmid) const;
   [[nodiscard]] bool direct_controlled_writeback(uint64_t address, uint32_t size,
                                                  uint32_t vmid) const noexcept;
   [[nodiscard]] bool retain_admitted_dirty_bytes(uint64_t line_addr, const simdojo::CacheTag &tag);
   VmAccessOutcome flush_line_locked(uint64_t addr, uint32_t vmid = 0);
+  VmAccessOutcome flush_line_locked(uint64_t addr, uint32_t vmid, CacheStore::Allocation line);
   VmAccessOutcome flush_dirty_locked(std::optional<uint32_t> vmid = std::nullopt);
   [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
   using DirtyMask = std::array<uint64_t, LINE_SIZE / 64>;
