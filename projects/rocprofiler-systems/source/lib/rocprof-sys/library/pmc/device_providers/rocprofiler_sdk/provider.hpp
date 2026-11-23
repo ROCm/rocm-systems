@@ -8,6 +8,7 @@
 #include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/expression_tree.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
@@ -257,25 +258,23 @@ private:
     }
 
     // A derived counter that is non-linear in totals since start_context is evaluated
-    // by the device on its inputs, so the SDK collects the inputs instead of it. The
-    // device resolves every derived expression, so it gets the definitions it uses.
+    // by the device on its inputs, so the SDK collects the inputs instead of it.
     static void add_requested(const catalog_entry& entry, const catalog_lookup& lookup,
                               size_t device_index, resolved_counters& result)
     {
-        const auto& meta           = entry.details.front();
-        auto        referenced     = std::vector<std::string>{};
-        auto        collect_inputs = false;
+        const auto& meta        = entry.details.front();
+        auto&       counters    = result.counters;
+        auto        is_interval = false;
         if(meta.is_derived)
         {
             try
             {
-                auto const expression =
+                collectors::gpu_perf_counter::derived_expression expression =
                     collectors::gpu_perf_counter::expression_parser::parse(
-                        meta.expression, lookup.definitions);
-                referenced = expression.referenced_names;
-                collect_inputs =
-                    expression.evaluation ==
-                    collectors::gpu_perf_counter::derived_evaluation::interval;
+                        meta.expression, lookup.definitions, counters.slots);
+                is_interval = expression.evaluation ==
+                              collectors::gpu_perf_counter::derived_evaluation::interval;
+                counters.expressions.insert_or_assign(meta.name, std::move(expression));
             } catch(const std::invalid_argument& e)
             {
                 LOG_ERROR("GPU perf counter {} on device {} is not collected: {}. "
@@ -285,20 +284,21 @@ private:
             }
         }
 
-        auto& requested = result.counters.requested;
-        requested.insert(requested.end(), entry.details.begin(), entry.details.end());
-        if(!collect_inputs)
+        counters.requested.insert(counters.requested.end(), entry.details.begin(),
+                                  entry.details.end());
+        if(!is_interval)
         {
             result.config_ids.push_back(entry.counter_id);
+            return;
         }
 
-        auto& inputs = result.counters.inputs;
-        for(const auto& name : referenced)
+        for(const auto& name : counters.expressions.at(meta.name).referenced_names)
         {
             const auto* input = lookup.entries.at(name);
-            inputs.insert(inputs.end(), input->details.begin(), input->details.end());
-            if(collect_inputs && !input->details.front().is_derived)
+            if(!input->details.front().is_derived)
             {
+                counters.inputs.insert(counters.inputs.end(), input->details.begin(),
+                                       input->details.end());
                 result.config_ids.push_back(input->counter_id);
             }
         }

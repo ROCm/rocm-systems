@@ -3,6 +3,7 @@
 
 #include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/expression_tree.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 
 #include <gmock/gmock.h>
@@ -75,6 +76,13 @@ sdk_definitions()
     return counter_definitions{ counters };
 }
 
+derived_expression
+parse(std::string_view expression)
+{
+    auto slots = input_slots{};
+    return expression_parser::parse(expression, sdk_definitions(), slots);
+}
+
 input_reduction
 reduction_of(std::initializer_list<double> values)
 {
@@ -128,9 +136,8 @@ TEST(DerivedExpressionTest, MfmaUtilIsEvaluatedOnItsInputs)
 
 TEST(DerivedExpressionTest, OperatorsFollowPrecedenceAndReduceOperations)
 {
-    auto const expression = expression_parser::parse(
-        "reduce(GRBM_COUNT,max) - reduce(GRBM_COUNT,min) * 2 + reduce(GRBM_COUNT,avr)",
-        sdk_definitions());
+    auto const expression = parse(
+        "reduce(GRBM_COUNT,max) - reduce(GRBM_COUNT,min) * 2 + reduce(GRBM_COUNT,avr)");
 
     auto const inputs = std::array{ reduction_of({ 10.0, 4.0, 1.0 }) };
     EXPECT_DOUBLE_EQ(expression.evaluate(inputs), 10.0 - (1.0 * 2.0) + 5.0);
@@ -138,7 +145,7 @@ TEST(DerivedExpressionTest, OperatorsFollowPrecedenceAndReduceOperations)
 
 TEST(DerivedExpressionTest, DivisionByZeroIntervalIsZero)
 {
-    auto const expression = expression_parser::parse(k_mfma_util, sdk_definitions());
+    auto const expression = parse(k_mfma_util);
 
     auto const inputs =
         std::array{ reduction_of({ 0.0 }), reduction_of({ 0.0 }), reduction_of({ 4.0 }) };
@@ -183,8 +190,7 @@ TEST(DerivedExpressionTest, ClassifiesHowASampleIsObtained)
     for(const auto& test_case : k_cases)
     {
         SCOPED_TRACE(test_case.expression);
-        auto const expression =
-            expression_parser::parse(test_case.expression, sdk_definitions());
+        auto const expression = parse(test_case.expression);
         EXPECT_EQ(expression.evaluation, test_case.expected);
     }
 }
@@ -221,12 +227,12 @@ TEST(DerivedExpressionTest, RejectsUnsupportedExpressionsNamingTheReason)
     for(const auto& test_case : k_cases)
     {
         SCOPED_TRACE(test_case.expression);
-        auto const parse = [&test_case] {
-            [[maybe_unused]] auto const expression =
-                expression_parser::parse(test_case.expression, sdk_definitions());
+        auto const parse_case = [&test_case] {
+            [[maybe_unused]] auto const expression = parse(test_case.expression);
         };
-        EXPECT_THAT(parse, ::testing::ThrowsMessage<std::invalid_argument>(
-                               ::testing::HasSubstr(std::string{ test_case.reason })));
+        EXPECT_THAT(parse_case,
+                    ::testing::ThrowsMessage<std::invalid_argument>(
+                        ::testing::HasSubstr(std::string{ test_case.reason })));
     }
 }
 

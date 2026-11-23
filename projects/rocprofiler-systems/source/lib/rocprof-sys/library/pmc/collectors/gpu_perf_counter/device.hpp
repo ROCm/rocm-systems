@@ -5,8 +5,8 @@
 
 #include "common/defines.h"
 #include "core/agent.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/expression_tree.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "logger/debug.hpp"
 
@@ -31,6 +31,20 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
+/// @brief The counters a device samples, as the device provider resolved them.
+struct device_counters
+{
+    /// Counters the user requested; every instance is reported in each sample.
+    std::vector<counter_metadata> requested;
+    /// Counters that are read only to evaluate the interval derived counters in
+    /// `requested`.
+    std::vector<counter_metadata> inputs;
+    /// The parsed expression of each derived counter in `requested`, by counter name.
+    std::unordered_map<std::string, derived_expression> expressions;
+    /// The slot each input counter's reduction has in `expressions`.
+    input_slots slots;
+};
+
 template <policies::gpu_perf_counters::backend Backend>
 class device
 {
@@ -49,7 +63,7 @@ public:
             std::max<size_t>((m_counter_meta.size() + counters.inputs.size()) *
                                  k_record_buffer_headroom_factor,
                              k_record_buffer_min_size));
-        build_record_roles(counters.inputs);
+        build_record_roles(counters);
     }
 
     [[nodiscard]] bool is_supported() const noexcept { return !m_counter_meta.empty(); }
@@ -213,32 +227,20 @@ private:
         derived_expression expression;  // reads m_input_reductions by slot
     };
 
-    void build_record_roles(const std::vector<counter_metadata>& inputs)
+    void build_record_roles(const device_counters& counters)
     {
-        auto all_counters = m_counter_meta;
-        all_counters.insert(all_counters.end(), inputs.begin(), inputs.end());
-        auto const definitions = counter_definitions{ all_counters };
-
-        auto slots_by_name = input_slots{};
         for(const auto& meta : m_counter_meta)
         {
-            add_requested(meta, definitions, slots_by_name);
+            add_requested(meta, counters.expressions);
         }
-        for(const auto& meta : all_counters)
-        {
-            auto const slot = slots_by_name.find(meta.name);
-            if(slot != slots_by_name.end() && !meta.is_derived)
-            {
-                auto& role       = m_record_roles[meta.counter_id];
-                role.is_constant = meta.is_constant;
-                role.input_slot  = slot->second;
-            }
-        }
-        m_input_reductions.resize(slots_by_name.size());
+        add_inputs(m_counter_meta, counters.slots);
+        add_inputs(counters.inputs, counters.slots);
+        m_input_reductions.resize(counters.slots.size());
     }
 
-    void add_requested(const counter_metadata&    meta,
-                       const counter_definitions& definitions, input_slots& slots_by_name)
+    void add_requested(
+        const counter_metadata&                                    meta,
+        const std::unordered_map<std::string, derived_expression>& expressions)
     {
         if(!meta.is_derived)
         {
@@ -247,9 +249,14 @@ private:
             return;
         }
 
-        auto expression =
-            expression_parser::parse(meta.expression, definitions, slots_by_name);
-        switch(expression.evaluation)
+        auto const itr = expressions.find(meta.name);
+        if(itr == expressions.end())
+        {
+            throw std::logic_error(
+                fmt::format("GPU {}: derived counter {} has no parsed expression",
+                            m_agent->device_type_index, meta.name));
+        }
+        switch(itr->second.evaluation)
         {
             case derived_evaluation::constant:
                 m_record_roles[meta.counter_id] = { .is_constant = true,
@@ -262,13 +269,29 @@ private:
             default:
                 throw std::logic_error(
                     fmt::format("derived_evaluation {} not handled",
-                                static_cast<int>(expression.evaluation)));
+                                static_cast<int>(itr->second.evaluation)));
         }
 
         // The SDK value of an interval counter is replaced by the evaluated one.
         m_record_roles[meta.counter_id] = {};
         m_interval_counters.push_back(
-            { .counter_id = meta.counter_id, .expression = std::move(expression) });
+            { .counter_id = meta.counter_id, .expression = itr->second });
+    }
+
+    // Gives every instance of a counter that an expression reads its input slot.
+    void add_inputs(const std::vector<counter_metadata>& candidates,
+                    const input_slots&                   slots)
+    {
+        for(const auto& meta : candidates)
+        {
+            auto const slot = slots.find(meta.name);
+            if(slot != slots.end() && !meta.is_derived)
+            {
+                auto& role       = m_record_roles[meta.counter_id];
+                role.is_constant = meta.is_constant;
+                role.input_slot  = slot->second;
+            }
+        }
     }
 
     [[nodiscard]] record_role& role_of(counter_id_t counter_id)

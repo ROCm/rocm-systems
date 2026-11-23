@@ -38,16 +38,6 @@ static_assert(sizeof(counter_value) == sizeof(counter_id_t) + sizeof(double),
 
 using metrics = std::vector<counter_value>;
 
-/// @brief The counters a device samples.
-struct device_counters
-{
-    /// Counters the user requested; every instance is reported in each sample.
-    std::vector<counter_metadata> requested;
-    /// Counters that are read only to evaluate the interval derived counters in
-    /// `requested`, and the derived counters their expressions refer to.
-    std::vector<counter_metadata> inputs;
-};
-
 struct counter_definition
 {
     std::string name;

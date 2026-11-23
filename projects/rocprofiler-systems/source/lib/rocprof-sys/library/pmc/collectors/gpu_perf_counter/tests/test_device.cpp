@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "mock_backend.hpp"
@@ -14,6 +16,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -415,6 +418,14 @@ find_value(const metrics& result, counter_id_t counter_id)
     return itr->value;
 }
 
+void
+expect_value(const metrics& result, counter_id_t counter_id, double expected)
+{
+    auto const value = find_value(result, counter_id);
+    ASSERT_TRUE(value.has_value()) << "counter " << counter_id;
+    EXPECT_DOUBLE_EQ(*value, expected) << "counter " << counter_id;
+}
+
 counter_metadata
 raw_counter(counter_id_t counter_id, std::string name)
 {
@@ -441,6 +452,32 @@ derived_counter(counter_id_t counter_id, std::string name, std::string expressio
     return meta;
 }
 
+// Resolves counters the way the device provider does: parses every requested derived
+// counter. @p definitions are counters its expression names that are not collected.
+device_counters
+resolve_counters(std::vector<counter_metadata> requested,
+                 std::vector<counter_metadata> inputs,
+                 std::vector<counter_metadata> definitions)
+{
+    definitions.insert(definitions.end(), requested.begin(), requested.end());
+    definitions.insert(definitions.end(), inputs.begin(), inputs.end());
+    auto const names = counter_definitions{ definitions };
+
+    auto counters = device_counters{};
+    for(const auto& meta : requested)
+    {
+        if(meta.is_derived)
+        {
+            counters.expressions.insert_or_assign(
+                meta.name,
+                expression_parser::parse(meta.expression, names, counters.slots));
+        }
+    }
+    counters.requested = std::move(requested);
+    counters.inputs    = std::move(inputs);
+    return counters;
+}
+
 MockBackend::counter_record_t
 record_of(counter_id_t counter_id, double value)
 {
@@ -452,6 +489,9 @@ record_of(counter_id_t counter_id, double value)
 
 // The SDK device counting service returns counters as totals since start_context.
 // This feeds one set of totals per sample and identifies each record by its own id.
+constexpr const char* k_mfma_util = "reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/"
+                                    "(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100";
+
 void
 expect_cumulative_samples(MockBackendImpl& mock_impl,
                           std::vector<std::vector<MockBackend::counter_record_t>> samples)
@@ -520,8 +560,8 @@ TEST_F(SdkPmcDeviceTest, ConstantDerivedCounterSampleIsItsValue)
 
     device<MockBackend> dev(
         mock_backend, test_context, test_agent,
-        { .requested = { derived_counter(k_simd_num_id, "SIMD_NUM", "simd_count") },
-          .inputs    = { constant_counter(0, "simd_count") } });
+        resolve_counters({ derived_counter(k_simd_num_id, "SIMD_NUM", "simd_count") }, {},
+                         { constant_counter(0, "simd_count") }));
 
     auto samples = std::vector<std::vector<MockBackend::counter_record_t>>(
         k_timestamps.size(), { record_of(k_simd_num_id, k_simd_num) });
@@ -559,13 +599,11 @@ TEST_F(SdkPmcDeviceTest, DerivedRatioCounterSampleIsEvaluatedOnIntervalDeltas)
 
     device<MockBackend> dev(
         mock_backend, test_context, test_agent,
-        { .requested = { derived_counter(k_mfma_util_id, "MfmaUtil",
-                                         "reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/"
-                                         "(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100") },
-          .inputs    = { raw_counter(k_busy_id, "SQ_VALU_MFMA_BUSY_CYCLES"),
-                         raw_counter(k_active_id, "GRBM_GUI_ACTIVE"),
-                         derived_counter(k_simd_num_id, "SIMD_NUM", "simd_count"),
-                         constant_counter(k_simd_count_id, "simd_count") } });
+        resolve_counters({ derived_counter(k_mfma_util_id, "MfmaUtil", k_mfma_util) },
+                         { raw_counter(k_busy_id, "SQ_VALU_MFMA_BUSY_CYCLES"),
+                           raw_counter(k_active_id, "GRBM_GUI_ACTIVE"),
+                           constant_counter(k_simd_count_id, "simd_count") },
+                         { derived_counter(k_simd_num_id, "SIMD_NUM", "simd_count") }));
 
     auto samples = std::vector<std::vector<MockBackend::counter_record_t>>{};
     for(size_t i = 0; i < k_timestamps.size(); ++i)
@@ -588,6 +626,86 @@ TEST_F(SdkPmcDeviceTest, DerivedRatioCounterSampleIsEvaluatedOnIntervalDeltas)
         EXPECT_DOUBLE_EQ(*value, k_mfma_util_interval.at(i)) << "sample " << i;
         EXPECT_EQ(result.size(), 1U) << "inputs must not be reported, sample " << i;
     }
+}
+
+// A counter can be requested itself and be an input of a requested derived counter, and
+// it can have several instances. Every instance is reported and enters the reduction.
+TEST_F(SdkPmcDeviceTest, RequestedInputWithTwoInstancesIsReportedAndReduced)
+{
+    constexpr counter_id_t k_busy_xcc0_id   = 11;
+    constexpr counter_id_t k_busy_xcc1_id   = 12;
+    constexpr counter_id_t k_active_xcc0_id = 21;
+    constexpr counter_id_t k_active_xcc1_id = 22;
+    constexpr counter_id_t k_simd_num_id    = 30;
+    constexpr counter_id_t k_simd_count_id  = 31;
+    constexpr counter_id_t k_mfma_util_id   = 50;
+    constexpr double       k_simd_num       = 4.0;
+
+    constexpr std::array<double, 2>        k_busy_xcc0_cumulative   = { 1000.0, 3000.0 };
+    constexpr std::array<double, 2>        k_busy_xcc1_cumulative   = { 740.0, 2220.0 };
+    constexpr std::array<double, 2>        k_active_xcc0_cumulative = { 1000.0, 2000.0 };
+    constexpr std::array<double, 2>        k_active_xcc1_cumulative = { 990.0, 1980.0 };
+    constexpr std::array<double, 2>        k_mfma_util_interval     = { 43.5, 87.0 };
+    constexpr double                       k_active_xcc0_interval   = 1000.0;
+    constexpr double                       k_active_xcc1_interval   = 990.0;
+    constexpr std::array<std::uint64_t, 2> k_timestamps             = { 1000, 2000 };
+    constexpr size_t                       k_reported_count         = 3;
+
+    auto const active_instances =
+        std::vector{ raw_counter(k_active_xcc0_id, "GRBM_GUI_ACTIVE"),
+                     raw_counter(k_active_xcc1_id, "GRBM_GUI_ACTIVE") };
+    device<MockBackend> dev(
+        mock_backend, test_context, test_agent,
+        resolve_counters({ derived_counter(k_mfma_util_id, "MfmaUtil", k_mfma_util),
+                           active_instances.at(0), active_instances.at(1) },
+                         { raw_counter(k_busy_xcc0_id, "SQ_VALU_MFMA_BUSY_CYCLES"),
+                           raw_counter(k_busy_xcc1_id, "SQ_VALU_MFMA_BUSY_CYCLES"),
+                           active_instances.at(0), active_instances.at(1),
+                           constant_counter(k_simd_count_id, "simd_count") },
+                         { derived_counter(k_simd_num_id, "SIMD_NUM", "simd_count") }));
+
+    auto samples = std::vector<std::vector<MockBackend::counter_record_t>>{};
+    for(size_t i = 0; i < k_timestamps.size(); ++i)
+    {
+        samples.push_back({ record_of(k_busy_xcc0_id, k_busy_xcc0_cumulative.at(i)),
+                            record_of(k_busy_xcc1_id, k_busy_xcc1_cumulative.at(i)),
+                            record_of(k_active_xcc0_id, k_active_xcc0_cumulative.at(i)),
+                            record_of(k_active_xcc1_id, k_active_xcc1_cumulative.at(i)),
+                            record_of(k_simd_count_id, k_simd_num) });
+    }
+    expect_cumulative_samples(*m_mock_impl, std::move(samples));
+
+    const enabled_metrics enabled{ {} };
+    for(size_t i = 0; i < k_timestamps.size(); ++i)
+    {
+        SCOPED_TRACE(i);
+        auto const result = dev.sample_metrics(enabled, k_timestamps.at(i));
+        expect_value(result, k_mfma_util_id, k_mfma_util_interval.at(i));
+        expect_value(result, k_active_xcc0_id, k_active_xcc0_interval);
+        expect_value(result, k_active_xcc1_id, k_active_xcc1_interval);
+        EXPECT_EQ(result.size(), k_reported_count);
+    }
+}
+
+// The SDK returns records only for the counters in the counter config, so a record of
+// any other counter is a broken invariant, not a value to drop.
+TEST_F(SdkPmcDeviceTest, RecordOfCounterOutsideTheConfigThrows)
+{
+    constexpr counter_id_t  k_waves_id     = 10;
+    constexpr counter_id_t  k_unknown_id   = 99;
+    constexpr double        k_record_value = 5.0;
+    constexpr std::uint64_t k_timestamp    = 1000;
+
+    device<MockBackend> dev(mock_backend, test_context, test_agent,
+                            { .requested = { raw_counter(k_waves_id, "SQ_WAVES") } });
+    expect_cumulative_samples(*m_mock_impl,
+                              { { record_of(k_unknown_id, k_record_value) } });
+
+    const enabled_metrics enabled{ {} };
+    auto const            sample = [&dev, &enabled] {
+        [[maybe_unused]] const auto& result = dev.sample_metrics(enabled, k_timestamp);
+    };
+    EXPECT_THROW(sample(), std::logic_error);
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing

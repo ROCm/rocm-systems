@@ -78,14 +78,6 @@ public:
         return expression_parser{ definitions, expression, slots }.parse_root();
     }
 
-    /// @brief As above, for a caller that does not need the input slots.
-    [[nodiscard]] static derived_expression parse(std::string_view           expression,
-                                                  const counter_definitions& definitions)
-    {
-        auto slots = input_slots{};
-        return parse(expression, definitions, slots);
-    }
-
 private:
     using expression_scanner = detail::expression_scanner;
     using node_kind          = detail::node_kind;
