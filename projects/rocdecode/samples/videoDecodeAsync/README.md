@@ -77,7 +77,7 @@ A plain `no-copy` run, where the consumer reads each frame as soon as it is dequ
 
 This prints `MD5 digest does not match the reference MD5 digest` and exits with 1. Even with no hold, the decoder has already reused many of the surfaces by the time the consumer reads them; a smaller queue (`-q 1`) reduces the damage but does not prevent it.
 
-The control, as the `video_decodeAsync-no-copy-control` CTest runs it. Each frame is held until 8 more frames have been displayed (`-w lag:8`, a fixed number of pictures, so the result does not depend on timing), and `-dd 0` makes the surfaces be reused as soon as possible:
+The following command runs the control the same way as the `video_decodeAsync-no-copy-control` CTest. Each frame is held until 8 more frames have been displayed (`-w lag:8`). Because this is a fixed number of pictures, the result doesn't depend on timing. The `-dd 0` option makes the decoder reuse surfaces as soon as possible:
 
 ```shell
 ./videodecodeasync -i $V/AMD_driving_virtual_20-H265.mp4 -p no-copy -w lag:8 -dd 0 \
