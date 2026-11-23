@@ -67,6 +67,14 @@ jobs:
           - id: gfx1100-01
             label: lstt-gfx1100
             gfx: gfx1100
+          # These two GPUs are on one machine whose single runner carries both
+          # labels, so their rows run one after the other on it.
+          - id: gfx908-01
+            label: lstt-gfx908
+            gfx: gfx908
+          - id: gfx1030-01
+            label: lstt-gfx1030
+            gfx: gfx1030
     runs-on:
       - ${{ matrix.label }}
       - ${{ matrix.host_label || matrix.label }}
