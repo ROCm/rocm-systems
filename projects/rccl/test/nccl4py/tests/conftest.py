@@ -82,7 +82,11 @@ os.makedirs(LOGDIR, exist_ok=True)
 CPU_SMOKE_TESTS = ("tests/test_rocm_extensions.py",)
 
 # Optional GPU-backed modules; each self-skips without enough HIP devices.
-GPU_SMOKE_TESTS = ("tests/test_shim_surface.py", "tests/test_group_window.py")
+GPU_SMOKE_TESTS = (
+    "tests/test_shim_surface.py",
+    "tests/test_group_window.py",
+    "tests/test_comm_config.py",
+)
 
 
 def _librccl_candidates():

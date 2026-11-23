@@ -35,6 +35,7 @@ It exercises:
 | `test_rocm_extensions.py` | RCCL-only wrappers (`all_reduce_with_bias`, `all_to_all_v`) fail controlled |
 | `test_shim_surface.py` | HIP `cuda.core` shim (optional; self-skips without visible GPUs) |
 | `test_group_window.py` | `register_window()` inside `nccl.core.group()` returns a handle (2 GPUs; self-skips on fewer) |
+| `test_comm_config.py` | `NCCLConfig(num_rma_sig=...)` reaches RCCL: a one-rank `Communicator.init` accepts 2 and rejects -1 (1 GPU; self-skips without one) |
 
 The harness also runs an out-of-process `import nccl.bindings` check against
 the uv env after the wheel is installed. The `test_loader_stubs.py` module
