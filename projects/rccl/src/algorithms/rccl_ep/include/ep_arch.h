@@ -35,6 +35,40 @@ __global__ void k_ep_publish_arch(EpConfig cfg, WindowView* __restrict__ peers, 
   for (int i = threadIdx.x; i < kArchLen; i += blockDim.x) slot[i] = mine[i];
 }
 
+// This rank's gcnArchName, or RCCL_EP_FAKE_ARCH on the rank RCCL_EP_FAKE_ARCH_RANK names
+// (every rank without it), zero-padded to kArchLen.
+inline int local_arch_string(const EpConfig& cfg, int device, char* mine, char* err, size_t err_len) {
+  memset(mine, 0, kArchLen);
+  hipDeviceProp_t pr;
+  if (hipGetDeviceProperties(&pr, device) != hipSuccess) {
+    snprintf(err, err_len, "hipGetDeviceProperties(%d) failed", device);
+    return -1;
+  }
+  snprintf(mine, kArchLen, "%s", pr.gcnArchName);
+
+  const char* fake = getenv("RCCL_EP_FAKE_ARCH");
+  const char* fake_rank = getenv("RCCL_EP_FAKE_ARCH_RANK");
+  if (fake && *fake && (!fake_rank || atoi(fake_rank) == cfg.rank)) snprintf(mine, kArchLen, "%s", fake);
+  return 0;
+}
+
+// 0 if the num_ranks kArchLen-byte slots of `all` agree, -1 with a message naming both
+// architectures otherwise.
+inline int compare_arch_table(char* all, int num_ranks, char* err, size_t err_len) {
+  for (int r = 0; r < num_ranks; ++r) {
+    all[(size_t)r * kArchLen + kArchLen - 1] = '\0';
+    if (strcmp(all, all + (size_t)r * kArchLen) != 0) {
+      snprintf(err, err_len,
+               "mixed-architecture communicator: rank 0 is %s but rank %d is %s. "
+               "FP8 e4m3 is fnuz on gfx942 and OCP on gfx950, so the ranks would "
+               "not agree on the wire format",
+               all, r, all + (size_t)r * kArchLen);
+      return -1;
+    }
+  }
+  return 0;
+}
+
 // Returns 0 if every rank reports the same architecture, -1 otherwise.
 // On mismatch `err` receives a message naming both architectures.
 //
@@ -43,17 +77,7 @@ __global__ void k_ep_publish_arch(EpConfig cfg, WindowView* __restrict__ peers, 
 inline int check_uniform_arch(const EpConfig& cfg, int device, WindowView* d_views, const WindowView& self,
                               ncclDevComm devComm, char* err, size_t err_len) {
   char mine[kArchLen];
-  memset(mine, 0, sizeof(mine));
-  hipDeviceProp_t pr;
-  if (hipGetDeviceProperties(&pr, device) != hipSuccess) {
-    snprintf(err, err_len, "hipGetDeviceProperties(%d) failed", device);
-    return -1;
-  }
-  snprintf(mine, sizeof(mine), "%s", pr.gcnArchName);
-
-  const char* fake = getenv("RCCL_EP_FAKE_ARCH");
-  const char* fake_rank = getenv("RCCL_EP_FAKE_ARCH_RANK");
-  if (fake && *fake && (!fake_rank || atoi(fake_rank) == cfg.rank)) snprintf(mine, sizeof(mine), "%s", fake);
+  if (local_arch_string(cfg, device, mine, err, err_len) != 0) return -1;
 
   char* d_mine = nullptr;
   if (hipMalloc(&d_mine, kArchLen) != hipSuccess) {
@@ -91,19 +115,7 @@ inline int check_uniform_arch(const EpConfig& cfg, int device, WindowView* d_vie
     return -1;
   }
 
-  int rc = 0;
-  for (int r = 0; r < cfg.num_ranks; ++r) {
-    all[(size_t)r * kArchLen + kArchLen - 1] = '\0';
-    if (strcmp(all, all + (size_t)r * kArchLen) != 0) {
-      snprintf(err, err_len,
-               "mixed-architecture communicator: rank 0 is %s but rank %d is %s. "
-               "FP8 e4m3 is fnuz on gfx942 and OCP on gfx950, so the ranks would "
-               "not agree on the wire format",
-               all, r, all + (size_t)r * kArchLen);
-      rc = -1;
-      break;
-    }
-  }
+  const int rc = compare_arch_table(all, cfg.num_ranks, err, err_len);
   free(all);
   return rc;
 }

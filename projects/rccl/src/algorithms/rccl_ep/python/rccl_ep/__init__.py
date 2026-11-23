@@ -7,6 +7,7 @@
 
 import ctypes
 import os
+import sys
 from typing import Optional, Tuple, Union
 
 import torch
@@ -68,6 +69,9 @@ def _lib():
         # The unique id is an opaque binary blob, not a string: raw pointers
         # rather than c_char_p, which is for NUL-terminated data.
         lib.ep_create.argtypes = [I, I, ctypes.c_void_p, I, I, I]
+        # ep_create with the ranks per node: ep_create is ep_create_nodes(..., num_ranks).
+        lib.ep_create_nodes.restype = ctypes.c_void_p
+        lib.ep_create_nodes.argtypes = [I, I, ctypes.c_void_p, I, I, I, I]
         lib.ep_configure.argtypes = [ctypes.c_void_p, I, I]
         lib.ep_window_bytes.restype = ctypes.c_size_t
         lib.ep_window_bytes.argtypes = [ctypes.c_void_p]
@@ -86,6 +90,10 @@ def _lib():
                                           I, I, P, I, I, P, P, I, P]
         lib.ep_combine.restype = I
         lib.ep_combine.argtypes = [ctypes.c_void_p, P, P, P, P, P, I, P, I, P, P, I, P, P, I, P]
+        # Internode: the host int32 arrays are raw pointers, and ep_inter_bind,
+        # which only records its arguments for the next call, takes no stream.
+        lib.ep_inter_counts.argtypes = [ctypes.c_void_p, P, ctypes.c_void_p, P]
+        lib.ep_inter_bind.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, P, I]
         lib.ep_get_unique_id.argtypes = [ctypes.c_void_p]
         lib.ep_unique_id_size.restype = I
         _LIB = lib
@@ -186,10 +194,49 @@ class EPHandle:
         self.expert_alignment = 1
         self.expanded = False
         self.num_expanded_rows = 0
+        # Internode only: this plan's [sendc] and [recvc] on the host, from the count
+        # exchange; every dispatch or combine on the handle binds them (_inter_bind).
+        self.inter_sendc = None
+        self.inter_recvc = None
+
+
+def _node_size(group, opt_in: bool) -> int:
+    """The ranks per node of `group`, which is the whole group on one node. Collective over group.
+
+    Nodes are grouped by NCCL_HOSTID, which is what RCCL itself groups ranks by, else the host
+    name. A group that spans nodes needs every rank to opt in to the internode path (`opt_in`):
+    NotImplementedError if no rank does, ValueError if only some do, and ValueError unless the
+    nodes are equal in size, each holding contiguous ranks. The opt-in is gathered with the
+    host, so every rank reaches the same verdict and none goes on alone into the collectives
+    that follow."""
+    world = dist.get_world_size(group)
+    if world == 1:
+        return 1
+    import socket
+    gathered = [None] * world
+    dist.all_gather_object(gathered, (os.environ.get("NCCL_HOSTID") or socket.gethostname(),
+                                      bool(opt_in)), group)
+    hosts = [host for host, _ in gathered]
+    nodes = len(set(hosts))
+    if nodes == 1:
+        return world
+    opted = [r for r, (_, o) in enumerate(gathered) if o]
+    if not opted:
+        raise NotImplementedError(f"this group spans {nodes} nodes, and the internode path is opt-in: "
+                                  f"pass allow_internode=True on every rank")
+    if len(opted) != world:
+        raise ValueError(f"this group spans {nodes} nodes, and allow_internode=True must be given on every "
+                         f"rank; only ranks {opted} gave it")
+    node_size = hosts.count(hosts[0])
+    if (world % node_size != 0 or nodes != world // node_size
+            or any(hosts[r] != hosts[r - r % node_size] for r in range(world))):
+        raise ValueError(f"the internode path needs equal nodes, each holding contiguous "
+                         f"ranks; this communicator's nodes are {hosts}")
+    return node_size
 
 
 class ElasticBuffer:
-    """Intranode expert-parallel dispatch/combine buffer.
+    """Expert-parallel dispatch/combine buffer.
 
     Implemented: BF16 and FP8 dispatch, expanded (grouped-by-expert) dispatch
     with alignment and zero padding, cached replay, both combine reduction
@@ -197,8 +244,15 @@ class ElasticBuffer:
     inherent here, since routing uses no atomics and no arrival-order
     dependence, so repeated runs are byte-identical.
 
-    Scale-up only: every peer must be reachable by load and store, so a
-    communicator spanning more than one node is rejected at construction.
+    Within a node every peer is reached by load and store. A group that spans
+    several nodes takes the internode path, which reaches peers on other nodes
+    by RCCL send/recv, as one flat (1, num_ranks) domain. That path is opt-in:
+    every rank passes allow_internode=True. A group that spans nodes raises, at
+    construction, NotImplementedError when no rank opts in and ValueError when
+    only some ranks do. Nodes are grouped by NCCL_HOSTID, else the host name; they
+    must be equal in size, each holding contiguous ranks. allow_hybrid_mode is
+    accepted and does not change this: a group that spans nodes takes the same
+    direct path with or without it.
 
     Tokens are 2-D: dispatch takes x as [num_tokens, hidden] (pass x.view(-1, hidden)
     for [batch, seq, hidden] activations) and combine returns that shape. A top-k id
@@ -206,36 +260,42 @@ class ElasticBuffer:
     top-k is delivered in each of its slots.
     """
 
+    # Single node unless the constructor finds that the group spans nodes.
+    internode = False
+
     def __init__(self, group, num_max_tokens_per_rank, hidden,
                  num_experts=None, num_topk=None,
                  deterministic=False, allow_hybrid_mode=False,
                  allow_multiple_reduction=False,
                  prefer_overlap_with_compute=False, sl_idx=0,
                  num_allocated_qps=0, explicitly_destroy=False,
-                 num_gpu_timeout_secs=100, num_cpu_timeout_secs=100, **kwargs):
+                 num_gpu_timeout_secs=100, num_cpu_timeout_secs=100, *,
+                 allow_internode=False, **kwargs):
         # Standard callers pass True for both, so refusing them outright would
         # leave the standard invocation unable to run at all.
         #
         # hybrid mode: on a single node there is no scale-out leg, so
         # num_scaleout_ranks is 1 and every hybrid branch degenerates to the
-        # pure scale-up path we implement. Accepting it is therefore honest
-        # HERE and only here -- across nodes it would silently do the wrong
-        # thing, so the single-node property is verified rather than assumed.
-        if allow_hybrid_mode:
-            import socket
-            hosts = [None] * dist.get_world_size(group)
-            dist.all_gather_object(hosts, socket.gethostname(), group)
-            if len(set(hosts)) != 1:
-                raise NotImplementedError(
-                    f"allow_hybrid_mode needs a scale-out leg, which this path does "
-                    f"not provide, and this communicator spans {len(set(hosts))} "
-                    f"nodes. It is accepted only on a single node, where it "
-                    f"degenerates to the scale-up path.")
+        # pure scale-up path. Across nodes this package has only the direct
+        # internode path, which the group takes, given allow_internode, with or
+        # without the flag, and the domain stays (1, num_ranks).
+        #
         # multiple reduction: the expanded combine has to apply the per-rank
         # grouped reduction before sending, instead of shipping one row per
         # (token, expert). Implemented; see combine().
         self.allow_multiple_reduction = bool(allow_multiple_reduction)
         self.allow_hybrid_mode = bool(allow_hybrid_mode)
+        # The internode path is taken when the group spans more than one node and every rank
+        # opted in. Decided before the unique-id broadcast and ep_create_nodes, so a
+        # refusal reaches every rank before any of them waits on a peer. ep_configure checks
+        # node_size against RCCL's LSA team, which RCCL builds from the same host grouping.
+        opt_in = bool(allow_internode)
+        node_size = _node_size(group, opt_in)
+        world = dist.get_world_size(group)
+        self.internode = node_size < world
+        if self.internode and dist.get_rank(group) == 0:
+            print(f"[rccl_ep] ElasticBuffer: the group spans {world // node_size} nodes of {node_size} ranks "
+                  f"and uses the internode send/recv path", file=sys.stderr, flush=True)
 
         self.group = group
         self.rank_idx = dist.get_rank(group)
@@ -271,9 +331,10 @@ class ElasticBuffer:
         t = t.cpu()
         raw = bytes(bytearray(t.tolist()))
 
-        self._h = lib.ep_create(self.rank_idx, self.num_ranks, raw,
-                                num_max_tokens_per_rank, hidden,
-                                torch.cuda.current_device())
+        # node_size is the whole group on a single node, where ep_create_nodes is ep_create.
+        self._h = lib.ep_create_nodes(self.rank_idx, self.num_ranks, raw,
+                                      num_max_tokens_per_rank, hidden,
+                                      torch.cuda.current_device(), node_size)
         if not self._h:
             raise RuntimeError("ep_create failed")
 
@@ -362,6 +423,26 @@ class ElasticBuffer:
             raise RuntimeError(f"ep_configure({num_experts}, {num_topk}) failed")
         self._configured = key
         self.num_experts, self.num_topk = num_experts, num_topk
+
+    def _inter_counts(self, h, stream):
+        """Internode: exchange the plan's send counts (ep_inter_counts, one host sync) and
+        keep [sendc, recvc] on the handle, where every later call on it binds them."""
+        R = self.num_ranks
+        out = (ctypes.c_int32 * (2 * R))()
+        if _lib().ep_inter_counts(self._h, h.sendc.data_ptr(), ctypes.addressof(out), stream) != 0:
+            raise RuntimeError("ep_inter_counts failed")
+        h.inter_sendc = (ctypes.c_int32 * R)(*out[:R])
+        h.inter_recvc = (ctypes.c_int32 * R)(*out[R:])
+
+    def _inter_bind(self, h):
+        """Internode: bind the handle's counts and plan for the dispatch or combine that
+        follows -- the transport posts receives of exactly these sizes."""
+        if not self.internode:
+            return
+        if _lib().ep_inter_bind(self._h, ctypes.addressof(h.inter_sendc),
+                                ctypes.addressof(h.inter_recvc), h.send_list.data_ptr(),
+                                h.num_tokens) != 0:
+            raise RuntimeError("ep_inter_bind failed")
 
     @property
     def num_local_experts(self):
@@ -511,8 +592,16 @@ class ElasticBuffer:
                            send_list.data_ptr(), sendc.data_ptr(), stream) != 0:
                 raise RuntimeError("ep_plan failed")
             h.slot, h.sendc, h.send_list = slot, sendc, send_list
+            if self.internode:
+                self._inter_counts(h, stream)
 
         cap = self.num_ranks * self.num_max_tokens_per_rank
+        if self.internode:
+            # The count exchange put the receive total on the host, so size outputs to it: a
+            # slice of a window-capacity buffer would keep the whole buffer alive while the
+            # caller holds it. At least one row, so a rank that receives nothing still passes
+            # valid pointers.
+            cap = max(1, sum(h.inter_recvc))
         hidden_sf = (self.hidden + 127) // 128
         rx = (torch.empty((cap, self.hidden), dtype=x.dtype, device=x.device)
               if use_fp8 else
@@ -522,6 +611,7 @@ class ElasticBuffer:
         rtw = torch.empty((cap, num_topk), dtype=torch.float32, device=x.device)
         rsrc = torch.empty((cap,), dtype=torch.int32, device=x.device)
 
+        self._inter_bind(h)
         n = lib.ep_dispatch(self._h, x.data_ptr(), _ptr(x_sf), ti32.data_ptr(), tw.data_ptr(),
                             num_tokens, send_list.data_ptr(), sendc.data_ptr(),
                             1 if use_fp8 else 0, num_sms,
@@ -672,6 +762,7 @@ class ElasticBuffer:
         # inline, the copy is dropped as soon as data_ptr() returns and the
         # allocator can hand the block out again before the kernel reads it.
         recv_src = handle.recv_src_metadata[:, 0].contiguous()
+        self._inter_bind(handle)
         rc = lib.ep_combine(self._h, x.data_ptr(), _ptr(in_w),
                             _ptr(handle.row_map) if handle.expanded else 0,
                             handle.recv_topk_idx.data_ptr(),

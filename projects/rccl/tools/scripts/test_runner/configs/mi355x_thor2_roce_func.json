@@ -144,6 +144,51 @@
           "test_filter": "RcclEpDispatchCombineTest.DataPathRejectsBadArguments"
         },
         {
+          "name": "RcclEp_InternodeDirectRoundTrip",
+          "description": "Internode direct round trip on two virtual nodes of four ranks",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeDirectRoundTrip"
+        },
+        {
+          "name": "RcclEp_InternodeRoundTripBelowCapacity",
+          "description": "Internode round trip with fewer tokens than the window holds, rows and combine checked exactly",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeRoundTripBelowCapacity"
+        },
+        {
+          "name": "RcclEp_InternodeFp8AndWeightedCombines",
+          "description": "Internode fp8 rows, expanded layout and weighted combines",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeFp8AndWeightedCombines"
+        },
+        {
+          "name": "RcclEp_InternodeBindIsRequiredAndBounded",
+          "description": "ep_inter_bind is required for internode calls and bounds its counts",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeBindIsRequiredAndBounded"
+        },
+        {
+          "name": "RcclEp_InternodeSetupFailureFailsConfigureOnEveryRank",
+          "description": "Internode ep_configure: an allocation failure on one rank fails it on every rank without a hang",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeSetupFailureFailsConfigureOnEveryRank"
+        },
+        {
+          "name": "RcclEp_InternodeWindowSetupFailureFailsConfigureOnEveryRank",
+          "description": "Internode ep_configure: a window, registration or devComm failure on one rank fails it on every rank",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeWindowSetupFailureFailsConfigureOnEveryRank"
+        },
+        {
+          "name": "RcclEp_InternodeDispatchRefusesAPlanItWasNotBoundFor",
+          "description": "Internode dispatch and combine refuse a send list, token count or plan other than the bound one",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeDispatchRefusesAPlanItWasNotBoundFor"
+        },
+        {
+          "name": "RcclEp_InternodeDispatchKeepsToTheBoundReceiveCounts",
+          "description": "Internode dispatch: a same-node count other than the bound one fails the call, nothing written past the outputs",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeDispatchKeepsToTheBoundReceiveCounts"
+        },
+        {
+          "name": "RcclEp_InternodeCombineOfAnEarlierDispatch",
+          "description": "Internode combine of an earlier dispatch after a later one reduces the earlier dispatch's rows",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeCombineOfAnEarlierDispatch"
+        },
+        {
           "name": "RcclEp_Fp8DispatchIsExact",
           "description": "fp8 payloads and scales arrive bit-exact",
           "test_filter": "RcclEpDispatchCombineTest.Fp8DispatchIsExact"

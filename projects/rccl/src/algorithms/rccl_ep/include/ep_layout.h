@@ -18,6 +18,11 @@
 namespace rccl_ep {
 
 constexpr int kMaxRanks = 16;   // intranode scale-up domain
+// Internode bounds: the whole EP group and its node count, each node at most kMaxRanks. No kernel
+// sizes an array by kMaxRanks; an internode handle runs the shared kernels with num_ranks up to
+// kMaxWorldRanks.
+constexpr int kMaxWorldRanks = 64;
+constexpr int kMaxNodes = 16;
 constexpr int kMaxTopk = 16;
 // Fixed width of one gcnArchName slot in the window's arch region.
 constexpr int kArchLen = 64;

@@ -2,8 +2,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # See LICENSE.txt for license information
-"""ElasticBuffer's Python-side input checks and plan bookkeeping, with the C library stubbed."""
+"""ElasticBuffer's Python-side input checks, internode opt-in and plan bookkeeping, with the C library
+stubbed."""
 
+import ctypes
 import os
 import sys
 import types
@@ -23,9 +25,11 @@ TOKENS, HIDDEN, TOPK, EXPERTS = 4, 256, 2, 4
 RECV = 3  # rows the stubbed ep_dispatch reports received
 
 
-def _make_buffer():
+def _make_buffer(internode=False):
     buf = object.__new__(rccl_ep.ElasticBuffer)
-    buf.num_ranks = 2
+    # Internode: two nodes of two ranks, as far as the Python layer can tell.
+    buf.num_ranks = 4 if internode else 2
+    buf.internode = internode
     buf.num_max_tokens_per_rank = 8
     buf.hidden = HIDDEN
     buf.num_experts = EXPERTS
@@ -36,20 +40,61 @@ def _make_buffer():
     return buf
 
 
-def _install_stubs(monkeypatch, expanded_rows=None):
-    """Stubs every entry point a dispatch and combine reach; returns the calls, by name."""
-    calls = {}
+class _Calls(dict):
+    """The stubbed calls' arguments by name, and `order`: their names in call order."""
+
+    def __init__(self):
+        super().__init__()
+        self.order = []
+
+
+def _install_stubs(monkeypatch, expanded_rows=None, inter_counts=()):
+    """Stubs every entry point a dispatch and combine reach; returns the calls.
+
+    For an internode buffer, `inter_counts` holds the (sendc, recvc) lists that successive
+    ep_inter_counts calls return. ep_inter_bind records the counts it reads at the call, with
+    send_list and num_tokens, and ep_dispatch then reports the bound receive total, or fails
+    with nothing bound, as the library does."""
+    calls = _Calls()
+    pending = list(inter_counts)
+    ranks = len(inter_counts[0][0]) if inter_counts else 0
+    bound = []
+
+    def record(name, *a):
+        calls.setdefault(name, []).append(a)
+        calls.order.append(name)
 
     def stub(name, rc=0):
         def f(*a):
-            calls.setdefault(name, []).append(a)
+            record(name, *a)
             return rc
         return f
+
+    def ep_inter_counts(h, sendc, out, stream):
+        record("ep_inter_counts", h, sendc, out, stream)
+        s, r = pending.pop(0)
+        (ctypes.c_int32 * (2 * ranks)).from_address(out)[:] = s + r
+        return 0
+
+    def ep_inter_bind(h, sendc, recvc, send_list, num_tokens):
+        s = list((ctypes.c_int32 * ranks).from_address(sendc))
+        r = list((ctypes.c_int32 * ranks).from_address(recvc))
+        record("ep_inter_bind", s, r, send_list, num_tokens)
+        bound[:] = [sum(r)]
+        return 0
+
+    def ep_dispatch(*a):
+        record("ep_dispatch", *a)
+        if not inter_counts:
+            return RECV
+        return bound[0] if bound else -1
 
     lib = types.SimpleNamespace(
         ep_configure=stub("ep_configure"),
         ep_plan=stub("ep_plan"),
-        ep_dispatch=stub("ep_dispatch", RECV),
+        ep_inter_counts=ep_inter_counts,
+        ep_inter_bind=ep_inter_bind,
+        ep_dispatch=ep_dispatch,
         ep_recv_counts=stub("ep_recv_counts"),
         ep_expert_counts=stub("ep_expert_counts"),
         ep_expand_build=stub("ep_expand_build", expanded_rows),
@@ -243,3 +288,111 @@ def test_combine_checks_bias_dtype_and_shape(monkeypatch):
     with pytest.raises(ValueError, match="bias1 must be"):
         buf.combine(x, handle, bias=(good, good[:, 8:]))
     assert "ep_combine" not in calls
+
+
+def _stub_group(monkeypatch, hosts, opted_in, rank):
+    """A stubbed group of len(hosts) ranks, this one `rank`, on hosts[rank]: rank r's entry in
+    the constructor's all-gather is (hosts[r], opted_in[r]), except this rank's, which is what
+    the constructor contributes. Returns the ep_create_nodes calls."""
+    monkeypatch.setenv("NCCL_HOSTID", hosts[rank])
+
+    def all_gather_object(out, obj, group=None):
+        out[:] = [obj if r == rank else p for r, p in enumerate(zip(hosts, opted_in))]
+
+    monkeypatch.setattr(rccl_ep, "dist", types.SimpleNamespace(
+        get_world_size=lambda group=None: len(hosts), get_rank=lambda group=None: rank,
+        get_backend=lambda group=None: "gloo", broadcast=lambda *a, **k: None,
+        all_gather_object=all_gather_object))
+    created = []
+
+    def ep_create_nodes(*a):
+        created.append(a)
+        return 1
+
+    monkeypatch.setattr(rccl_ep, "_LIB", types.SimpleNamespace(
+        ep_unique_id_size=lambda: 8, ep_get_unique_id=lambda buf: 0, ep_create_nodes=ep_create_nodes))
+    return created
+
+
+TWO_NODES = ["a", "a", "b", "b"]
+REFUSED = (NotImplementedError, "opt-in: pass allow_internode=True")
+MIXED = (ValueError, "must be given on every rank")
+LAYOUT = (ValueError, "needs equal nodes")
+# (what, hosts, the other ranks' opt-in, how this rank opts in, ranks per node or (error, match))
+CONSTRUCTOR_CASES = [
+    ("one node", ["a"] * 4, [False] * 3, None, 4),
+    ("two nodes, no opt-in", TWO_NODES, [False] * 3, None, REFUSED),
+    ("two nodes, keyword", TWO_NODES, [True] * 3, "keyword", 2),
+    ("two nodes, one other rank not opted in", TWO_NODES, [True, True, False], "keyword", MIXED),
+    ("two nodes, this rank not opted in", TWO_NODES, [True] * 3, None, MIXED),
+    ("interleaved nodes", ["a", "b", "a", "b"], [True] * 3, "keyword", LAYOUT),
+    ("unequal nodes", ["a", "a", "a", "b"], [True] * 3, "keyword", LAYOUT),
+]
+
+
+@pytest.mark.parametrize("hybrid", [False, True], ids=["plain", "hybrid"])
+@pytest.mark.parametrize("rank", [0, 3])
+@pytest.mark.parametrize("what,hosts,others,mine,want", CONSTRUCTOR_CASES, ids=[c[0] for c in CONSTRUCTOR_CASES])
+def test_constructor_takes_the_internode_path_only_when_every_rank_opts_in(
+        monkeypatch, capsys, what, hosts, others, mine, want, rank, hybrid):
+    created = _stub_group(monkeypatch, hosts, others[:rank] + [None] + others[rank:], rank)
+    kw = {"allow_hybrid_mode": hybrid}
+    if mine == "keyword":
+        kw["allow_internode"] = True
+
+    if isinstance(want, tuple):
+        # Every rank sees the same gathered list, so each raises the same error, before the
+        # unique-id broadcast and ep_create_nodes that would wait on its peers.
+        with pytest.raises(want[0], match=want[1]):
+            rccl_ep.ElasticBuffer(None, 8, HIDDEN, **kw)
+        assert not created, what
+        return
+    buf = rccl_ep.ElasticBuffer(None, 8, HIDDEN, **kw)
+    assert [c[-1] for c in created] == [want]
+    assert buf.internode == (want < len(hosts))
+    # One line from group rank 0 when the group takes the internode path, none otherwise.
+    noted = buf.internode and rank == 0
+    assert capsys.readouterr().err.count("internode send/recv path") == (1 if noted else 0)
+
+
+# (sendc, recvc) per rank, as ep_inter_counts returns them.
+COUNTS_A = ([1, 2, 0, 3], [2, 0, 1, 4])
+COUNTS_B = ([0, 1, 1, 1], [1, 1, 0, 0])
+
+
+def test_internode_dispatch_binds_its_plan_and_sizes_outputs_to_the_counts(monkeypatch):
+    calls = _install_stubs(monkeypatch, inter_counts=[COUNTS_A])
+    buf = _make_buffer(internode=True)
+
+    rx, _, rtw, h, _ = buf.dispatch(_x(), topk_idx=_topk())
+
+    steps = ("ep_plan", "ep_inter_counts", "ep_inter_bind", "ep_dispatch")
+    assert [c for c in calls.order if c in steps] == list(steps)
+    assert calls["ep_inter_counts"][0][1] == h.sendc.data_ptr()
+    assert calls["ep_inter_bind"] == [(*COUNTS_A, h.send_list.data_ptr(), TOKENS)]
+    # Sized to the receive total the exchange reported, not sliced from num_ranks * capacity rows.
+    assert rx.shape[0] == h.num_recv == sum(COUNTS_A[1])
+    for t in (rx, h.recv_topk_idx, rtw):
+        assert t.untyped_storage().nbytes() == t.numel() * t.element_size()
+
+
+def test_internode_combine_and_replay_bind_their_own_handle(monkeypatch):
+    calls = _install_stubs(monkeypatch, inter_counts=[COUNTS_A, COUNTS_B])
+    buf = _make_buffer(internode=True)
+    _, _, _, a, _ = buf.dispatch(_x(), topk_idx=_topk())
+    _, _, _, b, _ = buf.dispatch(_x()[:3], topk_idx=_topk()[:3])
+    bind_a = (*COUNTS_A, a.send_list.data_ptr(), TOKENS)
+    assert calls["ep_inter_bind"][-1] == (*COUNTS_B, b.send_list.data_ptr(), 3)
+
+    # The library still holds b's binding; combining a must bind a's first.
+    buf.combine(torch.zeros((a.num_recv, HIDDEN), dtype=torch.bfloat16, device="cuda"), a)
+    assert calls.order[-2:] == ["ep_inter_bind", "ep_combine"]
+    assert calls["ep_inter_bind"][-1] == bind_a
+
+    # A replay reuses the handle's counts, with no new exchange, and binds them again.
+    buf.dispatch(_x()[:3], handle=b)
+    buf.dispatch(_x(), handle=a)
+    assert len(calls["ep_inter_counts"]) == 2
+    last = len(calls.order) - 1 - calls.order[::-1].index("ep_dispatch")
+    assert calls.order[last - 1] == "ep_inter_bind"
+    assert calls["ep_inter_bind"][-1] == bind_a

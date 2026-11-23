@@ -2,7 +2,7 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
- * C ABI for the rccl_ep intranode kernels, consumed from Python via ctypes
+ * C ABI for the rccl_ep kernels, consumed from Python via ctypes
  * rather than a torch extension, which keeps the binding independent of the
  * torch version. Owns the communicator and the symmetric window; every
  * per-call structure belongs to the caller, which is what makes a cached
@@ -18,6 +18,8 @@
  * Every entry point validates its own arguments and returns -1 (or a null
  * handle) with one "[rccl_ep] <fn>: <reason>" line before it launches anything
  * or changes any state, since the ABI is reachable without the Python layer.
+ * The one check that runs on the device is an internode ep_dispatch's count
+ * check against the bound counts, which fails the call after its transfers.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -37,6 +39,7 @@
 #include "device/ep_common.h"
 #include "device/expand.h"
 #include "device/hip_prims.h"
+#include "device/internode.h"
 #include "include/ep_arch.h"
 #include "include/ep_layout.h"
 
@@ -54,14 +57,57 @@ struct EpHandle {
   ncclDevComm devComm{};
   WindowView* d_views{};
   WindowView self_view{};
-  int32_t *d_recvoff{}, *d_total{};
+  int32_t* d_recvoff{};
+  // [receive total, internode plan check], written by each dispatch for the host to read back; also ep_create's setup
+  // check and ep_expand_build's row total.
+  int32_t* d_total{};
   // The HIP device ordinal, kept separately from cfg.rank: the caller is free to
   // map ranks onto devices any way it likes, so querying device properties by
   // rank reads the wrong GPU on every non-identity mapping.
   int device{-1};
   bool devcomm{false};
   bool configured{false};
+  // A transfer failed after part of it was posted to the peers (see mark_broken): no later call can
+  // pair with what the peers expect, so every call but ep_destroy refuses.
+  bool broken{false};
+
+  // Internode (ep_create_nodes with node_size < num_ranks). Ranks [node_base, node_base +
+  // node_size) form the LSA team: the window, its devComm and every LSA barrier live on
+  // node_comm, a split of `comm`. Writes to a remote peer go through d_views_inter (see
+  // InterView) into `outbox`, which has the window's layout, and RCCL send/recv on `comm`
+  // moves each region; `inbox` receives returned combine rows. ep_inter_bind sets `bound`.
+  bool inter{false};
+  int node_size{0}, node_base{0};
+  ncclComm_t node_comm{};
+  ncclComm_t lsa{}; // node_comm internode, comm otherwise: the window and its devComm live on it
+  uint8_t* outbox{};
+  uint8_t* inbox{};
+  WindowView* d_views_inter{};
+  int32_t* d_src_inter{};
+  int32_t* d_scratch{}; // count exchange and barrier, kScratchInts
+  int32_t* host_scratch{};
+  InterCounts bound{};
+  const int32_t* bound_send_list{};
+  int bound_num_tokens{0};
+  bool is_bound{false};
 };
+
+// Count exchange scratch: every rank's sendc (R ints each).
+constexpr int kScratchInts = kMaxWorldRanks * kMaxWorldRanks;
+
+// Row strides differ by dispatch dtype (x) and by combine mode (y), so a remote peer
+// needs one outbox view per stride; the local views are the same in all four.
+enum InterView {
+  kViewBf16 = 0,
+  kViewFp8 = 1,
+  kViewCombGrouped = 2,
+  kViewCombFlat = 3,
+  kNumInterViews = 4
+};
+
+inline bool is_remote(const EpHandle* h, int r) {
+  return h->inter && (r < h->node_base || r >= h->node_base + h->node_size);
+}
 
 #define HC(x) do { hipError_t e_ = (x); if (e_ != hipSuccess) {          \
     fprintf(stderr, "[rccl_ep] %s:%d %s\n", __FILE__, __LINE__,          \
@@ -81,6 +127,7 @@ __attribute__((format(printf, 2, 3))) int ep_fail(const char* fn, const char* fm
 #define REQUIRE_HANDLE(h, fn) \
   do { \
     if ((h) == nullptr) return ep_fail(fn, "null handle"); \
+    if ((h)->broken) return ep_fail(fn, "a transfer failed part-way; the handle can only be destroyed"); \
   } while (0)
 
 // A pointer the call reads or writes, required when `needed`. Buffers sized by a token or row
@@ -140,14 +187,33 @@ inline int ctas_per_rank(int num_sms, int dflt, int num_ranks) {
 // the window, so deregistering the window under it would leave it dangling.
 inline void release_window(EpHandle* h, bool registered) {
   if (h->devcomm) {
-    ncclDevCommDestroy(h->comm, &h->devComm);
+    ncclDevCommDestroy(h->lsa, &h->devComm);
     h->devcomm = false;
   }
-  if (registered) ncclCommWindowDeregister(h->comm, h->win);
+  if (registered && h->win != nullptr) ncclCommWindowDeregister(h->lsa, h->win);
+  h->win = nullptr;
+  // The internode buffers are sized from the layout, so they go with the window.
+  for (void** p : {(void**)&h->outbox, (void**)&h->inbox, (void**)&h->d_views_inter, (void**)&h->d_src_inter}) {
+    if (*p) {
+      (void)hipFree(*p);
+      *p = nullptr;
+    }
+  }
+  h->is_bound = false;
   if (h->win_buf) {
     ncclMemFree(h->win_buf);
     h->win_buf = nullptr;
   }
+}
+
+// The node communicator and the count-exchange buffers (ep_create_nodes).
+inline void release_inter_comm(EpHandle* h) {
+  if (h->node_comm) (void)ncclCommDestroy(h->node_comm);
+  h->node_comm = nullptr;
+  (void)hipFree(h->d_scratch);
+  h->d_scratch = nullptr;
+  if (h->host_scratch) (void)hipHostFree(h->host_scratch);
+  h->host_scratch = nullptr;
 }
 
 // Every data-path entry point is reachable without the Python layer -- the unit
@@ -190,6 +256,14 @@ private:
   bool ok_{true};
 };
 
+// For a transfer that failed after some of it was posted: the peers expect the rest, which no
+// later call can supply, and a kernel of this handle may still be running, so the handle refuses
+// everything but ep_destroy from now on (which then releases no device memory; see there).
+int mark_broken(EpHandle* h, const char* fn) {
+  h->broken = true;
+  return ep_fail(fn, "a transfer failed part-way; the handle can only be destroyed");
+}
+
 // Waves per block for every kernel that moves payload. The parallelism these
 // kernels get is CTAs x waves, and only the CTA count follows the caller's
 // num_sms budget, so a narrow block starves them at every budget below the
@@ -204,12 +278,273 @@ private:
 // this path does not serve.
 constexpr int kEpWaves = 16;
 
+#define NC(x) \
+  do { \
+    ncclResult_t r_ = (x); \
+    if (r_ != ncclSuccess) { \
+      fprintf(stderr, "[rccl_ep] %s:%d %s\n", __FILE__, __LINE__, ncclGetErrorString(r_)); \
+      return -1; \
+    } \
+  } while (0)
+
+// Inside ncclGroupStart/End, NC would return with the group still open, and every later NCCL
+// call on this thread would then only be queued: a hang instead of an error. NCG keeps the first
+// failure in `err` and skips the remaining posts; NCG_END always closes the group, then fails if
+// anything did.
+#define NCG(err, x) \
+  do { \
+    if ((err) == ncclSuccess && ((err) = (x)) != ncclSuccess) { \
+      fprintf(stderr, "[rccl_ep] %s:%d %s\n", __FILE__, __LINE__, ncclGetErrorString(err)); \
+    } \
+  } while (0)
+#define NCG_END(err) \
+  do { \
+    ncclResult_t e_ = ncclGroupEnd(); \
+    if (e_ != ncclSuccess) { \
+      fprintf(stderr, "[rccl_ep] %s:%d %s\n", __FILE__, __LINE__, ncclGetErrorString(e_)); \
+    } \
+    if ((err) != ncclSuccess || e_ != ncclSuccess) return -1; \
+  } while (0)
+
+// The bytes per row of each region a remote peer's rows move through, in one InterView. Both
+// remote_layout's strides and the exchanges' transfer sizes come from here, so they agree;
+// EpWindowLayout::make sizes each region for its widest row instead.
+struct InterRows {
+  size_t x, sf, topk_idx, topk_w, src_idx, y, cw;
+};
+
+InterRows inter_rows(const EpConfig& c, int kind) {
+  const size_t H = c.hidden, K = c.num_topk;
+  InterRows r;
+  r.x = H * (kind == kViewFp8 ? sizeof(fp8_t) : sizeof(bf16_t));
+  r.sf = (size_t)c.hidden_sf() * sizeof(float);
+  r.topk_idx = K * sizeof(int32_t);
+  r.topk_w = K * sizeof(float);
+  r.src_idx = sizeof(int32_t);
+  r.y = H * sizeof(bf16_t) * (kind == kViewCombFlat ? K : 1);
+  r.cw = K * sizeof(float);
+  return r;
+}
+
+// The layout a remote peer q is seen through: every region offset moves by (q - rank)
+// rows of that region, so the kernels' slot(rank, i) = rank * T + i lands on row
+// q * T + i, in outbox region q. A negative shift is exact under size_t wrap-around.
+EpWindowLayout remote_layout(const EpWindowLayout& l, const EpConfig& c, int q, int kind) {
+  const int64_t d = (int64_t)q - c.rank;
+  const int64_t T = c.num_max_tokens_per_rank;
+  const InterRows rows = inter_rows(c, kind);
+  auto sh = [d](size_t off, int64_t row_bytes) { return off + (size_t)(d * row_bytes); };
+  EpWindowLayout r = l;
+  r.off_counts = sh(l.off_counts, sizeof(int32_t));
+  r.off_x = sh(l.off_x, T * (int64_t)rows.x);
+  r.off_sf = sh(l.off_sf, T * (int64_t)rows.sf);
+  r.off_topk_idx = sh(l.off_topk_idx, T * (int64_t)rows.topk_idx);
+  r.off_topk_w = sh(l.off_topk_w, T * (int64_t)rows.topk_w);
+  r.off_src_idx = sh(l.off_src_idx, T * (int64_t)rows.src_idx);
+  r.off_y = sh(l.off_y, T * (int64_t)rows.y);
+  r.off_cw = sh(l.off_cw, T * (int64_t)rows.cw);
+  r.off_arch = sh(l.off_arch, kArchLen);
+  return r;
+}
+
+// One region moved per peer: its offset in any buffer with the window's layout, and its
+// row size. Region q starts at off + q * T * row in both the outbox and the window.
+struct InterRegion {
+  size_t off, row;
+};
+
+// Send outbox region q and receive region q of `dst` for every remote q, in one group.
+// Both sides post ranks and regions in the same order, so every send meets its receive;
+// a zero count is skipped on both sides, since one's sendc[q] is the other's recvc[q].
+int inter_exchange(EpHandle* h, const InterRegion* regs, int nreg, const int32_t* send_rows, const int32_t* recv_rows,
+                   uint8_t* dst, hipStream_t s) {
+  const size_t T = h->cfg.num_max_tokens_per_rank;
+  NC(ncclGroupStart());
+  ncclResult_t gr = ncclSuccess;
+  for (int q = 0; q < h->cfg.num_ranks; ++q) {
+    if (!is_remote(h, q)) continue;
+    for (int g = 0; g < nreg; ++g) {
+      const size_t base = regs[g].off + (size_t)q * T * regs[g].row;
+      if (send_rows[q]) {
+        NCG(gr, ncclSend(h->outbox + base, (size_t)send_rows[q] * regs[g].row, ncclUint8, q, h->comm, s));
+      }
+      if (recv_rows[q]) {
+        NCG(gr, ncclRecv(dst + base, (size_t)recv_rows[q] * regs[g].row, ncclUint8, q, h->comm, s));
+      }
+    }
+  }
+  NCG_END(gr);
+  return 0;
+}
+
+// Dispatch's remote leg, after dispatch_impl has filled the outbox: each region goes to
+// its peer, and each remote source's rows land in this window for the epilogue (their counts
+// are set after barrier B, by k_inter_set_counts).
+int inter_dispatch(EpHandle* h, int use_fp8, hipStream_t s) {
+  const EpConfig& c = h->cfg;
+  const EpWindowLayout& l = h->lay;
+  const InterRows rows = inter_rows(c, use_fp8 ? kViewFp8 : kViewBf16);
+  InterRegion regs[5];
+  int n = 0;
+  regs[n++] = {l.off_x, rows.x};
+  if (use_fp8) regs[n++] = {l.off_sf, rows.sf};
+  regs[n++] = {l.off_topk_idx, rows.topk_idx};
+  regs[n++] = {l.off_topk_w, rows.topk_w};
+  regs[n++] = {l.off_src_idx, rows.src_idx};
+  return inter_exchange(h, regs, n, h->bound.sendc, h->bound.recvc, (uint8_t*)h->win_buf, s);
+}
+
+// Combine's remote leg, after combine_impl has filled the outbox: rows held for a remote
+// owner go back to it, and rows returned by each remote rank are scattered from the inbox
+// into this window's combine region for the reduce epilogue. The weight region always travels
+// with the rows (K floats per row): whether to pass weights is each rank's own choice, and a
+// rank that received no rows may pass none, but every rank must post the same transfers.
+int inter_combine(EpHandle* h, int grouped, int cta, hipStream_t s) {
+  const EpConfig& c = h->cfg;
+  const EpWindowLayout& l = h->lay;
+  const InterRows rows = inter_rows(c, grouped ? kViewCombGrouped : kViewCombFlat);
+  const int y_row_elems = (int)(rows.y / sizeof(bf16_t));
+  InterRegion regs[2] = {{l.off_y, rows.y}, {l.off_cw, rows.cw}};
+  // Owner-side: this rank received recvc[o] rows from o, and gets back sendc[r] from r.
+  if (inter_exchange(h, regs, 2, h->bound.recvc, h->bound.sendc, h->inbox, s) != 0) return -1;
+  hipLaunchKernelGGL(k_inter_unpack_combine, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s, c, h->bound,
+                     h->bound_send_list, h->bound_num_tokens, (const bf16_t*)(h->inbox + l.off_y),
+                     (const float*)(h->inbox + l.off_cw), y_row_elems, h->self_view);
+  return 0;
+}
+
+#define REQUIRE_BOUND(h, fn) \
+  do { \
+    if ((h)->inter && !(h)->is_bound) return ep_fail(fn, "an internode handle needs ep_inter_bind first"); \
+  } while (0)
+
+// Test hook for the setup failures the ranks agree on, which a real GPU does not produce on demand.
+// RCCL_EP_FAKE_ALLOC_FAIL_RANK="<rank>" fails, on that rank, the rest of ep_create's scratch and the internode
+// buffers of an ep_configure that runs while it is set. "<rank>:<step>" fails one step of an internode ep_configure
+// on that rank instead: "window" its window allocation, "register" its window registration and "devcomm" its
+// ncclDevCommCreate. The last two run the real call, which the peers' calls pair with, and then undo it, as a
+// failure late in the call would leave things. Any other value fails nothing.
+enum class FakeFail {
+  kNone,
+  kAlloc,
+  kWindow,
+  kRegister,
+  kDevComm
+};
+
+FakeFail fake_fail_at(int rank) {
+  const char* v = getenv("RCCL_EP_FAKE_ALLOC_FAIL_RANK");
+  if (v == nullptr || *v == '\0') return FakeFail::kNone;
+  char* step = nullptr;
+  const long r = strtol(v, &step, 10);
+  if (step == v || r != rank) return FakeFail::kNone;
+  if (*step == '\0') return FakeFail::kAlloc;
+  if (strcmp(step, ":window") == 0) return FakeFail::kWindow;
+  if (strcmp(step, ":register") == 0) return FakeFail::kRegister;
+  if (strcmp(step, ":devcomm") == 0) return FakeFail::kDevComm;
+  return FakeFail::kNone;
+}
+
+// One agreed step of an internode ep_configure, for a failure that must not reach the next node collective: every
+// rank passes whether its part of `what` succeeded, and if any rank's failed, every rank gets -1 after a line naming
+// one such rank. A 1-int max over the global communicator, staged in the count-exchange scratch as
+// check_uniform_arch_global's all-gather is. Like ep_create's d_total, only a failure of the copy into the scratch or
+// of the allreduce itself still leaves this rank out.
+int agree_setup(EpHandle* h, bool ok, const char* what) {
+  constexpr const char* fn = "ep_configure";
+  int32_t failed = ok ? 0 : h->cfg.rank + 1; // the max names the highest failed rank, 0 if none
+  if (hipMemcpy(h->d_scratch, &failed, sizeof(int32_t), hipMemcpyHostToDevice) != hipSuccess ||
+      ncclAllReduce(h->d_scratch, h->d_scratch, 1, ncclInt32, ncclMax, h->comm, nullptr) != ncclSuccess ||
+      hipDeviceSynchronize() != hipSuccess ||
+      hipMemcpy(&failed, h->d_scratch, sizeof(int32_t), hipMemcpyDeviceToHost) != hipSuccess) {
+    return ep_fail(fn, "the cross-rank setup check failed");
+  }
+  if (failed > 0) return ep_fail(fn, "rank %d failed to %s (see its log); failing on every rank", failed - 1, what);
+  return 0;
+}
+
+// The arch check over the global communicator: an all-gather of every rank's arch string,
+// in place of the LSA window the intranode check travels over, which spans one node here.
+// It is also ep_configure's last agreed setup check, for a failed ncclDevCommCreate and every
+// step after it (setup_ok false): such a rank joins with an empty slot rather than returning,
+// so every rank fails together instead of its peers waiting in the all-gather. (The window's
+// allocation and registration fail before a node collective that needs them, so agree_setup
+// agrees on them earlier.) It is staged in the count-exchange scratch, which ep_create_nodes
+// allocated and agreed on and no call is using now, so it allocates nothing; only a failure
+// of the copy into it or of the all-gather itself still leaves this rank out.
+int check_uniform_arch_global(EpHandle* h, bool setup_ok, char* err, size_t err_len) {
+  static_assert((kMaxWorldRanks + 1) * kArchLen <= kScratchInts * sizeof(int32_t), "the arch table fits the scratch");
+  const int R = h->cfg.num_ranks;
+  char mine[kArchLen] = {};
+  if (setup_ok && local_arch_string(h->cfg, h->device, mine, err, err_len) != 0) {
+    ep_fail("ep_configure", "%s", err);
+    memset(mine, 0, kArchLen);
+  }
+  char* d = (char*)h->d_scratch;
+  char* all = (char*)h->host_scratch;
+  if (hipMemcpy(d + (size_t)R * kArchLen, mine, kArchLen, hipMemcpyHostToDevice) != hipSuccess ||
+      ncclAllGather(d + (size_t)R * kArchLen, d, kArchLen, ncclUint8, h->comm, 0) != ncclSuccess ||
+      hipDeviceSynchronize() != hipSuccess ||
+      hipMemcpy(all, d, (size_t)R * kArchLen, hipMemcpyDeviceToHost) != hipSuccess) {
+    snprintf(err, err_len, "arch all-gather failed");
+    return -1;
+  }
+  for (int r = 0; r < R; ++r) {
+    if (all[(size_t)r * kArchLen] == '\0') {
+      snprintf(err, err_len, "rank %d failed to set up (see its log); failing on every rank", r);
+      return -1;
+    }
+  }
+  return compare_arch_table(all, R, err, err_len);
+}
+
 }  // namespace
 
 __global__ void k_capi_fill_views(ncclWindow_t w, EpWindowLayout l, int n, WindowView* out) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     for (int p = 0; p < n; ++p) { out[p].base = (uint8_t*)ncclGetLsaPointer(w, 0, p); out[p].l = l; }
   }
+}
+
+// Internode views: a local peer's is its LSA window; a remote peer's aims at the outbox through
+// remote_layout, one table per InterView. d_views gets the bf16 table. Also allocates the
+// internode buffers. A failure says why and returns -1, which ep_configure carries into its
+// agreed check (see check_uniform_arch_global).
+static int inter_fill_views(EpHandle* h) {
+  constexpr const char* fn = "ep_configure";
+  const EpConfig& c = h->cfg;
+  const int R = c.num_ranks;
+  const bool fake_fail = fake_fail_at(c.rank) == FakeFail::kAlloc; // test hook (see fake_fail_at)
+  uint8_t** d_bases = nullptr;
+  uint8_t* bases[kMaxRanks] = {};
+  if (hipMalloc(&d_bases, h->node_size * sizeof(uint8_t*)) != hipSuccess) {
+    return ep_fail(fn, "hipMalloc for the LSA bases failed");
+  }
+  hipLaunchKernelGGL(k_inter_lsa_bases, dim3(1), dim3(1), 0, 0, h->win, h->node_size, d_bases);
+  const bool ok = hipMemcpy(bases, d_bases, h->node_size * sizeof(uint8_t*), hipMemcpyDeviceToHost) == hipSuccess;
+  (void)hipFree(d_bases);
+  if (!ok) return ep_fail(fn, "reading the LSA bases failed");
+  // The outbox and the inbox each take a full window. Most of each goes unused, but sharing the
+  // window's layout is what lets the intranode kernels write the outbox.
+  const size_t lay_bytes = h->lay.total_bytes;
+  if (fake_fail || hipMalloc(&h->outbox, lay_bytes) != hipSuccess || hipMalloc(&h->inbox, lay_bytes) != hipSuccess ||
+      hipMalloc(&h->d_src_inter, (size_t)R * c.num_max_tokens_per_rank * sizeof(int32_t)) != hipSuccess ||
+      hipMalloc(&h->d_views_inter, kNumInterViews * R * sizeof(WindowView)) != hipSuccess) {
+    return ep_fail(fn, "allocating the internode buffers (2 x %zu bytes) failed", lay_bytes);
+  }
+  WindowView views[kNumInterViews * kMaxWorldRanks];
+  for (int kind = 0; kind < kNumInterViews; ++kind) {
+    for (int p = 0; p < R; ++p) {
+      views[kind * R + p] = is_remote(h, p) ? WindowView{h->outbox, remote_layout(h->lay, c, p, kind)} :
+                                              WindowView{bases[p - h->node_base], h->lay};
+    }
+  }
+  if (hipMemcpy(h->d_views_inter, views, kNumInterViews * R * sizeof(WindowView), hipMemcpyHostToDevice) !=
+        hipSuccess ||
+      hipMemcpy(h->d_views, views + kViewBf16 * R, R * sizeof(WindowView), hipMemcpyHostToDevice) != hipSuccess) {
+    return ep_fail(fn, "uploading the internode views failed");
+  }
+  return 0;
 }
 
 // librccl is built -fvisibility=hidden. Without this the entry points below
@@ -228,14 +563,26 @@ int ep_get_unique_id(char* out) {
   return 0;
 }
 
+void* ep_create_nodes(int rank, int num_ranks, const char* unique_id, int max_tokens_per_rank, int hidden, int device,
+                      int node_size);
+
 // unique_id must be ncclUniqueId bytes broadcast from rank 0 by the caller.
 void* ep_create(int rank, int num_ranks, const char* unique_id,
                 int max_tokens_per_rank, int hidden, int device) {
+  return ep_create_nodes(rank, num_ranks, unique_id, max_tokens_per_rank, hidden, device, num_ranks);
+}
+
+// ep_create for num_ranks / node_size nodes, node n holding ranks [n * node_size,
+// (n + 1) * node_size); node_size == num_ranks is ep_create. A peer on another node is
+// reached by RCCL send/recv (see EpHandle).
+void* ep_create_nodes(int rank, int num_ranks, const char* unique_id, int max_tokens_per_rank, int hidden, int device,
+                      int node_size) {
+  constexpr const char* fn = "ep_create";
   // Every argument check below runs before ncclCommInitRank and gives the same answer on every rank given the same
   // arguments, so a rejected call returns on each rank instead of leaving its peers waiting in the init. The device
   // check, which can differ between ranks, is agreed over the new communicator instead (see below).
   if (unique_id == nullptr) {
-    fprintf(stderr, "[rccl_ep] ep_create: unique_id must not be null\n");
+    ep_fail(fn, "unique_id must not be null");
     return nullptr;
   }
   // Payload copies move 16B per lane from a 256B-aligned region base, so the
@@ -243,31 +590,45 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
   // tails cover a leftover element count, not a misaligned base, so reject an
   // odd hidden here rather than reach a misaligned dwordx4.
   if (hidden <= 0 || hidden % 8 != 0) {
-    fprintf(stderr, "[rccl_ep] ep_create: hidden %d must be a positive multiple of 8 (16B vector alignment)\n", hidden);
+    ep_fail(fn, "hidden %d must be a positive multiple of 8 (16B vector alignment)", hidden);
     return nullptr;
   }
-  // kMaxRanks bounds the scale-up domain the window layout is written for, and
-  // ctas_per_rank divides by num_ranks, so zero is a division by zero.
-  if (num_ranks < 1 || num_ranks > kMaxRanks) {
-    fprintf(stderr, "[rccl_ep] ep_create: num_ranks %d must be in [1, kMaxRanks=%d]\n", num_ranks, kMaxRanks);
+  // kMaxRanks bounds the scale-up domain the window layout is written for, kMaxWorldRanks the
+  // internode group, and ctas_per_rank divides by num_ranks, so zero is a division by zero.
+  const bool internode = node_size < num_ranks;
+  const int max_ranks = internode ? kMaxWorldRanks : kMaxRanks;
+  if (num_ranks < 1 || num_ranks > max_ranks) {
+    ep_fail(fn, "num_ranks %d must be in [1, %s=%d]", num_ranks, internode ? "kMaxWorldRanks" : "kMaxRanks", max_ranks);
+    return nullptr;
+  }
+  if (node_size > kMaxRanks) {
+    ep_fail(fn, "node_size %d must be at most kMaxRanks=%d", node_size, kMaxRanks);
     return nullptr;
   }
   // EpWindowLayout::make widens this to size_t, so a negative value sign-extends
   // and wraps every offset in the window; zero reserves empty regions that the
   // slot arithmetic then indexes anyway.
   if (max_tokens_per_rank < 1) {
-    fprintf(stderr, "[rccl_ep] ep_create: max_tokens_per_rank %d must be positive\n", max_tokens_per_rank);
+    ep_fail(fn, "max_tokens_per_rank %d must be positive", max_tokens_per_rank);
+    return nullptr;
+  }
+  if (node_size < 1 || num_ranks % node_size != 0) {
+    ep_fail(fn, "node_size %d must divide num_ranks %d", node_size, num_ranks);
+    return nullptr;
+  }
+  if (num_ranks / node_size > kMaxNodes) {
+    ep_fail(fn, "%d nodes exceed kMaxNodes=%d", num_ranks / node_size, kMaxNodes);
     return nullptr;
   }
   if (rank < 0 || rank >= num_ranks) {
-    fprintf(stderr, "[rccl_ep] ep_create: rank %d outside [0, num_ranks=%d)\n", rank, num_ranks);
+    ep_fail(fn, "rank %d outside [0, num_ranks=%d)", rank, num_ranks);
     return nullptr;
   }
   // Bind explicitly. The caller's torch context may have selected a different
   // device than this thread's current one.
   hipError_t he = hipSetDevice(device);
   if (he != hipSuccess) {
-    fprintf(stderr, "[rccl_ep] ep_create: hipSetDevice(%d): %s\n", device, hipGetErrorString(he));
+    ep_fail(fn, "hipSetDevice(%d): %s", device, hipGetErrorString(he));
     return nullptr;
   }
   // The kernels are wave64 throughout (kWarpSize lanes per wave, 64-bit ballots): a wave32
@@ -294,10 +655,12 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
   memcpy(&id, unique_id, sizeof(id));
   ncclResult_t nr = ncclCommInitRank(&h->comm, num_ranks, id, rank);
   if (nr != ncclSuccess) {
-    fprintf(stderr, "[rccl_ep] ncclCommInitRank: %s\n", ncclGetErrorString(nr));
+    ep_fail(fn, "ncclCommInitRank: %s", ncclGetErrorString(nr));
     delete h;
     return nullptr;
   }
+  h->lsa = h->comm;
+  h->node_size = node_size;
   // ep_create's failure path aborts the communicators rather than destroying them: ncclCommDestroy waits in an
   // intra-node barrier for every rank, so a rank that fails before the check below would leave it waiting. Nothing is
   // in flight on them here.
@@ -305,45 +668,56 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
     (void)hipFree(h->d_recvoff);
     (void)hipFree(h->d_total);
     (void)hipFree(h->d_views);
+    (void)ncclCommAbort(h->node_comm); // the split goes before its parent
+    h->node_comm = nullptr;
+    release_inter_comm(h);
     (void)ncclCommAbort(h->comm);
     delete h;
     return nullptr;
   };
-  // d_total carries the cross-rank check below, so it is allocated first. Only a failure of that 4-byte allocation
-  // (just after the communicator's own allocations succeeded), or of the copy into it, still leaves this rank out of
-  // the allreduce: the rank returns, and its peers wait in the allreduce. The rest of the scratch joins the check:
-  // unchecked, a failed allocation would return a handle of null device pointers that faults inside a kernel later.
-  if (hipMalloc(&h->d_total, sizeof(int32_t)) != hipSuccess) {
-    fprintf(stderr, "[rccl_ep] ep_create: hipMalloc for scratch failed\n");
+  // A failed node split joins the setup check below, like the scratch allocations. One that fails during its init still
+  // returns its half-built communicator in node_comm, which release() aborts.
+  bool split_ok = true;
+  if (node_size < num_ranks) {
+    h->inter = true;
+    h->node_base = rank / node_size * node_size;
+    nr = ncclCommSplit(h->comm, rank / node_size, rank, &h->node_comm, nullptr);
+    split_ok = nr == ncclSuccess;
+    if (split_ok) {
+      h->lsa = h->node_comm;
+    } else {
+      ep_fail(fn, "ncclCommSplit for the node communicator: %s", ncclGetErrorString(nr));
+    }
+  }
+  // Allocated first, outside the agreed check: if this or the copy into it fails, the peers wait in the allreduce.
+  if (hipMalloc(&h->d_total, 2 * sizeof(int32_t)) != hipSuccess) {
+    ep_fail(fn, "hipMalloc for scratch failed");
     return release();
   }
-  // Test hook: RCCL_EP_FAKE_ALLOC_FAIL_RANK fails the rest of the scratch allocation on the rank it names, so the
-  // agreed failure can be tested.
-  const char* fake_alloc_rank = getenv("RCCL_EP_FAKE_ALLOC_FAIL_RANK");
-  const bool alloced = !(fake_alloc_rank && *fake_alloc_rank && atoi(fake_alloc_rank) == rank) &&
-                       hipMalloc(&h->d_recvoff, num_ranks * sizeof(int32_t)) == hipSuccess &&
-                       hipMalloc(&h->d_views, num_ranks * sizeof(WindowView)) == hipSuccess;
-  if (!alloced) fprintf(stderr, "[rccl_ep] ep_create: hipMalloc for scratch failed\n");
-  // The setup check, agreed over the communicator: the number of ranks that lack a wave64 device or failed to allocate
-  // their scratch, summed in d_total (scratch until the first dispatch). Every rank sees the same sum, so a group with
-  // any such rank fails on every rank together and releases its communicator, rather than one rank returning while the
-  // others wait for it in their next collective.
-  int bad_ranks = wave_ok && alloced ? 0 : 1;
+  // The test hook (see fake_fail_at) fails the rest of this scratch on the rank it names.
+  const bool alloced =
+    fake_fail_at(rank) != FakeFail::kAlloc && hipMalloc(&h->d_recvoff, num_ranks * sizeof(int32_t)) == hipSuccess &&
+    hipMalloc(&h->d_views, num_ranks * sizeof(WindowView)) == hipSuccess &&
+    (!h->inter || (hipMalloc(&h->d_scratch, kScratchInts * sizeof(int32_t)) == hipSuccess &&
+                   hipHostMalloc((void**)&h->host_scratch, kScratchInts * sizeof(int32_t)) == hipSuccess));
+  if (!alloced) ep_fail(fn, "hipMalloc for scratch failed");
+  // The setup check, agreed over the communicator: the number of ranks that lack a wave64 device, failed the node split
+  // or failed to allocate their scratch, summed in d_total (scratch until the first dispatch). Every rank sees the same
+  // sum, so a group with any such rank fails on every rank together and releases its communicator, rather than one rank
+  // returning while the others wait for it in their next collective.
+  int bad_ranks = wave_ok && split_ok && alloced ? 0 : 1;
   if (hipMemcpy(h->d_total, &bad_ranks, sizeof(int32_t), hipMemcpyHostToDevice) != hipSuccess ||
       ncclAllReduce(h->d_total, h->d_total, 1, ncclInt32, ncclSum, h->comm, nullptr) != ncclSuccess ||
       hipDeviceSynchronize() != hipSuccess ||
       hipMemcpy(&bad_ranks, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost) != hipSuccess) {
-    fprintf(stderr, "[rccl_ep] ep_create: the cross-rank setup check failed\n");
+    ep_fail(fn, "the cross-rank setup check failed");
     return release();
   }
   if (bad_ranks > 0) {
     if (!wave_ok) {
-      fprintf(stderr, "[rccl_ep] ep_create: device %d has a wave size of %d; rccl_ep needs a wave64 (gfx9) device\n",
-              device, warp_size);
-    } else if (alloced) {
-      fprintf(stderr,
-              "[rccl_ep] ep_create: %d rank(s) of this group have no wave64 (gfx9) device or failed to set up; failing "
-              "on all\n",
+      ep_fail(fn, "device %d has a wave size of %d; rccl_ep needs a wave64 (gfx9) device", device, warp_size);
+    } else if (split_ok && alloced) {
+      ep_fail(fn, "%d rank(s) of this group have no wave64 (gfx9) device or failed to set up; failing on all",
               bad_ranks);
     }
     return release();
@@ -385,61 +759,103 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   h->lay = EpWindowLayout::make(h->cfg, sizeof(bf16_t));
   h->win_bytes = h->lay.total_bytes;
 
-  ncclResult_t nr = ncclMemAlloc(&h->win_buf, h->win_bytes);
-  if (nr != ncclSuccess) {
+  // An intranode rank that fails below returns at once. An internode rank must not return alone: the registration
+  // and the devComm are collective over its node and the arch check over the group, so its node would wait in the
+  // next node collective and the other nodes in the arch all-gather. A failed window allocation (or clear) and a
+  // failed or declined registration are agreed before the next node collective (agree_setup), and then every rank
+  // releases what it took and fails. A failed ncclDevCommCreate or later step clears setup_ok instead, skips what
+  // needs the failed part and joins the arch all-gather with an empty slot (see check_uniform_arch_global), so the
+  // group fails together and only then releases the window. Deregistration and ncclDevCommDestroy wait for no peer,
+  // so a rank with no window or devComm to release leaves no one waiting. Out of reach: a rank failing inside one of
+  // these RCCL calls before the call's own rendezvous (a registration declined on one rank only, say) leaves its node
+  // waiting in that call, and a failed copy or collective of an agreed check leaves its rank out, as in ep_create.
+  const FakeFail fake = h->inter ? fake_fail_at(h->cfg.rank) : FakeFail::kNone; // test hook (see fake_fail_at)
+  ncclResult_t nr = fake == FakeFail::kWindow ? ncclSystemError : ncclMemAlloc(&h->win_buf, h->win_bytes);
+  bool ok = nr == ncclSuccess;
+  if (!ok) {
     h->win_buf = nullptr;
-    return ep_fail(fn, "ncclMemAlloc(%zu): %s", h->win_bytes, ncclGetErrorString(nr));
+    ep_fail(fn, "ncclMemAlloc(%zu): %s", h->win_bytes, ncclGetErrorString(nr));
+  } else if (hipMemset(h->win_buf, 0, h->win_bytes) != hipSuccess) {
+    ok = false;
+    ep_fail(fn, "clearing the %zu-byte window failed", h->win_bytes);
   }
-  // Spelled out rather than wrapped in HC: the macro returns before the window
-  // can be handed back.
-  if (hipMemset(h->win_buf, 0, h->win_bytes) != hipSuccess) {
-    release_window(h, false);
-    return ep_fail(fn, "clearing the %zu-byte window failed", h->win_bytes);
+  if (h->inter ? agree_setup(h, ok, "allocate the window") != 0 : !ok) {
+    release_window(h, false); // nothing is registered yet: this frees the window's memory, if any
+    return -1;
   }
   h->win = nullptr;
-  nr = ncclCommWindowRegister(h->comm, h->win_buf, h->win_bytes, &h->win, NCCL_WIN_COLL_SYMMETRIC);
-  if (nr != ncclSuccess) {
-    release_window(h, false);
-    return ep_fail(fn, "WindowRegister: %s (needs NCCL_WIN_ENABLE=1 and NCCL_CUMEM_ENABLE=1)", ncclGetErrorString(nr));
+  nr = ncclCommWindowRegister(h->lsa, h->win_buf, h->win_bytes, &h->win, NCCL_WIN_COLL_SYMMETRIC);
+  if (nr == ncclSuccess && h->win != nullptr && fake == FakeFail::kRegister) {
+    (void)ncclCommWindowDeregister(h->lsa, h->win);
+    h->win = nullptr;
   }
   // RCCL can decline a registration and still return success, with a null window, when the
   // communicator has no symmetric memory (window support disabled, or cuMem off).
-  if (h->win == nullptr) {
-    release_window(h, false);
-    return ep_fail(fn, "symmetric memory is unavailable (the window registration was declined); "
-                       "needs NCCL_CUMEM_ENABLE=1 and window support");
+  const bool registered = nr == ncclSuccess && h->win != nullptr;
+  if (nr != ncclSuccess) {
+    ep_fail(fn, "WindowRegister: %s (needs NCCL_WIN_ENABLE=1 and NCCL_CUMEM_ENABLE=1)", ncclGetErrorString(nr));
+  } else if (!registered) {
+    ep_fail(fn, "symmetric memory is unavailable (the window registration was declined); "
+                "needs NCCL_CUMEM_ENABLE=1 and window support");
+  }
+  if (h->inter ? agree_setup(h, registered, "register the window") != 0 : !registered) {
+    release_window(h, registered); // a rank whose registration failed has no window to deregister
+    return -1;
   }
 
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   reqs.lsaBarrierCount = kEpBarrierCtas;  // LSA only: no GIN contexts on the intranode path
-  nr = ncclDevCommCreate(h->comm, &reqs, &h->devComm);
-  if (nr != ncclSuccess) {
-    release_window(h, true);
-    return ep_fail(fn, "ncclDevCommCreate: %s", ncclGetErrorString(nr));
+  nr = ncclDevCommCreate(h->lsa, &reqs, &h->devComm);
+  if (nr == ncclSuccess && fake == FakeFail::kDevComm) {
+    (void)ncclDevCommDestroy(h->lsa, &h->devComm);
+    nr = ncclSystemError;
   }
-  h->devcomm = true;
+  h->devcomm = nr == ncclSuccess;
+  if (!h->devcomm) {
+    ep_fail(fn, "ncclDevCommCreate: %s", ncclGetErrorString(nr));
+    if (!h->inter) {
+      release_window(h, true);
+      return -1;
+    }
+  }
+  // Internode, from here on a failure clears setup_ok rather than returning (see above).
+  bool setup_ok = h->devcomm;
 
   // k_capi_fill_views resolves peer windows by LSA index while every data-path
   // kernel indexes d_views by world rank, so the two agree only when the LSA
-  // team is the whole communicator under the identity mapping. A comm that
-  // spans nodes, or one whose ranks are reordered within the node, would
-  // otherwise push payloads into the wrong peer's window with no error.
-  if (h->devComm.lsaSize != h->cfg.num_ranks || h->devComm.lsaRank != h->cfg.rank) {
-    release_window(h, true);
-    return ep_fail(fn,
-                   "LSA team is rank %d of %d but the communicator is rank %d of %d; "
-                   "rccl_ep needs a single-node communicator with the identity LSA mapping",
-                   h->devComm.lsaRank, h->devComm.lsaSize, h->cfg.rank, h->cfg.num_ranks);
+  // team is this rank's node under the identity mapping. A comm that spans
+  // nodes without ep_create_nodes, or one whose ranks are reordered within the
+  // node, would otherwise push payloads into the wrong peer's window with no error.
+  // Without a devComm there is no LSA team to check.
+  if (setup_ok && (h->devComm.lsaSize != h->node_size || h->devComm.lsaRank != h->cfg.rank - h->node_base)) {
+    ep_fail(fn,
+            "LSA team is rank %d of %d but this node is ranks [%d, %d) of %d, this rank %d; "
+            "rccl_ep needs every node's ranks contiguous, with the identity LSA mapping "
+            "(a communicator spanning nodes needs ep_create_nodes)",
+            h->devComm.lsaRank, h->devComm.lsaSize, h->node_base, h->node_base + h->node_size, h->cfg.num_ranks,
+            h->cfg.rank);
+    if (!h->inter) {
+      release_window(h, true);
+      return -1;
+    }
+    setup_ok = false;
   }
 
-  hipLaunchKernelGGL(k_capi_fill_views, dim3(1), dim3(1), 0, 0,
-                     h->win, h->lay, h->cfg.num_ranks, h->d_views);
+  if (!h->inter) {
+    hipLaunchKernelGGL(k_capi_fill_views, dim3(1), dim3(1), 0, 0, h->win, h->lay, h->cfg.num_ranks, h->d_views);
+  } else if (setup_ok) {
+    setup_ok = inter_fill_views(h) == 0;
+  }
   // Spelled out rather than wrapped in HC: the macro returns before the window
   // can be handed back.
   hipError_t he = hipDeviceSynchronize();
   if (he != hipSuccess) {
-    release_window(h, true);
-    return ep_fail(fn, "view fill: %s", hipGetErrorString(he));
+    ep_fail(fn, "view fill: %s", hipGetErrorString(he));
+    if (!h->inter) {
+      release_window(h, true);
+      return -1;
+    }
+    setup_ok = false;
   }
   h->self_view = WindowView{(uint8_t*)h->win_buf, h->lay};
 
@@ -448,8 +864,8 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   // ep_create because it travels over the LSA window, which does not exist
   // until now.
   char err[256];
-  if (check_uniform_arch(h->cfg, h->device, h->d_views, h->self_view,
-                         h->devComm, err, sizeof(err)) != 0) {
+  if ((h->inter ? check_uniform_arch_global(h, setup_ok, err, sizeof(err)) :
+                  check_uniform_arch(h->cfg, h->device, h->d_views, h->self_view, h->devComm, err, sizeof(err))) != 0) {
     release_window(h, true);
     return ep_fail(fn, "%s", err);
   }
@@ -462,9 +878,21 @@ size_t ep_window_bytes(void* handle) {
   return handle ? static_cast<EpHandle*>(handle)->win_bytes : 0;
 }
 
+// A broken handle (see mark_broken) releases none of its device memory, window or communicators:
+// a kernel of its own or a peer's transfer may still use them, and releasing them would wait for
+// that kernel anyway (hipFree synchronizes the device). It leaks them, with one line saying so,
+// and frees only the host-side handle.
 void ep_destroy(void* handle) {
   auto* h = static_cast<EpHandle*>(handle);
   if (!h) return;
+  if (h->broken) {
+    fprintf(stderr,
+            "[rccl_ep] rank %d: ep_destroy: the handle is broken; leaking its device memory, window and "
+            "communicators, which a kernel still running may use\n",
+            h->cfg.rank);
+    delete h;
+    return;
+  }
   const DeviceScope dev(h->device);
   // Unconditional rather than gated on `configured`: a handle whose ep_configure
   // failed part-way has already handed back what it took, and release_window is
@@ -473,6 +901,7 @@ void ep_destroy(void* handle) {
   (void)hipFree(h->d_recvoff);
   (void)hipFree(h->d_total);
   (void)hipFree(h->d_views);
+  release_inter_comm(h); // the split goes before its parent
   ncclCommDestroy(h->comm);
   delete h;
 }
@@ -481,7 +910,12 @@ int ep_barrier(void* handle, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
   REQUIRE_CONFIGURED(h, "ep_barrier");
   hipStream_t s = (hipStream_t)stream;
-  hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
+  if (h->inter) {
+    // The LSA team is one node: rendezvous over the global communicator instead.
+    NC(ncclAllReduce(h->d_scratch, h->d_scratch, 1, ncclInt32, ncclSum, h->comm, s));
+  } else {
+    hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
+  }
   HC(hipStreamSynchronize(s));
   return 0;
 }
@@ -508,7 +942,10 @@ int ep_plan(void* handle, uintptr_t topk_idx, int num_tokens,
   return 0;
 }
 
-// Returns the number of received tokens, or -1 on error.
+// Returns the number of received tokens, or -1 on error. On an internode handle the plan must be the bound one: a
+// send_list or num_tokens other than the bound ones is refused up front, and a sendc of this rank, or a count a
+// same-node peer published, that differs from the bound counts fails the call after its transfers, which all ran at
+// the bound counts, so no peer is left waiting and the outputs get no more than the bound rows.
 int ep_dispatch(void* handle,
                 uintptr_t x, uintptr_t x_sf,
                 uintptr_t topk_idx, uintptr_t topk_w, int num_tokens,
@@ -550,9 +987,19 @@ int ep_dispatch(void* handle,
   REQUIRE_PTR(fn, out_tw, true);
   REQUIRE_PTR(fn, out_src, true);
 
+  // An internode dispatch posts its receives at the counts the caller bound for it.
+  REQUIRE_BOUND(h, fn);
+  if (h->inter && num_tokens != h->bound_num_tokens) {
+    return ep_fail(fn, "num_tokens %d is not the %d bound by ep_inter_bind", num_tokens, h->bound_num_tokens);
+  }
+  if (h->inter && tok && (const int32_t*)send_list != h->bound_send_list) {
+    return ep_fail(fn, "send_list is not the one bound by ep_inter_bind");
+  }
+
   // 128 total CTAs is the measured bandwidth peak on gfx950; sweeping the CTA
   // budget shows dispatch flat from 32 upward on 8x MI350X.
   const int cta = ctas_per_rank(num_sms, 128, c.num_ranks);
+  WindowView* views = h->inter ? h->d_views_inter + (use_fp8 ? kViewFp8 : kViewBf16) * c.num_ranks : h->d_views;
 
   HC(hipMemsetAsync((uint8_t*)h->win_buf + h->lay.off_counts, 0, c.num_ranks * sizeof(int32_t), s));
 
@@ -561,13 +1008,22 @@ int ep_dispatch(void* handle,
   if (use_fp8) {
     hipLaunchKernelGGL(dispatch_impl<fp8_t>, grid, block, 0, s, c, (const fp8_t*)x, (const float*)x_sf,
                        (const int32_t*)topk_idx, (const float*)topk_w, num_tokens, (const int32_t*)send_list,
-                       (const int32_t*)sendc, h->d_views);
+                       (const int32_t*)sendc, views);
   } else {
     hipLaunchKernelGGL(dispatch_impl<bf16_t>, grid, block, 0, s, c, (const bf16_t*)x, (const float*)nullptr,
                        (const int32_t*)topk_idx, (const float*)topk_w, num_tokens, (const int32_t*)send_list,
-                       (const int32_t*)sendc, h->d_views);
+                       (const int32_t*)sendc, views);
   }
+  // Same stream, so the remote rows are in this window before barrier B. A remote source writes
+  // this window only through this rank's own receive, so barrier A only has local writers to hold
+  // off.
+  if (h->inter && inter_dispatch(h, use_fp8, s) != 0) return mark_broken(h, fn);
   hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
+  // After barrier B, when every same-node count has arrived: only this rank reads its counts.
+  if (h->inter) {
+    hipLaunchKernelGGL(k_inter_set_counts, dim3(1), dim3(kMaxWorldRanks), 0, s, c.num_ranks, h->bound,
+                       (const int32_t*)sendc, (int32_t*)((uint8_t*)h->win_buf + h->lay.off_counts), h->d_total + 1);
+  }
   hipLaunchKernelGGL(k_ep_scan_counts, dim3(1), dim3(1), 0, s,
                      c, h->self_view, h->d_recvoff, h->d_total);
 
@@ -580,10 +1036,22 @@ int ep_dispatch(void* handle,
     hipLaunchKernelGGL(dispatch_copy_epilogue_impl<bf16_t>, grid, block, 0, s, c, h->self_view, h->d_recvoff,
                        (bf16_t*)out_x, (float*)nullptr, (int32_t*)out_topk, (float*)out_tw, (int32_t*)out_src);
   }
-  int total = 0;
-  HC(hipMemcpyAsync(&total, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost, s));
+  int32_t res[2] = {0, 0}; // the receive total and, internode, k_inter_set_counts' check
+  HC(hipMemcpyAsync(res, h->d_total, (h->inter ? 2 : 1) * sizeof(int32_t), hipMemcpyDeviceToHost, s));
   HC(hipStreamSynchronize(s));
-  return total;
+  if (res[1] > kMaxWorldRanks) {
+    return ep_fail(fn,
+                   "rank %d sent a row count other than the bound receive count: a plan dispatched without its "
+                   "own ep_inter_counts and ep_inter_bind",
+                   res[1] - kMaxWorldRanks - 1);
+  }
+  if (res[1] > 0) {
+    return ep_fail(fn,
+                   "the send count to rank %d is not the bound one: a plan dispatched without its own "
+                   "ep_inter_counts and ep_inter_bind",
+                   res[1] - 1);
+  }
+  return res[0];
 }
 
 // Per-source received counts, so the caller can report the per-rank prefix sum.
@@ -743,18 +1211,96 @@ int ep_combine(void* handle,
   // CTAs and cost it 7x.
   const int cta = ctas_per_rank(num_sms, 128, c.num_ranks);
   const int cta_reduce = sms_or(num_sms, 128);
+  // An internode combine returns rows at the counts and plan the caller bound for its dispatch.
+  REQUIRE_BOUND(h, fn);
+  if (h->inter && num_tokens != h->bound_num_tokens) {
+    return ep_fail(fn, "num_tokens %d is not the %d bound by ep_inter_bind", num_tokens, h->bound_num_tokens);
+  }
 
   hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
-  hipLaunchKernelGGL(combine_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
-                     c, (const bf16_t*)y, (const float*)in_w, (const int32_t*)row_map,
-                     (const int32_t*)recv_topk, (const int32_t*)recv_src, num_recv,
-                     grouped, h->self_view, h->d_views);
+  WindowView* views = h->d_views;
+  const int32_t* src = (const int32_t*)recv_src;
+  if (h->inter) {
+    views = h->d_views_inter + (grouped ? kViewCombGrouped : kViewCombFlat) * c.num_ranks;
+    // After barrier A, so no peer's dispatch still writes the counts it rewrites.
+    hipLaunchKernelGGL(k_inter_remap_src, dim3(num_recv > 0 ? (num_recv + 255) / 256 : 1), dim3(256), 0, s,
+                       (const int32_t*)recv_src, num_recv, c.num_ranks, c.num_max_tokens_per_rank, h->bound,
+                       (int32_t*)((uint8_t*)h->win_buf + h->lay.off_counts), h->d_src_inter);
+    src = h->d_src_inter;
+  }
+  hipLaunchKernelGGL(combine_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s, c, (const bf16_t*)y,
+                     (const float*)in_w, (const int32_t*)row_map, (const int32_t*)recv_topk, src, num_recv, grouped,
+                     h->self_view, views);
+  // As in dispatch: the remote rows are in place before barrier B, on the same stream.
+  if (h->inter && inter_combine(h, grouped, cta, s) != 0) return mark_broken(h, fn);
   hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
   hipLaunchKernelGGL(combine_reduce_epilogue_impl, dim3(cta_reduce), dim3(kEpWaves * kWarpSize), 0, s,
                      c, h->self_view, (const int32_t*)topk_idx, num_tokens,
                      (const bf16_t*)bias0, (const bf16_t*)bias1, grouped,
                      (bf16_t*)out, (float*)out_w);
   HC(hipStreamSynchronize(s));
+  return 0;
+}
+
+// Internode count exchange for an ep_plan plan: all-gathers every rank's `sendc` (device
+// int32 [num_ranks]) over the global communicator and writes [sendc, recvc] (host int32
+// [2 * num_ranks]) to `out`. Synchronizes: each posted receive needs its size on the host.
+int ep_inter_counts(void* handle, uintptr_t sendc, int32_t* out, uintptr_t stream) {
+  auto* h = static_cast<EpHandle*>(handle);
+  constexpr const char* fn = "ep_inter_counts";
+  REQUIRE_CONFIGURED(h, fn);
+  if (!h->inter) return ep_fail(fn, "needs an internode handle (ep_create_nodes)");
+  REQUIRE_PTR(fn, sendc, true);
+  REQUIRE_PTR(fn, out, true);
+  const int R = h->cfg.num_ranks, me = h->cfg.rank;
+  hipStream_t s = (hipStream_t)stream;
+  NC(ncclAllGather((const void*)sendc, h->d_scratch, R, ncclInt32, h->comm, s));
+  HC(hipMemcpyAsync(h->host_scratch, h->d_scratch, (size_t)R * R * sizeof(int32_t), hipMemcpyDeviceToHost, s));
+  HC(hipStreamSynchronize(s));
+  for (int q = 0; q < R; ++q) {
+    out[q] = h->host_scratch[me * R + q];
+    out[R + q] = h->host_scratch[q * R + me];
+  }
+  return 0;
+}
+
+// Bind a dispatch's `sendc` / `recvc` (host int32 [num_ranks], from ep_inter_counts) and
+// send_list (device int32 [num_ranks, num_tokens]) for the internode dispatch or combine
+// that follows. Receives are posted at these sizes and the combine scatters by send_list,
+// so a cached replay rebinds its handle's; ep_dispatch checks that it is passed this plan.
+// Stays bound until replaced, or until ep_configure changes the shape, which drops it. A
+// no-op on an intranode handle.
+int ep_inter_bind(void* handle, const int32_t* sendc, const int32_t* recvc, uintptr_t send_list, int num_tokens) {
+  auto* h = static_cast<EpHandle*>(handle);
+  constexpr const char* fn = "ep_inter_bind";
+  REQUIRE_CONFIGURED(h, fn);
+  if (!h->inter) return 0;
+  REQUIRE_TOKENS(h, fn, num_tokens);
+  REQUIRE_PTR(fn, sendc, true);
+  REQUIRE_PTR(fn, recvc, true);
+  REQUIRE_PTR(fn, send_list, num_tokens > 0);
+  const int R = h->cfg.num_ranks, T = h->cfg.num_max_tokens_per_rank;
+  InterCounts ic{};
+  int acc = 0;
+  for (int r = 0; r < R; ++r) {
+    // A plan sends a token at most once per destination, and the combine reads send_list's row r
+    // up to sendc[r] entries, so a send count is bounded by this call's num_tokens.
+    if (sendc[r] < 0 || sendc[r] > num_tokens) {
+      return ep_fail(fn, "rank %d send count %d outside [0, num_tokens=%d]", r, sendc[r], num_tokens);
+    }
+    if (recvc[r] < 0 || recvc[r] > T) {
+      return ep_fail(fn, "rank %d receive count %d outside [0, %d]", r, recvc[r], T);
+    }
+    ic.sendc[r] = sendc[r];
+    ic.recvc[r] = recvc[r];
+    ic.prefix[r] = acc;
+    acc += recvc[r];
+    ic.remote[r] = is_remote(h, r) ? 1 : 0;
+  }
+  h->bound = ic;
+  h->bound_send_list = (const int32_t*)send_list;
+  h->bound_num_tokens = num_tokens;
+  h->is_bound = true;
   return 0;
 }
 
