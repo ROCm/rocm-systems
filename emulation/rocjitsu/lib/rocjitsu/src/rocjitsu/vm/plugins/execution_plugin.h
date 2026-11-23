@@ -76,6 +76,25 @@ public:
   virtual void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
 };
 
+/// One round of one barrier: the signals counted between two completions.
+/// Passed to the split-barrier hooks so a plugin can match each wave's signal
+/// and wait to the round that ordered them.
+struct BarrierRound {
+  BarrierKind kind = BarrierKind::Workgroup;
+  /// The Wavefront completion bit the round sets: 0 named, 1 workgroup,
+  /// 2 workgroup trap, 3 cluster, 4 cluster trap.
+  uint8_t completion_bit = 0;
+  /// The named barrier ID (1-16) for a Named round, otherwise 0.
+  uint32_t named_id = 0;
+  /// Counts completed rounds of this barrier, and S_BARRIER_INIT, which
+  /// discards the signals counted so far. Starts at 0 for each workgroup. A
+  /// single-wave workgroup has no barrier state, so on a target with a single
+  /// s_barrier instruction each of its rounds reports generation 0.
+  uint64_t generation = 0;
+
+  bool operator==(const BarrierRound &) const = default;
+};
+
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
@@ -396,12 +415,56 @@ public:
   /// Memory completion and runtime initialization remain unobserved storage operations.
   virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
-  /// Called with the waves synchronized by a completed barrier domain.
+  /// Called with the waves a completed barrier round notified.
   /// Workgroup callbacks include all surviving waves of one workgroup.
   /// Waves that ended before the barrier resolved are not included.
+  /// Notification is not synchronization: on targets with s_barrier_signal and
+  /// s_barrier_wait, a notified wave is ordered after the round only once
+  /// onAmdgpuBarrierWaitPassed() reports that it passed its wait for it.
+  /// onAmdgpuBarrierRoundCompleted() says which notified waves the round
+  /// armed, that is, whose next wait it releases.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
                                        BarrierKind /*kind*/) {}
+
+  /// Called when a wave's barrier signal is counted toward `round`. Signals the
+  /// hardware ignores are not reported, nor is a second signal from one
+  /// workgroup to a cluster barrier. Fires before the round can complete, so
+  /// the completing signal precedes onAmdgpuBarrierRoundCompleted(). On
+  /// targets with a single s_barrier instruction it fires for each member when
+  /// the barrier resolves.
+  /// Fires once per counted signal, on the thread executing the wave. A named
+  /// barrier counts signals, not waves, so one wave can signal a round more
+  /// than once. May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuBarrierSignaled(const amdgpu::Wavefront & /*wf*/,
+                                       const BarrierRound & /*round*/) {}
+
+  /// Called when `round` completes. `notified` lists every wave the round
+  /// notified, as onAmdgpuBarrierResolved() does. `armed` lists those whose
+  /// completion bit the round set: the waves whose next wait on this barrier
+  /// it releases. A wave whose bit was still set by an earlier round is
+  /// notified but not armed; its wait passes for that round. `armed` is empty
+  /// when every notified wave's bit was already set. Fires immediately after
+  /// onAmdgpuBarrierResolved(). A round that notifies no wave, such as a named
+  /// round no live wave has joined, reports neither.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  virtual void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> /*notified*/,
+                                             std::span<amdgpu::Wavefront *> /*armed*/,
+                                             const BarrierRound & /*round*/) {}
+
+  /// Called when a wave passes s_barrier_wait. `round` is the round whose
+  /// completion released it. Fires after onAmdgpuBarrierRoundCompleted() for
+  /// that round. The round is the one that set the wave's completion bit; a
+  /// bit set by other means, such as a privileged STATE_PRIV write, reports
+  /// the round that last set it.
+  /// A wave that finds its bit set fires this on the thread executing it. A
+  /// wave parked in the wait fires it on the thread that completes the round;
+  /// for a cluster round that is the command processor's thread, while the
+  /// dispatch workers are stopped. May run concurrently across simulation
+  /// partitions unless requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront & /*wf*/,
+                                         const BarrierRound & /*round*/) {}
 
   /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
   /// observation is real work on the per-instruction path, so a plugin that

@@ -4,6 +4,7 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -3411,7 +3412,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitIsNoOpForSingleWaveWorkgroup) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};
@@ -3439,7 +3440,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterSignalQuorum) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const std::array<uint32_t, 2> wait_words = {0xBF94FFFFu, 0u};

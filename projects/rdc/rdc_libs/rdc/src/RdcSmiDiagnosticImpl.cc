@@ -197,7 +197,7 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
       if (gpu_index[i] == gpu_index[j]) continue;
       std::pair<amdsmi_processor_handle, amdsmi_processor_handle> ph{nullptr, nullptr};
       if (get_processor_handle_from_id(gpu_index[i], &ph.first) != AMDSMI_STATUS_SUCCESS ||
-          get_processor_handle_from_id(gpu_index[i], &ph.second) != AMDSMI_STATUS_SUCCESS) {
+          get_processor_handle_from_id(gpu_index[j], &ph.second) != AMDSMI_STATUS_SUCCESS) {
         continue;  // an unavailable GPU has no links to check
       }
 

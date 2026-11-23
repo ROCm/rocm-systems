@@ -5,7 +5,6 @@
 
 #include "common/defines.h"
 #include "core/containers/c_array.hpp"
-#include "core/locking.hpp"
 #include "core/perf.hpp"
 
 #include <timemory/backends/papi.hpp>

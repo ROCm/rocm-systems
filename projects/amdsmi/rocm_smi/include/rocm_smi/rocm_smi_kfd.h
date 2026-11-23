@@ -95,6 +95,11 @@ int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 int read_node_properties(uint32_t node, std::string property_name, uint64_t* val);
 int get_gpu_id(uint32_t node, uint64_t* gpu_id);
 
+// Reads a single KFD node's gpu_id directly (0 for a CPU node), without the
+// full KFDNode::Initialize() get_gpu_id() runs. Returns errno-style values;
+// ENOENT means the node has no gpu_id file at all.
+int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t* gpu_id);
+
 // Replaces the contents of *out with the KFD GPU ids for pid (clears first).
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);
 

@@ -69,6 +69,24 @@ pub(crate) fn committed_range(ranges: &[(usize, usize)], address: usize) -> Opti
         .find(|&(start, size)| address >= start && address - start < size)
 }
 
+/// Requires exclusive backing changes only for bytes not already committed.
+fn registration_needs_commit(
+    ranges: &[(usize, usize)],
+    address: usize,
+    size: usize,
+    borrowed: bool,
+) -> Result<bool, Status> {
+    if committed_range(ranges, address)
+        .is_some_and(|(start, length)| size <= length - (address - start))
+    {
+        return Ok(false);
+    }
+    if borrowed {
+        return Err(OUT_OF_RESOURCES);
+    }
+    Ok(true)
+}
+
 /// Commits only runtime-owned anonymous memory, preserving its reservation.
 fn commit_managed(
     runtime: &mut HsaSession,
@@ -132,8 +150,20 @@ pub(crate) fn commit_registration(
         return Ok(());
     }
     let range = managed_range(runtime, address, size)?;
-    if runtime.memory_state.copy_borrowed(range.reservation) {
-        return Err(OUT_OF_RESOURCES);
+    let reservation = runtime
+        .memory_state
+        .vmem_reservations
+        .get(&range.reservation)
+        .ok_or(INVALID_ALLOCATION)?;
+    if !registration_needs_commit(
+        &reservation.svm_ranges,
+        range.address as usize,
+        range.size as usize,
+        runtime.memory_state.copy_borrowed(range.reservation),
+    )? {
+        // Native policy can change while asynchronous work retains the range.
+        // Avoid re-protecting its already committed host backing.
+        return Ok(());
     }
     commit_managed(runtime, service, range)
 }
@@ -388,5 +418,33 @@ mod tests {
         assert_eq!(committed_range(&ranges, 0x5000), None);
         merge_committed(&mut ranges, 0x3000, 0x1000);
         assert_eq!(ranges, [(0x1000, 0x4000)]);
+    }
+
+    #[test]
+    fn committed_registration_does_not_require_exclusive_backing_access() {
+        let ranges = [(0x1000, 0x2000), (0x4000, 0x1000)];
+        for borrowed in [false, true] {
+            for (address, size) in [(0x1000, 0x2000), (0x2000, 0x1000), (0x4000, 0x1000)] {
+                assert_eq!(
+                    registration_needs_commit(&ranges, address, size, borrowed),
+                    Ok(false)
+                );
+            }
+        }
+        for (address, size) in [
+            (0x1000, 0x3000),
+            (0x2000, 0x3000),
+            (0x3000, 0x1000),
+            (0x5000, 0x1000),
+        ] {
+            assert_eq!(
+                registration_needs_commit(&ranges, address, size, true),
+                Err(OUT_OF_RESOURCES)
+            );
+            assert_eq!(
+                registration_needs_commit(&ranges, address, size, false),
+                Ok(true)
+            );
+        }
     }
 }

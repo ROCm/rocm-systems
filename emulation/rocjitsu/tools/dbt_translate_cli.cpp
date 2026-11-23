@@ -4,6 +4,7 @@
 #include "dbt_translate_cli.h"
 #include "cli_choices.h"
 #include "rocjitsu/cli.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -39,7 +40,7 @@ enum class OutputMode {
 
 struct TargetInfo {
   std::string_view name;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t mach;
   rj_code_target_id_t code_object_target;
   bool operator==(const TargetInfo &) const = default;
@@ -48,17 +49,19 @@ struct TargetInfo {
 // \NPI new GPU: add a {"gfxNNNN", ARCH, EF_MACH, TARGET} row here
 // (and bump the  std::array size) so the DBT tool can translate to/from it.
 constexpr std::array<TargetInfo, 6> kTargetInfos = {{
-    {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942, ROCJITSU_CODE_TARGET_GFX942},
-    {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950},
-    {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+    {"gfx942", rocjitsu::IsaFamily::Cdna3, EF_AMDGPU_MACH_AMDGCN_GFX942,
+     ROCJITSU_CODE_TARGET_GFX942},
+    {"gfx950", rocjitsu::IsaFamily::Cdna4, EF_AMDGPU_MACH_AMDGCN_GFX950,
+     ROCJITSU_CODE_TARGET_GFX950},
+    {"gfx1200", rocjitsu::IsaFamily::Rdna4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
      ROCJITSU_CODE_TARGET_GFX1200},
-    {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
+    {"gfx1201", rocjitsu::IsaFamily::Rdna4, EF_AMDGPU_MACH_AMDGCN_GFX1201,
      ROCJITSU_CODE_TARGET_GFX1201},
     // gfx1250 A0 and B0 share the same ELF machine and structural ISA. Separate
     // revision options select the translation direction.
-    {"gfx1250", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+    {"gfx1250", rocjitsu::IsaFamily::Cdna5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
      ROCJITSU_CODE_TARGET_GFX1250},
-    {"gfx1251", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1251,
+    {"gfx1251", rocjitsu::IsaFamily::Cdna5, EF_AMDGPU_MACH_AMDGCN_GFX1251,
      ROCJITSU_CODE_TARGET_GFX1251},
 }};
 
