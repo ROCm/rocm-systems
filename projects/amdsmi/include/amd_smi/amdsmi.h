@@ -1437,16 +1437,18 @@ typedef uint32_t amdsmi_process_handle_t;
 typedef struct {
   char name[AMDSMI_MAX_STRING_LENGTH];
   amdsmi_process_handle_t pid;
-  uint64_t mem;  //!< In Bytes
+  uint64_t mem;  //!< In Bytes; on Linux, memory_usage's vram_mem + gtt_mem + cpu_mem
   struct engine_usage_ {
     uint64_t gfx;  //!< In nano-secs
     uint64_t enc;  //!< In nano-secs
     uint32_t reserved[12];
   } engine_usage;  //!< time the process spends using these engines in ns
   struct memory_usage_ {
-    uint64_t gtt_mem;   //!< In Bytes
+    uint64_t gtt_mem;   //!< In Bytes; on Linux, DRM fdinfo's count, or KFD's VRAM count if
+                        //!< larger where amdgpu places KFD's VRAM in GTT
     uint64_t cpu_mem;   //!< In Bytes
-    uint64_t vram_mem;  //!< In Bytes
+    uint64_t vram_mem;  //!< In Bytes; on Linux, the larger of KFD's and DRM fdinfo's counts,
+                        //!< or fdinfo's alone where amdgpu places KFD's VRAM in GTT
     uint32_t reserved[10];
   } memory_usage;  //!< In Bytes
   char container_name[AMDSMI_MAX_STRING_LENGTH];
@@ -1463,16 +1465,16 @@ typedef struct {
  */
 typedef struct {
   uint32_t gpu_index;  //!< GPU index
-  uint64_t mem;        //!< Total memory in bytes
+  uint64_t mem;        //!< Total memory in bytes: vram_mem + gtt_mem + cpu_mem
   struct {
     uint64_t gfx;  //!< GFX engine usage in nanoseconds
     uint64_t enc;  //!< ENC engine usage in nanoseconds
     uint32_t reserved[12];
   } engine_usage;
   struct {
-    uint64_t gtt_mem;   //!< GTT memory in bytes
+    uint64_t gtt_mem;   //!< GTT memory in bytes, as amdsmi_proc_info_t's gtt_mem
     uint64_t cpu_mem;   //!< CPU memory in bytes
-    uint64_t vram_mem;  //!< VRAM memory in bytes
+    uint64_t vram_mem;  //!< VRAM in bytes, as amdsmi_proc_info_t's vram_mem
     uint32_t reserved[10];
   } memory_usage;
   uint32_t cu_occupancy;  //!< Number of CUs utilized
@@ -2690,6 +2692,7 @@ typedef struct {
 /**
  * @brief This structure contains information specific to a process.
  * Sum of the process memory is not expected to be the total memory usage.
+ * A value with all bits set is not available.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -7088,6 +7091,13 @@ amdsmi_status_t amdsmi_get_gpu_available_counters(amdsmi_processor_handle proces
  *  to determine how much memory should be allocated for when @p procs is not
  *  NULL.
  *
+ *  @note KFD knows a process by its PID in the host's PID namespace. In another PID
+ *  namespace, such as that of a container that does not share the host's, this
+ *  function lists the processes of that namespace that have /dev/kfd open, by their
+ *  PIDs there, with vram_usage, sdma_usage, cu_occupancy and evicted_time all-ones
+ *  (not available). It leaves out the processes whose open files the caller may not
+ *  read, such as another user's when the caller lacks CAP_SYS_PTRACE.
+ *
  *  @param[in,out] procs a pointer to memory provided by the caller to which
  *  process information will be written. This may be NULL in which case only @p
  *  num_items will be updated with the number of processes found.
@@ -7099,7 +7109,16 @@ amdsmi_status_t amdsmi_get_gpu_available_counters(amdsmi_processor_handle proces
  *  written. If @p procs is NULL, this argument will be updated with the number
  *  processes for which there is information.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_INSUFFICIENT_SIZE if more processes run than
+ *                              *@p num_items holds, for example because processes started
+ *                              after the count. @p procs then holds process IDs only; count
+ *                              again and repeat the call,
+ *                            | ::AMDSMI_STATUS_INVAL if @p num_items is NULL, non-zero on
+ *                              other failures. A process that exits during the read keeps
+ *                              its process_id with zero usage and an all-ones (not
+ *                              available) cu_occupancy. A process whose statistics cannot
+ *                              be read has them all-ones.
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs,
                                                     uint32_t* num_items);
@@ -7116,13 +7135,23 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
  *  @p pid, this function will write the process information for @p pid, if
  *  available, to the memory pointed to by @p proc.
  *
+ *  @note In a PID namespace other than the host's, such as that of a container that
+ *  does not share the host's, @p pid is a process of that namespace. It is not found
+ *  unless it has /dev/kfd open, and its vram_usage, sdma_usage, cu_occupancy and
+ *  evicted_time are all-ones (not available).
+ *
  *  @param[in] pid The process ID for which process information is being
  *  requested
  *
  *  @param[in,out] proc a pointer to a ::amdsmi_process_info_t to which
  *  process information for @p pid will be written if it is found.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_NOT_FOUND if @p pid has no KFD process or it
+ *                              exited during the read,
+ *                            | ::AMDSMI_STATUS_NO_PERM if, in a PID namespace other than the
+ *                              host's, the caller may not read the open files of @p pid,
+ *                              non-zero on other failures.
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
                                                            amdsmi_process_info_t* proc);
@@ -7135,14 +7164,20 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
  *  @platform{gpu_bm_linux}
  *
  *  @details Given a process id @p pid, a non-NULL pointer to an array of
- *  uint32_t's @p processor_handleices of length *@p num_devices, this function will
- *  write up to @p num_devices device indices to the memory pointed to by
- *  @p processor_handleices. If @p processor_handleices is not NULL, @p num_devices will be
- *  updated with the number of gpu's currently being used by process @p pid.
- *  If @p processor_handleices is NULL, @p processor_handleices will be updated with the number of
+ *  uint32_t's @p dv_indices of length *@p num_devices, this function will
+ *  write up to *@p num_devices device indices to the memory pointed to by
+ *  @p dv_indices. If @p dv_indices is not NULL, @p num_devices will be
+ *  updated with the number of indices written (unchanged on
+ *  ::AMDSMI_STATUS_INSUFFICIENT_SIZE).
+ *  If @p dv_indices is NULL, @p num_devices will be updated with the number of
  *  gpus currently being used by @p pid. Calling this function with @p
  *  dv_indices being NULL is a way to determine how much memory is required
- *  for when @p processor_handleices is not NULL.
+ *  for when @p dv_indices is not NULL.
+ *
+ *  @note In a PID namespace other than the host's, such as that of a container that
+ *  does not share the host's, @p pid is a process of that namespace, and its GPUs are
+ *  read from its /proc files: those it created queues on or, if none is found, those
+ *  whose render node it holds open. A @p pid without /dev/kfd open uses no GPUs.
  *
  *  @param[in] pid The process id of the process for which the number of gpus
  *  currently being used is requested
@@ -7154,11 +7189,19 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
  *
  *  @param[in,out] num_devices A pointer to a uint32_t, which on input, should
  *  contain the amount of memory in uint32_t's which have been provided by the
- *  @p processor_handleices argument. On output, if @p processor_handleices is non-NULL, this will
- *  be updated with the number uint32_t's actually written. If @p processor_handleices is
+ *  @p dv_indices argument. On output, if @p dv_indices is non-NULL, this will
+ *  be updated with the number uint32_t's actually written. If @p dv_indices is
  *  NULL, this argument will be updated with the number devices being used.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_INSUFFICIENT_SIZE if the process uses more GPUs
+ *                              than *@p num_devices; the call fills @p dv_indices and leaves
+ *                              *@p num_devices unchanged. Count again and repeat the call,
+ *                            | ::AMDSMI_STATUS_INVAL if @p num_devices is NULL,
+ *                            | ::AMDSMI_STATUS_NO_PERM if, in a PID namespace other than the
+ *                              host's, the caller may not read the open files of @p pid,
+ *                              non-zero on other failures. A @p pid without a KFD process
+ *                              uses no GPUs.
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_indices,
                                                     uint32_t* num_devices);
@@ -8700,6 +8743,21 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *        The max_processes is always changed to reflect the actual size of
  *        list of processes running, so the caller knows where it is at.
  *
+ *  @note On Linux, memory_usage holds the memory a process uses on this GPU, in bytes: the
+ *        sizes its DRM fdinfo reports (the buffers its DRM clients map, graphics ones too, by
+ *        where they are now), except that the VRAM KFD reports for it (its allocations,
+ *        mapped or not) replaces vram_mem when larger. Where amdgpu places what KFD
+ *        allocates as VRAM in GTT, as on an APU with less VRAM than GTT, KFD's count
+ *        replaces gtt_mem when larger instead. mem is the sum of the three. VRAM that amdgpu
+ *        has moved to GTT for a while (evicted) can count in both. If the caller may not
+ *        read the process's fdinfo (such as another user's, when the caller lacks
+ *        CAP_SYS_PTRACE), only KFD's count is known: the other sizes are 0. On a GPU split
+ *        into partitions, DRM fdinfo names only the GPU's PCI device. Where amd-smi shows the
+ *        partitions with their ID in the PCI function, only the first partition's list matches
+ *        it and covers every partition's fdinfo sizes and engine_usage, while the others hold
+ *        only KFD's count (nothing, in a PID namespace other than the host's); otherwise every
+ *        partition's list matches it and covers them all.
+ *
  *  @param[in]      processor_handle Device which to query
  *
  *  @param[in,out]  max_processes Reference to the size of the list buffer in
@@ -8725,7 +8783,30 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES, filled list buffer with data, but
- * number of actual running processes is larger than the size provided.
+ * number of actual running processes is larger than the size provided,
+ *                            | ::AMDSMI_STATUS_INVAL if max_processes is NULL,
+ *                            | ::AMDSMI_STATUS_RETRY if processes kept starting while the
+ * list was read; call again. When the GPU's processes cannot be listed, the error from that
+ * listing is returned, which can be any status (including ::AMDSMI_STATUS_INVAL), and the list is
+ * not filled. Without KFD the list is empty. A process whose KFD statistics cannot be read is
+ * still listed, with cu_occupancy, evicted_time and sdma_usage all-ones (not available) and memory
+ * sizes from its fdinfo only (0 if the caller may not read it). So is a running process whose GPUs
+ * cannot be read from KFD, if its DRM fdinfo shows a DRM node of this GPU's PCI device open, which
+ * the ROCm runtime does for every GPU it can see (for a GPU split into partitions, see the note on
+ * memory_usage above). If its fdinfo cannot be read either, the listing
+ * fails with the error from KFD, unless that error is that the caller may not read which GPUs it
+ * uses (::AMDSMI_STATUS_NO_PERM from amdsmi_get_gpu_compute_process_gpus()): such a process is
+ * left out, as is one that exited. A listed process's DRM fdinfo (its directory or one of its
+ * files) that cannot be read, other than because the caller may not read it, its fd was closed or
+ * the process exited, fails the listing with the error from that read.
+ *
+ *  @note In a PID namespace other than the host's, such as that of a container that does not
+ *  share the host's, the list holds the processes of that namespace that have /dev/kfd open,
+ *  by their PIDs there, on the GPUs amdsmi_get_gpu_compute_process_gpus() reports for them. It
+ *  leaves out the processes whose open files the caller may not read, such as another user's
+ *  when the caller lacks CAP_SYS_PTRACE. Their name, container_name, memory_usage and
+ *  engine_usage come from their own files, and cu_occupancy, evicted_time and sdma_usage are
+ *  all-ones (not available).
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
@@ -8745,13 +8826,21 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *  @param[in]  num_processors     Number of handles in processor_handles
  *  @param[out] procs              Caller-allocated buffer of amdsmi_proc_info_by_pid_t.
  *                                 Pass NULL to query the required size via max_processes.
- *  @param[in,out] max_processes   On input: capacity of procs. On output: number of
- *                                 unique PIDs written (or required if procs is NULL).
+ *  @param[in,out] max_processes   On input: capacity of procs. On output: the number of
+ *                                 unique PIDs found; procs holds the first of them, up to
+ *                                 its capacity (none if procs is NULL or the capacity is 0,
+ *                                 which only returns the count, with ::AMDSMI_STATUS_SUCCESS).
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
- *                            | ::AMDSMI_STATUS_INVAL if processor_handles is NULL or num_processors
- * is 0
+ *                            | ::AMDSMI_STATUS_INVAL if processor_handles or max_processes is NULL,
+ * or num_processors is 0,
+ *                            | ::AMDSMI_STATUS_RETRY if processes kept starting while each GPU's
+ * list was read; call again. Handles that do not resolve to a GPU are skipped. Each GPU's processes
+ * are listed as amdsmi_get_gpu_process_list() lists them. A GPU whose processes cannot be listed is
+ * left out, and the result lacks its processes; amdsmi_get_gpu_process_list() returns the error for
+ * it. Only when every GPU's listing fails is an error returned, the first GPU's, which can be any
+ * status, and nothing is filled.
  */
 amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
                                                    uint32_t num_processors,

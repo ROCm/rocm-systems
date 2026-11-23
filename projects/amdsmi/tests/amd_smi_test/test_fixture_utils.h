@@ -12,6 +12,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -29,6 +30,7 @@ namespace amd::smi::test_hooks {
 void SetSysfsDrmRoot(const std::string& root);
 void SetKfdNodesPathRoot(const std::string& root);
 void SetAppTmpDir(const std::string& dir);
+void SetProcRoot(const std::string& root);
 }  // namespace amd::smi::test_hooks
 
 // Generic (not RAS-specific) fake-sysfs fixture tree, reusable by any unit
@@ -222,6 +224,28 @@ class ScopedRocmSmiDevice {
   uint32_t index_;
   std::string link_dir_;  // Directory holding the renderD link; empty if none was created.
 };
+
+// RAII: maps KFD GPU id `gpu_id` to device index `dev_index` in RocmSMI's KFD
+// node map, as KFD topology discovery does for a real GPU, so that the rocm_smi
+// process APIs report that device for a process KFD shows on that GPU. Restores
+// the map's previous entry for `gpu_id`, if any, on destruction.
+class ScopedKfdNode {
+ public:
+  ScopedKfdNode(uint64_t gpu_id, uint32_t dev_index);
+  ~ScopedKfdNode();
+
+  ScopedKfdNode(const ScopedKfdNode&) = delete;
+  ScopedKfdNode& operator=(const ScopedKfdNode&) = delete;
+
+ private:
+  uint64_t gpu_id_;
+  std::shared_ptr<amd::smi::KFDNode> previous_;
+};
+
+// Waits until a GPU's process list cached by an earlier query (for
+// AMDSMI_PROCESS_INFO_CACHE_MS, 1 ms by default) is stale, so that the next
+// query reads the processes a test set up instead of another test's.
+void WaitOutProcessListCache();
 
 // RAII: calls the real amdsmi_init()/amdsmi_shut_down() around a test case.
 // kNoHardwareDiscoveryInitFlags is not a public amdsmi_init_flags_t value --

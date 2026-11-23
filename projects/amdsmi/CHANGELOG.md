@@ -191,6 +191,24 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi set --ampp-configure=@<path>` lowercasing its file path**.  
   - The `=` form of `--ampp-configure` incorrectly lowercased its `@<path>` value, breaking case-sensitive paths. It now preserves case, matching the space-separated form.
 
+- **Fixed crashes and mixed-up memory usage in GPU process lists**.  
+  - Listing GPU processes from several threads at once could crash or leave processes out, and a process that uses several GPUs could show another GPU's memory and engine usage.
+
+- **Fixed GPU process lists coming back empty or incomplete while GPU processes start or exit**.  
+  - On a busy system, `amd-smi process` and the process-list APIs could briefly return no processes, miss a running one, fail, or, in Python, return entries with process ID 0. Now a list that cannot be read, or a process's DRM usage in it (unless the caller may not read it), is reported as an error instead of coming back short (`amd-smi process` and `amd-smi monitor -q` show it on that GPU and still list the other GPUs), a running process whose statistics cannot be read is listed with them N/A (before, `amdsmi_get_gpu_compute_process_info()` failed for it), a running process is left out only when the caller may not read which GPUs it uses (for a GPU split into partitions, see below), and `amdsmi_get_gpu_process_list_by_pid()`, which leaves out a GPU whose processes cannot be listed, now reports an error when no GPU's processes can be listed instead of returning none.
+
+- **Fixed per-process memory and engine usage in `amd-smi process`**.  
+  - VRAM, GTT and CPU memory read 2.3% low and could be counted several times for one process, and a process that opened the same GPU more than once showed the engine usage of only one of those opens. `MEM_USAGE` in `amd-smi`, `amd-smi process` and `amd-smi monitor` (`mem` in the APIs) is now always the sum of the process's VRAM, GTT and CPU memory; for a process that KFD reported VRAM for, it held only that VRAM. VRAM is now the larger of the VRAM KFD reports and the VRAM the process's fdinfo reports, so it can include compute allocations the process has not mapped; on an APU that keeps those allocations in GTT, GTT is the larger of KFD's count and fdinfo's instead. On a GPU split into partitions, DRM fdinfo cannot tell the partitions apart, so a partition's list can include the other partitions' fdinfo sizes and engine usage, or lack its own, and a process that only its fdinfo places can be listed on one of the partitions only.
+
+- **Fixed `amdsmi_get_gpu_compute_process_gpus()` failing when it counts a process's GPUs**.  
+  - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
+
+- **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_process_list()` returning invalid entries**.  
+  - The list could end with entries of undefined content: in `amdsmi_get_gpu_compute_process_info()` when processes exited between its count and its read, and in `amdsmi_get_gpu_process_list()` when a process started after a count of 0. When processes started between a count above 0 and the read, both calls failed.
+
+- **Fixed process information in containers showing other processes' data**.  
+  - In a container with its own PID namespace, `amd-smi process` and the process APIs could show host PIDs or another process's name, memory or GPUs. They now show only the container's processes (other users' only with `CAP_SYS_PTRACE`) by their container PIDs, and the driver's per-process statistics, such as CU occupancy and SDMA usage, are N/A unless the container shares the host's PID namespace (`docker run --pid=host`).
+
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 

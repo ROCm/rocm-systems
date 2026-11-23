@@ -29,4 +29,9 @@ AMDSMI_TEST_HOOK const std::string& KfdNodesPathRoot();
 // leaving files that a later real run on the same host would read.
 AMDSMI_TEST_HOOK const std::string& AppTmpDir();
 
+// Root of /proc, under which product code reads a process's fdinfo, exe link and cgroup, with no
+// trailing "/". Defaults to "/proc"; a test sets it to a FakeSysfsTree root. rocm_smi reads a PID
+// namespace's /proc through a hook of its own, amd::smi::SetProcPathRootForTesting().
+AMDSMI_TEST_HOOK const std::string& ProcRoot();
+
 }  // namespace amd::smi::test_hooks

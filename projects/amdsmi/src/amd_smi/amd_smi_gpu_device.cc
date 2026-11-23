@@ -7,7 +7,6 @@ extern "C" {
 #include "ualoe_lib/ualoe_lib.h"
 }
 
-#include <dirent.h>
 #include <sys/types.h>
 
 #include <algorithm>
@@ -15,7 +14,6 @@ extern "C" {
 #include <atomic>
 #include <cctype>
 #include <cerrno>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -30,17 +28,17 @@ extern "C" {
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_kfd_process_list.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/fdinfo.h"
+#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd::smi {
-
-// Constant for KFD context directory prefix
-static constexpr const char* kContextPrefix = "context_";
 
 AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf,
                                  AMDSmiDrm& drm)
@@ -165,16 +163,16 @@ amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_cpu_affinity(std::string& cpu_affi
 }
 
 namespace {
-// cache the compute process list for the device
+// This GPU's finished process list, reused for kComputeProcessCacheDuration.
 struct ComputeProcessCache {
-  std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
-  std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{
-      std::chrono::steady_clock::time_point{}};
   std::mutex mtx;
-  uint32_t num_running_processes = 0;
+  // All guarded by mtx.
+  bool valid = false;
+  std::chrono::steady_clock::time_point updated;
+  uint32_t num_kfd_processes = 0;  // Sizes the next listing of KFD processes.
+  GPUComputeProcessList_t list;
 };
 
-std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
 // Never destroyed: a thread can still be inside get_compute_process_list_impl()
 // while the library's static destructors run at exit.
 auto& compute_process_cache_map =
@@ -183,10 +181,62 @@ std::mutex compute_process_list_mutex;
 static const std::chrono::milliseconds kComputeProcessCacheDuration =
     std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
 
+// Set only by smi_amdgpu_set_kfd_process_lister_for_testing().
+std::atomic<SmiKfdProcessListerFn> g_kfd_process_lister_override{nullptr};
+
+SmiKfdProcessListerFn KfdProcessLister() {
+  const SmiKfdProcessListerFn lister = g_kfd_process_lister_override.load();
+  return lister != nullptr ? lister : GetProcessInfo;
+}
+
+// A partition's address holds its ID in bits 31:28 or, with some drivers, in the PCI
+// function (bits 2:0).
+constexpr uint64_t kPartitionIdBits = (uint64_t{0xF} << 28) | 0x7;
+
+// Whether amdgpu places the memory KFD allocates as VRAM on rocm_smi device
+// `index` (KFD id `kfd_gpu_id`) in GTT, as it does on an APU with less VRAM than
+// GTT. KFD then offers more local memory than the GPU has VRAM. The VRAM total
+// comes from sysfs, as rsmi_dev_memory_total_get() falls back to KFD's size, and
+// for a partition whose render node has none, from the GPU's first partition.
+// Where no partition has one, amdgpu manages no VRAM (an MI300A in native mode),
+// so the total is 0. No if a size cannot be read.
+bool KfdVramIsInGtt(uint32_t index, uint64_t kfd_gpu_id) {
+  try {
+    RocmSMI& smi = RocmSMI::getInstance();
+    const auto node = smi.kfd_node_map().find(kfd_gpu_id);
+    const auto& devices = smi.devices();
+    uint64_t kfd_memory = 0;
+    if (node == smi.kfd_node_map().end() || node->second->get_total_memory(&kfd_memory) != 0 ||
+        index >= devices.size()) {
+      return false;
+    }
+    uint64_t vram = 0;
+    const int vram_err = devices[index]->readDevInfo(kDevMemTotVRAM, &vram);
+    if (vram_err != 0) {
+      if (devices[index]->bdfid() == UINT64_MAX) return false;
+      const uint64_t gpu = devices[index]->bdfid() & ~kPartitionIdBits;
+      const auto first = std::find_if(devices.begin(), devices.end(), [&](const auto& device) {
+        return (device->bdfid() & ~kPartitionIdBits) == gpu &&
+               device->readDevInfo(kDevMemTotVRAM, &vram) == 0;
+      });
+      if (first == devices.end() && vram_err != ENOENT) return false;
+    }
+    return kfd_memory > vram;
+  } catch (...) {
+    // rocm_smi throws on a size that is not a number.
+    return false;
+  }
+}
+
 }  // namespace
 
-int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
+amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
+  compute_process_list.clear();
+  if (list_type != ComputeProcessListType_t::kAllProcesses &&
+      list_type != ComputeProcessListType_t::kAllProcessesOnDevice) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
   ComputeProcessCache* cache_ptr = nullptr;
   {
     std::lock_guard<std::mutex> lock(compute_process_list_mutex);
@@ -195,72 +245,33 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
     cache_ptr = compute_process_cache_map[gpu_id_].get();
   }
-
-  /**
-   *  The first call to rsmi_compute_process_info_get() to find the number of
-   *  rsmi_process_info_t currently running on the system.
-   */
-  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-  auto now = std::chrono::steady_clock::now();
-  auto last_read_delta = std::chrono::duration_cast<std::chrono::milliseconds>(
-      now - cache_ptr->last_compute_process_list_update_time.load());
-  // only get new data if cache duration has expired
-  if (last_read_delta > kComputeProcessCacheDuration) {
-    // double-check locking pattern here
-    std::lock_guard<std::mutex> lock(cache_ptr->mtx);
-    if (std::chrono::steady_clock::now() -
-            cache_ptr->last_compute_process_list_update_time.load() <=
-        kComputeProcessCacheDuration) {
-      // another thread already updated the data while we were waiting for the lock
-      // so just return the existing data
-      return rsmi_status_t::RSMI_STATUS_SUCCESS;
-    }
-
-    // Clear the process info cache when refreshing
-    process_info_cache_map.clear();
-
-    status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return static_cast<int32_t>(status_code);
-    }
-    if (cache_ptr->num_running_processes <= 0) {
-      compute_process_list.clear();
-      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
-      return static_cast<int32_t>(status_code);
-    }
-
-    /**
-     *  Make a type safe pointer, then
-     *
-     * second call to rsmi_compute_process_info_get() to get the actual data into
-     *  the allocated rsmi_process_info_t array.
-     */
-    cache_ptr->list_all_processes_ptr =
-        std::make_unique<rsmi_process_info_t[]>(cache_ptr->num_running_processes);
-
-    status_code = rsmi_compute_process_info_get(cache_ptr->list_all_processes_ptr.get(),
-                                                &cache_ptr->num_running_processes);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return static_cast<int32_t>(status_code);
-    }
-
-    if (cache_ptr->num_running_processes <= 0) {
-      compute_process_list.clear();
-      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
-      return rsmi_status_t::RSMI_STATUS_SUCCESS;  // No processes running
-    }
-
-    cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
+  // Held through the refresh, so a call that waits here while another call
+  // refreshes this GPU's list gets that list instead of reading it again.
+  std::lock_guard<std::mutex> lock(cache_ptr->mtx);
+  if (cache_ptr->valid &&
+      std::chrono::steady_clock::now() - cache_ptr->updated <= kComputeProcessCacheDuration) {
+    compute_process_list = cache_ptr->list;
+    return AMDSMI_STATUS_SUCCESS;
   }
+
+  // List the KFD processes by PID only; each one's stats are read below, for
+  // this GPU.
+  std::vector<rsmi_process_info_t> procs;
+  const amdsmi_status_t list_status =
+      smi_amdgpu_list_kfd_processes(KfdProcessLister(), cache_ptr->num_kfd_processes, &procs);
+  if (list_status != AMDSMI_STATUS_SUCCESS) {
+    return list_status;
+  }
+  cache_ptr->num_kfd_processes = static_cast<uint32_t>(procs.size());
 
   /**
    *  Check that you have devices that are able to be monitored, ie excluding CPUs
    */
   auto num_running_devices = uint32_t(0);
   auto list_device_allocation_size = uint32_t(0);
-  status_code = rsmi_num_monitor_devices(&num_running_devices);
+  const rsmi_status_t status_code = rsmi_num_monitor_devices(&num_running_devices);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_devices <= 0)) {
-    return static_cast<int32_t>(status_code);
+    return rsmi_to_amdsmi_status(status_code);
   }
 
   /**
@@ -284,6 +295,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
           "fall back to full KFD topology discovery.";
     LOG_WARN(ss);
   }
+  const bool kfd_vram_in_gtt = KfdVramIsInGtt(gpu_id_, kfd_gpu_id);
 
   auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info,
                               amdsmi_proc_info_t& amdsmi_proc_info) {
@@ -294,7 +306,16 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     // If we cannot get the info from sysfs, save the minimum info
     if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
       amdsmi_proc_info.pid = rsmi_proc_info.process_id;
-      amdsmi_proc_info.memory_usage.vram_mem = rsmi_proc_info.vram_usage;
+    }
+    // KFD counts the VRAM a process allocated, mapped or not; fdinfo the buffers
+    // its DRM clients map (graphics too), by where they are now. Each can miss
+    // some, so the size is the larger of the two: GTT's where amdgpu places
+    // KFD's VRAM in GTT, VRAM's elsewhere. An unknown KFD size (all-ones) is
+    // skipped.
+    if (rsmi_proc_info.vram_usage != UINT64_MAX) {
+      uint64_t& size = kfd_vram_in_gtt ? amdsmi_proc_info.memory_usage.gtt_mem
+                                       : amdsmi_proc_info.memory_usage.vram_mem;
+      size = std::max(size, rsmi_proc_info.vram_usage);
     }
 
     // Copy the kfd stats from rsmi_process_info_t to amdsmi_proc_info_t
@@ -302,95 +323,64 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     amdsmi_proc_info.evicted_time = rsmi_proc_info.evicted_time;
     amdsmi_proc_info.sdma_usage = rsmi_proc_info.sdma_usage;
 
-    // Safely handle KFD processes to get total memory_usage of the process
-    std::string kfd_proc_path =
-        "/sys/class/kfd/kfd/proc/" + std::to_string(rsmi_proc_info.process_id);
-    std::string kfd_vram_file = "/vram_" + std::to_string(kfd_gpu_id);
-
-    // Helper for safe addition without overflow
-    auto safe_add = [](uint64_t a, uint64_t b) -> uint64_t {
-      return (a > UINT64_MAX - b) ? UINT64_MAX : a + b;
-    };
-    // Helper lambda to read VRAM from a path.
-    // Returns 0 if file doesn't exist or can't be read (intentional for optional paths).
-    // Logs parse errors via LOG_INFO but doesn't propagate them - this is a best-effort
-    // aggregation where partial data is better than failing the entire operation.
-    auto read_vram_from_path = [&kfd_vram_file](const std::string& base_path) -> uint64_t {
-      uint64_t vram_bytes = 0;
-      std::string vram_path = base_path + kfd_vram_file;
-
-      // File may not exist for secondary contexts - this is expected, not an error
-      if (access(vram_path.c_str(), R_OK) != 0) {
-        return 0;  // File doesn't exist or not readable - expected for optional paths
-      }
-
-      std::ifstream kfd_file(vram_path);
-      if (!kfd_file.is_open()) {
-        return 0;  // Couldn't open file - treat as no data available
-      }
-
-      std::string line;
-      if (std::getline(kfd_file, line)) {
-        try {
-          vram_bytes = std::stoull(line);
-        } catch (const std::exception& e) {
-          // Parse error is unexpected - log it for debugging
-          std::ostringstream ss;
-          ss << __PRETTY_FUNCTION__ << " | Failed to parse VRAM value from KFD: " << e.what();
-          LOG_INFO(ss);
-          // Return 0 rather than failing - best effort aggregation
-        }
-      }
-      kfd_file.close();
-      return vram_bytes;
-    };
-
-    // Helper lambda to read VRAM from all contexts in a directory
-    auto read_vram_from_all_contexts = [&read_vram_from_path,
-                                        &safe_add](const std::string& base_path) -> uint64_t {
-      uint64_t total = read_vram_from_path(base_path);
-
-      // Check for secondary contexts (context_xxxx directories)
-      DIR* dir = opendir(base_path.c_str());
-      if (dir != nullptr) {
-        struct dirent* entry;
-        while ((entry = readdir(dir)) != nullptr) {
-          if (strncmp(entry->d_name, kContextPrefix, strlen(kContextPrefix)) == 0) {
-            std::string context_path = base_path + "/" + entry->d_name;
-            total = safe_add(total, read_vram_from_path(context_path));
-          }
-        }
-        closedir(dir);
-      }
-      return total;
-    };
-
-    // Read VRAM from primary process
-    uint64_t total_vram = read_vram_from_all_contexts(kfd_proc_path);
-
-    // Also check for "pid:PID-id:X" format directories at the parent level
-    // This is another format used for multi-context processes
-    std::string kfd_root = "/sys/class/kfd/kfd/proc/";
-    std::string pid_prefix = "pid:" + std::to_string(rsmi_proc_info.process_id) + "-id:";
-    DIR* proc_root = opendir(kfd_root.c_str());
-    if (proc_root != nullptr) {
-      struct dirent* root_entry;
-      while ((root_entry = readdir(proc_root)) != nullptr) {
-        if (root_entry->d_name[0] == '.') continue;
-        std::string entry_name = root_entry->d_name;
-        if (entry_name.find(pid_prefix) == 0) {
-          std::string alternate_path = kfd_root + entry_name;
-          total_vram = safe_add(total_vram, read_vram_from_all_contexts(alternate_path));
-        }
-      }
-      closedir(proc_root);
+    // mem is the sum of memory_usage on every path, so its meaning does not
+    // change with the sources the sizes came from. A sum that does not fit stops
+    // one below all-ones, as rocm_smi caps KFD's sizes, rather than wrap.
+    constexpr uint64_t kLargestSize = std::numeric_limits<uint64_t>::max() - 1;
+    const auto& usage = amdsmi_proc_info.memory_usage;
+    uint64_t mem = 0;
+    for (const uint64_t size : {usage.vram_mem, usage.gtt_mem, usage.cpu_mem}) {
+      mem = size > kLargestSize - mem ? kLargestSize : mem + size;
     }
+    amdsmi_proc_info.mem = mem;
 
-    if (total_vram > 0) {
-      amdsmi_proc_info.mem = total_vram;
+    return status_code;
+  };
+
+  // A process's fdinfo that cannot be read, other than because it exited or the
+  // caller may not read it, would leave sizes and engine usage silently low, so it
+  // fails the list.
+  auto fdinfo_read_failed = [](amdsmi_status_t status) {
+    return status != AMDSMI_STATUS_SUCCESS && status != AMDSMI_STATUS_NOT_FOUND &&
+           status != AMDSMI_STATUS_NO_PERM;
+  };
+
+  // For a process whose GPUs KFD could not report: KFD makes its files for every
+  // GPU, so only its DRM fdinfo places it. If that cannot be read either, the list
+  // fails rather than drop a running process, unless the caller may not read its
+  // GPUs, as a PID namespace's listing leaves such processes out.
+  const std::string fdinfo_bdf = bdf_to_string();
+  auto place_by_fdinfo = [&](uint32_t pid, rsmi_status_t gpus_status) {
+    // Only a missing KFD directory means that it exited.
+    if (!KfdProcessExists(pid)) {
+      return AMDSMI_STATUS_SUCCESS;
     }
-
-    return static_cast<int32_t>(status_code);
+    const amdsmi_status_t shown = smi_amdgpu_fdinfo_shows_gpu(pid, fdinfo_bdf);
+    if (shown == AMDSMI_STATUS_SUCCESS) {
+      amdsmi_proc_info_t amdsmi_proc_info{};
+      const amdsmi_status_t info_status =
+          get_process_info(MakeUnavailableProcessInfo(pid), amdsmi_proc_info);
+      if (fdinfo_read_failed(info_status)) {
+        return info_status;
+      }
+      if (info_status == AMDSMI_STATUS_SUCCESS || KfdProcessExists(pid)) {
+        compute_process_list.emplace(pid, amdsmi_proc_info);
+      }
+    }
+    if (shown == AMDSMI_STATUS_SUCCESS || shown == AMDSMI_STATUS_NOT_FOUND) {
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | pid " << pid << ": its GPUs could not be read from KFD ("
+       << getRSMIStatusString(gpus_status, false) << ") nor its DRM fdinfo ("
+       << smi_amdgpu_get_status_string(shown, false) << ")";
+    if (gpus_status == rsmi_status_t::RSMI_STATUS_PERMISSION) {
+      ss << "; left out";
+      LOG_INFO(ss);
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    LOG_ERROR(ss);
+    return rsmi_to_amdsmi_status(gpus_status);
   };
 
   /**
@@ -398,64 +388,62 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
    */
   auto update_list_by_running_device = [&](rsmi_process_info_t rsmi_proc_info) {
     // Get all devices running this process into list_device_ptr
-    auto status_result(true);
     std::unique_ptr<uint32_t[]> list_device_ptr = std::make_unique<uint32_t[]>(num_running_devices);
     list_device_allocation_size = num_running_devices;
-    auto status_code = rsmi_compute_process_gpus_get(
+    const auto gpus_status = rsmi_compute_process_gpus_get(
         rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      status_result = false;
-      return status_result;
+    if (gpus_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      return place_by_fdinfo(rsmi_proc_info.process_id, gpus_status);
     }
 
     for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
       // Is this device running this process?
       if (list_device_ptr[device_idx] == get_gpu_id()) {
-        amdsmi_proc_info_t tmp_amdsmi_proc_info{};
-
-        auto cached_amdsmi_proc = process_info_cache_map.find(rsmi_proc_info.process_id);
-        if (cached_amdsmi_proc != process_info_cache_map.end()) {
-          // Use cached info
-          tmp_amdsmi_proc_info = cached_amdsmi_proc->second;
-        } else {
-          // Need to get new info from system
-          std::unordered_set<uint64_t> gpu_set;
-          gpu_set.insert(get_kfd_gpu_id());
-          GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
-          get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
-          process_info_cache_map[rsmi_proc_info.process_id] = tmp_amdsmi_proc_info;
+        // Read the process's KFD stats for this GPU only.
+        std::unordered_set<uint64_t> gpu_set{kfd_gpu_id};
+        const auto pid = rsmi_proc_info.process_id;
+        const int err = GetProcessInfoForPID(pid, &rsmi_proc_info, &gpu_set);
+        if (err != 0) {
+          if (KfdProcessExitedDuringRead(pid, err)) {
+            break;
+          }
+          // Still running but unreadable: list it with each KFD stat unknown.
+          rsmi_proc_info = MakeUnavailableProcessInfo(pid);
         }
-        compute_process_list.emplace(rsmi_proc_info.process_id, tmp_amdsmi_proc_info);
+        amdsmi_proc_info_t amdsmi_proc_info{};
+        const amdsmi_status_t info_status = get_process_info(rsmi_proc_info, amdsmi_proc_info);
+        if (fdinfo_read_failed(info_status)) {
+          return info_status;
+        }
+        compute_process_list.emplace(rsmi_proc_info.process_id, amdsmi_proc_info);
       }
     }
-
-    return status_result;
+    return AMDSMI_STATUS_SUCCESS;
   };
 
   /**
    *  Transfer/Save the ones linked to this device.
    */
-  compute_process_list.clear();
-  std::lock_guard<std::mutex> lock(cache_ptr->mtx);
-  for (auto process_idx = uint32_t(0); process_idx < cache_ptr->num_running_processes;
-       ++process_idx) {
-    if (list_type == ComputeProcessListType_t::kAllProcesses ||
-        list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-      update_list_by_running_device(cache_ptr->list_all_processes_ptr[process_idx]);
+  for (const auto& rsmi_proc_info : procs) {
+    const amdsmi_status_t status = update_list_by_running_device(rsmi_proc_info);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      return status;
     }
   }
+  cache_ptr->list = compute_process_list;
+  cache_ptr->updated = std::chrono::steady_clock::now();
+  cache_ptr->valid = true;
 
-  return static_cast<int32_t>(status_code);
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-const GPUComputeProcessList_t& AMDSmiGPUDevice::amdgpu_get_compute_process_list(
-    ComputeProcessListType_t list_type) {
-  auto error_code = get_compute_process_list_impl(compute_process_list_, list_type);
-  if (error_code) {
-    compute_process_list_.clear();
+amdsmi_status_t AMDSmiGPUDevice::amdgpu_get_compute_process_list(
+    GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
+  const amdsmi_status_t status = get_compute_process_list_impl(compute_process_list, list_type);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    compute_process_list.clear();
   }
-
-  return compute_process_list_;
+  return status;
 }
 
 // Convert `amdsmi_bdf_t` to a PCI BDF string
@@ -1246,3 +1234,7 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
 }
 
 }  // namespace amd::smi
+
+void smi_amdgpu_set_kfd_process_lister_for_testing(SmiKfdProcessListerFn lister) {
+  amd::smi::g_kfd_process_lister_override.store(lister);
+}
