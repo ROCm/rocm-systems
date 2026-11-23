@@ -3398,6 +3398,13 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
 
+// TREE multi-node correctness has not been validated past 64 channels even though MAXCHANNELS permits 256, so an
+// opt-in NCCL_MAX_NCHANNELS=256 must not push TREE into the unvalidated regime. Tree/NaN on gfx1250 (cudaArch 1250,
+// gfx1250 and gfx1250_strict) runs up to 192.
+static inline int rcclTreeMaxChannels(const struct ncclComm* comm, int protocol) {
+  return protocol == NCCL_PROTO_NAN && comm->cudaArch == 1250 ? 192 : 64;
+}
+
 static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
                                     float** collCostTable, ncclSimInfo_t* simInfo) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
@@ -3556,17 +3563,14 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   } else if (info->algorithm == NCCL_ALGO_TREE) {
     nc = std::min(nc, 64); // Tree uses at most 64 channels as we don't support WarpSpeed Tree.
 #else
-    // Mirror the WarpSpeed cap: TREE multi-node correctness has not been
-    // validated past 64 channels even though MAXCHANNELS now permits 256.
-    // Cap nc to 64 here so an opt-in NCCL_MAX_NCHANNELS=256 doesn't push TREE
-    // into the unvalidated regime; RING is unaffected and scales to 256.
-    nc = std::min(nc, 64);
+    // Mirror the WarpSpeed cap; RING is unaffected and scales to 256.
+    nc = std::min(nc, rcclTreeMaxChannels(comm, info->protocol));
     info->nMaxChannels = nc;
 #endif
   } else if (info->algorithm == NCCL_ALGO_TREE) {
     // Same TREE cap for the non-AllReduce path (in case a tree-only collective
     // ends up here under an opt-in higher max).
-    nc = std::min(nc, 64);
+    nc = std::min(nc, rcclTreeMaxChannels(comm, info->protocol));
     info->nMaxChannels = nc;
   } else {
     info->nMaxChannels = nc;
