@@ -565,9 +565,10 @@ class CostModelLlCapMicrotest : public ::testing::Test {
     comm_->nRanks = 8;
     comm_->nNodes = 1;
     comm_->maxTreePattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
-    // Links fast enough that the per-arch LL cap, not the graph, bounds LL bandwidth.
+    // Links fast enough that the per-arch LL cap, not the graph, bounds LL bandwidth. At 32 channels the
+    // gfx12 Tree/LL bandwidth before the cap is about twice the cap, so the Tree per-channel cap never binds.
     for (int algo : {NCCL_ALGO_TREE, NCCL_ALGO_RING}) {
-      comm_->graphs[algo].nChannels = 16;
+      comm_->graphs[algo].nChannels = 32;
       comm_->graphs[algo].bwIntra = comm_->graphs[algo].bwInter = 100.0f;
     }
   }
@@ -577,11 +578,11 @@ class CostModelLlCapMicrotest : public ::testing::Test {
     ResetNcclFakes();
   }
 
-  // The shipped defaults, which comm init installs before the cost model runs, through the inits of
-  // the Ring/LL and Tree/LL rows. modelMap[] here dispatches to the fakes, so call the real ones.
+  // The constants comm init installs (ncclTuningInit runs ncclTuningCostModelPreInit), through the inits
+  // of the Ring/LL and Tree/LL rows. modelMap[] here dispatches to the fakes, so call the real ones.
   void InitLlModels(int compCap) {
     comm_->minCompCap = comm_->maxCompCap = compCap;
-    comm_->tuningContext.tuningConstants = ncclTunerConstantsDefaults;
+    ASSERT_EQ(ncclSuccess, ncclTuningCostModelPreInit(comm_.get()));
     const int ringLl = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_LL;
     const int treeLl = NCCL_ALGO_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_LL;
     ASSERT_EQ(ncclSuccess, ncclTuningRingModelInit(comm_.get(), ringLl, comm_->tuningContext.enabled[ringLl], &state_));
