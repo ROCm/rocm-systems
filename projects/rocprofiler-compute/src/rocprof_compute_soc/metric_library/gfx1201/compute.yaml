@@ -168,7 +168,8 @@ compute.wmma_flops_f16_16x16x16:
   name: WMMA FLOPs (F16->F32 16x16x16)
   formula: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
-  description: Achieved FP16 WMMA throughput.
+  description: >-
+    The total number of FP16 WMMA floating-point operations executed per second.
   peak: '$max_sclk * $cu_per_gpu * 1024 / 1000'
   peak_empirical: $WMMAF16Flops_empirical_peak
 compute.wmma_inst_cycles:
