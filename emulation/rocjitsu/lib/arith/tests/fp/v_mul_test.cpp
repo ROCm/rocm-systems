@@ -109,7 +109,7 @@ template <int Lanes, typename Call> void check_status(Call call) {
 TEST(FpMulF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_mul_f32_w32_gfx12, [](double x, double y) { return x * y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/true);
+      /*fp_status_supported=*/true, /*compatibility_status=*/true);
   check_status<32>(rj_arith_v_mul_f32_w32_gfx12);
 }
 
@@ -117,14 +117,14 @@ TEST(FpMulF32W32Gfx12, Arithmetic) {
 TEST(FpMulF32W32Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_mul_f32_w32, [](double x, double y) { return x * y; }, /*gfx12=*/false,
-      /*fp_status_supported=*/false);
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpMulF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_mul_f32_w64_gfx12, [](double x, double y) { return x * y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/true);
+      /*fp_status_supported=*/true, /*compatibility_status=*/true);
   check_status<64>(rj_arith_v_mul_f32_w64_gfx12);
 }
 
@@ -132,7 +132,7 @@ TEST(FpMulF32W64Gfx12, Arithmetic) {
 TEST(FpMulF32W64Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_mul_f32_w64, [](double x, double y) { return x * y; }, /*gfx12=*/false,
-      /*fp_status_supported=*/false);
+      /*fp_status_supported=*/false, /*compatibility_status=*/true);
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -160,7 +160,7 @@ TEST(FpMulF64W64Gfx11, Arithmetic) {
 }
 
 // Reject unqualified status domains before touching outputs; Compatibility
-// leaves status untouched even when the arithmetic overflows.
+// uses the inherited classifier even where explicit mode 3 is unqualified.
 TEST(FpMulF32, ReportingDomain) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -181,7 +181,11 @@ TEST(FpMulF32, ReportingDomain) {
           ASSERT_EQ(call(cpu | fp | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, instruction_flags, r.v + 2,
                          r.v, r.v + 1, &status),
                     RJ_ARITH_SUCCESS);
-          EXPECT_EQ(status, 0x80000000U);
+          const uint32_t causes =
+              call == rj_arith_v_mul_f32_w32_gfx12 && (instruction_flags & RJ_ARITH_ALU_OMOD_MASK)
+                  ? 8U
+                  : 0x28U;
+          EXPECT_EQ(status, 0x80000000U | causes);
         }
       }
     }
@@ -209,7 +213,8 @@ template <int Lanes, typename Call> void check_mul_rounding(Call call) {
             r.v[0][lane] = sign | 0x3f800001U;
             r.v[1][lane] = 0x3f800001U;
           }
-          ASSERT_EQ(call(cpu | semantics | rounding, ~Mask(0), 0, r.v + 2, r.v, r.v + 1, nullptr),
+          uint32_t status = 0;
+          ASSERT_EQ(call(cpu | semantics | rounding, ~Mask(0), 0, r.v + 2, r.v, r.v + 1, &status),
                     RJ_ARITH_SUCCESS);
           const bool away = rounding == (negative ? RJ_ARITH_FP_ROUND_DOWN : RJ_ARITH_FP_ROUND_UP);
           const uint32_t expected = sign | (away ? 0x3f800003U : 0x3f800002U);
@@ -477,6 +482,64 @@ TEST(FpMulF16Cdna, RoundedMinimumNormal) {
       ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, r.v + 1, nullptr),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[2][0] & 0xffffU, 0x0800U);
+    }
+  }
+}
+
+// Wave64 DPP filters INVALID by writable lanes, but classifies MUL range causes over EXEC.
+TEST(FpMulF32Gfx12, CompatibilityDppWave64Causes) {
+  using namespace rocjitsu::arith::test;
+  for (auto cpu : supported_cpu_levels()) {
+    for (uint64_t rows : {4ULL, 8ULL}) {
+      Registers<3, 64> r;
+      for (int lane = 0; lane < 64; ++lane) {
+        r.v[0][lane] = 0x3f800000U;
+        r.v[1][lane] = 0x3f800000U;
+      }
+      r.v[0][0] = 0x7f7fffffU;
+      r.v[1][0] = 0x40000000U;
+      r.v[0][48] = 0x7f800001U;
+      const auto before = r;
+      const uint64_t exec_mask = 1ULL | (1ULL << 32) | (1ULL << 48);
+      const uint64_t modifiers = RJ_ARITH_DPP16 | (0xe4ULL << RJ_ARITH_DPP_CTRL_SHIFT) |
+                                 (rows << RJ_ARITH_DPP_ROW_SHIFT) | RJ_ARITH_DPP_BANK_MASK;
+      uint32_t status = 0x40;
+      ASSERT_EQ(rj_arith_v_mul_f32_w64_gfx12(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, exec_mask,
+                                             modifiers, r.v + 2, r.v, r.v + 1, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status, rows == 4 ? 0x68U : 0x69U);
+      for (int lane = 0; lane < 64; ++lane) {
+        const uint32_t expected = rows == 4 && lane == 32   ? 0x3f800000U
+                                  : rows == 8 && lane == 48 ? 0x7fc00001U
+                                                            : before.v[2][lane];
+        EXPECT_EQ(r.v[2][lane], expected) << "lane=" << lane;
+      }
+      r.expect_preserved(before, 2, 1);
+    }
+  }
+}
+
+// Neither strict mode borrows another target's qualification.
+TEST(FpMulF32Gfx1250, NumericAndFpStatusQualification) {
+  for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    uint32_t a[64] = {0x7f800123}, b[64] = {0x3f800000}, out[64] = {};
+    const uint32_t *x = a, *y = b;
+    uint32_t *d = out;
+    for (auto semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                           RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      const uint64_t flags = cpu | semantics;
+      const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                               ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                               : RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+      for (bool wave64 : {false, true}) {
+        uint32_t status = 0x80;
+        out[0] = 0xdeadbeef;
+        const int error = wave64 ? rj_arith_v_mul_f32_w64_gfx1250(flags, 1, 0, &d, &x, &y, &status)
+                                 : rj_arith_v_mul_f32_w32_gfx1250(flags, 1, 0, &d, &x, &y, &status);
+        EXPECT_EQ(error, expected);
+        EXPECT_EQ(out[0], 0xdeadbeefU);
+        EXPECT_EQ(status, 0x80U);
+      }
     }
   }
 }

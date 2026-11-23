@@ -4,7 +4,7 @@
 //! Async copy submission, batches, rectangles, and engine queries.
 
 use super::*;
-use crate::runtime::{ApiLeaseScope, InFlightToken, InFlightTracker};
+use crate::admission::{ApiLeaseScope, InFlightToken, InFlightTracker};
 
 /// Keeps nested native retirement admitted through the worker's cleanup tail.
 /// The body must release retained resources even if ordinary admission closed.
@@ -13,10 +13,10 @@ fn with_copy_worker_lease(
     cleanup: Option<InFlightToken>,
     body: impl FnOnce(bool),
 ) {
-    let lease = cleanup
-        .or_else(|| inflight.enter())
-        .map(ApiLeaseScope::enter);
-    body(lease.is_some());
+    match cleanup.or_else(|| inflight.enter()) {
+        Some(token) => ApiLeaseScope::run(token, || body(true)),
+        None => body(false),
+    }
 }
 
 /// Enqueued copy with its operands retained until completion signaling.
@@ -33,7 +33,7 @@ pub(crate) struct AsyncCopyTask {
 
 /// Queues a resolved copy job for execution by a memory worker.
 pub(crate) fn enqueue_copy_job(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     tasks: Vec<AsyncCopyTask>,
     dependency_slice: &[HsaSignal],
 ) -> Status {
@@ -57,12 +57,12 @@ pub(crate) fn enqueue_copy_job(
     }
     handles.extend_from_slice(dependency_slice);
     handles.extend(tasks.iter().map(|task| task.completion));
-    let stop = runtime.operation_stop();
-    let cleanup = match runtime.inherit_cleanup() {
+    let stop = runtime.control.operation_stop();
+    let cleanup = match runtime.control.inherit_cleanup() {
         Ok(cleanup) => cleanup,
         Err(status) => return status,
     };
-    let inflight = runtime.inflight.clone();
+    let inflight = runtime.control.inflight.clone();
     let mut pending = match PendingAsyncRetention::new(
         &mut runtime.signal_state,
         &mut runtime.memory_state,
@@ -137,7 +137,7 @@ pub(crate) fn enqueue_copy_job(
 
 /// Resolves and queues an asynchronous copy with retained operands.
 pub(crate) fn enqueue_async_copy(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     resolved: ResolvedAsyncCopy,
     dependency_slice: &[HsaSignal],
     completion: HsaSignal,
@@ -205,7 +205,7 @@ pub(crate) unsafe fn submit_async_copy(
             return INVALID_SIGNAL;
         }
         if size == 0 {
-            if !runtime.is_agent(dst_agent) || !runtime.is_agent(src_agent) {
+            if !runtime.agents.is_agent(dst_agent) || !runtime.agents.is_agent(src_agent) {
                 return INVALID_AGENT;
             }
             if let Some(mask) = engine {
@@ -430,7 +430,7 @@ unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntr
 
 /// Resolves indirect batch entry to a validated runtime resource.
 fn resolve_indirect_batch_entry(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     entry: &BatchCopyEntry,
     indirect_source: bool,
     indirect_destination: bool,
@@ -451,12 +451,12 @@ fn resolve_indirect_batch_entry(
         destination_description.as_ref(),
     )?;
     let index = selected
-        .or(runtime.gpu_index(source_agent))
-        .or(runtime.gpu_index(destination_agent))
+        .or(runtime.agents.gpu_index(source_agent))
+        .or(runtime.agents.gpu_index(destination_agent))
         .ok_or(INVALID_AGENT)?;
     if (
-        runtime.gpus[index].info().gfx_major,
-        runtime.gpus[index].info().gfx_minor,
+        runtime.agents.gpus[index].info().gfx_major,
+        runtime.agents.gpus[index].info().gfx_minor,
     ) != (12, 5)
     {
         return Err(NOT_SUPPORTED);
@@ -497,7 +497,7 @@ fn resolve_indirect_batch_entry(
     Ok(ResolvedAsyncCopy {
         route: AsyncCopyRoute::Gpu {
             compute: false,
-            device: Box::new(runtime.gpus[index].device.clone()),
+            device: Box::new(runtime.agents.gpus[index].device.clone()),
             index,
             entry: GpuCopyEntry::Indirect {
                 destination,
@@ -513,7 +513,7 @@ fn resolve_indirect_batch_entry(
 
 /// Resolves batch copy entries to a validated runtime resource.
 fn resolve_batch_copy_entries(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     entries: &[BatchCopyEntry],
 ) -> Result<(AsyncCopyRoute, Vec<Option<usize>>), Status> {
     let mut prepared_entries = Vec::new();
@@ -533,8 +533,8 @@ fn resolve_batch_copy_entries(
     let mut selected: Option<(usize, Box<Device>)> = None;
     for entry in entries {
         if entry.size != 0
-            && runtime.gpu_index(entry.source_agent).is_none()
-            && runtime.gpu_index(entry.destination_agent).is_none()
+            && runtime.agents.gpu_index(entry.source_agent).is_none()
+            && runtime.agents.gpu_index(entry.destination_agent).is_none()
         {
             return Err(INVALID_AGENT);
         }
@@ -576,7 +576,7 @@ fn resolve_batch_copy_entries(
             else {
                 return Err(NOT_SUPPORTED);
             };
-            let info = runtime.gpus[index].info();
+            let info = runtime.agents.gpus[index].info();
             let alignment = match (info.gfx_major, info.gfx_minor) {
                 (9, 4 | 5) => 64,
                 (12, 5) => 32,
@@ -646,7 +646,7 @@ pub(crate) struct PreparedBatchCopy {
 
 /// Resolves the address used by a batch wait or signal operation.
 fn batch_control_address(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     pointer: usize,
     gpu: HsaAgent,
     permission: u32,
@@ -724,7 +724,7 @@ unsafe fn rect_batch_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<RectBatchEntr
 /// Copies and resolves every box before an asynchronous batch is accepted.
 #[allow(unsafe_code)]
 unsafe fn resolve_rect_batch(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     op: HsaAmdMemoryCopyOp,
 ) -> Result<(AsyncCopyRoute, Vec<Option<usize>>), Status> {
     // SAFETY: The caller supplies all descriptor arrays until this call returns.
@@ -737,7 +737,7 @@ unsafe fn resolve_rect_batch(
     bases
         .try_reserve_exact(decoded.len() * 2)
         .map_err(|_| OUT_OF_RESOURCES)?;
-    let mut selected = runtime.gpu_index(op.source_agent);
+    let mut selected = runtime.agents.gpu_index(op.source_agent);
     for entry in decoded {
         let source_address = entry.rect.source as usize;
         let destination_address = entry.rect.destination as usize;
@@ -752,15 +752,16 @@ unsafe fn resolve_rect_batch(
             entry.destination_agent,
             destination_description.as_ref(),
         )?;
-        if runtime.gpu_index(source_agent).is_none()
-            && runtime.gpu_index(destination_agent).is_none()
+        if runtime.agents.gpu_index(source_agent).is_none()
+            && runtime.agents.gpu_index(destination_agent).is_none()
         {
             return Err(INVALID_AGENT);
         }
         let gpu_index = *selected.get_or_insert(
             runtime
+                .agents
                 .gpu_index(source_agent)
-                .or(runtime.gpu_index(destination_agent))
+                .or(runtime.agents.gpu_index(destination_agent))
                 .ok_or(INVALID_AGENT)?,
         );
         copy_uses_compute(
@@ -799,7 +800,7 @@ unsafe fn resolve_rect_batch(
     let index = selected.ok_or(INVALID_AGENT)?;
     Ok((
         AsyncCopyRoute::GpuBatch {
-            device: Box::new(runtime.gpus[index].device.clone()),
+            device: Box::new(runtime.agents.gpus[index].device.clone()),
             index,
             entries,
             controls: BatchCopyControls::default(),
@@ -811,7 +812,7 @@ unsafe fn resolve_rect_batch(
 #[allow(unsafe_code)]
 /// Prepares batch copy before publication or execution.
 pub(crate) unsafe fn prepare_batch_copy(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     operations: &[HsaAmdMemoryCopyOp],
 ) -> Result<PreparedBatchCopy, Status> {
     let completion = batch_completion(operations)?;
@@ -850,7 +851,7 @@ pub(crate) unsafe fn prepare_batch_copy(
         {
             return Err(INVALID_ARGUMENT);
         }
-        if op.operation == 1 && runtime.gpu_index(op.source_agent).is_none() {
+        if op.operation == 1 && runtime.agents.gpu_index(op.source_agent).is_none() {
             return Err(INVALID_AGENT);
         }
         // SAFETY: Each operation selects the documented scalar or array union
@@ -870,8 +871,8 @@ pub(crate) unsafe fn prepare_batch_copy(
         {
             if (op.wait.function != 0 || op.signal.operation != 0)
                 && ((
-                    runtime.gpus[*index].info().gfx_major,
-                    runtime.gpus[*index].info().gfx_minor,
+                    runtime.agents.gpus[*index].info().gfx_major,
+                    runtime.agents.gpus[*index].info().gfx_minor,
                 ) != (12, 5)
                     || entries.iter().any(|entry| {
                         !matches!(
@@ -981,11 +982,11 @@ pub(crate) fn pitched_copy_range(
 }
 
 /// Copies engine mask for GPU after validating its source and destination.
-fn copy_engine_mask_for_gpu(runtime: &HsaState, index: usize) -> Result<u32, Status> {
-    if !runtime.sdma_enabled {
+fn copy_engine_mask_for_gpu(runtime: &HsaSession, index: usize) -> Result<u32, Status> {
+    if !runtime.config.sdma_enabled {
         return Ok(0);
     }
-    let gpu = runtime.gpus[index].device.gpu().map_err(map_error)?;
+    let gpu = runtime.agents.gpus[index].device.gpu().map_err(map_error)?;
     if !gpu.supports_linear_copy() {
         return Ok(0);
     }
@@ -996,18 +997,22 @@ fn copy_engine_mask_for_gpu(runtime: &HsaState, index: usize) -> Result<u32, Sta
 
 /// Copies engine mask after validating its source and destination.
 pub(crate) fn copy_engine_mask(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     dst: HsaAgent,
     src: HsaAgent,
 ) -> Result<u32, Status> {
-    if !runtime.peer_sdma_enabled
+    if !runtime.config.peer_sdma_enabled
         && dst != src
-        && runtime.gpu_index(dst).is_some()
-        && runtime.gpu_index(src).is_some()
+        && runtime.agents.gpu_index(dst).is_some()
+        && runtime.agents.gpu_index(src).is_some()
     {
         return Ok(0);
     }
-    let Some(index) = runtime.gpu_index(src).or_else(|| runtime.gpu_index(dst)) else {
+    let Some(index) = runtime
+        .agents
+        .gpu_index(src)
+        .or_else(|| runtime.agents.gpu_index(dst))
+    else {
         return Ok(0);
     };
     copy_engine_mask_for_gpu(runtime, index)

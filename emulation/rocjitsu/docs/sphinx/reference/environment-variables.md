@@ -1,12 +1,12 @@
 ---
 myst:
     html_meta:
-        "description": "Runtime environment variables for rocJITsu, including logging, race detection, output sinks, and path configuration."
-        "keywords": "rocJITsu, ROCm, environment variables, RJ_RACE, RJ_LOG, RJ_SINKS, configuration"
+        "description": "Runtime environment variables for rocjitsu, including logging, race detection, output sinks, and path configuration."
+        "keywords": "rocjitsu, ROCm, environment variables, RJ_RACE, RJ_LOG, RJ_SINKS, configuration"
 ---
 # Environment variable reference
 
-rocJITsu reads environment variables at runtime to control execution
+rocjitsu reads environment variables at runtime to control execution
 plugins, diagnostic output, and path resolution. This page documents
 each variable, its default value, allowed values, and effect.
 

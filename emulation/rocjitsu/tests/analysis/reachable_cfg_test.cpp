@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
 
@@ -27,7 +28,7 @@ namespace {
 using Blocks = std::vector<std::unique_ptr<BasicBlock>>;
 using Issue = BasicBlock::SuccessorIssue;
 using Range = BasicBlock::CodeRange;
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
 
 constexpr uint32_t kNop = build_s_nop(0, kArch).value();
 constexpr uint32_t kEnd = build_s_endpgm(kArch).value();
@@ -67,7 +68,7 @@ protected:
   FailureOr<Blocks> build_reachable(const std::vector<uint32_t> &words,
                                     const std::vector<uint64_t> &entries = {0},
                                     const std::vector<Range> &ranges = {},
-                                    rj_code_arch_t arch = kArch,
+                                    rocjitsu::IsaFamily arch = kArch,
                                     const std::vector<uint64_t> &decode_seeds = {},
                                     const std::vector<uint64_t> &split_points = {}) {
     error_("");
@@ -120,7 +121,8 @@ protected:
 
 std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, uint16_t hwreg,
                                                         uint32_t literal) {
-  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result =
+      build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
   static_assert(kEndpgmCdna5Result.succeeded());
 
   const auto set_banks = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = initial_banks});
@@ -334,10 +336,10 @@ TEST_F(ReachableCfg, RejectsTargetsInsideInstructionsInEitherDiscoveryOrder) {
 }
 
 TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
-  util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_nop.succeeded());
   const auto result =
-      build_reachable({maybe_s_nop.value(), 0, kInvalid}, {0}, {}, ROCJITSU_CODE_ARCH_CDNA5);
+      build_reachable({maybe_s_nop.value(), 0, kInvalid}, {0}, {}, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_EQ(result.value().size(), 1u);
   EXPECT_TRUE(result.value()[0]->has_implicit_terminator());
@@ -345,26 +347,26 @@ TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
 }
 
 TEST_F(ReachableCfg, Gfx1250ExplicitPaddingTargetFails) {
-  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_branch.succeeded());
   const auto result =
-      build_reachable({maybe_s_branch.value(), 0}, {0}, {}, ROCJITSU_CODE_ARCH_CDNA5);
+      build_reachable({maybe_s_branch.value(), 0}, {0}, {}, rocjitsu::IsaFamily::Cdna5);
   EXPECT_TRUE(result.failed());
   EXPECT_NE(error_.message().find("padding"), std::string::npos);
 }
 
 TEST_F(ReachableCfg, RangeBoundaryIsNotAnImplicitPaddingTerminator) {
-  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_nop_2.succeeded());
   const auto result =
-      build_reachable({maybe_s_nop_2.value(), 0}, {0}, {{0, 4}}, ROCJITSU_CODE_ARCH_CDNA5);
+      build_reachable({maybe_s_nop_2.value(), 0}, {0}, {{0, 4}}, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value()[0]->has_implicit_terminator());
   EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingFallthrough);
 }
 
 TEST_F(ReachableCfg, ClippedCalleeDoesNotDiscardCallContinuation) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5;
   util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(arch);
   ASSERT_TRUE(maybe_s_endpgm.succeeded());
   util::FailureOr<uint32_t> maybe_s_nop_3 = build_s_nop(0, arch);
@@ -393,7 +395,7 @@ TEST_F(ReachableCfg, RejectsAmbiguousSectionsAndReachedPartialWords) {
 }
 
 TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, arch);
     ASSERT_TRUE(maybe_s_nop_4.succeeded());
     const uint32_t nop = maybe_s_nop_4.value();
@@ -411,7 +413,7 @@ TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
         {call_result.value(), end, return_result.value()},
         {nop, end},
     };
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (arch == rocjitsu::IsaFamily::Cdna5)
       programs.push_back({nop, 0}); // Existing implicit termination at zero padding.
     for (const auto &words : programs) {
       const auto reachable = build_reachable(words, {0}, {}, arch);
@@ -451,8 +453,8 @@ TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
 
 TEST_F(ReachableCfg, SupportsTargetSpecificDirectBranchEncodings) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(arch);
     ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
     util::FailureOr<uint32_t> maybe_s_branch_2 = build_s_branch(1, arch);
@@ -596,7 +598,7 @@ TEST_F(ReachableCfg, IndependentSeedClosurePrecedesAnOptionalLiteralSeed) {
 }
 
 TEST_F(ReachableCfg, IndependentSeedPropagatesLaneStateWithoutAssumingAnEntryMode) {
-  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr auto arch = rocjitsu::IsaFamily::Cdna5;
   constexpr auto bank_zero = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0});
   for (bool set_mode : {false, true}) {
     SCOPED_TRACE(set_mode);
@@ -837,7 +839,7 @@ TEST_F(ReachableCfg, RealTargetCannotBeHiddenByOptionalSeed) {
 }
 
 TEST_F(ReachableCfg, SeedOnlyPaddingReturnsEmptyGraph) {
-  const auto result = build_reachable({0, 0}, {}, {}, ROCJITSU_CODE_ARCH_CDNA5, {0});
+  const auto result = build_reachable({0, 0}, {}, {}, rocjitsu::IsaFamily::Cdna5, {0});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_TRUE(result.value().empty());
 }
@@ -913,7 +915,7 @@ TEST_F(ReachableCfg, FullSectionBuildPreservesExplicitTargetForTargetlessObject)
   ASSERT_NE(decoder, nullptr);
 
   const auto result = BasicBlock::build(
-      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, error_.emitter(), {},
+      object, *decoder, rocjitsu::IsaFamily::Cdna5, error_.emitter(), {},
       ExternalEntryPolicy::InferPredecessorless, {}, ROCJITSU_CODE_TARGET_GFX1251);
 
   ASSERT_TRUE(result.succeeded()) << error_.message();
@@ -932,7 +934,7 @@ TEST_F(ReachableCfg, ReachableBuildPreservesExplicitTargetForTargetlessObject) {
   const std::array<uint64_t, 1> entries = {0};
 
   const auto result = BasicBlock::build_cfg(
-      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5,
+      object, *decoder, rocjitsu::IsaFamily::Cdna5,
       {.target = ROCJITSU_CODE_TARGET_GFX1251, .entries = entries}, error_.emitter());
 
   ASSERT_TRUE(result.succeeded()) << error_.message();

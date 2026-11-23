@@ -109,6 +109,7 @@ impl DeviceDriverState {
         alignment: u64,
         address: u64,
     ) -> Result<VirtualAddressState, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -223,6 +224,17 @@ pub(crate) enum VirtualHostMappingState {
 }
 
 impl VirtualHostMappingState {
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(mapping) => mapping.diagnostic_memory(),
+        }
+    }
+
     pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
@@ -255,6 +267,17 @@ pub(crate) enum AllocationState {
 }
 
 impl AllocationState {
+    pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(allocation) => allocation.admit(),
+            #[cfg(test)]
+            Self::Test(allocation) => allocation.admit(),
+        }
+    }
+
     #[cfg(target_os = "linux")]
     pub(crate) fn from_linux_kfd(driver: &Shared<KfdDriver>, inner: Owned<KfdAllocation>) -> Self {
         Self::LinuxKfd(DriverAllocation::new(driver.clone(), inner))
@@ -314,6 +337,22 @@ impl AllocationState {
         }
     }
 
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(allocation) => allocation.driver_state().diagnostic_memory(),
+            #[cfg(test)]
+            Self::Test(_) => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test diagnostic memory",
+            }),
+        }
+    }
+
     pub(crate) fn backing_offset(&self) -> Option<u64> {
         match self {
             #[cfg(not(target_os = "linux"))]
@@ -329,6 +368,7 @@ impl AllocationState {
         &self,
         identity: crate::memory::device::LocalBackingIdentity,
     ) -> Result<(), Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -469,6 +509,7 @@ impl DeviceDriverState {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -494,6 +535,7 @@ impl DeviceDriverState {
         &self,
         request: HostRegistration,
     ) -> Result<Allocation, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -520,6 +562,7 @@ impl DeviceDriverState {
         size: u64,
         options: VirtualMemoryOptions,
     ) -> Result<VirtualMemory, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -545,6 +588,7 @@ impl DeviceDriverState {
         reservation: &VirtualAddressState,
         request: VirtualMapRequest,
     ) -> Result<VirtualDeviceMappingState, Error> {
+        let _operation = self.admit()?;
         match (self, memory, reservation) {
             #[cfg(not(target_os = "linux"))]
             (Self::Unavailable(never, ..), ..) => match *never {},
@@ -576,6 +620,7 @@ impl DeviceDriverState {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -631,6 +676,7 @@ impl DeviceDriverState {
         peers: &[&Device],
         request: HostRegistration,
     ) -> Result<Allocation, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -660,6 +706,7 @@ impl DeviceDriverState {
 
 impl GpuDriverRef<'_> {
     pub(crate) fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -676,6 +723,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn map_mmio_remap(&self) -> Result<Allocation, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -748,6 +796,19 @@ impl QueueState {
             Self::LinuxKfd(queue) => queue.progress(),
             #[cfg(test)]
             Self::Test(queue) => queue.progress(),
+        }
+    }
+
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(queue) => queue.core_snapshot(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.core_snapshot(),
         }
     }
 
@@ -995,6 +1056,7 @@ impl GpuDriverRef<'_> {
     /// Every GPU address in the request remains backed through queue teardown.
     #[allow(unsafe_code)]
     pub(crate) unsafe fn create_queue(&self, desc: QueueRequest) -> Result<QueueState, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -1024,6 +1086,7 @@ impl GpuDriverRef<'_> {
         &self,
         format: KernelQueueFormat,
     ) -> Result<KernelQueueState, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -1044,6 +1107,7 @@ impl GpuDriverRef<'_> {
         &self,
         request: PcSamplingRequest,
     ) -> Result<PcSamplingState, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},

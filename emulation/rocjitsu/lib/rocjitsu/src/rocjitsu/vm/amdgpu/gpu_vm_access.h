@@ -33,21 +33,41 @@ namespace rocjitsu::amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class GpuVmAccessState;
+class GpuVmTransferBatch;
 class DeviceCacheMaintenanceLease;
+struct CacheMaintenanceResult;
 class VmTransferEffectGate;
 
 /// @brief Acquire a move-only cache lease for one tokenized data step.
 /// @details Acquisition runs without the VM state lock. A local backing step
 /// keeps the lease through its effect; a deferred request releases it before
 /// submission or polling.
-using VmTransferMaintenance = std::function<util::FailureOr<DeviceCacheMaintenanceLease>()>;
+using VmTransferMaintenance = std::function<util::FailureOr<CacheMaintenanceResult>()>;
 
 /// @brief Cache immutable VM snapshots for one bounded execution quantum.
 /// @details Nested guards share the outer cache. Borrowed objects remain alive
 /// until the outer guard exits, but each operation independently checks and
 /// leases its access state. Revoked entries are skipped on subsequent lookups.
 class GpuVmAccessBatchGuard {
+  class Cache;
+
 public:
+  /// @brief Bound synchronous execution caches to the call instead of its host thread.
+  /// @details Engine workers keep their persistent cache outside this scope.
+  class ScopedCache {
+  public:
+    ScopedCache();
+    ~ScopedCache();
+    ScopedCache(const ScopedCache &) = delete;
+    ScopedCache &operator=(const ScopedCache &) = delete;
+
+  private:
+    // Lazily allocated snapshots used by this host call's execution batches.
+    std::unique_ptr<Cache> cache_;
+    // Borrowed enclosing scope, restored when this call returns.
+    std::unique_ptr<Cache> *previous_;
+  };
+
   GpuVmAccessBatchGuard();
   ~GpuVmAccessBatchGuard();
 
@@ -60,6 +80,10 @@ public:
 
 private:
   friend class GpuVm;
+
+  static Cache &thread_cache();
+  // Borrowed host-call cache owner, or null for ordinary engine-worker caching.
+  inline static thread_local std::unique_ptr<Cache> *scoped_cache_ = nullptr;
 
   [[nodiscard]] static const GpuVmAccess *find_snapshot(const GpuVm *vm, AddressSpaceHandle handle);
   [[nodiscard]] static const GpuVmAccess *find_snapshot_vmid(const GpuVm *vm, uint32_t vmid);
@@ -738,7 +762,7 @@ public:
 
 private:
   friend class GpuVmAccess;
-  static constexpr std::size_t kSnapshotCount = 256;
+  static constexpr std::size_t kSnapshotCount = 512;
   using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
   // Interleaved lanes revisit short page runs in widely separated rows.
   // Offset each 128-page block by eight slots to separate those runs without
@@ -994,6 +1018,7 @@ private:
               std::shared_ptr<GpuVmAccessState> access_state)
       : address_space_(address_space), info_(info), access_state_(std::move(access_state)) {}
 
+  friend class GpuVmTransferBatch;
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
                                            bool report_fault) const;
@@ -1002,7 +1027,8 @@ private:
   transfer_tokenized(uint64_t address, Span bytes, std::size_t &completed_bytes,
                      VmTransferToken &token, VmAccessKind access, bool allow_deferred,
                      const VmTransferMaintenance &maintenance, const VmTransferIngress &ingress,
-                     const VmPrivateUcGttCopySource &copy_source) const;
+                     const VmPrivateUcGttCopySource &copy_source,
+                     GpuVmTransferBatch *batch = nullptr) const;
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;

@@ -850,7 +850,7 @@ void Buffer::destroy() {
       }
     }
 
-    if (needUnlockHostMem) {
+    if (needUnlockHostMem && HostLockOwner()) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
         if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
@@ -1194,8 +1194,36 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     owner()->setHostMem(deviceMemory_);
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-      deviceMemory_ =
-          dev().hostLock(owner()->getHostMem(), owner()->getSize(), getHostMemorySegment(memFlags));
+      // HIP's context always spans every device, so one device can lock every agent in a
+      // single call and the rest reuse that mapping; OpenCL's context can be a genuine
+      // subset, so it keeps locking per-device.
+      const bool shareLock = amd::IS_HIP && owner()->getContext().devices().size() > 1;
+
+      // addDeviceMemory() holds owner()->lockMemoryOps() for this whole call, so the first
+      // device to reach here for a given owner is always fully initialized by the time any
+      // other device gets here.
+      roc::Memory* first =
+          shareLock ? static_cast<roc::Memory*>(owner()->getOriginalDeviceMemory()) : nullptr;
+
+      if (first != nullptr && first != this && first->HostLockAllAgents()) {
+        // Reuse the first device's mapping; it remains the sole unlock owner.
+        assert(first->HostLockOwner() && "An all-agent lock must have an unlock owner!");
+        deviceMemory_ = reinterpret_cast<void*>(first->virtualAddress());
+        assert(!HostLockOwner() && "Only the locking device may unlock the range!");
+      } else {
+        // Only the first device for this owner ever attempts the group lock, so a failed
+        // attempt is never retried by a sibling.
+        const bool tryAllAgents = shareLock && (first == nullptr || first == this);
+        deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                       getHostMemorySegment(memFlags), tryAllAgents);
+        const bool lockedAllAgents = tryAllAgents && deviceMemory_ != nullptr;
+        if (deviceMemory_ == nullptr && tryAllAgents) {
+          // Group lock failed; fall back to locking just this device.
+          deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                         getHostMemorySegment(memFlags));
+        }
+        setHostLockState(deviceMemory_ != nullptr, lockedAllAgents);
+      }
     } else {
       deviceMemory_ = owner()->getHostMem();
     }
@@ -1206,50 +1234,49 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   return (success = (deviceMemory_ != nullptr));
 }
 
-// Resolve an imported VMM buffer's owning agent from its physical memory handle, since
-// pointer_info reports a null owner for imports. Returns false for non-VMM memory.
-static bool vmmOwningAgent(const Memory* self, hsa_agent_t* agent) {
-  amd::Memory* owner = self->owner();
-  if (owner == nullptr || !owner->vmmImported() || owner->getUserData().phys_mem_obj == nullptr) {
-    return false;
-  }
-  hsa_amd_vmem_alloc_handle_t handle{owner->getUserData().phys_mem_obj->getUserData().hsa_handle};
-  hsa_amd_vmem_handle_info_t info = {};
-  info.size = sizeof(info);
-  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
-    return false;
-  }
-  *agent = info.agent;
-  return true;
-}
+// Resolve the agent that owns the backing pages, which for imported memory is a peer device.
+// A mapped VMM range asks its physical handle, since pointer_info reports no owner for a handle
+// imported from another process. Other memory (IPC-opened) asks pointer_info, keyed off a valid
+// agentOwner because ROCr does not always tag IPC memory with HSA_EXT_POINTER_TYPE_IPC. A fabric
+// import reports no owner either way and falls back to this device.
+void Memory::refreshOwningAgent() {
+  hsa_agent_t agent = {};
+  amd::Memory* phys = (owner() != nullptr) ? owner()->getUserData().phys_mem_obj : nullptr;
 
-// For VMM-imported memory, resolve the owner from the allocation handle (vmem_get_vmem_info):
-// pointer_info is not sufficient there, as it reports a null owner for imports. All other memory
-// uses pointer_info.
-void Memory::refreshOwningAgentFromPointerInfo() {
-  if (deviceMemory_ == nullptr) {
-    return;
+  if (phys != nullptr) {
+    hsa_amd_vmem_alloc_handle_t handle{phys->getUserData().hsa_handle};
+    hsa_amd_vmem_handle_info_t handle_info = {};
+    handle_info.size = sizeof(handle_info);
+    if (Hsa::vmem_get_vmem_info(handle, &handle_info) == HSA_STATUS_SUCCESS) {
+      agent = handle_info.agent;
+    }
+  } else {
+    assert(deviceMemory_ != nullptr && "refreshOwningAgent called before memory was backed!");
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    if (hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &ptr_info, nullptr, nullptr,
+                             nullptr) == HSA_STATUS_SUCCESS) {
+      agent = ptr_info.agentOwner;
+    }
   }
 
-  hsa_agent_t agent;
-  if (!vmmOwningAgent(this, &agent)) {
-    hsa_amd_pointer_info_t info = {};
-    info.size = sizeof(info);
-    hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info,
-                                            nullptr, nullptr, nullptr);
-
-    // info.agentOwner is the agent that actually owns the backing pages (a peer device for
-    // IPC memory). Note ROCr does not always tag IPC-opened memory with
-    // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
-    agent = (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
-                                                                       : dev().getBackendDevice();
-  }
-  setOwningAgent(agent);
+  // Always set an agent: computeAndSetOwningAgent() calls this with nothing cached, and
+  // getOwningAgent() feeds the copy agents in rocblit.
+  setOwningAgent(agent.handle != 0 ? agent : dev().getBackendDevice());
 }
 
 // Helper function to compute and cache the owning agent
 void Buffer::computeAndSetOwningAgent() {
   hsa_agent_t agent;
+
+  // Memory backed by another device's pages is owned by that device. A mapped VMM range belongs
+  // to its physical handle's agent rather than the VA reservation it is carved from, so this
+  // must precede the sub-buffer inheritance below.
+  if (owner() != nullptr &&
+      (owner()->getUserData().phys_mem_obj != nullptr || owner()->ipcShared())) {
+    refreshOwningAgent();
+    return;
+  }
 
   // Sub-buffers must inherit agent from parent, not recompute it
   if (owner() != nullptr && owner()->parent() != nullptr) {
@@ -1262,11 +1289,6 @@ void Buffer::computeAndSetOwningAgent() {
     }
     // Fallback if parent not available (shouldn't happen)
     LogWarning("Sub-buffer parent not available for agent inheritance");
-  }
-
-  if (owner() != nullptr && (owner()->ipcShared() || owner()->vmmImported())) {
-    refreshOwningAgentFromPointerInfo();
-    return;
   }
 
   if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {
