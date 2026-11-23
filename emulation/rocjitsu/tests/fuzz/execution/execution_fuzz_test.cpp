@@ -3,15 +3,20 @@
 
 #include "execution_fuzz_core.h"
 #include "generated_kernel.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/simd_control.h"
 
 #include <gtest/gtest.h>
 
@@ -235,18 +240,63 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsRespectEverySizeAndTarget) {
         SCOPED_TRACE(seed);
         const std::vector<uint8_t> input = random_input(seed, size, target);
         ASSERT_EQ(input.size(), size);
-        EXPECT_EQ(input.front(), static_cast<uint8_t>(target));
+        EXPECT_EQ(input.front() & kTargetMask, static_cast<uint8_t>(target));
         EXPECT_EQ(input, random_input(seed, size, target));
         if (size >= kHeaderSize) {
-          EXPECT_EQ(input[1] & ~(kAsyncSelectBit | kConcurrentIssuerMask | kFullExecMaskBit |
-                                 kWaitCheckingBit | kCacheMemoryBit),
-                    0);
+          EXPECT_LT(input[0] >> kArithmeticSemanticsShift, 5);
           if (seed == *kernel_seed) {
             EXPECT_EQ((input[1] & kWaitCheckingBit) != 0, size >= kMinKernelInputSize);
           }
         }
       }
     }
+  }
+}
+
+TEST(ExecutionFuzzInputTest, ReplaySelectsArithmeticSemanticsAndCompatibleCpuTiers) {
+  constexpr std::array semantics = {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE,
+                                    RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                                    RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                                    RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL};
+  constexpr std::array levels = {RJ_ARITH_CPU_X86_64_ZEN4, RJ_ARITH_CPU_BASELINE,
+                                 RJ_ARITH_CPU_X86_64_V3, RJ_ARITH_CPU_X86_64_V4};
+  const uint64_t detected = rj_arith_init_cpu_flags();
+  for (size_t mode = 0; mode < semantics.size(); ++mode) {
+    for (size_t cpu = 0; cpu < levels.size(); ++cpu) {
+      SCOPED_TRACE(mode);
+      SCOPED_TRACE(cpu);
+      const std::array input = {static_cast<uint8_t>(static_cast<uint8_t>(FuzzTarget::Gfx942) |
+                                                     (mode << kArithmeticSemanticsShift)),
+                                static_cast<uint8_t>(cpu << kArithmeticCpuShift)};
+      const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 2);
+      EXPECT_EQ(stats.executed, 2u);
+      EXPECT_EQ(stats.arithmetic_flags & RJ_ARITH_SEMANTICS_MASK, semantics[mode]);
+      const uint64_t expected_cpu =
+          util::force_scalar() ? 0 : rj_arith_limit_cpu_flags(detected, levels[cpu]);
+      const uint64_t actual_cpu = stats.arithmetic_flags & RJ_ARITH_CPU_MASK;
+      EXPECT_EQ(actual_cpu, expected_cpu);
+      EXPECT_LE(actual_cpu, detected & RJ_ARITH_CPU_MASK);
+      EXPECT_EQ(stats.force_scalar, util::force_scalar() || levels[cpu] == RJ_ARITH_CPU_BASELINE);
+    }
+  }
+}
+
+TEST(ExecutionFuzzInputTest, ScalarReplayDisablesLegacySimd) {
+  const auto words = cdna4::build_vop3(cdna4::kVDivFixupF16Vop3,
+                                       {.vdst = 24, .src0 = 276, .src1 = 277, .src2 = 278});
+  std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx950), kFullExecMaskBit};
+  for (const uint32_t word : words)
+    for (unsigned byte = 0; byte < sizeof(word); ++byte)
+      input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+  for (bool scalar : {false, true, false}) {
+    SCOPED_TRACE(scalar);
+    input[1] = kFullExecMaskBit | (scalar ? (1u << kArithmeticCpuShift) : 0);
+    amdgpu::ScopedSimdFastPathTracker paths;
+    const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
+    EXPECT_EQ(stats.executed, 2u);
+    EXPECT_EQ(stats.inputs_halted, 1u);
+    EXPECT_EQ(paths.tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16),
+              util::has_stdx_simd && !scalar && !util::force_scalar());
   }
 }
 
@@ -261,7 +311,8 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsRejectInvalidSizes) {
 TEST(ExecutionFuzzInputTest, ArbitraryInputsPreserveByteStreamAcrossSizes) {
   const std::vector<uint8_t> expected = {0x02, 0, 0xaf, 0xf4, 0x4f, 0xec, 0x9b, 0xea};
   std::vector<uint8_t> input = random_input(0, expected.size(), FuzzTarget::Gfx942);
-  input[1] &= ~kCacheMemoryBit;
+  input[0] &= kTargetMask;
+  input[1] &= ~(kCacheMemoryBit | kArithmeticCpuMask);
   EXPECT_EQ(input, expected);
 
   const std::vector<uint8_t> full_input = random_input(0, kMaxInputSize, FuzzTarget::Gfx942);
@@ -269,7 +320,10 @@ TEST(ExecutionFuzzInputTest, ArbitraryInputsPreserveByteStreamAcrossSizes) {
   for (size_t size = 1; size < kMaxInputSize; ++size) {
     SCOPED_TRACE(size);
     const std::vector<uint8_t> input = random_input(0, size, FuzzTarget::Gfx942);
-    EXPECT_EQ(input, (std::vector<uint8_t>{full_input.begin(), full_input.begin() + size}));
+    if (size == 1)
+      EXPECT_EQ(input.front(), full_input.front() & kTargetMask);
+    else
+      EXPECT_TRUE(std::ranges::equal(input, std::span(full_input).first(size)));
   }
 }
 
@@ -298,7 +352,7 @@ TEST(ExecutionFuzzInputTest, GeneratedInstructionsPreservePrefixesAcrossSizes) {
       // Each input has one sparse bit mutation, so their common prefix can
       // differ in at most two bits when those mutations land differently.
       unsigned differing_bits = 0;
-      for (size_t byte = 0; byte < size; ++byte)
+      for (size_t byte = kHeaderSize; byte < size; ++byte)
         differing_bits += std::popcount(static_cast<unsigned>(input[byte] ^ full_input[byte]));
       EXPECT_LE(differing_bits, 2u);
     }
@@ -368,11 +422,12 @@ TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
       SCOPED_TRACE(test_case.seed);
       const std::vector<uint8_t> short_input = random_input(test_case.seed, input_size - 1, target);
       ASSERT_EQ(short_input.size(), input_size - 1);
-      EXPECT_EQ(short_input[1] & ~kCacheMemoryBit, test_case.short_mode);
+      constexpr uint8_t backend_and_cache = kArithmeticCpuMask | kCacheMemoryBit;
+      EXPECT_EQ(short_input[1] & ~backend_and_cache, test_case.short_mode);
 
-      const uint8_t cache_mode = short_input[1] & kCacheMemoryBit;
-      std::vector<uint8_t> expected{static_cast<uint8_t>(target),
-                                    static_cast<uint8_t>(test_case.prefix_mode | cache_mode)};
+      std::vector<uint8_t> expected{
+          static_cast<uint8_t>(target),
+          static_cast<uint8_t>(test_case.prefix_mode | (short_input[1] & backend_and_cache))};
       const auto append = [&](const auto &words) {
         for (const uint32_t word : words)
           for (unsigned byte = 0; byte < sizeof(word); ++byte)
@@ -386,7 +441,12 @@ TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
       append(first);
       append(second);
       ASSERT_EQ(expected.size(), input_size);
-      EXPECT_EQ(random_input(test_case.seed, input_size, target), expected);
+      auto input = random_input(test_case.seed, input_size, target);
+      const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
+      EXPECT_EQ(stats.executed, 3u);
+      EXPECT_EQ(stats.inputs_halted, 1u);
+      input[0] &= kTargetMask;
+      EXPECT_EQ(input, expected);
     }
   }
 }
@@ -496,8 +556,7 @@ TEST(ExecutionFuzzInputTest, TargetOverrideKeepsInputLayout) {
 TEST(ExecutionFuzzInputTest, PinnedGeneratorEncodesPinnedTarget) {
   const auto input = random_input(5, 24, FuzzTarget::Gfx90a);
   ASSERT_GE(input.size(), kHeaderSize);
-  EXPECT_EQ(input[0], static_cast<uint8_t>(FuzzTarget::Gfx90a));
-  EXPECT_EQ(indexed_target(input[0]), FuzzTarget::Gfx90a);
+  EXPECT_EQ(indexed_target(input[0] & kTargetMask), FuzzTarget::Gfx90a);
 }
 
 TEST(ExecutionFuzzInputTest, ExplicitModesOverrideInputSelection) {
@@ -555,6 +614,11 @@ TEST(ExecutionFuzzInputTest, HarnessModesPreserveInitialScalarCondition) {
       EXPECT_EQ(replay.executed, synchronous.executed);
       EXPECT_EQ(replay.inputs_halted, 1u);
     }
+    input[0] |= (1u + marker % 4) << kArithmeticSemanticsShift;
+    input[1] = (marker % 4) << kArithmeticCpuShift;
+    const RunStats backend_replay = run_input(input);
+    EXPECT_EQ(backend_replay.executed, synchronous.executed);
+    EXPECT_EQ(backend_replay.inputs_halted, 1u);
   }
   EXPECT_TRUE(saw_taken_branch);
   EXPECT_TRUE(saw_fallthrough);

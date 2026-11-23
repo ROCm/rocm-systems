@@ -231,7 +231,9 @@ endforeach()
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
     rj_arith_cpu_test
-    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+    PRIVATE
+        RJ_ARITH_IMPL_NAMESPACE=test_cpu
+        "$<FILTER:$<TARGET_PROPERTY:rj_arith,COMPILE_DEFINITIONS>,INCLUDE,^RJ_ARITH_HAVE_>"
 )
 add_subdirectory(headers)
 
