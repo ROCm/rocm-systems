@@ -838,7 +838,7 @@ TEST(ArithBridgeTest, DppFloatReadsExecButWritesOnlyEnabledRows) {
 
 TEST(ArithBridgeTest, ExactMulStatusRespectsDppRows) {
   for (bool enabled : {false, true}) {
-    BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+    BridgeFixture fixture(false, 32, {ArithmeticSemantics::BitExactEmpirical});
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(1);
     fixture.wave->set_mode_raw(0x1f0);
@@ -926,9 +926,10 @@ TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
 
 TEST(ArithBridgeTest, Gfx12ExceptionalOperandsUpdateUserFlags) {
   for (const bool report : {true, false}) {
-    BridgeFixture fixture(
-        false, 32,
-        parse_arithmetic_policy(report ? "compatibility" : "bit_exact_empirical_no_fp_status"));
+    const util::FailureOr<ArithmeticPolicy> maybe_policy =
+        parse_arithmetic_policy(report ? "compatibility" : "bit_exact_empirical_no_fp_status");
+    ASSERT_TRUE(maybe_policy.succeeded());
+    BridgeFixture fixture(false, 32, maybe_policy.value());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_mode_raw(0xf0);
     auto check = [&](std::array<uint32_t, 2> words, uint32_t lhs, uint32_t rhs, uint32_t causes) {
@@ -1855,7 +1856,10 @@ TEST(ArithBridgeTest, TrigEncodingsNanClampMasksAndOptionalState) {
 }
 
 TEST(ArithBridgeTest, TrigDppFilteredLanesDoNotReportExceptions) {
-  BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  const util::FailureOr<ArithmeticPolicy> maybe_policy =
+      parse_arithmetic_policy("bit_exact_empirical");
+  ASSERT_TRUE(maybe_policy.succeeded());
+  BridgeFixture fixture(false, 32, maybe_policy.value());
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec((1u << 0) | (1u << 16) | (1u << 17));
   fixture.wave->set_mode_raw(0xf0);
@@ -4805,7 +4809,9 @@ TEST(ArithBridgeTest, ClassCompareUsesRawHalfClassesAndIndependentHalfSelectors)
 
 TEST(ArithBridgeTest, FloatCompareReportsRepeatedCausesAndPreservesUnrelatedState) {
   for (uint32_t lanes : {32u, 64u}) {
-    BridgeFixture fixture(false, lanes, parse_arithmetic_policy("bit_exact_empirical"));
+    util::FailureOr<ArithmeticPolicy> policy = parse_arithmetic_policy("bit_exact_empirical");
+    ASSERT_TRUE(policy.succeeded());
+    BridgeFixture fixture(false, lanes, policy.value());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(5);
     fixture.wave->set_mode_raw(0xf0);
@@ -4835,8 +4841,10 @@ TEST(ArithBridgeTest, FloatCompareReportsRepeatedCausesAndPreservesUnrelatedStat
 TEST(ArithBridgeTest, FloatCompareHonorsGuestDenormalsAndExplicitLoosePolicy) {
   for (bool loose : {false, true})
     for (bool flush : {false, true}) {
-      BridgeFixture fixture(false, 32,
-                            parse_arithmetic_policy(loose ? "loose" : "bit_exact_empirical"));
+      util::FailureOr<ArithmeticPolicy> policy =
+          parse_arithmetic_policy(loose ? "loose" : "bit_exact_empirical");
+      ASSERT_TRUE(policy.succeeded());
+      BridgeFixture fixture(false, 32, policy.value());
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(1);
       fixture.wave->set_mode_raw(flush ? 0 : 0xf0);
@@ -4878,7 +4886,9 @@ TEST(ArithBridgeTest, FloatCompareHalfSelectorAndInlineFloatKeepTheirFormat) {
 }
 
 TEST(ArithBridgeTest, FloatCompareDppFilteredLanesCannotRaiseExceptions) {
-  BridgeFixture fixture(false, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  util::FailureOr<ArithmeticPolicy> policy = parse_arithmetic_policy("bit_exact_empirical");
+  ASSERT_TRUE(policy.succeeded());
+  BridgeFixture fixture(false, 32, policy.value());
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec((1u << 0) | (1u << 16) | (1u << 17));
   fixture.wave->set_mode_raw(0xf0);
@@ -4911,7 +4921,9 @@ TEST(ArithBridgeTest, FloatCompareDppFilteredLanesCannotRaiseExceptions) {
 }
 
 TEST(ArithBridgeTest, RejectedFloatCompareDppDoesNotChangeExecOrExceptionState) {
-  BridgeFixture fixture(true, 32, parse_arithmetic_policy("bit_exact_empirical"));
+  util::FailureOr<ArithmeticPolicy> policy = parse_arithmetic_policy("bit_exact_empirical");
+  ASSERT_TRUE(policy.succeeded());
+  BridgeFixture fixture(true, 32, policy.value());
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint64_t old_exec = 0xa5a55a5affff005bULL;
   fixture.wave->set_exec_raw(old_exec);
@@ -7653,7 +7665,9 @@ TEST(ArithBridgeTest, CompatibilityUnaryStatusIncludesDppSuppressedLanes) {
   for (bool sqrt : {false, true}) {
     for (bool status_only : {false, true}) {
       for (const char *policy : {"compatibility", "loose"}) {
-        BridgeFixture fixture(false, 32, parse_arithmetic_policy(policy));
+        const util::FailureOr<ArithmeticPolicy> maybe_policy = parse_arithmetic_policy(policy);
+        ASSERT_TRUE(maybe_policy.succeeded());
+        BridgeFixture fixture(false, 32, maybe_policy.value());
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
         fixture.wave->set_exec(status_only ? 1U : 1U | (1U << 16));
         fixture.wave->set_mode_raw(0xf0);
@@ -10177,7 +10191,10 @@ TEST(ArithBridgeTest, InterpolationRtzOverridesGuestNearest) {
 
 TEST(ArithBridgeTest, DecodedClassCompareStrictStatusIsArchitectureSpecific) {
   for (bool gfx11 : {false, true}) {
-    BridgeFixture fixture(gfx11, 32, parse_arithmetic_policy("bit_exact_empirical"));
+    const util::FailureOr<ArithmeticPolicy> maybe_policy =
+        parse_arithmetic_policy("bit_exact_empirical");
+    ASSERT_TRUE(maybe_policy.succeeded());
+    BridgeFixture fixture(gfx11, 32, maybe_policy.value());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(1);
     fixture.wave->set_vcc_mask(0x80);
