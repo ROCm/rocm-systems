@@ -372,6 +372,11 @@ RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle);
  * specified by the `jpeg_stream_handle`. The information is stored in the provided output parameters `num_components`,
  * `subsampling`, `widths`, and `heights`.
  *
+ * The width and height of a subsampled chroma component are rounded up, as the JPEG standard (ITU-T T.81) defines
+ * them. For example, for ROCJPEG_CSS_420, widths[1] and widths[2] are (widths[0] + 1) / 2, and heights[1] and
+ * heights[2] are (heights[0] + 1) / 2: with an odd width or height, the last chroma column or row covers only the
+ * last column or row of the image.
+ *
  * This function does not wait for decodes running on the same `handle`, so it can be called from another thread
  * while a decode is in progress, for example to prepare the next batch of images.
  *

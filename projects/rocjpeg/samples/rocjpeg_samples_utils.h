@@ -559,6 +559,8 @@ public:
                 }
                 break;
             case ROCJPEG_OUTPUT_YUV_PLANAR:
+                // Unlike the native chroma planes, the planar ones include the last chroma column or row of an odd image
+                // width or height, so their subsampled dimensions are rounded up.
                 switch (subsampling) {
                     case ROCJPEG_CSS_444:
                         widths[2] = widths[1] = widths[0] = img_width;
@@ -567,18 +569,18 @@ public:
                     case ROCJPEG_CSS_440:
                         widths[2] = widths[1] = widths[0] = img_width;
                         heights[0] = img_height;
-                        heights[2] = heights[1] = img_height >> 1;
+                        heights[2] = heights[1] = (img_height + 1) >> 1;
                         break;
                     case ROCJPEG_CSS_422:
                         widths[0] = img_width;
-                        widths[2] = widths[1] = widths[0] >> 1;
+                        widths[2] = widths[1] = (widths[0] + 1) >> 1;
                         heights[2] = heights[1] = heights[0] = img_height;
                         break;
                     case ROCJPEG_CSS_420:
                         widths[0] = img_width;
-                        widths[2] = widths[1] = widths[0] >> 1;
+                        widths[2] = widths[1] = (widths[0] + 1) >> 1;
                         heights[0] = img_height;
-                        heights[2] = heights[1] = img_height >> 1;
+                        heights[2] = heights[1] = (img_height + 1) >> 1;
                         break;
                     case ROCJPEG_CSS_400:
                         widths[0] = img_width;
