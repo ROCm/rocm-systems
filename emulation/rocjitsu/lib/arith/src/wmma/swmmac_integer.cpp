@@ -5,8 +5,8 @@
 // flags and dispatches decoded operands to scalar or SIMD accumulation,
 // preserving the instruction's stage-by-stage saturation or wraparound.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/swmmac_integer_impl.h"
 
 #include <stdint.h>
@@ -29,21 +29,21 @@ int swmmac(uint64_t flags, uint32_t mode, uint32_t *const *d, const uint32_t *co
   for (int reg = 0; reg < 8; ++reg) {
     dest[reg] = WaveSize == 64 ? d[reg % 4] + 32 * (reg / 4) : d[reg];
   }
-  rocjitsu::arith::SwmmacIntegerInputs input;
-  rocjitsu::arith::swmmac_integer_prepare<Bits, K, WaveSize>(input, mode, dest, a, b, index);
-  bool clamp = mode & RJ_ARITH_WMMA_CLAMP;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::swmmac_integer_x86_64_v4(K, clamp, dest, input);
+    rocjitsu::arith::swmmac_integer_x86_64_v4<Bits, K, WaveSize>(mode, dest, a, b, index);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::swmmac_integer_x86_64_v3(K, clamp, dest, input);
+    rocjitsu::arith::swmmac_integer_x86_64_v3<Bits, K, WaveSize>(mode, dest, a, b, index);
     return RJ_ARITH_SUCCESS;
   }
 #endif
+  rocjitsu::arith::SwmmacIntegerInputs input;
+  rocjitsu::arith::swmmac_integer_prepare<Bits, K, WaveSize>(input, mode, dest, a, b, index);
+  bool clamp = mode & RJ_ARITH_WMMA_CLAMP;
   uint32_t result[8][32];
   for (int row = 0; row < 16; ++row) {
     for (int col = 0; col < 16; ++col) {

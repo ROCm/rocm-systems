@@ -7,14 +7,12 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 
-#include "util/log.h"
-
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
-#include <format>
 #include <limits>
-#include <stdexcept>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -45,9 +43,9 @@ public:
               SdmaPacketDialect dialect, SdmaPacketCallbacks callbacks,
               SdmaQueueProgressObserver progress_observer)
       : address_space_lease_(std::move(retained_address_space)),
+        producer_ingress_(callbacks.admit_memory_ingress),
         ring_consumer_(gpu_vm, std::move(config.ring), dialect, std::move(callbacks)),
         process_id_(config.context.process_id), queue_id_(config.context.queue_id),
-        engine_id_(config.context.engine_id),
         producer_pointer_address_(config.producer_pointer_address),
         doorbell_offset_(config.doorbell_offset), doorbell_base_(config.doorbell_base),
         producer_cursor_(ring_consumer_.config().initial_cursor.value_or(0)),
@@ -59,10 +57,10 @@ private:
   friend class SdmaQueueScheduler;
 
   GpuVmBindingLease address_space_lease_;
+  SdmaMemoryIngressHandler producer_ingress_;
   SdmaRingConsumer ring_consumer_;
   uint32_t process_id_ = 0;
   uint32_t queue_id_ = 0;
-  uint32_t engine_id_ = 0;
   uint64_t producer_pointer_address_ = 0;
   uint32_t doorbell_offset_ = 0;
   void *doorbell_base_ = nullptr;
@@ -91,8 +89,7 @@ SdmaQueueScheduler::SdmaQueueScheduler(GpuVm &gpu_vm,
                                        std::shared_ptr<DeviceCacheCoherence> coherence,
                                        SdmaPacketDialect dialect)
     : gpu_vm_(gpu_vm), coherence_(std::move(coherence)), dialect_(dialect) {
-  if (!coherence_)
-    throw std::invalid_argument("SDMA queue scheduler requires a cache-coherence domain");
+  assert(coherence_ && "SDMA queue scheduler requires a cache-coherence domain");
 }
 
 SdmaQueueScheduler::~SdmaQueueScheduler() { shutdown(); }
@@ -274,6 +271,11 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
       condition_.notify_all();
       return status;
     }
+
+    // The worker can retain a QueueRecord after publishing service_active_=false.
+    // Cancel its deferred owner effect before detach reports force-close done.
+    if (force)
+      queue->ring_consumer_.cancel_in_flight();
 
     Slot &slot = slots_[handle.slot_];
     slot.queue.reset();
@@ -523,8 +525,25 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
     if (synchronize_publication) {
       // The doorbell remains the execution bound. This acquire load exists only
       // to pair with the producer's release-store of its canonical write pointer.
-      const AtomicLoadResult write_pointer = gpu_vm_.atomic_load(
-          queue->address_space_lease_.handle(), queue->producer_pointer_address_, sizeof(uint64_t));
+      AtomicLoadResult write_pointer;
+      if (queue->producer_ingress_) {
+        const std::optional<GpuVmAccess> access =
+            gpu_vm_.snapshot(queue->address_space_lease_.handle());
+        if (!access) {
+          write_pointer.outcome = VmAccessOutcome::Revoked;
+        } else {
+          const std::array spans{MemoryIngressSpan{queue->producer_pointer_address_,
+                                                   sizeof(uint64_t), VmAccessKind::Read}};
+          MemoryIngressAdmission admitted = queue->producer_ingress_(*access, spans);
+          write_pointer =
+              admitted.outcome == VmAccessOutcome::Complete
+                  ? access->atomic_load(queue->producer_pointer_address_, sizeof(uint64_t))
+                  : AtomicLoadResult{.outcome = admitted.outcome};
+        }
+      } else {
+        write_pointer = gpu_vm_.atomic_load(queue->address_space_lease_.handle(),
+                                            queue->producer_pointer_address_, sizeof(uint64_t));
+      }
       if (write_pointer.outcome == VmAccessOutcome::Complete) {
         const std::lock_guard lock(mutex_);
         queue->synchronized_cursor_ = std::max(queue->synchronized_cursor_, producer);
@@ -534,22 +553,8 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
                                                                         : SdmaRingStatus::Faulted;
       }
     }
-    if (publication_ready) {
-      try {
-        outcome = queue->ring_consumer_.service(producer, kPacketsPerTurn);
-      } catch (const std::exception &error) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after exception: {}",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_,
-                                       error.what()));
-        queue->ring_consumer_.latch_callback_failure();
-        outcome = SdmaRingStatus::Faulted;
-      } catch (...) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after unknown exception",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_));
-        queue->ring_consumer_.latch_callback_failure();
-        outcome = SdmaRingStatus::Faulted;
-      }
-    }
+    if (publication_ready)
+      outcome = queue->ring_consumer_.service(producer, kPacketsPerTurn);
 
     const bool terminal_outcome =
         outcome == SdmaRingStatus::Faulted || outcome == SdmaRingStatus::Malformed;
@@ -564,18 +569,7 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
     }
     if (queue->progress_observer_ &&
         (consumer_cursor != queue->reported_cursor_ || terminal_outcome)) {
-      try {
-        queue->progress_observer_(
-            {.consumer_cursor = consumer_cursor, .terminal = terminal_outcome});
-      } catch (const std::exception &error) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} progress observer failed: {}",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_,
-                                       error.what()));
-      } catch (...) {
-        util::Logger::warn(
-            std::format("SDMA{} queue {}:{} progress observer failed with unknown exception",
-                        queue->engine_id_, queue->process_id_, queue->queue_id_));
-      }
+      queue->progress_observer_({.consumer_cursor = consumer_cursor, .terminal = terminal_outcome});
       queue->reported_cursor_ = consumer_cursor;
     }
 

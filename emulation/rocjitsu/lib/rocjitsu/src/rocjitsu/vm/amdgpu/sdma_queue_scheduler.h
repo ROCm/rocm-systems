@@ -59,7 +59,7 @@ struct SdmaQueueProgress {
 /// @brief Frontend observer for queue progress, separate from packet semantics.
 /// @details Invoked without the scheduler mutex while the queue remains in an
 /// active service turn. Detach therefore waits for an admitted observer to
-/// return, and observers must not synchronously detach their own queue.
+/// return. Observers must not throw or synchronously detach their own queue.
 using SdmaQueueProgressObserver = std::function<void(const SdmaQueueProgress &)>;
 
 /// @brief Independently schedules and executes all SDMA queues for one SoC.
@@ -148,6 +148,7 @@ public:
   const std::shared_ptr<DeviceCacheCoherence> &cache_coherence() const { return coherence_; }
 
 private:
+  friend class SdmaQueueSchedulerTestAccess;
   class QueueRecord;
 
   class Slot {

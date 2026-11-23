@@ -77,16 +77,10 @@ DISPATCH: dict[str, Callable[[ExecuteContext], str]] = {}
 
 def _register_handlers() -> None:
     """Populate DISPATCH with handlers from the extracted modules."""
-    from amdisa.codegen.execute.scalar import (
-        gen_scalar_cmpk,
-    )
     from amdisa.codegen.execute.vector_cmp import (
-        gen_vector_cmp_class,
         gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
-        gen_vector_bcnt,
-        gen_vector_mbcnt,
         gen_vector_movrel,
         gen_vector_swaprel,
         gen_vector_sat_pack,
@@ -99,7 +93,6 @@ def _register_handlers() -> None:
         gen_vector_div_fixup,
         gen_vector_div_scale,
         gen_vector_div_fmas,
-        gen_vector_dot,
         gen_vector_dot2c_bf16,
         gen_vector_bitop3,
         gen_vector_permlane_swap,
@@ -108,15 +101,11 @@ def _register_handlers() -> None:
         gen_vector_permlane_family,
         gen_vector_permlane_idx_gen,
         gen_vector_cvt_pk,
-        gen_vector_cvt_scale,
         gen_cvt_fp8,
-        gen_cvt_scalef32,
     )
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
         gen_pk_ternary,
-        gen_pk_fmac_vop2,
-        gen_pk_fmac_vop3,
         gen_pk_binop_f32,
         gen_pk_ternary_f32,
         gen_pk_ternary_f64,
@@ -124,13 +113,6 @@ def _register_handlers() -> None:
         gen_pk_binop_f64,
         gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
-        gen_mad_mix_f32,
-        gen_mad_mix_lo_hi,
-        gen_mad_mix_bf16,
-        gen_dot2,
-        gen_dot2_true16,
-        gen_dot4,
-        gen_dot8,
     )
     from amdisa.codegen.execute.matrix import (
         gen_accvgpr_read,
@@ -138,22 +120,12 @@ def _register_handlers() -> None:
         gen_mfma,
     )
 
-    # Scalar ALU — scalar_unary, scalar_binop, scalar_cmp, scalar_bitcmp,
-    # scalar_saveexec now handled by SemaAST pipeline (_SEMA_CLASSES).
-    DISPATCH['scalar_cmpk'] = lambda c: gen_scalar_cmpk(
-        c.dst_ops, c.src_ops, c.op, c.dtype
-    )
-
     # Vector ALU — vector_unary, pseudo_scalar_unary, vector_binop, and
     # vector_ternary are handled by the SemaAST pipeline (_SEMA_CLASSES).
     # pseudo_scalar_unary retains its VALU expression/encoding contract but
     # uses ExecModel.SCALAR because the ISA says V_S_* ignores EXEC.
 
-    # Vector compare — vector_cmp, vector_add_co handled by SemaAST pipeline
-    # (_SEMA_CLASSES). vector_cmp_class is NOT: the SemaAST lowering mangles the
-    # operand (a bit_cast<float>(static_cast<uint32_t>(...)) value round-trip)
-    # and always classifies in f32, so the dedicated per-type generator here
-    # (correct f16/f32/f64 qnan masks, full 64-bit f64 read) owns it instead.
+    # Relational CMPX keeps the legacy fallback; CLASS is handled by rj-arith.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
         c.src_ops,
         c.op,
@@ -164,30 +136,7 @@ def _register_handlers() -> None:
         c.has_abs,
         c.result_writer,
     )
-    DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        False,
-        False,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-    DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        True,
-        c.cmpx_writes_vcc,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-
     # Vector special
-    DISPATCH['vector_bcnt'] = lambda c: gen_vector_bcnt(c.dst_ops, c.src_ops)
-    DISPATCH['vector_mbcnt'] = lambda c: gen_vector_mbcnt(c.dst_ops, c.src_ops, c.op)
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
         c.dst_ops,
         c.src_ops,
@@ -197,9 +146,17 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
+        is_vop3=c.is_vop3,
+        stage_after_destination=c.arch_name == 'rdna3_5',
+        # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
+        apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
-        c.dst_ops, c.src_ops, c.profile.uses_vgpr_msb_indexing
+        c.dst_ops,
+        c.src_ops,
+        c.profile.uses_vgpr_msb_indexing,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
         c.dst_ops,
@@ -219,6 +176,7 @@ def _register_handlers() -> None:
         c.op,
         c.profile.uses_vgpr_msb_indexing,
         c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
+        c.arch_name == 'rdna3_5',
     )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
@@ -247,8 +205,11 @@ def _register_handlers() -> None:
     DISPATCH['vector_div_fmas'] = lambda c: gen_vector_div_fmas(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
     )
-    DISPATCH['vector_dot'] = lambda c: gen_vector_dot(
-        c.dst_ops, c.src_ops, c.op, c.dtype
+    from .rj_arith_vector import gen_integer_dot
+    from .rj_arith_float import gen_float_dot32
+
+    DISPATCH['vector_dot'] = lambda c: (
+        gen_integer_dot(c) if c.dtype == 'i32' else gen_float_dot32(c)
     )
     DISPATCH['vector_dot2c_bf16'] = lambda c: gen_vector_dot2c_bf16(
         c.dst_ops, c.src_ops
@@ -307,15 +268,16 @@ def _register_handlers() -> None:
         ),
         arch_name=c.arch_name,
     )
-    DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
-    )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
-    DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)
 
     # Packed
     DISPATCH['pk_binop'] = lambda c: gen_pk_binop(
-        c.dst_ops, c.src_ops, c.op, c.dtype, opsel_exprs=c.opsel_exprs
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.dtype,
+        opsel_exprs=c.opsel_exprs,
+        multiply_clamp=c.profile.packed_mul_lo_u16_clamp,
     )
     DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
         c.dst_ops,
@@ -325,11 +287,6 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         integer_clamp=c.inst.name in c.profile.integer_clamp_dtypes,
-    )
-    DISPATCH['pk_fmac_vop2'] = lambda c: (
-        gen_pk_fmac_vop3(c.dst_ops, c.src_ops)
-        if c.enc_name.upper() == 'ENC_VOP3'
-        else gen_pk_fmac_vop2(c.dst_ops, c.src_ops)
     )
     DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
         c.dst_ops,
@@ -357,84 +314,28 @@ def _register_handlers() -> None:
         c.src_ops,
         opsel_exprs=c.opsel_exprs,
     )
-    DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
-        c.dst_ops,
-        c.src_ops,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=True,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=False,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mix_f32_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='f32',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixlo_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='lo',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixhi_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='hi',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
+    # MIX arithmetic is emitted by rj_arith_float.gen_mixed_fma.
     # DOT: every semantic class routes here, so the generator keeps no
     # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
     # fails if a new class arrives without an entry.
-    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16', 'dot2_i32_i16', 'dot2_u32_u16'):
-        DISPATCH[_cls] = lambda c: gen_dot2(
-            c.dst_ops,
-            c.src_ops,
-            c.cls,
-            opsel_exprs=c.opsel_exprs,
-            dot_accumulation=c.profile.float_dot_accumulation,
-        )
+    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        DISPATCH[_cls] = gen_float_dot32
+    from amdisa.codegen.execute.rj_arith_float import gen_half_dot
+
     for _cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
-        DISPATCH[_cls] = lambda c: gen_dot2_true16(
-            c.dst_ops, c.src_ops, c.cls, c.profile.float_dot_accumulation
-        )
-    for _cls in ('dot4_i32_i8', 'dot4_i32_iu8', 'dot4_u32_u8', 'dot4_f32_fp8'):
-        DISPATCH[_cls] = lambda c: gen_dot4(
-            c.dst_ops,
-            c.src_ops,
-            c.cls,
-            operation=c.sem.operation,
-            dot_accumulation=c.profile.float_dot_accumulation,
-            opsel_exprs=c.opsel_exprs,
-        )
-    for _cls in ('dot8_i32_i4', 'dot8_i32_iu4', 'dot8_u32_u4'):
-        DISPATCH[_cls] = lambda c: gen_dot8(
-            c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
-        )
+        DISPATCH[_cls] = gen_half_dot
+    for _cls in (
+        'dot2_i32_i16',
+        'dot2_u32_u16',
+        'dot4_i32_i8',
+        'dot4_i32_iu8',
+        'dot4_u32_u8',
+        'dot8_i32_i4',
+        'dot8_i32_iu4',
+        'dot8_u32_u4',
+    ):
+        DISPATCH[_cls] = gen_integer_dot
+    DISPATCH['dot4_f32_fp8'] = gen_float_dot32
 
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)

@@ -40,6 +40,50 @@ fn satisfied_single_wait_does_not_take_lifecycle_mutex() {
     assert_eq!(result.unwrap(), 7);
 }
 
+#[test]
+fn admitted_single_wait_reads_nonzero_signal_after_admission_closes() {
+    let gate = Arc::new(crate::admission::InFlightTracker::new_process());
+    gate.open(7);
+    let slot = Arc::new(AmdSignal::user(5));
+    let handle = HsaSignal {
+        handle: Arc::as_ptr(&slot) as u64,
+    };
+    reserve_wait_signal_slots(1).unwrap();
+    publish_wait_signal(handle.handle as usize);
+    let (admitted_send, admitted_recv) = std::sync::mpsc::channel();
+    let (release_send, release_recv) = std::sync::mpsc::channel();
+    let worker_gate = gate.clone();
+    let worker_slot = slot.clone();
+    let worker = std::thread::spawn(move || {
+        let _test_gate = crate::admission::install_test_public_raw_gate(worker_gate);
+        pause_after_wait_admission(admitted_send, release_recv);
+        // SAFETY: The worker retains the signal slot until this wait exits.
+        let observed = unsafe {
+            signal_wait(
+                handle,
+                SIGNAL_CONDITION_EQ,
+                0,
+                0,
+                WAIT_STATE_ACTIVE,
+                Ordering::Acquire,
+            )
+        };
+        // Keep the raw handle's backing alive even if coordination times out.
+        drop(worker_slot);
+        observed
+    });
+    admitted_recv.recv_timeout(Duration::from_secs(1)).unwrap();
+    gate.close();
+    release_send.send(()).unwrap();
+    let observed = worker.join().unwrap();
+    gate.wait_idle();
+    WAIT_SIGNAL_HANDLES
+        .write()
+        .unwrap()
+        .remove(&(handle.handle as usize));
+    assert_eq!(observed, 5);
+}
+
 /// Creates a signal batch and returns its live members.
 fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal>) {
     let slots: Box<[AmdSignal]> = (0..count)
@@ -52,7 +96,8 @@ fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal
         })
         .collect::<Vec<_>>();
     let batch = HsaAmdSignalBatch { handle: 42 };
-    let mut state = SignalState::new(DriverContextLifetime::Process);
+    let session = rocddi::session::Session::new(DriverContextLifetime::Process).unwrap();
+    let mut state = SignalState::new(&session).unwrap();
     for signal in &signals {
         state
             .batch_members
@@ -61,7 +106,7 @@ fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal
     state.batches.insert(
         batch.handle,
         SignalBatchStorage {
-            _backing: SignalBatchBacking::Test(slots),
+            _backing: SignalBacking::Test(slots),
             remaining: count,
             handle_live: true,
             host_atomics_supported: true,
@@ -751,7 +796,7 @@ fn shutdown_cancels_unbounded_multi_signal_waits() {
 
 #[test]
 fn closing_admission_releases_unbounded_waits() {
-    let gate = Arc::new(crate::runtime::InFlightTracker::new());
+    let gate = Arc::new(crate::admission::InFlightTracker::new());
     let stop = Arc::new(AtomicBool::new(false));
     let signal = Arc::new(AmdSignal::user(3));
     let (ready_send, ready_recv) = std::sync::mpsc::channel();
@@ -781,6 +826,7 @@ fn closing_admission_releases_unbounded_waits() {
                         compare_value: values[0],
                         timeout_hint: u64::MAX,
                         wait_state_hint: WAIT_STATE_BLOCKED,
+                        yielding_poll: false,
                         order: Ordering::Acquire,
                     },
                 ) as u32

@@ -10,7 +10,9 @@
 /// RDNA4's separate CO executor is scalar-only. Inactive lanes must preserve
 /// destination sentinels, and wave32 SDST writes must preserve the next SGPR.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/big_int.h"
 #include "util/simd_test_hooks.h"
 
@@ -68,9 +70,9 @@ constexpr void vop3_sdstenc_encode(uint32_t op, uint32_t vdst, uint32_t sdst, ui
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
 }
 
-std::array<uint32_t, 2> encode_mad64(rj_code_arch_t arch, bool is_signed, uint32_t sdst,
+std::array<uint32_t, 2> encode_mad64(rocjitsu::IsaFamily arch, bool is_signed, uint32_t sdst,
                                      uint32_t clamp = 0) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna4)
     return rdna4::build_vop3_sdst_enc(is_signed ? rdna4::kVMadCoI64I32Vop3SdstEnc
                                                 : rdna4::kVMadCoU64U32Vop3SdstEnc,
                                       {.vdst = kDstVgpr,
@@ -114,7 +116,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4)
       : gpu_mem("vop3_shift64_mem"), l2("vop3_shift64_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -122,7 +124,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_shift64", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_shift64", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -173,6 +177,8 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
   auto run = [&](bool force_scalar, uint32_t srot, uint32_t vrot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -209,6 +215,8 @@ void check_lshl_add(uint64_t exec) {
   auto run = [&](bool force_scalar, uint32_t srot, uint32_t crot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -294,6 +302,8 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
   auto run = [&](bool force_scalar, uint32_t arot, uint32_t crot) -> Mad64Output {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t sb = fx.wf->sgpr_alloc().base;
@@ -365,9 +375,9 @@ TEST(Vop3Shift64SimdCorrectness, SignedMadCarryIsBit64OfTheWidenedResult) {
       Case{-1, 1, 0, UINT64_MAX, 1},
   };
   ForceScalarGuard guard;
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
+  for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4})
     for (bool force_scalar : {false, true}) {
-      if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !force_scalar)
+      if (arch == rocjitsu::IsaFamily::Rdna4 && !force_scalar)
         continue; // The CO executor has no SIMD fast path.
       SCOPED_TRACE(testing::Message() << "arch=" << arch << " scalar=" << force_scalar);
       util::set_force_scalar_for_testing(force_scalar);
@@ -426,9 +436,9 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
                 static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), 0},
   };
   for (const ClampCase &test : kCases) {
-    for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
+    for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4})
       for (bool force_scalar : {false, true}) {
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !force_scalar)
+        if (arch == rocjitsu::IsaFamily::Rdna4 && !force_scalar)
           continue; // The CO executor has no SIMD fast path.
         SCOPED_TRACE(testing::Message() << "arch=" << arch << " scalar=" << force_scalar);
         util::set_force_scalar_for_testing(force_scalar);

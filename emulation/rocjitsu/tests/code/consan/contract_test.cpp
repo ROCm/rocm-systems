@@ -32,7 +32,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "083a76759fc07e774f153ef7d0f6611a48e23a8102352687fd6d5f9d4c39521a");
+            "8e4e17c79d00156a938aeba232063db0a7242c818fe19fa83e6c3778d43cff17");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -92,6 +92,7 @@ Manifest example() {
   manifest.sites = {{.id = 0,
                      .analysis = AnalysisKind::LdsRaceDetection,
                      .access = AccessKind::Write,
+                     .width = 4,
                      .original_offset = 0,
                      .original_size = 8,
                      .prepared_guest_offset = 32,
@@ -102,6 +103,7 @@ Manifest example() {
                     {.id = 1,
                      .analysis = AnalysisKind::LdsRaceDetection,
                      .access = AccessKind::Read,
+                     .width = 4,
                      .original_offset = 16,
                      .original_size = 8,
                      .prepared_guest_offset = 256,
@@ -110,6 +112,194 @@ Manifest example() {
                      .probe_size = 64,
                      .first_slot = 4}};
   return manifest;
+}
+
+Manifest barrier_example(const TargetProfile &target, uint32_t wave_size, ScopeKind scope) {
+  Manifest manifest = example();
+  manifest.target = target.id;
+  manifest.wave_size = wave_size;
+  manifest.scope = scope;
+  manifest.entry.workgroup_id_scalar = target.id == 1201 || target.id == 1250 ? 117 : 15;
+  manifest.sites.back().original_offset = 64;
+  const bool split = target.id == 1201 || target.id == 1250;
+  manifest.barriers = {{.original_drain = 8,
+                        .original_signal = 12,
+                        .original_wait = split ? 16u : 12u,
+                        .prepared_signal = 400,
+                        .prepared_wait = split ? 404u : 400u,
+                        .completion_probe = split ? 408u : 404u,
+                        .probe_size = 64}};
+  return manifest;
+}
+
+TEST(ConSanBoundedLaunch, FourCompleteGroupsKeepAllPartialWaves) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.entry.workgroup_id_scalar = 117;
+  ContractError error;
+  const FailureOr<LaunchLayout> layout =
+      plan_launch(manifest, {{260, 1, 1}, {65, 1, 1}}, 8, 0, &error);
+  ASSERT_TRUE(layout.succeeded()) << error.message;
+  EXPECT_EQ(layout.value().wave_count, 12u);
+  EXPECT_EQ(layout.value().report_bytes, 64u + 12u * 576u);
+}
+
+TEST(ConSanBoundedLaunch, AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission) {
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave_size : {32u, 64u}) {
+      if (!supports_wave(target, wave_size))
+        continue;
+      SCOPED_TRACE(target.name);
+      SCOPED_TRACE(wave_size);
+      Manifest manifest = example();
+      manifest.target = target.id;
+      manifest.wave_size = wave_size;
+      manifest.entry.workgroup_id_scalar = target.id == 1201 || target.id == 1250 ? 117 : 15;
+      for (const uint32_t groups : {1u, 4u, 16u})
+        for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1}) {
+          SCOPED_TRACE(groups);
+          SCOPED_TRACE(threads);
+          const uint32_t waves = (threads + wave_size - 1) / wave_size;
+          const LaunchDimensions dimensions = {{groups * threads, 1, 1}, {threads, 1, 1}};
+          ContractError error;
+          const FailureOr<LaunchLayout> layout = plan_launch(manifest, dimensions, 8, 0, &error);
+          ASSERT_TRUE(layout.succeeded()) << error.message;
+          EXPECT_EQ(layout.value().workgroup_count, groups);
+          EXPECT_EQ(layout.value().waves_per_workgroup, waves);
+          EXPECT_EQ(layout.value().wave_count, groups * waves);
+          EXPECT_EQ(layout.value().report_bytes, 64u + groups * waves * 576u);
+          const FailureOr<TransportImage> transport =
+              initialize_transport(manifest, dimensions, 8, 0, 1, 0x10000, &error);
+          ASSERT_TRUE(transport.succeeded()) << error.message;
+          for (uint32_t row = 0; row < groups * waves; ++row) {
+            const size_t offset = kReportHeaderBytes + row * layout.value().row_stride;
+            EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowWorkgroupX),
+                      row / waves);
+            EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowWave),
+                      row % waves);
+          }
+        }
+      ContractError error;
+      EXPECT_TRUE(plan_launch(manifest, {{17 * wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0, &error)
+                      .failed());
+      EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
+      manifest.entry.workgroup_id_scalar = UINT32_MAX;
+      EXPECT_TRUE(plan_launch(manifest, {{wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0).succeeded());
+      EXPECT_TRUE(
+          plan_launch(manifest, {{4 * wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0, &error).failed());
+      EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
+    }
+}
+
+TEST(ConSanBoundedLaunch, ValidateAllRowsDimensionsIdentityAndBudgetsBeforeAllocation) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.entry.workgroup_id_scalar = 117;
+  ContractError error;
+  for (const uint32_t groups : {1u, 4u, 16u}) {
+    const LaunchDimensions dimensions{{65 * groups, 1, 1}, {65, 1, 1}};
+    const FailureOr<LaunchLayout> layout = plan_launch(manifest, dimensions, 8, 0, &error);
+    ASSERT_TRUE(layout.succeeded()) << error.message;
+    EXPECT_EQ(layout.value().workgroup_count, groups);
+    EXPECT_EQ(layout.value().waves_per_workgroup, 3u);
+    EXPECT_EQ(layout.value().wave_count, 3 * groups);
+    const FailureOr<TransportImage> transport =
+        initialize_transport(manifest, dimensions, 8, 0, 1, 0x10000, &error);
+    ASSERT_TRUE(transport.succeeded()) << error.message;
+    for (uint32_t row = 0; row < 3 * groups; ++row) {
+      const size_t offset = kReportHeaderBytes + row * layout.value().row_stride;
+      EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowWave), row % 3);
+      EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowWorkgroupX), row / 3);
+      EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowStatus), 0u);
+    }
+    ContractLimits limits;
+    limits.report_bytes = layout.value().report_bytes;
+    EXPECT_TRUE(plan_launch(manifest, dimensions, 8, 0, &error, limits).succeeded());
+    --limits.report_bytes;
+    EXPECT_TRUE(plan_launch(manifest, dimensions, 8, 0, &error, limits).failed());
+    EXPECT_EQ(error.code, ContractErrorCode::ResourceLimit);
+  }
+  for (const LaunchDimensions dimensions : {LaunchDimensions{{0, 1, 1}, {65, 1, 1}},
+                                            {{65, 1, 1}, {0, 1, 1}},
+                                            {{65 * 17, 1, 1}, {65, 1, 1}},
+                                            {{261, 1, 1}, {65, 1, 1}},
+                                            {{260, 2, 1}, {65, 1, 1}},
+                                            {{260, 1, 2}, {65, 1, 1}},
+                                            {{260, 1, 1}, {65, 2, 1}},
+                                            {{260, 1, 1}, {65, 1, 2}},
+                                            {{UINT32_MAX, 1, 1}, {65, 1, 1}},
+                                            {{UINT32_MAX, 1, 1}, {UINT32_MAX, 1, 1}},
+                                            {{1025, 1, 1}, {1025, 1, 1}}}) {
+    EXPECT_TRUE(plan_launch(manifest, dimensions, 8, 0, &error).failed());
+    EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
+  }
+  manifest.entry.workgroup_id_scalar = UINT32_MAX;
+  EXPECT_TRUE(plan_launch(manifest, {{65, 1, 1}, {65, 1, 1}}, 8, 0).succeeded());
+  EXPECT_TRUE(plan_launch(manifest, {{260, 1, 1}, {65, 1, 1}}, 8, 0, &error).failed());
+  EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
+  manifest.entry.workgroup_id_scalar = 117;
+  manifest.target = 1201;
+  EXPECT_TRUE(plan_launch(manifest, {{260, 1, 1}, {65, 1, 1}}, 8, 0, &error).succeeded());
+}
+
+TEST(ConSanBoundedLaunch, DefaultReportCapNeverReducesQuotasOrSamplesWorkgroups) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.entry.workgroup_id_scalar = 117;
+  manifest.original.bytes = 65536;
+  manifest.original_text_bytes = 16384;
+  manifest.entry.original_descriptor_offset = 32768;
+  manifest.prepared.bytes = 1048576;
+  manifest.prepared_text_bytes = 262144;
+  manifest.entry.prepared_descriptor_offset = 524288;
+  manifest.sites.clear();
+  for (uint32_t site = 0; site < 1024; ++site)
+    manifest.sites.push_back({.id = site,
+                              .analysis = AnalysisKind::LdsRaceDetection,
+                              .width = 4,
+                              .original_offset = uint64_t{site} * 8,
+                              .original_size = 8,
+                              .prepared_guest_offset = uint64_t{site} * 128,
+                              .prepared_guest_size = 8,
+                              .probe_offset = uint64_t{site} * 128 + 16,
+                              .probe_size = 64,
+                              .first_slot = site * kAddressGroupsPerSite});
+  ASSERT_TRUE(validate_manifest(manifest).succeeded());
+  ContractError error;
+  EXPECT_TRUE(plan_launch(manifest, {{16384, 1, 1}, {1024, 1, 1}}, 8, 0, &error).failed());
+  EXPECT_EQ(error.code, ContractErrorCode::ResourceLimit);
+  EXPECT_EQ(manifest.sites.size(), 1024u);
+  EXPECT_EQ(kAddressGroupsPerSite, 4u);
+}
+
+TEST(ConSanBoundedLaunch, ProbeRowOffsetsCannotWrapWhenSoftwareBudgetsAreRaised) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.entry.workgroup_id_scalar = 117;
+  manifest.original.bytes = 2 * 1024 * 1024;
+  manifest.original_text_bytes = 1024 * 1024;
+  manifest.entry.original_descriptor_offset = 1024 * 1024;
+  manifest.prepared.bytes = 32 * 1024 * 1024;
+  manifest.prepared_text_bytes = 16 * 1024 * 1024;
+  manifest.entry.prepared_descriptor_offset = 24 * 1024 * 1024;
+  manifest.sites.clear();
+  for (uint32_t site = 0; site < 65536; ++site)
+    manifest.sites.push_back({.id = site,
+                              .analysis = AnalysisKind::LdsRaceDetection,
+                              .width = 4,
+                              .original_offset = uint64_t{site} * 8,
+                              .original_size = 8,
+                              .prepared_guest_offset = uint64_t{site} * 128,
+                              .prepared_guest_size = 8,
+                              .probe_offset = uint64_t{site} * 128 + 16,
+                              .probe_size = 64,
+                              .first_slot = site * kAddressGroupsPerSite});
+  ASSERT_TRUE(validate_manifest(manifest).succeeded());
+  ContractLimits limits;
+  limits.report_bytes = UINT64_MAX;
+  ContractError error;
+  EXPECT_TRUE(plan_launch(manifest, {{16384, 1, 1}, {1024, 1, 1}}, 8, 0, &error, limits).failed());
+  EXPECT_EQ(error.code, ContractErrorCode::ResourceLimit);
 }
 
 class ConSanContract : public ::testing::Test {
@@ -141,7 +331,7 @@ protected:
     rehash();
   }
 
-  size_t count_offset() const { return kEntry + 76 + example().entry.name.size(); }
+  size_t count_offset() const { return kEntry + 80 + example().entry.name.size(); }
   size_t site_offset() const { return count_offset() + 4; }
 
   ContractError error_;
@@ -166,7 +356,7 @@ TEST_F(ConSanContract, OwningFactsRoundTripIsCanonicalAndLittleEndian) {
   const FailureOr<std::vector<uint8_t>> reencoded = encode_manifest(decoded.value());
   ASSERT_TRUE(reencoded.succeeded());
   EXPECT_EQ(reencoded.value(), bytes_);
-  EXPECT_EQ(bytes_.size(), 64u + 144u + 76u + original.entry.name.size() + 4u + 2u * 68u);
+  EXPECT_EQ(bytes_.size(), 64u + 144u + 80u + original.entry.name.size() + 4u + 2u * 68u + 4u);
   // gfx1100 is encoded as the integer 1100, after the two image identities
   // and the options digest. This also pins the independently specified layout.
   EXPECT_EQ(bytes_[64 + 112], 0x4c);
@@ -250,6 +440,389 @@ TEST_F(ConSanContract, ValidChecksumDoesNotBypassRequiredMappings) {
   EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
 }
 
+TEST_F(ConSanContract, BarrierFormsRoundTripAcrossEveryNativeTargetWaveAndScope) {
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave_size : {32u, 64u})
+      for (const ScopeKind scope :
+           {ScopeKind::NativeLdsWorkgroupBarrier, ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
+        SCOPED_TRACE(target.name);
+        SCOPED_TRACE(wave_size);
+        SCOPED_TRACE(static_cast<uint32_t>(scope));
+        Manifest manifest = barrier_example(target, wave_size, scope);
+        if (!supports_wave(target, wave_size)) {
+          EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+          EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+          continue;
+        }
+        const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+        ASSERT_TRUE(encoded.succeeded()) << error_.message;
+        const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), &error_);
+        ASSERT_TRUE(decoded.succeeded()) << error_.message;
+        EXPECT_EQ(decoded.value(), manifest);
+        for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1})
+          for (const uint32_t groups : {1u, 4u}) {
+            SCOPED_TRACE(threads);
+            SCOPED_TRACE(groups);
+            const LaunchDimensions dimensions = {{groups * threads, 1, 1}, {threads, 1, 1}};
+            const FailureOr<LaunchLayout> layout =
+                plan_launch(decoded.value(), dimensions, 8, 0, &error_);
+            ASSERT_TRUE(layout.succeeded()) << error_.message;
+            const uint32_t waves = (threads + wave_size - 1) / wave_size;
+            EXPECT_EQ(layout.value().workgroup_count, groups);
+            EXPECT_EQ(layout.value().waves_per_workgroup, waves);
+            EXPECT_EQ(layout.value().wave_count, groups * waves);
+            EXPECT_EQ(layout.value().row_stride, report_row_bytes(manifest.sites.size(), true));
+          }
+        EXPECT_TRUE(
+            plan_launch(manifest, {{wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0, &error_).failed());
+        EXPECT_EQ(error_.code, ContractErrorCode::UnsupportedLaunch);
+      }
+}
+
+TEST_F(ConSanContract, BarrierGroupsCanEndExactlyAtTheOriginalTextBoundary) {
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave_size : {32u, 64u}) {
+      if (!supports_wave(target, wave_size))
+        continue;
+      SCOPED_TRACE(target.name);
+      SCOPED_TRACE(wave_size);
+      Manifest manifest =
+          barrier_example(target, wave_size, ScopeKind::NativeLdsWorkgroupBarrierLoop);
+      BarrierFacts &barrier = manifest.barriers.front();
+      const bool split = target.id == 1201 || target.id == 1250;
+      barrier.original_drain = manifest.original_text_bytes - (split ? 12 : 8);
+      barrier.original_signal = barrier.original_drain + 4;
+      barrier.original_wait = manifest.original_text_bytes - 4;
+      const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+      ASSERT_TRUE(encoded.succeeded()) << error_.message;
+      const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), &error_);
+      ASSERT_TRUE(decoded.succeeded()) << error_.message;
+      EXPECT_EQ(decoded.value(), manifest);
+    }
+}
+
+TEST_F(ConSanContract, RejectsBarrierFormMismatchesInTypedAndRehashedEncodedFacts) {
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave_size : {32u, 64u}) {
+      if (!supports_wave(target, wave_size))
+        continue;
+      SCOPED_TRACE(target.name);
+      SCOPED_TRACE(wave_size);
+      const Manifest manifest =
+          barrier_example(target, wave_size, ScopeKind::NativeLdsWorkgroupBarrierLoop);
+      const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+      ASSERT_TRUE(encoded.succeeded()) << error_.message;
+      const bool split = target.id == 1201 || target.id == 1250;
+      constexpr std::array<const char *, 5> kChanges = {
+          "original completion form", "prepared completion form", "drain adjacency",
+          "dynamic barrier identity", "completion probe placement"};
+      for (uint32_t change = 0; change < kChanges.size(); ++change) {
+        SCOPED_TRACE(kChanges[change]);
+        Manifest invalid = manifest;
+        BarrierFacts &barrier = invalid.barriers.front();
+        switch (change) {
+        case 0:
+          barrier.original_wait = split ? barrier.original_signal : barrier.original_signal + 4;
+          break;
+        case 1:
+          barrier.prepared_wait = split ? barrier.prepared_signal : barrier.prepared_signal + 4;
+          barrier.completion_probe = barrier.prepared_wait + 4;
+          break;
+        case 2:
+          barrier.original_signal += 4;
+          barrier.original_wait += 4;
+          break;
+        case 3:
+          barrier.identity = 0;
+          break;
+        case 4:
+          barrier.completion_probe += 4;
+          break;
+        }
+        EXPECT_TRUE(validate_manifest(invalid, &error_).failed());
+        EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+        EXPECT_TRUE(encode_manifest(invalid, &error_).failed());
+        EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+        bytes_ = encoded.value();
+        constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+        const size_t offset = bytes_.size() - kBarrierBytes;
+        const std::array<uint64_t, 6> fields = {barrier.original_drain, barrier.original_signal,
+                                                barrier.original_wait,  barrier.prepared_signal,
+                                                barrier.prepared_wait,  barrier.completion_probe};
+        for (size_t index = 0; index < fields.size(); ++index)
+          ASSERT_TRUE(wire::write_u64(bytes_, offset + index * sizeof(uint64_t), fields[index]));
+        put32(offset + 52, barrier.identity);
+        rehash();
+        EXPECT_TRUE(decode_manifest(bytes_, &error_).failed());
+        EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+      }
+    }
+}
+
+TEST_F(ConSanContract, LegacyBarrierAliasDoesNotPermitOverlappingPreparedGroups) {
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    if (target.id == 1201 || target.id == 1250)
+      continue;
+    for (const uint32_t wave_size : {32u, 64u}) {
+      if (!supports_wave(target, wave_size))
+        continue;
+      SCOPED_TRACE(target.name);
+      SCOPED_TRACE(wave_size);
+      Manifest manifest = barrier_example(target, wave_size, ScopeKind::NativeLdsWorkgroupBarrier);
+      manifest.barriers = {{.original_drain = 8,
+                            .original_signal = 12,
+                            .original_wait = 12,
+                            .prepared_signal = 128,
+                            .prepared_wait = 128,
+                            .completion_probe = 132,
+                            .probe_size = 8},
+                           {.original_drain = 32,
+                            .original_signal = 36,
+                            .original_wait = 36,
+                            .prepared_signal = 144,
+                            .prepared_wait = 144,
+                            .completion_probe = 148,
+                            .probe_size = 8}};
+      const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+      ASSERT_TRUE(encoded.succeeded()) << error_.message;
+      for (const uint64_t wait : {128u, 132u, 136u, 140u}) {
+        SCOPED_TRACE(wait);
+        const bool overlaps = wait < 140;
+        Manifest changed = manifest;
+        BarrierFacts &barrier = changed.barriers.back();
+        barrier.prepared_signal = wait;
+        barrier.prepared_wait = wait;
+        barrier.completion_probe = wait + 4;
+        EXPECT_EQ(validate_manifest(changed, &error_).failed(), overlaps);
+        EXPECT_EQ(encode_manifest(changed, &error_).failed(), overlaps);
+        bytes_ = encoded.value();
+        constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+        const size_t offset = bytes_.size() - kBarrierBytes;
+        ASSERT_TRUE(wire::write_u64(bytes_, offset + 24, wait));
+        ASSERT_TRUE(wire::write_u64(bytes_, offset + 32, wait));
+        ASSERT_TRUE(wire::write_u64(bytes_, offset + 40, wait + 4));
+        rehash();
+        EXPECT_EQ(decode_manifest(bytes_, &error_).failed(), overlaps);
+        if (overlaps) {
+          EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(ConSanContract, RejectsOverlappingPreparedBarrierMappings) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.scope = ScopeKind::NativeLdsWorkgroupBarrier;
+  manifest.sites.back().original_offset = 64;
+  manifest.barriers = {{.original_drain = 8,
+                        .original_signal = 12,
+                        .original_wait = 16,
+                        .prepared_signal = 128,
+                        .prepared_wait = 132,
+                        .completion_probe = 136,
+                        .probe_size = 8},
+                       {.original_drain = 32,
+                        .original_signal = 36,
+                        .original_wait = 40,
+                        .prepared_signal = 144,
+                        .prepared_wait = 164,
+                        .completion_probe = 168,
+                        .probe_size = 8}};
+  // B1's signal starts exactly where B0's completion probe ends: adjacency
+  // is legal, but sharing any instruction or probe bytes is not.
+  ASSERT_TRUE(validate_manifest(manifest, &error_).succeeded()) << error_.message;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+  ASSERT_TRUE(encoded.succeeded()) << error_.message;
+  ASSERT_TRUE(decode_manifest(encoded.value(), &error_).succeeded()) << error_.message;
+
+  struct Overlap {
+    const char *name;
+    uint64_t signal;
+    uint64_t wait;
+  };
+  constexpr std::array<Overlap, 5> kOverlaps = {{
+      {.name = "shared signal", .signal = 128, .wait = 164},
+      {.name = "shared wait and callback", .signal = 144, .wait = 132},
+      {.name = "shared signal, wait and callback", .signal = 128, .wait = 132},
+      {.name = "signal inside another callback", .signal = 140, .wait = 164},
+      {.name = "signal inside its own callback", .signal = 168, .wait = 164},
+  }};
+  for (const Overlap &overlap : kOverlaps) {
+    SCOPED_TRACE(overlap.name);
+    Manifest invalid = manifest;
+    invalid.barriers.back().prepared_signal = overlap.signal;
+    invalid.barriers.back().prepared_wait = overlap.wait;
+    invalid.barriers.back().completion_probe = overlap.wait + 4;
+    EXPECT_TRUE(validate_manifest(invalid, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+    EXPECT_TRUE(encode_manifest(invalid, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+
+    // Mutate the last encoded barrier directly, so the encoder cannot hide
+    // a missing decoder check. Keep framing and checksum valid.
+    bytes_ = encoded.value();
+    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    const size_t barrier = bytes_.size() - kBarrierBytes;
+    wire::write_u64(bytes_, barrier + 24, overlap.signal);
+    wire::write_u64(bytes_, barrier + 32, overlap.wait);
+    wire::write_u64(bytes_, barrier + 40, overlap.wait + 4);
+    rehash();
+    EXPECT_TRUE(decode_manifest(bytes_, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+  }
+}
+
+TEST_F(ConSanContract, RejectsBarrierCallbacksOverlappingAccessEnvelopes) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.scope = ScopeKind::NativeLdsWorkgroupBarrier;
+  manifest.sites.back().original_offset = 64;
+  manifest.barriers = {{.original_drain = 8,
+                        .original_signal = 12,
+                        .original_wait = 16,
+                        .prepared_signal = 400,
+                        .prepared_wait = 404,
+                        .completion_probe = 408,
+                        .probe_size = 64}};
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+  ASSERT_TRUE(encoded.succeeded()) << error_.message;
+
+  struct Mapping {
+    const char *name;
+    uint64_t wait;
+    uint32_t probe_size;
+    bool overlaps;
+  };
+  constexpr std::array<Mapping, 5> kMappings = {{
+      {.name = "identical access callback", .wait = 60, .probe_size = 64, .overlaps = true},
+      {.name = "partial overlap at start", .wait = 44, .probe_size = 64, .overlaps = true},
+      {.name = "partial overlap at end", .wait = 92, .probe_size = 64, .overlaps = true},
+      {.name = "contained callback", .wait = 76, .probe_size = 16, .overlaps = true},
+      {.name = "adjacent wait and callback", .wait = 128, .probe_size = 64, .overlaps = false},
+  }};
+  for (const Mapping &mapping : kMappings) {
+    SCOPED_TRACE(mapping.name);
+    Manifest changed = manifest;
+    changed.barriers.front().prepared_wait = mapping.wait;
+    changed.barriers.front().completion_probe = mapping.wait + 4;
+    changed.barriers.front().probe_size = mapping.probe_size;
+    EXPECT_EQ(validate_manifest(changed, &error_).failed(), mapping.overlaps);
+    EXPECT_EQ(encode_manifest(changed, &error_).failed(), mapping.overlaps);
+
+    // Independently exercise decoding with valid framing and checksum.
+    bytes_ = encoded.value();
+    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    const size_t barrier = bytes_.size() - kBarrierBytes;
+    ASSERT_TRUE(wire::write_u64(bytes_, barrier + 32, mapping.wait));
+    ASSERT_TRUE(wire::write_u64(bytes_, barrier + 40, mapping.wait + 4));
+    put32(barrier + 48, mapping.probe_size);
+    rehash();
+    EXPECT_EQ(decode_manifest(bytes_, &error_).failed(), mapping.overlaps);
+    if (mapping.overlaps) {
+      EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+    }
+  }
+}
+
+TEST_F(ConSanContract, BarrierMaximumWorkgroupMustPermitTwoWaves) {
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave_size : {32u, 64u}) {
+      if (!supports_wave(target, wave_size))
+        continue;
+      SCOPED_TRACE(target.name);
+      SCOPED_TRACE(wave_size);
+      Manifest manifest = barrier_example(target, wave_size, ScopeKind::NativeLdsWorkgroupBarrier);
+      manifest.entry.maximum_workgroup_size = wave_size + 1;
+      const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+      ASSERT_TRUE(encoded.succeeded()) << error_.message;
+      ASSERT_TRUE(decode_manifest(encoded.value(), &error_).succeeded()) << error_.message;
+      const LaunchDimensions dimensions = {{wave_size + 1, 1, 1}, {wave_size + 1, 1, 1}};
+      EXPECT_TRUE(plan_launch(manifest, dimensions, 8, 0, &error_).succeeded());
+
+      for (const uint32_t maximum : {1u, wave_size - 1, wave_size}) {
+        SCOPED_TRACE(maximum);
+        manifest.entry.maximum_workgroup_size = maximum;
+        EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+        EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+        EXPECT_TRUE(encode_manifest(manifest, &error_).failed());
+        bytes_ = encoded.value();
+        // workgroup_id_scalar follows maximum_workgroup_size before the site count.
+        put32(count_offset() - 2 * sizeof(uint32_t), maximum);
+        rehash();
+        EXPECT_TRUE(decode_manifest(bytes_, &error_).failed());
+        EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+        EXPECT_EQ(error_.message,
+                  "barrier profile requires a maximum workgroup size permitting two waves");
+      }
+      Manifest no_barrier = example();
+      no_barrier.target = target.id;
+      no_barrier.wave_size = wave_size;
+      no_barrier.entry.maximum_workgroup_size = wave_size;
+      EXPECT_TRUE(validate_manifest(no_barrier, &error_).succeeded()) << error_.message;
+    }
+}
+
+TEST_F(ConSanContract, BarrierJournalCapacityIsInclusiveForTypedAndEncodedFacts) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.scope = ScopeKind::NativeLdsWorkgroupBarrier;
+  manifest.original.bytes = 4096;
+  manifest.prepared.bytes = 8192;
+  manifest.original_text_bytes = 2048;
+  manifest.prepared_text_bytes = 4096;
+  manifest.entry.original_descriptor_offset = 2048;
+  manifest.entry.prepared_descriptor_offset = 4096;
+  const auto barrier_at = [](uint32_t group) {
+    const uint64_t original = 64 + uint64_t{group} * 16;
+    const uint64_t prepared = 1024 + uint64_t{group} * 32;
+    return BarrierFacts{.original_drain = original,
+                        .original_signal = original + 4,
+                        .original_wait = original + 8,
+                        .prepared_signal = prepared,
+                        .prepared_wait = prepared + 4,
+                        .completion_probe = prepared + 8,
+                        .probe_size = 8};
+  };
+  for (uint32_t group = 0; group < kSyncCapacity; ++group)
+    manifest.barriers.push_back(barrier_at(group));
+  ASSERT_TRUE(validate_manifest(manifest, &error_).succeeded()) << error_.message;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+  ASSERT_TRUE(encoded.succeeded()) << error_.message;
+  const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), &error_);
+  ASSERT_TRUE(decoded.succeeded()) << error_.message;
+  EXPECT_EQ(decoded.value(), manifest);
+
+  const BarrierFacts extra = barrier_at(kSyncCapacity);
+  manifest.barriers.push_back(extra);
+  EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+  EXPECT_EQ(error_.code, ContractErrorCode::ResourceLimit);
+  EXPECT_TRUE(encode_manifest(manifest, &error_).failed());
+  EXPECT_EQ(error_.code, ContractErrorCode::ResourceLimit);
+
+  // Supply all seventeen well-formed records, not just an excessive count:
+  // an extent or checksum error must not mask the decoder's capacity guard.
+  bytes_ = encoded.value();
+  constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+  const size_t count = bytes_.size() - kSyncCapacity * kBarrierBytes - sizeof(uint32_t);
+  const size_t tail = bytes_.size();
+  bytes_.resize(tail + kBarrierBytes);
+  put32(count, kSyncCapacity + 1);
+  const std::array<uint64_t, 6> offsets = {extra.original_drain, extra.original_signal,
+                                           extra.original_wait,  extra.prepared_signal,
+                                           extra.prepared_wait,  extra.completion_probe};
+  for (size_t index = 0; index < offsets.size(); ++index)
+    ASSERT_TRUE(wire::write_u64(bytes_, tail + index * sizeof(uint64_t), offsets[index]));
+  put32(tail + 48, extra.probe_size);
+  put32(tail + 52, extra.identity);
+  reframe();
+  EXPECT_TRUE(decode_manifest(bytes_, &error_).failed());
+  // InvalidEncoding identifies the count check before parsing the records;
+  // the later typed validation would instead return ResourceLimit.
+  EXPECT_EQ(error_.code, ContractErrorCode::InvalidEncoding);
+}
+
 TEST_F(ConSanContract, DuplicateIdentityAndInvalidOwnersAreRejectedAfterChecksum) {
   put32(site_offset() + 68, 0);
   rehash();
@@ -296,6 +869,12 @@ TEST_F(ConSanContract, OutOfBoundsAndWrappingPhysicalMappingsFail) {
 TEST_F(ConSanContract, GuestMappingsAndReservationsMustBeUnambiguous) {
   Manifest manifest = example();
   manifest.sites[1].prepared_guest_offset = manifest.sites[0].prepared_guest_offset;
+  EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+  manifest = example();
+  manifest.sites[1].probe_offset = manifest.sites[0].probe_offset;
+  EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+  manifest = example();
+  manifest.sites[0].probe_offset = manifest.sites[0].prepared_guest_offset + 4;
   EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
   manifest = example();
   manifest.sites[1].first_slot = 0;
@@ -369,7 +948,9 @@ TEST_F(ConSanContract, TwoChecksShareOneStaticReservationPerAccessSite) {
                                           .report_bytes = 1216,
                                           .group_bytes = 8,
                                           .private_bytes = 0,
-                                          .wave_count = 2}));
+                                          .wave_count = 2,
+                                          .workgroup_count = 1,
+                                          .waves_per_workgroup = 2}));
   Manifest manifest = example();
   manifest.sites.pop_back();
   const FailureOr<LaunchLayout> single = plan_launch(manifest, kLaunch, 8, 0);
@@ -459,6 +1040,7 @@ TEST_F(ConSanContract, TargetWaveFactsRoundTripAndRowsFollowActualGeometry) {
       Manifest manifest = example();
       manifest.target = target.id;
       manifest.wave_size = wave_size;
+      manifest.entry.workgroup_id_scalar = target.id == 1250 || target.id == 1201 ? 117 : 15;
       if (!supports_wave(target, wave_size)) {
         EXPECT_TRUE(validate_manifest(manifest).failed());
         continue;

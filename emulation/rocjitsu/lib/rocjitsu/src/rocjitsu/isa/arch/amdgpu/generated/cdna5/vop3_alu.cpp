@@ -16,8 +16,8 @@ namespace cdna5 {
 VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -40,6 +40,7 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_TRUNC_F64);
 }
 
 namespace detail {
@@ -69,8 +70,8 @@ DecodeResult decodeVTruncF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
     : Vop3("v_ceil_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -93,6 +94,7 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CEIL_F64);
 }
 
 namespace detail {
@@ -122,8 +124,8 @@ DecodeResult decodeVCeilF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -146,6 +148,7 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_RNDNE_F64);
 }
 
 namespace detail {
@@ -175,8 +178,8 @@ DecodeResult decodeVRndneF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
     : Vop3("v_floor_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -199,6 +202,7 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FLOOR_F64);
 }
 
 namespace detail {
@@ -228,8 +232,8 @@ DecodeResult decodeVFloorF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VTanhF32Vop3::VTanhF32Vop3(const MachineInst *inst)
     : Vop3("v_tanh_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTanhF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -259,6 +263,7 @@ VTanhF32Vop3::VTanhF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_TANH_F32);
 }
 
 namespace detail {
@@ -281,8 +286,8 @@ DecodeResult decodeVTanhF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VTanhF16Vop3::VTanhF16Vop3(const MachineInst *inst)
     : Vop3("v_tanh_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTanhF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -316,6 +321,7 @@ VTanhF16Vop3::VTanhF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_TANH_F16);
 }
 
 namespace detail {
@@ -350,8 +356,8 @@ void VTanhF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
     : Vop3("v_fract_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -380,6 +386,7 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FRACT_F32);
 }
 
 namespace detail {
@@ -402,8 +409,8 @@ DecodeResult decodeVFractF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -432,6 +439,7 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_TRUNC_F32);
 }
 
 namespace detail {
@@ -454,8 +462,8 @@ DecodeResult decodeVTruncF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
     : Vop3("v_ceil_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -484,6 +492,7 @@ VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CEIL_F32);
 }
 
 namespace detail {
@@ -506,8 +515,8 @@ DecodeResult decodeVCeilF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -536,6 +545,7 @@ VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_RNDNE_F32);
 }
 
 namespace detail {
@@ -558,8 +568,8 @@ DecodeResult decodeVRndneF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
     : Vop3("v_floor_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -588,6 +598,7 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FLOOR_F32);
 }
 
 namespace detail {
@@ -610,8 +621,8 @@ DecodeResult decodeVFloorF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
     : Vop3("v_exp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -641,6 +652,7 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_EXP_F32);
 }
 
 namespace detail {
@@ -663,8 +675,8 @@ DecodeResult decodeVExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
     : Vop3("v_log_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -694,6 +706,7 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_LOG_F32);
 }
 
 namespace detail {
@@ -716,8 +729,8 @@ DecodeResult decodeVLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
     : Vop3("v_rcp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -747,6 +760,7 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RCP_F32);
 }
 
 namespace detail {
@@ -769,8 +783,8 @@ DecodeResult decodeVRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
     : Vop3("v_rcp_iflag_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpIflagF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -800,6 +814,7 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RCP_IFLAG_F32);
 }
 
 namespace detail {
@@ -823,8 +838,8 @@ DecodeResult decodeVRcpIflagF32Vop3(const MachineInst *opcode,
 VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
     : Vop3("v_rsq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -854,6 +869,7 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RSQ_F32);
 }
 
 namespace detail {
@@ -876,8 +892,8 @@ DecodeResult decodeVRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
     : Vop3("v_rcp_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -891,6 +907,7 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RCP_F64);
 }
 
 namespace detail {
@@ -911,8 +928,8 @@ DecodeResult decodeVRcpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
     : Vop3("v_rsq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -926,6 +943,7 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RSQ_F64);
 }
 
 namespace detail {
@@ -946,8 +964,8 @@ DecodeResult decodeVRsqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
     : Vop3("v_sqrt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -977,6 +995,7 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_SQRT_F32);
 }
 
 namespace detail {
@@ -999,8 +1018,8 @@ DecodeResult decodeVSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
     : Vop3("v_sqrt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1014,6 +1033,7 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_SQRT_F64);
 }
 
 namespace detail {
@@ -1034,8 +1054,8 @@ DecodeResult decodeVSqrtF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
     : Vop3("v_sin_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1065,6 +1085,7 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_SIN_F32);
 }
 
 namespace detail {
@@ -1087,8 +1108,8 @@ DecodeResult decodeVSinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
     : Vop3("v_cos_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1118,6 +1139,7 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_COS_F32);
 }
 
 namespace detail {
@@ -1140,8 +1162,8 @@ DecodeResult decodeVCosF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
     : Vop3("v_not_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNotB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1170,6 +1192,7 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_NOT_B32);
 }
 
 namespace detail {
@@ -1192,8 +1215,8 @@ DecodeResult decodeVNotB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
     : Vop3("v_bfrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfrevB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1222,6 +1245,7 @@ VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_BFREV_B32);
 }
 
 namespace detail {
@@ -1244,8 +1268,8 @@ DecodeResult decodeVBfrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VClzI32U32Vop3::VClzI32U32Vop3(const MachineInst *inst)
     : Vop3("v_clz_i32_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VClzI32U32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1274,6 +1298,7 @@ VClzI32U32Vop3::VClzI32U32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CLZ_I32_U32);
 }
 
 namespace detail {
@@ -1296,8 +1321,8 @@ DecodeResult decodeVClzI32U32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCtzI32B32Vop3::VCtzI32B32Vop3(const MachineInst *inst)
     : Vop3("v_ctz_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCtzI32B32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1326,6 +1351,7 @@ VCtzI32B32Vop3::VCtzI32B32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CTZ_I32_B32);
 }
 
 namespace detail {
@@ -1348,8 +1374,8 @@ DecodeResult decodeVCtzI32B32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VClsI32Vop3::VClsI32Vop3(const MachineInst *inst)
     : Vop3("v_cls_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VClsI32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1378,6 +1404,7 @@ VClsI32Vop3::VClsI32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CLS_I32);
 }
 
 namespace detail {
@@ -1400,8 +1427,8 @@ DecodeResult decodeVClsI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
     : Vop3("v_fract_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1424,6 +1451,7 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FRACT_F64);
 }
 
 namespace detail {
@@ -1453,8 +1481,8 @@ DecodeResult decodeVFractF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VTanhBf16Vop3::VTanhBf16Vop3(const MachineInst *inst)
     : Vop3("v_tanh_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTanhBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1489,6 +1517,7 @@ VTanhBf16Vop3::VTanhBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_TANH_BF16);
 }
 
 namespace detail {
@@ -1524,8 +1553,8 @@ void VTanhBf16Vop3::implicit_use_operands(
 VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
     : Vop3("v_prng_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPrngB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1554,6 +1583,7 @@ VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_PRNG_B32);
 }
 
 namespace detail {
@@ -1576,8 +1606,8 @@ DecodeResult decodeVPrngB32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
     : Vop3("v_rcp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1611,6 +1641,7 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RCP_F16);
 }
 
 namespace detail {
@@ -1645,8 +1676,8 @@ void VRcpF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
     : Vop3("v_sqrt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1680,6 +1711,7 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_SQRT_F16);
 }
 
 namespace detail {
@@ -1714,8 +1746,8 @@ void VSqrtF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
     : Vop3("v_rsq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1749,6 +1781,7 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RSQ_F16);
 }
 
 namespace detail {
@@ -1783,8 +1816,8 @@ void VRsqF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
     : Vop3("v_log_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1818,6 +1851,7 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_LOG_F16);
 }
 
 namespace detail {
@@ -1852,8 +1886,8 @@ void VLogF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
     : Vop3("v_exp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1887,6 +1921,7 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_EXP_F16);
 }
 
 namespace detail {
@@ -1921,8 +1956,8 @@ void VExpF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
     : Vop3("v_floor_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1955,6 +1990,7 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FLOOR_F16);
 }
 
 namespace detail {
@@ -1990,8 +2026,8 @@ void VFloorF16Vop3::implicit_use_operands(
 VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
     : Vop3("v_ceil_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2024,6 +2060,7 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CEIL_F16);
 }
 
 namespace detail {
@@ -2058,8 +2095,8 @@ void VCeilF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2092,6 +2129,7 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_TRUNC_F16);
 }
 
 namespace detail {
@@ -2127,8 +2165,8 @@ void VTruncF16Vop3::implicit_use_operands(
 VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2161,6 +2199,7 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_RNDNE_F16);
 }
 
 namespace detail {
@@ -2196,8 +2235,8 @@ void VRndneF16Vop3::implicit_use_operands(
 VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
     : Vop3("v_fract_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2230,6 +2269,7 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FRACT_F16);
 }
 
 namespace detail {
@@ -2265,8 +2305,8 @@ void VFractF16Vop3::implicit_use_operands(
 VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
     : Vop3("v_sin_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2300,6 +2340,7 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_SIN_F16);
 }
 
 namespace detail {
@@ -2334,8 +2375,8 @@ void VSinF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
     : Vop3("v_cos_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2369,6 +2410,7 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_COS_F16);
 }
 
 namespace detail {
@@ -2403,8 +2445,8 @@ void VCosF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
     : Vop3("v_not_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNotB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2438,6 +2480,7 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_NOT_B16);
 }
 
 namespace detail {
@@ -2472,8 +2515,8 @@ void VNotB16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VRcpBf16Vop3::VRcpBf16Vop3(const MachineInst *inst)
     : Vop3("v_rcp_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2508,6 +2551,7 @@ VRcpBf16Vop3::VRcpBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RCP_BF16);
 }
 
 namespace detail {
@@ -2542,8 +2586,8 @@ void VRcpBf16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VSqrtBf16Vop3::VSqrtBf16Vop3(const MachineInst *inst)
     : Vop3("v_sqrt_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2578,6 +2622,7 @@ VSqrtBf16Vop3::VSqrtBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_SQRT_BF16);
 }
 
 namespace detail {
@@ -2613,8 +2658,8 @@ void VSqrtBf16Vop3::implicit_use_operands(
 VRsqBf16Vop3::VRsqBf16Vop3(const MachineInst *inst)
     : Vop3("v_rsq_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2649,6 +2694,7 @@ VRsqBf16Vop3::VRsqBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_RSQ_BF16);
 }
 
 namespace detail {
@@ -2683,8 +2729,8 @@ void VRsqBf16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VLogBf16Vop3::VLogBf16Vop3(const MachineInst *inst)
     : Vop3("v_log_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2719,6 +2765,7 @@ VLogBf16Vop3::VLogBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_LOG_BF16);
 }
 
 namespace detail {
@@ -2753,8 +2800,8 @@ void VLogBf16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VExpBf16Vop3::VExpBf16Vop3(const MachineInst *inst)
     : Vop3("v_exp_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2789,6 +2836,7 @@ VExpBf16Vop3::VExpBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_EXP_BF16);
 }
 
 namespace detail {
@@ -2823,8 +2871,8 @@ void VExpBf16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VSinBf16Vop3::VSinBf16Vop3(const MachineInst *inst)
     : Vop3("v_sin_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2859,6 +2907,7 @@ VSinBf16Vop3::VSinBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_SIN_BF16);
 }
 
 namespace detail {
@@ -2893,8 +2942,8 @@ void VSinBf16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VCosBf16Vop3::VCosBf16Vop3(const MachineInst *inst)
     : Vop3("v_cos_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosBf16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -2929,6 +2978,7 @@ VCosBf16Vop3::VCosBf16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_COS_BF16);
 }
 
 namespace detail {
@@ -2963,9 +3013,9 @@ void VCosBf16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
     : Vop3("v_add_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -2995,6 +3045,7 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_F64);
 }
 
 namespace detail {
@@ -3023,9 +3074,9 @@ DecodeResult decodeVAddF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
     : Vop3("v_add_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3060,6 +3111,7 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_F32);
 }
 
 namespace detail {
@@ -3082,9 +3134,9 @@ DecodeResult decodeVAddF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
     : Vop3("v_sub_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3119,6 +3171,7 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_F32);
 }
 
 namespace detail {
@@ -3141,9 +3194,9 @@ DecodeResult decodeVSubF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
     : Vop3("v_subrev_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3178,6 +3231,7 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUBREV_F32);
 }
 
 namespace detail {
@@ -3200,9 +3254,9 @@ DecodeResult decodeVSubrevF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
     : Vop3("v_mul_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3232,6 +3286,7 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_F64);
 }
 
 namespace detail {
@@ -3260,9 +3315,9 @@ DecodeResult decodeVMulF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
     : Vop3("v_mul_dx9_zero_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulDx9ZeroF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3297,6 +3352,7 @@ VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_DX9_ZERO_F32);
 }
 
 namespace detail {
@@ -3320,9 +3376,9 @@ DecodeResult decodeVMulDx9ZeroF32Vop3(const MachineInst *opcode,
 VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
     : Vop3("v_mul_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3357,6 +3413,7 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_F32);
 }
 
 namespace detail {
@@ -3379,9 +3436,9 @@ DecodeResult decodeVMulF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mul_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulI32I24Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3416,6 +3473,7 @@ VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_I32_I24);
 }
 
 namespace detail {
@@ -3438,9 +3496,9 @@ DecodeResult decodeVMulI32I24Vop3(const MachineInst *opcode, const DecodeErrorEm
 VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiI32I24Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3475,6 +3533,7 @@ VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_HI_I32_I24);
 }
 
 namespace detail {
@@ -3498,9 +3557,9 @@ DecodeResult decodeVMulHiI32I24Vop3(const MachineInst *opcode,
 VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mul_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulU32U24Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3535,6 +3594,7 @@ VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_U32_U24);
 }
 
 namespace detail {
@@ -3557,9 +3617,9 @@ DecodeResult decodeVMulU32U24Vop3(const MachineInst *opcode, const DecodeErrorEm
 VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiU32U24Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3594,6 +3654,7 @@ VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_HI_U32_U24);
 }
 
 namespace detail {
@@ -3617,9 +3678,9 @@ DecodeResult decodeVMulHiU32U24Vop3(const MachineInst *opcode,
 VMinNumF64Vop3::VMinNumF64Vop3(const MachineInst *inst)
     : Vop3("v_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinNumF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3649,6 +3710,7 @@ VMinNumF64Vop3::VMinNumF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_NUM_F64);
 }
 
 namespace detail {
@@ -3678,9 +3740,9 @@ DecodeResult decodeVMinNumF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VMaxNumF64Vop3::VMaxNumF64Vop3(const MachineInst *inst)
     : Vop3("v_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxNumF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3710,6 +3772,7 @@ VMaxNumF64Vop3::VMaxNumF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_NUM_F64);
 }
 
 namespace detail {
@@ -3739,9 +3802,9 @@ DecodeResult decodeVMaxNumF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
     : Vop3("v_min_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinI32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3776,6 +3839,7 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_I32);
 }
 
 namespace detail {
@@ -3798,9 +3862,9 @@ DecodeResult decodeVMinI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
     : Vop3("v_max_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxI32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3835,6 +3899,7 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_I32);
 }
 
 namespace detail {
@@ -3857,9 +3922,9 @@ DecodeResult decodeVMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
     : Vop3("v_min_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinU32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3894,6 +3959,7 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_U32);
 }
 
 namespace detail {
@@ -3916,9 +3982,9 @@ DecodeResult decodeVMinU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
     : Vop3("v_max_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxU32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -3953,6 +4019,7 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_U32);
 }
 
 namespace detail {
@@ -3975,9 +4042,9 @@ DecodeResult decodeVMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMinNumF32Vop3::VMinNumF32Vop3(const MachineInst *inst)
     : Vop3("v_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinNumF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4012,6 +4079,7 @@ VMinNumF32Vop3::VMinNumF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_NUM_F32);
 }
 
 namespace detail {
@@ -4034,9 +4102,9 @@ DecodeResult decodeVMinNumF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VMaxNumF32Vop3::VMaxNumF32Vop3(const MachineInst *inst)
     : Vop3("v_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxNumF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4071,6 +4139,7 @@ VMaxNumF32Vop3::VMaxNumF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_NUM_F32);
 }
 
 namespace detail {
@@ -4093,9 +4162,9 @@ DecodeResult decodeVMaxNumF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VFmacF64Vop3::VFmacF64Vop3(const MachineInst *inst)
     : Vop3("v_fmac_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmacF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4126,6 +4195,7 @@ VFmacF64Vop3::VFmacF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FMAC_F64);
 }
 
 namespace detail {
@@ -4155,9 +4225,9 @@ DecodeResult decodeVFmacF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4192,6 +4262,7 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHLREV_B32);
 }
 
 namespace detail {
@@ -4215,9 +4286,9 @@ DecodeResult decodeVLshlrevB32Vop3(const MachineInst *opcode,
 VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshrrevB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4252,6 +4323,7 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHRREV_B32);
 }
 
 namespace detail {
@@ -4275,9 +4347,9 @@ DecodeResult decodeVLshrrevB32Vop3(const MachineInst *opcode,
 VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4312,6 +4384,7 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ASHRREV_I32);
 }
 
 namespace detail {
@@ -4335,9 +4408,9 @@ DecodeResult decodeVAshrrevI32Vop3(const MachineInst *opcode,
 VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
     : Vop3("v_and_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAndB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4372,6 +4445,7 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_AND_B32);
 }
 
 namespace detail {
@@ -4394,9 +4468,9 @@ DecodeResult decodeVAndB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
     : Vop3("v_or_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VOrB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4431,6 +4505,7 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_OR_B32);
 }
 
 namespace detail {
@@ -4453,9 +4528,9 @@ DecodeResult decodeVOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitte
 VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
     : Vop3("v_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXorB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4490,6 +4565,7 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_XOR_B32);
 }
 
 namespace detail {
@@ -4512,9 +4588,9 @@ DecodeResult decodeVXorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
     : Vop3("v_xnor_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXnorB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4549,6 +4625,7 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_XNOR_B32);
 }
 
 namespace detail {
@@ -4571,9 +4648,9 @@ DecodeResult decodeVXnorB32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4602,6 +4679,7 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHLREV_B64);
 }
 
 namespace detail {
@@ -4632,9 +4710,9 @@ DecodeResult decodeVLshlrevB64Vop3(const MachineInst *opcode,
 VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcU32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4669,6 +4747,7 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_NC_U32);
 }
 
 namespace detail {
@@ -4691,9 +4770,9 @@ DecodeResult decodeVAddNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcU32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4728,6 +4807,7 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_NC_U32);
 }
 
 namespace detail {
@@ -4750,9 +4830,9 @@ DecodeResult decodeVSubNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     : Vop3("v_subrev_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevNcU32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4787,6 +4867,7 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUBREV_NC_U32);
 }
 
 namespace detail {
@@ -4810,9 +4891,9 @@ DecodeResult decodeVSubrevNcU32Vop3(const MachineInst *opcode,
 VAddNcU64Vop3::VAddNcU64Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcU64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4842,6 +4923,7 @@ VAddNcU64Vop3::VAddNcU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_NC_U64);
 }
 
 namespace detail {
@@ -4871,9 +4953,9 @@ DecodeResult decodeVAddNcU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VSubNcU64Vop3::VSubNcU64Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcU64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4903,6 +4985,7 @@ VSubNcU64Vop3::VSubNcU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_NC_U64);
 }
 
 namespace detail {
@@ -4932,9 +5015,9 @@ DecodeResult decodeVSubNcU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VMulU64Vop3::VMulU64Vop3(const MachineInst *inst)
     : Vop3("v_mul_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulU64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -4954,6 +5037,7 @@ VMulU64Vop3::VMulU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_U64);
 }
 
 namespace detail {
@@ -4974,9 +5058,9 @@ DecodeResult decodeVMulU64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
     : Vop3("v_fmac_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmacF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5012,6 +5096,7 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FMAC_F32);
 }
 
 namespace detail {
@@ -5034,9 +5119,9 @@ DecodeResult decodeVFmacF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
     : Vop3("v_min_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinNumF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5079,6 +5164,7 @@ VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_NUM_F16);
 }
 
 namespace detail {
@@ -5114,9 +5200,9 @@ void VMinNumF16Vop3::implicit_use_operands(
 VMaxNumF16Vop3::VMaxNumF16Vop3(const MachineInst *inst)
     : Vop3("v_max_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxNumF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5159,6 +5245,7 @@ VMaxNumF16Vop3::VMaxNumF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_NUM_F16);
 }
 
 namespace detail {
@@ -5194,9 +5281,9 @@ void VMaxNumF16Vop3::implicit_use_operands(
 VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
     : Vop3("v_add_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5239,6 +5326,7 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_F16);
 }
 
 namespace detail {
@@ -5273,9 +5361,9 @@ void VAddF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
     : Vop3("v_sub_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5318,6 +5406,7 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_F16);
 }
 
 namespace detail {
@@ -5352,9 +5441,9 @@ void VSubF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
     : Vop3("v_subrev_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5397,6 +5486,7 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUBREV_F16);
 }
 
 namespace detail {
@@ -5432,9 +5522,9 @@ void VSubrevF16Vop3::implicit_use_operands(
 VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
     : Vop3("v_mul_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5477,6 +5567,7 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_F16);
 }
 
 namespace detail {
@@ -5511,9 +5602,9 @@ void VMulF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
     : Vop3("v_fmac_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmacF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5557,6 +5648,7 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FMAC_F16);
 }
 
 namespace detail {
@@ -5591,9 +5683,9 @@ void VFmacF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *
 VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLdexpF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5636,6 +5728,7 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LDEXP_F16);
 }
 
 namespace detail {
@@ -5671,10 +5764,10 @@ void VLdexpF16Vop3::implicit_use_operands(
 VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFixupF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5697,6 +5790,7 @@ VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_DIV_FIXUP_F32);
 }
 
 namespace detail {
@@ -5718,10 +5812,10 @@ DecodeResult decodeVDivFixupF32Vop3(const MachineInst *opcode,
 VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFixupF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5757,6 +5851,7 @@ VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_DIV_FIXUP_F64);
 }
 
 namespace detail {
@@ -5787,10 +5882,10 @@ DecodeResult decodeVDivFixupF64Vop3(const MachineInst *opcode,
 VBitop3B16Vop3::VBitop3B16Vop3(const MachineInst *inst)
     : Vop3("v_bitop3_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBitop3B16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5845,6 +5940,7 @@ VBitop3B16Vop3::VBitop3B16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  set_amdgpu_operation(amdgpu::Operation::V_BITOP3_B16);
 }
 
 namespace detail {
@@ -5880,10 +5976,10 @@ void VBitop3B16Vop3::implicit_use_operands(
 VBitop3B32Vop3::VBitop3B32Vop3(const MachineInst *inst)
     : Vop3("v_bitop3_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBitop3B32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -5923,6 +6019,7 @@ VBitop3B32Vop3::VBitop3B32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_BITOP3_B32);
 }
 
 namespace detail {
@@ -5945,10 +6042,10 @@ DecodeResult decodeVBitop3B32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
     : Vop3("v_div_fmas_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFmasF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2),
       vcc(64, OperandType::OPR_VCC, 106) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -5974,6 +6071,7 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_DIV_FMAS_F32);
 }
 
 namespace detail {
@@ -5995,10 +6093,10 @@ DecodeResult decodeVDivFmasF32Vop3(const MachineInst *opcode,
 VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
     : Vop3("v_div_fmas_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFmasF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2),
       vcc(64, OperandType::OPR_VCC, 106) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -6037,6 +6135,7 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_DIV_FMAS_F64);
 }
 
 namespace detail {
@@ -6067,10 +6166,10 @@ DecodeResult decodeVDivFmasF64Vop3(const MachineInst *opcode,
 VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFixupF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -6122,6 +6221,9 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
+  set_amdgpu_operation(amdgpu::Operation::V_DIV_FIXUP_F16);
 }
 
 namespace detail {
@@ -6169,6 +6271,7 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_EXP_F32);
 }
 
 namespace detail {
@@ -6205,6 +6308,7 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_EXP_F16);
 }
 
 namespace detail {
@@ -6239,6 +6343,7 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_LOG_F32);
 }
 
 namespace detail {
@@ -6275,6 +6380,7 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_LOG_F16);
 }
 
 namespace detail {
@@ -6309,6 +6415,7 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_RCP_F32);
 }
 
 namespace detail {
@@ -6345,6 +6452,7 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_RCP_F16);
 }
 
 namespace detail {
@@ -6379,6 +6487,7 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_RSQ_F32);
 }
 
 namespace detail {
@@ -6415,6 +6524,7 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_RSQ_F16);
 }
 
 namespace detail {
@@ -6449,6 +6559,7 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_SQRT_F32);
 }
 
 namespace detail {
@@ -6485,6 +6596,7 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= TRANSCENDENTAL;
+  set_amdgpu_operation(amdgpu::Operation::V_S_SQRT_F16);
 }
 
 namespace detail {
@@ -6508,9 +6620,9 @@ DecodeResult decodeVSSqrtF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcU16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -6555,6 +6667,7 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_NC_U16);
 }
 
 namespace detail {
@@ -6590,9 +6703,9 @@ void VAddNcU16Vop3::implicit_use_operands(
 VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcU16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -6637,6 +6750,7 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_NC_U16);
 }
 
 namespace detail {
@@ -6672,9 +6786,9 @@ void VSubNcU16Vop3::implicit_use_operands(
 VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
     : Vop3("v_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulLoU16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -6719,6 +6833,7 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_LO_U16);
 }
 
 namespace detail {
@@ -6754,9 +6869,9 @@ void VMulLoU16Vop3::implicit_use_operands(
 VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     : Vop3("v_max_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxU16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -6801,6 +6916,7 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_U16);
 }
 
 namespace detail {
@@ -6835,9 +6951,9 @@ void VMaxU16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
     : Vop3("v_max_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxI16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -6882,6 +6998,7 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_I16);
 }
 
 namespace detail {
@@ -6916,9 +7033,9 @@ void VMaxI16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     : Vop3("v_min_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinU16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -6963,6 +7080,7 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_U16);
 }
 
 namespace detail {
@@ -6997,9 +7115,9 @@ void VMinU16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
     : Vop3("v_min_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinI16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7044,6 +7162,7 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_I16);
 }
 
 namespace detail {
@@ -7078,9 +7197,9 @@ void VMinI16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcI16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7125,6 +7244,7 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_NC_I16);
 }
 
 namespace detail {
@@ -7160,9 +7280,9 @@ void VAddNcI16Vop3::implicit_use_operands(
 VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcI16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7207,6 +7327,7 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_NC_I16);
 }
 
 namespace detail {
@@ -7242,9 +7363,9 @@ void VSubNcI16Vop3::implicit_use_operands(
 VMinU64Vop3::VMinU64Vop3(const MachineInst *inst)
     : Vop3("v_min_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinU64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7274,6 +7395,7 @@ VMinU64Vop3::VMinU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_U64);
 }
 
 namespace detail {
@@ -7302,9 +7424,9 @@ DecodeResult decodeVMinU64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMaxU64Vop3::VMaxU64Vop3(const MachineInst *inst)
     : Vop3("v_max_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxU64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7334,6 +7456,7 @@ VMaxU64Vop3::VMaxU64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_U64);
 }
 
 namespace detail {
@@ -7362,9 +7485,9 @@ DecodeResult decodeVMaxU64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMinI64Vop3::VMinI64Vop3(const MachineInst *inst)
     : Vop3("v_min_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinI64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7394,6 +7517,7 @@ VMinI64Vop3::VMinI64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN_I64);
 }
 
 namespace detail {
@@ -7422,9 +7546,9 @@ DecodeResult decodeVMinI64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMaxI64Vop3::VMaxI64Vop3(const MachineInst *inst)
     : Vop3("v_max_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxI64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7454,6 +7578,7 @@ VMaxI64Vop3::VMaxI64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX_I64);
 }
 
 namespace detail {
@@ -7482,9 +7607,9 @@ DecodeResult decodeVMaxI64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLdexpF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7519,6 +7644,7 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LDEXP_F32);
 }
 
 namespace detail {
@@ -7541,9 +7667,9 @@ DecodeResult decodeVLdexpF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
     : Vop3("v_bfm_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfmB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7578,6 +7704,7 @@ VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_BFM_B32);
 }
 
 namespace detail {
@@ -7600,9 +7727,9 @@ DecodeResult decodeVBfmB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
     : Vop3("v_mbcnt_lo_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMbcntLoU32B32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7636,6 +7763,7 @@ VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  set_amdgpu_operation(amdgpu::Operation::V_MBCNT_LO_U32_B32);
 }
 
 namespace detail {
@@ -7659,9 +7787,9 @@ DecodeResult decodeVMbcntLoU32B32Vop3(const MachineInst *opcode,
 VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
     : Vop3("v_mbcnt_hi_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMbcntHiU32B32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7695,6 +7823,7 @@ VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  set_amdgpu_operation(amdgpu::Operation::V_MBCNT_HI_U32_B32);
 }
 
 namespace detail {
@@ -7718,9 +7847,9 @@ DecodeResult decodeVMbcntHiU32B32Vop3(const MachineInst *opcode,
 VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcI32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7755,6 +7884,7 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_NC_I32);
 }
 
 namespace detail {
@@ -7777,9 +7907,9 @@ DecodeResult decodeVSubNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcI32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7814,6 +7944,7 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_NC_I32);
 }
 
 namespace detail {
@@ -7836,9 +7967,9 @@ DecodeResult decodeVAddNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLdexpF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7867,6 +7998,7 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LDEXP_F64);
 }
 
 namespace detail {
@@ -7896,9 +8028,9 @@ DecodeResult decodeVLdexpF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
     : Vop3("v_mul_lo_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulLoU32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7926,6 +8058,7 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_LO_U32);
 }
 
 namespace detail {
@@ -7955,9 +8088,9 @@ DecodeResult decodeVMulLoU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiU32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -7985,6 +8118,7 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_HI_U32);
 }
 
 namespace detail {
@@ -8014,9 +8148,9 @@ DecodeResult decodeVMulHiU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiI32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8044,6 +8178,7 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MUL_HI_I32);
 }
 
 namespace detail {
@@ -8073,9 +8208,9 @@ DecodeResult decodeVMulHiI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8120,6 +8255,7 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHLREV_B16);
 }
 
 namespace detail {
@@ -8156,9 +8292,9 @@ void VLshlrevB16Vop3::implicit_use_operands(
 VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshrrevB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8203,6 +8339,7 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHRREV_B16);
 }
 
 namespace detail {
@@ -8239,9 +8376,9 @@ void VLshrrevB16Vop3::implicit_use_operands(
 VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8286,6 +8423,7 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ASHRREV_I16);
 }
 
 namespace detail {
@@ -8322,9 +8460,9 @@ void VAshrrevI16Vop3::implicit_use_operands(
 VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshrrevB64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8353,6 +8491,7 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHRREV_B64);
 }
 
 namespace detail {
@@ -8383,9 +8522,9 @@ DecodeResult decodeVLshrrevB64Vop3(const MachineInst *opcode,
 VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8414,6 +8553,7 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ASHRREV_I64);
 }
 
 namespace detail {
@@ -8444,9 +8584,9 @@ DecodeResult decodeVAshrrevI64Vop3(const MachineInst *opcode,
 VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
     : Vop3("v_minimum_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimumF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8476,6 +8616,7 @@ VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINIMUM_F64);
 }
 
 namespace detail {
@@ -8506,9 +8647,9 @@ DecodeResult decodeVMinimumF64Vop3(const MachineInst *opcode,
 VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
     : Vop3("v_maximum_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumF64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8538,6 +8679,7 @@ VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXIMUM_F64);
 }
 
 namespace detail {
@@ -8568,9 +8710,9 @@ DecodeResult decodeVMaximumF64Vop3(const MachineInst *opcode,
 VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     : Vop3("v_and_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAndB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8615,6 +8757,7 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_AND_B16);
 }
 
 namespace detail {
@@ -8649,9 +8792,9 @@ void VAndB16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
     : Vop3("v_or_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VOrB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8696,6 +8839,7 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_OR_B16);
 }
 
 namespace detail {
@@ -8730,9 +8874,9 @@ void VOrB16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> 
 VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
     : Vop3("v_xor_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXorB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8777,6 +8921,7 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_XOR_B16);
 }
 
 namespace detail {
@@ -8811,9 +8956,9 @@ void VXorB16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VMinimumF32Vop3::VMinimumF32Vop3(const MachineInst *inst)
     : Vop3("v_minimum_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimumF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8848,6 +8993,7 @@ VMinimumF32Vop3::VMinimumF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINIMUM_F32);
 }
 
 namespace detail {
@@ -8871,9 +9017,9 @@ DecodeResult decodeVMinimumF32Vop3(const MachineInst *opcode,
 VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
     : Vop3("v_maximum_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8908,6 +9054,7 @@ VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXIMUM_F32);
 }
 
 namespace detail {
@@ -8931,9 +9078,9 @@ DecodeResult decodeVMaximumF32Vop3(const MachineInst *opcode,
 VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
     : Vop3("v_minimum_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimumF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -8976,6 +9123,7 @@ VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINIMUM_F16);
 }
 
 namespace detail {
@@ -9012,9 +9160,9 @@ void VMinimumF16Vop3::implicit_use_operands(
 VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
     : Vop3("v_maximum_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumF16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -9057,6 +9205,7 @@ VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXIMUM_F16);
 }
 
 namespace detail {
@@ -9093,10 +9242,10 @@ void VMaximumF16Vop3::implicit_use_operands(
 VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoCiU32Vop3SdstEnc)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
@@ -9136,6 +9285,7 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_CO_CI_U32);
 }
 
 namespace detail {
@@ -9156,26 +9306,13 @@ DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VAddCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
-void VAddCoCiU32Vop3SdstEnc::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vop3SdstEnc::implicit_use_operands(operands);
-}
-
 VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoCiU32Vop3SdstEnc)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
@@ -9215,6 +9352,7 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_CO_CI_U32);
 }
 
 namespace detail {
@@ -9235,26 +9373,13 @@ DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VSubCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
-void VSubCoCiU32Vop3SdstEnc::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vop3SdstEnc::implicit_use_operands(operands);
-}
-
 VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoCiU32Vop3SdstEnc)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
@@ -9294,6 +9419,7 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUBREV_CO_CI_U32);
 }
 
 namespace detail {
@@ -9314,27 +9440,14 @@ DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VSubrevCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
-void VSubrevCoCiU32Vop3SdstEnc::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vop3SdstEnc::implicit_use_operands(operands);
-}
-
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VDivScaleF32Vop3SdstEnc)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -9359,6 +9472,7 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_DIV_SCALE_F32);
 }
 
 namespace detail {
@@ -9381,11 +9495,11 @@ DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
 VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VDivScaleF64Vop3SdstEnc)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -9426,6 +9540,7 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_DIV_SCALE_F64);
 }
 
 namespace detail {
@@ -9471,11 +9586,11 @@ void VDivScaleF64Vop3SdstEnc::implicit_use_operands(
 VMadCoU64U32Vop3SdstEnc::VMadCoU64U32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_co_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VMadCoU64U32Vop3SdstEnc)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -9512,6 +9627,7 @@ VMadCoU64U32Vop3SdstEnc::VMadCoU64U32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_CO_U64_U32);
 }
 
 namespace detail {
@@ -9557,11 +9673,11 @@ void VMadCoU64U32Vop3SdstEnc::implicit_use_operands(
 VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_co_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VMadCoI64I32Vop3SdstEnc)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -9598,6 +9714,7 @@ VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_CO_I64_I32);
 }
 
 namespace detail {
@@ -9643,10 +9760,10 @@ void VMadCoI64I32Vop3SdstEnc::implicit_use_operands(
 VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoU32Vop3SdstEnc)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -9683,6 +9800,7 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_CO_U32);
 }
 
 namespace detail {
@@ -9703,26 +9821,13 @@ DecodeResult decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VAddCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
-void VAddCoU32Vop3SdstEnc::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vop3SdstEnc::implicit_use_operands(operands);
-}
-
 VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoU32Vop3SdstEnc)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -9759,6 +9864,7 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUB_CO_U32);
 }
 
 namespace detail {
@@ -9779,26 +9885,13 @@ DecodeResult decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VSubCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
-void VSubCoU32Vop3SdstEnc::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vop3SdstEnc::implicit_use_operands(operands);
-}
-
 VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop3SdstEnc)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &sdst;
   src_operands_[0] = &src0;
@@ -9835,6 +9928,7 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SUBREV_CO_U32);
 }
 
 namespace detail {
@@ -9854,19 +9948,6 @@ DecodeResult decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode,
   return std::make_unique<VSubrevCoU32Vop3SdstEnc>(opcode);
 }
 } // namespace detail
-
-void VSubrevCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
-void VSubrevCoU32Vop3SdstEnc::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vop3SdstEnc::implicit_use_operands(operands);
-}
 
 } // namespace cdna5
 } // namespace rocjitsu

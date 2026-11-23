@@ -60,7 +60,7 @@ export default function BenchmarkHistoryChart({ data, filters, benchmark, range 
     },
     grid: { ...CHART_GRID_INSETS, top: 24, bottom: 30 },
     // Extra room on the left so the first point clears the y axis.
-    xAxis: dayXAxis(viewModel.bounds, theme, { leftPad: (viewModel.bounds.lastX - viewModel.bounds.firstX) * LEFT_PAD_FRACTION }),
+    xAxis: { ...dayXAxis(viewModel.bounds, theme, { leftPad: (viewModel.bounds.lastX - viewModel.bounds.firstX) * LEFT_PAD_FRACTION }), name: 'Date (UTC)', nameLocation: 'middle', nameGap: 18 },
     yAxis: {
       type: 'value', name: 'Seconds', ...durationAxisBounds(values),
       nameTextStyle: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily, fontSize: fontSizes.caption },

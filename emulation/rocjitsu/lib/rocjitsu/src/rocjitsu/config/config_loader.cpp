@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/diagnostic.h"
 
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 
@@ -34,6 +36,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <cstdlib>
 #include <limits>
@@ -66,8 +69,9 @@ resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_t
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
     result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
-    result.helpers = request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
-                                          : (async_supported ? choice.helpers : 0);
+    result.helpers = !async_supported       ? 0
+                     : request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
+                                            : choice.helpers;
     for (uint32_t capacity : dispatch_capacities)
       result.dispatch.push_back(
           std::min(request.dispatch ? request.dispatch : choice.dispatch, std::max(capacity, 1u)));
@@ -93,7 +97,7 @@ resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_t
   return result;
 }
 
-bool configured_async_mma_supported(rj_code_arch_t arch) {
+bool configured_async_mma_supported(rocjitsu::IsaFamily arch) {
   return amdgpu::async_mma_policy::supported(arch);
 }
 
@@ -173,22 +177,29 @@ simdojo::ExecMode exec_mode_from_fb(const rocjitsu::fb::SimulationConfig *fb_con
   return parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
 }
 
-uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, const std::string &key,
-                    uint32_t def = 0) {
+util::FailureOr<uint32_t> config_u32(const std::unordered_map<std::string, std::string> &cfg,
+                                     const std::string &key, uint32_t fallback,
+                                     util::DiagnosticEmitter emit_error) {
   auto it = cfg.find(key);
   if (it == cfg.end())
-    return def;
-  return static_cast<uint32_t>(std::stoul(it->second));
+    return fallback;
+  char *end = nullptr;
+  errno = 0;
+  const unsigned long value = std::strtoul(it->second.c_str(), &end, 10);
+  if (end == it->second.c_str() || errno == ERANGE)
+    return emit_error.emit() << key << " must start with a decimal integer in unsigned long range";
+  // Preserve stoul's sign/prefix handling and the existing narrowing to uint32_t.
+  return static_cast<uint32_t>(value);
 }
 
-uint32_t default_sgprs_per_wf(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+uint32_t default_sgprs_per_wf(rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
     return 128;
   return 112;
 }
 
-uint32_t default_vgprs_per_wf(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+uint32_t default_vgprs_per_wf(rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return 1024;
   return 256;
 }
@@ -604,8 +615,9 @@ arithmetic_from_config(const CfgMap &cfg, util::DiagnosticEmitter emit_error) {
 enum class BuildMode { Full, Validate };
 
 util::FailureOr<amdgpu::ComputeUnitCore::Config>
-parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target_id_t target,
-                          const AsyncResources &resources, util::DiagnosticEmitter emit_error) {
+parse_compute_unit_config(const CfgMap &cfg, rocjitsu::IsaFamily arch, rj_code_target_id_t target,
+                          const AsyncResources &resources, uint32_t image_config,
+                          util::DiagnosticEmitter emit_error) {
   amdgpu::ComputeUnitCore::Config cc{};
   cc.arch = arch;
   cc.async_resources = resources;
@@ -614,13 +626,35 @@ parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target
   if (arithmetic.failed())
     return util::Result::failure();
   cc.arithmetic = arithmetic.value();
-  cc.num_wf_slots = config_u32(cfg, "num_wf_slots", 10);
-  cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
-  cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
-  cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
-  cc.gws_wait_limit = config_u32(cfg, "gws_wait_limit", cc.gws_wait_limit);
-  cc.functional_quantum =
-      config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
+  cc.image_gb_addr_config = image_config;
+  util::FailureOr<uint32_t> num_wf_slots = config_u32(cfg, "num_wf_slots", 10, emit_error);
+  if (num_wf_slots.failed())
+    return util::Result::failure();
+  cc.num_wf_slots = num_wf_slots.value();
+  util::FailureOr<uint32_t> sgprs_per_wf =
+      config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch), emit_error);
+  if (sgprs_per_wf.failed())
+    return util::Result::failure();
+  cc.sgprs_per_wf = sgprs_per_wf.value();
+  util::FailureOr<uint32_t> vgprs_per_wf =
+      config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch), emit_error);
+  if (vgprs_per_wf.failed())
+    return util::Result::failure();
+  cc.vgprs_per_wf = vgprs_per_wf.value();
+  util::FailureOr<uint32_t> lds_size_kb = config_u32(cfg, "lds_size_kb", 160, emit_error);
+  if (lds_size_kb.failed())
+    return util::Result::failure();
+  cc.lds_size_kb = lds_size_kb.value();
+  util::FailureOr<uint32_t> gws_wait_limit =
+      config_u32(cfg, "gws_wait_limit", cc.gws_wait_limit, emit_error);
+  if (gws_wait_limit.failed())
+    return util::Result::failure();
+  cc.gws_wait_limit = gws_wait_limit.value();
+  util::FailureOr<uint32_t> functional_quantum = config_u32(
+      cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum, emit_error);
+  if (functional_quantum.failed())
+    return util::Result::failure();
+  cc.functional_quantum = functional_quantum.value();
   if (auto it = cfg.find("memory_wait_diagnostics"); it != cfg.end()) {
     if (it->second == "off")
       cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
@@ -642,9 +676,9 @@ parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target
 
 using ComponentResult = util::FailureOr<std::unique_ptr<simdojo::Component>>;
 using FactoryFn = std::function<ComponentResult(
-    const std::string &name, const CfgMap &cfg, simdojo::ExecMode mode, rj_code_arch_t arch,
+    const std::string &name, const CfgMap &cfg, simdojo::ExecMode mode, rocjitsu::IsaFamily arch,
     rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources,
-    util::DiagnosticEmitter emit_error)>;
+    uint32_t image_config, util::DiagnosticEmitter emit_error)>;
 
 using FactoryMap = std::unordered_map<std::string, FactoryFn>;
 
@@ -662,50 +696,56 @@ private:
 const FactoryMap &factories(BuildMode build_mode) {
   static const FactoryMap full_factories = [] {
     std::unordered_map<std::string, FactoryFn> f;
-    f["composite"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                        rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+    f["composite"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
+                        rocjitsu::IsaFamily, rj_code_target_id_t, amdgpu::GpuMemory *,
+                        const AsyncResources &, uint32_t,
                         util::DiagnosticEmitter) -> ComponentResult {
       auto c = std::make_unique<simdojo::CompositeComponent>(n);
       c->set_weight(0);
       return std::unique_ptr<simdojo::Component>(std::move(c));
     };
-    f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rj_code_arch_t arch,
-                  rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
-                  util::DiagnosticEmitter) -> ComponentResult {
+    f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode,
+                  rocjitsu::IsaFamily arch, rj_code_target_id_t, amdgpu::GpuMemory *mem,
+                  const AsyncResources &, uint32_t, util::DiagnosticEmitter) -> ComponentResult {
       auto soc = std::make_unique<SoC>(n, mem, arch);
       soc->set_exec_mode(mode);
       return std::unique_ptr<simdojo::Component>(std::move(soc));
     };
-    f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+    f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rocjitsu::IsaFamily,
+                  rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &, uint32_t,
                   util::DiagnosticEmitter) -> ComponentResult {
-      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Xcd>(n));
+      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Xcd>(n, mode));
     };
-    f["shader_engine"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                            rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+    f["shader_engine"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
+                            rocjitsu::IsaFamily, rj_code_target_id_t, amdgpu::GpuMemory *,
+                            const AsyncResources &, uint32_t,
                             util::DiagnosticEmitter) -> ComponentResult {
       return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::ShaderEngine>(n));
     };
 
-    f["gpu_memory"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                         rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,
+    f["gpu_memory"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
+                         rocjitsu::IsaFamily, rj_code_target_id_t, amdgpu::GpuMemory *,
+                         const AsyncResources &, uint32_t,
                          util::DiagnosticEmitter) -> ComponentResult {
       return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::GpuMemory>(n));
     };
 
-    f["iod"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
+    f["iod"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode, rocjitsu::IsaFamily,
+                  rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &, uint32_t,
                   util::DiagnosticEmitter emit_error) -> ComponentResult {
       if (!mem)
         return emit_error.emit() << "IOD requires gpu_memory";
       amdgpu::Iod::Config ic{};
-      ic.num_hbm_stacks = config_u32(cfg, "num_hbm_stacks", 4);
+      util::FailureOr<uint32_t> num_hbm_stacks = config_u32(cfg, "num_hbm_stacks", 4, emit_error);
+      if (num_hbm_stacks.failed())
+        return util::Result::failure();
+      ic.num_hbm_stacks = num_hbm_stacks.value();
       return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Iod>(n, ic, mem));
     };
 
-    f["l2_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
+    f["l2_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rocjitsu::IsaFamily,
                        rj_code_target_id_t, amdgpu::GpuMemory *mem, const AsyncResources &,
-                       util::DiagnosticEmitter) -> ComponentResult {
+                       uint32_t, util::DiagnosticEmitter) -> ComponentResult {
       auto l2 = std::make_unique<amdgpu::L2Cache>(n);
       l2->set_backing_memory(mem);
       l2->set_legacy_maintenance_memory(mem);
@@ -713,16 +753,16 @@ const FactoryMap &factories(BuildMode build_mode) {
     };
 
     f["memory_side_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
-                                rj_code_arch_t, rj_code_target_id_t, amdgpu::GpuMemory *mem,
-                                const AsyncResources &,
+                                rocjitsu::IsaFamily, rj_code_target_id_t, amdgpu::GpuMemory *mem,
+                                const AsyncResources &, uint32_t,
                                 util::DiagnosticEmitter) -> ComponentResult {
       return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::MemorySideCache>(
           n, std::make_shared<amdgpu::DeviceCacheCoherence>(), mem));
     };
 
     f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode,
-                                rj_code_arch_t arch, rj_code_target_id_t, amdgpu::GpuMemory *,
-                                const AsyncResources &,
+                                rocjitsu::IsaFamily arch, rj_code_target_id_t, amdgpu::GpuMemory *,
+                                const AsyncResources &, uint32_t,
                                 util::DiagnosticEmitter) -> ComponentResult {
       auto cp = std::make_unique<amdgpu::CommandProcessor>(n, mode);
       cp->configure_for_arch(arch);
@@ -730,13 +770,19 @@ const FactoryMap &factories(BuildMode build_mode) {
     };
 
     f["compute_unit"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode mode,
-                           rj_code_arch_t arch, rj_code_target_id_t target, amdgpu::GpuMemory *mem,
-                           const AsyncResources &resources,
+                           rocjitsu::IsaFamily arch, rj_code_target_id_t target,
+                           amdgpu::GpuMemory *mem, const AsyncResources &resources,
+                           uint32_t image_config,
                            util::DiagnosticEmitter emit_error) -> ComponentResult {
-      auto cc = parse_compute_unit_config(cfg, arch, target, resources, emit_error);
-      if (cc.failed())
+      util::FailureOr<amdgpu::ComputeUnitCore::Config> maybe_cu_config =
+          parse_compute_unit_config(cfg, arch, target, resources, image_config, emit_error);
+      if (maybe_cu_config.failed())
         return util::Result::failure();
-      return amdgpu::ComputeUnitCore::create(n, cc.value(), mem, nullptr, mode);
+      auto compute_unit = amdgpu::ComputeUnitCore::create(n, maybe_cu_config.value(), mem, nullptr,
+                                                          mode, emit_error);
+      if (!compute_unit)
+        return util::Result::failure();
+      return std::unique_ptr<simdojo::Component>(std::move(compute_unit));
     };
     return f;
   }();
@@ -744,15 +790,17 @@ const FactoryMap &factories(BuildMode build_mode) {
     return full_factories;
   static const FactoryMap validation_factories = [] {
     FactoryMap result = full_factories;
-    result["compute_unit"] = [](const std::string &name, const CfgMap &cfg, simdojo::ExecMode,
-                                rj_code_arch_t arch, rj_code_target_id_t target,
-                                amdgpu::GpuMemory *, const AsyncResources &resources,
-                                util::DiagnosticEmitter emit_error) -> ComponentResult {
-      auto maybe_cu_config = parse_compute_unit_config(cfg, arch, target, resources, emit_error);
+    result["compute_unit"] =
+        [](const std::string &name, const CfgMap &cfg, simdojo::ExecMode, rocjitsu::IsaFamily arch,
+           rj_code_target_id_t target, amdgpu::GpuMemory *, const AsyncResources &resources,
+           uint32_t image_config, util::DiagnosticEmitter emit_error) -> ComponentResult {
+      auto maybe_cu_config =
+          parse_compute_unit_config(cfg, arch, target, resources, image_config, emit_error);
       if (maybe_cu_config.failed())
         return util::Result::failure();
       const auto &cu_config = maybe_cu_config.value();
-      amdgpu::ComputeUnitCore::validate(cu_config);
+      if (amdgpu::ComputeUnitCore::validate(cu_config, emit_error).failed())
+        return util::Result::failure();
       // Preserve the parsed CU config and declarative children without execution state.
       return std::unique_ptr<simdojo::Component>(
           std::make_unique<ValidatedComputeUnit>(name, cu_config));
@@ -801,9 +849,10 @@ util::Result apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides,
 util::Result
 build_children(simdojo::CompositeComponent *parent,
                const flatbuffers::Vector<flatbuffers::Offset<fb::ComponentDef>> *children,
-               simdojo::ExecMode mode, rj_code_arch_t arch, rj_code_target_id_t target,
-               amdgpu::GpuMemory *&mem, const AsyncResources &resources, const CfgMap &cu_overrides,
-               BuildMode build_mode, util::DiagnosticEmitter emit_error) {
+               simdojo::ExecMode mode, rocjitsu::IsaFamily arch, rj_code_target_id_t target,
+               amdgpu::GpuMemory *&mem, const AsyncResources &resources, uint32_t image_config,
+               const CfgMap &cu_overrides, BuildMode build_mode,
+               util::DiagnosticEmitter emit_error) {
   if (!children)
     return util::Result::success();
   for (auto *cd : *children) {
@@ -827,7 +876,8 @@ build_children(simdojo::CompositeComponent *parent,
       auto it = fmap.find(tp);
       if (it == fmap.end())
         return emit_error.emit() << "Unknown type: " << tp;
-      auto maybe_comp = it->second(n, cfg, mode, arch, target, mem, resources, emit_error);
+      auto maybe_comp =
+          it->second(n, cfg, mode, arch, target, mem, resources, image_config, emit_error);
       if (maybe_comp.failed())
         return util::Result::failure();
       auto comp = std::move(maybe_comp).value();
@@ -837,7 +887,8 @@ build_children(simdojo::CompositeComponent *parent,
       parent->add_child(std::move(comp));
       if (cd->children() && cd->children()->size() > 0 && raw->is_composite())
         if (build_children(static_cast<simdojo::CompositeComponent *>(raw), cd->children(), mode,
-                           arch, target, mem, resources, cu_overrides, build_mode, emit_error)
+                           arch, target, mem, resources, image_config, cu_overrides, build_mode,
+                           emit_error)
                 .failed())
           return util::Result::failure();
     }
@@ -969,12 +1020,11 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
   }
 }
 
-util::FailureOr<TopologyBuildResult>
-build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_code_arch_t arch,
-               rj_code_target_id_t target, const AsyncResources &resources,
-               uint32_t cus_per_shader_array, uint32_t shader_arrays_per_engine,
-               const CfgMap &cu_overrides, BuildMode build_mode,
-               util::DiagnosticEmitter emit_error) {
+util::FailureOr<TopologyBuildResult> build_topology(
+    const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rocjitsu::IsaFamily arch,
+    rj_code_target_id_t target, const AsyncResources &resources, uint32_t image_config,
+    uint32_t cus_per_shader_array, uint32_t shader_arrays_per_engine, const CfgMap &cu_overrides,
+    BuildMode build_mode, util::DiagnosticEmitter emit_error) {
   if (!topology_def || !topology_def->root())
     return emit_error.emit() << "TopologyDef missing root ComponentDef";
 
@@ -998,7 +1048,7 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
   if (it == f.end())
     return emit_error.emit() << "Unknown component type for root: " << rt;
   auto maybe_root_comp =
-      it->second(rn, root_cfg, mode, arch, target, nullptr, resources, emit_error);
+      it->second(rn, root_cfg, mode, arch, target, nullptr, resources, image_config, emit_error);
   if (maybe_root_comp.failed())
     return util::Result::failure();
   auto root_comp = std::move(maybe_root_comp).value();
@@ -1009,8 +1059,8 @@ build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode, rj_c
       static_cast<simdojo::CompositeComponent *>(root_comp.release()));
 
   amdgpu::GpuMemory *mem = nullptr;
-  if (build_children(root, rd->children(), mode, arch, target, mem, resources, cu_overrides,
-                     build_mode, emit_error)
+  if (build_children(root, rd->children(), mode, arch, target, mem, resources, image_config,
+                     cu_overrides, build_mode, emit_error)
           .failed())
     return util::Result::failure();
 
@@ -1134,9 +1184,12 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
   auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> util::Result {
     if (!copies)
       return util::Result::success();
-    if (type(node) == "xcd" && checked_capacity(result.xcds + copies, result.xcds).failed())
+    const auto node_type = type(node);
+    if (node_type == "xcd" && checked_capacity(result.xcds + copies, result.xcds).failed())
       return util::Result::failure();
-    if (!node->children())
+    // Match build_children: leaf components do not instantiate declared children.
+    if (!node->children() || node_type == "gpu_memory" || node_type == "l2_cache" ||
+        node_type == "memory_side_cache" || node_type == "command_processor")
       return util::Result::success();
     bool has_cp = false, has_se = false;
     uint64_t direct_cus = 0, se_cus = 0;
@@ -1208,7 +1261,7 @@ execution_thread_settings(const fb::SimulationConfig *config, uint32_t gpus,
   if (!config->vm() || !config->vm()->arch() || !config->topology())
     return emit_error.emit() << "Thread allocation requires vm.arch and topology";
   settings.arch = parse_arch(config->vm()->arch()->str());
-  if (settings.arch == ROCJITSU_CODE_ARCH_INVALID)
+  if (settings.arch == rocjitsu::IsaFamily::Invalid)
     return emit_error.emit() << "Invalid vm.arch for thread allocation";
   auto topology = execution_topology(config->topology()->root(), emit_error);
   if (topology.failed())
@@ -1271,31 +1324,31 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
   result.async_helper_threads = fb_config->async_helper_threads();
   result.requested_engine_threads = result.engine_config.num_threads;
 
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
   if (fb_config->vm() && fb_config->vm()->arch())
     arch = parse_arch(fb_config->vm()->arch()->str());
-  if (arch == ROCJITSU_CODE_ARCH_INVALID)
+  if (arch == rocjitsu::IsaFamily::Invalid)
     return emit_error.emit() << "Missing or invalid 'arch' in vm configuration";
 
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *architecture = registry.find(arch);
-  const IsaGpuTargetDescription *target = nullptr;
+  const IsaTargetBinding *target = nullptr;
   if (fb_config->vm()->target() && !fb_config->vm()->target()->str().empty()) {
     const std::string target_name = fb_config->vm()->target()->str();
-    target = registry.find_gpu_target_by_code_object_id(target_name);
+    target = registry.find_target_by_code_object_id(target_name);
     if (target == nullptr)
       return emit_error.emit() << "Missing or invalid 'target' in vm configuration: "
                                << target_name;
   } else if (architecture != nullptr &&
-             architecture->default_gpu_target != ROCJITSU_CODE_TARGET_INVALID) {
-    target = registry.find_default_gpu_target(*architecture);
+             architecture->default_target != ROCJITSU_CODE_TARGET_INVALID) {
+    target = registry.find_default_target(*architecture);
     if (target == nullptr)
       return emit_error.emit() << "selected architecture has no concrete default target";
   }
   const IsaTargetDescriptor *target_architecture = nullptr;
   if (target != nullptr) {
     target_architecture = registry.find(target->public_id);
-    if (target_architecture == nullptr || target_architecture->architecture_id != arch)
+    if (target_architecture == nullptr || target_architecture->family != arch)
       return emit_error.emit() << "vm target does not belong to the selected architecture";
     result.target = target->public_id;
   }
@@ -1355,10 +1408,14 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
   } else {
     result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
   }
-  auto primary_build =
-      build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
-                     result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
-                     cu_overrides, build_mode, emit_error);
+  const auto image_config_for_device = [arch](const KfdDeviceConfig &device) {
+    return device.present ? kmd::gb_addr_config_for_gfx_target_version(device.gfx_target_version)
+                          : kmd::gb_addr_config_for_arch(arch);
+  };
+  auto primary_build = build_topology(
+      topo_def, result.exec_mode, arch, result.target, result.async_resources,
+      image_config_for_device(result.device), result.device.num_cu_per_sh,
+      result.device.num_shader_arrays_per_engine, cu_overrides, build_mode, emit_error);
   if (primary_build.failed())
     return util::Result::failure();
   result.build_result = std::move(primary_build.value());
@@ -1444,10 +1501,10 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
       }
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i) {
-      auto extra_build =
-          build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
-                         result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
-                         cu_overrides, build_mode, emit_error);
+      auto extra_build = build_topology(
+          topo_def, result.exec_mode, arch, result.target, result.async_resources,
+          image_config_for_device(result.devices[i]), result.device.num_cu_per_sh,
+          result.device.num_shader_arrays_per_engine, cu_overrides, build_mode, emit_error);
       if (extra_build.failed())
         return util::Result::failure();
       result.extra_gpu_builds.push_back(std::move(extra_build.value()));
@@ -1481,60 +1538,60 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str) {
   return mode_str == "clocked" ? simdojo::ExecMode::CLOCKED : simdojo::ExecMode::FUNCTIONAL;
 }
 
-rj_code_arch_t parse_arch(const std::string &arch_str) {
+rocjitsu::IsaFamily parse_arch(const std::string &arch_str) {
   // \NPI new ISA family: add its "arch" string here and in arch_to_string().
   if (arch_str == "cdna1")
-    return ROCJITSU_CODE_ARCH_CDNA1;
+    return rocjitsu::IsaFamily::Cdna1;
   if (arch_str == "cdna2")
-    return ROCJITSU_CODE_ARCH_CDNA2;
+    return rocjitsu::IsaFamily::Cdna2;
   if (arch_str == "cdna3")
-    return ROCJITSU_CODE_ARCH_CDNA3;
+    return rocjitsu::IsaFamily::Cdna3;
   if (arch_str == "cdna4")
-    return ROCJITSU_CODE_ARCH_CDNA4;
+    return rocjitsu::IsaFamily::Cdna4;
   if (arch_str == "rdna1")
-    return ROCJITSU_CODE_ARCH_RDNA1;
+    return rocjitsu::IsaFamily::Rdna1;
   if (arch_str == "rdna2")
-    return ROCJITSU_CODE_ARCH_RDNA2;
+    return rocjitsu::IsaFamily::Rdna2;
   if (arch_str == "rdna3")
-    return ROCJITSU_CODE_ARCH_RDNA3;
+    return rocjitsu::IsaFamily::Rdna3;
   if (arch_str == "rdna3_5" || arch_str == "rdna3.5")
-    return ROCJITSU_CODE_ARCH_RDNA3_5;
+    return rocjitsu::IsaFamily::Rdna3_5;
   if (arch_str == "rdna4")
-    return ROCJITSU_CODE_ARCH_RDNA4;
+    return rocjitsu::IsaFamily::Rdna4;
   if (arch_str == "cdna5")
-    return ROCJITSU_CODE_ARCH_CDNA5;
+    return rocjitsu::IsaFamily::Cdna5;
   if (arch_str == "rv32i")
-    return ROCJITSU_CODE_ARCH_RV32I;
+    return rocjitsu::IsaFamily::Rv32i;
   if (arch_str == "rv64i")
-    return ROCJITSU_CODE_ARCH_RV64I;
-  return ROCJITSU_CODE_ARCH_INVALID;
+    return rocjitsu::IsaFamily::Rv64i;
+  return rocjitsu::IsaFamily::Invalid;
 }
 
-const char *arch_to_string(rj_code_arch_t arch) {
+const char *arch_to_string(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return "cdna1";
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return "cdna2";
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return "cdna3";
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return "cdna4";
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return "rdna1";
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return "rdna2";
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return "rdna3";
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return "rdna3_5";
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return "rdna4";
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return "cdna5";
-  case ROCJITSU_CODE_ARCH_RV32I:
+  case rocjitsu::IsaFamily::Rv32i:
     return "rv32i";
-  case ROCJITSU_CODE_ARCH_RV64I:
+  case rocjitsu::IsaFamily::Rv64i:
     return "rv64i";
   default:
     return "invalid";
@@ -1563,6 +1620,42 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
         if (identity.device.present)
           (void)resolve_gpu_generation_topology(identity.device);
         identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
+        return identity;
+      });
+}
+
+util::FailureOr<NodeDeviceIdentityConfig>
+load_node_device_identity_from_string(const std::string &json, const std::string &schema_text,
+                                      std::string_view node_id,
+                                      util::DiagnosticEmitter emit_error) {
+  return with_config_json(
+      json, schema_text, emit_error,
+      [&](const fb::SimulationConfig *config) -> util::FailureOr<NodeDeviceIdentityConfig> {
+        auto graph = system_graph_from_fb(config, emit_error);
+        if (graph.failed())
+          return util::Result::failure();
+        auto selection = selected_node(config, graph.value(), node_id, emit_error);
+        if (selection.failed())
+          return util::Result::failure();
+        const SystemNode &node = *selection.value();
+        auto topology = execution_topology(
+            config->topology() ? config->topology()->root() : nullptr, emit_error);
+        if (topology.failed())
+          return util::Result::failure();
+
+        NodeDeviceIdentityConfig identity;
+        identity.local_node_id = node.id;
+        identity.num_xcc = topology.value().xcds;
+        identity.publish_peer_links = !graph.value().explicit_manifest;
+        if (config->vm() && config->vm()->gpu())
+          identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
+        identity.devices.reserve(node.gpus.size());
+        for (const auto &gpu : node.gpus) {
+          auto device = gpu.device;
+          if (device.present)
+            (void)resolve_gpu_generation_topology(device);
+          identity.devices.push_back(std::move(device));
+        }
         return identity;
       });
 }

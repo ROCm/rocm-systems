@@ -71,9 +71,19 @@ _EVT_GRAPH_1 = 6
 _EVT_GRAPH_2 = 7
 _EVT_GRAPH_3 = 8
 _EVT_HIP_EVENT_1 = 9
+_EVT_PC_HOST_TRAP = 10
+_EVT_PC_STOCHASTIC = 11
+
+_PC_SCHEMA_HOST_TRAP = 1
+_PC_SCHEMA_STOCHASTIC = 2
+_PC_FULL_EXEC_MASK = "18446744073709551615"
+_PC_HOST_TRAP_OFFSET = 0x100
+_PC_STOCHASTIC_OFFSET = 0x104
 
 _PMC_NO_SPM_ID = 1
 _PMC_SPM_ID = 2
+_PMC_GRBM_COUNT_ID = 3
+_PMC_SQ_INSTS_SALU_ID = 4
 _TRACK_SPM_ID = 1
 _SAMPLE_SPM_ID = 1
 
@@ -615,6 +625,238 @@ def insert_minimal_data(
             ),
         )
 
+    # Replay-aware counter views were introduced in schema 3.0.6.
+    if ver >= (3, 0, 6):
+        # Kernel-replay dispatch counters. Dispatch 1 is replayed three times: SQ_WAVES has two
+        # instances in every pass, with per-pass sums 16, 18 and 20; GRBM_COUNT is collected by
+        # pass 0 only; SQ_INSTS_SALU by passes 1 and 2 only, with per-pass sums 5 and 6. Passes
+        # after the first carry replay_pass in extdata, as rocprofv3 writes them. Dispatch 2 has
+        # untagged SQ_WAVES rows, like a run without kernel replay.
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_pmc')} "
+            "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
+            "component, value_type, block, expression, is_constant, is_derived, "
+            "spm_support, extdata) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    _PMC_GRBM_COUNT_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "GRBM_COUNT",
+                    "GRBM_COUNT",
+                    "Tie High - Count Number of Clocks",
+                    "rocm",
+                    "ABS",
+                    "GRBM",
+                    "",
+                    0,
+                    0,
+                    None,
+                    "{}",
+                ),
+                (
+                    _PMC_SQ_INSTS_SALU_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "SQ_INSTS_SALU",
+                    "SQ_INSTS_SALU",
+                    "Number of SALU instructions issued",
+                    "rocm",
+                    "ABS",
+                    "SQ",
+                    "",
+                    0,
+                    0,
+                    None,
+                    "{}",
+                ),
+            ],
+        )
+
+        def replay_pass(index):
+            return "{}" if index == 0 else f'{{"replay_pass":{index}}}'
+
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_pmc_event')} "
+            "(id, guid, event_id, pmc_id, value, extdata) VALUES (?,?,?,?,?,?)",
+            [
+                (3, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 8.0, replay_pass(0)),
+                (4, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 8.0, replay_pass(0)),
+                (5, guid, _EVT_KERNEL_1, _PMC_GRBM_COUNT_ID, 1000.0, replay_pass(0)),
+                (6, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 9.0, replay_pass(1)),
+                (7, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 9.0, replay_pass(1)),
+                (8, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 10.0, replay_pass(2)),
+                (9, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 10.0, replay_pass(2)),
+                (10, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
+                (11, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
+                (12, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 2.0, replay_pass(1)),
+                (13, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(1)),
+                (14, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(2)),
+                (15, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(2)),
+            ],
+        )
+
+    # PC sampling (blob tables, rocpd_gpu_pc_sample, rocpd_disassembly_data, and
+    # rocpd_event.parent_id) was introduced in schema 3.1.0.
+    if ver >= (3, 1, 0):
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_blob_schema')} "
+            "(id, guid, nid, pid, name, source_table, byte_order, alignment, "
+            "struct_size, version) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    _PC_SCHEMA_HOST_TRAP,
+                    guid,
+                    _NID,
+                    _PID,
+                    "pc_sample_extdata_hosttrap",
+                    "rocpd_gpu_pc_sample",
+                    "little",
+                    1,
+                    2,
+                    2,
+                ),
+                (
+                    _PC_SCHEMA_STOCHASTIC,
+                    guid,
+                    _NID,
+                    _PID,
+                    "pc_sample_extdata_stochastic",
+                    "rocpd_gpu_pc_sample",
+                    "little",
+                    1,
+                    3,
+                    2,
+                ),
+            ],
+        )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_blob_field')} "
+            "(guid, schema_id, name, offset, size, data_type, is_signed) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [
+                (guid, _PC_SCHEMA_HOST_TRAP, "hw_id_wave_id", 0, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_HOST_TRAP, "wave_in_group", 1, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "hw_id_wave_id", 0, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "wave_in_group", 1, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "arb_state_issue_valu", 2, 1, "uint8_t", 0),
+            ],
+        )
+        # Each sample event is a child of the first kernel dispatch event.
+        for event_id, correlation_id in ((_EVT_PC_HOST_TRAP, 1), (_EVT_PC_STOCHASTIC, 2)):
+            conn.execute(
+                f"INSERT INTO {tbl('rocpd_event')} "
+                "(id, guid, category_id, stack_id, parent_stack_id, correlation_id, parent_id) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    event_id,
+                    guid,
+                    _STR_CATEGORY,
+                    event_id,
+                    0,
+                    correlation_id,
+                    _EVT_KERNEL_1,
+                ),
+            )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_blob_event')} "
+            "(guid, nid, pid, event_id, schema_id, blob) VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    guid,
+                    _NID,
+                    _PID,
+                    _EVT_PC_HOST_TRAP,
+                    _PC_SCHEMA_HOST_TRAP,
+                    bytes([3, 7]),
+                ),
+                (
+                    guid,
+                    _NID,
+                    _PID,
+                    _EVT_PC_STOCHASTIC,
+                    _PC_SCHEMA_STOCHASTIC,
+                    bytes([4, 9, 1]),
+                ),
+            ],
+        )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_gpu_pc_sample')} "
+            "(id, guid, timestamp, nid, pid, tid, agent_id, event_id, dispatch_id, "
+            "correlation_id, exec_mask, code_object_id, code_object_offset, "
+            "wave_issued, inst_type, stall_reason, wave_count) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    guid,
+                    _T_START + 10_000,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _EVT_PC_HOST_TRAP,
+                    1,
+                    1,
+                    _PC_FULL_EXEC_MASK,
+                    _CODE_OBJ_ID,
+                    _PC_HOST_TRAP_OFFSET,
+                    None,  # host-trap samples have no stochastic fields
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    2,
+                    guid,
+                    _T_START + 20_000,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _EVT_PC_STOCHASTIC,
+                    1,
+                    2,
+                    "255",
+                    _CODE_OBJ_ID,
+                    _PC_STOCHASTIC_OFFSET,
+                    1,  # wave_issued
+                    1,  # inst_type: ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU
+                    None,
+                    4,  # wave_count
+                ),
+            ],
+        )
+        # Stored text for the host-trap PC; the stochastic PC is decoded lazily.
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_disassembly_data')} "
+            "(guid, nid, pid, code_object_id, code_object_offset, instruction, comment) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                guid,
+                _NID,
+                _PID,
+                _CODE_OBJ_ID,
+                _PC_HOST_TRAP_OFFSET,
+                "s_nop 0",
+                "kernel.cpp:10",
+            ),
+        )
+
+    # Kernel dispatch pipe_id was introduced in schema 3.1.1. Leave the second dispatch at the
+    # column default (-1, unknown).
+    if ver >= (3, 1, 1):
+        conn.execute(
+            f"UPDATE {tbl('rocpd_kernel_dispatch')} SET pipe_id = ? WHERE id = ?", (2, 1)
+        )
+
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -646,7 +888,31 @@ def main() -> int:
     schema.write_schema(conn)
     conn.close()
 
+    # Fail fast if the wrong schema SQL was loaded (e.g. system rocpd + stale
+    # ROCPD_SCHEMA_PATH). Archival schemas must not expose replay_pass; 3.0.6+
+    # must.
     conn = sqlite3.connect(output_path)
+    pmc_columns = [row[1] for row in conn.execute("PRAGMA table_info(pmc_events)")]
+    expect_replay_pass = tuple(int(part) for part in args.version.split(".")) >= (
+        3,
+        0,
+        6,
+    )
+    has_replay_pass = "replay_pass" in pmc_columns
+    if has_replay_pass != expect_replay_pass:
+        conn.close()
+        raise RuntimeError(
+            "schema {version} pmc_events columns unexpected after write_schema: "
+            "replay_pass present={present}, expected={expected}. columns={columns}. "
+            "ROCPD_SCHEMA_PATH={schema_path}".format(
+                version=args.version,
+                present=has_replay_pass,
+                expected=expect_replay_pass,
+                columns=pmc_columns,
+                schema_path=os.environ.get("ROCPD_SCHEMA_PATH", "<unset>"),
+            )
+        )
+
     insert_minimal_data(conn, uuid, guid, args.version)
     conn.commit()
     conn.close()

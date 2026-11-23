@@ -293,9 +293,6 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
 std::map<basic_block_t*, basic_block_signature>
 get_basic_block_file_line_info(module_t* module, procedure_t* func);
 
-std::vector<statement_t>
-get_source_code(module_t* module, procedure_t* func);
-
 std::tuple<size_t, size_t>
 query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc,
             flow_graph_t* cfGraph = nullptr, basic_loop_t* loopToInstrument = nullptr);
@@ -334,9 +331,6 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& objects,
 
 void
 error_func_real(error_level_t level, int num, const char* const* params);
-
-void
-error_func_fake(error_level_t level, int num, const char* const* params);
 
 std::string_view
 get_name(procedure_t*);

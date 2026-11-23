@@ -2,40 +2,29 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code_internal.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <cstring>
-#include <new>
 #include <string>
-#include <unordered_map>
 
 using namespace rocjitsu;
 
 namespace {
 
-Decoder *create_decoder_for_target(rj_code_target_id_t target) {
-  const IsaTargetRegistry &registry = default_isa_target_registry();
-  const IsaTargetDescriptor *descriptor = registry.find(target);
-  if (descriptor == nullptr)
-    return nullptr;
-
-  static thread_local std::unordered_map<rj_code_target_id_t, std::unique_ptr<Decoder>> decoders;
-  std::unique_ptr<Decoder> &decoder = decoders[target];
-  if (!decoder)
-    decoder = Decoder::create(registry, target);
-  return decoder.get();
-}
-
-rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
+rocjitsu::IsaFamily arch_for_target(rj_code_target_id_t target) {
   const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
   if (descriptor == nullptr)
-    return ROCJITSU_CODE_ARCH_INVALID;
-  return descriptor->architecture_id;
+    return rocjitsu::IsaFamily::Invalid;
+  return descriptor->family;
 }
 
 bool code_object_accepts_target(const AmdGpuCodeObject &object, rj_code_target_id_t target) {
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target(target);
+  if (binding == nullptr || binding->elf_machine == 0)
+    return false;
   const rj_code_target_id_t object_target = object.target_id();
   return object_target == ROCJITSU_CODE_TARGET_INVALID || object_target == target;
 }
@@ -46,7 +35,7 @@ rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **e
   if (!path || !exec)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  try {
+  return [&]() noexcept -> rj_status_t {
     auto handle = std::make_unique<rj_code_executable_t>();
     handle->exec = std::make_unique<Executable>(path);
     if (!handle->exec->is_valid())
@@ -54,11 +43,7 @@ rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **e
 
     *exec = handle.release();
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
 
 void rj_code_executable_retain(rj_code_executable_t *exec) {
@@ -130,14 +115,14 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *inst_list = nullptr;
 
-  if (!code_object_accepts_target(*obj->co, target_id))
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id))
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    auto decoder = Decoder::create(default_isa_target_registry(), target_id);
+    if (!decoder)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  try {
     Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_inst_list_t>();
 
@@ -150,7 +135,8 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
       // at word zero for each section.
       std::size_t word_index = 0;
       while (word_index < inst_data_size) {
-        DecodeResult decoded = decoder->decode(&inst_data[word_index]);
+        DecodeResult decoded =
+            decoder->decode_window(std::span(inst_data + word_index, inst_data_size - word_index));
         if (decoded.failed())
           return ROCJITSU_STATUS_ERROR;
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
@@ -161,12 +147,8 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     }
 
     *inst_list = owned.release();
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
-  return ROCJITSU_STATUS_SUCCESS;
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_inst_list_retain(rj_code_inst_list_t *inst_list) {
@@ -198,18 +180,18 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *list = nullptr;
 
-  if (!code_object_accepts_target(*obj->co, target_id))
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id))
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    auto decoder = Decoder::create(default_isa_target_registry(), target_id);
+    if (!decoder)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const rj_code_arch_t arch = arch_for_target(target_id);
-  if (arch == ROCJITSU_CODE_ARCH_INVALID)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    const rocjitsu::IsaFamily arch = arch_for_target(target_id);
+    if (arch == rocjitsu::IsaFamily::Invalid)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  try {
     Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_basic_block_list_t>();
     auto blocks = BasicBlock::build(*obj->co, *decoder, arch, {}, {},
@@ -219,11 +201,7 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     owned->blocks = std::move(blocks).value();
     *list = owned.release();
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
 
 void rj_code_basic_block_list_retain(rj_code_basic_block_list_t *list) {
@@ -321,18 +299,6 @@ uint32_t rj_code_inst_size(const rj_code_inst_t *inst) {
   if (!inst)
     return 0;
   return static_cast<uint32_t>(reinterpret_cast<const Instruction *>(inst)->size());
-}
-
-uint32_t rj_code_inst_flags(const rj_code_inst_t *inst) {
-  if (!inst)
-    return 0;
-  const auto *i = reinterpret_cast<const Instruction *>(inst);
-  uint32_t flags = 0;
-  if (i->is_branch())
-    flags |= RJ_CODE_INST_BRANCH;
-  if (i->is_memory_op())
-    flags |= RJ_CODE_INST_MEMORY_OP;
-  return flags;
 }
 
 rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint32_t buf_size) {

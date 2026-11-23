@@ -9,7 +9,7 @@
 //! caller may reuse an indirect buffer.
 
 use super::memory::DeviceVm;
-use super::{drm, errno, error, native_error, os_process};
+use super::{drm, errno, error, native_error};
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
 };
@@ -75,8 +75,6 @@ fn validate_command(command: KernelCommand) -> Result<u32, Error> {
 pub(crate) struct KfdKernelQueue {
     /// Exact render VM that owns the command context and completion fence.
     vm: Shared<DeviceVm>,
-    /// Rejects use of inherited handles after fork.
-    process: u32,
     /// Private DRM submission context until destruction succeeds.
     context_id: Option<u32>,
     /// Timeline object proving command retirement.
@@ -131,7 +129,6 @@ impl KfdKernelQueue {
         // Drop then share exactly the same resumable cleanup state.
         let mut queue = slot.write(Self {
             vm,
-            process: std::process::id(),
             context_id: None,
             completion_syncobj: None,
             engine,
@@ -209,7 +206,9 @@ impl KfdKernelQueue {
     }
 
     fn check_process(&self) -> Result<(), Error> {
-        os_process::check_process(self.process)
+        self.vm
+            .kfd()
+            .check_process()
             .map_err(|source| native_error("DRM command context process check", source))
     }
 
@@ -481,17 +480,17 @@ impl Drop for KfdKernelQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{memory, sys, sysfs, uapi};
+    use super::super::{connection, memory, sysfs, uapi};
     use super::*;
     use std::fs::File;
     use std::sync::Arc;
 
     #[allow(clippy::unwrap_used)]
     fn scripted_vm() -> Shared<DeviceVm> {
-        let kfd = Shared::new(sys::Kfd::with_hook(
+        let kfd = Shared::new(connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(|call| {
-                if let sys::Call::Wait(args, _) = call {
+                if let connection::Call::Wait(args, _) = call {
                     args.result = uapi::WAIT_TIMEOUT;
                 }
                 Ok(())
@@ -499,6 +498,8 @@ mod tests {
         ))
         .unwrap();
         let node = sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
+            host_atomics: false,
             node: 1,
             gpu_id: 42,
             render_minor: Some(128),
@@ -621,7 +622,11 @@ mod tests {
                     })
                     .unwrap();
                 assert_eq!(
-                    queue.refresh_status().unwrap_err().native_error_code(),
+                    queue
+                        .refresh_status()
+                        .unwrap_err()
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
                     Some(errno::EIO)
                 );
                 assert_eq!(queue.status().retired_submission, 0);
@@ -756,7 +761,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EFAULT));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EFAULT)
+                );
             },
         );
         drm::with_script(
@@ -772,7 +782,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EBUSY));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EBUSY)
+                );
                 // Drop retries the ordinary EBUSY rollback through the owner.
             },
         );

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <array>
 #include <cstdint>
@@ -20,7 +21,7 @@ namespace rocjitsu {
 
 class Decoder;
 
-/// @brief Immutable semantic capabilities of one concrete GPU target.
+/// @brief Immutable semantic capabilities of one concrete target.
 ///
 /// Capability bits are defined by the ISA family that consumes them. They
 /// describe instruction/encoding legality and target-specific semantics rather
@@ -35,13 +36,13 @@ struct IsaTargetCapabilities {
   bool execution_implemented = false;
 };
 
-/// @brief Non-owning code-object identity published by an AMDGPU ISA target.
-struct IsaGpuTargetDescription {
+/// @brief Concrete target identity and capabilities published by an ISA provider.
+struct IsaTargetBinding {
   rj_code_target_id_t public_id;
-  /// Processor name used in Clang offload bundle entry IDs (for example ``gfx90a``).
-  std::string_view code_object_id;
-  /// ELF ``e_flags & EF_AMDGPU_MACH`` value for standalone code objects.
-  uint32_t elf_machine;
+  /// Canonical target name, also used in AMDGPU offload bundle entry IDs.
+  std::string_view id;
+  /// AMDGPU ELF machine value, or zero for a target without AMDGPU code objects.
+  uint32_t elf_machine = 0;
   /// KFD packed target version (for example 120501 for gfx1251), or zero.
   uint32_t gfx_target_version = 0;
   /// Semantic capabilities selected by this concrete target.
@@ -51,20 +52,19 @@ struct IsaGpuTargetDescription {
 /// @brief Static, non-owning description contributed by one ISA target.
 struct IsaTargetDescriptor {
   using DecoderFactory = std::unique_ptr<Decoder> (*)();
-  using VariantDecoderFactory =
-      std::unique_ptr<Decoder> (*)(const IsaGpuTargetDescription &gpu_target);
+  using VariantDecoderFactory = std::unique_ptr<Decoder> (*)(const IsaTargetBinding &gpu_target);
 
   /// Canonical target identity (for example ``gfx1250``).
   std::string_view id;
   /// Additional string identities accepted by lookup.
   std::span<const std::string_view> aliases = {};
-  /// Public architecture enum key accepted by lookup, or INVALID when unbound.
-  rj_code_arch_t architecture_id = ROCJITSU_CODE_ARCH_INVALID;
-  /// Public GPU target keys and the code-object identities bound to them.
-  std::span<const IsaGpuTargetDescription> gpu_targets = {};
+  /// Shared implementation family, or Invalid for a source-integrated provider.
+  rocjitsu::IsaFamily family = rocjitsu::IsaFamily::Invalid;
+  /// Concrete target keys, names, and optional AMDGPU code-object identities.
+  std::span<const IsaTargetBinding> bindings = {};
   /// Concrete target selected by architecture-only lookup, or INVALID when
   /// this provider does not have target-specific decoder behavior.
-  rj_code_target_id_t default_gpu_target = ROCJITSU_CODE_TARGET_INVALID;
+  rj_code_target_id_t default_target = ROCJITSU_CODE_TARGET_INVALID;
   /// Factory used to construct this target's decoder.
   DecoderFactory decoder_factory = nullptr;
   /// Optional factory used when lookup selected a concrete GPU binding.
@@ -116,19 +116,20 @@ public:
 
   /// @brief Look up a canonical ID or string alias.
   const IsaTargetDescriptor *find(std::string_view id) const;
-  /// @brief Look up a descriptor-bound public architecture key.
-  const IsaTargetDescriptor *find(rj_code_arch_t architecture_id) const;
-  /// @brief Look up a descriptor-bound public GPU target key.
-  const IsaTargetDescriptor *find(rj_code_target_id_t gpu_target_id) const;
+  /// @brief Look up an internal implementation family.
+  const IsaTargetDescriptor *find(rocjitsu::IsaFamily family) const;
+  /// @brief Look up a descriptor-bound public target key.
+  const IsaTargetDescriptor *find(rj_code_target_id_t target_id) const;
   /// @brief Look up the binding for a standalone ELF machine value.
-  const IsaGpuTargetDescription *find_gpu_target_by_elf_machine(uint32_t elf_machine) const;
+  const IsaTargetBinding *find_target_by_elf_machine(uint32_t elf_machine) const;
   /// @brief Look up the binding for a Clang offload bundle processor ID.
-  const IsaGpuTargetDescription *find_gpu_target_by_code_object_id(std::string_view id) const;
+  const IsaTargetBinding *find_target_by_code_object_id(std::string_view id) const;
   /// @brief Look up a binding by its public target enum.
-  const IsaGpuTargetDescription *find_gpu_target(rj_code_target_id_t gpu_target_id) const;
+  const IsaTargetBinding *find_target(rj_code_target_id_t target_id) const;
+  /// @brief Look up a concrete binding by its canonical target name.
+  const IsaTargetBinding *find_target(std::string_view id) const;
   /// @brief Resolve a descriptor's explicit architecture-only default binding.
-  const IsaGpuTargetDescription *
-  find_default_gpu_target(const IsaTargetDescriptor &descriptor) const;
+  const IsaTargetBinding *find_default_target(const IsaTargetDescriptor &descriptor) const;
 
 private:
   explicit IsaTargetRegistry(std::span<const IsaTargetDescriptor> targets);

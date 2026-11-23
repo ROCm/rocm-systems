@@ -194,52 +194,47 @@ int main(int argc, char **argv) {
         .emit();
     return 1;
   }
-  try {
-    AmdGpuCodeObject object(parsed.value().positional.front());
-    if (!object.is_valid()) {
-      std::cerr << "Failed to parse input code object\n";
-      return 2;
-    }
-    const rj_code_target_id_t object_target = object.target_id();
-    if (flags.target->value() && object_target != ROCJITSU_CODE_TARGET_INVALID &&
-        *flags.target->value() != object_target) {
-      std::cerr << "Selected target does not match code-object target metadata\n";
-      return 2;
-    }
-    const rj_code_target_id_t target = flags.target->value().value_or(object_target);
-    if (target == ROCJITSU_CODE_TARGET_INVALID) {
-      std::cerr << "Cannot infer decoder target; pass --target\n";
-      return 2;
-    }
-    std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target);
-    if (!decoder) {
-      std::cerr << "No decoder is available for the selected target\n";
-      return 2;
-    }
-
-    DecodeCorpus corpus;
-    std::string error;
-    if (!collect_corpus(object, *decoder, flags.invalid_limit->value(), corpus, error)) {
-      std::cerr << error << '\n';
-      return 2;
-    }
-    if (corpus.valid_offsets.empty()) {
-      std::cerr << "No valid instruction encodings found in text sections\n";
-      return 2;
-    }
-
-    std::cout << "text: " << corpus.text_bytes << " bytes, " << corpus.valid_offsets.size()
-              << " valid instructions, " << corpus.scan_rejections << " rejected words, "
-              << corpus.invalid_encodings.size() << " invalid samples\n";
-    const Measurement valid = measure_valid(corpus, *decoder, flags.iterations->value());
-    print_measurement("valid", valid);
-    if (!corpus.invalid_encodings.empty()) {
-      const Measurement invalid = measure_invalid(corpus, *decoder, flags.iterations->value());
-      print_measurement("invalid", invalid);
-    }
-    return valid.unexpected == 0 ? 0 : 3;
-  } catch (const std::exception &error) {
-    std::cerr << "Benchmark failed: " << error.what() << '\n';
+  AmdGpuCodeObject object(parsed.value().positional.front());
+  if (!object.is_valid()) {
+    std::cerr << "Failed to parse input code object\n";
     return 2;
   }
+  const rj_code_target_id_t object_target = object.target_id();
+  if (flags.target->value() && object_target != ROCJITSU_CODE_TARGET_INVALID &&
+      *flags.target->value() != object_target) {
+    std::cerr << "Selected target does not match code-object target metadata\n";
+    return 2;
+  }
+  const rj_code_target_id_t target = flags.target->value().value_or(object_target);
+  if (target == ROCJITSU_CODE_TARGET_INVALID) {
+    std::cerr << "Cannot infer decoder target; pass --target\n";
+    return 2;
+  }
+  std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target);
+  if (!decoder) {
+    std::cerr << "No decoder is available for the selected target\n";
+    return 2;
+  }
+
+  DecodeCorpus corpus;
+  std::string error;
+  if (!collect_corpus(object, *decoder, flags.invalid_limit->value(), corpus, error)) {
+    std::cerr << error << '\n';
+    return 2;
+  }
+  if (corpus.valid_offsets.empty()) {
+    std::cerr << "No valid instruction encodings found in text sections\n";
+    return 2;
+  }
+
+  std::cout << "text: " << corpus.text_bytes << " bytes, " << corpus.valid_offsets.size()
+            << " valid instructions, " << corpus.scan_rejections << " rejected words, "
+            << corpus.invalid_encodings.size() << " invalid samples\n";
+  const Measurement valid = measure_valid(corpus, *decoder, flags.iterations->value());
+  print_measurement("valid", valid);
+  if (!corpus.invalid_encodings.empty()) {
+    const Measurement invalid = measure_invalid(corpus, *decoder, flags.iterations->value());
+    print_measurement("invalid", invalid);
+  }
+  return valid.unexpected == 0 ? 0 : 3;
 }

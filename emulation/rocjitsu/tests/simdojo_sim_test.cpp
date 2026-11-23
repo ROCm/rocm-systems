@@ -18,10 +18,10 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <time.h>
+#include <utility>
 #include <vector>
 
 using namespace simdojo;
@@ -71,6 +71,98 @@ class AsyncPrimaryComponent : public Component {
 public:
   explicit AsyncPrimaryComponent(std::string name) : Component(std::move(name)) {}
   void startup() override { engine()->register_as_primary(); }
+};
+
+/// Active primary that performs one real event but deliberately remains registered.
+class ScheduledPrimaryComponent : public Component {
+public:
+  ScheduledPrimaryComponent(std::string name, Tick event_tick)
+      : Component(std::move(name)), event_tick_(event_tick) {
+    timer_event_.set_handler([this](Tick tick, Message *) {
+      handled = true;
+      handled_tick = tick;
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&timer_event_, event_tick_);
+  }
+
+  bool handled = false;
+  Tick handled_tick = 0;
+
+private:
+  Tick event_tick_;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Primary that releases itself after processing one scheduled event.
+class ReleasingPrimaryComponent : public Component {
+public:
+  ReleasingPrimaryComponent(std::string name, Tick event_tick)
+      : Component(std::move(name)), event_tick_(event_tick) {
+    timer_event_.set_handler([this](Tick tick, Message *) {
+      handled_tick = tick;
+      engine()->primary_release();
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&timer_event_, event_tick_);
+  }
+
+  Tick handled_tick = 0;
+
+private:
+  Tick event_tick_;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Primary that posts async work and optionally releases after that work runs.
+class AsyncPostingPrimaryComponent : public Component {
+public:
+  AsyncPostingPrimaryComponent(std::string name, Tick callback_tick, Tick late_tick,
+                               bool release_after_async = false)
+      : Component(std::move(name)), late_tick_(late_tick) {
+    post_.set_handler([this, callback_tick, release_after_async](Tick tick, Message *) {
+      engine()->schedule_event_async(&async_, callback_tick);
+      if (!release_after_async)
+        release(tick);
+    });
+    async_.set_handler([this, release_after_async](Tick tick, Message *) {
+      async_tick = tick;
+      if (release_after_async)
+        schedule_event(&release_, tick + kReleaseDelayTicks);
+    });
+    release_.set_handler([this](Tick tick, Message *) { release(tick); });
+    late_.set_handler([this](Tick, Message *) { late_ran = true; });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&post_, 10);
+    schedule_event(&late_, late_tick_);
+  }
+
+  Tick async_tick = 0;
+  Tick release_tick = 0;
+  bool late_ran = false;
+
+private:
+  static constexpr Tick kReleaseDelayTicks = 5;
+
+  void release(Tick tick) {
+    release_tick = tick;
+    engine()->primary_release();
+  }
+
+  Tick late_tick_;
+  Event post_{this, EventType::TIMER_CALLBACK};
+  Event async_{this, EventType::TIMER_CALLBACK};
+  Event release_{this, EventType::TIMER_CALLBACK};
+  Event late_{this, EventType::TIMER_CALLBACK};
 };
 
 /// Component with IN/OUT ports that replies to each received message.
@@ -301,7 +393,7 @@ private:
 
 /// Component that counts initialize()/startup()/shutdown() calls. Used to verify
 /// that shutdown() cleanup fires exactly once per initialized component, on both
-/// the normal shutdown path and the startup-failure unwind path. When given a
+/// the normal shutdown path and the initialization-failure unwind path. When given a
 /// shared order log, records its own name on shutdown() so tests can assert the
 /// reverse-topology-order shutdown contract.
 class LifecycleCountingComponent : public Component {
@@ -310,7 +402,10 @@ public:
                                       std::vector<std::string> *shutdown_order = nullptr)
       : Component(std::move(name)), shutdown_order_(shutdown_order) {}
 
-  void initialize() override { ++initializes; }
+  util::Result initialize(util::DiagnosticEmitter = {}) override {
+    ++initializes;
+    return util::Result::success();
+  }
   void startup() override { ++startups; }
   void shutdown() override {
     ++shutdowns;
@@ -326,64 +421,18 @@ private:
   std::vector<std::string> *shutdown_order_;
 };
 
-/// Component whose startup() requests an ordinary exit and only then throws.
-///
-/// @details Pins the precedence between the two terminal writers. The exit request
-/// records a code-0 status FIRST, so unless the failure outranks it, run() hands back
-/// success for a generation whose components never started.
-class ExitThenThrowStartupComponent : public Component {
+class FailingInitializeComponent : public LifecycleCountingComponent {
 public:
-  explicit ExitThenThrowStartupComponent(std::string name) : Component(std::move(name)) {}
+  using LifecycleCountingComponent::LifecycleCountingComponent;
 
-  void startup() override {
-    engine()->request_exit("ordinary exit request from startup", /*code=*/0);
-    throw std::runtime_error("startup failed after requesting exit");
-  }
-};
-
-/// Component whose startup() throws the first N times it is called, then
-/// succeeds. Also counts shutdown() so tests can assert unwind cleanup.
-class FlakyStartupComponent : public Component {
-public:
-  FlakyStartupComponent(std::string name, uint32_t throws_before_success)
-      : Component(std::move(name)), remaining_throws_(throws_before_success) {}
-
-  void startup() override {
-    if (remaining_throws_ > 0) {
-      --remaining_throws_;
-      throw std::runtime_error("startup deliberately failing");
-    }
-    ++successful_startups;
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override {
+    ++initializes;
+    if (fail)
+      return emit_error.emit() << "component initialization rejected";
+    return util::Result::success();
   }
 
-  void shutdown() override { ++shutdowns; }
-
-  uint32_t successful_startups = 0;
-  uint32_t shutdowns = 0;
-
-private:
-  uint32_t remaining_throws_;
-};
-
-/// Component whose startup() AND shutdown() both throw. Component::shutdown() is
-/// not noexcept, so the startup-failure unwind must survive a throwing shutdown
-/// hook without escaping the engine or stranding wait_until_started().
-class DoublyThrowingComponent : public Component {
-public:
-  explicit DoublyThrowingComponent(std::string name) : Component(std::move(name)) {}
-
-  void startup() override {
-    ++startups;
-    throw std::runtime_error("startup deliberately failing");
-  }
-
-  void shutdown() override {
-    ++shutdowns;
-    throw std::runtime_error("shutdown deliberately failing");
-  }
-
-  uint32_t startups = 0;
-  uint32_t shutdowns = 0;
+  bool fail = true;
 };
 
 /// Helper: build engine with manual partition assignment.
@@ -409,6 +458,27 @@ PartitionID partition_by_name_suffix(Component *comp) {
   if (last >= '0' && last <= '9')
     return static_cast<PartitionID>(last - '0');
   return 0;
+}
+
+ExitStatus run_with_watchdog(SimulationEngine &engine) {
+  ExitStatus exit;
+  std::atomic<bool> finished{false};
+  std::thread runner([&]() {
+    exit = engine.run();
+    finished.store(true, std::memory_order_release);
+  });
+  const bool started = engine.wait_until_started();
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+  if (!finished_on_its_own)
+    engine.request_exit("termination regression timeout", 1);
+  runner.join();
+  EXPECT_TRUE(started);
+  EXPECT_TRUE(finished_on_its_own);
+  return exit;
 }
 
 } // namespace
@@ -986,10 +1056,10 @@ TEST(TerminationTest, QuiescenceDetection) {
   engine.topology().set_root(std::move(root));
   ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
       << admission_diagnostic.message();
-  auto exit = engine.run();
+  const ExitStatus exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("quiescent"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::QUIESCENCE);
 }
 
 TEST(TerminationTest, AllPrimaryDoneTrigger) {
@@ -1003,10 +1073,10 @@ TEST(TerminationTest, AllPrimaryDoneTrigger) {
                              static_cast<ConsumerComponent *>(c)->in_port(), 1);
   ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
       << admission_diagnostic.message();
-  auto exit = engine.run();
+  const ExitStatus exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("primaries"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
   EXPECT_EQ(static_cast<ConsumerComponent *>(c)->received.size(), 5u);
 }
 
@@ -1018,10 +1088,311 @@ TEST(TerminationTest, MaxTicksSentinel) {
   engine.topology().set_root(std::move(root));
   ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
       << admission_diagnostic.message();
-  auto exit = engine.run();
+  const ExitStatus exit = engine.run();
 
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
-  EXPECT_NE(exit.message.find("max ticks"), std::string::npos);
+  EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+}
+
+TEST(TerminationTest, MultiThreadedMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary1"));
+  engine.topology().set_root(std::move(root));
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  const ExitStatus exit = run_with_watchdog(engine);
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(exit.cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(exit.tick, 0u);
+}
+
+TEST(TerminationTest, SingleThreadedMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+
+  const ExitStatus exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(exit.cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(exit.tick, 0u);
+}
+
+TEST(TerminationTest, StepModeMaxTicksStopsAQuiescentPrimary) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+
+  EXPECT_FALSE(engine.step());
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::COMPLETED);
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::ACTIVE_PRIMARY_STALL);
+  EXPECT_EQ(engine.last_exit().tick, 0u);
+}
+
+TEST(TerminationTest, FinitePrimaryStallAppliesOnlyBeforeMaxTicks) {
+  for (const Tick event_tick : {Tick{99}, Tick{100}}) {
+    SCOPED_TRACE(::testing::Message() << "run event_tick=" << event_tick);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ScheduledPrimaryComponent *>(
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", event_tick)));
+    engine.topology().set_root(std::move(root));
+    ASSERT_TRUE(engine.create().succeeded());
+
+    const ExitStatus exit = engine.run();
+    EXPECT_TRUE(component->handled);
+    EXPECT_EQ(component->handled_tick, event_tick);
+    EXPECT_EQ(exit.tick, event_tick);
+    EXPECT_EQ(exit.cause,
+              event_tick < 100 ? ExitCause::ACTIVE_PRIMARY_STALL : ExitCause::MAX_TICKS);
+  }
+
+  for (const Tick event_tick : {Tick{99}, Tick{100}}) {
+    SCOPED_TRACE(::testing::Message() << "step event_tick=" << event_tick);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ScheduledPrimaryComponent *>(
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", event_tick)));
+    engine.topology().set_root(std::move(root));
+    ASSERT_TRUE(engine.create().succeeded());
+
+    while (engine.step()) {
+    }
+    EXPECT_TRUE(component->handled);
+    EXPECT_EQ(component->handled_tick, event_tick);
+    EXPECT_EQ(engine.last_exit().tick, event_tick);
+    EXPECT_EQ(engine.last_exit().cause,
+              event_tick < 100 ? ExitCause::ACTIVE_PRIMARY_STALL : ExitCause::MAX_TICKS);
+  }
+}
+
+TEST(TerminationTest, FiniteRunsReportEarlyPrimaryCompletionAtTheLastProcessedTick) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "run partitions=" << partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<ReleasingPrimaryComponent *>(
+        root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10)));
+    engine.topology().set_root(std::move(root));
+    if (partitions == 1) {
+      ASSERT_TRUE(engine.create().succeeded());
+    } else {
+      build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+    }
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(component->handled_tick, 10u);
+    EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+    EXPECT_EQ(exit.tick, 10u);
+  }
+
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<ReleasingPrimaryComponent *>(
+      root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10)));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+  while (engine.step()) {
+  }
+  EXPECT_EQ(component->handled_tick, 10u);
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+  EXPECT_EQ(engine.last_exit().tick, 10u);
+}
+
+TEST(TerminationTest, FiniteHorizonBoundsDrainAfterPrimaryRelease) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto producer = std::make_unique<ProducerComponent>("producer0", 1, 10);
+    auto consumer = std::make_unique<ConsumerComponent>("consumer1");
+    ProducerComponent *producer_ptr = producer.get();
+    ConsumerComponent *consumer_ptr = consumer.get();
+    root->add_child(std::move(producer));
+    root->add_child(std::move(consumer));
+    engine.topology().set_root(std::move(root));
+    engine.topology().add_link(producer_ptr->out_port(), consumer_ptr->in_port(), 190);
+    if (partitions == 1) {
+      ASSERT_TRUE(engine.create().succeeded());
+    } else {
+      build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+    }
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(producer_ptr->sent_, 1u);
+    EXPECT_TRUE(consumer_ptr->received.empty());
+    EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+    EXPECT_EQ(exit.tick, 100u);
+  }
+}
+
+TEST(TerminationTest, FiniteHorizonDrainsAsyncWorkBeforeStopping) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(partitions);
+    constexpr Tick kHorizon = 100;
+    for (const Tick callback_tick : {Tick{20}, kHorizon - 1, kHorizon, kHorizon + 1}) {
+      SCOPED_TRACE(callback_tick);
+      SimulationEngine engine({.max_ticks = kHorizon, .num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      auto primary = std::make_unique<AsyncPostingPrimaryComponent>("primary0", callback_tick, 200);
+      AsyncPostingPrimaryComponent *primary_ptr = primary.get();
+      root->add_child(std::move(primary));
+      engine.topology().set_root(std::move(root));
+      if (partitions == 1) {
+        ASSERT_TRUE(engine.create().succeeded());
+      } else {
+        build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+      }
+
+      const ExitStatus exit = engine.run();
+      // The single-threaded sentinel follows this same-tick callback.
+      // The partitioned loop stops before processing the horizon epoch.
+      const bool ran = callback_tick < kHorizon || (callback_tick == kHorizon && partitions == 1);
+      EXPECT_EQ(primary_ptr->async_tick, ran ? callback_tick : 0u);
+      EXPECT_FALSE(primary_ptr->late_ran);
+      EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+      EXPECT_EQ(exit.tick, kHorizon);
+    }
+  }
+}
+
+TEST(TerminationTest, TickLimitDoesNotDelayBufferedAsyncWork) {
+  constexpr Tick kUnrelatedTick = 99;
+  for (const uint32_t partitions : {1u, 2u}) {
+    for (const Tick horizon : {Tick{0}, kUnrelatedTick, kUnrelatedTick + 1}) {
+      SCOPED_TRACE(::testing::Message() << "partitions=" << partitions << " horizon=" << horizon);
+      SimulationEngine engine({.max_ticks = horizon, .num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      auto primary = std::make_unique<AsyncPostingPrimaryComponent>("primary0", 20, kUnrelatedTick,
+                                                                    /*release_after_async=*/true);
+      AsyncPostingPrimaryComponent *primary_ptr = primary.get();
+      root->add_child(std::move(primary));
+      engine.topology().set_root(std::move(root));
+      if (partitions == 1) {
+        ASSERT_TRUE(engine.create().succeeded());
+      } else {
+        build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+      }
+
+      const ExitStatus exit = engine.run();
+      EXPECT_EQ(primary_ptr->async_tick, 20u);
+      EXPECT_EQ(primary_ptr->release_tick, 25u);
+      EXPECT_EQ(exit.cause, horizon == kUnrelatedTick ? ExitCause::MAX_TICKS
+                                                      : ExitCause::ALL_PRIMARIES_COMPLETED);
+      EXPECT_EQ(exit.tick, kUnrelatedTick);
+    }
+  }
+}
+
+TEST(TerminationTest, FiniteHorizonStopsBeforeSaturatedEvent) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    for (const bool release_primary : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "partitions=" << partitions << " release_primary=" << release_primary);
+      SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      if (release_primary) {
+        root->add_child(std::make_unique<ReleasingPrimaryComponent>("primary0", 10));
+      } else {
+        root->add_child(std::make_unique<ScheduledPrimaryComponent>("primary0", 10));
+      }
+      auto late = std::make_unique<ProducerComponent>("late1", 1, TICK_MAX,
+                                                      /*register_primary=*/false);
+      ProducerComponent *late_ptr = late.get();
+      root->add_child(std::move(late));
+      engine.topology().set_root(std::move(root));
+      if (partitions == 1) {
+        ASSERT_TRUE(engine.create().succeeded());
+      } else {
+        build_with_manual_partitions(engine, partitions, partition_by_name_suffix);
+      }
+
+      const ExitStatus exit = run_with_watchdog(engine);
+      EXPECT_EQ(late_ptr->sent_, 0u);
+      EXPECT_EQ(exit.cause, ExitCause::MAX_TICKS);
+      EXPECT_EQ(exit.tick, 100u);
+    }
+  }
+}
+
+TEST(TerminationTest, FiniteRunsReportEarlyQuiescenceWithoutPrimaries) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "run partitions=" << partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    root->add_child(std::make_unique<LifecycleCountingComponent>("component0"));
+    engine.topology().set_root(std::move(root));
+    if (partitions == 1) {
+      ASSERT_TRUE(engine.create().succeeded());
+    } else {
+      ASSERT_TRUE(engine.topology().partition_balanced(partitions).succeeded());
+      ASSERT_TRUE(engine.create().succeeded());
+    }
+
+    const ExitStatus exit = engine.run();
+    EXPECT_EQ(exit.cause, ExitCause::QUIESCENCE);
+    EXPECT_EQ(exit.tick, 0u);
+  }
+
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<LifecycleCountingComponent>("component0"));
+  engine.topology().set_root(std::move(root));
+  ASSERT_TRUE(engine.create().succeeded());
+  while (engine.step()) {
+  }
+  EXPECT_EQ(engine.last_exit().cause, ExitCause::QUIESCENCE);
+  EXPECT_EQ(engine.last_exit().tick, 0u);
+}
+
+TEST(TerminationTest, FiniteMaxTicksStillAwaitsTheFirstPrimary) {
+  for (const uint32_t partitions : {1u, 2u}) {
+    SCOPED_TRACE(partitions);
+    SimulationEngine engine({.max_ticks = 100, .num_threads = partitions, .await_primaries = true});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component0 = static_cast<LifecycleCountingComponent *>(
+        root->add_child(std::make_unique<LifecycleCountingComponent>("component0")));
+    root->add_child(std::make_unique<LifecycleCountingComponent>("component1"));
+    engine.topology().set_root(std::move(root));
+    if (partitions > 1) {
+      ASSERT_TRUE(engine.topology().partition_balanced(partitions).succeeded());
+    }
+    ASSERT_TRUE(engine.create().succeeded());
+
+    ExitStatus exit;
+    std::atomic<bool> finished{false};
+    std::thread runner([&]() {
+      exit = engine.run();
+      finished.store(true, std::memory_order_release);
+    });
+    const bool started = engine.wait_until_started();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const bool stayed_alive_while_idle = !finished.load(std::memory_order_acquire);
+    engine.request_exit("external stop", 7);
+
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    const bool stopped_on_request = finished.load(std::memory_order_acquire);
+    Event rescue_event(component0, EventType::TIMER_CALLBACK, [](Tick, Message *) {});
+    if (!stopped_on_request)
+      engine.schedule_event_now(&rescue_event);
+    runner.join();
+
+    EXPECT_TRUE(started);
+    EXPECT_TRUE(stayed_alive_while_idle);
+    EXPECT_TRUE(stopped_on_request);
+    EXPECT_EQ(exit.reason, ExitReason::EXIT_REQUEST);
+    EXPECT_EQ(exit.code, 7);
+    EXPECT_EQ(exit.message, "external stop");
+  }
 }
 
 TEST(StartupReadinessTest, CleanStartupReportsReady) {
@@ -1038,236 +1409,48 @@ TEST(StartupReadinessTest, CleanStartupReportsReady) {
   EXPECT_TRUE(engine.wait_until_started());
 }
 
-TEST(StartupReadinessTest, StartupFailureOutranksAnEarlierExitRequest) {
-  util::StringDiagnostic admission_diagnostic;
-  // The failure is recorded SECOND here, after an ordinary code-0 exit request that
-  // the same startup() issued. Whoever wrote first must not win: a generation whose
-  // components never started has to report failure, or the C API maps code 0 to
-  // success and a dead VM looks like a clean run.
-  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+TEST(StartupReadinessTest, InitializationFailureUnwindsAttemptedPrefixAndAllowsFreshCreate) {
+  util::StringDiagnostic diagnostic;
+  std::vector<std::string> shutdown_order;
+  SimulationEngine engine({.max_ticks = 5, .num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
-  root->add_child(std::make_unique<ExitThenThrowStartupComponent>("exit_then_throw0"));
+  auto *before = static_cast<LifecycleCountingComponent *>(
+      root->add_child(std::make_unique<LifecycleCountingComponent>("before", &shutdown_order)));
+  auto *failing = static_cast<FailingInitializeComponent *>(
+      root->add_child(std::make_unique<FailingInitializeComponent>("failing", &shutdown_order)));
+  auto *after = static_cast<LifecycleCountingComponent *>(
+      root->add_child(std::make_unique<LifecycleCountingComponent>("after", &shutdown_order)));
   engine.topology().set_root(std::move(root));
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
 
-  auto exit = engine.run();
-
-  EXPECT_EQ(exit.reason, ExitReason::INTERRUPTED);
-  EXPECT_EQ(exit.code, 1) << "a startup failure must not be reported as a clean exit";
+  EXPECT_TRUE(engine.create(diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("initialization rejected"), std::string::npos);
+  EXPECT_FALSE(engine.is_created());
   EXPECT_FALSE(engine.wait_until_started());
   EXPECT_EQ(engine.last_exit().code, 1);
-}
-
-TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
-  util::StringDiagnostic admission_diagnostic;
-  // A startup() throw leaves the partial attempt's event/primary/component state
-  // intact, so the create() generation is terminal: step() rethrows once, latches
-  // failure, and a same-generation retry must NOT re-run startup (it returns done).
-  // A clean retry requires shutdown() + create().
-  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky0", 1));
-  engine.topology().set_root(std::move(root));
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
-
-  // First step(): startup throws, wait_until_started() observes failure.
-  EXPECT_THROW(engine.step(), std::runtime_error);
-  EXPECT_FALSE(engine.wait_until_started());
-
-  // step() must record the SAME failure ExitStatus run() would. Without it the
-  // create() default {COMPLETED, 0} survives and the terminal guard below hands
-  // back a success-looking status for a generation that never started.
-  EXPECT_EQ(engine.last_exit().reason, ExitReason::INTERRUPTED);
-  EXPECT_EQ(engine.last_exit().code, 1);
-
-  // Same-generation retry: startup is NOT re-run (generation is terminal), so the
-  // component's startup() never succeeds and step() reports done.
-  EXPECT_FALSE(engine.step());
-  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
-
-  // A run() after the failed step() goes through the same terminal guard and must
-  // report the recorded failure, not the create() default.
-  auto after_failed_step = engine.run();
-  EXPECT_EQ(after_failed_step.reason, ExitReason::INTERRUPTED);
-  EXPECT_EQ(after_failed_step.code, 1);
-  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
-
-  // A fresh generation (shutdown + create) starts cleanly and succeeds.
+  EXPECT_EQ(before->initializes, 1u);
+  EXPECT_EQ(failing->initializes, 1u);
+  EXPECT_EQ(after->initializes, 0u);
+  EXPECT_EQ(before->startups, 0u);
+  EXPECT_EQ(failing->startups, 0u);
+  EXPECT_EQ(before->shutdowns, 1u);
+  EXPECT_EQ(failing->shutdowns, 1u);
+  EXPECT_EQ(after->shutdowns, 0u);
+  EXPECT_EQ(shutdown_order, (std::vector<std::string>{"failing", "before"}));
   engine.shutdown();
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
+  EXPECT_EQ(before->shutdowns, 1u);
+  EXPECT_EQ(failing->shutdowns, 1u);
+
+  failing->fail = false;
+  ASSERT_TRUE(engine.create(diagnostic.emitter()).succeeded()) << diagnostic.message();
   engine.step();
   EXPECT_TRUE(engine.wait_until_started());
-  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 1u);
-}
-
-TEST(StartupReadinessTest, ThrowingShutdownDuringStartupUnwindStillPublishesFailure) {
-  util::StringDiagnostic admission_diagnostic;
-  // Component::shutdown() is not noexcept. If the startup-failure unwind ran
-  // BEFORE the readiness latch, a throwing shutdown hook would escape the catch
-  // path — terminating the interposer's background run() thread — while
-  // wait_until_started() stayed blocked forever. The failure must therefore be
-  // published first and the unwind caught separately.
-  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
-  engine.topology().set_root(std::move(root));
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
-
-  // run() must return the terminal status rather than letting the shutdown throw
-  // propagate out of the engine.
-  auto exit = engine.run();
-  EXPECT_EQ(exit.reason, ExitReason::INTERRUPTED);
-  EXPECT_EQ(exit.code, 1);
-  EXPECT_FALSE(engine.wait_until_started());
-
-  auto *comp = static_cast<DoublyThrowingComponent *>(doubly);
-  EXPECT_EQ(comp->startups, 1u);
-  EXPECT_EQ(comp->shutdowns, 1u) << "the unwind must still attempt the shutdown hook";
-
-  // The engine's own shutdown() must also survive the throwing hook (it is guarded
-  // against a second invocation, so this asserts no rethrow escapes destruction).
-  EXPECT_NO_THROW(engine.shutdown());
-}
-
-TEST(StartupReadinessTest, ThrowingShutdownDuringStepUnwindRethrowsOnlyTheStartupError) {
-  util::StringDiagnostic admission_diagnostic;
-  // step() rethrows to its foreground caller. The exception it propagates must be
-  // the STARTUP failure, not whatever the best-effort unwind's shutdown hook threw
-  // on top of it, and readiness must still be published as failed.
-  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
-  engine.topology().set_root(std::move(root));
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
-
-  try {
-    engine.step();
-    ADD_FAILURE() << "step() must rethrow the startup failure";
-  } catch (const std::runtime_error &e) {
-    EXPECT_STREQ(e.what(), "startup deliberately failing")
-        << "the unwind's shutdown throw must not replace the startup error";
-  }
-
-  EXPECT_FALSE(engine.wait_until_started());
-  EXPECT_EQ(engine.last_exit().reason, ExitReason::INTERRUPTED);
-  EXPECT_EQ(engine.last_exit().code, 1);
-
-  auto *comp = static_cast<DoublyThrowingComponent *>(doubly);
-  EXPECT_EQ(comp->startups, 1u);
-  EXPECT_EQ(comp->shutdowns, 1u);
-}
-
-TEST(StartupReadinessTest, RunAfterFailedStartupFailsClosedWithoutRerun) {
-  util::StringDiagnostic admission_diagnostic;
-  // run()'s terminal-generation guard must be a RUNTIME check, not just an
-  // assert: under -DNDEBUG a second run() after a startup throw must fail closed
-  // (return the terminal INTERRUPTED status) instead of re-entering
-  // startup_components() on the dirty generation. This runs regardless of build
-  // type, so it covers the release path.
-  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky0", 1));
-  engine.topology().set_root(std::move(root));
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
-
-  // First run(): startup throws; run() catches, latches failure, returns INTERRUPTED.
-  auto first = engine.run();
-  EXPECT_EQ(first.reason, ExitReason::INTERRUPTED);
-  EXPECT_EQ(first.code, 1);
-  EXPECT_FALSE(engine.wait_until_started());
-  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
-
-  // Second run() on the same (dirty) generation must NOT re-run startup — it
-  // returns the terminal status. Without the runtime guard this would re-enter
-  // startup_components() on already-scheduled/registered state.
-  auto second = engine.run();
-  EXPECT_EQ(second.reason, ExitReason::INTERRUPTED);
-  EXPECT_EQ(second.code, 1);
-  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
-}
-
-TEST(StartupReadinessTest, StartupFailureUnwindsEveryInitializedComponentOnce) {
-  util::StringDiagnostic admission_diagnostic;
-  // A throwing component partway through startup must not leave earlier components'
-  // resources dangling: shutdown() pairs with initialize(), so the unwind shuts
-  // down EVERY initialized component (not only the started prefix) exactly once —
-  // including the component that threw and the one after it that never started.
-  std::vector<std::string> shutdown_order;
-  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *before =
-      root->add_child(std::make_unique<LifecycleCountingComponent>("before", &shutdown_order));
-  auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky", 1));
-  auto *after =
-      root->add_child(std::make_unique<LifecycleCountingComponent>("after", &shutdown_order));
-  engine.topology().set_root(std::move(root));
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
-
-  EXPECT_THROW(engine.step(), std::runtime_error);
-
-  auto *before_c = static_cast<LifecycleCountingComponent *>(before);
-  auto *after_c = static_cast<LifecycleCountingComponent *>(after);
-  EXPECT_EQ(before_c->initializes, 1u);
-  EXPECT_EQ(before_c->startups, 1u);
-  EXPECT_EQ(before_c->shutdowns, 1u); // started, then unwound
-  EXPECT_EQ(after_c->initializes, 1u);
-  EXPECT_EQ(after_c->startups, 0u);  // never reached
-  EXPECT_EQ(after_c->shutdowns, 1u); // initialized, so still cleaned up
-  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->shutdowns, 1u);
-
-  // shutdown() runs in reverse topology order. "flaky" has no counting log, but
-  // the two counting components bracket it, so "after" must be shut down before
-  // "before".
-  ASSERT_EQ(shutdown_order.size(), 2u);
-  EXPECT_EQ(shutdown_order[0], "after");
-  EXPECT_EQ(shutdown_order[1], "before");
-
-  // The engine's own shutdown() must not double-shut-down the already-unwound
-  // components.
+  EXPECT_EQ(after->initializes, 1u);
   engine.shutdown();
-  EXPECT_EQ(before_c->shutdowns, 1u);
-  EXPECT_EQ(after_c->shutdowns, 1u);
-}
-
-TEST(StartupReadinessTest, ThrowingShutdownStillCleansUpRemainingComponents) {
-  util::StringDiagnostic admission_diagnostic;
-  // shutdown_components() marks the generation shut down before invoking any
-  // callback, so a callback that throws must not be allowed to skip the components
-  // after it — there is no second chance to clean them up. Each callback is
-  // isolated; the first failure is reported once the rest have run.
-  std::vector<std::string> shutdown_order;
-  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *first =
-      root->add_child(std::make_unique<LifecycleCountingComponent>("first", &shutdown_order));
-  auto *thrower = root->add_child(std::make_unique<DoublyThrowingComponent>("thrower"));
-  auto *last =
-      root->add_child(std::make_unique<LifecycleCountingComponent>("last", &shutdown_order));
-  engine.topology().set_root(std::move(root));
-  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
-      << admission_diagnostic.message();
-
-  // Reverse order is last -> thrower -> first, so the throw lands between them.
-  // shutdown() must NOT propagate it: it is reached from ~SimulationEngine(), from
-  // the engine's own background thread, and across the C API, none of which can
-  // absorb an exception.
-  EXPECT_NO_THROW(engine.shutdown());
-  EXPECT_FALSE(engine.is_created()) << "engine cleanup must complete despite a throwing hook";
-
-  EXPECT_EQ(static_cast<DoublyThrowingComponent *>(thrower)->shutdowns, 1u);
-  EXPECT_EQ(static_cast<LifecycleCountingComponent *>(last)->shutdowns, 1u);
-  EXPECT_EQ(static_cast<LifecycleCountingComponent *>(first)->shutdowns, 1u)
-      << "a throwing callback must not skip cleanup for the components after it";
-  ASSERT_EQ(shutdown_order.size(), 2u);
-  EXPECT_EQ(shutdown_order[0], "last");
-  EXPECT_EQ(shutdown_order[1], "first");
+  EXPECT_EQ(before->shutdowns, 2u);
+  EXPECT_EQ(failing->shutdowns, 2u);
+  EXPECT_EQ(after->shutdowns, 1u);
+  EXPECT_EQ(shutdown_order,
+            (std::vector<std::string>{"failing", "before", "after", "failing", "before"}));
 }
 
 TEST(StartupReadinessTest, CreateThenShutdownRunsComponentCleanup) {
@@ -1756,6 +1939,35 @@ TEST(CrossPartitionTest, LinkLatencyAdded) {
 // ============================================================================
 // Area 3: Async Event Causality Tests
 // ============================================================================
+
+TEST(AsyncCausalityTest, IdlePeerUsesLastCommittedTickAsAsyncFloor) {
+  for (const Tick horizon : {Tick{0}, Tick{100}}) {
+    SCOPED_TRACE(horizon);
+    // Repeat because the peer may drain before or after the posting handler.
+    for (unsigned repetition = 0; repetition < 16; ++repetition) {
+      SimulationEngine engine({.max_ticks = horizon, .num_threads = 2});
+      auto root = std::make_unique<CompositeComponent>("root");
+      Component *primary = root->add_child(std::make_unique<AsyncPrimaryComponent>("primary0"));
+      Component *peer = root->add_child(std::make_unique<CompositeComponent>("peer1"));
+      engine.topology().set_root(std::move(root));
+      ASSERT_NO_FATAL_FAILURE(build_with_manual_partitions(engine, 2, partition_by_name_suffix));
+
+      Tick callback_tick = TICK_MAX;
+      Event callback(peer, EventType::TIMER_CALLBACK,
+                     [&](Tick tick, Message *) { callback_tick = tick; });
+      Event post(primary, EventType::TIMER_CALLBACK, [&](Tick, Message *) {
+        engine.schedule_event_async(&callback, 5);
+        engine.primary_release();
+      });
+      engine.schedule_event_async(&post, 10);
+
+      const ExitStatus exit = engine.run();
+      EXPECT_EQ(callback_tick, 10u);
+      EXPECT_EQ(exit.cause, ExitCause::ALL_PRIMARIES_COMPLETED);
+      EXPECT_EQ(exit.tick, 10u);
+    }
+  }
+}
 
 TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   util::StringDiagnostic admission_diagnostic;

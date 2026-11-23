@@ -1112,8 +1112,12 @@ inline uint16_t f32_to_f16_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
 }
 
 inline uint16_t f32_to_bf16_sr(float val, uint32_t seed) {
-  return static_cast<uint16_t>(
-      f32_to_binary_float_sr(val, seed, 8, 7, 127, 127, -126, 0x7FFFu, 0x7F80u));
+  const uint32_t bits = std::bit_cast<uint32_t>(val);
+  if ((bits & 0x7fffffffu) > 0x7f800000u)
+    return static_cast<uint16_t>((bits >> 16) | 0x7fffu); // Signed canonical NaN.
+  // BF16 shares the F32 exponent, including zero for subnormals. Add the
+  // leading 16 seed bits at the precision discarded by truncation.
+  return static_cast<uint16_t>((bits + (seed >> 16)) >> 16);
 }
 
 /// @brief Convert F32 to BF16 SR with MODE.FP16_OVFL overflow handling.

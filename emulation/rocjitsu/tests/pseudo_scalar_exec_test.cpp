@@ -4,6 +4,7 @@
 /// @file pseudo_scalar_exec_test.cpp
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -14,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -67,7 +69,7 @@ std::optional<BaseEncodingWords> gfx1250_encoding(std::string_view mnemonic) {
 }
 
 struct PseudoScalarProfile {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   std::string_view name;
   EncodingLookup find_encoding;
   uint32_t setreg_op;
@@ -75,9 +77,9 @@ struct PseudoScalarProfile {
 };
 
 constexpr std::array<PseudoScalarProfile, 2> kProfiles{{
-    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
+    {rocjitsu::IsaFamily::Rdna4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
+    {rocjitsu::IsaFamily::Cdna5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
      cdna5::kSSetregImm32B32Sopk},
 }};
 
@@ -668,7 +670,7 @@ constexpr auto kSpecialParameters = make_special_parameters();
 
 class PseudoScalarFixture {
 public:
-  explicit PseudoScalarFixture(const PseudoScalarProfile &profile)
+  explicit PseudoScalarFixture(const PseudoScalarProfile &profile, uint32_t wave_size = 0)
       : profile(profile), gpu_memory(std::string(profile.name) + "_pseudo_scalar_memory"),
         l2(std::string(profile.name) + "_pseudo_scalar_l2") {
     config.arch = profile.arch;
@@ -676,11 +678,14 @@ public:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    compute_unit =
-        amdgpu::ComputeUnitCore::create(std::string(profile.name), config, &gpu_memory, &l2);
+    rocjitsu::test::initialize_compute_unit(compute_unit, std::string(profile.name), config,
+                                            &gpu_memory, &l2);
+    if (!compute_unit)
+      return;
     decoder = Decoder::create(profile.arch);
     if (compute_unit)
-      wavefront = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      wavefront =
+          compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
   }
 
   ~PseudoScalarFixture() {
@@ -773,6 +778,28 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
     EXPECT_TRUE(fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront)
                     .succeeded());
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
+  }
+}
+
+TEST(PseudoScalarSpecialSourceTest, Rdna4HalfTranscendentalsReadSpecialScalarSources) {
+  PseudoScalarFixture fixture(kProfiles[0], 64);
+  ASSERT_TRUE(fixture.ready());
+  fixture.wavefront->set_m0(0x4400u);
+  fixture.wavefront->set_exec_raw(0x440000004400ull);
+  fixture.wavefront->write_scc(true);
+  fixture.wavefront->set_fp_denorm_mode(0xf);
+  constexpr uint32_t dest = 4;
+  // gfx1201 returns sqrt(4) for M0 and either EXEC half, and sqrt(2^-24) for SCC.
+  for (uint32_t selector : {125u, 126u, 127u, 253u}) {
+    SCOPED_TRACE(selector);
+    const auto words = encode_vop3(fixture.profile, "v_s_sqrt_f16", dest, selector);
+    std::unique_ptr<Instruction> inst(decode_valid(*fixture.decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    fixture.compute_unit->write_sgpr(fixture.sgpr_base() + dest, 0xdeadbeef);
+    ASSERT_TRUE(
+        fixture.compute_unit->execute_instruction(inst.get(), *fixture.wavefront).succeeded());
+    EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + dest),
+              selector == 253u ? 0x0c00u : 0x4000u);
   }
 }
 

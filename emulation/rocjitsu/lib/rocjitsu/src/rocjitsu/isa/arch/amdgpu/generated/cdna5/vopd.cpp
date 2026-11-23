@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include <cstring>
 #include <format>
 #include <string>
 
@@ -122,6 +123,70 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
+amdgpu::Operation Vopd::operation(uint16_t op) {
+  switch (op) {
+  case kVopdFmacF32:
+    return amdgpu::Operation::V_DUAL_FMAC_F32;
+  case kVopdFmaakF32:
+    return amdgpu::Operation::V_DUAL_FMAAK_F32;
+  case kVopdFmamkF32:
+    return amdgpu::Operation::V_DUAL_FMAMK_F32;
+  case kVopdMulF32:
+    return amdgpu::Operation::V_DUAL_MUL_F32;
+  case kVopdAddF32:
+    return amdgpu::Operation::V_DUAL_ADD_F32;
+  case kVopdSubF32:
+    return amdgpu::Operation::V_DUAL_SUB_F32;
+  case kVopdSubrevF32:
+    return amdgpu::Operation::V_DUAL_SUBREV_F32;
+  case kVopdMulDx9ZeroF32:
+    return amdgpu::Operation::V_DUAL_MUL_DX9_ZERO_F32;
+  case kVopdMovB32:
+    return amdgpu::Operation::V_DUAL_MOV_B32;
+  case kVopdCndmaskB32:
+    return amdgpu::Operation::V_DUAL_CNDMASK_B32;
+  case kVopdMaxNumF32:
+    return amdgpu::Operation::V_DUAL_MAX_NUM_F32;
+  case kVopdMinNumF32:
+    return amdgpu::Operation::V_DUAL_MIN_NUM_F32;
+  case kVopdAddNcU32:
+    return amdgpu::Operation::V_DUAL_ADD_NC_U32;
+  case kVopdLshlrevB32:
+    return amdgpu::Operation::V_DUAL_LSHLREV_B32;
+  case kVopdBitop2B32:
+    return amdgpu::Operation::V_DUAL_BITOP2_B32;
+  case kVopdFmaF32:
+    return amdgpu::Operation::V_DUAL_FMA_F32;
+  case kVopdSubNcU32:
+    return amdgpu::Operation::V_DUAL_SUB_NC_U32;
+  case kVopdLshrrevB32:
+    return amdgpu::Operation::V_DUAL_LSHRREV_B32;
+  case kVopdAshrrevI32:
+    return amdgpu::Operation::V_DUAL_ASHRREV_I32;
+  case kVopdMaxI32:
+    return amdgpu::Operation::V_DUAL_MAX_I32;
+  case kVopdMinI32:
+    return amdgpu::Operation::V_DUAL_MIN_I32;
+  case kVopdFmaF64:
+    return amdgpu::Operation::V_DUAL_FMA_F64;
+  case kVopdAddF64:
+    return amdgpu::Operation::V_DUAL_ADD_F64;
+  case kVopdMulF64:
+    return amdgpu::Operation::V_DUAL_MUL_F64;
+  case kVopdMaxNumF64:
+    return amdgpu::Operation::V_DUAL_MAX_NUM_F64;
+  case kVopdMinNumF64:
+    return amdgpu::Operation::V_DUAL_MIN_NUM_F64;
+  default:
+    return amdgpu::Operation::Unknown;
+  }
+}
+
+void Vopd::implicit_uses(RegisterSet &uses) const {
+  if (x_.uses_vcc || y_.uses_vcc)
+    uses.expand(RegisterRef{RegClass::VCC, 0, 1});
+}
+
 bool Vopd::is_float64_op(uint16_t op) {
   switch (op) {
   case kVopdFmaF64:
@@ -179,28 +244,28 @@ Vopd::Vopd(const MachineInst *inst)
       srcx2_(32, OperandType::OPR_VGPR, 0), srcy0_(32, OperandType::OPR_SRC, 0),
       srcy1_(32, OperandType::OPR_VGPR, 0), srcy2_(32, OperandType::OPR_VGPR, 0) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
-  raw_encoding_ = words;
-  word0_ = words[0];
-  word1_ = words[1];
+  const uint32_t word0 = words[0];
+  const uint32_t word1 = words[1];
+  uint32_t word2 = 0;
 
-  if ((word0_ >> 24) == 0xCF) {
+  if ((word0 >> 24) == 0xCF) {
     format_ = Format::Vopd3;
     flags_ |= VALU;
     size_ = 12;
     encoding_id_ = 0xCF;
-    word2_ = words[2];
-    opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
-    opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
-    uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
-    uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-    negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
-    negy_ = static_cast<uint8_t>((word1_ >> 12) & 0x7);
-    uint16_t vsrcx1 = static_cast<uint16_t>((word1_ >> 16) & 0xFF);
-    uint16_t vsrcx2 = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
-    uint16_t vdstx = static_cast<uint16_t>(word2_ & 0xFF);
-    uint16_t vsrcy1 = static_cast<uint16_t>((word2_ >> 8) & 0xFF);
-    uint16_t vsrcy2 = static_cast<uint16_t>((word2_ >> 16) & 0xFF);
-    uint16_t vdsty = static_cast<uint16_t>((word2_ >> 24) & 0xFF);
+    word2 = words[2];
+    opx_ = static_cast<uint16_t>((word0 >> 18) & 0x3F);
+    opy_ = static_cast<uint16_t>((word0 >> 12) & 0x3F);
+    uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+    uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+    negx_ = static_cast<uint8_t>((word1 >> 9) & 0x7);
+    negy_ = static_cast<uint8_t>((word1 >> 12) & 0x7);
+    uint16_t vsrcx1 = static_cast<uint16_t>((word1 >> 16) & 0xFF);
+    uint16_t vsrcx2 = static_cast<uint16_t>((word1 >> 24) & 0xFF);
+    uint16_t vdstx = static_cast<uint16_t>(word2 & 0xFF);
+    uint16_t vsrcy1 = static_cast<uint16_t>((word2 >> 8) & 0xFF);
+    uint16_t vsrcy2 = static_cast<uint16_t>((word2 >> 16) & 0xFF);
+    uint16_t vdsty = static_cast<uint16_t>((word2 >> 24) & 0xFF);
 
     uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
@@ -210,9 +275,9 @@ Vopd::Vopd(const MachineInst *inst)
     srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
-    srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
+    srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(32, OperandType::OPR_SREG, vsrcx2)
                                        : Operand(x_bits, OperandType::OPR_VGPR, vsrcx2);
-    srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
+    srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(32, OperandType::OPR_SREG, vsrcy2)
                                        : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
     if (opx_ == kVopdCndmaskB32)
       srcx2_.set_wave_mask();
@@ -222,21 +287,21 @@ Vopd::Vopd(const MachineInst *inst)
     format_ = Format::VopdXy;
     flags_ |= VALU;
     encoding_id_ = 0x32;
-    opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
-    opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
-    uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
-    uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
-    uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-    uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
-    uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
-    uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
+    opx_ = static_cast<uint16_t>((word0 >> 22) & 0xF);
+    opy_ = static_cast<uint16_t>((word0 >> 17) & 0x1F);
+    uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+    uint16_t vsrcx1 = static_cast<uint16_t>((word0 >> 9) & 0xFF);
+    uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+    uint16_t vsrcy1 = static_cast<uint16_t>((word1 >> 9) & 0xFF);
+    uint16_t vdstx = static_cast<uint16_t>((word1 >> 24) & 0xFF);
+    uint16_t vdsty_hi = static_cast<uint16_t>((word1 >> 17) & 0x7F);
     uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
     has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == kVopdFmaakF32 || opx_ == kVopdFmamkF32 ||
                    opy_ == kVopdFmaakF32 || opy_ == kVopdFmamkF32;
     size_ = has_literal_ ? 12 : 8;
     if (has_literal_) {
-      word2_ = words[2];
-      literal_ = word2_;
+      word2 = words[2];
+      literal_ = word2;
     }
 
     uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
@@ -261,7 +326,12 @@ Vopd::Vopd(const MachineInst *inst)
   srcy2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 
   opcode_ = static_cast<uint16_t>((opx_ << 8) | opy_);
+  // Own the encoding so the decoded-instruction cache can keep this
+  // instruction after the fetch window it was decoded from is gone.
+  std::memcpy(raw_words_.data(), words, size_);
+  raw_encoding_ = raw_words_.data();
   init_operands();
+  set_amdgpu_operation(operation(opx_), operation(opy_));
   // Evaluate the qualified operand restrictions once, at decode.
   const bool vopd3 = format_ == Format::Vopd3;
   const auto bank_conflict = [](const Operand &a, const Operand &b) {

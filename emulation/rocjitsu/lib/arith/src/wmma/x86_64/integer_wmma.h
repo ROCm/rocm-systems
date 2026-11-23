@@ -1,124 +1,111 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Shared dense INT8/INT4 WMMA algorithm for AVX2 and AVX-512 VNNI backends.
-// Owns gfx11/gfx12 register layouts, signedness, and saturation stage ordering;
-// the Ops parameter supplies vector operations without changing those rules.
-
+// Dense integer WMMA factor layout and staged accumulation for packed SIMD dots.
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "common/compiler.h"
 #include "wmma/layout.h"
 
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
-// Compute an integer WMMA tile with validated modifiers and the selected
-// gfx11/gfx12 layout. Clamp selects staged signed saturation; otherwise D
-// wraps modulo 2^32. D may overlap A, B, or C.
-template <int Bits, int K, bool Clamp, typename Ops, int Lanes = 32, bool Rdna3 = false>
-void integer_wmma_impl(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
+// Evaluate a tile with validated flags. Each Dot handles the signedness and
+// native product width of its packed operands. D may overlap any source VGPR.
+template <int Bits, int K, int Lanes, bool Rdna3, int RowsPerBlock, typename Dot>
+void integer_wmma_tile(const Dot &dot, uint32_t *const *d, const uint32_t *const *a,
                        const uint32_t *const *b, const uint32_t *const *c) {
-  using V = typename Ops::V;
-  static_assert(!Rdna3 || K == 16);
+  using V = typename Dot::V;
   constexpr int Groups = Rdna3 ? Lanes / 16 : 1;
-  const int sign_a = (modifiers & RJ_ARITH_WMMA_SIGNED_A) ? 1 << (Bits - 1) : 0;
-  const int sign_b = (modifiers & RJ_ARITH_WMMA_SIGNED_B) ? 1 << (Bits - 1) : 0;
-  // Map logical K to a packed factor word, lane-group offset, and bit shift.
-  const auto location = [](int k, int &reg, int &lane, int &shift) {
-    int local = Rdna3 ? k : rocjitsu::arith::wmma_gfx12_packed_local(k);
-    reg = local * Bits / 32;
-    lane = Rdna3 ? 0 : 16 * ((k / 8) % 2);
-    shift = local * Bits % 32;
-  };
-  // Widen factors to signed 16-bit pairs, including unsigned bytes (0..255).
-  // Byte-pair saturation would lose information before GPU stage saturation.
-  uint32_t packed[Groups][2][K / 2][16];
+  constexpr int Rows = 16 / Groups;
+  constexpr int Block = RowsPerBlock < Rows ? RowsPerBlock : Rows;
+  constexpr int Chunks = 16 / Dot::width;
+  constexpr int Stages = !Dot::staged_clamp ? 1 : Rdna3 ? K / (Bits == 8 ? 2 : 4) : 2;
+  constexpr int Dots = K / (Stages * Dot::products);
+  static_assert(Rows % Block == 0 && K % (Stages * Dot::products) == 0);
+  alignas(64) uint32_t result[256 / Lanes][Lanes];
   for (int group = 0; group < Groups; ++group) {
-    for (int operand = 0; operand < 2; ++operand) {
-      const uint32_t *const *v = operand ? b : a;
-      int sign = operand ? sign_b : sign_a;
-      for (int k = 0; k < K; k += 2) {
-        int reg, lane, shift;
-        location(k, reg, lane, shift);
-        for (int index = 0; index < 16; index += Ops::width) {
-          V words = Ops::load(v[reg] + 16 * group + lane + index);
-          // Extract and sign- or zero-extend one factor into each 32-bit lane.
-          const auto extend = [&](int offset) {
-            V value = Ops::bit_and(Ops::shift_right(words, offset), Ops::splat((1 << Bits) - 1));
-            return Ops::sub(Ops::bit_xor(value, Ops::splat(sign)), Ops::splat(sign));
-          };
-          V pair = Ops::bit_or(Ops::bit_and(extend(shift), Ops::splat(0xffff)),
-                               Ops::shift_left16(extend(shift + Bits)));
-          Ops::store(packed[group][operand][k / 2] + index, pair);
+    // gfx11 interleaves rows from independent sixteen-lane factor groups.
+    // gfx12 Wave64 storage has already been mapped into Wave32 register sections.
+    alignas(64) uint32_t left[Stages][Dots][16];
+    V right[Stages][Dots][Chunks], bias[Stages][Chunks];
+    for (int stage = 0; stage < Stages; ++stage) {
+      for (auto &value : bias[stage]) {
+        value = V{};
+      }
+      RJ_ARITH_UNROLL(8)
+      for (int q = 0; q < Dots; ++q) {
+        int step = q * Dot::products;
+        int k = Rdna3               ? stage * (K / Stages) + step
+                : Dot::staged_clamp ? wmma_gfx12_integer_stage_k(stage, step)
+                                    : step;
+        int local = Rdna3 ? k : wmma_gfx12_packed_local(k);
+        int reg = local * Bits / 32;
+        int lane = 16 * (Rdna3 ? group : (k / 8) % 2);
+        for (int chunk = 0; chunk < Chunks; ++chunk) {
+          int col = chunk * Dot::width;
+          V av = dot.unpack_a(dot.load(a[reg] + lane + col), local);
+          V bv = dot.unpack_b(dot.load(b[reg] + lane + col), local);
+          dot.store(left[stage][q] + col, av);
+          right[stage][q][chunk] = bv;
+          if constexpr (Dot::biased) {
+            bias[stage][chunk] = dot.sum_b(bias[stage][chunk], bv);
+          }
+        }
+      }
+      if constexpr (Dot::biased) {
+        for (auto &value : bias[stage]) {
+          value = dot.bias_correction(value);
+        }
+      }
+    }
+    for (int first = 0; first < Rows; first += Block) {
+      typename Dot::Accumulator acc[Block][Chunks];
+      uint32_t *out[Block];
+      for (int i = 0; i < Block; ++i) {
+        int row = (first + i) * Groups + group;
+        int reg = Rdna3 ? first + i : row % 8;
+        int lane = 16 * (Rdna3 ? group : row / 8);
+        out[i] = result[reg] + lane;
+        for (int chunk = 0; chunk < Chunks; ++chunk) {
+          acc[i][chunk] = dot.accumulator(dot.load(c[reg] + lane + chunk * Dot::width));
+        }
+      }
+      for (int stage = 0; stage < Stages; ++stage) {
+        V sums[Block][Chunks];
+        for (int i = 0; i < Block; ++i) {
+          for (int chunk = 0; chunk < Chunks; ++chunk) {
+            sums[i][chunk] = dot.start_stage(acc[i][chunk], bias[stage][chunk]);
+          }
+        }
+        RJ_ARITH_UNROLL(8)
+        for (int q = 0; q < Dots; ++q) {
+          for (int i = 0; i < Block; ++i) {
+            V av = dot.broadcast(left[stage][q][(first + i) * Groups + group]);
+            for (int chunk = 0; chunk < Chunks; ++chunk) {
+              sums[i][chunk] = dot.product(sums[i][chunk], av, right[stage][q][chunk]);
+            }
+          }
+        }
+        for (int i = 0; i < Block; ++i) {
+          for (int chunk = 0; chunk < Chunks; ++chunk) {
+            dot.finish_stage(acc[i][chunk], sums[i][chunk]);
+          }
+        }
+      }
+      for (int i = 0; i < Block; ++i) {
+        for (int chunk = 0; chunk < Chunks; ++chunk) {
+          dot.store(out[i] + chunk * Dot::width, dot.result(acc[i][chunk]));
         }
       }
     }
   }
-
-  uint32_t result[256 / Lanes][Lanes];
-  constexpr bool clamp = Clamp;
-  // RDNA3 clamps adjacent pairs (IU8) or quartets (IU4); RDNA4 has
-  // two stages, with the physical product order selected below.
-  constexpr int stages = !Clamp ? 1 : Rdna3 ? K / (Bits == 8 ? 2 : 4) : 2;
-  for (int row = 0; row < 16; ++row) {
-    // RDNA3 interleaves output rows across replicated sixteen-lane groups.
-    int group = Rdna3 ? row % Groups : 0;
-    int reg = Rdna3 ? row / Groups : row % 8;
-    int lane = Rdna3 ? 16 * group : 16 * (row / 8);
-    V acc[16 / Ops::width];
-    for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
-      acc[chunk] = Ops::load(c[reg] + lane + chunk * Ops::width);
-    }
-    for (int stage = 0; stage < stages; ++stage) {
-      V sums[16 / Ops::width];
-      for (auto &sum : sums) {
-        sum = Ops::splat(0);
-      }
-      for (int local = 0; local < K / stages; local += 2) {
-        int k = Rdna3   ? stage * (K / stages) + local
-                : clamp ? rocjitsu::arith::wmma_gfx12_integer_stage_k(stage, local)
-                        : local;
-        V left = Ops::splat_bits(packed[group][0][k / 2][row]);
-        for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
-          sums[chunk] =
-              Ops::dot(sums[chunk], left, Ops::load(packed[group][1][k / 2] + chunk * Ops::width));
-        }
-      }
-      for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
-        V sum = Ops::add(acc[chunk], sums[chunk]);
-        // Each stage's dot fits int32. Saturate its addition to the current
-        // accumulator before starting the next hardware stage.
-        if (clamp) {
-          V overflow = Ops::bit_and(Ops::bit_xor(acc[chunk], sum), Ops::bit_xor(sums[chunk], sum));
-          V limit = Ops::bit_xor(Ops::sign(acc[chunk]), Ops::splat(INT32_MAX));
-          sum = Ops::select_negative(overflow, limit, sum);
-        }
-        acc[chunk] = sum;
-      }
-    }
-    for (int chunk = 0; chunk < 16 / Ops::width; ++chunk) {
-      Ops::store(result[reg] + lane + chunk * Ops::width, acc[chunk]);
-    }
-  }
-  // All source reads precede writes, including when D shares A/B/C VGPRs.
+  // Complete source reads before ascending VGPR writes, including repeated D pointers.
   for (int reg = 0; reg < 256 / Lanes; ++reg) {
-    for (int lane = 0; lane < Lanes; lane += Ops::width) {
-      Ops::store(d[reg] + lane, Ops::load(result[reg] + lane));
+    for (int lane = 0; lane < Lanes; lane += Dot::width) {
+      dot.store(d[reg] + lane, dot.load(result[reg] + lane));
     }
-  }
-}
-
-// Compute integer A*B+C with the CLAMP mode in validated modifiers.
-// D may alias inputs; signedness and layout follow the template parameters.
-template <int Bits, int K, typename Ops, int Lanes = 32, bool Rdna3 = false>
-void integer_wmma(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
-                  const uint32_t *const *b, const uint32_t *const *c) {
-  if (modifiers & RJ_ARITH_WMMA_CLAMP) {
-    integer_wmma_impl<Bits, K, true, Ops, Lanes, Rdna3>(modifiers, d, a, b, c);
-  } else {
-    integer_wmma_impl<Bits, K, false, Ops, Lanes, Rdna3>(modifiers, d, a, b, c);
   }
 }
 

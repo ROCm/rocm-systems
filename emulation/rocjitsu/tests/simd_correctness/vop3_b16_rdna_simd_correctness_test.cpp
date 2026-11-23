@@ -16,7 +16,9 @@
 /// destination's high half on RDNA. The CU and decoder are built for RDNA3;
 /// encoding marker is 0x35<<26.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -112,13 +114,15 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop3_b16_mem"), l2("vop3_b16_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+    cfg.arch = rocjitsu::IsaFamily::Rdna3;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_b16", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_b16", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
+    decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -168,6 +172,8 @@ void check_binary(const BinCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -204,6 +210,8 @@ void check_not_b16(uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -237,6 +245,8 @@ void check_cndmask_b16(uint64_t exec, uint64_t sel) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t sb = fx.wf->sgpr_alloc().base;
@@ -329,6 +339,8 @@ void check_mov_b16(uint64_t exec, uint32_t omod, uint32_t clamp) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};

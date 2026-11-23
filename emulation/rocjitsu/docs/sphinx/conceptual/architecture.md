@@ -1,12 +1,12 @@
 ---
 myst:
     html_meta:
-        "description": "Architecture and component layers of rocJITsu, covering the simulation engine, configuration, code, ISA, VM, and KMD layers plus the three execution strategies."
-        "keywords": "rocJITsu, ROCm, architecture, simulation, DBT, DBI, GPU emulation, PDES, layers"
+        "description": "Architecture and component layers of rocjitsu, covering the simulation engine, configuration, code, ISA, VM, and KMD layers plus the three execution strategies."
+        "keywords": "rocjitsu, ROCm, architecture, simulation, DBT, DBI, GPU emulation, PDES, layers"
 ---
 # Architecture and component layers
 
-rocJITsu is organized into layered components that together form a
+rocjitsu is organized into layered components that together form a
 full-system GPU emulation toolkit. Each layer has a well-defined
 responsibility and maps to a distinct source directory. The three
 execution strategies --- simulation, dynamic binary translation (DBT),
@@ -144,12 +144,12 @@ shared using `memfd` file descriptors passed via `SCM_RIGHTS`.
 
 A header-heavy C++ utility library providing bit manipulation,
 floating-point format conversions, SIMD helpers, arena allocators,
-spinlocks, intrusive lists, logging, and exception types. Both rocJITsu
+spinlocks, intrusive lists, logging, and exception types. Both rocjitsu
 and simdojo depend on it.
 
 ## Execution strategies
 
-rocJITsu supports three execution strategies. Each uses a different
+rocjitsu supports three execution strategies. Each uses a different
 combination of the layers described above.
 
 ### Simulation
@@ -181,7 +181,7 @@ simulated VM or by real hardware through an HSA tools hook.
 
 Translation is exposed through the `rj_code_translate` function in the
 public C API, which takes a source code object and a
-`rj_code_dbt_options_t` specifying the guest and host architectures.
+`rj_code_dbt_options_t` specifying the concrete guest and host targets.
 
 ### Dynamic binary instrumentation
 

@@ -21,6 +21,7 @@ real hardware. Supports three execution strategies:
 | CDNA3&trade; | gfx94x | GFX9 | Beta |
 | CDNA4&trade; | gfx950 | GFX9 | Beta |
 | CDNA5&trade; | gfx1250 | GFX12.5 | Beta |
+| CDNA5&trade; | gfx1251 | GFX12.5 | Experimental |
 | RDNA1&trade; | gfx1010 | GFX10 | Experimental |
 | RDNA2&trade; | gfx1030 | GFX10 | Experimental |
 | RDNA3&trade; | gfx110x | GFX11 | Beta |
@@ -176,6 +177,7 @@ workers. Scripts, tests, interactive shells, and notebooks use the same library.
 | [Simdojo Engine](docs/simdojo.md) | PDES simulation framework |
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
+| [Fault Injection](docs/fault-injection.md) | Offline mutation architecture, features, target coverage, and limitations |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
 | [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 

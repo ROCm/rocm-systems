@@ -12,9 +12,12 @@
 
 #include <sys/wait.h>
 
+#include <algorithm>
 #include <csignal>
+#include <cstdio>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -23,6 +26,7 @@
 #include "AsanCheck.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
+#include "fakes/hip_fakes.h"
 #include "fakes/net_ib_cast_p2p_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "net-ib-cast-test-common.h"
@@ -76,6 +80,7 @@ class NetIbCastGinMicrotest : public ::testing::Test {
     netConfig_.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
   }
   void TearDown() override {
+    IbCastMaxPostSendBytes = UINT32_MAX;
     NetIbCastResetGlobals();
     NetIbCastResetInitRefCount();
     ResetIbvwrapFakes();
@@ -172,10 +177,12 @@ TEST_F(NetIbCastGinInitMicrotest, RmaProxyInit_DeviceDiscoveryFails_Fails) {
 }
 
 TEST_F(NetIbCastGinMicrotest, GinProperties_AdvertiseStrongAndVaSignals) {
-  ncclGinProperties_v14_t props{};
+  ncclGinProperties_t props{};
+  props.barrierOptions = (ncclGinBarrierOptions_t)-1;
   ASSERT_EQ(IbCastGinIbGetGinProperties(&props), ncclSuccess);
   EXPECT_TRUE(props.supportsStrongSignals);
   EXPECT_TRUE(props.supportsVASignals);
+  EXPECT_EQ(props.barrierOptions, NCCL_GIN_BARRIER_DEFAULT);
 }
 
 TEST_F(NetIbCastGinMicrotest, RmaProperties_DoNotClaimSignalsFlushPuts) {
@@ -239,7 +246,7 @@ TEST_F(NetIbCastGinMicrotestIsolated, GdrSupport_NeitherPeermemNorDmaBuf_Refuses
     EXPECT_FALSE(gdr);
     EXPECT_EQ(IbCastGinIbGdrGpuSupport(false), ncclInvalidUsage);
     void* collComm = nullptr;
-    EXPECT_EQ(IbCastRmaIbProxyConnect(nullptr, nullptr, 2, 0, nullptr, &collComm), ncclInvalidUsage);
+    EXPECT_EQ(IbCastRmaIbProxyConnect(nullptr, nullptr, 2, 0, nullptr, &collComm, nullptr), ncclInvalidUsage);
   });
 }
 
@@ -391,6 +398,24 @@ TEST_F(NetIbCastGinRingMicrotest, AllGather_AnyFailure_ReleasesWhatWasRegistered
   }
 }
 
+// A set abort flag ends the ring even though the peers never complete.
+TEST_F(NetIbCastGinRingMicrotest, AllGather_Aborted_StopsPollingAndReleasesWhatWasRegistered) {
+  char out[3 * 4];
+  base_ = out;
+  int deregs = 0;
+  ScopedHook dereg(g_ibvDeregMr, [&](struct ibv_mr*) {
+    deregs++;
+    return ncclSuccess;
+  });
+  volatile uint32_t abortFlag = 1;
+  cComm_.abortFlag = &abortFlag;
+  pendingTests_ = 1000;  // stands in for peers that never answer
+  EXPECT_EQ(IbCastGinIbAllGather(&cComm_, out, out, 4), ncclInternalError);
+  EXPECT_EQ(sends_.size(), 1u);
+  EXPECT_EQ(test_.calls, 2);
+  EXPECT_EQ(deregs, 2);
+}
+
 // allGather stand-in for AllToAll: rank r's row j is the chunk r sends to rank j, "rj".
 ncclResult_t ScriptedAllGather(struct CastIbGinCollComm* cComm, void* src, void* recv, size_t len) {
   for (int r = 0; r < cComm->nranks; r++) {
@@ -455,7 +480,7 @@ TEST_F(NetIbCastGinConnectMicrotest, Connect_RetriesUntilBothSidesAreUpAndFillsT
   int h0, h1;
   void* handles[2] = {&h0, &h1};
   void* collComm = nullptr;
-  ASSERT_EQ(IbCastRmaIbProxy.connect(&netConfig_, handles, 2, 1, &lComm_, &collComm), ncclSuccess);
+  ASSERT_EQ(IbCastRmaIbProxy.connect(&netConfig_, handles, 2, 1, &lComm_, &collComm, nullptr), ncclSuccess);
   auto* c = static_cast<struct CastIbGinCollComm*>(collComm);
   ASSERT_NE(c, nullptr);
   EXPECT_EQ(c->rank, 1);
@@ -485,42 +510,62 @@ TEST_F(NetIbCastGinConnectMicrotest, Connect_RetriesUntilBothSidesAreUpAndFillsT
   EXPECT_EQ(closeSend.calls, 1);
 }
 
+// ncclCommAbort during connect: the loop gives up instead of waiting for a peer that never comes, and closes the
+// side it already connected.
+TEST_F(NetIbCastGinConnectMicrotest, Connect_Aborted_StopsWaitingAndClosesWhatItOpened) {
+  acceptRefusals_ = 1000;  // stands in for a peer that never connects back
+  volatile uint32_t abortFlag = 1;
+  int h0, h1;
+  void* handles[2] = {&h0, &h1};
+  void* collComm = nullptr;
+  ScopedHook closeSend(g_ibCastCloseSend, [&](void* comm) {
+    EXPECT_EQ(comm, send_.get());
+    return ncclSuccess;
+  });
+  EXPECT_EQ(IbCastRmaIbProxy.connect(&netConfig_, handles, 2, 1, &lComm_, &collComm, &abortFlag), ncclInternalError);
+  EXPECT_EQ(collComm, nullptr);
+  EXPECT_EQ(accept_.calls, 1);
+  EXPECT_EQ(closeSend.calls, 1);
+}
+
 TEST_F(NetIbCastGinConnectMicrotest, Connect_GinTrafficClassWinsOverTheIbOne) {
   void* handles[2] = {nullptr, nullptr};
   void* collComm = nullptr;
   params_.Set("IB_TC", 40);
-  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclSuccess);
+  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclSuccess);
   free(collComm);
   params_.Set("GIN_IB_TC", 104);
-  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclSuccess);
+  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclSuccess);
   free(collComm);
   EXPECT_EQ(connectTcs_, (std::vector<int>{40, 104}));
 }
 
 TEST_F(NetIbCastGinConnectMicrotest, Connect_ConnectOrAcceptFails_ReturnsTheError) {
-  if (kAsan) GTEST_SKIP() << "the failed connect leaks the coll comm";
   void* handles[2] = {nullptr, nullptr};
   void* collComm = reinterpret_cast<void*>(0x1);
   {
     ScopedHook fails(g_ibCastConnectImpl, [](void*, int, void*, void**, ncclNetDeviceHandle_t**, int) {
       return ncclRemoteError;
     });
-    EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclRemoteError);
+    EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclRemoteError);
     EXPECT_EQ(collComm, nullptr);
   }
 }
 
-// The coll comm and the send comm already connected are left behind when accept fails.
-// Pins AICOMRCCL-3094; a fix flips this pin.
-TEST_F(NetIbCastGinConnectMicrotest, Connect_KnownBug_AcceptFailureLeavesTheSendCommOpen) {
-  if (kAsan) GTEST_SKIP() << "the failed connect leaks the coll comm";
+// An accept failure goes through fail:, which closes the send comm already connected and frees the coll comm, as
+// upstream net_ib/gin.cc does (AICOMRCCL-3094).
+TEST_F(NetIbCastGinConnectMicrotest, Connect_AcceptFailure_ClosesTheSendComm) {
   void* handles[2] = {nullptr, nullptr};
   void* collComm = nullptr;
   ScopedHook fails(g_ibCastAccept, [](void*, void**, ncclNetDeviceHandle_t**) { return ncclSystemError; });
-  ScopedHook closeSend(g_ibCastCloseSend, [](void*) { return ncclSuccess; });
-  EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclSystemError);
+  ScopedHook closeSend(g_ibCastCloseSend, [&](void* comm) {
+    EXPECT_EQ(comm, send_.get());
+    return ncclSuccess;
+  });
+  EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclSystemError);
+  EXPECT_EQ(collComm, nullptr);
   EXPECT_EQ(connect_.calls, 1);
-  EXPECT_EQ(closeSend.calls, 0);
+  EXPECT_EQ(closeSend.calls, 1);
 }
 
 TEST_F(NetIbCastGinMicrotest, CloseColl_NullIsANoOpAndCloseErrorsArePassedUp) {
@@ -571,18 +616,22 @@ class NetIbCastGinContextMicrotest : public NetIbCastGinRingMicrotest {
     }
     NetIbCastGinRingMicrotest::TearDown();
   }
-  ncclResult_t Create(int nContexts, int rankStride, void** ctx) {
+  // RMA v17: the peers to connect to arrive as a sorted peerArray (empty means none but self).
+  ncclResult_t Create(int nContexts, std::vector<int> peers, void** ctx) {
     ncclRmaConfig_t config{};
     config.nContexts = nContexts;
     config.trafficClass = 72;
-    config.rankStride = rankStride;
+    config.peerArray = peers.empty() ? nullptr : peers.data();
+    config.peerArrayCount = (int)peers.size();
     ncclResult_t res = IbCastRmaIbProxy.createContext(&cComm_, &config, ctx);
     if (res == ncclSuccess) contexts_.push_back(static_cast<struct IbCastRmaIbProxyCtx*>(*ctx));
     return res;
   }
 
+  const std::vector<int> kAllPeers{0, 1, 2, 3};
   std::vector<struct IbCastRmaIbProxyCtx*> contexts_;
   std::vector<int> connectPeers_, acceptPeers_;
+  std::vector<int> connectChIds_, acceptChIds_;  // the channel id each call passed, or -1 for none
   std::deque<ZeroedPtr<ncclIbSendComm>> peerSends_;
   std::deque<ZeroedPtr<ncclIbRecvComm>> peerRecvs_;
   struct ncclIbListenComm lComm_ {};
@@ -614,18 +663,22 @@ class NetIbCastGinContextMicrotest : public NetIbCastGinRingMicrotest {
     return ncclSuccess;
   }
   HookOf<decltype(g_ibCastConnectImpl)> connect_{
-      g_ibCastConnectImpl, [this](void* ctx, int, void* handle, void** sendComm, ncclNetDeviceHandle_t**, int tc) {
+      g_ibCastConnectImpl,
+      [this](void* ctx, int, void* handle, void** sendComm, ncclNetDeviceHandle_t** devHandle, int tc) {
         const struct ncclIbHandle* h = (const struct ncclIbHandle*)handle;
         EXPECT_TRUE(h->isRMA);
         connectPeers_.push_back((int)(h->magic - 0x100));
+        connectChIds_.push_back(devHandle ? ((ncclNet_ctxt_t*)devHandle)->chId : -1);
         *sendComm = peerSends_[connectPeers_.size() - 1].get();
         return ncclSuccess;
       }};
-  HookOf<decltype(g_ibCastAccept)> accept_{g_ibCastAccept, [this](void*, void** recvComm, ncclNetDeviceHandle_t**) {
-                                             acceptPeers_.push_back(0);
-                                             *recvComm = peerRecvs_[acceptPeers_.size() - 1].get();
-                                             return ncclSuccess;
-                                           }};
+  HookOf<decltype(g_ibCastAccept)> accept_{
+      g_ibCastAccept, [this](void*, void** recvComm, ncclNetDeviceHandle_t** devHandle) {
+        acceptPeers_.push_back(0);
+        acceptChIds_.push_back(devHandle ? ((ncclNet_ctxt_t*)devHandle)->chId : -1);
+        *recvComm = peerRecvs_[acceptPeers_.size() - 1].get();
+        return ncclSuccess;
+      }};
 };
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachContext) {
@@ -635,7 +688,7 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachCont
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(2, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(2, kAllPeers, &ctx), ncclSuccess);
   auto* gc = static_cast<struct IbCastRmaIbProxyCtx*>(ctx);
   EXPECT_EQ(gc[0].nContexts, 2);
   EXPECT_EQ(gc[0].nranks, 4);
@@ -654,31 +707,82 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachCont
   EXPECT_EQ(sends_.size(), 8u * 3);  // 8 barriers of nranks - 1 steps
 }
 
-TEST_F(NetIbCastGinContextMicrotest, CreateContext_RankStride_ConnectsOnlyToThatStride) {
+// On AINIC the channel id picks a QP's uDMA pipeline (connect.cc reads it only in AINIC mode).
+// Every context passes its own id from the top half of the range, the same one for all of its
+// peers, on connect and accept alike.
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_EachContextPassesItsOwnTopRangeChannelId) {
   cComm_.allGather = HandleAllGather;
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(1, 2, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(3, kAllPeers, &ctx), ncclSuccess);
+  ASSERT_EQ(connectChIds_.size(), 12u);
+  ASSERT_EQ(acceptChIds_.size(), 12u);
+  std::set<int> ids;
+  for (int c = 0; c < 3; c++) {
+    const int id = connectChIds_[4 * c];
+    EXPECT_GE(id, MAXCHANNELS / 2) << c;
+    EXPECT_LT(id, MAXCHANNELS) << c;
+    for (int p = 0; p < 4; p++) {
+      EXPECT_EQ(connectChIds_[4 * c + p], id) << c << " " << p;
+      EXPECT_EQ(acceptChIds_[4 * c + p], id) << c << " " << p;
+    }
+    ids.insert(id);
+  }
+  EXPECT_EQ(ids.size(), 3u);
+}
+
+// After MAXCHANNELS / 2 contexts the ids wrap back to the top of the range, so they never leave its
+// top half (nor the range nccl_channel_ud_map covers).
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_ChannelIdsWrapWithinTheTopHalf) {
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  ibCastRmaContextChIds.store(MAXCHANNELS / 2 - 1);  // the last context before the wrap
+  void* ctx = nullptr;
+  ASSERT_EQ(Create(2, kAllPeers, &ctx), ncclSuccess);
+  ASSERT_EQ(connectChIds_.size(), 8u);
+  EXPECT_EQ(connectChIds_[0], MAXCHANNELS / 2);
+  EXPECT_EQ(connectChIds_[4], MAXCHANNELS - 1);
+}
+
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_PeerArray_ConnectsOnlyToListedPeers) {
+  // {1, 3} is what ncclRmaProxyCreateContext hands rank 1 at a rank stride of 2.
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  void* ctx = nullptr;
+  ASSERT_EQ(Create(1, {1, 3}, &ctx), ncclSuccess);
   EXPECT_EQ(connectPeers_, (std::vector<int>{1, 3}));
   auto* gc = static_cast<struct IbCastRmaIbProxyCtx*>(ctx);
   EXPECT_EQ(gc[0].fullSendComm[0], nullptr);
   EXPECT_EQ(gc[0].fullRecvComm[2], nullptr);
+  EXPECT_EQ(sends_.size(), 4u * 3);  // still a barrier on every one of the nranks rounds
 }
 
-TEST_F(NetIbCastGinContextMicrotest, CreateContext_NoRankStride_MeansEveryRank) {
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_EmptyPeerArray_ConnectsOnlyToSelf) {
   cComm_.allGather = HandleAllGather;
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(1, 0, &ctx), ncclSuccess);
-  EXPECT_EQ(connectPeers_, (std::vector<int>{1, 2, 3, 0}));
+  ASSERT_EQ(Create(1, {}, &ctx), ncclSuccess);
+  EXPECT_EQ(connectPeers_, (std::vector<int>{1}));
+  EXPECT_EQ(accept_.calls, 1);
+  auto* gc = static_cast<struct IbCastRmaIbProxyCtx*>(ctx);
+  EXPECT_NE(gc[0].fullSendComm[1], nullptr);
+  EXPECT_NE(gc[0].fullRecvComm[1], nullptr);
 }
 
-TEST_F(NetIbCastGinContextMicrotest, CreateContext_StrideThatDoesNotDivideTheRanks_IsRejected) {
-  void* ctx = reinterpret_cast<void*>(0x1);
-  EXPECT_EQ(Create(1, 3, &ctx), ncclInternalError);
-  EXPECT_EQ(listen_.calls, 0);
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_PeerArrayWithoutSelf_StillConnectsSelf) {
+  // Neither divides the ranks nor names this rank: no stride validation remains, and the self
+  // QP that iFlush uses is always built.
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  void* ctx = nullptr;
+  ASSERT_EQ(Create(1, {3}, &ctx), ncclSuccess);
+  EXPECT_EQ(connectPeers_, (std::vector<int>{1, 3}));
+  EXPECT_EQ(accept_.calls, 2);
 }
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_AnyStepFails_ReturnsNoContextAndClosesTheListener) {
@@ -688,12 +792,12 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_AnyStepFails_ReturnsNoContext
   void* ctx = reinterpret_cast<void*>(0x1);
   {
     ScopedHook listen(g_ibCastListen, [](void*, int, void*, void**) { return ncclSystemError; });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
     EXPECT_EQ(ctx, nullptr);
     EXPECT_EQ(closeListen_.calls, 0);
   }
   cComm_.allGather = FailingAllGather;
-  EXPECT_EQ(Create(1, 1, &ctx), ncclRemoteError);
+  EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclRemoteError);
   EXPECT_EQ(closeListen_.calls, 1);
   if (kAsan) GTEST_SKIP() << "a failure past the peer-comm arrays leaks them";
   cComm_.allGather = HandleAllGather;
@@ -701,15 +805,15 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_AnyStepFails_ReturnsNoContext
     ScopedHook fails(g_ibCastConnectImpl, [](void*, int, void*, void**, ncclNetDeviceHandle_t**, int) {
       return ncclSystemError;
     });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
   }
   {
     ScopedHook fails(g_ibCastAccept, [](void*, void**, ncclNetDeviceHandle_t**) { return ncclSystemError; });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
   }
   {
     ScopedHook fails(g_ibCastIsend, [](void*, void*, size_t, int, void*, void*, void**) { return ncclSystemError; });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);  // the barrier
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);  // the barrier
   }
   EXPECT_EQ(ctx, nullptr);
 }
@@ -730,10 +834,32 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_KnownBug_FailureLeavesConnect
   ScopedHook closeSend(g_ibCastCloseSend, [](void*) { return ncclSuccess; });
   ScopedHook closeRecv(g_ibCastCloseRecv, [](void*) { return ncclSuccess; });
   void* ctx = nullptr;
-  EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+  EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
   EXPECT_EQ(accept_.calls, 1);
   EXPECT_EQ(closeSend.calls, 0);
   EXPECT_EQ(closeRecv.calls, 0);
+}
+
+// ncclCommAbort while connecting the per-peer comms: the context build gives up and closes the listener.
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_Aborted_StopsWaitingForAPeer) {
+  if (kAsan) GTEST_SKIP() << "a failure past the peer-comm arrays leaks them";
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  int accepts = 0;
+  ScopedHook acceptLate(g_ibCastAccept, [&](void*, void** recvComm, ncclNetDeviceHandle_t**) {
+    // stands in for a peer that never connects back; the abort flag is already set, so one try is all it gets
+    ++accepts;
+    *recvComm = nullptr;
+    return ncclSuccess;
+  });
+  volatile uint32_t abortFlag = 1;
+  cComm_.abortFlag = &abortFlag;
+  void* ctx = reinterpret_cast<void*>(0x1);
+  EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclInternalError);
+  EXPECT_EQ(ctx, nullptr);
+  EXPECT_EQ(accepts, 1);
+  EXPECT_EQ(closeListen_.calls, 1);
 }
 
 TEST_F(NetIbCastGinContextMicrotest, DestroyContext_ClosesEveryPeerCommOfEveryContext) {
@@ -741,7 +867,7 @@ TEST_F(NetIbCastGinContextMicrotest, DestroyContext_ClosesEveryPeerCommOfEveryCo
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(2, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(2, kAllPeers, &ctx), ncclSuccess);
   ScopedHook closeRecv(g_ibCastCloseRecv, [](void*) { return ncclSuccess; });
   ScopedHook closeSend(g_ibCastCloseSend, [](void*) { return ncclSuccess; });
   ASSERT_EQ(IbCastRmaIbProxy.destroyContext(ctx), ncclSuccess);
@@ -757,7 +883,7 @@ TEST_F(NetIbCastGinContextMicrotest, DestroyContext_CloseFails_ReturnsTheError) 
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(1, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(1, kAllPeers, &ctx), ncclSuccess);
   {
     ScopedHook closeRecv(g_ibCastCloseRecv, [](void*) { return ncclSystemError; });
     EXPECT_EQ(IbCastRmaIbProxyDestroyContext(ctx), ncclSystemError);
@@ -862,6 +988,34 @@ class NetIbCastGinDataMicrotest : public NetIbCastGinMicrotest {
     dst_ = Handle(0x20, 0xa1, 0xb1);
     sig_ = Handle(0x30, 0xa2, 0xb2);
     recv_->devs[0].gpuFlush.sge.lkey = 0xf1;
+    IbCastMaxPostSendBytes = UINT32_MAX;
+    IbCastDevs[0].portAttr.max_msg_sz = 0;
+  }
+
+  // requested <= 0 leaves RCCL_IB_MAX_MSG_SIZE unset. A port max of 0 is no port cap.
+  void ApplyMaxMsgSize(int64_t requested, uint32_t portMax) {
+    if (requested > 0) params_.Set("RCCL_IB_MAX_MSG_SIZE", requested);
+    IbCastDevs[0].portAttr.max_msg_sz = portMax;
+    IbCastInitMaxPostSendBytes();
+  }
+
+  // Data WRs posted for one RDMA, in order. Lengths sum to size and addresses step by each chunk.
+  void ExpectDataChunks(size_t nData, ibv_wr_opcode opcode, uint64_t localBase, uint64_t remoteBase, uint32_t lkey,
+                        uint32_t rkey, uint32_t cap, size_t size, unsigned lastFlags) {
+    ASSERT_GE(posted_.size(), nData);
+    size_t off = 0;
+    for (size_t i = 0; i < nData; i++) {
+      const uint32_t chunk = size == 0 ? 0 : (uint32_t)std::min(size - off, (size_t)cap);
+      EXPECT_EQ(Posted(i).opcode, opcode) << i;
+      EXPECT_EQ(Posted(i).send_flags, i + 1 == nData ? lastFlags : 0u) << i;
+      EXPECT_EQ(postedSges_[i].addr, localBase + off) << i;
+      EXPECT_EQ(postedSges_[i].length, chunk) << i;
+      EXPECT_EQ(postedSges_[i].lkey, lkey) << i;
+      EXPECT_EQ(Posted(i).wr.rdma.remote_addr, remoteBase + off) << i;
+      EXPECT_EQ(Posted(i).wr.rdma.rkey, rkey) << i;
+      off += chunk;
+    }
+    EXPECT_EQ(off, size);
   }
   // A symmetric registration: rank r's buffer at base + r * 0x10000, with rkey rkey0 + r.
   struct IbCastRmaProxyMrHandle Handle(uintptr_t base, uint32_t lkey, uint32_t rkey0) {
@@ -955,6 +1109,174 @@ TEST_F(NetIbCastGinDataMicrotest, IPutSignal_WithData_ChainsAnUnsignaledWriteBef
   EXPECT_EQ(postedSges_[1].lkey, 0x5cu);
   EXPECT_EQ(Posted(0).wr_id, Posted(1).wr_id);
   EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+constexpr uint32_t kMiB = 1024u * 1024u;
+constexpr uint64_t kIPutLocal = 0x10u + 8;
+constexpr uint64_t kIPutRemote = 0x20u + 0x10000 + 16;
+constexpr uint32_t kIPutLkey = 0xa0u;
+constexpr uint32_t kIPutRkey = 0xb2u;
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_LargerThanTheCap_PostsChunksAndSignalsOnlyTheLast) {
+  constexpr uint32_t kCap = 2u * kMiB;
+  constexpr size_t kSize = 2u * kCap + 64;
+  ApplyMaxMsgSize(kCap, 0);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  EXPECT_EQ(postedQp_, &qp_);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kCap, kSize,
+                   IBV_SEND_SIGNALED);
+  auto* req = static_cast<struct ncclIbRequest*>(request);
+  EXPECT_EQ(req->events[0], 1);
+  EXPECT_EQ(Posted(0).wr_id, Posted(2).wr_id);
+  EXPECT_EQ(Posted(2).wr_id, (uint64_t)(req - send_->base.reqs));
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IGet_LargerThanTheCap_PostsChunksAndSignalsOnlyTheLast) {
+  constexpr uint32_t kCap = 2u * kMiB;
+  constexpr size_t kSize = 2u * kCap + 64;
+  constexpr uint64_t kLocal = 0x10u + 12;
+  constexpr uint64_t kRemote = 0x20u + 0x10000 + 4;
+  ApplyMaxMsgSize(kCap, 0);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iget(proxyCtx_, 0, 4, &dst_, kSize, 12, &src_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  ExpectDataChunks(3, IBV_WR_RDMA_READ, kLocal, kRemote, kIPutLkey, kIPutRkey, kCap, kSize, IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->type, NCCL_NET_IB_REQ_GIN_IGET);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPutSignal_LargerThanTheCap_LeavesTheAtomicAsTheSignaledTail) {
+  constexpr uint32_t kCap = 2u * kMiB;
+  constexpr size_t kSize = 2u * kCap + 64;
+  ApplyMaxMsgSize(kCap, 0);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iputSignal(proxyCtx_, 0, 0, &src_, kSize, 0, &dst_, 1, 8, &sig_, 5, NCCL_NET_SIGNAL_OP_ADD,
+                                         true, 0, &request),
+            ncclSuccess);
+  ASSERT_EQ(posted_.size(), 4u);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, 0x10u, 0x20u + 0x10000, kIPutLkey, kIPutRkey, kCap, kSize, 0u);
+  const struct ibv_send_wr sig = Posted(3);
+  EXPECT_EQ(sig.opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
+  EXPECT_EQ(sig.send_flags, (unsigned)IBV_SEND_SIGNALED);
+  EXPECT_EQ(sig.wr.atomic.remote_addr, 0x30u + 0x10000 + 8);
+  EXPECT_EQ(sig.wr.atomic.compare_add, 5u);
+  EXPECT_EQ(sig.wr.atomic.rkey, 0xb3u);
+  EXPECT_EQ(postedSges_[3].addr, (uint64_t)(uintptr_t)&send_->putSignalScratchpad);
+  EXPECT_EQ(postedSges_[3].lkey, 0x5cu);
+  EXPECT_EQ(Posted(0).wr_id, sig.wr_id);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_SizeZero_PostsOneSignaledZeroLengthWrite) {
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, 0, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 1u);
+  ExpectDataChunks(1, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, UINT32_MAX, 0,
+                   IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_UnsetEnvAndZeroPortMax_PostsOneWrite) {
+  constexpr size_t kSize = 8u * kMiB;
+  ApplyMaxMsgSize(-1, 0);
+  EXPECT_GT(IbCastMaxPostSendBytes, kSize);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 1u);
+  ExpectDataChunks(1, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, IbCastMaxPostSendBytes, kSize,
+                   IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_UnsetEnvAndPortMax_SplitsAtThePortValue) {
+  constexpr uint32_t kPort = 2u * kMiB;
+  constexpr size_t kSize = kPort + 256;
+  ApplyMaxMsgSize(-1, kPort);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kPort);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 2u);
+  ExpectDataChunks(2, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kPort, kSize,
+                   IBV_SEND_SIGNALED);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_Gfx1250AndUnsetEnv_SplitsAt256MiB) {
+  constexpr uint32_t kCap = 256u * kMiB;
+  constexpr size_t kSize = (size_t)kCap + 128;
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx1250:sramecc+:xnack-");
+    return hipSuccess;
+  });
+  ApplyMaxMsgSize(-1, 0);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kCap);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 2u);
+  ExpectDataChunks(2, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kCap, kSize,
+                   IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCapBelowOneMiB_PostsOneMiBChunks) {
+  constexpr size_t kSize = 2u * kMiB + 64;
+  ApplyMaxMsgSize(4096, 0);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kMiB, kSize,
+                   IBV_SEND_SIGNALED);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_PortMaxBelowOneMiB_PostsOneMiBChunks) {
+  constexpr size_t kSize = 2u * kMiB + 64;
+  ApplyMaxMsgSize(-1, 64u * 1024u);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kMiB, kSize,
+                   IBV_SEND_SIGNALED);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_UnalignedPortMax_RoundsTheCapDown) {
+  ApplyMaxMsgSize(-1, kMiB + 64);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_TwoPorts_UsesTheSmallerLimit) {
+  constexpr uint32_t kSmaller = 2u * kMiB;
+  IbCastNDevs = 2;
+  IbCastDevs[0].portAttr.max_msg_sz = 4u * kMiB;
+  IbCastDevs[1].portAttr.max_msg_sz = kSmaller;
+  IbCastInitMaxPostSendBytes();
+  EXPECT_EQ(IbCastMaxPostSendBytes, kSmaller);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCap_OverridesGfx1250AndThePort) {
+  constexpr uint32_t kRequested = 512u * kMiB;
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx1250:sramecc+:xnack-");
+    return hipSuccess;
+  });
+  ApplyMaxMsgSize(kRequested, 2u * kMiB);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kRequested);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_MoreChunksThanTheStackHolds_PostsThemFromTheHeap) {
+  constexpr int kChunks = IB_CAST_MAX_STACK_WRS + 1;
+  constexpr size_t kSize = (size_t)kMiB * (kChunks - 1) + 64;
+  ApplyMaxMsgSize(kMiB, 0);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), (size_t)kChunks);
+  ExpectDataChunks(kChunks, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kMiB, kSize,
+                   IBV_SEND_SIGNALED);
 }
 
 TEST_F(NetIbCastGinDataMicrotest, IPutSignal_SizeZeroOrNoDestination_PostsOnlyTheSignal) {

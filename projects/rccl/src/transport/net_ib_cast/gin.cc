@@ -5,6 +5,8 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+#include <atomic>
+
 #include "common_cast.h"
 #include "connect_cast.h"
 
@@ -117,10 +119,15 @@ ncclResult_t IbCastGinIbFinalize(void* ctx) {
 
 // v14 GIN plugins expose GIN capability flags via getGinProperties. IB-CAST's
 // IB proxy/GDAKI backends support both strong and VA signals.
-ncclResult_t IbCastGinIbGetGinProperties(ncclGinProperties_v14_t* ginProps) {
+ncclResult_t IbCastGinIbGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
+  ginProps->barrierOptions = NCCL_GIN_BARRIER_DEFAULT;
   return ncclSuccess;
+}
+
+static inline bool IbCastGinIbAborted(volatile uint32_t* abortFlag) {
+  return abortFlag && COMPILER_ATOMIC_LOAD(abortFlag, std::memory_order_acquire) != 0;
 }
 
 static ncclResult_t IbCastGinIbAllGather(struct CastIbGinCollComm* cComm, void* srcBuf, void* recvBuf, size_t len) {
@@ -131,6 +138,7 @@ static ncclResult_t IbCastGinIbAllGather(struct CastIbGinCollComm* cComm, void* 
   int speer;
   int rpeer;
   int step = 0;
+  bool aborted = false;
   void* rbuf;
   int tag;
 
@@ -172,12 +180,20 @@ static ncclResult_t IbCastGinIbAllGather(struct CastIbGinCollComm* cComm, void* 
           srequest = NULL;
         }
       }
+      if (IbCastGinIbAborted(cComm->abortFlag)) {
+        aborted = true;
+        status = ncclInternalError;
+        goto out;
+      }
     }
     speer = rpeer;
   }
 
 out:
-  if (status != ncclSuccess) {
+  if (aborted) {
+    INFO(NCCL_NET, "NET/IB/GIN: allgather aborted on rank %d/%d at step %d/%d", cComm->rank, cComm->nranks, step,
+         cComm->nranks - 1);
+  } else if (status != ncclSuccess) {
     WARN("NET/IB/GIN: allgather failed (res=%d) on rank %d/%d at step %d/%d", status, cComm->rank, cComm->nranks, step,
          cComm->nranks - 1);
   }
@@ -216,9 +232,11 @@ ncclResult_t IbCastGinIbP2PBarrier(struct CastIbGinCollComm* cComm) {
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
+ncclResult_t IbCastGinIbConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm,
+                                volatile uint32_t* abortFlag) {
   struct ncclIbListenComm* lComm = (struct ncclIbListenComm*)listenComm;
   struct CastIbGinCollComm* cCommArray = nullptr;
+  ncclResult_t ret = ncclSuccess;
   int next;
 
   *collComm = NULL;
@@ -228,14 +246,21 @@ ncclResult_t IbCastGinIbConnect(void* ctx, void* handles[], int nranks, int rank
   cComm->ctx = ctx;
   cComm->nranks = nranks;
   cComm->rank = rank;
+  cComm->abortFlag = abortFlag;
 
   next = (cComm->rank + 1) % nranks;
   do {
     if (cComm->sendComm == NULL) {
-      NCCLCHECK(IbCastConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL,
-                                  ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()));
+      NCCLCHECKGOTO(IbCastConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL,
+                                      ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()),
+                    ret, fail);
     }
-    if (cComm->recvComm == NULL) NCCLCHECK(netIbCast.accept(lComm, &cComm->recvComm, NULL));
+    if (cComm->recvComm == NULL) NCCLCHECKGOTO(netIbCast.accept(lComm, &cComm->recvComm, NULL), ret, fail);
+    if (IbCastGinIbAborted(abortFlag)) {
+      INFO(NCCL_NET, "NET/IB/GIN: connect aborted on rank %d/%d", rank, nranks);
+      ret = ncclInternalError;
+      goto fail;
+    }
   } while (cComm->sendComm == NULL || cComm->recvComm == NULL);
 
   cComm->getProperties = (ncclResult_t (*)(int dev, void* props))IbCastGetProperties;
@@ -249,6 +274,12 @@ ncclResult_t IbCastGinIbConnect(void* ctx, void* handles[], int nranks, int rank
 
   *collComm = cCommArray;
   return ncclSuccess;
+
+fail:
+  if (cComm->recvComm) netIbCast.closeRecv(cComm->recvComm);
+  if (cComm->sendComm) netIbCast.closeSend(cComm->sendComm);
+  free(cCommArray);
+  return ret;
 }
 
 ncclResult_t IbCastGinIbCloseColl(void* collComm) {
@@ -305,11 +336,11 @@ ncclResult_t IbCastGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void
 }
 
 ncclResult_t IbCastGinIbGdakiConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
-                                     void** collComm) {
+                                     void** collComm, volatile uint32_t* abortFlag) {
   // Check the current GPU supports GDR
   NCCLCHECK(IbCastGinIbGdrGpuSupport(/*gdaki*/ true));
 
-  NCCLCHECK(IbCastGinIbConnect(ctx, handles, nranks, rank, listenComm, collComm));
+  NCCLCHECK(IbCastGinIbConnect(ctx, handles, nranks, rank, listenComm, collComm, abortFlag));
 
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)*collComm;
   cComm->getProperties = (ncclResult_t (*)(int dev, void* props))IbCastGinIbGdakiGetProperties;
@@ -394,12 +425,12 @@ ncclResult_t IbCastRmaIbProxyGetProperties(int dev, ncclNetProperties_t* props) 
 }
 
 ncclResult_t IbCastRmaIbProxyConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
-                                     void** collComm) {
+                                     void** collComm, volatile uint32_t* abortFlag) {
   // Check the current GPU supports GDR
   NCCLCHECK(IbCastGinIbGdrGpuSupport(/*gdaki*/ false));
 
   // Connect.
-  NCCLCHECK(IbCastGinIbConnect(ctx, handles, nranks, rank, listenComm, collComm));
+  NCCLCHECK(IbCastGinIbConnect(ctx, handles, nranks, rank, listenComm, collComm, abortFlag));
 
   return ncclSuccess;
 }
@@ -411,18 +442,14 @@ struct IbCastRmaIbProxyCtx {
   int nContexts;
 };
 
+// [RCCL] Each RMA context takes its own top-half chId, so on AINIC it gets its own uDMA pipeline; never sent to peer.
+static std::atomic<unsigned> ibCastRmaContextChIds{0};
+
 ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** ginCtx) {
   ncclResult_t ret = ncclSuccess;
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
   // Make sure all QP we create use the provided traffic class.
   IbCastSetTrafficClass(cComm->ctx, config->trafficClass);
-
-  int rankStride = config->rankStride <= 0 ? 1 : config->rankStride;
-  if ((cComm->nranks % rankStride) != 0) {
-    WARN("RMA_IB_PROXY create context: invalid rank stride %d, nranks (%d) must be a multiple of it", rankStride,
-         cComm->nranks);
-    return ncclInternalError;
-  }
 
   int nranks;
   struct IbCastRmaIbProxyCtx* ginProxyCtx = NULL;
@@ -449,19 +476,38 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullSendComm, sizeof(void*) * nranks), ret, end);
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
+    ncclNet_ctxt_t chCtxt = {};
+    chCtxt.chId =
+      (MAXCHANNELS - 1) - (int)(ibCastRmaContextChIds.fetch_add(1, std::memory_order_relaxed) % (MAXCHANNELS / 2));
 
-    for (int i = 0; i < nranks; i += rankStride) {
+    // RMA v17 replaces rankStride with a sorted peerArray. Iterate through all ranks and barrier on each round to
+    // handle non-uniform peer counts across ranks; always connect to self (the self-QP serves iFlush).
+    for (int i = 0; i < nranks; i++) {
       int connectPeer = (cComm->rank + i) % nranks;
       int acceptPeer = (cComm->rank - i + nranks) % nranks;
+      bool wantConnect = (connectPeer == cComm->rank);
+      bool wantAccept = (acceptPeer == cComm->rank);
+      if (config->peerArrayCount > 0) {
+        wantConnect |= (bool)bsearch(&connectPeer, config->peerArray, config->peerArrayCount, sizeof(int), compareInts);
+        wantAccept |= (bool)bsearch(&acceptPeer, config->peerArray, config->peerArrayCount, sizeof(int), compareInts);
+      }
       do {
-        if (gc->fullSendComm[connectPeer] == NULL)
+        if (wantConnect && gc->fullSendComm[connectPeer] == NULL)
           NCCLCHECKGOTO(IbCastConnectImpl(cComm->ctx, cComm->dev, handles + NCCL_NET_HANDLE_MAXSIZE * connectPeer,
-                                          &gc->fullSendComm[connectPeer], NULL,
+                                          &gc->fullSendComm[connectPeer], (ncclNetDeviceHandle_t**)&chCtxt,
                                           ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()),
                         ret, end);
-        if (gc->fullRecvComm[acceptPeer] == NULL)
-          NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], NULL), ret, end);
-      } while ((gc->fullSendComm[connectPeer] == NULL) || (gc->fullRecvComm[acceptPeer] == NULL));
+        if (wantAccept && gc->fullRecvComm[acceptPeer] == NULL)
+          NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], (ncclNetDeviceHandle_t**)&chCtxt), ret,
+                        end);
+        if (IbCastGinIbAborted(cComm->abortFlag)) {
+          INFO(NCCL_NET, "NET/IB/GIN: proxy context connect aborted on rank %d/%d (peers %d/%d)", cComm->rank, nranks,
+               connectPeer, acceptPeer);
+          ret = ncclInternalError;
+          goto end;
+        }
+      } while ((wantConnect && gc->fullSendComm[connectPeer] == NULL) ||
+               (wantAccept && gc->fullRecvComm[acceptPeer] == NULL));
       NCCLCHECKGOTO(IbCastGinIbP2PBarrier(cComm), ret, end);
     }
   }
@@ -540,6 +586,62 @@ ncclResult_t IbCastRmaIbProxyCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
+static ncclResult_t IbCastPostDataChunks(struct ibv_qp* qp, struct ibv_send_wr* wr_template, uint32_t lkey,
+                                         uintptr_t localAddr, uint64_t remoteAddr, size_t size,
+                                         int sendFlagsLast, struct ibv_send_wr* tail) {
+  struct ibv_send_wr stackWrs[IB_CAST_MAX_STACK_WRS];
+  struct ibv_sge stackSges[IB_CAST_MAX_STACK_WRS];
+  struct ibv_send_wr* extraWrs = NULL;
+  struct ibv_sge* extraSges = NULL;
+  struct ibv_send_wr* head = NULL;
+  struct ibv_send_wr* prev = NULL;
+  struct ibv_send_wr* bad_wr = NULL;
+  ncclResult_t ret = ncclSuccess;
+
+  const uint32_t cap = IbCastMaxPostSendBytes;
+  // A zero-length iput is still one signaled write, as before the split.
+  const size_t nChunks = size == 0 ? 1 : (size / cap) + ((size % cap) != 0);
+  if (nChunks > IB_CAST_MAX_STACK_WRS) {
+    NCCLCHECKGOTO(ncclCalloc(&extraWrs, nChunks), ret, out);
+    NCCLCHECKGOTO(ncclCalloc(&extraSges, nChunks), ret, out);
+  } else {
+    extraWrs = stackWrs;
+    extraSges = stackSges;
+  }
+
+  for (size_t i = 0; i < nChunks; i++) {
+    struct ibv_send_wr* chunkWr = &extraWrs[i];
+    struct ibv_sge* chunkSge = &extraSges[i];
+    const uint32_t chunk = size == 0 ? 0 : (uint32_t)std::min((size_t)cap, size);
+    size -= chunk;
+
+    *chunkWr = *wr_template;
+    chunkSge->addr = localAddr;
+    chunkSge->length = chunk;
+    chunkSge->lkey = lkey;
+    chunkWr->sg_list = chunkSge;
+    chunkWr->num_sge = 1;
+    chunkWr->send_flags = 0;
+    chunkWr->wr.rdma.remote_addr = remoteAddr;
+    chunkWr->next = NULL;
+    if (prev) prev->next = chunkWr;
+    else head = chunkWr;
+    prev = chunkWr;
+    localAddr += chunk;
+    remoteAddr += chunk;
+  }
+  if (prev) prev->send_flags = sendFlagsLast;
+  if (tail) {
+    if (prev) prev->next = tail;
+    else head = tail;
+  }
+  ret = wrap_ibv_post_send(qp, head, &bad_wr);
+out:
+  if (extraWrs != NULL && extraWrs != stackWrs) free(extraWrs);
+  if (extraSges != NULL && extraSges != stackSges) free(extraSges);
+  return ret;
+}
+
 ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                   uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags,
                                   void** request) {
@@ -567,26 +669,19 @@ ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
     req->devBases[i] = &comm->devs[i].base;
   }
 
-  struct ibv_send_wr wr;
-  memset(&wr, 0, sizeof(wr));
-  struct ibv_sge sge;
-  memset(&sge, 0, sizeof(sge));
+  struct ibv_send_wr wr_template;
+  memset(&wr_template, 0, sizeof(wr_template));
 
-  wr.opcode = IBV_WR_RDMA_WRITE;
-  wr.send_flags = IBV_SEND_SIGNALED;
-  wr.wr_id = req - comm->base.reqs;
-  wr.next = NULL;
-  wr.wr.rdma.remote_addr = (uint64_t)dstPtr;
-  wr.wr.rdma.rkey = rkey;
-  wr.sg_list = &sge;
-  wr.num_sge = 1;
+  wr_template.opcode = IBV_WR_RDMA_WRITE;
+  wr_template.wr_id = req - comm->base.reqs;
+  wr_template.wr.rdma.rkey = rkey;
+  wr_template.sg_list = NULL;
+  wr_template.num_sge = 1;
 
-  sge.addr = (uintptr_t)srcPtr;  // Local buffer address
-  sge.length = size;  // Size of the transfer
-  sge.lkey = lkey;  // Local key
-
-  struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr, &bad_wr));
+  NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr_template,
+                                 lkey, (uintptr_t)srcPtr,
+                                 (uint64_t)dstPtr, size,
+                                 IBV_SEND_SIGNALED, NULL));
   IbCastAddEvent(req, qp->devIndex);
 
   *request = req;
@@ -620,26 +715,20 @@ ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
   uint32_t rkey = remoteMrHandle->rkeys[rank];
   uint32_t lkey = localMrHandle->mrHandle->mrs[0]->lkey;
 
-  struct ibv_send_wr wr;
-  memset(&wr, 0, sizeof(wr));
-  struct ibv_sge sge;
-  memset(&sge, 0, sizeof(sge));
+  struct ibv_send_wr wr_template;
+  memset(&wr_template, 0, sizeof(wr_template));
 
-  wr.opcode = IBV_WR_RDMA_READ;
-  wr.send_flags = IBV_SEND_SIGNALED; // TODO: Potentially optimize this?
-  wr.wr_id = req - comm->base.reqs;
-  wr.next = NULL;
-  wr.wr.rdma.remote_addr = (uint64_t)remotePtr;
-  wr.wr.rdma.rkey = rkey;
-  wr.sg_list = &sge;
-  wr.num_sge = 1;
+  wr_template.opcode = IBV_WR_RDMA_READ;
+  wr_template.wr_id = req - comm->base.reqs;
+  wr_template.wr.rdma.rkey = rkey;
+  wr_template.sg_list = NULL;
+  wr_template.num_sge = 1;
 
-  sge.addr = (uintptr_t)localPtr;
-  sge.length = size;
-  sge.lkey = lkey;
-
-  struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr, &bad_wr));
+  // Same split as iput: only the last read is signaled. TODO: Potentially optimize this?
+  NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr_template,
+                                 lkey, (uintptr_t)localPtr,
+                                 (uint64_t)remotePtr, size,
+                                 IBV_SEND_SIGNALED, NULL));
   IbCastAddEvent(req, qp->devIndex);
 
   *request = req;
@@ -679,29 +768,26 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
 
   struct ibv_send_wr wr[2];
   memset(&wr, 0, sizeof(wr));
-  struct ibv_sge sge[2];
-  memset(&sge, 0, sizeof(sge));
+  struct ibv_sge signalSge;
+  memset(&signalSge, 0, sizeof(signalSge));
 
-  // If size is 0, we only need to send the signal. srcMrHandle must be non-NULL
-  if (size > 0 && dstMrHandle) {
-    void* srcPtr = (void*)(srcMrHandle->base_vas[ginProxyCtx->rank] + srcOff);
-    void* dstPtr = (void*)(dstMrHandle->base_vas[rank] + dstOff);
-    uint32_t lkey = srcMrHandle->mrHandle->mrs[0]->lkey;
+  // Size 0 posts only the signal. A size with no destination posts the empty wr[0] instead.
+  void* srcPtr = NULL;
+  void* dstPtr = NULL;
+  uint32_t lkey = 0;
+  const bool postData = size > 0 && dstMrHandle;
+  if (postData) {
+    srcPtr = (void*)(srcMrHandle->base_vas[ginProxyCtx->rank] + srcOff);
+    dstPtr = (void*)(dstMrHandle->base_vas[rank] + dstOff);
+    lkey = srcMrHandle->mrHandle->mrs[0]->lkey;
     uint32_t rkey = dstMrHandle->rkeys[rank];
 
     // PUT
     wr[0].opcode = IBV_WR_RDMA_WRITE;
-    wr[0].send_flags = 0; // We only need the CQE from the signal
     wr[0].wr_id = req - comm->base.reqs;
-    wr[0].next = &wr[1];
-    wr[0].wr.rdma.remote_addr = (uint64_t)dstPtr;
     wr[0].wr.rdma.rkey = rkey;
-    wr[0].sg_list = &sge[0];
+    wr[0].sg_list = NULL;
     wr[0].num_sge = 1;
-
-    sge[0].addr = (uintptr_t)srcPtr;  // Local buffer address
-    sge[0].length = size;  // Size of the transfer
-    sge[0].lkey = lkey;  // Local key
   }
 
   void* signalPtr = (void*)(signalMrHandle->base_vas[rank] + signalOff);
@@ -715,16 +801,20 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   wr[1].wr.atomic.remote_addr = (uint64_t)signalPtr;
   wr[1].wr.atomic.compare_add = signalOp == NCCL_NET_SIGNAL_OP_INC ? 1 : signalValue;
   wr[1].wr.atomic.rkey = signalRkey;
-  wr[1].sg_list = &sge[1];
+  wr[1].sg_list = &signalSge;
   wr[1].num_sge = 1;
 
-  sge[1].addr = (uintptr_t)&comm->putSignalScratchpad;
-  sge[1].length = sizeof(comm->putSignalScratchpad);
-  sge[1].lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
+  signalSge.addr = (uintptr_t)&comm->putSignalScratchpad;
+  signalSge.length = sizeof(comm->putSignalScratchpad);
+  signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
 
-  // Send the put and the signal in one go
-  struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(qp->qp, size > 0 ? &wr[0] : &wr[1], &bad_wr));
+  if (postData) {
+    NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr[0], lkey, (uintptr_t)srcPtr, (uint64_t)dstPtr, size,
+                                   0, &wr[1]));
+  } else {
+    struct ibv_send_wr* bad_wr;
+    NCCLCHECK(wrap_ibv_post_send(qp->qp, size > 0 ? &wr[0] : &wr[1], &bad_wr));
+  }
   IbCastAddEvent(req, qp->devIndex);
   *request = req;
   return ncclSuccess;

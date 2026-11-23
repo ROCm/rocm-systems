@@ -6,7 +6,7 @@
 //! A primary-process VM may survive session destruction in the kernel. The
 //! Linux process connection retains its exact render files through exit for
 //! later activation; secondary bindings are released with their session.
-use super::{drm, errno, error, native_error, os_file, os_memory, sys, sysfs, uapi};
+use super::{connection, drm, errno, error, native_error, os_file, os_memory, sysfs, uapi};
 use crate::device::event::{
     DeviceEvent, GpuHardwareException, GpuMemoryFault, GpuMemoryFaultCause, GpuResetCause,
     GpuResetScope,
@@ -25,8 +25,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 mod host_alias;
+mod registered_svm;
 mod scratch;
 pub(super) use host_alias::KfdHostAlias;
+pub(super) use registered_svm::KfdRegisteredHost;
 use scratch::ScratchPool;
 
 /// Process-local set of activated device VMs and their shared loss events.
@@ -145,10 +147,12 @@ impl VmBindings {
 
     pub(super) fn device(
         &self,
-        kfd: &Shared<sys::Kfd>,
+        kfd: &Shared<connection::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
     ) -> Result<Shared<DeviceVm>, Error> {
-        self.device_with_render(kfd, node, sysfs::open_render)
+        self.device_with_render(kfd, node, xnack_requested, debugger, sysfs::open_render)
     }
 
     // Supplying the opener lets tests exercise concurrent initialization and
@@ -159,8 +163,10 @@ impl VmBindings {
     )]
     fn device_with_render(
         &self,
-        kfd: &Shared<sys::Kfd>,
+        kfd: &Shared<connection::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
         open_render: impl FnOnce(u32) -> io::Result<File>,
     ) -> Result<Shared<DeviceVm>, Error> {
         kfd.check_process()
@@ -168,6 +174,12 @@ impl VmBindings {
         let mut runtime = kfd
             .runtime_guard()
             .map_err(|source| native_error("KFD runtime serialization", source))?;
+        kfd.configure_debugger_locked(&mut runtime, debugger)
+            .map_err(|source| native_error("KFD debugger registration", source))?;
+        if let Some(request) = xnack_requested {
+            kfd.configure_xnack_mode_locked(&mut runtime, request)
+                .map_err(|source| native_error("KFD XNACK configuration", source))?;
+        }
         let process = std::process::id();
         let owner = self
             .process
@@ -321,6 +333,10 @@ pub(crate) struct DeviceVm {
 }
 
 impl DeviceVm {
+    pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
+        crate::device::event::DeviceEventOriginId::from_driver_key(u64::from(self.gpu_id))
+    }
+
     pub(super) fn render(&self) -> Result<&File, Error> {
         self.render
             .as_ref()
@@ -356,11 +372,11 @@ impl DeviceVm {
         self.loss.has_latched_loss()
     }
 
-    pub(super) fn kfd(&self) -> &sys::Kfd {
+    pub(super) fn kfd(&self) -> &connection::Kfd {
         &self.loss.kfd
     }
 
-    pub(super) fn kfd_owner(&self) -> Shared<sys::Kfd> {
+    pub(super) fn kfd_owner(&self) -> Shared<connection::Kfd> {
         self.loss.kfd.clone()
     }
 
@@ -422,7 +438,7 @@ impl DeviceVm {
 /// serialized observer, so neither path can consume another path's details.
 struct LossEvent {
     /// Exact KFD connection that created the native event IDs.
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     /// Native hardware exception event identity.
     hardware_event_id: AtomicU32,
     /// Native memory exception event identity.
@@ -435,6 +451,8 @@ struct LossEvent {
     observed: Mutex<ObservedEvents>,
     /// Live BO-backed CPU mappings available for safe registration reuse.
     host_aliases: Mutex<Vec<Shared<host_alias::HostAliasRecord>>>,
+    /// Page/GPU grants shared by process-context SVM host registrations.
+    svm_registrations: Mutex<registered_svm::Registry>,
     /// Sticky terminal connection-loss flag.
     lost: AtomicBool,
 }
@@ -676,7 +694,7 @@ impl LossEvent {
         Ok(())
     }
 
-    fn create(kfd: Shared<sys::Kfd>) -> Result<Shared<Self>, Error> {
+    fn create(kfd: Shared<connection::Kfd>) -> Result<Shared<Self>, Error> {
         let observed = ObservedEvents::new()?;
         let event = Shared::new(Self {
             kfd,
@@ -686,6 +704,7 @@ impl LossEvent {
             memory_destroy_uncertain: AtomicBool::new(false),
             observed: Mutex::new(observed),
             host_aliases: Mutex::new(Vec::new()),
+            svm_registrations: Mutex::new(registered_svm::Registry::default()),
             lost: AtomicBool::new(false),
         })?;
         let mut args = uapi::CreateEvent::default();
@@ -810,6 +829,9 @@ impl LossEvent {
                 exception.gpu_id,
                 DeviceEvent::GpuHardwareException(GpuHardwareException {
                     endpoint_id: None,
+                    origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                        u64::from(exception.gpu_id),
+                    )),
                     scope: if exception.reset_type == 0 {
                         GpuResetScope::WholeGpu
                     } else {
@@ -966,6 +988,13 @@ struct PeerVm {
     vm: Shared<DeviceVm>,
 }
 
+/// Definite USERPTR/SVM collision before KFD created any native object.
+/// The original host lease is returned only after the speculative VA owner
+/// has completed cleanup, so another registration mechanism can take it.
+pub(super) struct RejectedUserptr {
+    pub(super) backing: Option<HostBackingLease>,
+}
+
 /// Complete ownership record for a KFD allocation and all of its mappings.
 ///
 /// Optional fields encode teardown progress. Successful cleanup clears each
@@ -1067,6 +1096,34 @@ impl KfdAllocation {
         permissions: DeviceAccess,
         backing: Option<HostBackingLease>,
     ) -> Result<Owned<Self>, Error> {
+        let mut rejected = None;
+        Self::create_with_peers_recover_userptr(
+            vm,
+            peers,
+            desc,
+            kind,
+            permissions,
+            backing,
+            &mut rejected,
+        )
+    }
+
+    /// Returns host ownership separately only for a clean no-object USERPTR
+    /// collision. Generic allocation, mapping, and copyout errors never qualify.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "native ownership and definitive rejection form one transaction"
+    )]
+    pub(super) fn create_with_peers_recover_userptr(
+        vm: Shared<DeviceVm>,
+        peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
+        desc: AllocationDesc,
+        kind: BufferKind,
+        permissions: DeviceAccess,
+        backing: Option<HostBackingLease>,
+        rejected: &mut Option<RejectedUserptr>,
+    ) -> Result<Owned<Self>, Error> {
+        *rejected = None;
         if !permissions.contains(DeviceAccess::READ) {
             return Err(error(
                 ErrorKind::Unsupported,
@@ -1262,6 +1319,23 @@ impl KfdAllocation {
             .as_ref()
             .err()
             .is_some_and(|source| source.raw_os_error() == Some(errno::EFAULT));
+        if matches!(kind, BufferKind::Userptr(_))
+            && allocation.handle.is_none()
+            && result
+                .as_ref()
+                .err()
+                .is_some_and(|source| source.raw_os_error() == Some(libc::EADDRINUSE))
+        {
+            // kfd_ioctl_alloc_memory_of_gpu rejects overlap with its SVM
+            // interval tree before allocating the BO. A changed handle would
+            // contradict that proof and must follow ordinary error cleanup.
+            let backing = allocation.backing.take();
+            if let Err(error) = allocation.free() {
+                allocation.backing = backing;
+                return Err(error);
+            }
+            *rejected = Some(RejectedUserptr { backing });
+        }
         result.map_err(|source| native_error("AMDKFD_IOC_ALLOC_MEMORY_OF_GPU", source))?;
         if allocation.handle.is_none() {
             allocation.uncertain = true;
@@ -1355,7 +1429,14 @@ impl KfdAllocation {
                 "scratch address exceeds the host address width",
             ));
         };
-        let reservation = os_memory::Reservation::view_with_poison(address_usize, size, poison);
+        let reservation =
+            match os_memory::Reservation::view_with_poison(address_usize, size, poison) {
+                Ok(reservation) => reservation,
+                Err(source) => {
+                    vm.release_scratch(address, desc.size)?;
+                    return Err(native_error("scratch reservation process identity", source));
+                }
+            };
         let mut allocation = owner.write(Self {
             vm: vm.clone(),
             peers,
@@ -1917,6 +1998,37 @@ impl KfdAllocation {
 
     pub(crate) fn metadata(&self) -> &[u8] {
         self.metadata.as_slice()
+    }
+
+    #[allow(unsafe_code)]
+    pub(super) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.vm
+            .kfd()
+            .check_process()
+            .map_err(|source| native_error("diagnostic allocation", source))?;
+        if self.freeing
+            || self.uncertain
+            || !matches!(self.mapping, GpuMapping::Mapped)
+            || self.native_flags & (uapi::DOORBELL | uapi::MMIO_REMAP) != 0
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "allocation has no retained diagnostic backing",
+            ));
+        }
+        let info = self.cached_info();
+        // SAFETY: Native cleanup is excluded by this borrow. Registered callers
+        // retain their pages by the allocation's original lifetime contract.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                info.device_address,
+                info.host_address,
+                info.size,
+            )
+        }
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -2584,7 +2696,7 @@ mod tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 pub(super) fn queue_fixture(
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     render: File,
     node: sysfs::KfdNode,
 ) -> Shared<DeviceVm> {
@@ -2594,7 +2706,7 @@ pub(super) fn queue_fixture(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 pub(super) fn queue_fixture_with_range(
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     render: File,
     node: sysfs::KfdNode,
     bounds: (u64, u64),
@@ -2607,6 +2719,7 @@ pub(super) fn queue_fixture_with_range(
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
         host_aliases: Mutex::new(Vec::new()),
+        svm_registrations: Mutex::new(registered_svm::Registry::default()),
         lost: AtomicBool::new(false),
     })
     .unwrap();

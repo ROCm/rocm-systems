@@ -35,8 +35,9 @@ constexpr uint64_t RJ_ARITH_CPU_FEATURES_MASK = 0xfff0ULL;
 // Mode 2 requires exact results. Mode 3 additionally requires FP status reporting.
 // Modes 0 through 2 never access FP status outputs. Values 4 through 6 are reserved.
 // Temporary migration mode 7 is outside this ordering: each instruction resolves
-// it to the mode closest to old rocjitsu behavior. FP status storage must be
-// valid if that resolution selects mode 3; otherwise it remains unused.
+// it to the behavior closest to old rocjitsu. Compatibility FP status follows
+// each instruction family's declaration, independently of its numeric mode;
+// supply valid storage whenever that family reports status.
 constexpr uint64_t RJ_ARITH_SEMANTICS_MASK = 7ULL << 16;
 constexpr uint64_t RJ_ARITH_SEMANTICS_LOOSE = 0ULL;
 constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE = 1ULL << 16;
@@ -83,6 +84,14 @@ constexpr uint64_t RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK = 3ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16 = 1ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16 = 2ULL << 26;
 
+// FP32 intermediate rounding for mixed instructions that round again to FP16.
+// Uses the same enumeration as FP_ROUND_MASK, which controls the final result.
+// Availability is instruction-specific; no host FP controls are changed.
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_MASK = 3ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_UP = 1ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_DOWN = 2ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_ZERO = 3ULL << 28;
+
 // Status codes returned by instruction emulation functions.
 constexpr int RJ_ARITH_SUCCESS = 0;
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS = 1;
@@ -90,9 +99,6 @@ constexpr int RJ_ARITH_ERROR_INVALID_FLAGS = 2;
 
 // Required faithful FP status reporting is unavailable.
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS = 3;
-
-// A non-FP architectural side effect requested by a register operation is unavailable.
-constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
 
 // Names retain ISA mnemonics. Wave and architecture suffixes follow corresponding
 // Clang AMDGPU builtins where available, with wave width before architecture.
@@ -110,10 +116,11 @@ constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
 // nearest-even rounding, denormals enabled, and exceptions masked. Implementations
 // never explicitly modify host FP state; ordinary arithmetic may raise sticky flags.
 
-// FP status outputs are appended to the operand list. Their use is controlled
-// solely by the semantics field. Modes 0 through 2 do not access these pointers:
-// null is allowed and supplied storage remains unchanged. Mode 3 requires valid
-// storage as a caller precondition; entry points do not check pointer nullness.
+// FP status outputs are appended to the operand list. Modes 0 through 2 do not
+// access these pointers: null is allowed and supplied storage remains unchanged.
+// Mode 3 requires valid storage. Compatibility follows the instruction-family
+// status contract, which may require storage even when its numeric mode is 2.
+// Entry points assume required storage is valid; they do not check nullness.
 // trapsts (RDNA3) or excp_flag_user (RDNA4) accumulates participating-lane FP
 // exception causes with bitwise OR, preserving all existing bits. Status storage
 // must not overlap operands unless an instruction explicitly permits it.
@@ -212,15 +219,32 @@ constexpr uint32_t RJ_ARITH_ALU_HIGH_B = 1U << 10;
 constexpr uint32_t RJ_ARITH_ALU_HIGH_C = 1U << 11;
 constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
 
+// gfx942/gfx950 conversions to FP16: use inherited SDWA arithmetic, scaling the
+// exact value before rounding. Source selection and destination byte placement
+// remain separate from this arithmetic control.
+constexpr uint32_t RJ_ARITH_CVT_SDWA = 1U << 16;
+// CDNA FP16 binary SDWA scaling order in Compatibility. Only the gfx942
+// binary arithmetic entry points accept this encoding selector.
+constexpr uint32_t RJ_ARITH_ALU_SDWA = 1U << 16;
+
 // Mixed FMA source formats: unset means FP32; set means FP16 in the half
 // selected by RJ_ARITH_ALU_HIGH_A/B/C. Half selectors are ignored for FP32 sources.
 constexpr uint32_t RJ_ARITH_MIX_F16_A = 1U << 13;
 constexpr uint32_t RJ_ARITH_MIX_F16_B = 1U << 14;
 constexpr uint32_t RJ_ARITH_MIX_F16_C = 1U << 15;
 
+// Mixed BF16/FP32 FMA uses the same format-selector positions as mixed FP16.
+// These names apply to BF16 entry points; they select BF16 rather than FP32.
+constexpr uint32_t RJ_ARITH_MIX_BF16_A = 1U << 13;
+constexpr uint32_t RJ_ARITH_MIX_BF16_B = 1U << 14;
+constexpr uint32_t RJ_ARITH_MIX_BF16_C = 1U << 15;
+
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.
 uint64_t rj_arith_init_cpu_flags(void);
+
+// Limit detected CPU flags to the highest compiled level at or below max_level.
+uint64_t rj_arith_limit_cpu_flags(uint64_t detected_flags, uint64_t max_level);
 
 // Returns a static CPU-level name, ignoring bits outside RJ_ARITH_CPU_MASK.
 // Unknown levels return "unknown". The returned string must not be modified.

@@ -9,7 +9,8 @@
 #include "common/integer.h"
 #include "common/registers.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/helpers.h"
 #include <algorithm>
 
@@ -91,6 +92,8 @@ TEST(SwmmacI32Iu8K32W32, Arithmetic) {
       RJ_ARITH_WMMA_CLAMP | RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B,
       (RJ_ARITH_WMMA_CLAMP | RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B) |
           RJ_ARITH_SWMMAC_INDEX_KEY_1};
+  rocjitsu::arith::test::expect_sparse_destination_order(rj_arith_v_swmmac_i32_16x16x32_iu8_w32,
+                                                         input, /*b=*/2, /*index=*/14);
   const auto cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
   for (uint64_t cpu : cpu_levels) {
     for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
