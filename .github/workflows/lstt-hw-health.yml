@@ -75,6 +75,16 @@ jobs:
           - id: gfx1030-01
             label: lstt-gfx1030
             gfx: gfx1030
+          # Same again for this machine: its runner carries lstt-gfx1201 and
+          # lstt-gfx90a. The MI210 is the second machine with that GPU, so its
+          # row takes the next number and needs its own host label, gfx90a-02.
+          - id: gfx1201-01
+            label: lstt-gfx1201
+            gfx: gfx1201
+          - id: gfx90a-02
+            label: lstt-gfx90a
+            host_label: gfx90a-02
+            gfx: gfx90a
     runs-on:
       - ${{ matrix.label }}
       - ${{ matrix.host_label || matrix.label }}
