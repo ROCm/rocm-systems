@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/helper_error_sink.h"
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
@@ -874,11 +875,18 @@ public:
   /// Callers must not treat it as a hardware trap. Detail must have static lifetime.
   void report_instruction_execution_error(InstructionExecutionError error,
                                           const char *detail = nullptr) const {
+    if (helper_error_sink) [[unlikely]] {
+      helper_error_sink->error = static_cast<uint8_t>(error);
+      helper_error_sink->detail = detail;
+      return;
+    }
     instruction_execution_error_ = error;
     instruction_execution_error_detail_ = detail;
   }
 
   InstructionExecutionError instruction_execution_error() const {
+    if (helper_error_sink) [[unlikely]]
+      return static_cast<InstructionExecutionError>(helper_error_sink->error);
     return instruction_execution_error_;
   }
 
@@ -887,6 +895,8 @@ public:
   }
 
   bool instruction_execution_failed() const {
+    if (helper_error_sink) [[unlikely]]
+      return helper_error_sink->error != 0;
     return instruction_execution_error_ != InstructionExecutionError::None;
   }
 

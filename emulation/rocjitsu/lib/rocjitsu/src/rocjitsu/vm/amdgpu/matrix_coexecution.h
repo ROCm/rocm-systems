@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/matrix_input_snapshot.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/helper_error_sink.h"
 #include "util/host_target.h"
 #include "util/result.h"
 
@@ -105,6 +106,9 @@ public:
   }
 
   bool ready() const { return state_.load(std::memory_order_acquire) == 0; }
+  /// The first failing chain member and its error; valid after wait().
+  unsigned failed_member() const { return failed_; }
+  const HelperErrorSink &error() const { return error_; }
 
 private:
   void publish(int value) {
@@ -141,11 +145,21 @@ private:
         wait_while(0);
         continue;
       }
+      HelperErrorSink sink;
+      helper_error_sink = &sink;
+      failed_ = count_;
       for (unsigned i = 0; i != count_; ++i) {
         matrix_input_snapshot = snapshots_[i];
         chain_[i]->execute(*chain_[i], wave_);
+        if (sink.error) {
+          // Later members depend on this result; they do not execute.
+          failed_ = i;
+          break;
+        }
       }
       matrix_input_snapshot = nullptr;
+      helper_error_sink = nullptr;
+      error_ = sink;
       publish(0);
     }
   }
@@ -153,6 +167,8 @@ private:
   alignas(64) std::atomic<int> state_{0};
   alignas(64) std::array<Instruction *, kMaxChain> chain_{};
   std::array<const MatrixInputSnapshot *, kMaxChain> snapshots_{};
+  unsigned failed_ = 0;
+  HelperErrorSink error_;
   unsigned count_ = 0;
   void *wave_ = nullptr;
   std::thread thread_;
@@ -195,10 +211,16 @@ public:
   static bool ready(Ticket ticket) { return !helpers_enabled() || ticket.slot->helper.ready(); }
   /// Join a claimed job and release its slot; consume each ticket exactly once.
   /// Returns failure in a fork child where the inherited helper no longer exists.
-  util::Result finish(Ticket ticket) {
+  util::Result finish(Ticket ticket) { return finish(ticket, nullptr, nullptr); }
+  /// Also reports the first execution error of the job, if any, and its chain member.
+  util::Result finish(Ticket ticket, HelperErrorSink *error, unsigned *member) {
     if (!helpers_enabled())
       return util::Result::failure();
     ticket.slot->helper.wait();
+    if (error) {
+      *error = ticket.slot->helper.error();
+      *member = ticket.slot->helper.failed_member();
+    }
     release(ticket.slot);
     return util::Result::success();
   }

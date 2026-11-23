@@ -2803,6 +2803,12 @@ void AsyncInstructionWindow::check_errors() {
   // releasing wave storage. Further failures must not replace its guest PC.
   arithmetic_->drain();
   (void)arithmetic_->take_error();
+  if (failure->error.error) {
+    cu_.fail_wave_instruction(wf_, std::format("asynchronous {}", failure->mnemonic), failure->pc,
+                              static_cast<InstructionExecutionError>(failure->error.error),
+                              failure->error.detail ? failure->error.detail : "");
+    return;
+  }
   cu_.fail_wave_instruction(wf_, std::format("asynchronous {}", failure->mnemonic), failure->pc,
                             InstructionExecutionError::MissingExecutionBackend,
                             "MMA helper unavailable after fork");
@@ -2915,11 +2921,27 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     active->pc += step.size;
     record_gws_instruction_progress(process);
   };
+  const uint64_t entry_pc = active->pc;
   const auto helpers_failed = [&](uint64_t pc, const Instruction &inst) {
     (void)replay.drain();
     fail_wave_instruction(*active, std::format("asynchronous {}", inst.mnemonic()), pc,
                           InstructionExecutionError::MissingExecutionBackend,
                           "MMA helper unavailable after fork");
+  };
+  // Every helper is joined before the wave fails; the first failing member's
+  // guest PC and error are reported, as if it had failed during ordinary issue.
+  const auto helper_error = [&]() {
+    const auto &failure = replay.failure();
+    if (!failure)
+      return false;
+    (void)replay.drain();
+    const Instruction &inst = *failure->head->chain[failure->member];
+    const uint64_t pc =
+        entry_pc + plan->steps[failure->head->member_step[failure->member]].offset;
+    fail_wave_instruction(*active, std::format("asynchronous {}", inst.mnemonic()), pc,
+                          static_cast<InstructionExecutionError>(failure->error.error),
+                          failure->error.detail ? failure->error.detail : "");
+    return true;
   };
   // Retained steps are neither memory producers nor waits. Check their
   // operands against outstanding memory in program order, as ordinary issue does.
@@ -2962,6 +2984,8 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       helpers_failed(active->pc, *plan->steps.front().inst);
       return true;
     }
+    if (helper_error())
+      return true;
     switch (step.kind) {
     case mma_plan::StepKind::Chained:
       check_waits(*step.inst);
@@ -3001,8 +3025,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         ++cache.stats.snapshot_chains;
         cache.stats.snapshot_bytes += words * sizeof(uint32_t);
       }
-      if (!inline_only &&
-          replay.submit(step.slot, step.chain.data(), step.members, active, snapshots)) {
+      if (!inline_only && replay.submit(step.slot, step, active, snapshots)) {
         ++cache.stats.offloads;
         cache.stats.chained += step.members - 1u;
         // A replay is one asynchronous window; every accepted job is joined.
@@ -3040,6 +3063,8 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         // A stall, fault or redirect ends the block; no helper chain extends past it.
         ++cache.stats.early_exit;
         (void)replay.drain();
+        if (!active->is_halted())
+          (void)helper_error();
         return true;
       }
       break;
@@ -3048,6 +3073,8 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   }
   if (!replay.drain())
     helpers_failed(active->pc, *plan->steps.front().inst);
+  else
+    (void)helper_error();
   return true;
 }
 

@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/helper_error_sink.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 
@@ -48,6 +49,7 @@ struct SnapshotSpec {
 struct Step {
   StepKind kind = StepKind::Ordinary;
   uint8_t size = 0;
+  uint16_t offset = 0; ///< Bytes from the block entry.
   uint8_t slot = 0;
   uint8_t wait = 0; ///< Helper slots joined before the step.
   uint8_t members = 0;
@@ -55,6 +57,7 @@ struct Step {
   std::array<Instruction *, kMaxChain> chain{};
   bool snapshots = false;
   std::array<SnapshotSpec, kMaxChain> snapshot{};
+  std::array<uint8_t, kMaxChain> member_step{}; ///< Program position of each member.
 };
 
 /// @brief Matrix instructions a helper may execute: register-only operands.
@@ -334,6 +337,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     plan.code.push_back({offset, words});
     Step step;
     step.size = static_cast<uint8_t>(inst->size());
+    step.offset = static_cast<uint16_t>(offset);
     uint8_t conflicts = 0;
     for (unsigned s = 0; s != kSlots; ++s)
       if (slots[s].active && overlaps(slots[s].access, *access))
@@ -365,6 +369,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
       if (bundle >= 0) {
         auto &chain = slots[bundle];
         auto &head = plan.steps[chain.head];
+        head.member_step[head.members] = uint8_t(k);
         head.chain[head.members++] = inst.get();
         chain.members[chain.count++] = *operands;
         chain.refresh();
@@ -400,6 +405,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         step.kind = StepKind::Offload;
         step.slot = uint8_t(slot);
         step.chain[0] = inst.get();
+        step.member_step[0] = uint8_t(k);
         step.members = 1;
         step_slot.push_back(int8_t(slot));
       }
@@ -468,11 +474,12 @@ public:
   Replay(const Replay &) = delete;
   Replay &operator=(const Replay &) = delete;
 
-  bool submit(unsigned slot, Instruction *const *chain, unsigned count, void *wave,
+  bool submit(unsigned slot, const Step &step, void *wave,
               const MatrixInputSnapshot *const *snapshots = nullptr) {
-    tickets_[slot] = pool_.submit(chain, count, wave, snapshots);
+    tickets_[slot] = pool_.submit(step.chain.data(), step.members, wave, snapshots);
     if (!tickets_[slot])
       return false;
+    heads_[slot] = &step;
     active_ |= uint8_t(1u << slot);
     return true;
   }
@@ -482,18 +489,31 @@ public:
     mask &= active_;
     while (mask) {
       const unsigned slot = std::countr_zero(mask);
-      ok &= pool_.finish(tickets_[slot]).succeeded();
+      HelperErrorSink error;
+      unsigned member = 0;
+      ok &= pool_.finish(tickets_[slot], &error, &member).succeeded();
+      if (error.error && !failure_)
+        failure_ = Failure{heads_[slot], member, error};
       active_ &= uint8_t(~(1u << slot));
       mask &= uint8_t(mask - 1);
     }
     return ok;
   }
+  /// The first instruction a helper failed, kept until the issuer reports it.
+  struct Failure {
+    const Step *head;
+    unsigned member;
+    HelperErrorSink error;
+  };
+  const std::optional<Failure> &failure() const { return failure_; }
   bool drain() { return join(active_); }
   bool pending() const { return active_ != 0; }
 
 private:
   matrix_coexecution::SharedPool &pool_;
   std::array<matrix_coexecution::SharedPool::Ticket, kSlots> tickets_{};
+  std::array<const Step *, kSlots> heads_{};
+  std::optional<Failure> failure_;
   uint8_t active_ = 0;
 };
 

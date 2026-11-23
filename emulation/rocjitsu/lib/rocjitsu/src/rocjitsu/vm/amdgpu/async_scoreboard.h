@@ -86,6 +86,7 @@ public:
   struct Failure {
     uint64_t pc = 0;
     std::string mnemonic;
+    HelperErrorSink error; ///< Empty when the helper itself was unavailable.
   };
 
   /// @brief Submit an instruction together with its issuing guest PC.
@@ -134,9 +135,11 @@ private:
   };
   void retire(size_t index) {
     auto &entry = entries_[index];
-    const util::Result result = pool_.finish(entry.ticket);
-    if (result.failed() && !error_)
-      error_ = Failure{entry.pc, std::string(entry.inst->mnemonic())};
+    HelperErrorSink error;
+    unsigned member = 0;
+    const util::Result result = pool_.finish(entry.ticket, &error, &member);
+    if ((result.failed() || error.error) && !error_)
+      error_ = Failure{entry.pc, std::string(entry.inst->mnemonic()), error};
     entry.inst.reset();
     ++async_execution::stats.retired_mma;
     for (size_t i = index + 1; i != count_; ++i)
