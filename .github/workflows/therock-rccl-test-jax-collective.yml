@@ -70,7 +70,14 @@ jobs:
       # jax, jaxlib, and the ROCm plugin and PJRT wheels all install this
       # release. ==X.Y.Z also matches the nightly plugin builds, which are
       # versioned X.Y.Z+rocm<version>a<date>.
-      JAX_VERSION: "0.11.2"
+      #
+      # Keep it at a release TheRock still builds the plugin for nightly
+      # (JAX_REF_CONFIGS in TheRock's configure_jax_release_matrix.py). The
+      # nightly index keeps a rolling window of builds, about three months as
+      # of 2026-11, so a release TheRock stops building eventually fails to
+      # install. The rccl-ci team, which owns this workflow, bumps it; the
+      # test sources follow the installed jax automatically.
+      JAX_VERSION: "0.12.0"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
