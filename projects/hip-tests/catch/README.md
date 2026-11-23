@@ -116,6 +116,8 @@ and this macro is expanded in the actual test case definition
 TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs, int, float, double)
 ```
 
+<b>Every newly added test should mandate adding an entry to the configuration file.</b>
+
 ### Device feature requirements
 
 A test case can list the device features it needs in a `requires` field:
@@ -128,14 +130,11 @@ texture:
 ```
 The available features are declared, with a short description of each, under
 `features` in `configs/definitions.yaml`. Naming a feature that is not declared
-there fails the build (and `check_config.py`).
+there causes build failure.
 
 Features are capabilities that can be queried through the HIP API on the machine
 the tests run on (including `multi_gpu` and `p2p`). They are only allowed in
-`requires`, which is just a list of the features a case needs.
-The environment a build targets (platform, OS, architecture, ASAN) is not a feature
-and is only allowed as a `disabled`/`unsupported` target; conversely, listing a
-feature as a `disabled`/`unsupported` target fails the build (and `check_config.py`).
+`requires`, which is just a list of the features a test case needs.
 
 Every feature in `requires` is emitted as a `[requires_<feature>]` tag. By default
 that is all it does: the binaries are built to run on any machine, so a test must
@@ -148,23 +147,22 @@ generating `hip_test_config.hh`. It probes the GPUs visible on the build machine
 writes the available features to `hip_tests_features.yaml` in the config build
 directory. Only devices the tests are built for are probed: a device must match one
 of the `--offload-arch` target IDs (e.g. `gfx1201` or `gfx942:xnack+`, as derived
-from `OFFLOAD_ARCH_STR` or `GPU_TARGETS`). Other devices are listed in the report
-with `selected: false` and ignored, and the build fails if no device matches. Generic
-targets (e.g. `gfx11-generic`) and SPIR-V (`amdgcnspirv`) match no device, since tests
-cannot be tailored to them; building only for SPIR-V (e.g. with `ENABLE_SPIRV`) is
-rejected at configure time. A feature counts as available only when every probed
+from `OFFLOAD_ARCH_STR` or `GPU_TARGETS`). The `sysinfo` tool emits information
+about other devices as well, but it markes them with `selected: false`. Generic
+targets (e.g. `gfx11-generic`) and SPIR-V (`amdgcnspirv`) are also ignored, because
+their specific features are generally considered to be underspecified for the
+purposes of feature detection. If no devices matched ones specified in build
+config, then build fails. A feature counts as available only when every probed
 device supports it.
 Test cases that require an unavailable feature are still compiled, but are disabled
 like a `disabled`/`unsupported` match: they get the `[disabled]` tag, plus a
 `[missing_<feature>]` tag for every missing feature. The resulting binaries are
 therefore specific to the build machine. This mode needs a working GPU at build time.
 
-The probe must report exactly the features declared in `definitions.yaml`; any
-difference fails the build. To add a feature, declare it in `definitions.yaml` and
+The probe reports exactly the features declared in `definitions.yaml`, i.e. any
+difference causes build failure. To add a feature, declare it in `definitions.yaml` and
 detect it in `hip_tests_sysinfo.cc`. The probe runs once per build tree; delete
 `hip_tests_features.yaml` to re-probe, for example after changing `HIP_VISIBLE_DEVICES`.
-
-<b>Every newly added test should mandate adding an entry to the configuration file.</b>
 
 ## Test Levels and Quick Mode (`level_0`)
 
