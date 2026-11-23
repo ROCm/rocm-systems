@@ -1,6 +1,6 @@
 # DBT Design
 
-Rocjitsu's dynamic binary translator (DBT) turns an AMDGPU code object for a
+rocjitsu's dynamic binary translator (DBT) turns an AMDGPU code object for a
 guest ISA into a loadable code object for a host ISA.
 
 The Dynamic Binary Translation (DBT) system translates AMDGPU code objects compiled for one ISA to execute on a different ISA. The initial target pairs are CDNA4 (GFX950) → RDNA4 (GFX1200/1201) and CDNA4 (GFX950) → CDNA3 (GFX942), but the architecture is designed to support any directional ISA pair.
@@ -64,7 +64,7 @@ execution backend. The backend is an enum with two modes:
 
 - `hardware` forwards execution-facing operations to a real host GPU.
 - `simulator` delegates host KFD execution to `SimulatedKfd` and runs the
-  translated code on a RocJITsu VM.
+  translated code on a rocjitsu VM.
 
 A simulator-backed DBT config supports two layouts. When `simulator_config` is
 set, it names an external host simulator config; relative paths are resolved

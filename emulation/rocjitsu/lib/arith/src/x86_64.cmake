@@ -105,6 +105,7 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_ternary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_add_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/packed_u64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_mad_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_minmax_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_mul_x86_64_v3.cpp
@@ -206,6 +207,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/byte_shift_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/carry_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_add_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/packed_u64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_minmax_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_ternary_x86_64_v4.cpp

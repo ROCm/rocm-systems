@@ -309,6 +309,7 @@ if(BUILD_TESTS)
     P2pChannelScalingTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
+    HipProbeTests.cpp
     SendRecvTests.cpp
     SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
@@ -846,6 +847,7 @@ if(BUILD_TESTS)
       CeAllReduceEligibilityTests.cpp
       CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      GinAllGatherEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
       EnqueueTests.cpp

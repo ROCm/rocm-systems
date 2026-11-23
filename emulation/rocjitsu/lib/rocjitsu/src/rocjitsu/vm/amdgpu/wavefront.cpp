@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
@@ -44,8 +45,8 @@ bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
 
 bool Wavefront::memory_destination_out_of_range(const Instruction &inst) const {
   const auto arch = cu_.arch();
-  if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-      arch != ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch != rocjitsu::IsaFamily::Cdna2 && arch != rocjitsu::IsaFamily::Cdna3 &&
+      arch != rocjitsu::IsaFamily::Cdna4)
     return false;
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto reg = inst.dst_operand(i)->decoded_vgpr();
@@ -154,13 +155,13 @@ bool Wavefront::discards_valu_result(const Instruction &inst) const {
   if (!(inst.flags() & VALU))
     return false;
   switch (cu_.arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return !valu_destinations_allocated(inst);
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return !vgpr_destinations_allocated(inst);
   default:
     return false;
@@ -173,12 +174,12 @@ bool Wavefront::vgpr_destinations_allocated(const Instruction &inst) const {
 
 uint64_t Wavefront::memory_exec(const Instruction &inst) const {
   if (inst.flags() & FIRST_ACTIVE_MEMORY_LANE) {
-    if (cu_.arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && !vgpr_destinations_allocated(inst))
+    if (cu_.arch() == rocjitsu::IsaFamily::Rdna3_5 && !vgpr_destinations_allocated(inst))
       return 0;
     const uint64_t active = exec();
     return active & -active;
   }
-  if ((cu_.arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_.arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+  if ((cu_.arch() == rocjitsu::IsaFamily::Rdna1 || cu_.arch() == rocjitsu::IsaFamily::Rdna2) &&
       (inst.flags() & (VMEM | LDS)) && !vgpr_destinations_allocated(inst))
     return 0;
   return exec();
