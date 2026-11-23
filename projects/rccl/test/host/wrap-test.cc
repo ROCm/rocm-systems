@@ -9019,6 +9019,30 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
+// gfx950 multi-node AllReduce runs Tree up to nRanks x 4 MiB, 32 MiB per node at 8 GPUs per node, on any node
+// count; one node keeps Ring.
+TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_Gfx950MultiNodeAllReduceTakesTree) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveAlgorithm_Gfx950MultiNodeAllReduceTakesTree",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        CostTable table;
+        ncclComm* comm = MakeTuningComm(8, "gfx950");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx950", RCCL_TUNING_PARTITION_SPX);
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 32 * kMiB, table)) << "1 node";
+        for (int nNodes : {2, 4, 6, 8, 16}) {
+          comm->nNodes = nNodes;
+          comm->nRanks = nNodes * 8;
+          const size_t cap = (size_t)nNodes * 32 * kMiB;
+          EXPECT_EQ(NCCL_ALGO_TREE, AlgoAfterUpdate(comm, ncclFuncAllReduce, cap, table)) << nNodes << " nodes";
+          EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, cap + 1, table)) << nNodes << " nodes";
+          EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllGather, cap, table)) << nNodes << " nodes";
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 // The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
 // DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable) {
