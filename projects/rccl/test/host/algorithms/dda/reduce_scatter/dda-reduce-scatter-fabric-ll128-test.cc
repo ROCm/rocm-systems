@@ -384,6 +384,65 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTableKeepsTheGridBudget
   EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), 64 * kMiBFloats, ncclFloat8e4m3), 256u);
 }
 
+// Past the narrow window a batched block packs 16 slices instead of 8 while the grid keeps half the 256-block
+// budget, so 2 MiB shards stay on 137 blocks, 4 MiB shards drop to 137 and 8 MiB shards keep the full budget.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTablePacksWhileTheGridKeepsHalfTheBudget) {
+  using Shape = std::pair<unsigned, unsigned>;
+  constexpr size_t kMiB = size_t{1} << 20;
+  struct Cell {
+    int nRanks;
+    size_t shardBytes;
+    Shape shape;
+  };
+  const Cell cells[] = {
+    {8, kMiB, {137u, 128u}},       {8, 2 * kMiB, {137u, 256u}},  {8, 4 * kMiB, {137u, 256u}},
+    {8, 8 * kMiB, {256u, 256u}},   {12, 3 * kMiB / 2, {103u, 256u}}, {12, 2 * kMiB, {137u, 256u}},
+    {16, kMiB, {256u, 512u}},      {16, 2 * kMiB, {137u, 256u}}, {16, 4 * kMiB, {137u, 256u}},
+    {24, 3 * kMiB, {205u, 256u}},  {32, 2 * kMiB, {137u, 256u}}, {32, 4 * kMiB, {137u, 256u}},
+    {64, kMiB, {137u, 128u}},      {64, 2 * kMiB, {137u, 256u}}, {64, 4 * kMiB, {137u, 256u}},
+    {64, 8 * kMiB, {256u, 256u}},
+  };
+  const std::pair<ncclDataType_t, size_t> types[] = {{ncclBfloat16, 2}, {ncclFloat8e4m3, 1}, {ncclFloat32, 4}};
+  UseShapeTable();
+  for (const Cell& c : cells) {
+    comm().nRanks = c.nRanks;
+    const size_t n = (size_t)c.nRanks;
+    PeerParallelUpTo(std::min(n * std::max(size_t{512} << 10, n * (size_t{64} << 10)), 32 * kMiB));
+    for (const auto& [type, size] : types) {
+      EXPECT_EQ(GridBlock(c.shardBytes / size, type), c.shape)
+        << c.nRanks << " ranks, shard " << c.shardBytes << ", type " << type;
+      EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), c.shardBytes / size, type), c.shape.first);
+    }
+  }
+}
+
+// The packing doubles only while ceil(slices / packed) stays at or above half the budget, up to a 512-thread block's
+// slices, and never applies to a threads override, smaller comms or no table.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTablePackingBoundaries) {
+  using Shape = std::pair<unsigned, unsigned>;
+  UseShapeTable();
+  EXPECT_EQ(GridBlock(2032 * kSliceFloats), Shape(254u, 256u)) << "16 per block would leave 127 blocks";
+  EXPECT_EQ(GridBlock(2033 * kSliceFloats), Shape(128u, 256u)) << "16 per block keeps 128";
+  comm().ddaFabricMaxBlocks = 101;
+  EXPECT_EQ(GridBlock(800 * kSliceFloats), Shape(50u, 256u)) << "half of an odd budget rounds down";
+  EXPECT_EQ(GridBlock(783 * kSliceFloats), Shape(98u, 256u));
+  comm().ddaFabricMaxBlocks = 256;
+  g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 128; };
+  EXPECT_EQ(GridBlock(2185 * kSliceFloats), Shape(137u, 128u)) << "packs twice up to 16 slices";
+  EXPECT_EQ(GridBlock(1093 * kSliceFloats), Shape(137u, 128u)) << "packs once";
+  g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 512; };
+  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(256u, 512u)) << "a 512-thread block is already at the limit";
+  g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 256; };
+  params_["RCCL_DDA_LL128_RS_THREADS"] = 256;
+  EXPECT_EQ(GridBlock(2185 * kSliceFloats), Shape(256u, 256u)) << "a threads override keeps a slice a warp";
+  params_.erase("RCCL_DDA_LL128_RS_THREADS");
+  comm().nRanks = 7;
+  EXPECT_EQ(GridBlock(2185 * kSliceFloats), Shape(256u, 256u)) << "below rankScaledMinRanks";
+  comm().nRanks = 8;
+  comm().archThresholds = nullptr;
+  EXPECT_EQ(GridBlock(2185 * kSliceFloats), Shape(256u, 256u)) << "no table";
+}
+
 // The reported block count is the launch grid of either kernel, caps included.
 TEST_F(DdaReduceScatterFabricLL128Microtest, Blocks_MatchTheLaunchedGrid) {
   struct Case {

@@ -83,6 +83,22 @@ static inline bool ddaLL128RsNarrow(const rcclArchThresholds* t, size_t shardByt
   return shardBytes <= t->rsDdaLL128NarrowMaxPerRank;
 }
 
+// Slices per batched block from rankScaledMinRanks ranks: a slice a warp, doubled up to a kDdaLL128RsMaxThreads
+// block's worth while the grid keeps at least half the budget. Each warp then takes more passes through the slice loop.
+static inline size_t ddaLL128RsPackedSlicesPerBlock(const rcclArchThresholds* t, size_t slices, unsigned threads,
+                                                     int nBlocksMax) {
+  size_t slicesPerBlock = threads / (unsigned)kDdaLL128Warp;
+  if (t == nullptr || ddaLL128RsThreadsFit(rcclParamDdaLL128RSThreads())) {
+    return slicesPerBlock;
+  }
+  const size_t maxSlicesPerBlock = kDdaLL128RsMaxThreads / (unsigned)kDdaLL128Warp;
+  while (slicesPerBlock * 2 <= maxSlicesPerBlock &&
+         (slices + slicesPerBlock * 2 - 1) / (slicesPerBlock * 2) >= (size_t)(nBlocksMax / 2)) {
+    slicesPerBlock *= 2;
+  }
+  return slicesPerBlock;
+}
+
 // Launch shape of whichever kernel the message takes.
 struct DdaLL128RsGeom {
   dim3 grid;
@@ -93,7 +109,7 @@ struct DdaLL128RsGeom {
 // A warp (batched) or a warp group (peer-parallel) carries one slice, so blocks = ceil(slices / slicesPerBlock),
 // capped by the grid budget. More slices than the grid holds just means more passes through the slice loop. From
 // rankScaledMinRanks ranks, small batched shards start at narrow blocks and widen to the batched block size once the
-// budget is full.
+// budget is full; larger ones pack more slices per block while the grid keeps half the budget.
 static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
   int nBlocksMax = comm->ddaFabricMaxBlocks;
@@ -126,8 +142,10 @@ static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, siz
       while (threads < batchedThreads && slices > (size_t)nBlocksMax * (threads / (unsigned)kDdaLL128Warp)) {
         threads = std::min(threads * 2, batchedThreads);
       }
+      slicesPerBlock = threads / (unsigned)kDdaLL128Warp;
+    } else {
+      slicesPerBlock = ddaLL128RsPackedSlicesPerBlock(t, slices, threads, nBlocksMax);
     }
-    slicesPerBlock = threads / (unsigned)kDdaLL128Warp;
   }
   unsigned blocks = (unsigned)std::min<size_t>((slices + slicesPerBlock - 1) / slicesPerBlock, (size_t)nBlocksMax);
   if (blocks == 0) {
