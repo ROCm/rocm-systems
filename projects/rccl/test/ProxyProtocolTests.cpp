@@ -4,10 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// ProxyProtocol: the proxy service thread (src/proxy.cc, ncclProxyService) serves any TCP
-// peer that knows the communicator magic. These tests act as such a peer against the proxy
-// of a one-rank communicator: a request the proxy must not act on has to close the
-// connection instead of being served.
+// ProxyProtocol: act as a TCP peer holding the comm magic; a request the proxy must refuse closes the connection.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -85,17 +82,16 @@ int initConnection(int fd) {
   if (!sendOp(fd, ncclProxyMsgInit, -1, &kValidInit, sizeof(kValidInit), sizeof(resp)) ||
       recv(fd, &hdr, sizeof(hdr), MSG_WAITALL) != (ssize_t)sizeof(hdr) || hdr.opId != kOpId ||
       hdr.res != ncclSuccess || hdr.respSize != (int)sizeof(resp) ||
-      recv(fd, &resp, sizeof(resp), MSG_WAITALL) != (ssize_t)sizeof(resp))
+      recv(fd, &resp, sizeof(resp), MSG_WAITALL) != (ssize_t)sizeof(resp)) {
     return -1;
+  }
   return resp.connId;
 }
 
-// Run probe against the proxy of a fresh one-rank communicator on GPU 0. Each test body is
-// only this call, so the skip below ends the test.
+// Run probe against the proxy of a fresh one-rank communicator on GPU 0.
 void withOneRankComm(const std::function<void(ncclComm_t)>& probe) {
-  int deviceCount = 0;
-  if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1) GTEST_SKIP() << "requires at least one GPU";
-  ASSERT_EQ(hipSetDevice(0), hipSuccess);
+  // Fail rather than skip: RUN_ISOLATED_TEST scores a skipped child as a passed test.
+  ASSERT_EQ(hipSetDevice(0), hipSuccess) << "the isolated child cannot open GPU 0";
   ncclUniqueId id;
   ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
   ncclComm_t comm = nullptr;
@@ -106,7 +102,6 @@ void withOneRankComm(const std::function<void(ncclComm_t)>& probe) {
 
 } // namespace
 
-// The client above speaks the protocol, so a closed connection in the tests below is a rejection.
 TEST(ProxyProtocol, AnswersWellFormedInit) {
   RUN_ISOLATED_TEST("ProxyProtocol.AnswersWellFormedInit", []() {
     withOneRankComm([](ncclComm_t comm) {
@@ -118,21 +113,21 @@ TEST(ProxyProtocol, AnswersWellFormedInit) {
   });
 }
 
-// Init sizes and fields come from the peer: a request larger than ncclProxyInitReq, or a
-// tpRank outside the communicator, must be refused.
+// Init sizes and fields come from the peer, so each malformed Init below must be refused.
 TEST(ProxyProtocol, RejectsMalformedInit) {
   RUN_ISOLATED_TEST("ProxyProtocol.RejectsMalformedInit", []() {
     withOneRankComm([](ncclComm_t comm) {
       struct { InitReq req; int pad; } oversized = {kValidInit, 0};
       InitReq badRank = kValidInit;
       badRank.tpRank = 1; // the communicator has a single rank
-      const struct { const char* what; const void* req; int size; } probes[] = {
-        {"a request larger than ncclProxyInitReq", &oversized, (int)sizeof(oversized)},
-        {"tpRank out of range", &badRank, (int)sizeof(badRank)}};
+      const struct { const char* what; const void* req; int reqSize; int respSize; } probes[] = {
+        {"a request larger than ncclProxyInitReq", &oversized, (int)sizeof(oversized), (int)sizeof(InitResp)},
+        {"tpRank out of range", &badRank, (int)sizeof(badRank), (int)sizeof(InitResp)},
+        {"no response buffer (respSize 0)", &kValidInit, (int)sizeof(kValidInit), 0}};
       for (const auto& probe : probes) {
         int fd = connectToProxy(comm);
         ASSERT_GE(fd, 0) << "could not connect to the proxy service";
-        ASSERT_TRUE(sendOp(fd, ncclProxyMsgInit, -1, probe.req, probe.size, sizeof(InitResp)));
+        ASSERT_TRUE(sendOp(fd, ncclProxyMsgInit, -1, probe.req, probe.reqSize, probe.respSize));
         EXPECT_EQ(awaitReply(fd, kTimeoutMs), Reply::Closed) << "proxy served an Init with " << probe.what;
         close(fd);
       }
@@ -140,8 +135,7 @@ TEST(ProxyProtocol, RejectsMalformedInit) {
   });
 }
 
-// A connection belongs to the peer that created it: an op naming another peer's connId must
-// be refused, not served with its response written into the owner's socket.
+// An op naming another peer's connId must be refused, not answered on the owner's socket.
 TEST(ProxyProtocol, RejectsOpOnAnotherPeersConnection) {
   RUN_ISOLATED_TEST("ProxyProtocol.RejectsOpOnAnotherPeersConnection", []() {
     withOneRankComm([](ncclComm_t comm) {
@@ -151,7 +145,7 @@ TEST(ProxyProtocol, RejectsOpOnAnotherPeersConnection) {
       ASSERT_GE(intruder, 0) << "could not connect to the proxy service";
       int connId = initConnection(owner);
       ASSERT_GE(connId, 0) << "proxy did not answer a well-formed Init";
-      // A Deregister the P2P transport refuses for its size, so it is harmless if served.
+      // A Deregister that the P2P transport refuses for its size, so it is harmless if served.
       int junk = 0;
       ASSERT_TRUE(sendOp(intruder, ncclProxyMsgDeregister, connId, &junk, sizeof(junk), 0));
       EXPECT_EQ(awaitReply(intruder, kTimeoutMs), Reply::Closed) << "proxy served an op on another peer's connection";

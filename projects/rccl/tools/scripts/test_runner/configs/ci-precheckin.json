@@ -132,6 +132,7 @@
         {"name": "ProxyTraceTestFixture.getMapSizeMB", "description": "ProxyTrace get map size test", "test_filter": "ProxyTraceTestFixture.getMapSizeMB", "timeout": 60},
         {"name": "ProxyTraceTestFixture.updateTraceOp", "description": "ProxyTrace update trace operation test", "test_filter": "ProxyTraceTestFixture.updateTraceOp", "timeout": 60},
         {"name": "ProxyTraceTestFixture.updateTraceOp2", "description": "ProxyTrace update trace operation test 2", "test_filter": "ProxyTraceTestFixture.updateTraceOp2", "timeout": 60},
+        {"name": "ProxyProtocol", "description": "Verify the proxy service closes a connection that sends a malformed Init or an op on another peer's connection, and answers a well-formed Init", "test_filter": "ProxyProtocol.*", "timeout": 120},
         {"name": "CollTraceUtilsTest.aggregateResultsTest", "description": "CollTrace aggregate results test", "test_filter": "CollTraceUtilsTest.aggregateResultsTest", "timeout": 60},
         {"name": "CollTraceUtilsTest.EventQueueOperationTest", "description": "CollTrace event queue operation test", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest", "timeout": 60},
         {"name": "CollTraceUtilsTest.EventQueueMultiThreadTest", "description": "CollTrace event queue multithread test", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest", "timeout": 60},
