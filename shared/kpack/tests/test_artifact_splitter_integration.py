@@ -4,6 +4,7 @@ Integration tests for the artifact splitter.
 These tests simulate real artifact splitting scenarios with mock data.
 """
 
+import re
 import shutil
 import struct
 from argparse import Namespace
@@ -933,14 +934,68 @@ class TestArtifactSplitterIntegration:
         ).read_bytes() == b"strict build"
         assert not (strict_test / "half.pass.cpp.gfx1250.gpu").exists()
         assert (gfx942_test / "half.pass.cpp.gfx942.gpu").exists()
-        for test_dir in (gfx1250_test, strict_test, gfx942_test):
-            assert (test_dir / "half.pass.cpp.build.yml").read_text() == run_description
+        # Each archive gets a run description that lists only its own build, so
+        # hiprtcc runs exactly the file the archive ships.
+        header = "cuda_thread_count: 1\ncuda_block_shmem_size: 0\nbuilds:\n"
+        for test_dir, build in (
+            (gfx1250_test, "half.pass.cpp.gfx1250.gpu"),
+            (strict_test, "half.pass.cpp.gfx1250-strict.gpu"),
+            (gfx942_test, "half.pass.cpp.gfx942.gpu"),
+        ):
+            description = (test_dir / "half.pass.cpp.build.yml").read_text()
+            assert description == header + f"  - '{build}'\n"
+            listed = re.findall(r"^\s*-\s*'([^']+)'", description, re.MULTILINE)
+            assert listed and all((test_dir / name).is_file() for name in listed)
 
         # The generic archive keeps neither device builds nor the run description.
         assert not (generic_test / "half.pass.cpp.build.yml").exists()
         assert not (generic_test / "half.pass.cpp.gfx1250.gpu").exists()
         assert not (generic_test / "half.pass.cpp.gfx1250-strict.gpu").exists()
         assert not (generic_test / "half.pass.cpp.gfx942.gpu").exists()
+
+    def test_libhipcxx_hiprtc_run_description_only_in_archives_with_a_build(
+        self, toolchain, tmp_path
+    ):
+        parent_dir = tmp_path / "shard"
+        input_dir = parent_dir / "libhipcxx_test_gfx1250-gfx942"
+        input_dir.mkdir(parents=True)
+        prefix = "math-libs/libhipcxx_hiprtc_tests/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        test_dir = (
+            input_dir / prefix / "bin/libhipcxx/lit-hiprtc/test/cuda/float/Output"
+        )
+        test_dir.mkdir(parents=True)
+        # Test A is only built for gfx942, test B only for gfx1250.
+        (test_dir / "a.pass.cpp.gfx942.gpu").write_bytes(b"a gfx942")
+        (test_dir / "a.pass.cpp.build.yml").write_text(
+            "builds:\n  - 'a.pass.cpp.gfx942.gpu'\n"
+        )
+        (test_dir / "b.pass.cpp.gfx1250.gpu").write_bytes(b"b gfx1250")
+        (test_dir / "b.pass.cpp.build.yml").write_text(
+            "builds:\n  - 'b.pass.cpp.gfx1250.gpu'\n"
+        )
+
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=["libhipcxx"],
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+            gpu_targets=["gfx1250", "gfx942"],
+        )
+        batch_split(args, toolchain)
+
+        relative_test = Path("bin/libhipcxx/lit-hiprtc/test/cuda/float/Output")
+        gfx1250_test = output_dir / "libhipcxx_test_gfx1250" / prefix / relative_test
+        gfx942_test = output_dir / "libhipcxx_test_gfx942" / prefix / relative_test
+
+        # A description never lands in an archive that has no build for it.
+        assert (gfx942_test / "a.pass.cpp.build.yml").exists()
+        assert not (gfx942_test / "b.pass.cpp.build.yml").exists()
+        assert (gfx1250_test / "b.pass.cpp.build.yml").exists()
+        assert not (gfx1250_test / "a.pass.cpp.build.yml").exists()
 
     def test_libhipcxx_hiprtc_run_description_kept_without_arch_artifacts(
         self, toolchain, tmp_path

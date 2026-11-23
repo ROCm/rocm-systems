@@ -1270,6 +1270,41 @@ class TestLibhipcxxHiprtcHandler:
         file_path = self._touch(prefix_root, relative_path)
         assert not handler.is_shared_sidecar(file_path, prefix_root)
 
+    RUN_DESCRIPTION = (
+        "cuda_thread_count: 1\n"
+        "cuda_block_shmem_size: 0\n"
+        "builds:\n"
+        "  - 'x.gfx1250.gpu'\n"
+        "  - 'x.gfx1250-strict.gpu'\n"
+        "  - 'x.gfx942-xnack+.gpu'\n"
+    )
+
+    @pytest.mark.parametrize(
+        "arch, expected_entries",
+        [
+            ("gfx1250", ["x.gfx1250.gpu"]),
+            ("gfx1250-strict", ["x.gfx1250-strict.gpu"]),
+            # xnack variants fold into the base arch, as for the artifact name
+            ("gfx942", ["x.gfx942-xnack+.gpu"]),
+        ],
+    )
+    def test_render_run_description_keeps_only_own_build(
+        self, handler, prefix_root, arch, expected_entries
+    ):
+        file_path = self._touch(prefix_root, f"{self.TEST_DIR}/x.build.yml")
+        file_path.write_text(self.RUN_DESCRIPTION)
+        rendered = handler.render_shared_sidecar(file_path, arch).decode()
+        assert rendered == (
+            "cuda_thread_count: 1\n"
+            "cuda_block_shmem_size: 0\n"
+            "builds:\n" + "".join(f"  - '{name}'\n" for name in expected_entries)
+        )
+
+    def test_render_run_description_without_build_for_arch(self, handler, prefix_root):
+        file_path = self._touch(prefix_root, f"{self.TEST_DIR}/x.build.yml")
+        file_path.write_text(self.RUN_DESCRIPTION)
+        assert handler.render_shared_sidecar(file_path, "gfx1100") is None
+
 
 class TestDatabaseHandlerRegistry:
     """Tests for database handler registry functions."""

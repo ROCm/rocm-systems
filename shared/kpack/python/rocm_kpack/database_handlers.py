@@ -125,6 +125,16 @@ class DatabaseHandler(ABC):
         """
         return False
 
+    def render_shared_sidecar(self, path: Path, arch: str) -> Optional[bytes]:
+        """
+        Return the content of a shared sidecar for one architecture artifact.
+
+        The default is a verbatim copy. Handlers override this when the sidecar
+        refers to per-architecture files, so each artifact only references what
+        it contains. Returning None skips the sidecar for this architecture.
+        """
+        return path.read_bytes()
+
 
 # Regex matching a library/<arch>/ path component (for per-arch subdirectory layout).
 _LIBRARY_ARCH_DIR_PATTERN = re.compile(
@@ -456,6 +466,9 @@ class HotswapCacheHandler(DatabaseHandler):
 # is for rocBLAS and composable_kernel. xnack is a feature; base_arch() strips
 # it before the artifact name is chosen.
 _HIPRTC_GPU_PATTERN = re.compile(r"\.(gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?)\.gpu$")
+_HIPRTC_FEATURE_RE = re.compile(r"-(?:xnack|sramecc)[+-]?")
+# A list entry of the hiprtcc run description: "  - 'name.gfx942.gpu'".
+_HIPRTC_BUILD_ENTRY = re.compile(r"^\s*-\s*'?([^'\s]+)'?\s*$")
 
 
 class LibhipcxxHiprtcHandler(DatabaseHandler):
@@ -496,6 +509,31 @@ class LibhipcxxHiprtcHandler(DatabaseHandler):
     def is_shared_sidecar(self, path: Path, prefix_root: Path) -> bool:
         """Detect the run description that lists the device builds of a test."""
         return path.name.endswith(".build.yml") and self._in_test_dir(path, prefix_root)
+
+    def render_shared_sidecar(self, path: Path, arch: str) -> Optional[bytes]:
+        """
+        Restrict the run description to the device build of one architecture.
+
+        Every other line (thread count, shared memory size, ``builds:``) is kept.
+        List entries are kept only when they name a ``.<arch>.gpu`` build, so the
+        description of an architecture artifact only lists files it ships and
+        hiprtcc runs exactly that build. Returns None when the test has no build
+        for this architecture.
+        """
+        kept: List[str] = []
+        found = False
+        for line in path.read_text().splitlines(keepends=True):
+            entry = _HIPRTC_BUILD_ENTRY.match(line)
+            if entry is None:
+                kept.append(line)
+                continue
+            gpu_match = _HIPRTC_GPU_PATTERN.search(entry.group(1))
+            # The artifact arch is the base arch (xnack/sramecc features are
+            # folded into it, '-strict' is not), as in the splitter.
+            if gpu_match and _HIPRTC_FEATURE_RE.sub("", gpu_match.group(1)) == arch:
+                kept.append(line)
+                found = True
+        return "".join(kept).encode() if found else None
 
 
 # Registry of available handlers

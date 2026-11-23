@@ -110,7 +110,7 @@ class FileClassificationVisitor:
         # Files every per-arch artifact of this prefix needs (see
         # DatabaseHandler.is_shared_sidecar). Not excluded from generic here:
         # that depends on whether the prefix produces any per-arch artifacts.
-        self.shared_sidecars: List[Path] = []
+        self.shared_sidecars: List[Tuple[Path, DatabaseHandler]] = []
 
     def visit_file(self, file_path: Path, prefix_path: Path) -> None:
         """
@@ -128,7 +128,7 @@ class FileClassificationVisitor:
         # them here prevents them from entering the kpack processing path.
         for handler in self.database_handlers:
             if handler.is_shared_sidecar(file_path, prefix_path):
-                self.shared_sidecars.append(file_path)
+                self.shared_sidecars.append((file_path, handler))
                 return
             arch = handler.detect(file_path, prefix_path)
             if arch:
@@ -738,11 +738,13 @@ class ArtifactSplitter:
         output_dir: Path,
     ):
         """
-        Copy shared sidecar files into every architecture artifact of a prefix.
+        Write shared sidecar files into the architecture artifacts of a prefix.
 
-        Shared sidecars are excluded from the generic artifact only when the
-        prefix produces at least one architecture artifact. Otherwise they stay
-        in the generic artifact, so no file is lost.
+        Each architecture artifact gets the content the handler renders for that
+        architecture (a verbatim copy unless the handler narrows it). A sidecar
+        is excluded from the generic artifact only when at least one
+        architecture artifact received it. Otherwise it stays in the generic
+        artifact, so no file is lost.
 
         Args:
             classifier: Classification results for this prefix
@@ -754,16 +756,23 @@ class ArtifactSplitter:
         if not arches or not classifier.shared_sidecars:
             return
 
-        for file_path in classifier.shared_sidecars:
+        for file_path, handler in classifier.shared_sidecars:
             rel_path = file_path.relative_to(prefix_path)
+            written = False
             for arch in arches:
+                content = handler.render_shared_sidecar(file_path, arch)
+                if content is None:
+                    continue
                 arch_artifact_name = f"{self.artifact_prefix}_{arch}"
                 dest_path = output_dir / arch_artifact_name / prefix / rel_path
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 if self.verbose:
-                    print(f"    Copying shared {rel_path} to {arch_artifact_name}")
-                shutil.copy2(file_path, dest_path)
-            classifier.exclude_from_generic.add(file_path)
+                    print(f"    Writing shared {rel_path} to {arch_artifact_name}")
+                dest_path.write_bytes(content)
+                shutil.copystat(file_path, dest_path)
+                written = True
+            if written:
+                classifier.exclude_from_generic.add(file_path)
 
     def split(self, input_dir: Path, output_dir: Path):
         """
