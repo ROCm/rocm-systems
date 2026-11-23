@@ -111,12 +111,15 @@ fn first_conversion_waits_once_for_a_measured_baseline_without_nominal_output() 
         Ok(sample(8_000_100, 1_080_120_000)),
     ]);
     let clock = GpuClock::new(source.clone()).unwrap();
-    assert!(clock.calibration.lock().unwrap().is_none());
+    assert!(clock.state.lock().unwrap().ratio.is_none());
     assert_eq!(clock.tick(102), Ok(1_000_000_020));
-    let map = clock.calibration.lock().unwrap().unwrap();
-    assert_eq!(map.latest, sample(8_000_100, 1_080_120_000));
-    assert_eq!(map.ratio.host, 80_120_000);
-    assert_eq!(map.ratio.gpu, 8_000_000);
+    let map = clock.state.lock().unwrap().ratio.unwrap();
+    assert_eq!(
+        clock.state.lock().unwrap().latest,
+        sample(8_000_100, 1_080_120_000)
+    );
+    assert_eq!(map.host, 80_120_000);
+    assert_eq!(map.gpu, 8_000_000);
     assert_eq!(
         *source.waits.lock().unwrap(),
         [Duration::from_micros(62_495)]
@@ -176,45 +179,49 @@ fn interval_and_tick_use_the_same_measured_host_ratio_and_ignore_boottime() {
 }
 
 #[test]
-fn quarter_span_refresh_starts_strictly_after_the_boundary() {
+fn crossing_the_quarter_span_boundary_keeps_the_map_and_records_live_samples() {
     let startup = sample(100, 1_000_000_000);
     let latest = sample(10_000_100, 1_100_000_000);
     let clock = GpuClock::new(Samples::new([
         Ok(startup),
         Ok(latest),
-        Ok(sample(12_600_100, 1_126_000_000)),
-        Ok(sample(13_000_100, 1_130_000_000)),
+        Ok(sample(12_600_100, 1_125_900_000)),
+        Ok(sample(13_000_100, 1_129_800_000)),
     ]))
     .unwrap();
     assert_eq!(clock.tick(latest.gpu), Ok(latest.host));
     assert_eq!(clock.tick(12_500_100), Ok(1_125_000_000));
-    assert_eq!(clock.calibration.lock().unwrap().unwrap().latest, latest);
-    assert_eq!(clock.tick(12_500_101), Ok(1_125_000_010));
+    let ratio = clock.state.lock().unwrap().ratio.unwrap();
     assert_eq!(
-        clock.calibration.lock().unwrap().unwrap().latest.gpu,
-        13_000_100
+        clock.state.lock().unwrap().latest,
+        sample(12_600_100, 1_125_900_000)
     );
+    assert_eq!(clock.tick(12_500_101), Ok(1_125_000_010));
+    assert_eq!(clock.state.lock().unwrap().latest.gpu, 13_000_100);
+    assert_eq!(clock.state.lock().unwrap().ratio, Some(ratio));
 }
 
 #[test]
-fn host_horizon_refresh_starts_strictly_after_one_sixteenth_second() {
+fn crossing_the_host_horizon_keeps_the_map_and_records_live_samples() {
     let startup = sample(100, 1_000_000_000);
     let latest = sample(100_000_100, 2_000_000_000);
     let clock = GpuClock::new(Samples::new([
         Ok(startup),
         Ok(latest),
-        Ok(sample(106_300_100, 2_063_000_000)),
-        Ok(sample(106_400_100, 2_064_000_000)),
+        Ok(sample(106_300_100, 2_062_900_000)),
+        Ok(sample(106_400_100, 2_063_800_000)),
     ]))
     .unwrap();
     assert_eq!(clock.tick(latest.gpu), Ok(latest.host));
     assert_eq!(clock.tick(106_250_100), Ok(2_062_500_000));
-    assert_eq!(clock.calibration.lock().unwrap().unwrap().latest, latest);
-    assert_eq!(clock.tick(106_250_101), Ok(2_062_500_010));
+    let ratio = clock.state.lock().unwrap().ratio.unwrap();
     assert_eq!(
-        clock.calibration.lock().unwrap().unwrap().latest.gpu,
-        106_400_100
+        clock.state.lock().unwrap().latest,
+        sample(106_300_100, 2_062_900_000)
     );
+    assert_eq!(clock.tick(106_250_101), Ok(2_062_500_010));
+    assert_eq!(clock.state.lock().unwrap().latest.gpu, 106_400_100);
+    assert_eq!(clock.state.lock().unwrap().ratio, Some(ratio));
 }
 
 #[test]
@@ -263,35 +270,52 @@ fn captured_anchor_replay_removes_the_reverse_retained_bootstrap_inversion() {
 }
 
 #[test]
-fn refreshed_slope_can_remap_and_reverse_close_retained_endpoints() {
-    // Positive increasing anchors alone cannot establish cross-refresh order.
+fn later_slope_changes_preserve_cached_close_endpoints_in_both_query_orders() {
+    // These increasing anchors used to move a cached +412-tick pair by -95,881 ns.
     let latest = sample(100_000_100, 2_000_000_000);
     let refreshed = sample(125_000_100, 2_249_875_000);
-    let clock = GpuClock::new(Samples::new([
-        Ok(sample(100, 1_000_000_000)),
-        Ok(latest),
-        Ok(refreshed),
-        Ok(refreshed),
-        Ok(refreshed),
-    ]))
-    .unwrap();
-    let earlier = clock.tick(latest.gpu).unwrap();
-    clock.tick(110_000_100).unwrap();
-    let later = clock.tick(latest.gpu + 412).unwrap();
-    let repeated_earlier = clock.tick(latest.gpu).unwrap();
-    eprintln!(
-        "refresh counterexample: ticks=(100000100,100000512) translated=({earlier},{later}) gap_ns={} repeated_earlier={repeated_earlier}",
-        i128::from(later) - i128::from(earlier)
-    );
-    assert!(
-        later < earlier,
-        "mutable calibration does not establish historical ordering"
-    );
-    assert_ne!(repeated_earlier, earlier);
+    for reverse in [false, true] {
+        let source = Samples::new([
+            Ok(sample(100, 1_000_000_000)),
+            Ok(latest),
+            Ok(refreshed),
+            Ok(refreshed),
+            Ok(refreshed),
+            Ok(refreshed),
+        ]);
+        let clock = GpuClock::new(source.clone()).unwrap();
+        let (first, second) = if reverse {
+            (latest.gpu + 412, latest.gpu)
+        } else {
+            (latest.gpu, latest.gpu + 412)
+        };
+        let first_value = clock.tick(first).unwrap();
+        assert_eq!(clock.tick(110_000_100), Ok(2_100_000_000));
+        let second_value = clock.tick(second).unwrap();
+        let (earlier, later) = if reverse {
+            (second_value, first_value)
+        } else {
+            (first_value, second_value)
+        };
+        assert_eq!(earlier, 2_000_000_000);
+        assert_eq!(later, 2_000_004_120);
+        assert!(later > earlier);
+        assert_eq!(clock.tick(first), Ok(first_value));
+        assert_eq!(
+            clock.interval(latest.gpu, latest.gpu + 412),
+            Ok((earlier, later))
+        );
+        assert_eq!(clock.state.lock().unwrap().latest, refreshed);
+        assert_eq!(source.calls.load(Ordering::Relaxed), 6);
+        eprintln!(
+            "retained slope witness: reverse={reverse} gap_ns={} repeated_first_change_ns=0",
+            later - earlier
+        );
+    }
 }
 
 #[test]
-fn pre_startup_ticks_keep_their_first_ratio_across_refreshes() {
+fn pre_startup_and_later_ticks_keep_their_first_measured_ratio() {
     let latest = sample(11_000_100, 1_100_150_000);
     let refreshed = sample(21_000_100, 1_200_200_000);
     let clock = GpuClock::new(Samples::new([
@@ -302,7 +326,7 @@ fn pre_startup_ticks_keep_their_first_ratio_across_refreshes() {
     ]))
     .unwrap();
     assert_eq!(clock.tick(100), Ok(989_985_000));
-    assert_eq!(clock.tick(refreshed.gpu), Ok(refreshed.host));
+    assert_eq!(clock.tick(refreshed.gpu), Ok(1_200_300_000));
     assert_eq!(clock.tick(100), Ok(989_985_000));
 }
 
@@ -318,7 +342,10 @@ fn live_failure_never_returns_a_cached_success_and_is_retryable() {
     ]);
     let clock = GpuClock::new(source.clone()).unwrap();
     let value = clock.tick(9_000_100).unwrap();
+    let ratio = clock.state.lock().unwrap().ratio;
     assert_eq!(clock.tick(9_000_100), Err(INVALID_RUNTIME_STATE));
+    assert_eq!(clock.state.lock().unwrap().latest, latest);
+    assert_eq!(clock.state.lock().unwrap().ratio, ratio);
     assert_eq!(clock.tick(9_000_100), Ok(value));
     assert_eq!(source.calls.load(Ordering::Relaxed), 4);
 }
@@ -341,9 +368,118 @@ fn invalid_or_regressing_samples_leave_calibration_unchanged_for_retry() {
         let latest = sample(10_000_100, 1_100_000_000);
         let clock = GpuClock::new(Samples::new([Ok(startup), Ok(invalid), Ok(latest)])).unwrap();
         assert_eq!(clock.tick(1_000_100), Err(ERROR));
-        assert!(clock.calibration.lock().unwrap().is_none());
+        assert!(clock.state.lock().unwrap().ratio.is_none());
         assert_eq!(clock.tick(10_000_100), Ok(latest.host));
     }
+}
+
+#[test]
+fn every_later_observation_validates_metadata_and_progress_without_remapping() {
+    let startup = sample(100, 1_000_000_000);
+    let measured = sample(10_000_100, 1_100_000_000);
+    let observed = sample(30_000_100, 1_299_900_000);
+    let healthy = sample(observed.gpu + 200, observed.host + 2_000);
+    let invalid_metadata = |frequency_hz, counter_bit_count| ClockCounters {
+        gpu_info: rocddi::host::clock::ClockInfo {
+            frequency_hz,
+            counter_bit_count,
+        },
+        ..healthy
+    };
+    for (invalid, status) in [
+        (sample(observed.gpu - 1, observed.host + 1), ERROR),
+        (sample(observed.gpu + 1, observed.host - 1), ERROR),
+        (invalid_metadata(0, 0), ERROR),
+        (invalid_metadata(200_000_000, 0), ERROR),
+        (invalid_metadata(100_000_000, 32), NOT_SUPPORTED),
+        (invalid_metadata(100_000_000, 64), ERROR),
+        (invalid_metadata(100_000_000, 65), ERROR),
+    ] {
+        let source = Samples::new([
+            Ok(startup),
+            Ok(measured),
+            Ok(observed),
+            Ok(invalid),
+            Ok(healthy),
+        ]);
+        let clock = GpuClock::new(source.clone()).unwrap();
+        let value = clock.tick(9_000_100).unwrap();
+        let ratio = clock.state.lock().unwrap().ratio;
+        assert_eq!(clock.tick(9_000_100), Ok(value));
+        assert_eq!(clock.state.lock().unwrap().latest, observed);
+        assert_eq!(clock.tick(9_000_100), Err(status));
+        assert_eq!(clock.state.lock().unwrap().latest, observed);
+        assert_eq!(clock.state.lock().unwrap().ratio, ratio);
+        assert_eq!(clock.tick(9_000_100), Ok(value));
+        assert_eq!(clock.state.lock().unwrap().latest, healthy);
+        assert_eq!(clock.state.lock().unwrap().ratio, ratio);
+        assert_eq!(source.calls.load(Ordering::Relaxed), 5);
+    }
+}
+
+#[test]
+fn failed_output_arithmetic_retains_native_progress_without_publishing_a_map() {
+    let startup = sample(100, 1_000_000_000);
+    let measured = sample(10_000_100, 1_100_000_000);
+    let observed = sample(30_000_100, 1_299_900_000);
+    for initialized in [false, true] {
+        let latest = if initialized { observed } else { measured };
+        let regressed = sample(latest.gpu - 1, latest.host + 1);
+        let recovered = sample(latest.gpu + 100, latest.host + 1_000);
+        let mut values = vec![Ok(startup), Ok(measured)];
+        if initialized {
+            values.push(Ok(observed));
+        }
+        values.extend([Ok(regressed), Ok(recovered)]);
+        let source = Samples::new(values);
+        let clock = GpuClock::new(source.clone()).unwrap();
+        if initialized {
+            assert_eq!(clock.tick(1_000_100), Ok(1_010_000_000));
+        }
+        let before = clock.state.lock().unwrap().ratio;
+        // The end converts first; failure of the start must not publish the map.
+        assert_eq!(clock.interval(u64::MAX, 1_000_100), Err(ERROR));
+        assert_eq!(clock.state.lock().unwrap().latest, latest);
+        assert_eq!(clock.state.lock().unwrap().ratio, before);
+        assert_eq!(clock.tick(1_000_100), Err(ERROR));
+        assert_eq!(clock.state.lock().unwrap().latest, latest);
+        assert_eq!(clock.state.lock().unwrap().ratio, before);
+        assert_eq!(clock.tick(1_000_100), Ok(1_010_000_000));
+        assert_eq!(clock.state.lock().unwrap().latest, recovered);
+        assert_eq!(
+            source.calls.load(Ordering::Relaxed),
+            if initialized { 5 } else { 4 }
+        );
+    }
+}
+
+#[test]
+fn arbitrary_future_ticks_and_reversed_intervals_share_the_immutable_map() {
+    let measured = sample(10_000_100, 1_100_000_000);
+    let later = sample(125_000_100, 2_249_875_000);
+    let source = Samples::new([
+        Ok(sample(100, 1_000_000_000)),
+        Ok(measured),
+        Ok(later),
+        Ok(later),
+        Ok(later),
+        Ok(later),
+    ]);
+    let clock = GpuClock::new(source.clone()).unwrap();
+    let future_tick = 1_000_000_000_100;
+    let future_value = clock.tick(future_tick).unwrap();
+    assert_eq!(future_value, 10_001_000_000_000);
+    let earlier = clock.tick(measured.gpu).unwrap();
+    let later_value = clock.tick(measured.gpu + 412).unwrap();
+    assert_eq!(earlier, measured.host);
+    assert_eq!(later_value - earlier, 4_120);
+    assert_eq!(clock.tick(future_tick), Ok(future_value));
+    assert_eq!(
+        clock.interval(measured.gpu + 412, measured.gpu),
+        Ok((later_value, earlier))
+    );
+    assert_eq!(clock.state.lock().unwrap().latest, later);
+    assert_eq!(source.calls.load(Ordering::Relaxed), 6);
 }
 
 #[test]
@@ -354,7 +490,7 @@ fn checked_conversion_overflows_remain_errors_and_do_not_publish_calibration() {
     ]);
     let clock = GpuClock::new(source).unwrap();
     assert_eq!(clock.tick(10_000_101), Err(ERROR));
-    assert!(clock.calibration.lock().unwrap().is_none());
+    assert!(clock.state.lock().unwrap().ratio.is_none());
     let clock = GpuClock::new(Samples::new([
         Ok(sample(100_000_000, 1_000_000)),
         Ok(sample(110_000_000, 101_000_000)),
@@ -429,7 +565,7 @@ fn post_deadline_native_shortfall_leaves_initialization_retryable() {
     let source = Samples::new([Ok(startup), Ok(startup), Ok(startup), Ok(latest)]);
     let clock = GpuClock::new(source.clone()).unwrap();
     assert_eq!(clock.tick(101), Err(ERROR));
-    assert!(clock.calibration.lock().unwrap().is_none());
+    assert!(clock.state.lock().unwrap().ratio.is_none());
     assert_eq!(
         *source.waits.lock().unwrap(),
         [Duration::from_micros(62_500)]
@@ -453,7 +589,7 @@ fn post_wait_native_failure_or_regression_never_publishes_a_first_map() {
         let source = Samples::new([Ok(startup), Ok(first), bad, Ok(latest)]);
         let clock = GpuClock::new(source.clone()).unwrap();
         assert_eq!(clock.tick(150), Err(expected));
-        assert!(clock.calibration.lock().unwrap().is_none());
+        assert!(clock.state.lock().unwrap().ratio.is_none());
         assert_eq!(source.waits.lock().unwrap().len(), 1);
         assert_eq!(clock.tick(latest.gpu), Ok(latest.host));
     }
@@ -488,8 +624,7 @@ fn cold_calibration_measures_the_production_wait_on_the_host() {
     assert!(clock.tick(100).unwrap() > 0);
     let elapsed = before.elapsed();
     let raw_elapsed = rocddi::host::clock::read().unwrap() - raw_before;
-    let calibration = clock.calibration.lock().unwrap().unwrap();
-    let span = calibration.latest.host - clock.startup.host;
+    let span = clock.state.lock().unwrap().ratio.unwrap().host;
     let samples = source.samples.lock().unwrap();
     let first_query_age = samples[1].host - samples[0].host;
     let expected_samples = if first_query_age < 62_500_000 { 3 } else { 2 };
@@ -610,7 +745,7 @@ fn raw_host_errors_or_regressions_propagate_without_another_gpu_sample() {
         let source = ScriptedHostSamples::new([Ok(startup), Ok(first), Ok(latest)], reads);
         let clock = GpuClock::new(source.clone()).unwrap();
         assert_eq!(clock.tick(150), Err(expected));
-        assert!(clock.calibration.lock().unwrap().is_none());
+        assert!(clock.state.lock().unwrap().ratio.is_none());
         assert_eq!(source.native.calls.load(Ordering::Relaxed), 2);
         assert_eq!(source.native.waits.lock().unwrap().len(), expected_waits);
         assert_eq!(clock.tick(latest.gpu), Ok(latest.host));
@@ -624,7 +759,7 @@ fn checked_raw_deadline_overflow_returns_before_host_waiting() {
     let source = Samples::new([Ok(startup), Ok(startup)]);
     let clock = GpuClock::new(source.clone()).unwrap();
     assert_eq!(clock.tick(100), Err(ERROR));
-    assert!(clock.calibration.lock().unwrap().is_none());
+    assert!(clock.state.lock().unwrap().ratio.is_none());
     assert!(source.waits.lock().unwrap().is_empty());
     assert_eq!(source.calls.load(Ordering::Relaxed), 2);
 }
@@ -643,7 +778,7 @@ fn post_deadline_native_host_must_follow_the_observed_raw_clock() {
     );
     let clock = GpuClock::new(source.clone()).unwrap();
     assert_eq!(clock.tick(150), Err(ERROR));
-    assert!(clock.calibration.lock().unwrap().is_none());
+    assert!(clock.state.lock().unwrap().ratio.is_none());
     assert_eq!(source.native.calls.load(Ordering::Relaxed), 3);
     assert_eq!(clock.tick(10_000_100), Ok(1_100_150_000));
     assert_eq!(source.native.calls.load(Ordering::Relaxed), 4);
@@ -708,10 +843,10 @@ fn differing_sleep_and_raw_rates_reach_one_raw_deadline_without_gpu_retries() {
         let clock = GpuClock::new(source.clone()).unwrap();
         source.time.lock().unwrap().now += 1_000;
         assert!(clock.tick(150).is_ok());
-        let map = clock.calibration.lock().unwrap().unwrap();
+        let map = clock.state.lock().unwrap().ratio.unwrap();
         let time = source.time.lock().unwrap();
         let sleep_count = time.sleeps.len();
-        assert!(map.latest.host - clock.startup.host >= 62_500_000);
+        assert!(map.host >= 62_500_000);
         assert!(time.sleeps.iter().all(|duration| !duration.is_zero()));
         assert_eq!(source.native_calls.load(Ordering::Relaxed), 3);
         assert_eq!(source.host_reads.load(Ordering::Relaxed), sleep_count + 1);
@@ -726,7 +861,7 @@ fn differing_sleep_and_raw_rates_reach_one_raw_deadline_without_gpu_retries() {
                 .iter()
                 .map(Duration::as_nanos)
                 .collect::<Vec<_>>(),
-            map.latest.host - clock.startup.host
+            map.host
         );
     }
 }
@@ -758,14 +893,14 @@ fn captured_short_baselines_use_one_measured_first_map_in_both_query_orders() {
                 (earlier_tick, later_tick)
             };
             let first_value = clock.tick(first).unwrap();
-            let frozen = clock.calibration.lock().unwrap().unwrap();
+            let frozen = clock.state.lock().unwrap().ratio.unwrap();
             let second_value = clock.tick(second).unwrap();
             let (earlier, later) = if reverse {
                 (second_value, first_value)
             } else {
                 (first_value, second_value)
             };
-            assert_eq!(frozen.latest, measured);
+            assert_eq!(clock.state.lock().unwrap().latest, measured);
             assert_eq!(frozen.translate(startup, earlier_tick), Ok(earlier));
             assert_eq!(frozen.translate(startup, later_tick), Ok(later));
             assert_eq!(clock.tick(earlier_tick), Ok(earlier));
@@ -788,7 +923,7 @@ fn captured_short_baselines_use_one_measured_first_map_in_both_query_orders() {
 }
 
 #[test]
-fn captured_refresh_boundaries_and_retained_requeries_have_a_frozen_measured_control() {
+fn captured_old_refresh_boundaries_keep_cached_values_exactly_stable() {
     let startup = sample(anchors::SHORT[0].0, anchors::SHORT[0].1);
     let mut minimum_gap = i128::MAX;
     let mut maximum_retained_change = 0_u128;
@@ -808,18 +943,23 @@ fn captured_refresh_boundaries_and_retained_requeries_have_a_frozen_measured_con
             ]);
             let clock = GpuClock::new(source.clone()).unwrap();
             assert_eq!(clock.tick(previous.gpu), Ok(previous.host));
-            let frozen = clock.calibration.lock().unwrap().unwrap();
+            let frozen = clock.state.lock().unwrap().ratio.unwrap();
             let host_limit = rocddi::host::clock::info().frequency_hz / 16;
             let time_limit = u64::try_from(
-                (u128::from(host_limit + 1) * u128::from(frozen.ratio.gpu) - 1)
-                    / u128::from(frozen.ratio.host),
+                (u128::from(host_limit + 1) * u128::from(frozen.gpu) - 1) / u128::from(frozen.host),
             )
             .unwrap();
             let earlier_tick = previous.gpu + ((previous.gpu - startup.gpu) / 4).min(time_limit);
             let later_tick = earlier_tick + 412;
             assert!(later_tick < next.gpu);
-            assert!(!frozen.needs_refresh(startup, earlier_tick).unwrap());
-            assert!(frozen.needs_refresh(startup, later_tick).unwrap());
+            let earlier_extrapolation = earlier_tick - previous.gpu;
+            let later_extrapolation = later_tick - previous.gpu;
+            assert!(earlier_extrapolation <= (previous.gpu - startup.gpu) / 4);
+            assert!(frozen.scale(earlier_extrapolation).unwrap() <= host_limit);
+            assert!(
+                later_extrapolation > (previous.gpu - startup.gpu) / 4
+                    || frozen.scale(later_extrapolation).unwrap() > host_limit
+            );
             let (first, second) = if reverse {
                 (later_tick, earlier_tick)
             } else {
@@ -838,16 +978,20 @@ fn captured_refresh_boundaries_and_retained_requeries_have_a_frozen_measured_con
                 - frozen.translate(startup, earlier_tick).unwrap();
             let gap = i128::from(later) - i128::from(earlier);
             let retained_change = i128::from(retained_earlier) - i128::from(earlier);
-            let selected = clock.calibration.lock().unwrap().unwrap();
-            assert_eq!(selected.latest, next);
+            let selected = clock.state.lock().unwrap().ratio.unwrap();
+            assert_eq!(clock.state.lock().unwrap().latest, next);
+            assert_eq!(selected, frozen);
+            assert_eq!(earlier, frozen.translate(startup, earlier_tick).unwrap());
+            assert_eq!(later, frozen.translate(startup, later_tick).unwrap());
+            assert_eq!(retained_earlier, earlier);
             assert_eq!(retained_later, later);
             assert!(gap > 0, "captured +412-tick boundary pair inverted");
             assert!(source.waits.lock().unwrap().is_empty());
             minimum_gap = minimum_gap.min(gap);
             maximum_retained_change = maximum_retained_change.max(retained_change.unsigned_abs());
             eprintln!(
-                "captured refresh: span_index={index} reverse={reverse} old_ratio={}/{} new_ratio={}/{} ticks=({earlier_tick},{later_tick}) converted=({earlier},{later}) gap_ns={gap} frozen_gap_ns={frozen_gap} retained_earlier_change_ns={retained_change}",
-                frozen.ratio.host, frozen.ratio.gpu, selected.ratio.host, selected.ratio.gpu
+                "captured old refresh boundary: span_index={index} reverse={reverse} ratio={}/{} ticks=({earlier_tick},{later_tick}) converted=({earlier},{later}) gap_ns={gap} frozen_gap_ns={frozen_gap} retained_earlier_change_ns={retained_change}",
+                frozen.host, frozen.gpu
             );
             cases += 1;
         }
@@ -856,6 +1000,7 @@ fn captured_refresh_boundaries_and_retained_requeries_have_a_frozen_measured_con
         "captured refresh summary: cases={cases} minimum_ordered_gap_ns={minimum_gap} maximum_abs_retained_change_ns={maximum_retained_change}"
     );
     assert_eq!(cases, 38);
+    assert_eq!(maximum_retained_change, 0);
 }
 
 #[test]
@@ -863,7 +1008,7 @@ fn captured_trajectory_keeps_the_first_measured_map_as_an_immutable_control() {
     let startup = sample(anchors::SHORT[0].0, anchors::SHORT[0].1);
     let short = sample(anchors::SHORT[127].0, anchors::SHORT[127].1);
     let measured = sample(anchors::SPAN[1].0, anchors::SPAN[1].1);
-    let mut samples = vec![Ok(startup), Ok(short), Ok(measured)];
+    let mut samples = vec![Ok(startup), Ok(short), Ok(measured), Ok(measured)];
     for &(gpu, host) in anchors::SPAN.iter().skip(2) {
         samples.extend([Ok(sample(gpu, host)); 3]);
     }
@@ -872,18 +1017,23 @@ fn captured_trajectory_keeps_the_first_measured_map_as_an_immutable_control() {
     let earlier_tick = short.gpu - 1_412;
     let later_tick = earlier_tick + 412;
     let first_later = clock.tick(later_tick).unwrap();
-    let frozen = clock.calibration.lock().unwrap().unwrap();
+    let first_earlier = clock.tick(earlier_tick).unwrap();
+    let frozen = clock.state.lock().unwrap().ratio.unwrap();
     let mut maximum_control_difference = 0_u128;
     let mut minimum_cached_retained_gap = i128::MAX;
     for (index, &(gpu, host)) in anchors::SPAN.iter().enumerate().skip(2) {
         let interval = clock.interval(gpu - 1_412, gpu - 1_000).unwrap();
         let earlier = clock.tick(earlier_tick).unwrap();
         let later = clock.tick(later_tick).unwrap();
+        assert_eq!(earlier, first_earlier);
         assert!(interval.1 > interval.0 && later > earlier);
-        let selected = clock.calibration.lock().unwrap().unwrap();
-        assert_eq!(selected.latest, sample(gpu, host));
+        let selected = clock.state.lock().unwrap().ratio.unwrap();
+        assert_eq!(clock.state.lock().unwrap().latest, sample(gpu, host));
+        assert_eq!(selected, frozen);
         let control = frozen.translate(startup, gpu - 1_000).unwrap();
         let control_difference = i128::from(interval.1) - i128::from(control);
+        assert_eq!(control_difference, 0);
+        assert_eq!(later, first_later);
         let cached_retained_gap = i128::from(first_later) - i128::from(earlier);
         assert!(
             cached_retained_gap > 0,
@@ -899,8 +1049,9 @@ fn captured_trajectory_keeps_the_first_measured_map_as_an_immutable_control() {
         );
     }
     eprintln!(
-        "captured trajectory summary: refreshes=19 maximum_abs_frozen_control_difference_ns={maximum_control_difference} minimum_cached_retained_gap_ns={minimum_cached_retained_gap}"
+        "captured trajectory summary: later_samples=19 maximum_abs_frozen_control_difference_ns={maximum_control_difference} minimum_cached_retained_gap_ns={minimum_cached_retained_gap}"
     );
+    assert_eq!(maximum_control_difference, 0);
     assert_eq!(source.waits.lock().unwrap().len(), 1);
 }
 
@@ -915,25 +1066,53 @@ impl ClockSource for Arc<IncreasingSamples> {
         let index = u64::try_from(self.calls.fetch_add(1, Ordering::Relaxed)).unwrap();
         Ok(sample(
             100 + index * 10_000_000,
-            1_000_000_000 + index * 100_000_000,
+            1_000_000_000 + index * 100_000_000 - index.saturating_sub(1) * 12_500,
         ))
     }
 }
 
 #[test]
-fn concurrent_clones_share_one_serialized_owner_and_live_sampling() {
+fn concurrent_reverse_and_future_queries_share_one_map_despite_changing_samples() {
     let source = Arc::new(IncreasingSamples {
         calls: AtomicUsize::new(0),
     });
     let clock = Arc::new(GpuClock::new(source.clone()).unwrap());
+    let ready = Arc::new(std::sync::Barrier::new(8));
     let workers: Vec<_> = (0..8)
-        .map(|_| {
+        .map(|index| {
             let clock = clock.clone();
-            thread::spawn(move || clock.tick(5_000_100))
+            let ready = ready.clone();
+            thread::spawn(move || {
+                let tick = if index == 0 {
+                    50
+                } else if index % 2 == 0 {
+                    5_000_100 + index
+                } else {
+                    1_000_000_100 + index
+                };
+                let expected =
+                    u64::try_from(1_000_000_000 + (i128::from(tick) - 100) * 10).unwrap();
+                ready.wait();
+                assert_eq!(clock.tick(tick), Ok(expected));
+                assert_eq!(
+                    clock.interval(tick + 412, tick),
+                    Ok((expected + 4_120, expected))
+                );
+                assert_eq!(clock.tick(tick), Ok(expected));
+                assert_eq!(clock.tick(tick + 412), Ok(expected + 4_120));
+            })
         })
         .collect();
     for worker in workers {
-        assert_eq!(worker.join().unwrap(), Ok(1_050_000_000));
+        worker.join().unwrap();
     }
-    assert_eq!(source.calls.load(Ordering::Relaxed), 9);
+    assert_eq!(source.calls.load(Ordering::Relaxed), 33);
+    assert_eq!(clock.state.lock().unwrap().latest.gpu, 320_000_100);
+    assert_eq!(
+        clock.state.lock().unwrap().ratio,
+        Some(ClockRatio {
+            host: 100_000_000,
+            gpu: 10_000_000
+        })
+    );
 }

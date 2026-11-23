@@ -28,26 +28,44 @@ impl ClockSource for Device {
     }
 }
 
-/// Shared calibration for one activated GPU and uninterrupted counter epoch.
+/// Shared measured map for one activated GPU and uninterrupted counter epoch.
 pub(crate) struct GpuClock<Source = Device> {
     /// Retains the activated device and performs a live query on every conversion.
     source: Source,
     /// Startup observation from the originating activated device's epoch.
     startup: ClockCounters,
-    /// Serializes sampling, calibration updates, and whole-interval conversion.
-    calibration: Mutex<Option<Calibration>>,
+    /// Serializes live observations, first-map publication, and conversion.
+    state: Mutex<ClockState>,
 }
 
-/// Positive rational host/GPU interval ratio, in host ticks per GPU tick.
-#[derive(Clone, Copy)]
+/// Native health observations and the separately published conversion map.
+struct ClockState {
+    /// Latest validated native observation, including failed output conversions.
+    latest: ClockCounters,
+    /// First adequate measured ratio, immutable after a successful conversion.
+    ratio: Option<ClockRatio>,
+}
+
+/// Immutable positive measured ratio, in host ticks per GPU tick.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ClockRatio {
-    /// Host ticks in the measured startup-to-latest span.
+    /// Host ticks in the first adequate startup-to-sample span.
     host: u64,
-    /// GPU ticks in the measured startup-to-latest span.
+    /// GPU ticks in the first adequate startup-to-sample span.
     gpu: u64,
 }
 
 impl ClockRatio {
+    /// Requires a full host calibration horizon before any map can be published.
+    fn measured(startup: ClockCounters, sample: ClockCounters) -> Result<Self, Status> {
+        let gpu = sample.gpu.checked_sub(startup.gpu).ok_or(ERROR)?;
+        let host = sample.host.checked_sub(startup.host).ok_or(ERROR)?;
+        if gpu == 0 || host < rocddi::host::clock::info().frequency_hz / 16 {
+            return Err(ERROR);
+        }
+        Ok(Self { host, gpu })
+    }
+
     /// Scales a magnitude without floating-point rounding or unchecked narrowing.
     fn scale(self, ticks: u64) -> Result<u64, Status> {
         u64::try_from(u128::from(ticks) * u128::from(self.host) / u128::from(self.gpu))
@@ -71,56 +89,6 @@ impl ClockRatio {
     }
 }
 
-/// Bounded startup/latest calibration with the reference refresh thresholds.
-#[derive(Clone, Copy)]
-struct Calibration {
-    /// Most recent sample selected for the conversion ratio.
-    latest: ClockCounters,
-    /// Current positive ratio; nominal frequency is never a conversion map.
-    ratio: ClockRatio,
-    /// Initial measured ratio, frozen so pre-startup ticks stay stable.
-    historical: ClockRatio,
-}
-
-impl Calibration {
-    /// Refreshes after quarter-span extrapolation or 1/16 host second.
-    fn needs_refresh(self, startup: ClockCounters, tick: u64) -> Result<bool, Status> {
-        let Some(extrapolation) = tick.checked_sub(self.latest.gpu) else {
-            return Ok(false);
-        };
-        Ok(extrapolation > (self.latest.gpu - startup.gpu) / 4
-            || self.ratio.scale(extrapolation)? > rocddi::host::clock::info().frequency_hz / 16)
-    }
-
-    /// Builds a measured ratio only after a full host calibration horizon.
-    fn new(startup: ClockCounters, latest: ClockCounters) -> Result<Self, Status> {
-        let gpu = latest.gpu.checked_sub(startup.gpu).ok_or(ERROR)?;
-        let host = latest.host.checked_sub(startup.host).ok_or(ERROR)?;
-        if gpu == 0 || host == 0 {
-            return Err(ERROR);
-        }
-        if host < rocddi::host::clock::info().frequency_hz / 16 {
-            return Err(ERROR);
-        }
-        let ratio = ClockRatio { host, gpu };
-        Ok(Self {
-            latest,
-            ratio,
-            historical: ratio,
-        })
-    }
-
-    /// Uses one origin for in-session ticks and a frozen ratio before startup.
-    fn translate(self, startup: ClockCounters, tick: u64) -> Result<u64, Status> {
-        let ratio = if tick < startup.gpu {
-            self.historical
-        } else {
-            self.ratio
-        };
-        ratio.translate(startup, tick)
-    }
-}
-
 impl<Source: ClockSource> GpuClock<Source> {
     /// Samples startup during normal GPU construction; failure uses init rollback.
     pub(crate) fn new(source: Source) -> Result<Self, Status> {
@@ -129,7 +97,10 @@ impl<Source: ClockSource> GpuClock<Source> {
         Ok(Self {
             source,
             startup,
-            calibration: Mutex::new(None),
+            state: Mutex::new(ClockState {
+                latest: startup,
+                ratio: None,
+            }),
         })
     }
 
@@ -146,7 +117,8 @@ impl<Source: ClockSource> GpuClock<Source> {
     }
 
     /// Obtains one adequate measured baseline before publishing any conversion.
-    fn initialize(&self, mut sample: ClockCounters) -> Result<Calibration, Status> {
+    fn initialize(&self, state: &mut ClockState) -> Result<ClockRatio, Status> {
+        let sample = state.latest;
         let elapsed = sample.host.checked_sub(self.startup.host).ok_or(ERROR)?;
         // Use the reference refresh horizon as a minimum calibration span.
         // This limits short-baseline sensitivity, not absolute conversion error.
@@ -159,11 +131,11 @@ impl<Source: ClockSource> GpuClock<Source> {
             if next.host < reached {
                 return Err(ERROR);
             }
-            sample = next;
+            state.latest = next;
         }
         // Native sampling is not retried: the post-deadline sample must honor
         // the same host domain and provide positive GPU progress.
-        Calibration::new(self.startup, sample)
+        ClockRatio::measured(self.startup, state.latest)
     }
 
     /// Reaches a fixed calibration-span target, not an operation timeout.
@@ -183,7 +155,7 @@ impl<Source: ClockSource> GpuClock<Source> {
         }
     }
 
-    /// Converts both endpoints using one calibration, considering the end first.
+    /// Converts both endpoints using the same immutable map.
     pub(crate) fn interval(&self, start: u64, end: u64) -> Result<(u64, u64), Status> {
         if start == 0 || end == 0 {
             return Ok((0, 0));
@@ -191,29 +163,27 @@ impl<Source: ClockSource> GpuClock<Source> {
         self.convert(start, end)
     }
 
-    /// Converts a retained originating-agent tick with the shared calibration.
+    /// Converts a retained originating-agent tick with the shared measured map.
     pub(crate) fn tick(&self, tick: u64) -> Result<u64, Status> {
         self.convert(tick, tick).map(|(_, end)| end)
     }
 
     /// Keeps native failure visible even when no new calibration is needed.
     fn convert(&self, start: u64, end: u64) -> Result<(u64, u64), Status> {
-        let mut guard = self.calibration.lock().map_err(|_| ERROR)?;
+        let mut state = self.state.lock().map_err(|_| ERROR)?;
         let sample = self.source.sample()?;
-        self.validate(guard.map_or(self.startup, |value| value.latest), sample)?;
-        let calibration = if let Some(mut calibration) = *guard {
-            if calibration.needs_refresh(self.startup, start.max(end))? {
-                let updated = Calibration::new(self.startup, sample)?;
-                calibration.latest = updated.latest;
-                calibration.ratio = updated.ratio;
-            }
-            calibration
+        self.validate(state.latest, sample)?;
+        state.latest = sample;
+        let ratio = if let Some(ratio) = state.ratio {
+            ratio
         } else {
-            self.initialize(sample)?
+            self.initialize(&mut state)?
         };
-        let end = calibration.translate(self.startup, end)?;
-        let start = calibration.translate(self.startup, start)?;
-        *guard = Some(calibration);
+        let end = ratio.translate(self.startup, end)?;
+        let start = ratio.translate(self.startup, start)?;
+        // A later slope would reinterpret values already cached by callers.
+        // Keep one map for the epoch; its initial error and drift remain unbounded.
+        state.ratio = Some(ratio);
         Ok((start, end))
     }
 }
