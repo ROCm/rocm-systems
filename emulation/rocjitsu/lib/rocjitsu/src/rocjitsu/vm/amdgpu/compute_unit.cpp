@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/mma_admission.h"
+#include "rocjitsu/vm/amdgpu/mma_plan.h"
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
@@ -2807,6 +2808,210 @@ void AsyncInstructionWindow::check_errors() {
                             "MMA helper unavailable after fork");
 }
 
+void ComputeUnitCore::clear_mma_plans() {
+  if (mma_plans_)
+    mma_plans_->clear();
+}
+
+void ComputeUnitCore::flush_mma_plans() {
+  if (mma_plans_)
+    mma_plans_->flush();
+}
+
+// The caller has checked the wave-wide window preconditions: wave size, full
+// EXEC, no VGPR MSB or index mode, no debugger, single step or trap handler,
+// and plugins that permit asynchronous execution.
+bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, bool has_accvgprs) {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_MMA_PLAN");
+    return !value || *value != '0';
+  }();
+  if (!enabled)
+    return false;
+  if (!mma_plans_)
+    mma_plans_ = std::make_unique<mma_plan::PlanCache>();
+  auto &cache = *mma_plans_;
+  // Replay skips per-step debugger, plugin, VSKIP and ALU-trap handling, so
+  // every such mode keeps the ordinary path. Wait checks run per step below.
+  if (active->memory_trap_pending() || (active->mode_raw() & Wavefront::VSKIP_BIT) ||
+      observes_before_execute_instruction_ || observes_after_execute_instruction_ ||
+      observes_async_instruction_issued_ || alu_exception_trap_enables(*active) ||
+      active->wf_size() != wave_size) {
+    ++cache.stats.entry_rejects;
+    return false;
+  }
+  const uint32_t vmid = active->process_id();
+  const GpuVmAccess *vm_access = active->vm_access();
+  if (!vm_access && (active->address_space() || vmid != 0)) {
+    // Borrow the quantum's current snapshot; refreshing it is left to ordinary issue.
+    const InstructionVmSnapshot *snapshot = instruction_vm_snapshot_;
+    if (!snapshot || snapshot->compute_unit != this || snapshot->owner != gpu_vm_ ||
+        snapshot->address_space != active->address_space() || snapshot->vmid != vmid ||
+        !snapshot->access || !snapshot->access->is_current() ||
+        !active->same_execution_root(*snapshot->access)) {
+      ++cache.stats.entry_rejects;
+      return false;
+    }
+    vm_access = &*snapshot->access;
+  } else if (vm_access && !vm_access->is_current()) {
+    ++cache.stats.entry_rejects;
+    return false;
+  }
+  sync_inst_cache_debug_epoch();
+  const uint64_t fetch_pc = vm_access ? active->vm_instruction_pc() : active->pc;
+  const auto fetch_words = [&](uint64_t address, mma_plan::Plan::Words &words) {
+    if (vm_access)
+      return inst_cache_.fetch(*vm_access, address, reinterpret_cast<uint8_t *>(words.data())) ==
+             VmAccessOutcome::Complete;
+    inst_cache_.fetch(*memory_, address, reinterpret_cast<uint8_t *>(words.data()));
+    return true;
+  };
+  mma_plan::Plan::Words first;
+  if (!fetch_words(fetch_pc, first) ||
+      !async_mma_policy::encoding_may_be_candidate(arch(), first[0]))
+    return false;
+  const mma_plan::PlanCache::Key key{fetch_pc, vmid, active->num_vgprs(), has_accvgprs,
+                                     vm_access ? vm_access->cache_namespace()
+                                               : VmCacheNamespace{}};
+  const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first);
+  if (!plan)
+    return false;
+  auto &pool = async_pool();
+  const bool inline_only = mma_plan::inline_only();
+  if (!inline_only && !pool.available()) {
+    ++cache.stats.pool_full;
+    return false;
+  }
+
+  // Inline steps can touch new registers while helpers run. Allocate all lazy
+  // chunks before the first job can race with that allocation.
+  const uint32_t vgpr_base = active->vgpr_alloc().base;
+  for (uint32_t reg = 0; reg != active->num_vgprs(); ++reg)
+    (void)raw_vgpr_data(vgpr_base + reg);
+  if (has_accvgprs)
+    for (uint32_t reg = 256; reg != 512; ++reg)
+      (void)raw_vgpr_data(vgpr_base + reg);
+
+  mma_plan::Replay replay(pool);
+  struct ActiveScope {
+    mma_plan::Replay *&slot;
+    ~ActiveScope() { slot = nullptr; }
+  } scope{active_replay_ = &replay};
+  ++cache.stats.replays;
+  unsigned offloaded = 0;
+  const uint32_t process = active->process_id();
+  const auto advance = [&](const mma_plan::Step &step) {
+    active->note_potential_execution_effect();
+    ++active->trace_inst_count_;
+    active->pc += step.size;
+    record_gws_instruction_progress(process);
+  };
+  const auto helpers_failed = [&](uint64_t pc, const Instruction &inst) {
+    (void)replay.drain();
+    fail_wave_instruction(*active, std::format("asynchronous {}", inst.mnemonic()), pc,
+                          InstructionExecutionError::MissingExecutionBackend,
+                          "MMA helper unavailable after fork");
+  };
+  // Retained steps are neither memory producers nor waits. Check their
+  // operands against outstanding memory in program order, as ordinary issue does.
+  const bool wait_checks = config_.memory_wait_checks_enabled();
+  const auto check_waits = [&](const Instruction &inst) {
+    if (!wait_checks)
+      return;
+    if (auto *wait_state = active->memory_wait_scoreboard()) {
+      wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
+      wait_state->check_instruction(inst, *active);
+    }
+  };
+  // Executes on the issuer exactly as execute_instruction() would during ordinary issue.
+  const auto run_inline = [&](Instruction &inst) {
+    active->note_potential_execution_effect();
+    active->clear_pending_alu_causes();
+    const uint64_t pc = active->pc;
+    const util::Result result = execute_instruction(&inst, *active, &execution_failure_detail_);
+    if (result.succeeded() && !active->is_halted()) {
+      if (wait_checks && checks_gds_source_lifetime(config_.arch))
+        if (auto *wait_state = active->memory_wait_scoreboard())
+          if (auto reg = active->instruction_exec_write())
+            wait_state->access(*reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask,
+                               true);
+      return true;
+    }
+    (void)replay.drain();
+    if (!active->is_halted()) {
+      const std::string_view preserved = active->instruction_execution_error_mnemonic();
+      fail_wave_instruction(*active, preserved.empty() ? inst.mnemonic() : preserved, pc,
+                            active->instruction_execution_error(),
+                            std::exchange(execution_failure_detail_, {}));
+    } else {
+      execution_failure_detail_.clear();
+    }
+    return false;
+  };
+  for (const mma_plan::Step &step : plan->steps) {
+    if (step.wait && !replay.join(step.wait)) {
+      helpers_failed(active->pc, *plan->steps.front().inst);
+      return true;
+    }
+    switch (step.kind) {
+    case mma_plan::StepKind::Chained:
+      check_waits(*step.inst);
+      advance(step);
+      break;
+    case mma_plan::StepKind::Offload:
+      check_waits(*step.inst);
+      // Submission bypasses execute_instruction(); keep its per-issue effects.
+      for (unsigned i = 0; i != step.members; ++i)
+        check_static_isa_diagnostics(*step.chain[i], *active);
+      active->clear_setreg_vgpr_msb_hazard();
+      if (!inline_only && replay.submit(step.slot, step.chain.data(), step.members, active)) {
+        ++cache.stats.offloads;
+        cache.stats.chained += step.members - 1u;
+        // A replay is one asynchronous window; every accepted job is joined.
+        if (!offloaded++)
+          ++async_execution::stats.windows;
+        async_execution::stats.mma += step.members;
+        async_execution::stats.retired_mma += step.members;
+      } else {
+        // Members precede every step that could observe them, so running the
+        // whole chain now is equivalent to its helper.
+        ++cache.stats.pool_full;
+        for (unsigned i = 0; i != step.members; ++i)
+          if (!run_inline(*step.chain[i]))
+            return true;
+      }
+      advance(step);
+      break;
+    case mma_plan::StepKind::IssuerMma:
+    case mma_plan::StepKind::Alu: {
+      ++(step.kind == mma_plan::StepKind::Alu ? cache.stats.alu : cache.stats.issuer_mma);
+      ++active->trace_inst_count_;
+      check_waits(*step.inst);
+      if (!run_inline(*step.inst))
+        return true;
+      active->pc += step.size;
+      record_gws_instruction_progress(process);
+      break;
+    }
+    case mma_plan::StepKind::Ordinary: {
+      ++cache.stats.ordinary;
+      const uint64_t next = active->pc + step.size;
+      (void)issue_instruction_impl<false>(active);
+      if (active->pc != next || active->state() != WfState::RUNNING || active->is_halted()) {
+        // A stall, fault or redirect ends the block; no helper chain extends past it.
+        ++cache.stats.early_exit;
+        (void)replay.drain();
+        return true;
+      }
+      break;
+    }
+    }
+  }
+  if (!replay.drain())
+    helpers_failed(active->pc, *plan->steps.front().inst);
+  return true;
+}
+
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
@@ -2825,7 +3030,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
         if (active->is_halted())
-          async_execution::stats.flush();
+          {
+      async_execution::stats.flush();
+      flush_mma_plans();
+    }
         return;
       }
     }
@@ -2838,6 +3046,11 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     issue_instruction_impl<true>(active);
     return;
   }
+  if (replay_mma_plan(active, wave_size, has_accvgprs)) {
+    if (active->is_halted())
+      flush_mma_plans();
+    return;
+  }
   AsyncInstructionWindowStorage storage;
   storage.admission = admission;
   storage.has_accvgprs = has_accvgprs;
@@ -2846,7 +3059,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
     if (!storage.window) {
       if (active->is_halted())
-        async_execution::stats.flush();
+        {
+      async_execution::stats.flush();
+      flush_mma_plans();
+    }
       return;
     }
     storage.window->poll();
@@ -2854,7 +3070,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
            !storage.window->stopped() && active->state() == WfState::RUNNING);
   storage.window->drain();
   if (active->is_halted())
-    async_execution::stats.flush();
+    {
+      async_execution::stats.flush();
+      flush_mma_plans();
+    }
 }
 
 constinit thread_local ComputeUnitCore::InstructionVmSnapshot
@@ -2870,6 +3089,9 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       if (window)
         window->drain();
     }
+    // Plan replay issues its memory steps here; helpers finish before fault handling.
+    if (active_replay_) [[unlikely]]
+      (void)active_replay_->drain();
   };
 
   // A completed FLAT exception interrupts between instructions. An enabled CDNA2
@@ -3070,6 +3292,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       if (window)
         window->drain();
     }
+    if (active_replay_) [[unlikely]]
+      (void)active_replay_->drain();
     if (active->instruction_execution_error_detail())
       execution_failure_detail_ = active->instruction_execution_error_detail();
     active->pc = instruction_pc;

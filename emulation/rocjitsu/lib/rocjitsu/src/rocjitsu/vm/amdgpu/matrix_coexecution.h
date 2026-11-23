@@ -15,6 +15,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -77,8 +78,17 @@ public:
     thread_.join();
   }
 
+  static constexpr unsigned kMaxChain = 8;
+
   void submit(Instruction &instruction, void *wave) {
-    instruction_ = &instruction;
+    Instruction *chain = &instruction;
+    submit(&chain, 1, wave);
+  }
+  /// Execute same-wave instructions back to back in program order with one handoff.
+  void submit(Instruction *const *chain, unsigned count, void *wave) {
+    assert(count != 0 && count <= kMaxChain);
+    std::copy_n(chain, count, chain_.begin());
+    count_ = count;
     wave_ = wave;
     publish(1);
   }
@@ -125,13 +135,15 @@ private:
         wait_while(0);
         continue;
       }
-      instruction_->execute(*instruction_, wave_);
+      for (unsigned i = 0; i != count_; ++i)
+        chain_[i]->execute(*chain_[i], wave_);
       publish(0);
     }
   }
 
   alignas(64) std::atomic<int> state_{0};
-  alignas(64) Instruction *instruction_ = nullptr;
+  alignas(64) std::array<Instruction *, kMaxChain> chain_{};
+  unsigned count_ = 0;
   void *wave_ = nullptr;
   std::thread thread_;
 };
@@ -162,7 +174,11 @@ public:
 
   /// Claim a helper without waiting, or return an empty ticket for inline execution.
   Ticket submit(Instruction &instruction, void *context) {
-    return {try_submit(instruction, context)};
+    Instruction *chain = &instruction;
+    return {try_submit(&chain, 1, context)};
+  }
+  Ticket submit(Instruction *const *chain, unsigned count, void *context) {
+    return {try_submit(chain, count, context)};
   }
   /// A true result permits finish() without waiting for the helper.
   static bool ready(Ticket ticket) { return !helpers_enabled() || ticket.slot->helper.ready(); }
@@ -208,7 +224,7 @@ public:
   }
 
 private:
-  Slot *try_submit(Instruction &instruction, void *wave) {
+  Slot *try_submit(Instruction *const *chain, unsigned count, void *wave) {
     if (!helpers_enabled())
       return nullptr;
     // A stable preference may reuse a still-awake helper without pinning or a
@@ -237,7 +253,7 @@ private:
                                                  std::memory_order_relaxed))
           continue;
         auto *slot = slots_[word * 64 + bit].get();
-        slot->helper.submit(instruction, wave);
+        slot->helper.submit(chain, count, wave);
         return slot;
       }
     }

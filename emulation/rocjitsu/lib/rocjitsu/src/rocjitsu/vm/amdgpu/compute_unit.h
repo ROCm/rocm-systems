@@ -82,6 +82,10 @@ enum class MemoryWaitDiagnostics { Off, Warn };
 class CommandProcessor;
 class AsyncInstructionWindow;
 class MmaAdmissionCache;
+namespace mma_plan {
+class PlanCache;
+class Replay;
+} // namespace mma_plan
 struct AsyncInstructionWindowStorage;
 namespace matrix_coexecution {
 class ExecutionResources;
@@ -1568,6 +1572,8 @@ public:
     assert(decoder != nullptr);
     assert(!has_active_wfs());
     decoded_inst_cache_.clear();
+    // Retained plan instructions belong to the decoder being replaced.
+    clear_mma_plans();
     decoder_ = std::move(decoder);
   }
 
@@ -1686,6 +1692,10 @@ protected:
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
                                bool has_accvgprs);
+  /// @brief Replay a compiled straight-line MMA plan; false leaves the wave untouched.
+  bool replay_mma_plan(Wavefront *wf, uint32_t wave_size, bool has_accvgprs);
+  void clear_mma_plans();
+  void flush_mma_plans();
   /// @brief Convert a guest instruction execution failure into wave termination.
   void fail_wave_instruction(Wavefront &wf, std::string_view instruction, uint64_t pc,
                              InstructionExecutionError error, std::string_view failure_detail = {});
@@ -1780,6 +1790,10 @@ protected:
   Config config_;
   ArithmeticExecution arithmetic_;
   matrix_coexecution::SharedPool *async_pool_ = nullptr;
+  /// Lazily created on async CUs. Holds plans with retained decoded instructions.
+  std::unique_ptr<mma_plan::PlanCache> mma_plans_;
+  /// Helpers of the plan being replayed; joined before any fault or failure path.
+  mma_plan::Replay *active_replay_ = nullptr;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
   uint32_t vgpr_storage_lane_count_ = 0;
