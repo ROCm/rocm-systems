@@ -188,7 +188,7 @@ so they are compared against a **local baseline** recorded on the same machine:
 $ROCDECODE_PERF_DIR/local_baselines/<GPU>_m<N>.csv    # e.g. Navi31_m1.csv
 ```
 
-Record one once per GPU and memory type, from a known-good build:
+Record a baseline once for each GPU and memory type, using a known-good build:
 
 ```shell
 test/perf_regression.py --mem-type 1 --save-baseline
