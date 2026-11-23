@@ -4,8 +4,8 @@
 //! Sampler descriptor entry points.
 
 use crate::ffi::*;
-use crate::image_abi::{create_sampler, destroy_sampler};
-use crate::runtime::boundary;
+use crate::image::{create_sampler, destroy_sampler};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -115,5 +115,5 @@ pub unsafe extern "C" fn hsa_ext_sampler_create_v3(
 #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases a sampler descriptor handle.
 pub extern "C" fn hsa_ext_sampler_destroy(agent: HsaAgent, sampler: HsaExtSampler) -> Status {
-    destroy_sampler(agent, sampler)
+    boundary(|| destroy_sampler(agent, sampler))
 }

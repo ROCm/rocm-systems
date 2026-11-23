@@ -209,7 +209,8 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
       (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
-       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier) ||
+       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
+       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop) ||
       manifest.options != mvp_options_digest())
     return reject(error, ContractErrorCode::InvalidFacts,
                   "empty image or unsupported target, ABI, scope or options");
@@ -252,16 +253,20 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
   std::vector<std::pair<uint64_t, uint64_t>> prepared_ranges;
   prepared_ranges.reserve(2 * manifest.sites.size() + 2 * manifest.barriers.size());
   uint64_t previous_barrier_end = 0;
+  const bool split_barrier = uses_split_workgroup_barrier(target->arch);
   for (const BarrierFacts &barrier : manifest.barriers) {
-    if (barrier.original_drain < previous_barrier_end || manifest.target != 1250 ||
-        manifest.wave_size != 32 || barrier.identity != UINT32_MAX ||
-        !util::is_range_in_bounds(barrier.original_drain, 12, manifest.original_text_bytes) ||
+    if (barrier.original_drain < previous_barrier_end || barrier.identity != UINT32_MAX ||
+        !util::is_range_in_bounds(barrier.original_drain, split_barrier ? 12 : 8,
+                                  manifest.original_text_bytes) ||
         barrier.original_drain % 4 != 0 || barrier.original_signal != barrier.original_drain + 4 ||
-        barrier.original_wait < barrier.original_signal + 4 || barrier.original_wait % 4 != 0 ||
+        (split_barrier ? barrier.original_wait < barrier.original_signal + 4
+                       : barrier.original_wait != barrier.original_signal) ||
+        barrier.original_wait % 4 != 0 ||
         !util::is_range_in_bounds(barrier.original_wait, 4, manifest.original_text_bytes) ||
         !util::is_range_in_bounds(barrier.prepared_signal, 4, manifest.prepared_text_bytes) ||
         barrier.prepared_signal % 4 != 0 || barrier.prepared_wait % 4 != 0 ||
-        barrier.prepared_signal == barrier.prepared_wait ||
+        (split_barrier ? barrier.prepared_signal == barrier.prepared_wait
+                       : barrier.prepared_signal != barrier.prepared_wait) ||
         !util::is_range_in_bounds(barrier.prepared_wait, 4, manifest.prepared_text_bytes) ||
         barrier.completion_probe != barrier.prepared_wait + 4 || barrier.probe_size == 0 ||
         barrier.probe_size % 4 != 0 ||
@@ -277,7 +282,8 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
                       "access overlaps original barrier group");
     // Distinct source operations cannot share prepared instruction bytes.
     // Include each wait's completion callback so partial overlaps fail too.
-    prepared_ranges.emplace_back(barrier.prepared_signal, barrier.prepared_signal + 4);
+    if (split_barrier)
+      prepared_ranges.emplace_back(barrier.prepared_signal, barrier.prepared_signal + 4);
     prepared_ranges.emplace_back(barrier.prepared_wait,
                                  barrier.completion_probe + barrier.probe_size);
   }
@@ -440,10 +446,10 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
     return reject(error, ContractErrorCode::UnsupportedLaunch,
                   "capture requires complete bounded 1D workgroups and no private segment");
   const uint32_t workgroups = dimensions.grid[0] / dimensions.workgroup[0];
-  if (workgroups > (manifest.target == 1250 ? 16u : 1u) ||
+  if (workgroups > kWorkgroupCapacity ||
       (workgroups > 1 && manifest.entry.workgroup_id_scalar == UINT32_MAX))
     return reject(error, ContractErrorCode::UnsupportedLaunch,
-                  "multi-workgroup profile requires gfx1250, at most 16 groups, and original "
+                  "multi-workgroup profile requires at most 16 groups and original "
                   "workgroup-X input");
   const uint64_t row_stride = report_row_bytes(manifest.sites.size(), !manifest.barriers.empty());
   const uint32_t waves_per_group =

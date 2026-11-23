@@ -82,16 +82,133 @@ def set_property(test, name, value):
 
 
 class RequiredCoverage(unittest.TestCase):
-    def test_multiple_barrier_controls_cannot_be_omitted(self):
+    def test_core_multi_workgroup_regressions_cannot_be_omitted(self):
+        expected = {
+            'ConSanHsaPlugin.CompleteWorkgroupsPublishAllRowsAndCaptureTheirFullExtent',
+            'ConSanBoundedLaunch.AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission',
+            'ConSanAnalysis.EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalToWorkgroups',
+            'ConSanAnalysis.EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups',
+            'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
+        }
+        for suffix in (
+            'gfx942Wave64',
+            'gfx950Wave64',
+            'gfx1100Wave32',
+            'gfx1100Wave64',
+            'gfx1201Wave32',
+            'gfx1201Wave64',
+            'gfx1250Wave32',
+        ):
+            expected.add(
+                'ConSanTargets/ConSanTargetStatic.'
+                f'BoundedWorkgroupFixturesRetainQualifiedLdsSites/{suffix}'
+            )
         required = required_names()
-        for case in ('barrier_multiple', 'barrier_missing_second'):
-            with self.subTest(case=case):
-                name = f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}'
+        for name in expected:
+            with self.subTest(name=name):
                 self.assertIn(name, required)
                 with self.assertRaisesRegex(
                     ValueError, 'Required ConSan registrations missing'
                 ):
                     validate_selected([{'name': item} for item in required - {name}])
+
+    def test_multi_workgroup_controls_are_required_for_every_target_and_wave_mode(self):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for prefix, case, groups in (
+                ('Production', 'grouped_race', 16),
+                ('Production', 'grouped_isolation', 4),
+                ('', 'grouped_repeat', 4),
+                ('', 'grouped_missing_id', 4),
+            ):
+                name = (
+                    f'ConSanSim{prefix}E2E.{gpu}.wave{wave_size}'
+                    f'.assembly.{case}.groups{groups}'
+                )
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
+
+    def test_barrier_and_loop_controls_are_required_for_every_target_and_wave_mode(
+        self,
+    ):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for case in (
+                'barrier',
+                'barrier_empty',
+                'barrier_high',
+                'barrier_separated',
+                'barrier_multiple',
+                'barrier_missing_second',
+                'loop_zero',
+                'loop_one',
+                'loop_three',
+                'loop_access_loss',
+                'loop_sync_loss',
+                'loop_no_b0',
+                'loop_no_b0_full_journal',
+                'loop_no_b0_sync_loss',
+                'loop_no_b1',
+                'loop_late',
+            ):
+                name = f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}'
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
+
+    def test_barrier_publication_and_loop_saturation_need_simulator_controls(self):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for case in (
+                'PublicationBarrierBlocksAnEarlyConsumer',
+                'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',
+                'RepeatedBarrierLoopsRetainHighLaneMasks',
+                'SeededNearLimitLoopCountersSaturateWithoutStoppingGuest',
+            ):
+                name = f'ConSanTargets/ConSanTargetSim.{case}/{gpu}Wave{wave_size}'
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
 
     def test_compiled_probe_validation_is_required_for_every_mode(self):
         for name in required_names():
@@ -239,7 +356,7 @@ class RequiredCoverage(unittest.TestCase):
         ):
             tests = paired_registrations()
             fixture = 'grouped_disjoint' if groups == 1 else 'grouped_race'
-            suffix = f'.assembly.{fixture}.groups{groups}'
+            suffix = f'.gfx1250.wave32.assembly.{fixture}.groups{groups}'
             twins = [test for test in tests if test['name'].endswith(suffix)]
             self.assertEqual(len(twins), 2)
             for test in twins:

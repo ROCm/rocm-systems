@@ -171,7 +171,7 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 typedef enum {
   RDC_FI_INVALID = 0,  //!< Invalid field value
   //!< @brief Identifier fields
-  RDC_FI_GPU_COUNT = 1,            //!< GPU count in the system
+  RDC_FI_GPU_COUNT = 1,            //!< GPU count in the system, unavailable GPUs included
   RDC_FI_DEV_NAME,                 //!< Name of the device
   RDC_FI_OAM_ID,                   //!< OAM ID of the device
   RDC_FI_DEV_ID,                   //!< Device ID
@@ -577,7 +577,8 @@ typedef struct {
  */
 typedef struct {
   uint64_t max_value;         //!< Maximum value measured
-  uint64_t min_value;         //!< Minimum value measured
+  uint64_t min_value;         //!< Minimum value measured; UINT64_MAX if there are
+                              //!< no samples, and then the other members are 0
   uint64_t average;           //!< Average value measured
   double standard_deviation;  //!< The standard deviation
 } rdc_stats_summary_t;
@@ -630,7 +631,10 @@ typedef struct {
   uint32_t num_gpus;                                    //!< Number of GPUs used by job
   rdc_gpu_usage_info_t summary;                         //!< Job usage summary statistics
                                                         //!< (overall)
-  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU
+  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU,
+                                                        //!< in the first num_gpus entries, ordered
+                                                        //!< by gpu_id, the entity index of the GPU
+                                                        //!< or GPU partition
   uint32_t num_processes;                               //!< Number of processes tracked
   rdc_process_status_info_t
       processes[RDC_MAX_NUM_PROCESSES_STATUS];  //!< Array to track process start/stop times
@@ -994,6 +998,13 @@ rdc_status_t rdc_shutdown();
  *  rdc_field_update_all() when op_mode is RDC_OPERATION_MODE_MANUAL, which
  *  tells RDC to collect the stats.
  *
+ *  @details Embedded RDC takes its own AMD SMI reference and releases it when
+ *  the last embedded handle stops, so a process that uses AMD SMI itself keeps
+ *  its AMD SMI handles while RDC runs and after it stops. AMD SMI applies the
+ *  flags of the first amdsmi_init() of a process only: a process that
+ *  initializes AMD SMI before it starts RDC must pass AMDSMI_INIT_AMD_CPUS for
+ *  RDC to read CPU fields.
+ *
  *  @param[in] op_mode Operation modes. When RDC_OPERATION_MODE_AUTO, RDC
  * schedules background task to collect the stats. When
  * RDC_OPERATION_MODE_MANUAL, the user needs to call rdc_field_update_all()
@@ -1001,8 +1012,11 @@ rdc_status_t rdc_shutdown();
  *
  *  @param[inout] p_rdc_handle Caller provided pointer to rdc_handle_t. Upon
  *  successful call, the value will contain the handler for following API calls.
+ *  On failure it is set to NULL.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_FAIL_LOAD_MODULE is returned when librdc cannot be loaded
+ *  or AMD SMI fails to initialize.
  */
 rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rdc_handle);
 
@@ -1010,7 +1024,8 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rd
  *  @brief Stop embedded RDC agent.
  *
  *  @details Stop the embedded RDC agent, and p_rdc_handle becomes
- *  invalid after this call.
+ *  invalid after this call. It returns once RDC's threads have stopped; a
+ *  notification listen in progress can delay that by up to about a second.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from
  *  rdc_start_embedded().
@@ -1050,7 +1065,13 @@ rdc_status_t rdc_connect(const char* ipAndPort, rdc_handle_t* p_rdc_handle, cons
  *  @brief Disconnect from rdcd daemon.
  *
  *  @details Disconnect from rdcd daemon, and p_rdc_handle becomes invalid
- *  after this call.
+ *  after this call. It stops the policy callbacks registered on the handle
+ *  and waits for a running one to return. It must not run at the same time
+ *  as other calls on the handle, except calls from policy callbacks and an
+ *  rdc_policy_register() that is waiting for rdcd to admit a registration.
+ *  Once rdc_disconnect() has begun, rdc_policy_register() and
+ *  rdc_policy_unregister() from a callback, and a waiting
+ *  rdc_policy_register(), return ::RDC_ST_CLIENT_ERROR.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from rdc_connect().
  *
@@ -1075,6 +1096,8 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *  @param[in] update_freq  How often to update this field in usec.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if the group has more than
+ *  ::RDC_MAX_NUM_GPUS_PER_JOB GPUs.
  */
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  const char job_id[64], uint64_t update_freq);
@@ -1093,6 +1116,8 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  successful call, the value will contain the stats of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if the job has more than
+ *  ::RDC_MAX_NUM_GPUS_PER_JOB GPUs.
  */
 rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
                                rdc_job_info_t* p_job_info);
@@ -1160,14 +1185,21 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle, uint32_t wait_for_u
  *
  *  @details Indexes represents RDC GPU Id corresponding to each GPU on the
  * system and is immutable during the lifespan of the engine. The list
- * should be queried again if the engine is restarted.
+ * should be queried again if the engine is restarted. A GPU that AMD SMI
+ * cannot identify keeps its index: rdc_device_get_attributes() returns
+ * ::RDC_ST_NOT_FOUND for it and its fields cannot be read until AMD SMI
+ * identifies it. When AMD SMI also lists CPUs, a processor it cannot
+ * identify on a socket without an identified GPU could be a CPU and gets no
+ * index, so the GPUs after it move down one index.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] gpu_index_list Array reference to fill GPU indexes present on
- *  the system.
+ *  the system. At most ::RDC_MAX_NUM_DEVICES GPUs and GPU partitions are
+ *  listed; any beyond that are not.
  *
- *  @param[out] count Number of GPUs returned in gpu_index_list.
+ *  @param[out] count Number of GPUs returned in gpu_index_list, at most
+ *  ::RDC_MAX_NUM_DEVICES.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
@@ -1189,6 +1221,8 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
  *  read as 0.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned for a GPU that AMD SMI cannot
+ *  identify (see rdc_device_get_all()).
  */
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr);
@@ -1279,11 +1313,13 @@ rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] group_id_list Array reference to fill GPU group
- *  ids in the system.
+ *  ids in the system, of ::RDC_MAX_NUM_GROUPS entries.
  *
  *  @param[out] count Number of GPU group returned in group_id_list.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT there are more than ::RDC_MAX_NUM_GROUPS
+ *  groups; count is not set.
  */
 rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id_list[],
                                    uint32_t* count);
@@ -1372,11 +1408,13 @@ rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] field_group_id_list Array reference to fill field group
- *  ids in the system.
+ *  ids in the system, of ::RDC_MAX_NUM_FIELD_GROUPS entries.
  *
  *  @param[out] count Number of field group returned in field_group_id_list.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT there are more than
+ *  ::RDC_MAX_NUM_FIELD_GROUPS field groups; count is not set.
  */
 rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
                                          rdc_field_grp_t field_group_id_list[], uint32_t* count);
@@ -1411,9 +1449,17 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t 
  *
  *  @param[in] update_freq  How often to update fields in usec.
  *
- *  @param[in] max_keep_age How long to keep data for fields in seconds.
+ *  @param[in] max_keep_age How long to keep data for fields in seconds. 0 keeps
+ *  no samples: each is dropped soon after it arrives. See max_keep_samples for
+ *  how the limits of several watches of one field combine.
  *
- *  @param[in] max_keep_samples Maximum number of samples to keep. 0=no limit.
+ *  @param[in] max_keep_samples Maximum number of samples to keep. 0 keeps no
+ *  samples: each is dropped soon after it arrives. To keep every sample, pass a
+ *  large value, such as UINT32_MAX. When several watches cover a field, each
+ *  limit is the largest that any of them sets, also after a watch ends: a new
+ *  watch can raise a limit but not lower it until RDC stops tracking the field,
+ *  which it does only when no watch covers the field and its last update is
+ *  older than the largest max_keep_age set for it.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_CONFLICT is returned if the field group is already watched for the GPU group.
@@ -1594,6 +1640,10 @@ const char* rdc_diagnostic_result_string(rdc_diag_result_t result);
  *
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned for an unknown condition or action.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
+ *  @retval ::RDC_ST_NOT_SUPPORTED is returned if a GPU of the group cannot report
+ *  the retired pages that a ::RDC_POLICY_COND_MAX_PAGE_RETRIED condition needs.
  */
 rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_policy_t policy);
@@ -1657,7 +1707,19 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
 /**
  *  @brief Register a function to be called when policy condition is meet.
  *
- *  @details Register the RDC policy callback
+ *  @details Register the RDC policy callback. On a handle from rdc_connect(),
+ *  the callback runs on a thread that the library starts for the group. The
+ *  callback may call rdc_policy_unregister(), but not rdc_disconnect().
+ *
+ *  On a handle from rdc_connect(), the call waits up to 5 seconds for rdcd to
+ *  admit the registration. rdcd serves 64 registrations at once, from all of
+ *  its clients. An rdcd that predates admission does not answer, so after one
+ *  wait without an answer, later calls on the handle do not wait, until the
+ *  handle sees one of its registrations admitted. If rdcd rejects a
+ *  registration after that wait, the registration ends, the rejection is
+ *  logged, and the next rdc_policy_register() of the group runs as if there
+ *  had been none. If rdc_policy_unregister() of the group runs while the call
+ *  waits, the call returns ::RDC_ST_OK and no registration remains.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1666,6 +1728,17 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
  *  @param[in] callback  The callback function to be called when condition meet.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND The GPU group does not exist.
+ *  @retval ::RDC_ST_CONFLICT On a handle from rdc_connect(): a callback is
+ *  already registered for the group, or rdc_policy_unregister() for the group
+ *  has not returned yet.
+ *  @retval ::RDC_ST_INSUFF_RESOURCES On a handle from rdc_connect(): the
+ *  thread for the callback could not start.
+ *  @retval ::RDC_ST_MAX_LIMIT On a handle from rdc_connect(): rdcd already
+ *  serves 64 registrations.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, is stopping or cannot register the group, or the handle is
+ *  being disconnected.
  */
 rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  rdc_policy_register_callback callback);
@@ -1673,13 +1746,23 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
 /**
  *  @brief un-register a policy callback function for a conditioin.
  *
- *  @details Un-register the policy callback for a condition.
+ *  @details Un-register the policy callback for a condition. On a handle from
+ *  rdc_connect(), it waits for a running callback of the group to return.
+ *  Called from a callback, it does not wait: a callback of the group that is
+ *  running or about to run can still run after it returns, also once the
+ *  group is registered again. On a handle from rdc_start_embedded(), a check
+ *  that is already running may still call the callback after this returns,
+ *  once for each policy and GPU of the group that meets the policy's
+ *  condition. Through rdcd, it ends every registration of the group that
+ *  rdcd serves, from all of its clients.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[in] group_id The GPU group id.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
+ *  be reached, or the handle is being disconnected.
  */
 rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
@@ -1794,7 +1877,9 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
 /**
  *  @brief Set one configuration
  *
- *  @details Set the given configuration to all nodes belong to the given group
+ *  @details Set the given configuration to all nodes belong to the given group.
+ *  A GPU of the group that AMD SMI cannot identify (see rdc_device_get_all())
+ *  gets the configuration within about a minute after AMD SMI identifies it.
  *
  *  @param[in] p_rdc_handle Node handle
  *
@@ -1935,6 +2020,7 @@ typedef struct {
  *  @param[out] profile  The details how the resource is allocated.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND for a GPU that AMD SMI cannot identify, or an instance of one.
  */
 rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
                                       rdc_instance_resource_type_t resource_type,
@@ -1948,6 +2034,8 @@ rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity
  * @param[out] num_partition Pointer to a variable to receive the number of partitions.
  *
  * @retval ::RDC_ST_OK on success.
+ * @retval ::RDC_ST_NOT_FOUND for a GPU that AMD SMI cannot identify, unless
+ * it can identify another partition of the same GPU (see rdc_device_get_all()).
  */
 rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
                                    uint16_t* num_partition);

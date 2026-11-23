@@ -12,8 +12,8 @@
 use crate::device::{Device, DeviceResources};
 use crate::driver::{self, ConfigurableDriver, DriverConfiguration, DriverInstance};
 use crate::memory::Allocation;
-use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
+use crate::memory::storage::{RetainOnDrop, Shared};
 use crate::os::{ProcessIdentity, native_error};
 use crate::topology::{Endpoint, TopologyGraphSnapshot};
 use crate::{Error, ErrorKind};
@@ -112,7 +112,7 @@ struct DriverRegistry {
 /// whose cleanup has not been proved.
 #[must_use = "retry native shutdown until it succeeds or retain this owner"]
 pub struct SessionRetirement {
-    session: Option<Session>,
+    session: Option<RetainOnDrop<Session>>,
 }
 
 impl SessionRetirement {
@@ -131,17 +131,9 @@ impl SessionRetirement {
         };
         let outcome = session.try_close();
         if matches!(outcome, RetirementOutcome::Closed) {
-            self.session = None;
+            drop(self.session.take().map(RetainOnDrop::into_inner));
         }
         outcome
-    }
-}
-
-impl Drop for SessionRetirement {
-    fn drop(&mut self) {
-        if let Some(session) = self.session.take() {
-            std::mem::forget(session);
-        }
     }
 }
 
@@ -202,7 +194,7 @@ impl Session {
     /// Moves a session into an owner that retains failed native cleanup.
     pub fn into_retirement(self) -> SessionRetirement {
         SessionRetirement {
-            session: Some(self),
+            session: Some(RetainOnDrop::new(self)),
         }
     }
 
@@ -1070,8 +1062,15 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn retirement_keeps_a_busy_session_for_a_later_shutdown_attempt() {
-        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        let allocator_state = crate::test_support::allocator::State::default();
+        // SAFETY: The callback state outlives successful retirement below.
+        let allocator = unsafe { allocator_state.allocator() };
+        let session = allocator
+            .with_scope(|| Session::new(DriverContextLifetime::Session))
+            .unwrap();
+        assert!(allocator_state.allocations.load(Ordering::Relaxed) > 0);
         let clone = session.clone();
         let mut retirement = session.into_retirement();
         assert_eq!(
@@ -1081,6 +1080,20 @@ mod tests {
         drop(clone);
         retirement.try_destroy().unwrap();
         retirement.try_destroy().unwrap();
+        assert_eq!(
+            allocator_state.frees.load(Ordering::Relaxed),
+            allocator_state.allocations.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn dropping_unfinished_retirement_preserves_its_session_owner() {
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
+        let retirement = session.clone().into_retirement();
+        drop(retirement);
+        // The discarded retirement still owns its registry reference. It must
+        // not run Session's destructor and authorize premature native release.
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
     }
 
     #[test]

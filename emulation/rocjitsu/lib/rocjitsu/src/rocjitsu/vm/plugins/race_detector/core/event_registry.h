@@ -29,15 +29,16 @@ namespace rocjitsu::plugins::race_detector {
 /// preserving their IDs and captured instructions until barrier retirement.
 ///
 /// An event is trimmable when it can never be accessed again:
-///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
+///   - RETIRED events (retired via retireEvent once every other wave has
+///     acquired them through a barrier).
 ///   - WAVE_COMPLETE events without LDS intervals: non-LDS events, and LDS
 ///     events that touch no LDS bytes, such as a tensor transfer that moves no
 ///     data. These have left all per-wave and per-register lists and were never
-///     added to ldsWriteEvents/ldsReadEvents; retireEvent is a no-op for them,
-///     so they don't need to wait for s_barrier.
+///     indexed for LDS checks; retireEvent is a no-op for them,
+///     so they don't need to wait for a barrier.
 ///   - WAVE_COMPLETE LDS events with intervals are NOT trimmable until
-///     retired, because retireEvent must still remove them from
-///     ldsWriteEvents/ldsReadEvents and adjust byte counts.
+///     retired, because other waves still check them and retireEvent must still
+///     adjust byte counts.
 ///
 /// Trimming is attempted every kTrimAttemptInterval allocations. The
 /// trimmable prefix is scanned and erased only if it covers at least half
@@ -68,6 +69,11 @@ class EventRegistry {
     // Younger counter-only units in this FIFO, before its next tracked event.
     std::array<uint8_t, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> followingUnits{};
     ConditionalVgprWrite feedback{};
+    bool hasLdsSourceReads = false;
+    /// The owning wave's barrier epoch when the event's LDS access completed,
+    /// or 0 until it has. The wave's next barrier signal releases the event to
+    /// other waves.
+    uint32_t releaseEpoch = 0;
   };
 
 public:
@@ -159,7 +165,7 @@ public:
     e.status = e.ldsPublished ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE;
   }
 
-  /// Transition → RETIRED (s_barrier flushed this event).
+  /// Transition → RETIRED (no wave can still race with this event).
   void markRetired(EventId id) {
     if (id.value < base_offset_) {
       completed_lds_.erase(id.value);
@@ -337,6 +343,10 @@ public:
       if (bytes & (1u << byte))
         it->lanes[byte] |= lanes;
   }
+  /// Record the owning wave's barrier epoch at which the event's LDS access
+  /// completed.
+  void setReleaseEpoch(EventId id, uint32_t epoch) { get(id).releaseEpoch = epoch; }
+  uint32_t releaseEpoch(EventId id) const { return get(id).releaseEpoch; }
 
   uint64_t registerLanes(EventId id, uint32_t reg, uint8_t bytes = 0xf) const {
     const auto &event = get(id);
@@ -369,6 +379,8 @@ public:
     event.ldsIntervals = std::move(intervals);
   }
 
+  void markLdsSourceReads(EventId id) { get(id).hasLdsSourceReads = true; }
+
   // -- Test helpers --
 
   /// Number of events currently stored (live + not-yet-trimmed dead).
@@ -400,7 +412,7 @@ private:
     if (e.status == EventStatus::RETIRED)
       return true;
     return e.status == EventStatus::WAVE_COMPLETE &&
-           (isWaveLocal(e.type) || e.ldsIntervals.empty());
+           (isWaveLocal(e.type) || (e.ldsIntervals.empty() && !e.hasLdsSourceReads));
   }
 
   void tryTrimEvents() {

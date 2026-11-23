@@ -1497,7 +1497,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
   }
 
   // gfx125+ fast path: WaitSignal packets in one doorbell submission.
-  // Each chunk carries wait+copy+signal inline; no prologue signal needed.
+  // Profiled copies defer completion until after the end timestamp.
   if (blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
     if (sdma_blit->IsGfx125Plus()) {
@@ -3609,6 +3609,22 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
                                  tma_size);
 }
 
+void GpuAgent::WarnIfNoSecondLevelTrapHandler() {
+  if (!trap_handler_unavailable_) return;
+
+  // One message per agent, however many queues it ends up with.
+  if (queue_exception_warned_.exchange(true)) return;
+
+  // Cap 0 is deliberate: the per-agent latch above bounds this, and a shared
+  // call-site cap would hide the second affected agent.
+  log_warning_n(0,
+                "No second-level trap handler bound for GPU node %u (%s): exception "
+                "debugging is not available to the runtime. A device-side abort will not "
+                "be reported, and on gfx11 the dispatch never retires, so the host may "
+                "wait indefinitely. PC sampling is unavailable.\n",
+                node_id(), supported_isas()[0]->GetIsaName().c_str());
+}
+
 void GpuAgent::BindTrapHandler() {
   if (supported_isas()[0]->GetMajorVersion() == 7) {
     // No trap handler support on Gfx7, soft error.
@@ -3628,19 +3644,9 @@ void GpuAgent::BindTrapHandler() {
         (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5)) ||
        (supported_isas()[0]->GetMajorVersion() == 10 && supported_isas()[0]->GetMinorVersion() == 3 &&
         supported_isas()[0]->GetStepping() == 6)) {
-      // No trap handler support without exception handling, soft error.
-      // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
-      //
-      // Nothing is bound on this path, and the queue is also created without an event or
-      // an ErrorReason, so there is no way left to deliver a queue exception. Say so once
-      // per agent rather than failing silently - a device-side abort then parks its wave
-      // forever and presents as an unexplained hang rather than as an error.
-      log_warning_n(0,
-                    "No trap handler bound for GPU node %u (%s): the kernel driver does not "
-                    "report support for exception debugging. Queue exceptions such as a "
-                    "device-side abort will not be reported, and a kernel that aborts will "
-                    "leave its dispatch unretired, so the host may wait indefinitely.\n",
-                    node_id(), supported_isas()[0]->GetIsaName().c_str());
+      // No second-level trap handler on this path, soft error. Record it so the
+      // first queue created on this agent can report it.
+      trap_handler_unavailable_ = true;
       return;
     }
 

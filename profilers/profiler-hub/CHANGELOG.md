@@ -22,8 +22,10 @@ downstream consumer of the library.
 
 ### Added
 
+- RocPD schema SQL is embedded in the profiler-hub library. Configure reads `versions.yml` from the cloned `rocprofiler-sdk-rocpd` tree and compiles each listed schema into the library.
 - Windows/MSVC build support. When SQLite is fetched, Windows downloads the
   official amalgamation zip instead of running `./configure`.
+- `storage_t` takes a RocPD schema version. No version, and `version_t{}`, both write 3.0.1. An explicit 3.0.0 is also accepted. Every other version fails initialization.
 
 ### Changed
 

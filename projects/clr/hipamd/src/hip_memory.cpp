@@ -3220,6 +3220,15 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
+  // An asymmetric swap without SDMA support is decomposed into two ops: one extra op per such entry.
+  // sizesDst is non-zero only for swap entries (validated above).
+  size_t extraOps = 0;
+  if (sizesDst != nullptr && !stream.device().settings().sdma_asymmetric_swap_supported_) {
+    for (size_t i = 0; i < count; ++i) {
+      extraOps += (sizesDst[i] != 0 && sizesDst[i] != sizes[i]);
+    }
+  }
+
   // Classify copies by type and group them by the queue device that will execute each batch.
   std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
   std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device(g_devices.size());
@@ -3301,6 +3310,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
               (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
                   ? srcMemories[i]->getUserData().deviceId
                   : dstMemories[i]->getUserData().deviceId;
+        }
+        // Size the vector once on first use: this device receives at most the remaining entries
+        // plus the extra op of each decomposed swap.
+        if (copy_ops_by_device[device_id].capacity() == 0) {
+          copy_ops_by_device[device_id].reserve((count - i) + extraOps);
         }
         if (sizeB > 0 && sizeB != sizes[i]
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
@@ -4709,6 +4723,28 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
   }
 
   HIP_RETURN(ihipArray3DGetDescriptor(pArrayDescriptor, array));
+}
+
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  HIP_INIT_API(hipArrayGetPlane, pPlaneArray, hArray, planeIdx);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (pPlaneArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(hArray) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *pPlaneArray = nullptr;
+
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+          "HIP does not implement multiplanar arrays, so no array has planes to return");
+  HIP_RETURN(hipErrorNotSupported);
 }
 
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
