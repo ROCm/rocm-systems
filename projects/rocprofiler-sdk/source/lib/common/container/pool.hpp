@@ -161,9 +161,9 @@ template <typename Tp>
 void
 pool<Tp>::release(size_type idx)
 {
+    auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
     if(idx < m_pool.size())
     {
-        auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
         ROCP_FATAL_IF(m_pool.at(idx).in_use())
             << fmt::format("Pool object at index {} was expected to be not in use", idx);
         m_available.push(idx);
