@@ -76,6 +76,12 @@ impl PendingCode {
         if let Some(publication) = image.publication() {
             publication
                 .publish(stop)
+                .inspect_err(|error| {
+                    crate::status::queue_diagnostic(
+                        "private_dispatch_code_publication",
+                        format_args!("error={error:?}; can_release={}", publication.can_release()),
+                    );
+                })
                 .map_err(crate::loader::map_loader_error)?;
         }
         self.image.take().ok_or(ERROR)
@@ -107,6 +113,12 @@ fn release_after_publication<T>(owner: T, can_release: bool, health: &SessionHea
 unsafe extern "C" fn queue_error(status: Status, _queue: *mut HsaQueue, data: *mut c_void) {
     // SAFETY: Dispatch retains this stable atomic through checked retirement.
     unsafe { &*data.cast::<AtomicU32>() }.store(status, Ordering::Release);
+    if status != SUCCESS {
+        crate::status::queue_diagnostic(
+            "private_dispatch_queue_callback",
+            format_args!("status=0x{status:08x}"),
+        );
+    }
 }
 
 impl<D> Dispatch<D> {
@@ -130,6 +142,12 @@ impl<D> Dispatch<D> {
         };
         let (image, mut symbols) =
             rocloader::load_image(&device, object, MemoryKind::System, page, |_| None)
+                .inspect_err(|error| {
+                    crate::status::queue_diagnostic(
+                        "private_dispatch_load_image",
+                        format_args!("error={error:?}"),
+                    );
+                })
                 .map_err(crate::loader::map_loader_error)?;
         symbols.retain(|symbol| symbol.kind == SymbolKind::Kernel);
         let argument_bytes = symbols
@@ -151,6 +169,12 @@ impl<D> Dispatch<D> {
         }
         let arguments = device
             .allocate(MemoryKind::System, page, page, DeviceAccess::READ)
+            .inspect_err(|error| {
+                crate::status::queue_diagnostic(
+                    "private_dispatch_argument_allocation",
+                    format_args!("error={error:?}"),
+                );
+            })
             .map_err(map_error)?;
         if arguments.info().host_address.is_none() {
             return Err(NOT_SUPPORTED);
@@ -180,11 +204,17 @@ impl<D> Dispatch<D> {
         };
         // The current admitted operation and the dispatch in-flight token keep
         // the generation alive while its signal and queue owners are published.
-        dispatch.completion = {
+        let completion = {
             let mut guard = lock()?;
             let runtime = crate::lifecycle::initialized_mut(&mut guard)?;
-            runtime.create_signal(1, true)?
+            runtime.create_signal(1, true)
         };
+        dispatch.completion = completion.inspect_err(|status| {
+            crate::status::queue_diagnostic(
+                "private_dispatch_signal_create",
+                format_args!("status=0x{status:08x}"),
+            );
+        })?;
         let Some(assets) = dispatch.assets.as_ref() else {
             return Err(ERROR);
         };
@@ -203,6 +233,10 @@ impl<D> Dispatch<D> {
         match unsafe { crate::queue::create(request) } {
             Ok(queue) => dispatch.queue = Some(queue),
             Err(status) => {
+                crate::status::queue_diagnostic(
+                    "private_dispatch_queue_create",
+                    format_args!("status=0x{status:08x}"),
+                );
                 if dispatch.health.is_quarantined() {
                     dispatch.finished = true;
                 }
@@ -332,9 +366,16 @@ impl<D> Dispatch<D> {
     #[allow(unsafe_code)]
     fn retire(&mut self, status: Status) -> DispatchResult {
         self.finished = true;
-        let retired = self
-            .queue
-            .is_none_or(|queue| crate::queue::destroy(queue).is_ok());
+        let retired = self.queue.is_none_or(|queue| {
+            crate::queue::destroy(queue)
+                .inspect_err(|status| {
+                    crate::status::queue_diagnostic(
+                        "private_dispatch_queue_retire",
+                        format_args!("status=0x{status:08x}"),
+                    );
+                })
+                .is_ok()
+        });
         if !retired {
             self.health.quarantine();
             return DispatchResult {
@@ -348,7 +389,13 @@ impl<D> Dispatch<D> {
         } else {
             match signal::destroy(self.completion) {
                 Ok(()) => SUCCESS,
-                Err(status) => status,
+                Err(status) => {
+                    crate::status::queue_diagnostic(
+                        "private_dispatch_signal_retire",
+                        format_args!("status=0x{status:08x}"),
+                    );
+                    status
+                }
             }
         };
         self.completion.handle = 0;
@@ -401,5 +448,95 @@ mod tests {
             assert_eq!(released.load(Ordering::Acquire), can_release);
             assert_eq!(health.is_quarantined(), !can_release);
         }
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn queue_diagnostics_preserve_callback_status_and_exact_flag() {
+        const CHILD: &str = "ROCDDI_TEST_COPY_QUEUE_DIAGNOSTIC";
+        if std::env::var_os(CHILD).is_some() {
+            let status = AtomicU32::new(SUCCESS);
+            // SAFETY: The callback only accesses this retained atomic; the queue is unused.
+            unsafe {
+                queue_error(
+                    INVALID_ALLOCATION,
+                    std::ptr::null_mut(),
+                    (&raw const status).cast_mut().cast(),
+                );
+            }
+            assert_eq!(status.load(Ordering::Acquire), INVALID_ALLOCATION);
+            return;
+        }
+        for setting in [None, Some("0"), Some("1"), Some("true")] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "dispatch::tests::queue_diagnostics_preserve_callback_status_and_exact_flag",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env_remove("ROCDDI_HSA_QUEUE_DIAGNOSTICS");
+            if let Some(setting) = setting {
+                command.env("ROCDDI_HSA_QUEUE_DIAGNOSTICS", setting);
+            }
+            let output = command.output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            if setting == Some("1") {
+                assert!(stderr.contains("stage=private_dispatch_queue_callback"));
+                assert!(stderr.contains(&format!("status=0x{INVALID_ALLOCATION:08x}")));
+            } else {
+                assert!(!stderr.contains("rocddi HSA queue:"), "{stderr}");
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    #[allow(clippy::unwrap_used)]
+    fn fork_child_queue_diagnostic_returns_before_formatting() {
+        const CHILD: &str = "ROCDDI_TEST_FORK_COPY_QUEUE_DIAGNOSTIC";
+        struct MustNotFormat;
+        impl std::fmt::Display for MustNotFormat {
+            fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                // SAFETY: Formatting in the fork child is a test failure; never unwind there.
+                unsafe { libc::_exit(91) }
+            }
+        }
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "dispatch::tests::fork_child_queue_diagnostic_returns_before_formatting",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("ROCDDI_HSA_QUEUE_DIAGNOSTICS", "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert!(output.stderr.is_empty(), "{output:?}");
+            return;
+        }
+        crate::platform::bind_process().unwrap();
+        let guard = lock().unwrap();
+        // SAFETY: The child only checks the witness and guarded diagnostic, then exits.
+        let child = unsafe { libc::syscall(libc::SYS_fork) };
+        assert!(child >= 0);
+        if child == 0 {
+            // SAFETY: Bound a broken guard without unwinding inherited test-runner state.
+            unsafe { libc::alarm(3) };
+            let current = crate::platform::process_is_current();
+            crate::status::queue_diagnostic("fork_child", format_args!("{MustNotFormat}"));
+            // SAFETY: _exit avoids inherited Rust destructors and lifecycle locks.
+            unsafe { libc::_exit(i32::from(current)) }
+        }
+        let mut status = 0;
+        let child = i32::try_from(child).unwrap();
+        // SAFETY: Wait only for the child just created, with writable status storage.
+        assert_eq!(unsafe { libc::waitpid(child, &raw mut status, 0) }, child);
+        assert_eq!(status, 0);
+        drop(guard);
     }
 }

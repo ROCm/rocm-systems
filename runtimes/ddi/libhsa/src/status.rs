@@ -23,6 +23,22 @@ pub(crate) fn map_error(error: rocddi::Error) -> Status {
     }
 }
 
+/// Emits optional queue-backed operation evidence without changing its result.
+pub(crate) fn queue_diagnostic(stage: &str, details: std::fmt::Arguments<'_>) {
+    use std::io::Write as _;
+
+    // Inherited children must not acquire environment or I/O locks.
+    if !crate::platform::process_is_current()
+        || std::env::var_os("ROCDDI_HSA_QUEUE_DIAGNOSTICS").is_none_or(|value| value != "1")
+    {
+        return;
+    }
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "rocddi HSA queue: stage={stage}; {details}",
+    );
+}
+
 /// Runs an HSA ABI operation behind the panic-to-status boundary.
 pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
     if !crate::platform::process_is_current() {

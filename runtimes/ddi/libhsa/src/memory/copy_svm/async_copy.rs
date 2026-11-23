@@ -91,26 +91,52 @@ pub(crate) fn enqueue_copy_job(
         .name("rocddi-hsa-copy".into())
         .spawn(move || {
             with_copy_worker_lease(&inflight, cleanup, |admitted| {
-                let mut execute = admitted
+                let dependencies_ready = admitted
                     && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         wait_async_dependencies(&worker_handles[..dependency_len], &stop)
                     }))
+                    .inspect_err(|_| {
+                        crate::status::queue_diagnostic(
+                            "async_copy_dependency_panic",
+                            format_args!("admitted={admitted}"),
+                        );
+                    })
                     .unwrap_or(false);
+                let mut execute = dependencies_ready;
                 for task in tasks {
                     let result = if execute {
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             execute_copy_route(task.route, task.sdma_engine, profile_enabled, &stop)
                         }))
-                        .unwrap_or(Err(CopyRouteFailure {
-                            status: ERROR,
-                            operands_may_be_live: true,
-                        }))
+                        .unwrap_or_else(|panic| {
+                            let message = panic.downcast_ref::<&str>().copied().or_else(|| {
+                                panic.downcast_ref::<String>().map(String::as_str)
+                            });
+                            crate::status::queue_diagnostic(
+                                "async_copy_worker_panic",
+                                format_args!("message={message:?}"),
+                            );
+                            Err(CopyRouteFailure {
+                                status: ERROR,
+                                operands_may_be_live: true,
+                            })
+                        })
                     } else {
                         Err(CopyRouteFailure::retired(ERROR))
                     };
                     let (success, may_be_live, profile) = match result {
                         Ok(profile) => (true, false, profile),
-                        Err(failure) => (false, failure.operands_may_be_live, None),
+                        Err(failure) => {
+                            crate::status::queue_diagnostic(
+                                "async_copy_worker_failure",
+                                format_args!(
+                                    "status=0x{:08x}; operands_may_be_live={}; admitted={admitted}; dependencies_ready={dependencies_ready}; execute={execute}",
+                                    failure.status,
+                                    failure.operands_may_be_live,
+                                ),
+                            );
+                            (false, failure.operands_may_be_live, None)
+                        }
                     };
                     if may_be_live {
                         health.quarantine();

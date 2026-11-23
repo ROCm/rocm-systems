@@ -100,11 +100,45 @@ pub(crate) fn copy(
     if size == 0 {
         return Ok(());
     }
-    let mut dispatch = prepare(device, device.clone())?;
+    let started = std::time::Instant::now();
+    let mut dispatch = prepare(device, device.clone()).inspect_err(|failure| {
+        crate::status::queue_diagnostic(
+            "compute_copy_prepare",
+            format_args!(
+                "status=0x{:08x}; operands_may_be_live={}; elapsed_ns={}",
+                failure.status,
+                failure.operands_may_be_live,
+                started.elapsed().as_nanos(),
+            ),
+        );
+    })?;
     let (args, work_items) = copy_arguments(destination, source, size);
+    let started = std::time::Instant::now();
     // SAFETY: The HSA route retains both checked GPU operands through finish.
     let status = unsafe { dispatch.launch("copy_bytes", &args, work_items) };
-    finish(&dispatch.finish(status))
+    if status != SUCCESS {
+        crate::status::queue_diagnostic(
+            "compute_copy_launch",
+            format_args!(
+                "status=0x{status:08x}; elapsed_ns={}",
+                started.elapsed().as_nanos()
+            ),
+        );
+    }
+    let started = std::time::Instant::now();
+    let result = dispatch.finish(status);
+    if result.status != SUCCESS {
+        crate::status::queue_diagnostic(
+            "compute_copy_finish",
+            format_args!(
+                "incoming_status=0x{status:08x}; status=0x{:08x}; operands_may_be_live={}; elapsed_ns={}",
+                result.status,
+                result.operands_may_be_live,
+                started.elapsed().as_nanos(),
+            ),
+        );
+    }
+    finish(&result)
 }
 
 /// Fills a retained GPU address range with repeated 32-bit values.
