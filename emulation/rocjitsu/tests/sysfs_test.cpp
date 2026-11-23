@@ -11,6 +11,7 @@
 /// that IP discovery publishes the configured GC, SDMA, and NBIF versions.
 
 #include "config_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "scoped_temp.h"
 #include "util/diagnostic.h"
@@ -185,13 +186,13 @@ TEST(SysfsTopologyTest, ShippedCdnaKfdDefaultsAreFullyCpuVisible) {
 TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
   struct Case {
     const char *config_name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t max_vgprs;
   };
   for (const auto &[config_name, arch, max_vgprs] :
-       {Case{"gfx942_cdna3_kmd.json", ROCJITSU_CODE_ARCH_CDNA3, 256},
-        Case{"gfx950_mi350x_kmd.json", ROCJITSU_CODE_ARCH_CDNA4, 256},
-        Case{"gfx1250_mi455x.json", ROCJITSU_CODE_ARCH_CDNA5, 1024}}) {
+       {Case{"gfx942_cdna3_kmd.json", rocjitsu::IsaFamily::Cdna3, 256},
+        Case{"gfx950_mi350x_kmd.json", rocjitsu::IsaFamily::Cdna4, 256},
+        Case{"gfx1250_mi455x.json", rocjitsu::IsaFamily::Cdna5, 1024}}) {
     SCOPED_TRACE(config_name);
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/" + config_name, loaded));
@@ -244,7 +245,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     EXPECT_LE((uint64_t{info.context_save_size} + debugger_reserve) * xcc_count,
               std::numeric_limits<uint32_t>::max());
 
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == rocjitsu::IsaFamily::Cdna4) {
       // A large LDS group alongside many empty groups must fit while
       // preserving the independent record size of each group.
       std::vector<kmd::CwsrWaveState> mixed_lds(512);
@@ -274,7 +275,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
   uint32_t writes = 0;
   EXPECT_FALSE(kmd::serialize_queue_cwsr(
                    0x100000, info.context_save_size, wave, [&](uint64_t, uint32_t) { ++writes; },
-                   ROCJITSU_CODE_ARCH_RDNA3)
+                   rocjitsu::IsaFamily::Rdna3)
                    .ok);
   EXPECT_EQ(writes, 0u);
 }

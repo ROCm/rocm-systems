@@ -10,7 +10,7 @@ same API:
 
 ## Installation
 
-The package requires Linux and a matching native Rocjitsu runtime. Bundled wheels
+The package requires Linux and a matching native rocjitsu runtime. Bundled wheels
 containing the Python package, native runtime, and JSON presets require follow-up
 TheRock packaging support. Once a build containing that support is published,
 install its wheel into your Python environment:

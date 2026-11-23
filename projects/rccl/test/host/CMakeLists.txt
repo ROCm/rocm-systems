@@ -189,6 +189,12 @@ while(_rccl_cast_pins)
   rccl_assert_source_line("${_rccl_src_root}/${_src}" "${_prod}" "fakes/${_fake}")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/${_fake}" "${_copy}" "the ${_src} copy")
 endwhile()
+rccl_assert_source_line("${_rccl_src_root}/graph/paths.cc"
+  "RCCL_PARAM(SaturateP2pNChannels, \"SATURATE_P2P_NCHANNELS\", RCCL_VALUE_UNSET)"
+  "fakes/enqueue_test_deps.cc: rcclParamSaturateP2pNChannels()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/enqueue_test_deps.cc"
+  "int64_t rcclParamSaturateP2pNChannels() { return g_loadParam(\"RCCL_SATURATE_P2P_NCHANNELS\", RCCL_VALUE_UNSET); }"
+  "the SaturateP2pNChannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -299,7 +305,8 @@ foreach(_dda_param
     "RCCL_PARAM(DdaLL, \"DDA_LL\", 1)"
     "RCCL_PARAM(DdaLLOneShotThreshold, \"DDA_LL_ONESHOT_THRESHOLD\", (size_t)(1) * 1024 * 1024)"
     "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)"
-    "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)")
+    "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)"
+    "RCCL_PARAM(DdaLL128ArPeerParallel, \"DDA_LL128_AR_PEER_PARALLEL\", 1)")
   rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc" "${_dda_param}"
     "the rccl_wrap.cc DDA param")

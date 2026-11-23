@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "util/result.h"
 #include "util/simd_control.h"
 
 #include <cstdint>
@@ -29,7 +30,7 @@ struct ArithmeticPolicy {
 };
 
 /// @brief Parse an arithmetic semantics name, rejecting unknown or reserved modes.
-ArithmeticPolicy parse_arithmetic_policy(std::string_view semantics);
+util::FailureOr<ArithmeticPolicy> parse_arithmetic_policy(std::string_view semantics);
 
 /// @brief Return the configuration spelling of an arithmetic semantics mode.
 const char *arithmetic_semantics_name(ArithmeticSemantics semantics);
@@ -38,6 +39,10 @@ const char *arithmetic_semantics_name(ArithmeticSemantics semantics);
 class ArithmeticExecution {
 public:
   explicit ArithmeticExecution(ArithmeticPolicy policy = {});
+
+  /// @brief Cap the arithmetic CPU tier before execution. A scalar limit also disables legacy SIMD.
+  void limit_cpu_level(uint64_t max_level);
+  bool force_scalar() const { return force_scalar_ || util::force_scalar(); }
 
   /// @brief Return cached CPU/semantics flags with the live scalar-test override.
   /// Guest instruction controls are added separately by the execution adapters.
@@ -48,6 +53,7 @@ private:
   // constructor.
   static constexpr uint64_t cpu_flags_mask = 0xffff;
   uint64_t flags_;
+  bool force_scalar_ = false;
 };
 
 } // namespace rocjitsu::amdgpu

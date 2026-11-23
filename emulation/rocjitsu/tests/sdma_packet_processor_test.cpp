@@ -258,11 +258,11 @@ TEST(SdmaPacketProcessorTest, SwapAdmitsAndMaintainsEachMemoryEffect) {
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++maintenance_acquires;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++maintenance_releases;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
   const std::vector<uint32_t> packet = swap_packet(SdmaPacketDialect::Gfx1250, 0x1000, 0x2000, 8);
@@ -801,7 +801,7 @@ TEST(SdmaPacketProcessorTest, FailedCacheMaintenanceStopsEffectsAndRetirement) {
     uint32_t maintenance_calls = 0;
     SdmaPacketCallbacks callbacks;
     callbacks.acquire_cache_maintenance =
-        [&](SdmaCacheOperation) -> util::FailureOr<SdmaCacheLease> {
+        [&](SdmaCacheOperation) -> util::FailureOr<CacheMaintenanceResult> {
       ++maintenance_calls;
       return util::Result::failure();
     };
@@ -830,11 +830,12 @@ TEST(SdmaPacketProcessorTest, FailedCacheReacquisitionRetiresCommittedCopyPrefix
   fixture.memory->set_unavailable_write(kDestination + 16);
   uint32_t maintenance_calls = 0;
   SdmaPacketCallbacks callbacks;
-  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation) -> util::FailureOr<SdmaCacheLease> {
+  callbacks.acquire_cache_maintenance =
+      [&](SdmaCacheOperation) -> util::FailureOr<CacheMaintenanceResult> {
     ++maintenance_calls;
     if (fixture.memory->write_calls(kDestination + 16) != 0)
       return util::Result::failure();
-    return SdmaCacheLease{};
+    return CacheMaintenanceResult{};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
   const auto packet = copy_packet(kSource, kDestination, 32);
@@ -871,11 +872,11 @@ TEST(SdmaPacketProcessorTest, CacheLeaseIsReleasedOnUnavailableAndReacquiredOnRe
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++acquired;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++released;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++released;
+                                  })};
   };
   const std::array<uint32_t, 5> packet = {11, static_cast<uint32_t>(kDestination), 0, 0x11223344,
                                           3};
@@ -907,8 +908,8 @@ TEST(SdmaPacketProcessorTest, PreEffectMaintenanceRefusalRetainsFenceForRetry) {
   callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
     EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
     if (++attempts == 1)
-      throw CacheMaintenanceUnavailable("prepared writeback is unavailable");
-    return SdmaCacheLease{};
+      return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+    return CacheMaintenanceResult{};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
   const std::array<uint32_t, 4> packet = {5, static_cast<uint32_t>(kDestination), 0, 0x11223344};
@@ -936,6 +937,38 @@ TEST(SdmaPacketProcessorTest, PreEffectMaintenanceRefusalRetainsFenceForRetry) {
   EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x11223344u);
 }
 
+TEST(SdmaPacketProcessorTest, MaintenanceRetryRetainsGcrWithoutCommitting) {
+  for (uint32_t flags : {1u << 15, 1u << 14}) {
+    SCOPED_TRACE(flags);
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    uint32_t attempts = 0;
+    SdmaPacketCallbacks callbacks;
+    callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+      EXPECT_EQ(operation, flags == (1u << 15) ? SdmaCacheOperation::WritebackInvalidate
+                                               : SdmaCacheOperation::Invalidate);
+      if (++attempts == 1)
+        return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+      return CacheMaintenanceResult{};
+    };
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+    const std::array<uint32_t, 6> packet = {17, 0, 0, flags, 0, 0};
+    const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                             .access = *fixture.access,
+                                                             .continuation = fixture.continuation});
+    EXPECT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+    EXPECT_EQ(first.packet.retirement, PacketRetirement::Hold);
+    EXPECT_FALSE(first.operation_committed);
+    EXPECT_TRUE(fixture.continuation.pending());
+    const SdmaPacketProcessResult resumed = processor.process(
+        {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+    EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+    EXPECT_TRUE(resumed.operation_committed);
+    EXPECT_FALSE(fixture.continuation.pending());
+    EXPECT_EQ(attempts, 2u);
+  }
+}
+
 TEST(SdmaPacketProcessorTest, MaintenanceRefusalKeepsTokenizedWriteProgress) {
   PacketProcessorFixture fixture(0x10000, 16);
   ASSERT_TRUE(fixture.access);
@@ -945,8 +978,8 @@ TEST(SdmaPacketProcessorTest, MaintenanceRefusalKeepsTokenizedWriteProgress) {
   callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
     EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
     if (++attempts == 2)
-      throw CacheMaintenanceUnavailable("prepared writeback is unavailable");
-    return SdmaCacheLease{};
+      return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+    return CacheMaintenanceResult{};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
   const std::array<uint32_t, 12> packet = {
@@ -1001,11 +1034,11 @@ TEST(SdmaPacketProcessorTest, CacheMaintenanceCoversEachLocalBackingSpan) {
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++acquired;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++released;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++released;
+                                  })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
   const std::array<uint32_t, 12> packet = {
@@ -1624,11 +1657,11 @@ TEST(SdmaPacketProcessorTest, CacheMaintenanceAllowsDeferredCopyAfterLeaseReleas
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++maintenance_acquires;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++maintenance_releases;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
   SdmaPacketContinuation continuation;
@@ -1700,7 +1733,7 @@ TEST(SdmaPacketProcessorTest, IngressPermitCoversLocalStepAndLeavesBeforeDeferre
       EXPECT_FALSE(permit_active);
     cache_lease_active = true;
     ++maintenance_acquires;
-    return SdmaCacheLease([&] { cache_lease_active = false; });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] { cache_lease_active = false; })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
   SdmaPacketContinuation continuation;
@@ -1755,7 +1788,7 @@ TEST(SdmaPacketProcessorTest, PrivateUcGttCopySourcePermitScopesOnlyTheSourceRea
       EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
       EXPECT_FALSE(source_permit_active);
       ++maintenance_acquires;
-      return SdmaCacheLease{};
+      return CacheMaintenanceResult{};
     };
     callbacks.admit_private_uc_gtt_copy_source = [&](const GpuVmAccess &expected, uint64_t address,
                                                      std::size_t size) {
@@ -1804,7 +1837,7 @@ TEST(SdmaPacketProcessorTest, ClosingPrivateUcGttCopySourceRetriesBeforeReading)
   SdmaPacketCallbacks callbacks;
   callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation) {
     ++maintenance_acquires;
-    return SdmaCacheLease{};
+    return CacheMaintenanceResult{};
   };
   callbacks.admit_private_uc_gtt_copy_source =
       [&](const GpuVmAccess &, uint64_t, std::size_t) -> VmPrivateUcGttCopySourceAdmission {
@@ -1952,11 +1985,11 @@ TEST(SdmaPacketProcessorTest, BroadcastCopyResumesAfterDeferredDestinationWithCa
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++maintenance_acquires;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++maintenance_releases;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
   SdmaPacketContinuation continuation;
@@ -2031,11 +2064,11 @@ TEST(SdmaPacketProcessorTest, ResetCancelsPostedDeferredCopyWithCacheMaintenance
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++maintenance_acquires;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++maintenance_releases;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
   SdmaPacketContinuation continuation;
@@ -2090,11 +2123,11 @@ TEST(SdmaPacketProcessorTest, CacheMaintenanceAllowsDeferredCopySource) {
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++maintenance_acquires;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++maintenance_releases;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
   SdmaPacketContinuation continuation;
@@ -2143,11 +2176,11 @@ TEST(SdmaPacketProcessorTest, CacheMaintenanceAllowsPeerOnlyFillAndWrite) {
       EXPECT_FALSE(lease_active);
       lease_active = true;
       ++maintenance_acquires;
-      return SdmaCacheLease([&] {
-        EXPECT_TRUE(lease_active);
-        lease_active = false;
-        ++maintenance_releases;
-      });
+      return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                      EXPECT_TRUE(lease_active);
+                                      lease_active = false;
+                                      ++maintenance_releases;
+                                    })};
     };
     SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
     SdmaPacketContinuation continuation;
@@ -2225,7 +2258,7 @@ TEST(SdmaPacketProcessorTest, CacheMaintenanceRechecksRouteAfterAcquiringLocalLe
     EXPECT_EQ(translator->prepare_calls, 1u);
     translator->peer_enabled = true;
     lease_active = true;
-    return SdmaCacheLease([&] { lease_active = false; });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] { lease_active = false; })};
   };
   SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
   SdmaPacketContinuation continuation;

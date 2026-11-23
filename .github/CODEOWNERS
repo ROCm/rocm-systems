@@ -169,7 +169,6 @@
 /projects/rocjpeg/**/*.rst                                            @ROCm/rocjpeg-docs-reviewers
 /projects/rocjpeg/**/.readthedocs.yaml                                @ROCm/rocjpeg-docs-reviewers
 
-/projects/hipfile/CHANGELOG.md                                        @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 /projects/hipfile/**/.readthedocs.yaml                                @ROCm/hipfile-docs-reviewers
 /projects/hipfile/docs/                                               @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 

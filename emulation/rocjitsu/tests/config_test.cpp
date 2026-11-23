@@ -6,6 +6,7 @@
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scoped_temp.h"
 #include "test_paths.h"
 
@@ -1411,16 +1412,16 @@ TEST(SystemGraphTest, RejectsMultiGpuCheckpointWithoutWritingFile) {
 
 TEST(SoCTest, SelectsSdmaPacketDialect) {
   const std::array cases = {
-      std::pair{ROCJITSU_CODE_ARCH_CDNA1, amdgpu::SdmaPacketDialect::Legacy},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA3, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA4, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_CDNA5, amdgpu::SdmaPacketDialect::Gfx1250},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA1, amdgpu::SdmaPacketDialect::Legacy},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Rdna4},
+      std::pair{rocjitsu::IsaFamily::Cdna1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{rocjitsu::IsaFamily::Cdna2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Cdna3, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Cdna4, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Cdna5, amdgpu::SdmaPacketDialect::Gfx1250},
+      std::pair{rocjitsu::IsaFamily::Rdna1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{rocjitsu::IsaFamily::Rdna2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{rocjitsu::IsaFamily::Rdna3, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{rocjitsu::IsaFamily::Rdna3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{rocjitsu::IsaFamily::Rdna4, amdgpu::SdmaPacketDialect::Rdna4},
   };
   for (const auto &[arch, expected] : cases) {
     SCOPED_TRACE(static_cast<int>(arch));
@@ -1483,7 +1484,7 @@ TEST(ConfigLoaderTest, LoadCdna2Config) {
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", loaded));
   auto *soc = loaded.soc();
 
-  EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA2);
+  EXPECT_EQ(soc->arch(), rocjitsu::IsaFamily::Cdna2);
   EXPECT_EQ(loaded.device.gpu_id, 50149u);
   EXPECT_EQ(loaded.device.device_id, 0x740fu);
   EXPECT_EQ(loaded.device.family_id, 0x8du);
@@ -1620,7 +1621,7 @@ TEST(ConfigLoaderTest, ImageAddressingUsesEachDeviceIdentity) {
       if (!cu)
         continue;
       const amdgpu::ImageAddressConfig identity = cu->image_address_config();
-      EXPECT_EQ(identity.arch, ROCJITSU_CODE_ARCH_RDNA2);
+      EXPECT_EQ(identity.arch, rocjitsu::IsaFamily::Rdna2);
       EXPECT_EQ(identity.gb_addr_config,
                 kmd::gb_addr_config_for_gfx_target_version(loaded.device.gfx_target_version));
       EXPECT_EQ(identity.gb_addr_config, version == 100300 ? 0x444u : 0u);
@@ -2203,7 +2204,7 @@ TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTop
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   config::LoadedConfig rdna4;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rdna4));
-  EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(rdna4.soc()->arch(), rocjitsu::IsaFamily::Rdna4);
   EXPECT_EQ(rdna4.device.gpu_id, 8716u);
   EXPECT_EQ(rdna4.device.device_id, 0x7551u);
   EXPECT_EQ(rdna4.device.family_id, 0x98u);
@@ -2235,7 +2236,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(kmd::gfx_target_name(120501u), "gfx1251");
   EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1251"), 120501u);
   EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
-  EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
+  EXPECT_EQ(kmd::gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna3_5), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(120500), 0u);
   EXPECT_EQ(kmd::drm_shader_engine_count(0, 2), 0u);
@@ -2251,7 +2252,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
 
   config::LoadedConfig rdna3;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rdna3));
-  EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(rdna3.soc()->arch(), rocjitsu::IsaFamily::Rdna3);
   EXPECT_EQ(rdna3.device.gpu_id, 7019u);
   EXPECT_EQ(rdna3.device.device_id, 0x7448u);
   EXPECT_EQ(rdna3.device.family_id, 0x91u);
@@ -2287,7 +2288,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
 
   config::LoadedConfig rdna35;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1151.json", rdna35));
-  EXPECT_EQ(rdna35.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3_5);
+  EXPECT_EQ(rdna35.soc()->arch(), rocjitsu::IsaFamily::Rdna3_5);
   EXPECT_EQ(rdna35.device.gpu_id, 5510u);
   EXPECT_EQ(rdna35.device.device_id, 0x1586u);
   EXPECT_EQ(rdna35.device.family_id, 0x91u);
@@ -2340,7 +2341,7 @@ TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
   constexpr uint32_t sentinel = 0x12345678u;
   cu->write_sgpr(neighbor_base, sentinel);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   ASSERT_NE(decoder, nullptr);
   // LLVM MC gfx1151 encodings exercise both the destination and source
   // selectors that the undersized 104-register profile could not back.
@@ -3399,8 +3400,8 @@ TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
         EXPECT_EQ(config.xcnt_diagnostics, !mode || *mode == WaitChecking::All
                                                ? MemoryWaitDiagnostics::Warn
                                                : MemoryWaitDiagnostics::Off);
-        EXPECT_EQ(config.xcnt_checks_enabled(),
-                  config.arch == ROCJITSU_CODE_ARCH_CDNA5 && (!mode || *mode == WaitChecking::All));
+        EXPECT_EQ(config.xcnt_checks_enabled(), config.arch == rocjitsu::IsaFamily::Cdna5 &&
+                                                    (!mode || *mode == WaitChecking::All));
       }
       EXPECT_GT(count, loaded.num_gpus);
     }
@@ -4021,6 +4022,58 @@ void expect_config_target_failure(const std::string &json, const char *message) 
   EXPECT_EQ(validation_diagnostic.message(), message);
 }
 
+TEST(ConfigLoaderTest, RejectsInvalidComponentIntegersWithoutThrowing) {
+  const struct {
+    const char *type;
+    const char *key;
+  } fields[] = {{"compute_unit", "num_wf_slots"},   {"compute_unit", "sgprs_per_wf"},
+                {"compute_unit", "vgprs_per_wf"},   {"compute_unit", "lds_size_kb"},
+                {"compute_unit", "gws_wait_limit"}, {"compute_unit", "functional_quantum"},
+                {"iod", "num_hbm_stacks"}};
+  for (const auto &field : fields) {
+    for (const char *value : {"", "nonnumeric", "+", "18446744073709551616"}) {
+      SCOPED_TRACE(field.key);
+      SCOPED_TRACE(value);
+      const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+        "topology":{"root":{"name":"soc","type":"soc","children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"rejected","type":")") +
+                               field.type + R"(","config":[{"key":")" + field.key +
+                               R"(","value":")" + value + R"("}]}]}}})";
+      const std::string message =
+          std::string(field.key) + " must start with a decimal integer in unsigned long range";
+      EXPECT_NO_THROW(expect_config_target_failure(json, message.c_str()));
+      rj_vm_t sentinel;
+      rj_vm_t *output = &sentinel;
+      EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
+                ROCJITSU_STATUS_INVALID_ARGUMENT);
+      EXPECT_EQ(output, &sentinel);
+    }
+  }
+}
+
+TEST(ConfigLoaderTest, PreservesComponentIntegerPrefixesSignsAndNarrowing) {
+  const struct {
+    const char *text;
+    uint32_t expected;
+  } cases[] = {{"0", 0},           {"4294967295", UINT32_MAX}, {"4294967296", 0},
+               {"-1", UINT32_MAX}, {" +7suffix", 7},           {"0x10", 0}};
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.text);
+    const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+      "topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},
+        {"name":"cu","type":"compute_unit","config":[
+          {"key":"gws_wait_limit","value":")") +
+                             test_case.text + R"("}]}]}}})";
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(loaded.soc()->find_child("cu"));
+    ASSERT_NE(cu, nullptr);
+    EXPECT_EQ(cu->config().gws_wait_limit, test_case.expected);
+  }
+}
+
 TEST(ConfigLoaderTest, PropagatesRootComputeUnitFailure) {
   const std::string json = R"({"vm":{"arch":"cdna3"},"topology":{
     "root":{"name":"rejected","type":"compute_unit","config":[
@@ -4406,7 +4459,7 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
 TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   config::LoadedConfig source;
   ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", source, 48));
-  ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{33}));
+  ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{41}));
   auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
   ASSERT_EQ(source_cu->num_wf_slots(), 64u);
   ASSERT_EQ(source_cu->scratch_slots_per_cu(), 32u);
@@ -4435,7 +4488,7 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   EXPECT_EQ(restored.execution_threads.dispatch, source.execution_threads.dispatch);
   EXPECT_EQ(restored.execution_threads.helpers, source.execution_threads.helpers);
   restored.apply_cpu_dispatch_threads();
-  EXPECT_EQ(restored.soc()->dispatch_threads(), 33u);
+  EXPECT_EQ(restored.soc()->dispatch_threads(), source.execution_threads.dispatch.front());
   ASSERT_EQ(restored.soc()->num_xcds(), 8u);
   for (auto *xcd : restored.soc()->xcds()) {
     auto *cp = xcd->command_processor();
@@ -4782,7 +4835,7 @@ TEST(CheckpointTest, RestoredGfx1030WakeupUsesTheOriginalDispatchAndInTgBit) {
   config::LoadedConfig restored;
   ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   const uint32_t wake_word = 0xbf830000u, sleep_word = 0xbf8e0001u;
   std::unique_ptr<Instruction> wake(decode_valid(*decoder, &wake_word));
   std::unique_ptr<Instruction> sleep(decode_valid(*decoder, &sleep_word));
@@ -5686,10 +5739,10 @@ TEST(CheckpointTest, RestoresLogicalVgprBoundsUsedByDecodedInstructions) {
     ASSERT_TRUE(test::load_valid_config_from_string(json, source));
     auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
     const bool cdna =
-        cu->arch() == ROCJITSU_CODE_ARCH_CDNA1 || cu->arch() == ROCJITSU_CODE_ARCH_CDNA2;
+        cu->arch() == rocjitsu::IsaFamily::Cdna1 || cu->arch() == rocjitsu::IsaFamily::Cdna2;
     auto *wave = cu->dispatch_wf(0, 0x1000, 8, 16, cdna ? 64 : 32);
     ASSERT_NE(wave, nullptr);
-    if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA2)
+    if (cu->arch() == rocjitsu::IsaFamily::Cdna2)
       wave->set_accum_vgpr_base(8);
     auto decoder = Decoder::create(cu->arch());
     ASSERT_NE(decoder, nullptr);
@@ -5699,7 +5752,7 @@ TEST(CheckpointTest, RestoresLogicalVgprBoundsUsedByDecodedInstructions) {
       wave->set_exec(1);
       cu->write_vgpr(base + 40, 0, 0xbeef);
       if (cdna) {
-        if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA2) {
+        if (cu->arch() == rocjitsu::IsaFamily::Cdna2) {
           EXPECT_EQ(wave->accum_vgpr_base(), 8u);
         }
         cu->write_vgpr(base, 0, 0x12345678);
@@ -5798,7 +5851,7 @@ TEST(CheckpointTest, RoundTripsCdna3LdsWindowDataAndReservation) {
   EXPECT_EQ(w->lds_size(), 512u);
   EXPECT_EQ(w->lds().read32(base + 4), 0x01234567u);
   EXPECT_EQ(out->allocate_lds(512), 1536u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
   // ds_write_b32 v0,v1, with lane 0 active.
   const std::array<uint32_t, 2> encoding{0xd81a0000u, 0x00000100u};
   auto store = [&](uint32_t offset) {
@@ -6078,7 +6131,7 @@ TEST(CheckpointTest, Gfx115xGdsBytesStreamoutAndOrderedPositionRequireProcessRel
   ASSERT_TRUE(replace_exactly_once(config, R"("arch":"cdna3")", R"("arch":"rdna3_5")"));
   ASSERT_TRUE(test::load_valid_config_from_string(config, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   ASSERT_NE(decoder, nullptr);
   test::ScopedTempFile checkpoint;
   ASSERT_TRUE(checkpoint.initialize("rocjitsu-gfx115x-gds-"));
@@ -6423,7 +6476,7 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
 TEST(CheckpointTest, RestoresGfx10WaveAndLaunchAperturesIndependently) {
   auto json = functional_quantum_checkpoint_config(1, 1);
   ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA1);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
   ASSERT_NE(decoder, nullptr);
   constexpr uint16_t bases = 15u | (31u << 11); // Full SH_MEM_BASES register.
   const auto set = rdna1::build_sopk(rdna1::kSSetregB32, {.simm16 = bases, .sdst = 0});
@@ -6659,7 +6712,7 @@ TEST(CheckpointTest, RestoresShaderOwnedGfx10Halt) {
   EXPECT_EQ(restored_cu->read_sgpr(wave->sgpr_alloc().base + 3), 0u);
   constexpr uint16_t halt = 2u | (13u << 6); // STATUS.HALT.
   const auto get = rdna1::build_sopk(rdna1::kSGetregB32, {.simm16 = halt, .sdst = 1});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA1);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
   std::unique_ptr<Instruction> getreg(decode_valid(*decoder, get.data()));
   ASSERT_NE(getreg, nullptr);
   ASSERT_TRUE(restored_cu->execute_instruction(getreg.get(), *wave).succeeded());
@@ -6686,7 +6739,7 @@ TEST(CheckpointTest, RejectsPendingGfx10WaitBeforeReplacingCheckpoint) {
   EXPECT_TRUE(save(1).failed());
   EXPECT_EQ(read_binary_file(checkpoint.path()), original);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA1);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
   const auto wait = rdna1::build_sopk(rdna1::kSWaitcntVmcnt, {.simm16 = 0, .sdst = 125});
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, wait.data()));
   ASSERT_NE(inst, nullptr);
@@ -7606,7 +7659,7 @@ TEST(CheckpointTest, RejectsGdsContentsAndOrderedStateBeforeReplacingCheckpoint)
   };
 
   // Reading the implicit zero backing creates no state that needs persistence.
-  device.access_gds(ROCJITSU_CODE_ARCH_RDNA1, process,
+  device.access_gds(rocjitsu::IsaFamily::Rdna1, process,
                     [](amdgpu::Lds &gds) { EXPECT_EQ(gds.read32(8), 0u); });
   ASSERT_TRUE(save().succeeded());
   const auto original = read_binary_file(checkpoint.path());
@@ -7618,7 +7671,7 @@ TEST(CheckpointTest, RejectsGdsContentsAndOrderedStateBeforeReplacingCheckpoint)
   wf->set_m0(32);
   cu->write_vgpr(wf->vgpr_alloc().base, 0, 8);
   cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, 0xcafe1234);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA1);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna1);
   const auto words = rdna1::build_ds(rdna1::kDsWriteB32, {.gds = 1, .addr = 0, .data0 = 1});
   std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
   ASSERT_TRUE(store);
@@ -7626,7 +7679,7 @@ TEST(CheckpointTest, RejectsGdsContentsAndOrderedStateBeforeReplacingCheckpoint)
   amdgpu::LocalMemPipeline local;
   ASSERT_EQ(local.issue(store.release(), *wf), amdgpu::VmAccessOutcome::Complete);
   wf->halt();
-  device.access_gds(ROCJITSU_CODE_ARCH_RDNA1, process,
+  device.access_gds(rocjitsu::IsaFamily::Rdna1, process,
                     [](amdgpu::Lds &gds) { EXPECT_EQ(gds.read32(8), 0xcafe1234u); });
   EXPECT_TRUE(save().failed());
   EXPECT_NE(diagnostic.message().find("GDS memory or ordered-count state"), std::string::npos);
@@ -7826,7 +7879,7 @@ TEST(CheckpointTest, RefusesToSaveIndexedGdsUntilProcessRelease) {
   ASSERT_NE(wf, nullptr);
   wf->set_m0((128u << 16) | 4u);
   cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, 0x12345678u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   ASSERT_NE(decoder, nullptr);
   amdgpu::LocalMemPipeline local;
   const auto issue = [&](uint16_t opcode, uint64_t exec, uint32_t offset) {
@@ -7917,7 +7970,7 @@ TEST(CheckpointTest, PreservesGfx1030GdsOwnersAcrossAqlCheckpoint) {
             ROCJITSU_STATUS_SUCCESS);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(reloaded, &rj_vm_destroy);
   auto *restored_se = restored->soc->xcd(0)->shader_engine(0);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   ASSERT_NE(decoder, nullptr);
   // Fetch the next scalar instruction through the restored queue owner's VM binding.
   for (const auto &[c, i] : slots) {
@@ -7964,12 +8017,12 @@ TEST(CheckpointTest, PreservesGfx1030GdsOwnersAcrossAqlCheckpoint) {
 }
 
 TEST(CheckpointTest, PreservesGfx11AndCdnaWorkgroupMembership) {
-  for (const auto &[name, arch] :
-       {std::pair{"rdna3", ROCJITSU_CODE_ARCH_RDNA3},
-        std::pair{"rdna3_5", ROCJITSU_CODE_ARCH_RDNA3_5},
-        std::pair{"cdna1", ROCJITSU_CODE_ARCH_CDNA1}, std::pair{"cdna2", ROCJITSU_CODE_ARCH_CDNA2},
-        std::pair{"cdna3", ROCJITSU_CODE_ARCH_CDNA3},
-        std::pair{"cdna4", ROCJITSU_CODE_ARCH_CDNA4}}) {
+  for (const auto &[name, arch] : {std::pair{"rdna3", rocjitsu::IsaFamily::Rdna3},
+                                   std::pair{"rdna3_5", rocjitsu::IsaFamily::Rdna3_5},
+                                   std::pair{"cdna1", rocjitsu::IsaFamily::Cdna1},
+                                   std::pair{"cdna2", rocjitsu::IsaFamily::Cdna2},
+                                   std::pair{"cdna3", rocjitsu::IsaFamily::Cdna3},
+                                   std::pair{"cdna4", rocjitsu::IsaFamily::Cdna4}}) {
     for (uint32_t size : {64u, 128u}) {
       SCOPED_TRACE(testing::Message() << name << " work-items=" << size);
       auto json = functional_quantum_checkpoint_config(1, 1);
@@ -8022,8 +8075,8 @@ TEST(CheckpointTest, PreservesGfx11AndCdnaWorkgroupMembership) {
 }
 
 TEST(CheckpointTest, Gfx11PreservesAqlFlagsAndPrefetchDistanceInIbSts2) {
-  for (const auto &[name, arch] : {std::pair{"rdna3", ROCJITSU_CODE_ARCH_RDNA3},
-                                   std::pair{"rdna3_5", ROCJITSU_CODE_ARCH_RDNA3_5}}) {
+  for (const auto &[name, arch] : {std::pair{"rdna3", rocjitsu::IsaFamily::Rdna3},
+                                   std::pair{"rdna3_5", rocjitsu::IsaFamily::Rdna3_5}}) {
     SCOPED_TRACE(name);
     auto json = functional_quantum_checkpoint_config(1, 1);
     ASSERT_TRUE(replace_exactly_once(json, "cdna3", name));
@@ -8052,7 +8105,7 @@ TEST(CheckpointTest, Gfx11PreservesAqlFlagsAndPrefetchDistanceInIbSts2) {
     ASSERT_NE(wave, nullptr);
     auto decoder = Decoder::create(arch);
     ASSERT_NE(decoder, nullptr);
-    const uint32_t expected = (arch == ROCJITSU_CODE_ARCH_RDNA3 ? 0x602u : 0x502u) |
+    const uint32_t expected = (arch == rocjitsu::IsaFamily::Rdna3 ? 0x602u : 0x502u) |
                               (uint32_t{wave->wf_size() == 64} << 11);
     const uint32_t prefetch = 0xbf840006u; // s_set_inst_prefetch_distance 2
     auto set_distance = decoder->decode(&prefetch);
@@ -8122,7 +8175,7 @@ TEST(CheckpointTest, Rdna2AqlRegisterAllocationAndStickyExceptionsSurviveRestore
   ASSERT_NE(wave, nullptr);
   const uint32_t descriptor_vgprs = wave->num_vgprs();
   ASSERT_LT(descriptor_vgprs, 40u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   auto readlane =
       decoder->decode_window(std::array<uint32_t, 2>{0xd7600004, 0x02010b28}); // s4,v40,5
   ASSERT_TRUE(readlane.succeeded());
@@ -8288,7 +8341,7 @@ TEST(CheckpointTest, RejectsExternalRdna2BindingsAndRestoresStandaloneProcessZer
   cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   wave = cu->wf(0);
   ASSERT_NE(wave, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(wave->process_id(), 0u);
   wave->set_exec(1);

@@ -1925,6 +1925,8 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
 
 static_assert(NCCL_STEPS <= NCCL_NET_MAX_REQUESTS, "Not enough net requests to cover for steps");
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct ncclProxyArgs* args) {
   int checkedNetAttr = 0;
   if (args->state == ncclProxyOpReady) {
@@ -2121,6 +2123,8 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
 
 RCCL_PARAM(NetHdpFlush, "NET_HDP_FLUSH", 0);
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct ncclProxyArgs* args) {
   int checkedNetAttr = 0;
   if (args->state == ncclProxyOpReady) {

@@ -1,0 +1,1 @@
+* On gfx1250, a scale-out communicator (several hosts that are not one MNNVL clique) now models each GPU's link to the UALoE fabric switch with the value the platform reports, instead of a per-peer placeholder. Topologies without that value, such as older XML dumps, and intra-clique and single-host communicators are unchanged.

@@ -24,6 +24,9 @@ surface:
   Unit_surf1DLayered_Positive_ReadWrite:
     <<: *level_default
     tags: [surfop, texture, image]
+  Unit_surf1DLayered_Positive_NonzeroLayers:
+    <<: *level_default
+    tags: [surfop, texture, image]
   Unit_surf2Dread_Positive_Basic:
     <<: *level_default
     tags: [surfop, texture, image]
@@ -40,6 +43,9 @@ surface:
     <<: *level_default
     tags: [surfop, texture, image]
   Unit_surf2DLayered_Positive_ReadWrite:
+    <<: *level_default
+    tags: [surfop, texture, image]
+  Unit_surf2DLayered_Positive_NonzeroLayers:
     <<: *level_default
     tags: [surfop, texture, image]
   Unit_surf3Dread_Positive_Basic:
