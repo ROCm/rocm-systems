@@ -220,3 +220,20 @@ struct RedOpComm {
   ncclComm* get() { return storage.get(); }
 };
 }  // namespace
+
+namespace {
+std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels, int perPeer) {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  comm->nNodes = nNodes;
+  comm->nRanks = nRanks;
+  comm->p2pnChannels = p2pnChannels;
+  comm->p2pnChannelsPerPeer = perPeer;
+  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  return comm;
+}
+}  // namespace
+
+namespace {
+// Per-peer payload for the AllToAll peer-layer cases: large enough to be layered.
+constexpr ssize_t kLayerPeerBytes = ssize_t(16) << 20;
+}  // namespace

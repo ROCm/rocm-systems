@@ -17,18 +17,6 @@
 // depend only on comm-wide fields.
 // ===========================================================================
 
-namespace {
-std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels, int perPeer) {
-  std::unique_ptr<ncclComm> comm{new ncclComm{}};
-  comm->nNodes = nNodes;
-  comm->nRanks = nRanks;
-  comm->p2pnChannels = p2pnChannels;
-  comm->p2pnChannelsPerPeer = perPeer;
-  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
-  return comm;
-}
-}  // namespace
-
 TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitThePool) {
   g_rcclUseAinicValue = true;
   struct Case {
@@ -409,4 +397,114 @@ TEST_F(EnqueueMicrotest, P2pBatchEligible_UnsetThresholdOtherArchsKeepNodeScoped
   EXPECT_TRUE(rcclP2pBatchEligible(gfx950At16.get(), 64 * 1024, 64 * 1024));
   BatchComm gfx1250At8(/*nNodes=*/8, "gfx1250");
   EXPECT_TRUE(rcclP2pBatchEligible(gfx1250At8.get(), perPeer, perPeer));
+}
+
+// ===========================================================================
+// Direct P2P AllToAll peer layers (RCCL_A2A_P2P_PEERS_IN_FLIGHT): the rule and its gfx1250 default, the channel set of
+// a round and the pre-connect.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, A2aP2pLayerParts_PoolOverPeersInFlightOnlyWhenItAddsChannels) {
+  struct Case {
+    int64_t peersInFlight;
+    int perPeer, parts;
+  };
+  // 256 channels: 16 in flight at 8 (32r) or 4 (64r) per peer gives 16; 32 in flight at 8 adds nothing; 24 rounds
+  // down to 16; more in flight than channels leaves one channel (no more than the default); one in flight is off;
+  // -1 is the arch default, off on this non-gfx1250 comm.
+  for (Case k : {Case{0, 8, 0}, Case{16, 8, 16}, Case{16, 4, 16}, Case{8, 8, 32}, Case{32, 8, 0}, Case{32, 4, 8},
+                 Case{24, 8, 16}, Case{16, 16, 0}, Case{512, 4, 0}, Case{-1, 4, 0}, Case{1, 8, 0}}) {
+    SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", k.peersInFlight);
+    auto comm = P2pPartsComm(/*nNodes=*/1, /*nRanks=*/32, /*p2pnChannels=*/256, k.perPeer);
+    comm->rank = 0;
+    EXPECT_EQ(k.parts, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, /*peer=*/1))
+      << "K=" << k.peersInFlight << " perPeer=" << k.perPeer;
+  }
+}
+
+TEST_F(EnqueueMicrotest, A2aP2pLayerParts_UnsetIsSixteenInFlightOnGfx1250AndOffElsewhere) {
+  struct Case {
+    int cudaArch;
+    int64_t knob;  // -2: unset
+    int perPeer, parts;
+  };
+  // Unset and -1 pick 16 in flight on gfx1250 only; 0 turns the gfx1250 default off; a set K applies on every arch.
+  for (Case k : {Case{1250, -2, 8, 16}, Case{1250, -2, 4, 16}, Case{1250, -1, 8, 16}, Case{1250, -2, 16, 0},
+                 Case{1250, 0, 8, 0}, Case{1250, 1, 8, 0}, Case{1250, 32, 4, 8}, Case{950, -2, 4, 0},
+                 Case{942, -2, 4, 0}, Case{942, -1, 4, 0}, Case{942, 16, 4, 16}, Case{0, -2, 4, 0}}) {
+    if (k.knob == -2) {
+      g_loadParam = [](const char*, int64_t deft) { return deft; };
+    } else {
+      SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", k.knob);
+    }
+    auto comm = P2pPartsComm(/*nNodes=*/1, /*nRanks=*/64, /*p2pnChannels=*/256, k.perPeer);
+    comm->rank = 0;
+    comm->cudaArch = k.cudaArch;
+    EXPECT_EQ(k.parts, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, /*peer=*/1))
+      << "cudaArch=" << k.cudaArch << " knob=" << k.knob << " perPeer=" << k.perPeer;
+  }
+}
+
+TEST_F(EnqueueMicrotest, A2aP2pLayerParts_OffForOtherCallsSelfSmallPeersAndShiftMaps) {
+  SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", 16);
+  auto comm = P2pPartsComm(/*nNodes=*/1, /*nRanks=*/32, /*p2pnChannels=*/256, /*perPeer=*/8);
+  comm->rank = 3;
+  comm->p2pChannelShiftSize = -1;
+  EXPECT_EQ(16, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, ssize_t(4) << 20, /*peer=*/1)) << "4 MiB is in";
+  EXPECT_EQ(0, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, (ssize_t(4) << 20) - 1, 1)) << "below 4 MiB";
+  EXPECT_EQ(0, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, /*peer=*/3)) << "self copy";
+  for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncGather, ncclFuncScatter}) {
+    EXPECT_EQ(0, rcclA2aP2pLayerParts(comm.get(), f, kLayerPeerBytes, 1)) << "collAPI=" << int(f);
+  }
+  comm->nNodes = 4;
+  EXPECT_EQ(16, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, 1)) << "bit-reversal map";
+  comm->p2pChannelShiftSize = 2;
+  EXPECT_EQ(0, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, 1)) << "shift-size map";
+  comm->nNodes = 2;
+  EXPECT_EQ(16, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, 1)) << "linear map";
+  comm->p2pNet = 1;
+  EXPECT_EQ(0, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, 1)) << "P2P over NET";
+  comm->p2pNet = 0;
+  comm->p2pnChannels = 192;
+  EXPECT_EQ(0, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, 1)) << "pool not a power of two";
+  comm->p2pnChannels = 256;
+  g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+    if (std::strcmp(env, "RCCL_A2A_P2P_PEERS_IN_FLIGHT") == 0) {
+      return 16;
+    }
+    return std::strcmp(env, "ENQUEUE_REARCH_ENABLE") == 0 ? 1 : deft;
+  };
+  EXPECT_EQ(0, rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, 1)) << "rearchitected enqueue";
+}
+
+// The K rounds of a layer take disjoint channel sets that tile the pool, on both channel maps. The linear map's
+// device inverse reads part = channel - base * p2pnChannelsPerPeer, so a set must start at base * p2pnChannelsPerPeer.
+TEST_F(EnqueueMicrotest, A2aP2pLayerBase_RoundsOfALayerTileThePoolWithDisjointSets) {
+  for (int nNodes : {1, 4}) {
+    auto comm = P2pPartsComm(nNodes, /*nRanks=*/64, /*p2pnChannels=*/256, /*perPeer=*/4);
+    comm->p2pChannelShiftSize = -1;
+    const int parts = 16;
+    const int sets = rcclA2aP2pLayerSets(comm.get(), parts);
+    ASSERT_EQ(16, sets);
+    for (int layer = 0; layer < 64 / sets; ++layer) {
+      std::vector<int> owner(256, -1);
+      for (int round = layer * sets; round < (layer + 1) * sets; ++round) {
+        uint8_t base = rcclA2aP2pLayerBase(comm.get(), round, parts);
+        for (int part = 0; part < parts; ++part) {
+          int ch = ncclP2pChannelForPart(256, base, part, /*nParts=*/4, nNodes, -1);
+          ASSERT_GE(ch, 0);
+          ASSERT_LT(ch, 256);
+          EXPECT_EQ(-1, owner[ch]) << "nNodes=" << nNodes << " round " << round << " reuses channel " << ch
+                                   << " of round " << owner[ch];
+          owner[ch] = round;
+          if (nNodes == 1) {
+            EXPECT_EQ(base * 4 + part, ch) << "linear map must start the set at base * p2pnChannelsPerPeer";
+          }
+        }
+        // The same set for the same round mod sets in every layer, so both ends of a pair agree.
+        EXPECT_EQ(base, rcclA2aP2pLayerBase(comm.get(), round % sets, parts));
+      }
+      EXPECT_EQ(0, std::count(owner.begin(), owner.end(), -1)) << "a layer fills the pool";
+    }
+  }
 }

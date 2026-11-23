@@ -278,3 +278,139 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneWorkItemForTheNextRound) 
     EXPECT_EQ(4 * work, sc.bp.p()->workBytes);
   }
 }
+
+
+// ===========================================================================
+// Direct P2P AllToAll peer layers (RCCL_A2A_P2P_PEERS_IN_FLIGHT): the plan cut before each layer.
+// ===========================================================================
+
+namespace {
+// A layered AllToAll plan on AllToAllPlanScene: 4 ranks, 64 channels per peer, 256 channels; K=2 gives 128 per peer.
+struct LayeredAllToAllScene : AllToAllPlanScene {
+  ssize_t inArgs = ssize_t(ncclMaxKernelArgsSize(942)) - ssize_t(sizeof(struct ncclDevKernelArgs));
+  LayeredAllToAllScene() {
+    SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", 2);
+    for (int peer = 0; peer < kRanks; ++peer) {
+      sends[peer].root = peer;
+      recvs[peer].root = peer;
+    }
+  }
+  // Channels holding n batches.
+  int channelsWith(int n) {
+    int count = 0;
+    for (int ch = 0; ch < kP2pChannels; ++ch) {
+      count += bp.queueLength(ch) == n ? 1 : 0;
+    }
+    return count;
+  }
+  ncclDevWorkP2p* work(int index) {
+    ncclWorkList* node = bp.p()->workQueue.head;
+    for (int i = 0; i < index && node != nullptr; ++i) {
+      node = node->next;
+    }
+    return node == nullptr ? nullptr : reinterpret_cast<ncclDevWorkP2p*>(node + 1);
+  }
+  void newPlan() {
+    bp.plan.reset(new ncclKernelPlan{});
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_LayeredAllToAllEndsThePlanBeforeEachLayer) {
+  LayeredAllToAllScene sc;
+  ASSERT_EQ(ncclSuccess, sc.schedule(sc.inArgs));
+  EXPECT_EQ(4, sc.bp.c()->planner.nTasksP2p) << "rounds 2 and 3 are the second layer: next plan";
+  // Self copy (round 0) keeps its 64 channels 0-63; round 1 takes set 1 = channels 128-255.
+  EXPECT_EQ(64 + 128, sc.bp.p()->nWorkBatches);
+  ncclDevWorkP2p* peerWork = sc.work(1);
+  ASSERT_NE(nullptr, peerWork);
+  EXPECT_EQ(1, peerWork->sendRank);
+  EXPECT_EQ(128, peerWork->nSendChannels);
+  EXPECT_EQ(128, peerWork->nRecvChannels);
+  EXPECT_EQ(2, peerWork->channelBase) << "set 1 starts at channel 2 * 64";
+  for (int ch = 0; ch < AllToAllPlanScene::kP2pChannels; ++ch) {
+    EXPECT_EQ(ch < 64 || ch >= 128 ? 1 : 0, sc.bp.queueLength(ch)) << "channel " << ch;
+  }
+
+  sc.newPlan();
+  ASSERT_EQ(ncclSuccess, sc.schedule(sc.inArgs));
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+  EXPECT_EQ(256, sc.bp.p()->nWorkBatches) << "rounds 2 and 3 fill sets 0 and 1: one batch per channel";
+  EXPECT_EQ(0, sc.work(0)->channelBase);
+  EXPECT_EQ(2, sc.work(1)->channelBase);
+  EXPECT_EQ(64 + 128, sc.channelsWith(2));
+  EXPECT_EQ(64, sc.channelsWith(1));
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_LayeredRoundReservesItsWholeChannelSet) {
+  // The self copy takes 64 batches; round 1 needs its 128-channel set. One batch short defers it, an exact fit not.
+  {
+    LayeredAllToAllScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((64 + 128 - 1) * kBatch));
+    EXPECT_EQ(6, sc.bp.c()->planner.nTasksP2p) << "round 1 must wait for the next plan";
+    EXPECT_EQ(64, sc.bp.p()->nWorkBatches);
+  }
+  {
+    LayeredAllToAllScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((64 + 128) * kBatch));
+    EXPECT_EQ(4, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(64 + 128, sc.bp.p()->nWorkBatches);
+  }
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_LayeringOffForSmallPeersOrCappedCtas) {
+  {
+    LayeredAllToAllScene sc;
+    for (int peer = 0; peer < AllToAllPlanScene::kRanks; ++peer) {
+      sc.sends[peer].bytes = (ssize_t(4) << 20) - 1;
+      sc.recvs[peer].bytes = (ssize_t(4) << 20) - 1;
+    }
+    ASSERT_EQ(ncclSuccess, sc.schedule(sc.inArgs));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "below 4 MiB per peer: one plan as with the knob off";
+  }
+  {
+    LayeredAllToAllScene sc;
+    sc.sends[1].maxCTAs = MAXCHANNELS - 1;
+    sc.recvs[3].maxCTAs = MAXCHANNELS - 1;
+    EXPECT_EQ(0, rcclA2aP2pLayerPairParts(sc.bp.c(), &sc.recvs[3], &sc.sends[1]));
+    EXPECT_EQ(0, rcclA2aP2pLayerPairParts(sc.bp.c(), &sc.recvs[2], &sc.sends[1]));
+    EXPECT_EQ(128, rcclA2aP2pLayerPairParts(sc.bp.c(), &sc.recvs[2], &sc.sends[2]));
+    EXPECT_EQ(0, rcclA2aP2pLayerPairParts(sc.bp.c(), nullptr, &sc.sends[2]));
+  }
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_Gfx1250LayersALargeAllToAllByDefault) {
+  // 8 channels per peer on gfx1250 with the knob unset: 16 in flight gives each peer round 16 channels at set
+  // round mod 16. With the knob at 0 the same plan keeps 8 per peer.
+  for (int64_t knob : {int64_t(-2), int64_t(0)}) {
+    AllToAllPlanScene sc;
+    if (knob == -2) {
+      g_loadParam = [](const char*, int64_t deft) { return deft; };
+    } else {
+      SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", knob);
+    }
+    sc.bp.c()->cudaArch = 1250;
+    sc.bp.c()->p2pnChannelsPerPeer = 8;
+    for (int peer = 0; peer < AllToAllPlanScene::kRanks; ++peer) {
+      sc.sends[peer].root = peer;
+      sc.recvs[peer].root = peer;
+    }
+    ssize_t inArgs = ssize_t(ncclMaxKernelArgsSize(942)) - ssize_t(sizeof(struct ncclDevKernelArgs));
+    ASSERT_EQ(ncclSuccess, sc.schedule(inArgs));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "four rounds fit one layer: one plan";
+    ncclWorkList* node = sc.bp.p()->workQueue.head;
+    ASSERT_NE(nullptr, node);
+    ASSERT_NE(nullptr, node->next);
+    auto* peerWork = reinterpret_cast<ncclDevWorkP2p*>(node->next + 1);
+    EXPECT_EQ(1, peerWork->sendRank);
+    const int perPeer = knob == -2 ? 16 : 8;
+    EXPECT_EQ(perPeer, peerWork->nSendChannels) << "knob=" << knob;
+    EXPECT_EQ(perPeer, peerWork->nRecvChannels) << "knob=" << knob;
+    if (knob == -2) {
+      EXPECT_EQ(2, peerWork->channelBase) << "set 1 starts at channel 2 * 8";
+      EXPECT_EQ(8 + 3 * 16, sc.bp.p()->nWorkBatches) << "the self copy keeps 8 channels";
+    } else {
+      EXPECT_EQ(4 * 8, sc.bp.p()->nWorkBatches);
+    }
+  }
+}

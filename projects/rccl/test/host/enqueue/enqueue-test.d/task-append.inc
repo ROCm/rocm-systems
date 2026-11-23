@@ -754,3 +754,49 @@ TEST_F(EnqueueMicrotest, PlannerSetCapturingGraph_StreamsFromDifferentGraphs_Are
   EXPECT_EQ(2, sc.cc.get()->planner.numStreams);
   EXPECT_FALSE(ncclCudaGraphValid(sc.cc.get()->planner.capturingGraph));
 }
+
+// ===========================================================================
+// Direct P2P AllToAll peer layers (RCCL_A2A_P2P_PEERS_IN_FLIGHT): the pre-connect of a layer's channel set.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, A2aP2pLayerPreconnect_MarksTheRoundsSetOnceOnConnectorOne) {
+  // 8 ranks, 32 channels, 2 per peer; 4 in flight gives 8 channels per peer and 4 sets of 8 channels.
+  SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", 4);
+  constexpr int kRanks = 8, kPool = 32, kPerPeer = 2;
+  auto comm = P2pPartsComm(/*nNodes=*/1, kRanks, kPool, kPerPeer);
+  comm->rank = 0;
+  std::vector<ncclComm::P2pSchedulePair> rounds(kRanks);
+  for (int round = 0; round < kRanks; ++round) {
+    rounds[round].sendRank = round;
+    rounds[round].recvRank = (kRanks - round) % kRanks;
+  }
+  comm->p2pSchedule = rounds.data();
+  std::vector<ncclChannelPeer> peers(kPool * kRanks);
+  std::vector<std::vector<ncclChannelPeer*>> slots(kPool, std::vector<ncclChannelPeer*>(kRanks));
+  for (int ch = 0; ch < kPool; ++ch) {
+    for (int r = 0; r < kRanks; ++r) {
+      slots[ch][r] = &peers[ch * kRanks + r];
+    }
+    comm->channels[ch].peers = slots[ch].data();
+  }
+  std::vector<channelMasks> send(3 * kRanks), recv(3 * kRanks);
+  comm->connectSend = send.data();
+  comm->connectRecv = recv.data();
+  const int parts = rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, /*peer=*/3);
+  ASSERT_EQ(8, parts);
+
+  // Send to 3 is round 3: set 3 = channels 24-31 (its receive round, 5, would be set 1).
+  rcclA2aP2pLayerPreconnect(comm.get(), /*isSendNotRecv=*/true, /*peer=*/3, parts);
+  EXPECT_EQ(uint64_t(0xff000000), send[3].masks[0]);
+  EXPECT_EQ(uint64_t(0), recv[3].masks[0]);
+  for (int ch = 0; ch < kPool; ++ch) {
+    EXPECT_EQ(ch >= 24 ? 1 : 0, comm->channels[ch].peers[3]->send[1].hasSeen) << "channel " << ch;
+    EXPECT_EQ(0, comm->channels[ch].peers[3]->send[0].hasSeen);
+  }
+  // Send to 2 is round 2: set 2 = channels 16-23. A channel already seen keeps its mask bit clear.
+  comm->channels[19].peers[2]->send[1].hasSeen = 1;
+  rcclA2aP2pLayerPreconnect(comm.get(), /*isSendNotRecv=*/true, /*peer=*/2, parts);
+  EXPECT_EQ(uint64_t(0x00f70000), send[2].masks[0]);
+  rcclA2aP2pLayerPreconnect(comm.get(), /*isSendNotRecv=*/false, /*peer=*/1, parts);
+  EXPECT_EQ(uint64_t(0xff000000), recv[1].masks[0]) << "receive from 1 is round 7: set 3";
+}
