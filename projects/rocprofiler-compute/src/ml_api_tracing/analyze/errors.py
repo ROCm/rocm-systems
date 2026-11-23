@@ -29,6 +29,10 @@ class FatalMlApiTraceError(MlApiTraceError):
     """A trace integrity error that stops analyze. Other trace errors only warn."""
 
 
+class MlApiTraceInputError(FatalMlApiTraceError):
+    """Invalid trace columns, null values, or unsupported marker wire."""
+
+
 class UnaccountedKernelError(MlApiTraceError):
     """Dispatch unmatched on Correlation_ID and GUID."""
 

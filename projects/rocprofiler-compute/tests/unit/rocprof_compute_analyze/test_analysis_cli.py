@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from ml_api_tracing.analyze.call_tree import iter_call_tree_paths
 from ml_api_tracing.analyze.definitions import CallTreeNode, KernelStats
 from rocprof_compute_analyze.analysis_cli import (
     _check_listed_backends,
@@ -18,7 +19,6 @@ from rocprof_compute_analyze.analysis_cli import (
     cli_analysis,
 )
 from utils import schema
-from utils.utils_analysis import iter_call_tree_paths
 
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
 RELU_PMC_GROUP_KEY = (2, "relu_kernel", 0, 0, 0)
