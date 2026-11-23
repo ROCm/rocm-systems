@@ -128,7 +128,7 @@ Memory chart - Workgroup Processors (WGPs):
     unit: Bytes per Workgroup
   Scratch Allocation:
     plain: The number of bytes of scratch memory requested per work-item for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
-    rst: The number of bytes of scratch memory requested per work-item for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    rst: The number of bytes of scratch memory requested per :ref:`work-item <desc-work-item>` for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
     unit: Bytes per Work-item
   Workgroups:
     plain: The number of workgroups in the launch divided by the number of WGPs.

@@ -70,7 +70,7 @@ Memory chart - Workgroup Processors (WGPs):
     rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup
   Scratch Allocation:
-    rst: The number of bytes of scratch memory requested per work-item for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
+    rst: The number of bytes of scratch memory requested per :ref:`work-item <desc-work-item>` for this kernel. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.
     unit: Bytes per Work-item
   Workgroups:
     rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of WGPs.
