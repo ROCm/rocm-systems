@@ -29,9 +29,13 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci stats -j` labels each GPU by its ID, such as `GPU 3`, or `GPU g0.1` for partition 1 of GPU 0, instead of by its position in the job. The JSON keys follow, such as `gpu_3` and `gpu_g0.1`. A statistic without samples prints as `N/A` in the text output and as `null` in JSON, instead of zeros and a minimum of 18446744073709551615. PCIe standard deviations print with two decimals, like the other statistics.
 
+- `rdcd` exits with status 1 for an unknown option or a missing option argument, instead of ignoring it and starting, and whenever it finds another `rdcd` running; it exited with status 0 when two started at the same time.
+
+- A non-root `rdcd` no longer refuses to start when it cannot read the lock file of the root `rdcd`, `/var/run/rdcd.lock`. It still stops when it can read that file and the root `rdcd` holds it.
+
 ### Resolved Issues
 
-- `rdcd` no longer keeps a thread and memory for each policy registration whose client went away, and no longer hangs at shutdown while policy registrations arrive.
+- `rdcd` no longer keeps a thread and memory for each policy registration whose client went away, and no longer hangs at shutdown while policy registrations arrive. Unregistering the policies of a group also ends a registration whose client stays connected but stopped reading notifications.
 
 - All clients registered for the policies of one GPU group receive every notification. Each notification went to only one of them, and a client could miss some when several GPUs met a condition at once.
   - `rdcd` holds up to 1,024 notifications for a client that is slow to read them, and drops the oldest beyond that.
@@ -86,6 +90,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_policy_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist, instead of accepting the policy, and `rdci policy` exits with the status of a failed set.
 
+- A process that uses AMD SMI itself keeps working AMD SMI handles after it starts RDC in embedded mode. Loading RDC shut AMD SMI down and initialized it again, which invalidated the handles of the host process. Such a process must pass `AMDSMI_INIT_AMD_CPUS` in its first `amdsmi_init()` call for RDC to read CPU fields.
+
+- `rdc_start_embedded()` returns `RDC_ST_FAIL_LOAD_MODULE`, and `rdcd` exits with an error, when AMD SMI fails to initialize. Both aborted the process.
+
+- GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values. `rdci config` sets and clears the settings of a group that holds such a GPU on the other GPUs, instead of stopping at it; after a set, that GPU gets the settings once AMD SMI identifies it.
+
+- The node topology check of `rdci diag` reports the link weight between each pair of GPUs in the group. It reported each GPU's weight to itself.
+
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
 - Certificates signed with the RDC certificate authority setup in `authentication/openssl.cnf` can no longer sign other certificates. A certificate request could ask to become a signing certificate, and its holder could then create client and server certificates that `rdcd` and `rdci` trust.
@@ -107,11 +119,13 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Field watches with a `max_keep_samples` above 2147483647, such as `UINT32_MAX`, no longer crash `rdcd` or the process that embeds RDC.
 
-- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port. It printed "Server listening" and then crashed.
+- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port, and the message asks whether `rdcd` is already running. It printed "Server listening" and then crashed.
 
 - `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
 
 - `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
+
+- `rdcd` no longer follows a symbolic link at its lock file path or writes into a file that belongs to another user or has another name, and a root `rdcd` no longer refuses to start because of a `/tmp/rdcd.lock` that another user created and locked. For a lock file it refuses to use, `rdcd` exits with an error that names it.
 
 - When `rdcd` takes more than 5 seconds to stop, another SIGTERM or SIGINT ends it at once, with status 1.
 

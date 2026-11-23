@@ -171,7 +171,7 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 typedef enum {
   RDC_FI_INVALID = 0,  //!< Invalid field value
   //!< @brief Identifier fields
-  RDC_FI_GPU_COUNT = 1,            //!< GPU count in the system
+  RDC_FI_GPU_COUNT = 1,            //!< GPU count in the system, unavailable GPUs included
   RDC_FI_DEV_NAME,                 //!< Name of the device
   RDC_FI_OAM_ID,                   //!< OAM ID of the device
   RDC_FI_DEV_ID,                   //!< Device ID
@@ -998,6 +998,13 @@ rdc_status_t rdc_shutdown();
  *  rdc_field_update_all() when op_mode is RDC_OPERATION_MODE_MANUAL, which
  *  tells RDC to collect the stats.
  *
+ *  @details Embedded RDC takes its own AMD SMI reference and releases it when
+ *  the last embedded handle stops, so a process that uses AMD SMI itself keeps
+ *  its AMD SMI handles while RDC runs and after it stops. AMD SMI applies the
+ *  flags of the first amdsmi_init() of a process only: a process that
+ *  initializes AMD SMI before it starts RDC must pass AMDSMI_INIT_AMD_CPUS for
+ *  RDC to read CPU fields.
+ *
  *  @param[in] op_mode Operation modes. When RDC_OPERATION_MODE_AUTO, RDC
  * schedules background task to collect the stats. When
  * RDC_OPERATION_MODE_MANUAL, the user needs to call rdc_field_update_all()
@@ -1005,8 +1012,11 @@ rdc_status_t rdc_shutdown();
  *
  *  @param[inout] p_rdc_handle Caller provided pointer to rdc_handle_t. Upon
  *  successful call, the value will contain the handler for following API calls.
+ *  On failure it is set to NULL.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_FAIL_LOAD_MODULE is returned when librdc cannot be loaded
+ *  or AMD SMI fails to initialize.
  */
 rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rdc_handle);
 
@@ -1014,7 +1024,8 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rd
  *  @brief Stop embedded RDC agent.
  *
  *  @details Stop the embedded RDC agent, and p_rdc_handle becomes
- *  invalid after this call.
+ *  invalid after this call. It returns once RDC's threads have stopped; a
+ *  notification listen in progress can delay that by up to about a second.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from
  *  rdc_start_embedded().
@@ -1186,7 +1197,12 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle, uint32_t wait_for_u
  *
  *  @details Indexes represents RDC GPU Id corresponding to each GPU on the
  * system and is immutable during the lifespan of the engine. The list
- * should be queried again if the engine is restarted.
+ * should be queried again if the engine is restarted. A GPU that AMD SMI
+ * cannot identify keeps its index: rdc_device_get_attributes() returns
+ * ::RDC_ST_NOT_FOUND for it and its fields cannot be read until AMD SMI
+ * identifies it. When AMD SMI also lists CPUs, a processor it cannot
+ * identify on a socket without an identified GPU could be a CPU and gets no
+ * index, so the GPUs after it move down one index.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1220,6 +1236,8 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
  *  read as 0.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned for a GPU that AMD SMI cannot
+ *  identify (see rdc_device_get_all()).
  */
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr);
@@ -1572,9 +1590,9 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
  *  be reached, does not finish the run within 30 minutes, the connection
  *  failed during the run, or rdcd ended the run without its results.
- *  @retval ::RDC_ST_BAD_PARAMETER is returned if response is NULL, or, on a
- *  handle from rdc_connect(), if rdcd sent more test results or GPU results
- *  than response holds.
+ *  @retval ::RDC_ST_BAD_PARAMETER response is NULL, or, on a handle from
+ *  rdc_connect(), the run reported more test cases or GPU results than
+ *  rdc_diag_response_t holds.
  */
 rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                 rdc_diag_level_t level, const char* config, size_t config_size,
@@ -1609,8 +1627,9 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
  *  be reached, the connection failed during the run, or rdcd ended the run
  *  without its result.
- *  @retval ::RDC_ST_BAD_PARAMETER is returned if result is NULL, or, on a
- *  handle from rdc_connect(), if rdcd sent more GPU results than result holds.
+ *  @retval ::RDC_ST_BAD_PARAMETER result is NULL, or, on a handle from
+ *  rdc_connect(), the run reported more GPU results than rdc_diag_test_result_t
+ *  holds.
  */
 rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                rdc_diag_test_cases_t test_case, const char* config,
@@ -1921,7 +1940,9 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
 /**
  *  @brief Set one configuration
  *
- *  @details Set the given configuration to all nodes belong to the given group
+ *  @details Set the given configuration to all nodes belong to the given group.
+ *  A GPU of the group that AMD SMI cannot identify (see rdc_device_get_all())
+ *  gets the configuration within about a minute after AMD SMI identifies it.
  *
  *  @param[in] p_rdc_handle Node handle
  *
@@ -2062,6 +2083,7 @@ typedef struct {
  *  @param[out] profile  The details how the resource is allocated.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND for a GPU that AMD SMI cannot identify, or an instance of one.
  */
 rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
                                       rdc_instance_resource_type_t resource_type,
@@ -2075,6 +2097,8 @@ rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity
  * @param[out] num_partition Pointer to a variable to receive the number of partitions.
  *
  * @retval ::RDC_ST_OK on success.
+ * @retval ::RDC_ST_NOT_FOUND for a GPU that AMD SMI cannot identify, unless
+ * it can identify another partition of the same GPU (see rdc_device_get_all()).
  * @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot be
  * reached, does not answer in time, or reported more partitions than a
  * uint16_t holds.

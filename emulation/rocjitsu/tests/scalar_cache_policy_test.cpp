@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -30,7 +31,7 @@ using namespace rocjitsu;
 
 class ScalarCachePolicyTest : public ::testing::Test {
 protected:
-  virtual rj_code_arch_t arch() const { return ROCJITSU_CODE_ARCH_CDNA4; }
+  virtual rocjitsu::IsaFamily arch() const { return rocjitsu::IsaFamily::Cdna4; }
   void SetUp() override { initialize(1); }
 
   void initialize(uint32_t num_wf_slots) {
@@ -84,13 +85,13 @@ protected:
 };
 
 class Gfx11ScalarCachePolicyTest : public ScalarCachePolicyTest,
-                                   public testing::WithParamInterface<rj_code_arch_t> {
+                                   public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11ScalarCachePolicyTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11ScalarCachePolicyTest, GlcBypassesAWarmScalarCacheLine) {
   constexpr uint32_t address = 0x4000;
@@ -286,7 +287,7 @@ TEST(ScalarCacheMtypeTest, NarrowPipelineLoadsForwardDecodedPolicy) {
     amdgpu::L1ScalarCache l1(&l2);
     amdgpu::ScalarMemPipeline pipeline(&l1);
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Rdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
