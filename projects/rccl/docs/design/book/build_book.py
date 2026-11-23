@@ -27,33 +27,27 @@ BUILD = HERE / "_build"
 SRC, HTML, SINGLE = BUILD / "src", BUILD / "html", BUILD / "single"
 TITLE = "RCCL Multi-Segment DMA-BUF Design"
 REPO_URL = "https://github.com/ROCm/rocm-systems"
-CODE_URL = f"{REPO_URL}/blob/users/atulkulk/mseg/multi-segment-dmabuf-cast-gin/projects/rccl/"
+CODE_URL = f"{REPO_URL}/blob/users/atulkulk/netib-mseg/04-rma-gin-multiseg/projects/rccl/"
 
 PARTS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Part I — Overview", [
         ("multi_segment_overview.md", "Overview (start here)"),
         ("multi_segment_current.md", "Current behavior and invariants"),
-        ("multi_segment_sync_and_removal.md", "Upstream sync impact and removal plan"),
+        ("multi_segment_fork_plugin.md", "IB-MSEG plugin and the fork stack"),
         ("multi_segment_review_feedback.md", "Review feedback and status"),
-        ("multi_segment_fork_plugin.md", "IB-MSEG fork plugin (planned replacement)"),
     ]),
     ("Part II — Design per transport layer", [
-        ("multi_segment_gin_rma.md", "Classic GIN / RMA"),
-        ("multi_segment_netib_wire.md", "Classic NET/IB P2P"),
-        ("multi_segment_netib_cast.md", "IB-CAST NET/IB P2P"),
-        ("multi_segment_netib_cast_gin.md", "IB-CAST GIN / RMA"),
+        ("multi_segment_gin_rma.md", "GIN / RMA (core and IB-MSEG)"),
+        ("multi_segment_netib_wire.md", "IB-MSEG NET/IB P2P"),
+        ("multi_segment_netib_cast.md", "IB-CAST NET/IB P2P (fork 6 design)"),
+        ("multi_segment_netib_cast_gin.md", "IB-CAST GIN / RMA (fork 6 design)"),
     ]),
     ("Part III — Testing and related designs", [
         ("multi_segment_testing.md", "Testing and validation"),
         ("multi_segment_validation_plan.md", "Validation plan"),
         ("multi_segment_gin_rocshmem_gda_and_anvil_sdma.md", "rocSHMEM GDA and Anvil SDMA (proposed)"),
     ]),
-    ("Part IV — Earlier follow-up designs (history)", [
-        ("multi_segment_varseg.md", "Register past 16 segments (implemented differently)"),
-        ("multi_segment_sidetable_first_reg.md", "Side table on first registration (superseded)"),
-        ("multi_segment_flush_read_collapse.md", "Flush read collapse (superseded)"),
-    ]),
-    ("Part V — Reference", [
+    ("Part IV — Reference", [
         ("multi_segment_code_map.md", "Code map"),
     ]),
 ]
