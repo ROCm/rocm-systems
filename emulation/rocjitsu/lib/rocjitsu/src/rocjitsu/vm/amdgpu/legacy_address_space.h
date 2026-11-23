@@ -681,6 +681,19 @@ public:
                             const std::shared_ptr<util::DistributedSharedMutex> &expected,
                             const std::shared_ptr<LegacyPageTableCacheState> &policies) const;
 
+  /// @brief Resolve the local extent containing @p address at copied-policy
+  /// @p generation, or nothing when the page is not a whole uniform mapping or
+  /// the generation is no longer current.
+  /// @details A hit in this thread's recent extents takes no lock. A miss
+  /// consults the extents shared by all threads, and only then walks the page
+  /// table under its request lease, bounded in both directions. The caller
+  /// must admit @p generation before dereferencing the extent's host pages.
+  std::optional<LegacyLocalExtent>
+  local_extent(uint64_t address, uint32_t vmid,
+               const std::shared_ptr<util::DistributedSharedMutex> &expected,
+               const std::shared_ptr<LegacyPageTableCacheState> &policies,
+               uint64_t generation) const;
+
   /// @brief Return whether a GPU VA has a VMID page-table mapping.
   bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)
@@ -2823,31 +2836,24 @@ private:
 
   class PteCacheSet {
   public:
-    struct Coverage {
-      // Legacy memory instance whose PTEs established the mapping.
+    // One local extent observed under a copied-policy generation.
+    struct ExtentEntry {
+      // Legacy memory instance whose PTEs established the extent.
       uint64_t memory = 0;
-      // Page-table policy generation under which the run was observed.
-      uint64_t generation = 0;
-      // First GPU byte covered by the run.
-      uint64_t begin = 0;
-      // Exclusive end of the covered GPU run.
-      uint64_t end = 0;
-      // Process address space containing the run.
+      // Process address space containing the extent.
       uint32_t vmid = 0;
-      // Retains the policy epoch used to validate cached coverage.
+      // Retains the policy state whose generation validates the extent.
       std::shared_ptr<LegacyPageTableCacheState> policies;
-      // Driver-owned mappings have stable write permissions.
-      bool driver_owned = false;
-      // First host byte, or zero when the run is not contiguous on the host.
-      uintptr_t host_begin = 0;
+      uint64_t generation = 0;
+      LegacyLocalExtent extent;
     };
     static constexpr size_t kEntryCount = 64;
     static_assert((kEntryCount & (kEntryCount - 1)) == 0);
     std::array<PteCache, kEntryCount> entries;
-    // Local ingress coverage shares the PTE cache's command/worker lifetime.
-    std::array<Coverage, 8> coverage_runs;
-    // Round-robin replacement position in coverage_runs.
-    unsigned next_coverage = 0;
+    // Recently used local extents; they share the PTE cache's command/worker lifetime.
+    std::array<ExtentEntry, 8> extents;
+    // Round-robin replacement position in extents.
+    unsigned next_extent = 0;
   };
 
   /// @brief The command's PTE cache, or this worker thread's persistent cache.

@@ -2180,10 +2180,12 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       }
     }
     const uint64_t bytes = uint64_t{d.elem_size} * d.num_elems;
-    // Bound speculation across inactive gaps in a strided wave. The exact-lane
-    // path below handles wider requests without probing unrequested pages.
+    // Bound speculation across inactive gaps in a strided wave. One grant and
+    // a few shared local extents prove a box within an allocation; the
+    // exact-lane path below handles wider requests without probing
+    // unrequested pages.
     constexpr uint64_t page = IdentityAddressSpaceTranslator::kPageSize;
-    if (bytes && bytes <= UINT64_MAX - last && last + bytes - begin <= 128 * page) {
+    if (bytes && bytes <= UINT64_MAX - last && last + bytes - begin <= (uint64_t{1} << 16) * page) {
       auto local = local_range_handler_(
           wf.process_id(), *d.translated.access,
           {begin, last + bytes - begin, d.is_load ? VmAccessKind::Read : VmAccessKind::Write});

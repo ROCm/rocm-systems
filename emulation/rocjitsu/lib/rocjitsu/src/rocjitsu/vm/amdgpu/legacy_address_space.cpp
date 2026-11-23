@@ -22,6 +22,90 @@ constexpr uint64_t PROCMAP_QUERY_VMA_WRITABLE = 2;
 
 namespace rocjitsu::amdgpu {
 
+namespace {
+
+// Bound one miss's page-table walk in each direction. Overlapping pieces of a
+// longer run merge when published, so wider runs extend on later misses.
+constexpr uint64_t kLocalExtentWalkPages = uint64_t{1} << 14;
+
+const LegacyHostExtent *whole_page_extent(const LegacyPageTable &table, uint64_t page) {
+  const auto it = table.find(page);
+  if (it == table.end() || it->second.host_extents.size() != 1)
+    return nullptr;
+  const auto &extent = it->second.host_extents.front();
+  if (!extent.host_ptr || extent.gpu_page_offset != 0 ||
+      extent.host_backed_bytes != kLegacyPageSize)
+    return nullptr;
+  return &extent;
+}
+
+std::optional<LegacyLocalExtent> walk_local_extent(const LegacyPageTable &table, uint64_t page) {
+  const LegacyHostExtent *origin = whole_page_extent(table, page);
+  if (!origin)
+    return std::nullopt;
+  const Mtype mtype = table.find(page)->second.mtype;
+  const uintptr_t origin_host = reinterpret_cast<uintptr_t>(origin->host_ptr);
+  const auto continues = [&](uint64_t candidate) {
+    const LegacyHostExtent *extent = whole_page_extent(table, candidate);
+    return extent && extent->owner == origin->owner &&
+           table.find(candidate)->second.mtype == mtype &&
+           reinterpret_cast<uintptr_t>(extent->host_ptr) ==
+               origin_host + (candidate - page) * kLegacyPageSize;
+  };
+  uint64_t first = page;
+  while (page - first < kLocalExtentWalkPages && first > 0 && continues(first - 1))
+    --first;
+  uint64_t last = page + 1;
+  while (last - page < kLocalExtentWalkPages && last < (UINT64_MAX >> kLegacyPageShift) &&
+         continues(last))
+    ++last;
+  return LegacyLocalExtent{
+      .begin = first << kLegacyPageShift,
+      .end = last << kLegacyPageShift,
+      .host_begin = reinterpret_cast<uint8_t *>(origin_host - (page - first) * kLegacyPageSize),
+      .mtype = mtype,
+      .owner = origin->owner,
+  };
+}
+
+} // namespace
+
+std::optional<LegacyLocalExtent> LegacyAddressSpace::local_extent(
+    uint64_t address, uint32_t vmid, const std::shared_ptr<util::DistributedSharedMutex> &expected,
+    const std::shared_ptr<LegacyPageTableCacheState> &policies, uint64_t generation) const {
+  if (vmid == 0 || !policies)
+    return std::nullopt;
+  auto &cache = thread_pte_caches();
+  for (const auto &entry : cache.extents)
+    if (entry.memory == instance_id_ && entry.vmid == vmid &&
+        entry.policies.get() == policies.get() && entry.generation == generation &&
+        entry.extent.contains(address, 1))
+      return entry.extent;
+  const auto remember = [&](const LegacyLocalExtent &extent) {
+    cache.extents[cache.next_extent++ % cache.extents.size()] = {instance_id_, vmid, policies,
+                                                                 generation, extent};
+    return extent;
+  };
+  if (auto shared = policies->local_extents().find(address, generation))
+    return remember(*shared);
+
+  // Never reached with an admission held: a mutator holding the request lease
+  // exclusively waits for admitted readers to leave.
+  auto request = acquire_page_table_request(vmid, expected);
+  if (!request.owns_lock() || request.policies_ != policies.get())
+    return std::nullopt;
+  std::shared_lock page_table_lock(*request.page_table_mutex_);
+  // Mutators advance the generation under the exclusive page-table lock, so
+  // this walk observes exactly the generation read here.
+  if (policies->generation() != generation)
+    return std::nullopt;
+  const auto extent = walk_local_extent(*request.page_table_, address >> PAGE_SHIFT);
+  if (!extent)
+    return std::nullopt;
+  policies->local_extents().publish(*extent, generation);
+  return remember(*extent);
+}
+
 bool LegacyAddressSpace::local_ingress_mapped(
     std::span<const MemoryIngressSpan> spans, uint64_t begin, uint64_t end, uint32_t vmid,
     const std::shared_ptr<util::DistributedSharedMutex> &expected,
@@ -29,67 +113,51 @@ bool LegacyAddressSpace::local_ingress_mapped(
   // The general lookup drops its page-table lease around allocator metadata queries.
   if constexpr (kCheckAsanBacking)
     return false;
-  // Cached coverage identifies mapped GPU pages. Only the driver owns stable
-  // write permissions. Application pages need a fresh check on each ingress.
-  auto &cache = thread_pte_caches();
-  auto &runs = cache.coverage_runs;
   const bool writing =
       std::ranges::any_of(spans, [](const auto &s) { return s.access != VmAccessKind::Read; });
-  // A contiguous application mapping still needs a fresh kernel permission
-  // query for each ingress. Only reuse its numeric GPU-to-host offset.
-  const auto admitted = [&](const PteCacheSet::Coverage &run) {
-    if (!writing || run.driver_owned)
+  // Local extents prove that every GPU page in the box is mapped. Only the
+  // driver owns stable write permissions. A contiguous application mapping
+  // still needs a fresh kernel permission query for each ingress.
+  const uint64_t generation = policies->generation();
+  bool covered = begin < end;
+  bool driver_owned = true, host_contiguous = true;
+  uint8_t *host_begin = nullptr;
+  // Scattered application pages form one extent per page; leave those boxes
+  // to the exact per-span check rather than chaining many lookups.
+  constexpr unsigned kMaxChainedExtents = 8;
+  unsigned chained = 0;
+  for (uint64_t address = begin; covered && address < end;) {
+    const auto extent = ++chained <= kMaxChainedExtents
+                            ? local_extent(address, vmid, expected, policies, generation)
+                            : std::nullopt;
+    if (!extent) {
+      covered = false;
+      break;
+    }
+    if (address == begin)
+      host_begin = extent->host(begin);
+    else if (extent->host(address) != host_begin + (address - begin))
+      host_contiguous = false;
+    driver_owned &= extent->owner != LegacyHostExtentOwner::Application;
+    address = extent->end;
+  }
+  if (covered) {
+    if (!writing || driver_owned)
       return true;
-    if (!run.host_begin)
-      return false;
-    const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
-    const auto host = run.host_begin + (begin - run.begin);
-    uintptr_t vma_end = 0;
-    return host_page_writability(reinterpret_cast<const uint8_t *>(host), &vma_end) ==
-               PageWritability::Writable &&
-           vma_end >= host && end - begin <= vma_end - host &&
-           policies->generation() == run.generation;
-  };
-  const auto generation = policies->generation();
-  for (const auto &run : runs)
-    if (run.memory == instance_id_ && run.vmid == vmid && run.policies == policies &&
-        run.generation == generation && run.begin <= begin && end <= run.end && admitted(run))
-      return true;
+    if (host_contiguous) {
+      const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
+      const auto host = reinterpret_cast<uintptr_t>(host_begin);
+      uintptr_t vma_end = 0;
+      if (host_page_writability(host_begin, &vma_end) == PageWritability::Writable &&
+          vma_end >= host && end - begin <= vma_end - host && policies->generation() == generation)
+        return true;
+    }
+  }
 
   auto request = acquire_page_table_request(vmid, expected);
   if (!request.owns_lock())
     return false;
   std::shared_lock page_table_lock(*request.page_table_mutex_);
-  // A replacement registration can share the request mutex but provide
-  // different copied-policy state. Only publish coverage under its actual epoch.
-  if (request.policies_ == policies.get()) {
-    constexpr uint64_t max_pages = 128;
-    const uint64_t first = begin >> PAGE_SHIFT;
-    uint64_t page = first;
-    bool driver_owned = true;
-    uintptr_t host_begin = 0;
-    for (; page - first < max_pages && page < (UINT64_MAX >> PAGE_SHIFT); ++page) {
-      const auto entry = request.page_table_->find(page);
-      if (entry == request.page_table_->end() || entry->second.host_extents.size() != 1)
-        break;
-      const auto &extent = entry->second.host_extents.front();
-      if (!extent.host_ptr || extent.gpu_page_offset != 0 || extent.host_backed_bytes != PAGE_SIZE)
-        break;
-      const uintptr_t host = reinterpret_cast<uintptr_t>(extent.host_ptr);
-      if (page == first)
-        host_begin = host;
-      else if (host - host_begin != (page - first) * PAGE_SIZE)
-        host_begin = 0;
-      driver_owned &= extent.owner != LegacyHostExtentOwner::Application;
-    }
-    if (page != first) {
-      auto &run = runs[cache.next_coverage++ % runs.size()];
-      run = {instance_id_, policies->generation(), first << PAGE_SHIFT, page << PAGE_SHIFT, vmid,
-             policies,     driver_owned,           host_begin};
-      if (end <= run.end && admitted(run))
-        return true;
-    }
-  }
   // A wide bounding span can include inactive lanes. If copied PTE coverage
   // did not prove it, let exact ingress inspect only the requested stores.
   if (writing && spans.size() == 1 && spans.front().size > PAGE_SIZE)

@@ -12,6 +12,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <optional>
 #include <pthread.h>
 #include <string_view>
 #include <thread>
@@ -267,6 +268,155 @@ TEST(LegacyPageTableCacheStateTest, ConcurrentAdmissionsObserveOnlyPublishedCopi
 
 // glibc carves every thread's static TLS out of its stack, so rocJITsu's TLS
 // decides whether the preloaded application can start a small-stack thread.
+TEST(LegacyLocalExtentTableTest, PublishMergesOverlappingPiecesOfOneRun) {
+  LegacyLocalExtentTable table;
+  auto *host = reinterpret_cast<uint8_t *>(uintptr_t{0x7000'0000});
+  const auto piece = [&](uint64_t begin, uint64_t end) {
+    return LegacyLocalExtent{.begin = begin, .end = end, .host_begin = host + (begin - 0x10000)};
+  };
+  table.publish(piece(0x20000, 0x40000), 5);
+  table.publish(piece(0x10000, 0x28000), 5);
+  table.publish(piece(0x60000, 0x70000), 5);
+  auto merged = table.find(0x3f000, 5);
+  ASSERT_TRUE(merged);
+  EXPECT_EQ(merged->begin, 0x10000u);
+  EXPECT_EQ(merged->end, 0x40000u);
+  EXPECT_EQ(merged->host(0x3f000), host + 0x2f000);
+  EXPECT_FALSE(table.find(0x50000, 5));
+  EXPECT_TRUE(table.find(0x60000, 5));
+  // A newer generation discards every older extent; an older one is ignored.
+  EXPECT_FALSE(table.find(0x10000, 6));
+  table.publish(piece(0x60000, 0x61000), 6);
+  table.publish(piece(0x10000, 0x40000), 5);
+  EXPECT_FALSE(table.find(0x10000, 6));
+  EXPECT_FALSE(table.find(0x60000, 5));
+  EXPECT_TRUE(table.find(0x60000, 6));
+}
+
+class LegacyLocalExtentTest : public ::testing::Test {
+protected:
+  static constexpr uint32_t kVmid = 7;
+  static constexpr uint64_t kBase = 0x4000'0000;
+
+  void SetUp() override {
+    ASSERT_TRUE(space_
+                    .register_process(kVmid, &process_.page_table_, &process_.page_table_mutex_,
+                                      nullptr, process_.page_table_request_mutex(),
+                                      process_.page_table_cache_state())
+                    .succeeded());
+  }
+
+  std::optional<LegacyLocalExtent> extent(uint64_t address) {
+    return space_.local_extent(address, kVmid, process_.page_table_request_mutex(),
+                               process_.page_table_cache_state(),
+                               process_.page_table_cache_state()->generation());
+  }
+
+  uint8_t *pages(size_t count) {
+    storage_.emplace_back(count * kLegacyPageSize + kLegacyPageSize);
+    auto address = reinterpret_cast<uintptr_t>(storage_.back().data());
+    return reinterpret_cast<uint8_t *>((address + kLegacyPageSize - 1) & ~(kLegacyPageSize - 1));
+  }
+
+  GpuMemory memory_{"local_extent"};
+  LegacyAddressSpace space_{memory_};
+  KfdProcess process_{kVmid};
+  std::vector<std::vector<uint8_t>> storage_;
+};
+
+TEST_F(LegacyLocalExtentTest, CoversOneContiguousSealedRun) {
+  uint8_t *host = pages(4);
+  ASSERT_EQ(process_.map_pages(kBase, host, 4 * kLegacyPageSize, Mtype::NT,
+                               LegacyHostExtentOwner::DriverSealedRam),
+            KfdProcess::PageTableMutationResult::Applied);
+  const auto found = extent(kBase + 2 * kLegacyPageSize + 8);
+  ASSERT_TRUE(found);
+  EXPECT_EQ(found->begin, kBase);
+  EXPECT_EQ(found->end, kBase + 4 * kLegacyPageSize);
+  EXPECT_EQ(found->host(kBase + 5), host + 5);
+  EXPECT_EQ(found->mtype, Mtype::NT);
+  EXPECT_EQ(found->owner, LegacyHostExtentOwner::DriverSealedRam);
+  EXPECT_FALSE(extent(kBase + 4 * kLegacyPageSize));
+}
+
+TEST_F(LegacyLocalExtentTest, SplitsAtHostGapsMtypeAndOwnerChanges) {
+  uint8_t *first = pages(2);
+  uint8_t *second = pages(1);
+  uint8_t *third = pages(2);
+  constexpr auto kSealed = LegacyHostExtentOwner::DriverSealedRam;
+  process_.map_pages(kBase, first, 2 * kLegacyPageSize, Mtype::RW, kSealed);
+  process_.map_pages(kBase + 2 * kLegacyPageSize, second, kLegacyPageSize, Mtype::RW, kSealed);
+  process_.map_pages(kBase + 3 * kLegacyPageSize, third, kLegacyPageSize, Mtype::UC, kSealed);
+  process_.map_pages(kBase + 4 * kLegacyPageSize, third + kLegacyPageSize, kLegacyPageSize,
+                     Mtype::UC, LegacyHostExtentOwner::Application);
+  const auto run = [&](unsigned page) { return extent(kBase + page * kLegacyPageSize); };
+  ASSERT_TRUE(run(0) && run(2) && run(3) && run(4));
+  EXPECT_EQ(run(1)->end, kBase + 2 * kLegacyPageSize);
+  EXPECT_EQ(run(2)->begin, kBase + 2 * kLegacyPageSize);
+  EXPECT_EQ(run(2)->end, kBase + 3 * kLegacyPageSize);
+  EXPECT_EQ(run(3)->end, kBase + 4 * kLegacyPageSize);
+  EXPECT_EQ(run(3)->mtype, Mtype::UC);
+  EXPECT_EQ(run(4)->owner, LegacyHostExtentOwner::Application);
+}
+
+TEST_F(LegacyLocalExtentTest, MutationRetiresExtentsOfOlderGenerations) {
+  uint8_t *host = pages(2);
+  uint8_t *replacement = pages(1);
+  process_.map_pages(kBase, host, 2 * kLegacyPageSize, Mtype::RW,
+                     LegacyHostExtentOwner::DriverSealedRam);
+  auto state = process_.page_table_cache_state();
+  const uint64_t old_generation = state->generation();
+  ASSERT_TRUE(extent(kBase));
+  ASSERT_EQ(process_.remap_page_host_ptrs(kBase + kLegacyPageSize, host + kLegacyPageSize,
+                                          replacement, kLegacyPageSize),
+            KfdProcess::PageTableMutationResult::Applied);
+  EXPECT_NE(state->generation(), old_generation);
+  // Extents are answered per generation; a retired one can no longer be admitted.
+  EXPECT_FALSE(state->try_acquire(old_generation));
+  const auto fresh = extent(kBase + kLegacyPageSize);
+  ASSERT_TRUE(fresh);
+  EXPECT_FALSE(state->local_extents().find(kBase, old_generation));
+  EXPECT_EQ(fresh->begin, kBase + kLegacyPageSize);
+  EXPECT_EQ(fresh->host(kBase + kLegacyPageSize), replacement);
+  ASSERT_EQ(process_.unmap_pages(kBase, 2 * kLegacyPageSize),
+            KfdProcess::PageTableMutationResult::Applied);
+  EXPECT_FALSE(extent(kBase));
+}
+
+TEST_F(LegacyLocalExtentTest, OtherThreadsReuseThePublishedExtent) {
+  uint8_t *host = pages(3);
+  process_.map_pages(kBase, host, 3 * kLegacyPageSize, Mtype::RW,
+                     LegacyHostExtentOwner::DriverSealedRam);
+  const uint64_t generation = process_.page_table_cache_state()->generation();
+  ASSERT_TRUE(extent(kBase));
+  EXPECT_TRUE(process_.page_table_cache_state()->local_extents().find(kBase + 9000, generation));
+  std::optional<LegacyLocalExtent> seen;
+  std::thread([&] { seen = extent(kBase + 2 * kLegacyPageSize); }).join();
+  ASSERT_TRUE(seen);
+  EXPECT_EQ(seen->begin, kBase);
+}
+
+TEST_F(LegacyLocalExtentTest, WideBoxBeyondTheOldCoverageCapIsLocal) {
+  constexpr size_t kPages = 32 * 1024; // 128 MiB, past the old 512 KiB coverage cap.
+  uint8_t *host = pages(kPages);
+  ASSERT_EQ(process_.map_pages(kBase, host, kPages * kLegacyPageSize, Mtype::RW,
+                               LegacyHostExtentOwner::DriverSealedRam),
+            KfdProcess::PageTableMutationResult::Applied);
+  const uint64_t end = kBase + uint64_t{kPages} * kLegacyPageSize;
+  const MemoryIngressSpan span{kBase, kPages * kLegacyPageSize, VmAccessKind::Write};
+  EXPECT_TRUE(space_.local_ingress_mapped({&span, 1}, kBase, end, kVmid,
+                                          process_.page_table_request_mutex(),
+                                          process_.page_table_cache_state()));
+  const auto last = extent(end - 4);
+  ASSERT_TRUE(last);
+  EXPECT_EQ(last->host(end - 4), host + kPages * kLegacyPageSize - 4);
+  // A hole inside the box is never reported as mapped.
+  process_.unmap_pages(kBase + 7 * kLegacyPageSize, kLegacyPageSize);
+  EXPECT_FALSE(space_.local_ingress_mapped({&span, 1}, kBase, end, kVmid,
+                                           process_.page_table_request_mutex(),
+                                           process_.page_table_cache_state()));
+}
+
 TEST(LegacyAddressSpaceTest, StaticTlsLeavesRoomForASmallThreadStack) {
   pthread_attr_t attr;
   ASSERT_EQ(pthread_attr_init(&attr), 0);
