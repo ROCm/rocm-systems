@@ -61,6 +61,13 @@ check(hsa_status_t status)
     }
 }
 
+// Time a dependency is held on the host while profiled copies wait on it. A copy whose
+// start timestamp precedes the release is early by at least this much.
+constexpr auto dependency_hold = std::chrono::milliseconds{10};
+
+// Time allowed after a copy completes for its profiling timestamps to become visible.
+constexpr auto timestamp_deadline = std::chrono::seconds{1};
+
 struct options
 {
     size_t             bytes            = 1 << 20;
@@ -203,6 +210,7 @@ submit(const route&        copy,
 
 std::atomic<uint64_t> completed{0};
 std::atomic<uint64_t> timestamp_checks{0};
+std::atomic<uint64_t> late_timestamps{0};
 std::atomic<uint64_t> elapsed_ns{0};
 
 void
@@ -210,7 +218,9 @@ wait_and_check(hsa_signal_t       signal,
                uint64_t           timeout,
                bool               timestamps,
                hsa_signal_value_t expected_value,
-               uint64_t           earliest_start = 0)
+               uint64_t&          previous_end,
+               uint64_t           earliest_start = 0,
+               uint64_t           tolerance      = 0)
 {
     require(hsa_signal_wait_scacquire(
                 signal, HSA_SIGNAL_CONDITION_EQ, expected_value, timeout, HSA_WAIT_STATE_ACTIVE) ==
@@ -218,11 +228,29 @@ wait_and_check(hsa_signal_t       signal,
             "Copy completion timed out");
     if(timestamps)
     {
+        // The SDMA engine records the end timestamp before it completes the signal, but that
+        // write can become visible to the host slightly after the completion value does
+        // (rocprofiler-sdk reads the timestamps later, from its completion handler). Re-read
+        // until the copy has a positive duration and started after the previous copy that
+        // completed on this signal.
         hsa_amd_profiling_async_copy_time_t time{};
-        check(hsa_amd_profiling_get_async_copy_time(signal, &time));
-        require(time.start > 0 && time.end > time.start,
-                "Completed SDMA copy has invalid or non-positive profiling duration");
-        require(time.start >= earliest_start,
+        const auto deadline = std::chrono::steady_clock::now() + timestamp_deadline;
+        bool       late     = false;
+        for(;;)
+        {
+            check(hsa_amd_profiling_get_async_copy_time(signal, &time));
+            if(time.start > previous_end && time.end > time.start) break;
+            require(std::chrono::steady_clock::now() < deadline,
+                    "Completed SDMA copy has invalid or non-positive profiling duration");
+            late = true;
+            std::this_thread::yield();
+        }
+        if(late) ++late_timestamps;
+        previous_end = time.end;
+        // ROCr translates SDMA timestamps from the GPU clock into the host clock with a
+        // few microseconds of uncertainty. The tolerance is far below dependency_hold, so
+        // it separates clock skew from a copy that really started before the release.
+        require(time.start + tolerance >= earliest_start,
                 "Profiled copy started before its dependency was released");
         ++timestamp_checks;
     }
@@ -230,18 +258,21 @@ wait_and_check(hsa_signal_t       signal,
 }
 
 void
-run(const options& config, const agents& devices, size_t worker, uint64_t timeout)
+run(const options& config, const agents& devices, size_t worker, uint64_t frequency)
 {
+    const uint64_t                 timeout         = 5 * frequency;
+    const uint64_t                 tolerance       = frequency / 1000;  // one millisecond
     const auto                     gpu_source      = devices.gpus.front();
     const auto                     gpu_destination = config.peer ? devices.gpus[1] : gpu_source;
     const std::vector<hsa_agent_t> access =
         config.peer ? std::vector<hsa_agent_t>{gpu_source, gpu_destination}
                     : std::vector<hsa_agent_t>{gpu_source};
-    buffer  host_source(pool_for(devices.cpu), config.bytes, access);
-    buffer  host_destination(pool_for(devices.cpu), config.bytes, access);
-    buffer  device_source(pool_for(gpu_source), config.bytes, access);
-    buffer  device_destination(pool_for(gpu_destination), config.bytes, access);
-    signals completion;
+    buffer                  host_source(pool_for(devices.cpu), config.bytes, access);
+    buffer                  host_destination(pool_for(devices.cpu), config.bytes, access);
+    buffer                  device_source(pool_for(gpu_source), config.bytes, access);
+    buffer                  device_destination(pool_for(gpu_destination), config.bytes, access);
+    signals                 completion;
+    std::array<uint64_t, 6> previous_end{};
     const std::array<hsa_signal_t, 3> dependencies = {
         completion.values[0], completion.values[4], completion.values[5]};
     auto* expected = static_cast<uint32_t*>(host_source.data);
@@ -292,25 +323,35 @@ run(const options& config, const agents& devices, size_t worker, uint64_t timeou
         uint64_t   dependency_release = 0;
         if(config.dependencies != 0u)
         {
-            require(hsa_signal_load_scacquire(completion.values[1]) >= config.completion_value &&
-                        hsa_signal_load_scacquire(completion.values[3]) >= config.completion_value,
-                    "Copy completed before its dependency was released");
-            if(timestamps && iteration < config.dependencies)
-                std::this_thread::sleep_for(std::chrono::milliseconds{50});
+            const auto pending = [&]() {
+                return hsa_signal_load_scacquire(completion.values[1]) >= config.completion_value &&
+                       hsa_signal_load_scacquire(completion.values[3]) >= config.completion_value;
+            };
+            require(pending(), "Copy completed before its dependency was released");
             if(timestamps)
+            {
+                std::this_thread::sleep_for(dependency_hold);
+                require(pending(), "Copy completed before its dependency was released");
                 check(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &dependency_release));
+            }
             hsa_signal_store_screlease(pending_dependency, 0);
         }
         const auto expected_value = config.completion_value - 1;
-        wait_and_check(
-            completion.values[1], timeout, timestamps, expected_value, dependency_release);
+        wait_and_check(completion.values[1],
+                       timeout,
+                       timestamps,
+                       expected_value,
+                       previous_end[1],
+                       dependency_release,
+                       tolerance);
         if(expected_value != 0) hsa_signal_store_screlease(completion.values[1], 0);
         if(config.peer)
         {
-            wait_and_check(completion.values[2], timeout, timestamps, expected_value);
+            wait_and_check(
+                completion.values[2], timeout, timestamps, expected_value, previous_end[2]);
             if(expected_value != 0) hsa_signal_store_screlease(completion.values[2], 0);
         }
-        wait_and_check(completion.values[3], timeout, timestamps, expected_value);
+        wait_and_check(completion.values[3], timeout, timestamps, expected_value, previous_end[3]);
         elapsed_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
                           std::chrono::steady_clock::now() - start)
                           .count();
@@ -387,21 +428,26 @@ main(int argc, char** argv)
     check(hsa_amd_profiling_async_copy_enable(config.profiling));
     std::vector<std::thread> workers;
     for(size_t worker = 0; worker < config.threads; ++worker)
-        workers.emplace_back(run, std::cref(config), std::cref(devices), worker, frequency * 5);
+        workers.emplace_back(run, std::cref(config), std::cref(devices), worker, frequency);
     for(auto& worker : workers)
         worker.join();
     const auto expected = config.iterations * config.threads * (config.peer ? 3 : 2);
     require(completed == expected, "Missing completed copy records");
     require(timestamp_checks == (config.profiling && !config.benchmark ? expected : 0),
             "Missing profiling timestamp checks");
+    // A runtime that completes the signal before it records the end timestamp reports late
+    // timestamps for nearly every copy, while a late write is otherwise rare.
+    const auto late_message = "Profiling timestamps of " + std::to_string(late_timestamps) +
+                              " of " + std::to_string(timestamp_checks) +
+                              " completed SDMA copies were still invalid at completion";
+    require(late_timestamps * 10 <= timestamp_checks, late_message.c_str());
     check(hsa_amd_profiling_async_copy_enable(false));
     check(hsa_shut_down());
     std::cout << "bytes,iterations,threads,profiling,peer,blit,benchmark,dependencies,copies,"
-                 "timestamp_checks,"
-                 "elapsed_ns\n"
+                 "timestamp_checks,late_timestamps,elapsed_ns\n"
               << config.bytes << ',' << config.iterations << ',' << config.threads << ','
               << config.profiling << ',' << config.peer << ',' << config.blit << ','
               << config.benchmark << ',' << config.dependencies << ',' << completed << ','
-              << timestamp_checks << ',' << elapsed_ns << '\n';
+              << timestamp_checks << ',' << late_timestamps << ',' << elapsed_ns << '\n';
     return EXIT_SUCCESS;
 }
