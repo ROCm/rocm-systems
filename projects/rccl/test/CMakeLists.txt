@@ -327,6 +327,7 @@ if(BUILD_TESTS)
     ProfilerApiEventRankTests.cpp
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
+    ProfilerMultiPluginTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
@@ -384,6 +385,18 @@ if(BUILD_TESTS)
   # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
   target_compile_options(rccl-UnitTests PRIVATE
     -fvisibility=hidden -fvisibility-inlines-hidden)
+
+  # Working profiler plugin for ProfilerMultiPluginTests, which loads two copies of it at once.
+  # Built against the standalone headers an external plugin ships with; lands and installs beside the test.
+  add_library(rccl-test-profiler-multi SHARED plugin/profiler_multi_plugin.cpp)
+  target_include_directories(rccl-test-profiler-multi PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/profiler/example/nccl)
+  add_dependencies(rccl-UnitTests rccl-test-profiler-multi)
+  set_source_files_properties(ProfilerMultiPluginTests.cpp PROPERTIES COMPILE_DEFINITIONS
+    "RCCL_TEST_PROFILER_MULTI_NAME=\"$<TARGET_FILE_NAME:rccl-test-profiler-multi>\"")
+  install(TARGETS rccl-test-profiler-multi
+    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT tests)
 
   # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
   # that RCCL unloads an external profiler plugin, so it needs a separately loadable

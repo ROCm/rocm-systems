@@ -1610,6 +1610,11 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "ProfilerMultiPlugin.EachListedPluginGetsItsOwnEvents",
+          "description": "Verify NCCL_PROFILER_PLUGIN loads every listed plugin and gates each one's events on its own mask",
+          "test_filter": "ProfilerMultiPlugin.EachListedPluginGetsItsOwnEvents"
         }
       ]
     },

@@ -2816,6 +2816,11 @@
           "name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled",
           "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM",
           "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"
+        },
+        {
+          "name": "ProfilerMultiPlugin.EachListedPluginGetsItsOwnEvents",
+          "description": "Verify NCCL_PROFILER_PLUGIN loads every listed plugin and gates each one's events on its own mask",
+          "test_filter": "ProfilerMultiPlugin.EachListedPluginGetsItsOwnEvents"
         }
       ]
     },
