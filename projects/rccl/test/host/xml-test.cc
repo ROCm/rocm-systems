@@ -63,6 +63,15 @@ class XmlMicrotest : public ::testing::Test {
     EXPECT_EQ(ncclSuccess, xmlGetAttr(node, key, &value));
     return value ? value : "<unset>";
   }
+
+  static void ExpectTerminatedAttribute(const ncclXmlNode* node, const std::string& value) {
+    ASSERT_EQ(1, node->nAttrs);
+    ASSERT_EQ('\0', node->attrs[0].key[MAX_STR_LEN]);
+    ASSERT_EQ('\0', node->attrs[0].value[value.size()]);
+    EXPECT_EQ(std::string(MAX_STR_LEN, 'k'), node->attrs[0].key);
+    EXPECT_EQ(value, node->attrs[0].value);
+    EXPECT_EQ('Z', node->attrs[1].key[0]);
+  }
 };
 
 // --- Parser
@@ -466,6 +475,99 @@ TEST_F(XmlMicrotest, AttrSetters_FailOnceTheNodeIsFull) {
 
   EXPECT_EQ(MAX_ATTR_COUNT, node->nAttrs);
   EXPECT_TRUE(Logged("too many XML attributes (max 16)"));
+}
+
+TEST_F(XmlMicrotest, AttrSetters_FullNodeStillUpdatesExistingAttributes) {
+  ncclXmlNode* node = Add(nullptr, "n");
+  for (int index = 0; index < MAX_ATTR_COUNT; index++) {
+    ASSERT_EQ(ncclSuccess, xmlSetAttrInt(node, std::to_string(index).c_str(), index));
+  }
+
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(node, "0", "changed"));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrIfUnset(node, "0", "ignored"));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrInt(node, "1", -17));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrFloat(node, "2", 1.5f));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrLong(node, "3", INT64_C(0x123456789abcdef)));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrUint64(node, "4", UINT64_MAX));
+
+  EXPECT_EQ(MAX_ATTR_COUNT, node->nAttrs);
+  EXPECT_EQ("changed", Attr(node, "0"));
+  EXPECT_EQ("-17", Attr(node, "1"));
+  EXPECT_EQ("1.5", Attr(node, "2"));
+  EXPECT_EQ("0x123456789abcdef", Attr(node, "3"));
+  EXPECT_EQ("0xffffffffffffffff", Attr(node, "4"));
+  EXPECT_EQ(std::to_string(MAX_ATTR_COUNT - 1), Attr(node, std::to_string(MAX_ATTR_COUNT - 1).c_str()));
+}
+
+TEST_F(XmlMicrotest, AttrSetters_TerminateLongKeysAndValuesWithoutOverwritingNeighbors) {
+  const std::string key(MAX_STR_LEN + 9, 'k');
+  const std::string value(MAX_STR_LEN + 13, 'v');
+  struct Case {
+    const char* name;
+    ncclResult_t (*set)(ncclXmlNode*, const char*, const char*);
+    std::string expected;
+  };
+  const Case cases[] = {
+      {"string", xmlSetAttr, std::string(MAX_STR_LEN, 'v')},
+      {"if unset", xmlSetAttrIfUnset, std::string(MAX_STR_LEN, 'v')},
+      {"int", [](ncclXmlNode* node, const char* name, const char*) { return xmlSetAttrInt(node, name, -17); }, "-17"},
+      {"float", [](ncclXmlNode* node, const char* name, const char*) {
+         return xmlSetAttrFloat(node, name, 1.5f);
+       }, "1.5"},
+      {"long", [](ncclXmlNode* node, const char* name, const char*) {
+         return xmlSetAttrLong(node, name, INT64_C(0x123456789abcdef));
+       }, "0x123456789abcdef"},
+      {"uint64", [](ncclXmlNode* node, const char* name, const char*) {
+         return xmlSetAttrUint64(node, name, UINT64_MAX);
+       }, "0xffffffffffffffff"}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.name);
+    ncclXmlNode* node = Add(nullptr, "n");
+    std::memset(node->attrs, 'Z', sizeof(node->attrs));
+    ASSERT_EQ(ncclSuccess, test.set(node, key.c_str(), value.c_str()));
+    ASSERT_NO_FATAL_FAILURE(ExpectTerminatedAttribute(node, test.expected));
+    ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), "short"));
+    EXPECT_EQ(1, node->nAttrs);
+    EXPECT_STREQ("short", node->attrs[0].value);
+  }
+}
+
+TEST_F(XmlMicrotest, FindNode_ReorderedAttributesMatchButMissingKeysDoNot) {
+  ncclXmlNode* parent = Add(nullptr, "system");
+  Add(parent, "cpu", {{"numaid", "3"}, {"other", "x"}});
+  ncclXmlNode* expected = Add(parent, "cpu", {{"arch", "x"}, {"numaid", "3"}});
+  ncclXmlNode* query = Add(nullptr, "cpu", {{"numaid", "3"}, {"arch", "x"}});
+  ncclXmlNode* found = parent;
+
+  ASSERT_EQ(ncclSuccess, xmlFindNode(parent, query, &found));
+  EXPECT_EQ(expected, found);
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(query, "arch", "different"));
+  ASSERT_EQ(ncclSuccess, xmlFindNode(parent, query, &found));
+  EXPECT_EQ(nullptr, found);
+}
+
+TEST_F(XmlMicrotest, AddTree_CopiedChildrenBelongToDestinationAndDoNotAliasSource) {
+  XmlPtr source = NewXml(4);
+  ncclXmlNode* root = nullptr;
+  ncclXmlNode* child = nullptr;
+  ncclXmlNode* leaf = nullptr;
+  ASSERT_EQ(ncclSuccess, xmlAddNode(source.get(), nullptr, "cpu", &root));
+  ASSERT_EQ(ncclSuccess, xmlAddNode(source.get(), root, "pci", &child));
+  ASSERT_EQ(ncclSuccess, xmlAddNode(source.get(), child, "gpu", &leaf));
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(leaf, "rank", "7"));
+  ncclXmlNode* parent = Add(nullptr, "system");
+
+  ASSERT_EQ(ncclSuccess, xmlAddTree(xml_.get(), parent, root));
+
+  ASSERT_EQ(4, xml_->maxIndex);
+  ASSERT_EQ(1, parent->nSubs);
+  EXPECT_EQ(xml_->nodes + 1, parent->subs[0]);
+  EXPECT_EQ(parent, xml_->nodes[1].parent);
+  EXPECT_EQ(xml_->nodes + 1, xml_->nodes[2].parent);
+  EXPECT_EQ(xml_->nodes + 2, xml_->nodes[3].parent);
+  EXPECT_EQ(xml_->nodes + 2, xml_->nodes[1].subs[0]);
+  EXPECT_EQ(xml_->nodes + 3, xml_->nodes[2].subs[0]);
+  EXPECT_EQ("7", Attr(xml_->nodes + 3, "rank"));
 }
 
 TEST_F(XmlMicrotest, FindAndGetSub_MatchByNameAndAttribute) {

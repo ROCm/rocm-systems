@@ -77,18 +77,6 @@ ring_writer(const void* packets, uint64_t count)
         *tl_submit_queue, static_cast<const hsa::rocprofiler_packet*>(packets), count);
 }
 
-std::vector<void*>
-tracked_pointers(hsa_agent_t agent)
-{
-    auto inventory = kernel_replay::memory_tracker::snap_inventory(agent);
-    auto out       = std::vector<void*>{};
-    out.reserve(inventory.size());
-    for(const auto& [ptr, size] : inventory)
-        out.emplace_back(ptr);
-    std::sort(out.begin(), out.end());
-    return out;
-}
-
 // A kernarg block for one replay pass: every recorded dispatch's arguments, laid out back to back
 // with each kernel's alignment honored. The block is retained for the agent's next range when this
 // one finishes (see retained_kernarg.hpp).
@@ -323,7 +311,8 @@ ensure_entry_snapshot(range_context_t&                      ctx,
         return;
     }
 
-    ctx.snapshot_ptrs = tracked_pointers(ctx.hsa_agent);
+    ctx.snapshot_allocations =
+        kernel_replay::memory_tracker::snap_allocation_identity(ctx.hsa_agent);
 
     ROCP_INFO << fmt::format("range replay: range {} entry: drain {:.3f} ms, snapshot {:.3f} ms "
                              "({} bytes in {} regions)",
@@ -363,8 +352,9 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     const auto drained_at = phase_clock::now();
 
     // Every region the entry snapshot covers must still be the same allocation, or restoring it
-    // would write into memory the application has since repurposed.
-    if(tracked_pointers(ctx.hsa_agent) != ctx.snapshot_ptrs)
+    // would write into memory the application has since repurposed. A freed address that was
+    // allocated again is repurposed memory, even at the same size.
+    if(!kernel_replay::memory_tracker::allocations_match(ctx.hsa_agent, ctx.snapshot_allocations))
         return ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE;
 
     // The state the application must resume with, captured before the first pass overwrites it.

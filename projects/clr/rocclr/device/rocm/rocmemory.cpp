@@ -25,8 +25,10 @@
 #include "platform/external_memory.hpp"
 
 #ifdef _WIN32
+#include "device/rocm/rocd3d9interop.hpp"
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d9.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
 #endif
@@ -81,8 +83,6 @@ Memory::~Memory() {
 
 bool Memory::allocateMapMemory(size_t allocationSize) {
   assert(mapMemory_ == nullptr);
-
-  void* mapData = nullptr;
 
   amd::Memory* mapMemory = dev().findMapTarget(owner()->getSize());
   if (mapMemory == nullptr) {
@@ -311,18 +311,21 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   // Check if this is D3D interop (vs GL interop)
   amd::InteropObject* interopObj = owner()->getInteropObj();
+
+  const bool querySrd = isImage;
+
   // SRD and size are only needed for images; pass nullptr for plain buffers.
-  void* srdPtr = isImage ? amdImageDesc_->data : nullptr;
-  UINT srdSize = isImage ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
+  void* srdPtr = querySrd ? amdImageDesc_->data : nullptr;
+  UINT srdSize = querySrd ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
   size_t sizeHint = 0;
   // The *Interop::Export calls below fill a full driver SRD into data[0..7], so mark the descriptor
   // as carrying an SRD (version 1) before interopMapBuffer, which then skips the metadata query.
-  if (isImage) amdImageDesc_->version = 1;
+  if (querySrd) amdImageDesc_->version = 1;
   if (interopObj->asD3D11Object()) {
     // D3D11 interop
     D3D11Object* d3d11Obj = interopObj->asD3D11Object();
     if (!D3D11Interop::Export(this, d3d11Obj, &handle, &offset,
-                              srdPtr, isImage ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
+                              srdPtr, querySrd ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
       LogError("D3D11Interop::Export failed for buffer");
       return false;
     }
@@ -332,6 +335,13 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
     if (!D3D10Interop::Export(this, d3d10Obj, &handle, &offset,
                               srdPtr, isImage ? &srdSize : nullptr, &mapFlags)) {
       LogError("D3D10Interop::Export failed for buffer");
+      return false;
+    }
+  } else if (interopObj->asD3D9Object()) {
+    D3D9Object* d3d9Obj = interopObj->asD3D9Object();
+    if (!D3D9Interop::Export(this, d3d9Obj, &handle, &offset,
+                             srdPtr, isImage ? &srdSize : nullptr, &mapFlags)) {
+      LogError("D3D9Interop::Export failed for buffer");
       return false;
     }
   } else if (interopObj->asGLObject()) {
@@ -405,7 +415,6 @@ void Memory::destroyInteropBuffer() {
 }
 
 bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
-  size_t pinAllocSize;
   const static bool SysMem = true;
   amd::Memory* amdMemory = nullptr;
   amd::Memory* amdParent = owner()->parent();
@@ -715,7 +724,7 @@ void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Make synchronization
   if (owner()->getHostMem() != nullptr) {
     //! \note Ignore pinning result
-    bool ok = pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+    (void)pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     owner()->cacheWriteBack(&gpu);
   }
 }
@@ -1533,8 +1542,10 @@ bool Image::createInteropImage() {
     }
   }
 #ifdef _WIN32
-  // Handle D3D interop images (D3D11/D3D10 supported)
-  else if (owner()->getInteropObj()->asD3D11Object() || owner()->getInteropObj()->asD3D10Object()) {
+  // Handle D3D interop images (D3D11/D3D10/D3D9 supported)
+  else if (owner()->getInteropObj()->asD3D11Object() ||
+           owner()->getInteropObj()->asD3D10Object() ||
+           owner()->getInteropObj()->asD3D9Object()) {
     // For D3D, we use targetType=0 and miplevel from D3D object
     // The createInteropBuffer will detect D3D object type and handle appropriately
     if (!createInteropBuffer(0, 0)) {
@@ -1783,7 +1794,7 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
         // There are corner cases which still need workaround.
         const size_t kAlignments[] = {16, 32, 64, 128, 256};
         size_t tryPitch;
-        for (int i = 0; i < sizeof(kAlignments) / sizeof(kAlignments[0]); i++) {
+        for (size_t i = 0; i < sizeof(kAlignments) / sizeof(kAlignments[0]); i++) {
           tryPitch = amd::alignUp(ownerImage.getWidth(), kAlignments[i]) * elementSize;
           if (tryPitch >= rowPitch) {
             break;
@@ -1943,7 +1954,7 @@ void Image::destroy() {
   delete copyImageBuffer_;
 
   if (hsaImageObject_.handle != 0 && ownsHsaImageObject_) {
-    hsa_status_t status = Hsa::image_destroy(dev().getBackendDevice(), hsaImageObject_);
+    [[maybe_unused]] hsa_status_t status = Hsa::image_destroy(dev().getBackendDevice(), hsaImageObject_);
     assert(status == HSA_STATUS_SUCCESS);
   }
   // Don't destroy memory if it's a view. Parent will destroy the original allocation.

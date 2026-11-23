@@ -6,11 +6,11 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
 use crate::api_trace;
 use crate::ffi::*;
+use crate::runtime;
 use crate::runtime::{
     ApiLeaseScope, HsaState, LifecycleCallScope, LifecycleTransition, ShutdownWork, lock,
     plain_boundary,
 };
-use crate::{runtime, signal};
 
 /// Quiesces tool callbacks while HSA storage is still published, then retires
 /// the prepared generation. Callback workers may enter this on a helper thread.
@@ -76,7 +76,6 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
     if result.is_ok() {
         transition.disarm();
     }
-    signal::set_system_frequency(0);
     result.map_or_else(|error| error, |()| status)
 }
 
@@ -88,6 +87,9 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
 /// Initializes the process HSA runtime and increments its reference count.
 pub extern "C" fn hsa_init() -> Status {
     plain_boundary(|| {
+        if let Err(status) = crate::platform::bind_process() {
+            return status;
+        }
         let _entry = match LifecycleCallScope::enter() {
             Ok(entry) => entry,
             Err(status) => return status,
@@ -105,22 +107,13 @@ pub extern "C" fn hsa_init() -> Status {
         };
         let mut transition = LifecycleTransition::starting(generation);
         let result = HsaState::create();
-        let frequency = result
-            .as_ref()
-            .ok()
-            .and_then(|runtime| runtime.gpus.first())
-            .and_then(|gpu| runtime::clock_counters(&gpu.device).ok())
-            .map_or(0, |counters| counters.system_frequency);
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
         let (status, transitioned, published) = match result {
             Ok(runtime) => match guard.publish_init(generation, runtime) {
-                Ok(()) => {
-                    signal::set_system_frequency(frequency);
-                    (SUCCESS, true, true)
-                }
+                Ok(()) => (SUCCESS, true, true),
                 Err(status) => (status, false, false),
             },
             Err(failure) => match guard.cancel_init(generation, failure.cleanup_failed) {
@@ -155,6 +148,9 @@ pub extern "C" fn hsa_init() -> Status {
 /// Releases one HSA initialization reference and tears down the final state.
 pub extern "C" fn hsa_shut_down() -> Status {
     plain_boundary(|| {
+        if !crate::platform::process_is_current() {
+            return NOT_INITIALIZED;
+        }
         let _entry = match LifecycleCallScope::enter() {
             Ok(entry) => entry,
             Err(status) => return status,

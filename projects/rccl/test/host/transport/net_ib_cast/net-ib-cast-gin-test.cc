@@ -12,7 +12,9 @@
 
 #include <sys/wait.h>
 
+#include <algorithm>
 #include <csignal>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -23,6 +25,7 @@
 #include "AsanCheck.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
+#include "fakes/hip_fakes.h"
 #include "fakes/net_ib_cast_p2p_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "net-ib-cast-test-common.h"
@@ -76,6 +79,7 @@ class NetIbCastGinMicrotest : public ::testing::Test {
     netConfig_.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
   }
   void TearDown() override {
+    IbCastMaxPostSendBytes = UINT32_MAX;
     NetIbCastResetGlobals();
     NetIbCastResetInitRefCount();
     ResetIbvwrapFakes();
@@ -862,6 +866,34 @@ class NetIbCastGinDataMicrotest : public NetIbCastGinMicrotest {
     dst_ = Handle(0x20, 0xa1, 0xb1);
     sig_ = Handle(0x30, 0xa2, 0xb2);
     recv_->devs[0].gpuFlush.sge.lkey = 0xf1;
+    IbCastMaxPostSendBytes = UINT32_MAX;
+    IbCastDevs[0].portAttr.max_msg_sz = 0;
+  }
+
+  // requested <= 0 leaves RCCL_IB_MAX_MSG_SIZE unset. A port max of 0 is no port cap.
+  void ApplyMaxMsgSize(int64_t requested, uint32_t portMax) {
+    if (requested > 0) params_.Set("RCCL_IB_MAX_MSG_SIZE", requested);
+    IbCastDevs[0].portAttr.max_msg_sz = portMax;
+    IbCastInitMaxPostSendBytes();
+  }
+
+  // Data WRs posted for one RDMA, in order. Lengths sum to size and addresses step by each chunk.
+  void ExpectDataChunks(size_t nData, ibv_wr_opcode opcode, uint64_t localBase, uint64_t remoteBase, uint32_t lkey,
+                        uint32_t rkey, uint32_t cap, size_t size, unsigned lastFlags) {
+    ASSERT_GE(posted_.size(), nData);
+    size_t off = 0;
+    for (size_t i = 0; i < nData; i++) {
+      const uint32_t chunk = size == 0 ? 0 : (uint32_t)std::min(size - off, (size_t)cap);
+      EXPECT_EQ(Posted(i).opcode, opcode) << i;
+      EXPECT_EQ(Posted(i).send_flags, i + 1 == nData ? lastFlags : 0u) << i;
+      EXPECT_EQ(postedSges_[i].addr, localBase + off) << i;
+      EXPECT_EQ(postedSges_[i].length, chunk) << i;
+      EXPECT_EQ(postedSges_[i].lkey, lkey) << i;
+      EXPECT_EQ(Posted(i).wr.rdma.remote_addr, remoteBase + off) << i;
+      EXPECT_EQ(Posted(i).wr.rdma.rkey, rkey) << i;
+      off += chunk;
+    }
+    EXPECT_EQ(off, size);
   }
   // A symmetric registration: rank r's buffer at base + r * 0x10000, with rkey rkey0 + r.
   struct IbCastRmaProxyMrHandle Handle(uintptr_t base, uint32_t lkey, uint32_t rkey0) {
@@ -955,6 +987,174 @@ TEST_F(NetIbCastGinDataMicrotest, IPutSignal_WithData_ChainsAnUnsignaledWriteBef
   EXPECT_EQ(postedSges_[1].lkey, 0x5cu);
   EXPECT_EQ(Posted(0).wr_id, Posted(1).wr_id);
   EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+constexpr uint32_t kMiB = 1024u * 1024u;
+constexpr uint64_t kIPutLocal = 0x10u + 8;
+constexpr uint64_t kIPutRemote = 0x20u + 0x10000 + 16;
+constexpr uint32_t kIPutLkey = 0xa0u;
+constexpr uint32_t kIPutRkey = 0xb2u;
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_LargerThanTheCap_PostsChunksAndSignalsOnlyTheLast) {
+  constexpr uint32_t kCap = 2u * kMiB;
+  constexpr size_t kSize = 2u * kCap + 64;
+  ApplyMaxMsgSize(kCap, 0);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  EXPECT_EQ(postedQp_, &qp_);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kCap, kSize,
+                   IBV_SEND_SIGNALED);
+  auto* req = static_cast<struct ncclIbRequest*>(request);
+  EXPECT_EQ(req->events[0], 1);
+  EXPECT_EQ(Posted(0).wr_id, Posted(2).wr_id);
+  EXPECT_EQ(Posted(2).wr_id, (uint64_t)(req - send_->base.reqs));
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IGet_LargerThanTheCap_PostsChunksAndSignalsOnlyTheLast) {
+  constexpr uint32_t kCap = 2u * kMiB;
+  constexpr size_t kSize = 2u * kCap + 64;
+  constexpr uint64_t kLocal = 0x10u + 12;
+  constexpr uint64_t kRemote = 0x20u + 0x10000 + 4;
+  ApplyMaxMsgSize(kCap, 0);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iget(proxyCtx_, 0, 4, &dst_, kSize, 12, &src_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  ExpectDataChunks(3, IBV_WR_RDMA_READ, kLocal, kRemote, kIPutLkey, kIPutRkey, kCap, kSize, IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->type, NCCL_NET_IB_REQ_GIN_IGET);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPutSignal_LargerThanTheCap_LeavesTheAtomicAsTheSignaledTail) {
+  constexpr uint32_t kCap = 2u * kMiB;
+  constexpr size_t kSize = 2u * kCap + 64;
+  ApplyMaxMsgSize(kCap, 0);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iputSignal(proxyCtx_, 0, 0, &src_, kSize, 0, &dst_, 1, 8, &sig_, 5, NCCL_NET_SIGNAL_OP_ADD,
+                                         true, 0, &request),
+            ncclSuccess);
+  ASSERT_EQ(posted_.size(), 4u);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, 0x10u, 0x20u + 0x10000, kIPutLkey, kIPutRkey, kCap, kSize, 0u);
+  const struct ibv_send_wr sig = Posted(3);
+  EXPECT_EQ(sig.opcode, IBV_WR_ATOMIC_FETCH_AND_ADD);
+  EXPECT_EQ(sig.send_flags, (unsigned)IBV_SEND_SIGNALED);
+  EXPECT_EQ(sig.wr.atomic.remote_addr, 0x30u + 0x10000 + 8);
+  EXPECT_EQ(sig.wr.atomic.compare_add, 5u);
+  EXPECT_EQ(sig.wr.atomic.rkey, 0xb3u);
+  EXPECT_EQ(postedSges_[3].addr, (uint64_t)(uintptr_t)&send_->putSignalScratchpad);
+  EXPECT_EQ(postedSges_[3].lkey, 0x5cu);
+  EXPECT_EQ(Posted(0).wr_id, sig.wr_id);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_SizeZero_PostsOneSignaledZeroLengthWrite) {
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, 0, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 1u);
+  ExpectDataChunks(1, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, UINT32_MAX, 0,
+                   IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_UnsetEnvAndZeroPortMax_PostsOneWrite) {
+  constexpr size_t kSize = 8u * kMiB;
+  ApplyMaxMsgSize(-1, 0);
+  EXPECT_GT(IbCastMaxPostSendBytes, kSize);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 1u);
+  ExpectDataChunks(1, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, IbCastMaxPostSendBytes, kSize,
+                   IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_UnsetEnvAndPortMax_SplitsAtThePortValue) {
+  constexpr uint32_t kPort = 2u * kMiB;
+  constexpr size_t kSize = kPort + 256;
+  ApplyMaxMsgSize(-1, kPort);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kPort);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 2u);
+  ExpectDataChunks(2, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kPort, kSize,
+                   IBV_SEND_SIGNALED);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_Gfx1250AndUnsetEnv_SplitsAt256MiB) {
+  constexpr uint32_t kCap = 256u * kMiB;
+  constexpr size_t kSize = (size_t)kCap + 128;
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx1250:sramecc+:xnack-");
+    return hipSuccess;
+  });
+  ApplyMaxMsgSize(-1, 0);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kCap);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 2u);
+  ExpectDataChunks(2, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kCap, kSize,
+                   IBV_SEND_SIGNALED);
+  EXPECT_EQ(static_cast<struct ncclIbRequest*>(request)->events[0], 1);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCapBelowOneMiB_PostsOneMiBChunks) {
+  constexpr size_t kSize = 2u * kMiB + 64;
+  ApplyMaxMsgSize(4096, 0);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kMiB, kSize,
+                   IBV_SEND_SIGNALED);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_PortMaxBelowOneMiB_PostsOneMiBChunks) {
+  constexpr size_t kSize = 2u * kMiB + 64;
+  ApplyMaxMsgSize(-1, 64u * 1024u);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), 3u);
+  ExpectDataChunks(3, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kMiB, kSize,
+                   IBV_SEND_SIGNALED);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_UnalignedPortMax_RoundsTheCapDown) {
+  ApplyMaxMsgSize(-1, kMiB + 64);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_TwoPorts_UsesTheSmallerLimit) {
+  constexpr uint32_t kSmaller = 2u * kMiB;
+  IbCastNDevs = 2;
+  IbCastDevs[0].portAttr.max_msg_sz = 4u * kMiB;
+  IbCastDevs[1].portAttr.max_msg_sz = kSmaller;
+  IbCastInitMaxPostSendBytes();
+  EXPECT_EQ(IbCastMaxPostSendBytes, kSmaller);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCap_OverridesGfx1250AndThePort) {
+  constexpr uint32_t kRequested = 512u * kMiB;
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx1250:sramecc+:xnack-");
+    return hipSuccess;
+  });
+  ApplyMaxMsgSize(kRequested, 2u * kMiB);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kRequested);
+}
+
+TEST_F(NetIbCastGinDataMicrotest, IPut_MoreChunksThanTheStackHolds_PostsThemFromTheHeap) {
+  constexpr int kChunks = IB_CAST_MAX_STACK_WRS + 1;
+  constexpr size_t kSize = (size_t)kMiB * (kChunks - 1) + 64;
+  ApplyMaxMsgSize(kMiB, 0);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kMiB);
+  void* request = nullptr;
+  ASSERT_EQ(IbCastRmaIbProxy.iput(proxyCtx_, 0, 8, &src_, kSize, 16, &dst_, 1, 0, &request), ncclSuccess);
+  ASSERT_EQ(posted_.size(), (size_t)kChunks);
+  ExpectDataChunks(kChunks, IBV_WR_RDMA_WRITE, kIPutLocal, kIPutRemote, kIPutLkey, kIPutRkey, kMiB, kSize,
+                   IBV_SEND_SIGNALED);
 }
 
 TEST_F(NetIbCastGinDataMicrotest, IPutSignal_SizeZeroOrNoDestination_PostsOnlyTheSignal) {

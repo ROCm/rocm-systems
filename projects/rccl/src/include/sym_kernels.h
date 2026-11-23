@@ -32,6 +32,9 @@ constexpr int ncclSymkLLMaxEltSize = 8;
 // Max blocks for the hierarchical LSA AllGather kernel.
 constexpr int ncclSymkAgHierMaxBlocks = 72;
 
+// Max blocks for the hierarchical TDM AllGather kernel.
+constexpr int ncclSymkAgHierTmaMaxBlocks = 48;
+
 // How the hierarchical LSA AllGather kernel splits nBlocks over nGroups packages. Group 0 copies with
 // whole blocks where a pushing group forwards with half of each, so it gets about half as many blocks
 // as each pushing group, and at least one.
@@ -74,6 +77,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
   ncclSymkKernelId_AllGather_HierLsaST,
+  ncclSymkKernelId_AllGather_HierLsaTmaST,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -101,6 +105,7 @@ constexpr char const* ncclSymKernelStr[] = {
   "AllGather_RailRing_LsaST",
   "AllGather_RailRing_LsaSTMC",
   "AllGather_HierLsaST",
+  "AllGather_HierLsaTmaST",
   "ReduceScatter_LL",
   "ReduceScatter_TmaLD",
   "ReduceScatter_LD",

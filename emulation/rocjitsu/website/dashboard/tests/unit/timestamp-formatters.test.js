@@ -8,30 +8,31 @@ import DashboardHeader from '../../src/components/layout/DashboardHeader.jsx';
 
 const timestamp = '2026-10-05T14:07:00Z';
 
-test('compact run formatting preserves the localized year-less 24-hour UTC table label', () => {
+test('compact run formatting preserves the year-less 24-hour local table label', () => {
   expect(typeof formatters.formatCompactRunTime).toBe('function');
   for (const value of [timestamp, '2026-10-05T00:07:00Z', '2026-10-05T23:07:00-04:00']) {
     const expected = new Date(value).toLocaleString(undefined, {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC',
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
     });
     expect(formatters.formatCompactRunTime(value)).toBe(expected);
   }
 });
 
-test('picker formatting preserves the existing localized 24-hour UTC label', () => {
+test('picker formatting preserves the browser-local 24-hour label', () => {
   const expected = `${new Intl.DateTimeFormat(undefined, {
     year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    hour12: false, timeZone: 'UTC',
-  }).format(new Date(timestamp))} UTC`;
+    hour12: false, timeZoneName: 'short',
+  }).format(new Date(timestamp))}`;
   expect(formatRunTime(timestamp)).toBe(expected);
   expect(runSelectionLabel({ timestamp })).toBe(`- · Run ${expected}`);
 });
 
-test('publication formatting preserves the year-less UTC header label', () => {
-  expect(formatPublicationTime(timestamp)).toBe('Oct 5 · 14:07 UTC');
-  expect(formatPublicationTime('2026-10-05T00:07:00Z')).toBe('Oct 5 · 00:07 UTC');
+test('publication formatting preserves the year-less local header label', () => {
+  const date = new Date(timestamp);
+  const expected = `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date)} · ${new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).format(date)}`;
+  expect(formatPublicationTime(timestamp)).toBe(expected);
   const html = renderToStaticMarkup(createElement(DashboardHeader, { data: { generatedAt: timestamp }, mode: 'light' }));
-  expect(html).toContain('Oct 5 · 14:07 UTC');
+  expect(html).toContain(expected);
   expect(html).toContain(`dateTime="${timestamp}"`);
 });
 

@@ -14,11 +14,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -131,9 +133,22 @@ setup_output_env(const std::string& output_path)
         return;
     }
 
-    const auto* const pwd = getenv("PWD");
-    const auto        output =
-        output_path.empty() ? fmt::format("{}/rocprof-sys-output", pwd) : output_path;
+    auto output = output_path;
+    if(output.empty())
+    {
+        // error_code overload: current_path() throws if the cwd was deleted or is not
+        // accessible, and nothing in main() would catch it.
+        std::error_code cwd_error;
+        const auto      cwd = std::filesystem::current_path(cwd_error);
+        if(cwd_error)
+        {
+            LOG_ERROR("Unable to determine the current directory for the default "
+                      "output path: {}",
+                      cwd_error.message());
+            std::exit(EXIT_FAILURE);
+        }
+        output = (cwd / "rocprof-sys-output").string();
+    }
 
     setenv(rocprofsys::env_vars::OUTPUT_PATH, output.c_str(), 1);
     LOG_INFO("Output path: {}", output);
@@ -184,34 +199,34 @@ void
 parse_pid(attach_options& opts, const char* arg)
 {
     auto const pid = rocprofsys::utility::string::safe_stoi(arg);
-    if(!pid)
+    if(pid.is_error())
     {
-        LOG_ERROR("Invalid PID '{}'.", arg);
+        LOG_ERROR("Invalid PID '{}': {}.", arg, pid.error());
         std::exit(EXIT_FAILURE);
     }
-    if(*pid <= 0)
+    if(pid.value() <= 0)
     {
         LOG_ERROR("PID must be a positive integer.");
         std::exit(EXIT_FAILURE);
     }
-    opts.pid = *pid;
+    opts.pid = pid.value();
 }
 
 void
 parse_detach_after(attach_options& opts, const char* arg)
 {
     auto const detach_after = rocprofsys::utility::string::safe_stoi(arg);
-    if(!detach_after)
+    if(detach_after.is_error())
     {
-        LOG_ERROR("Invalid --detach-after value '{}'.", arg);
+        LOG_ERROR("Invalid --detach-after value '{}': {}.", arg, detach_after.error());
         std::exit(EXIT_FAILURE);
     }
-    if(*detach_after < 0)
+    if(detach_after.value() < 0)
     {
         LOG_ERROR("--detach-after must be non-negative.");
         std::exit(EXIT_FAILURE);
     }
-    opts.detach_after = *detach_after;
+    opts.detach_after = detach_after.value();
 }
 
 void

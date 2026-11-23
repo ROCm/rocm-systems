@@ -314,10 +314,20 @@ impl SdmaCommand {
                 options,
             } => match protocol {
                 SdmaProtocol::Gfx9 => {
-                    debug_assert!(options.is_plain() && timing.is_none());
+                    debug_assert!(options.is_plain());
                     words.fill(0);
-                    encode_copy_packet(words, 0, destination, source, size);
-                    COPY_PACKET_BYTES as u64
+                    let mut offset = 0;
+                    if let Some(start) = timing.and_then(|timing| timing.start) {
+                        encode_gfx9_timestamp(words, offset, start);
+                        offset += TIMESTAMP_PACKET_BYTES / 4;
+                    }
+                    encode_copy_packet(words, offset, destination, source, size);
+                    offset += COPY_PACKET_BYTES / 4;
+                    if let Some(timing) = timing {
+                        encode_gfx9_timestamp(words, offset, timing.end);
+                        offset += TIMESTAMP_PACKET_BYTES / 4;
+                    }
+                    (offset * 4) as u64
                 }
                 SdmaProtocol::Gfx12_0 => {
                     debug_assert!(options.is_plain());
@@ -390,6 +400,41 @@ impl SdmaCommand {
 mod tests {
     use super::super::TIMED_COMMAND_BYTES;
     use super::*;
+
+    #[test]
+    fn gfx9_indirect_timing_retains_both_timestamp_destinations() {
+        let copy = SdmaCommand::Copy {
+            destination: 0x1000,
+            source: 0x2000,
+            size: 64,
+            options: GpuCopyOptions::default(),
+        };
+        let mut words = [0; 64];
+        let length = copy.encode(
+            &mut words,
+            Some(TimingAddresses {
+                start: Some(0x1_0000_3000),
+                end: 0x2_0000_4000,
+            }),
+            SdmaProtocol::Gfx9,
+        );
+        assert_eq!(
+            length,
+            (COPY_PACKET_BYTES + 2 * TIMESTAMP_PACKET_BYTES) as u64
+        );
+        assert_eq!(&words[..3], &[0x20d, 0x3000, 1]);
+        assert_eq!(&words[10..13], &[0x20d, 0x4000, 2]);
+        let length = copy.encode(
+            &mut words,
+            Some(TimingAddresses {
+                start: None,
+                end: 0x2_0000_4000,
+            }),
+            SdmaProtocol::Gfx9,
+        );
+        assert_eq!(length, (COPY_PACKET_BYTES + TIMESTAMP_PACKET_BYTES) as u64);
+        assert_eq!(&words[7..10], &[0x20d, 0x4000, 2]);
+    }
 
     #[test]
     fn gfx1201_linear_copy_encodes_system_cache_controls_and_full_addresses() {

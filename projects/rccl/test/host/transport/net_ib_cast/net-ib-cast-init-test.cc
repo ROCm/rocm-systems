@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <fcntl.h>
 #include <limits.h>
 #include <unistd.h>
@@ -329,8 +330,32 @@ INSTANTIATE_TEST_SUITE_P(
                       DmaBufProbe{"KernelProtocolUnsupported", false, EPROTONOSUPPORT, EBADF, false, false},
                       DmaBufProbe{"Mlx5LacksDmaBuf", false, EBADF, EPROTONOSUPPORT, false, false},
                       DmaBufProbe{"Mlx5OpUnsupported", false, EBADF, EOPNOTSUPP, false, false},
+                      DmaBufProbe{"Mlx5SymbolMissing", false, EBADF, ENOSYS, false, false},
                       DmaBufProbe{"PdDeallocFails", false, EBADF, EBADF, true, false}),
     [](const ::testing::TestParamInfo<DmaBufProbe>& info) { return info.param.name; });
+
+TEST_F(NetIbCastInitMicrotest, Mlx5SymbolMissing_RestoresTheIbvErrno) {
+  struct ibv_context ctx {};
+  struct ibv_pd pd {};
+  errno = EOPNOTSUPP;
+  ScopedHook alloc(g_ibvAllocPd, [&](struct ibv_pd** ret, struct ibv_context*) {
+    *ret = &pd;
+    return ncclSuccess;
+  });
+  ScopedHook ibvReg(g_ibvDirectRegDmabufMr, [](struct ibv_pd*, uint64_t, size_t, uint64_t, int, int) {
+    errno = EBADF;
+    return (struct ibv_mr*)nullptr;
+  });
+  ScopedHook mlx5Reg(g_mlx5dvDirectRegDmabufMr, [](struct ibv_pd*, uint64_t, size_t, uint64_t, int, int, int) {
+    errno = ENOSYS;
+    return (struct ibv_mr*)nullptr;
+  });
+  ScopedHook dealloc(g_ibvDeallocPd, [](struct ibv_pd*) { return ncclSuccess; });
+  EXPECT_FALSE(ncclMlx5dvDmaBufCapable(&ctx));
+  // The kernel accepted the DMA-BUF ioctl (EBADF on fd=-1). A missing mlx5
+  // symbol must not leave EOPNOTSUPP for IbCastDmaBufSupport().
+  EXPECT_EQ(errno, EBADF);
+}
 
 TEST_F(NetIbCastInitMicrotest, OooRqSize_ReportsTheDevicesOooReceiveDepthOnlyWhenEnabled) {
   struct ibv_context ctx {};
@@ -543,6 +568,21 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_OneRoceHca_AddsOnePhysicalAndO
   EXPECT_EQ(IbCastRelaxedOrderingEnabled, 0);
   EXPECT_EQ(World().threadNames, std::vector<std::string>{"NCCL IbAsync  0"});
   EXPECT_EQ(g_ibCastReportMatchingSchemeCalls, 1);
+}
+
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_RequestedCap_OverridesThePortLimit) {
+  params_.Set("RCCL_IB_MAX_MSG_SIZE", 4 * 1024 * 1024);
+  World().AddHca("ionic_0").ports[0].max_msg_sz = 1024 * 1024;
+  ASSERT_EQ(Init(), ncclSuccess);
+  EXPECT_EQ(IbCastMaxPostSendBytes, 4u * 1024u * 1024u);
+}
+
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_UnsetMaxMsgSize_UsesTheSmallerPort) {
+  World().AddHca("ionic_0").ports[0].max_msg_sz = 4u * 1024u * 1024u;
+  World().AddHca("ionic_1").ports[0].max_msg_sz = 2u * 1024u * 1024u;
+  ASSERT_EQ(Init(), ncclSuccess);
+  ASSERT_EQ(IbCastNDevs, 2);
+  EXPECT_EQ(IbCastMaxPostSendBytes, 2u * 1024u * 1024u);
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_SecondCall_OnlyTakesAReference) {
@@ -927,13 +967,13 @@ TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_NoDataDirectPath_KeepsThePl
   EXPECT_EQ(IbCastDevs[0].capsProvider.mlx5.dataDirect, 0);
 }
 
-// The error returns past the fail: label, so the device list and the open context are never released.
-// Pins AICOMRCCL-3090; a fix flips this pin.
-TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_KnownBug_DataDirectLookupErrorLeaksTheDeviceList) {
+// The error goes through the fail: label, so the device list and the open context are released (AICOMRCCL-3090).
+TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectLookupErrorReleasesTheDeviceListAndContext) {
   DataDirect(ncclSystemError);
   EXPECT_EQ(Init(), ncclSystemError);
-  EXPECT_EQ(World().freeDeviceList.calls, 0);
-  EXPECT_EQ(World().hcas[0].closes, 0);
+  EXPECT_EQ(World().freeDeviceList.calls, 1);
+  EXPECT_EQ(World().hcas[0].closes, 1);
+  EXPECT_EQ(IbCastNDevs, 0);
 }
 
 TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectOff_SkipsTheProbe) {

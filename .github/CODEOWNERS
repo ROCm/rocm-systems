@@ -4,6 +4,7 @@
 # Team-specific CI ownership
 /.github/workflows/*docs*.yml                                         @ROCm/rocm-documentation
 /.github/docs-config.json                                             @ROCm/rocm-documentation
+/.github/workflows/fortran-bindings*.yml                              @ROCm/rocm-fortran-maintainers
 /.github/workflows/hip-*.yml                                          @ROCm/hip-reviewers
 /.github/workflows/hrr-*.yml                                          @ROCm/hrr-reviewers
 /.github/workflows/amdsmi-*.yml                                       @ROCm/smi-reviewers

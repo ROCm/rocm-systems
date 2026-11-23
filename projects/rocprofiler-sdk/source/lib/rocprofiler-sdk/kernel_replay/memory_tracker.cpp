@@ -50,6 +50,13 @@ tracking_flag()
     static auto*& _v = rocprofiler::common::static_object<std::atomic<bool>>::construct(false);
     return *_v;
 }
+
+uint64_t
+next_allocation_lifetime()
+{
+    static auto next = std::atomic<uint64_t>{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
 }  // namespace
 
 // Tracked allocations. The map and its lock are bundled in a Synchronized wrapper so every access
@@ -100,7 +107,7 @@ record_unsupported_executable(void* ptr, size_t size)
     // stay out of both inventories (silent omit is correct for those).
     if(!q.trackable) return;
     unsupported_executable_inventory().wlock([&](auto& _map) {
-        _map[ptr] = alloc_info_t{size, q.agent};
+        _map[ptr] = alloc_info_t{size, q.agent, next_allocation_lifetime()};
     });
 }
 
@@ -236,7 +243,9 @@ record_alloc(void* ptr, size_t size)
 
     const auto q = query_alloc(ptr);
     if(!q.trackable) return;  // skip kernarg / host / fine-grained memory
-    inventory().wlock([&](auto& _map) { _map[ptr] = alloc_info_t{size, q.agent}; });
+    inventory().wlock([&](auto& _map) {
+        _map[ptr] = alloc_info_t{size, q.agent, next_allocation_lifetime()};
+    });
 }
 
 void
@@ -271,6 +280,44 @@ unsupported_executable(hsa_agent_t agent)
             if(info.agent == agent) out.emplace(ptr, info.size);
     });
     return out;
+}
+
+tracked_map_t
+snap_allocation_identity(hsa_agent_t agent)
+{
+    if(registration::get_fini_status() > 0) return {};
+
+    auto out = tracked_map_t{};
+    inventory().rlock([&](const auto& map) {
+        for(const auto& [ptr, info] : map)
+            if(info.agent == agent) out.emplace(ptr, info);
+    });
+    return out;
+}
+
+bool
+allocations_match(hsa_agent_t agent, const tracked_map_t& expected)
+{
+    if(registration::get_fini_status() > 0) return expected.empty();
+
+    return inventory().rlock(
+        [&](const auto& map) { return allocations_match(agent, expected, map); });
+}
+
+bool
+allocations_match(hsa_agent_t          agent,
+                  const tracked_map_t& expected,
+                  const tracked_map_t& locked_inventory)
+{
+    auto count = size_t{0};
+    for(const auto& [ptr, info] : locked_inventory)
+    {
+        if(info.agent != agent) continue;
+        ++count;
+        const auto itr = expected.find(ptr);
+        if(itr == expected.end() || !(itr->second == info)) return false;
+    }
+    return count == expected.size();
 }
 
 bool

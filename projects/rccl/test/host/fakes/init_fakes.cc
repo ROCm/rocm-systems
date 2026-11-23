@@ -84,6 +84,11 @@ void InstallCommAllocSuccess() {
 void InstallDevCommSetupSuccess() {
   InstallCommAllocSuccess();
   g_hipAsyncOpsResult = hipSuccess;
+  g_hipMemGetAddressRange = [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t ptr) {
+    if (base) *base = ptr;
+    if (size) *size = 0;
+    return hipSuccess;
+  };
 }
 
 void ResetInitFakes() {
@@ -109,6 +114,7 @@ void ResetInitFakes() {
   ResetRocshmemFakes();
 #endif
   ResetStrongStreamStubs();
+  ResetSearchFakes();
   ResetTopoStubs();
   ResetTransportStubs();
   ResetTransportNetIbFakes();

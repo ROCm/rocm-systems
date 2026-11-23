@@ -94,14 +94,6 @@ static amd::Monitor g_hiprtcInitlock{};
 
 namespace hiprtc {
 
-static void crashWithMessage(std::string message) {
-#ifdef HIPRTC_USE_EXCEPTIONS
-  throw std::runtime_error(message);
-#else
-  guarantee(false, message.c_str());
-#endif
-}
-
 struct Settings {
   bool offloadArchProvided{false};
 };

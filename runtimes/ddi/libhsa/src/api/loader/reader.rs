@@ -7,7 +7,6 @@ use std::ffi::c_void;
 
 use crate::ffi::*;
 use crate::loader::Reader;
-use crate::platform::memory as linux_interop;
 use crate::runtime::{boundary, initialized_mut, lock};
 
 #[cfg_attr(
@@ -17,11 +16,11 @@ use crate::runtime::{boundary, initialized_mut, lock};
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 /// Snapshots a file descriptor into a code-object reader handle.
 pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
-    file: i32,
+    file: HsaFile,
     reader: *mut HsaCodeObjectReader,
 ) -> Status {
     boundary(|| {
-        if file < 0 || reader.is_null() {
+        if crate::platform::invalid_file(file) || reader.is_null() {
             return INVALID_ARGUMENT;
         }
         let mut guard = match lock() {
@@ -32,29 +31,28 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let size = match linux_interop::descriptor_length(file)
+        let file = match crate::platform::acquire_code_object_file(file) {
+            Ok(file) => file,
+            Err(_) => return INVALID_FILE,
+        };
+        let size = match file
+            .metadata()
             .ok()
-            .and_then(|length| usize::try_from(length).ok())
+            .and_then(|metadata| usize::try_from(metadata.len()).ok())
         {
             Some(0) => return INVALID_CODE_OBJECT,
             Some(size) => size,
             None => return INVALID_FILE,
         };
-        let mut bytes = Vec::new();
-        if bytes.try_reserve_exact(size).is_err() {
-            return OUT_OF_RESOURCES;
-        }
-        bytes.resize(size, 0);
-        if linux_interop::read_descriptor_exact_at(file, &mut bytes, 0).is_err() {
-            return INVALID_FILE;
-        }
+        let snapshot = match Reader::snapshot_file(&file, 0, size) {
+            Ok(reader) => reader,
+            Err(status) => return status,
+        };
         let handle = match runtime.allocate_handle() {
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime
-            .loader
-            .insert_reader(handle, Reader::from_file(bytes, file, size));
+        runtime.loader.insert_reader(handle, snapshot);
         // SAFETY: The caller supplied writable output storage.
         unsafe { reader.write(HsaCodeObjectReader { handle }) };
         SUCCESS

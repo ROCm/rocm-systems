@@ -1231,6 +1231,12 @@ graph:
   Unit_hipGraphExecKernelNodeSetParams_Functional:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecKernelNodeSetParams_DisabledNeighborInBatch:
+    <<: *level_default
+    tags: [exec]
+  Unit_hipGraphExecKernelNodeSetParams_DisabledBatchHead:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphLaunch_Positive:
     <<: *level_default
     tags: [exec, smoke, P0]
@@ -1675,6 +1681,9 @@ graph:
   Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphKernelNodeSetAttribute_Priority:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -2005,3 +2014,24 @@ graph:
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphAddExternalSemaphoresSignalNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphAddExternalSemaphoresWaitNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExternalSemaphoresNodeParams_Negative_NullNode:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecExternalSemaphoresNodeSetParams_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateEmbeddedNodes:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_UpdateNestedChildGraphNodes:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_NodeFromUnrelatedGraphRejected:
+    <<: *level_default
+    tags: [node]

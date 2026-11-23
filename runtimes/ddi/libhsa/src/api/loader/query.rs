@@ -8,7 +8,6 @@ use std::ffi::c_void;
 use crate::ffi::*;
 use crate::loader::query::*;
 use crate::loader::*;
-use crate::platform::memory as linux_interop;
 use crate::runtime::{boundary, initialized_mut, lock};
 
 #[cfg_attr(
@@ -295,13 +294,13 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 /// Snapshots a bounded file range into a code-object reader.
 pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
-    file: i32,
+    file: HsaFile,
     offset: usize,
     size: usize,
     reader: *mut HsaCodeObjectReader,
 ) -> Status {
     boundary(|| {
-        if file < 0 {
+        if crate::platform::invalid_file(file) {
             return INVALID_FILE;
         }
         if size == 0 {
@@ -310,14 +309,14 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
         if reader.is_null() {
             return INVALID_ARGUMENT;
         }
-        let mut bytes = Vec::new();
-        if bytes.try_reserve_exact(size).is_err() {
-            return OUT_OF_RESOURCES;
-        }
-        bytes.resize(size, 0);
-        if linux_interop::read_descriptor_exact_at(file, &mut bytes, offset as u64).is_err() {
-            return INVALID_FILE;
-        }
+        let file = match crate::platform::acquire_code_object_file(file) {
+            Ok(file) => file,
+            Err(_) => return INVALID_FILE,
+        };
+        let snapshot = match Reader::snapshot_file(&file, offset, size) {
+            Ok(reader) => reader,
+            Err(status) => return status,
+        };
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -330,10 +329,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.loader.insert_reader(
-            handle,
-            Reader::from_file_with_offset(bytes, file, offset, size),
-        );
+        runtime.loader.insert_reader(handle, snapshot);
         // SAFETY: The caller supplied writable output storage.
         unsafe { reader.write(HsaCodeObjectReader { handle }) };
         SUCCESS

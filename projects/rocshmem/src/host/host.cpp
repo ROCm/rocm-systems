@@ -423,12 +423,12 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
   // - Query optimal block size using occupancy API
   // - Limit block size to nelems (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
                                               rocshmem_alltoallmem_kernel,
-                                              tdm_lds_bytes, 0));
+                                              lds_stage_bytes, 0));
 
   // Limit block size to nelems (bytes) to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -438,7 +438,7 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
   // Launch kernel to do alltoall with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_alltoallmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_alltoallmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       team, dest, source, nelems);
 }
 
@@ -451,13 +451,13 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
   // - Query optimal block size using occupancy API
   // - Limit block size to nelems (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size,
                                               &optimal_block_size,
                                               rocshmem_broadcastmem_kernel,
-                                              tdm_lds_bytes,
+                                              lds_stage_bytes,
                                               0));
 
   // Limit block size to nelems (bytes) to avoid over-subscription
@@ -468,19 +468,19 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
   // Launch kernel to do broadcast with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_broadcastmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_broadcastmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       team, dest, source, nelems, pe_root);
 }
 
 __host__ void HostInterface::getmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
                                               rocshmem_getmem_kernel,
-                                              tdm_lds_bytes, 0));
+                                              lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -490,19 +490,19 @@ __host__ void HostInterface::getmem_on_stream(void *dest, const void *source,
   // Launch kernel to do getmem with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_getmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_getmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       dest, source, nelems, pe);
 }
 
 __host__ void HostInterface::putmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
                                               rocshmem_putmem_kernel,
-                                              tdm_lds_bytes, 0));
+                                              lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -512,19 +512,19 @@ __host__ void HostInterface::putmem_on_stream(void *dest, const void *source,
   // Launch kernel to do putmem with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_putmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_putmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       dest, source, nelems, pe);
 }
 
 __host__ void HostInterface::putmem_signal_on_stream(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe, hipStream_t stream) {
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(
       &grid_size, &optimal_block_size, rocshmem_putmem_signal_kernel,
-      tdm_lds_bytes, 0));
+      lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -534,7 +534,7 @@ __host__ void HostInterface::putmem_signal_on_stream(
   // Launch kernel to do putmem_signal with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_putmem_signal_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_putmem_signal_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
 

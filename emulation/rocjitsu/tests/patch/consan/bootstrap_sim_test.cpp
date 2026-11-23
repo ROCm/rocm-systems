@@ -155,10 +155,8 @@ protected:
     }
 
     std::string topology(kTopology);
-    const std::string vm = "\"arch\":\"" + std::string(config::arch_to_string(arch)) + "\"" +
-                           (profile->public_id == ROCJITSU_CODE_TARGET_INVALID
-                                ? ""
-                                : ",\"target\":\"" + std::string(target_mode.target) + "\"");
+    const std::string vm = "\"arch\":\"" + std::string(config::arch_to_string(arch)) +
+                           "\",\"target\":\"" + std::string(target_mode.target) + "\"";
     topology.replace(topology.find("\"arch\":\"rdna3\""), std::string("\"arch\":\"rdna3\"").size(),
                      vm);
     config::LoadedConfig loaded;

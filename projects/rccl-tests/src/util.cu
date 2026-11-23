@@ -373,7 +373,12 @@ void jsonOutputInit(const char *in_path,
   jsonKey("env");
   jsonStartList();
   for(char **e = envp; *e; e++) {
-    jsonStr(*e);
+    // Reports get shared; the TLS pre-shared key must not end up in them.
+    if (strncmp(*e, NCCL_TESTS_TLS_PSK_ENV "=", strlen(NCCL_TESTS_TLS_PSK_ENV "=")) == 0) {
+      jsonStr(NCCL_TESTS_TLS_PSK_ENV "=<redacted>");
+    } else {
+      jsonStr(*e);
+    }
   }
   jsonFinishList();
   jsonKey("nccl_version"); jsonInt(test_ncclVersion);
@@ -510,7 +515,7 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
   if (reportErrors) {
     PRINT("  %7s  %6s  %6s  %6g", timeStr, algBwStr, busBwStr, (double)wrongElts);
   } else {
-    PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
+    PRINT("  %7s  %6s  %6s  %6s", timeStr, algBwStr, busBwStr, "N/A");
   }
 
   if (!out_of_place && report_timestamps && !per_iter_timing) writeTimestamp();

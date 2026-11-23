@@ -130,7 +130,9 @@ pub struct QueueErrorEvent {
 
 /// One queue allocation request with common fields and tagged engine
 /// parameters. Frontend ownership and callback policy are intentionally absent.
-/// Ring capacity is always expressed in bytes.
+/// Ring capacity is always expressed in bytes. Current direct consumers
+/// require `HostQueuePublication::Ordered64BitMmio`; a provider needing another
+/// protocol must reject acquisition before native publication.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct QueueRequest {
     /// Requested power-of-two packet-ring capacity in bytes. Native limits are
@@ -152,6 +154,17 @@ pub enum QueueAccessWidth {
     Bits32,
     /// One aligned 64-bit access.
     Bits64,
+}
+
+/// Host publication mechanism qualified by the native queue provider.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostQueuePublication {
+    /// Drain earlier packet/index stores, then issue an aligned volatile
+    /// 64-bit MMIO store using the qualified host-architecture ordering recipe.
+    Ordered64BitMmio,
+    /// Publication requires a provider notification operation. Current direct
+    /// queue consumers reject this protocol before exposing mapped transport.
+    ProviderNotification,
 }
 
 /// Existing queue transport addresses, borrowed from a live queue owner. These
@@ -189,15 +202,16 @@ pub struct QueueTransport {
     /// Whether the native read index wraps at the ring capacity rather than
     /// advancing in the full-width counter domain.
     pub read_index_wraps: bool,
-    /// Host address of this queue's notification word. It may be an MMIO
-    /// doorbell or a backend-serviced word. Use the ordering and value
-    /// convention of the selected queue transport.
+    /// Host notification address. Its mapping and width alone do not qualify
+    /// a store; `host_publication` supplies the required native protocol.
     pub doorbell_host_address: usize,
     /// Queue-device notification address when device production was required
     /// at creation, or `None` for a host-only queue.
     pub doorbell_device_address: Option<u64>,
     /// Required doorbell access width, not the size of its mapping.
     pub doorbell_width: QueueAccessWidth,
+    /// Provider-qualified protocol required of every host producer.
+    pub host_publication: HostQueuePublication,
 }
 
 /// Compact publication promise retained without keeping a caller's AQL
@@ -294,6 +308,7 @@ impl QueueTransport {
             && self.doorbell_host_address != 0
             && self.doorbell_host_address % 8 == 0
             && self.doorbell_width == QueueAccessWidth::Bits64
+            && self.host_publication == HostQueuePublication::Ordered64BitMmio
             && (!expected.device_producer || device_doorbell)
             && control
             && (targeted_sdma == self.sdma_engine_id.is_some())

@@ -24,6 +24,8 @@ pub(crate) struct ApiLeaseScope {
     previous: u64,
     /// The parent count stays live until the thread-local marker is cleared.
     _token: InFlightToken,
+    /// A lease scope must be dropped on the thread whose marker it changed.
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl ApiLeaseScope {
@@ -33,6 +35,7 @@ impl ApiLeaseScope {
         Self {
             previous,
             _token: token,
+            _thread_bound: std::marker::PhantomData,
         }
     }
 
@@ -85,7 +88,7 @@ impl InFlightTracker {
     }
 
     /// Initializes the closed process gate before its first HSA generation.
-    fn new_process() -> Self {
+    pub(crate) fn new_process() -> Self {
         Self {
             process: true,
             state: AtomicUsize::new(ADMISSION_CLOSED),
@@ -109,6 +112,9 @@ impl InFlightTracker {
 
     /// Adds an in-flight operation unless this generation is closing.
     pub(crate) fn enter(self: &Arc<Self>) -> Option<InFlightToken> {
+        if !crate::platform::process_is_current() {
+            return None;
+        }
         let admitted = self
             .state
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
@@ -130,7 +136,7 @@ impl InFlightTracker {
                 .ok()?;
         }
         Some(InFlightToken {
-            tracker: self.clone(),
+            tracker: Some(self.clone()),
             generation: self.generation.load(Ordering::Acquire),
         })
     }
@@ -142,6 +148,9 @@ impl InFlightTracker {
 
     /// Waits for idle to complete.
     pub(crate) fn wait_idle(&self) {
+        if !crate::platform::process_is_current() {
+            return;
+        }
         debug_assert!(self.state.load(Ordering::Acquire) & ADMISSION_CLOSED != 0);
         let mut idle = self
             .idle_lock
@@ -159,7 +168,7 @@ impl InFlightTracker {
 /// One registered operation that must finish before runtime teardown.
 pub(crate) struct InFlightToken {
     /// Counter decremented when this operation leaves its native work.
-    tracker: Arc<InFlightTracker>,
+    tracker: Option<Arc<InFlightTracker>>,
     /// Generation retained by this token, or zero for an object-local drain.
     generation: u64,
 }
@@ -174,24 +183,61 @@ impl InFlightToken {
 impl Drop for InFlightToken {
     /// Decrements the active count and wakes teardown when it reaches zero.
     fn drop(&mut self) {
-        let previous = self.tracker.state.fetch_sub(1, Ordering::AcqRel);
+        if !crate::platform::process_is_current() {
+            if let Some(tracker) = self.tracker.take() {
+                std::mem::forget(tracker);
+            }
+            return;
+        }
+        let Some(tracker) = self.tracker.as_ref() else {
+            return;
+        };
+        let previous = tracker.state.fetch_sub(1, Ordering::AcqRel);
         if previous == ADMISSION_CLOSED + 1 {
-            let _idle = self
-                .tracker
+            let _idle = tracker
                 .idle_lock
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            self.tracker.idle.notify_all();
+            tracker.idle.notify_all();
         }
     }
 }
 
 /// Admits one raw-handle operation for its full callback duration.
 pub(crate) fn enter_public_raw_handle() -> Option<InFlightToken> {
+    if !crate::platform::process_is_current() {
+        return None;
+    }
     #[cfg(test)]
-    return TEST_RAW_HANDLES.enter();
+    return TEST_PUBLIC_RAW_GATE
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_else(|| TEST_RAW_HANDLES.clone())
+        .enter();
     #[cfg(not(test))]
     PROCESS_ADMISSION.enter()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Lets one test thread race a process gate without closing other tests' gate.
+    static TEST_PUBLIC_RAW_GATE: std::cell::RefCell<Option<Arc<InFlightTracker>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn install_test_public_raw_gate(gate: Arc<InFlightTracker>) -> impl Drop {
+    /// Restores the test thread's previous raw-handle gate on scope exit.
+    struct RestoreGate(Option<Arc<InFlightTracker>>);
+
+    impl Drop for RestoreGate {
+        fn drop(&mut self) {
+            TEST_PUBLIC_RAW_GATE.with(|slot| {
+                slot.replace(self.0.take());
+            });
+        }
+    }
+
+    RestoreGate(TEST_PUBLIC_RAW_GATE.with(|slot| slot.replace(Some(gate))))
 }
 
 #[cfg(test)]

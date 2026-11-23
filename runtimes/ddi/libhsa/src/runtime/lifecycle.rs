@@ -39,6 +39,8 @@ thread_local! {
 pub(crate) struct LifecycleCallScope {
     /// Whether this scope set and must clear the thread-local entry flag.
     owns_flag: bool,
+    /// The thread-local entry flag must be cleared on its entering thread.
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl LifecycleCallScope {
@@ -49,7 +51,10 @@ impl LifecycleCallScope {
                 Err(INVALID_RUNTIME_STATE)
             } else {
                 active.set(true);
-                Ok(Self { owns_flag: true })
+                Ok(Self {
+                    owns_flag: true,
+                    _thread_bound: std::marker::PhantomData,
+                })
             }
         })
     }
@@ -65,7 +70,10 @@ impl LifecycleCallScope {
                 true
             }
         });
-        Self { owns_flag }
+        Self {
+            owns_flag,
+            _thread_bound: std::marker::PhantomData,
+        }
     }
 }
 
@@ -493,7 +501,7 @@ impl LifecycleTransition {
 impl Drop for LifecycleTransition {
     /// Rolls back an incomplete generation transition.
     fn drop(&mut self) {
-        if !self.armed {
+        if !self.armed || !crate::platform::process_is_current() {
             return;
         }
         let mut registry = LIFECYCLE
@@ -528,6 +536,9 @@ pub(crate) static LIFECYCLE_CONDVAR: Condvar = Condvar::new();
 
 /// Locks the process-global lifecycle state, handling poisoned locks.
 pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
+    if !crate::platform::process_is_current() {
+        return Err(NOT_INITIALIZED);
+    }
     LIFECYCLE.lock().map_err(|_| ERROR)
 }
 

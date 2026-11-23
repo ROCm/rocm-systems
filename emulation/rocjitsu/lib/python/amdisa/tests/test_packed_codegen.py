@@ -511,8 +511,8 @@ def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
         use_cdna5_helpers=True,
     )
 
-    assert 'const auto s0 = read_pk_f32_words(src0, wf, lane)' in cpp
-    assert 'read_pk_f32_words(src0, wf, lane)' in cpp
+    assert 'const auto s0 = amdgpu::RegisterAccess(wf).read_lane_pair32(' in cpp
+    assert 'src0, lane, amdgpu::ScalarPairMode::Replicate32)' in cpp
     assert 's0_hi_w' not in cpp
     assert 's0.hi' in cpp
     assert 'read_lane64' not in cpp
@@ -816,7 +816,7 @@ def test_dot_dispatch_covers_every_semantic_class():
     """The DOT semantic classes and their DISPATCH handlers must agree exactly.
 
     The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a class with
-    no entry would generate a body that throws ``UnimplementedInst``. Checking
+    no entry would generate an unimplemented-instruction reporting stub. Checking
     the other direction too rejects handlers for classes no ISA defines,
     including bare ``dot2``/``dot4``/``dot8`` routes.
     """

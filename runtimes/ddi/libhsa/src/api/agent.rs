@@ -324,11 +324,28 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     write_value(value, if gpu_only { 32_u32 } else { 0 })
                 }
                 AGENT_INFO_QUEUES_MAX => write_value(value, if gpu_only { 128_u32 } else { 0 }),
-                AGENT_INFO_QUEUE_MIN_SIZE => write_value(value, if gpu_only { 64_u32 } else { 0 }),
-                AGENT_INFO_QUEUE_MAX_SIZE => {
-                    write_value(value, if gpu_only { 131_072_u32 } else { 0 })
-                }
-                AGENT_INFO_QUEUE_TYPE => write_value(value, QUEUE_TYPE_MULTI),
+                AGENT_INFO_QUEUE_MIN_SIZE => write_value(
+                    value,
+                    gpu.and_then(crate::queue::aql_queue_limits)
+                        .map_or(0, |limits| limits.0),
+                ),
+                AGENT_INFO_QUEUE_MAX_SIZE => write_value(
+                    value,
+                    gpu.and_then(crate::queue::aql_queue_limits)
+                        .map_or(0, |limits| limits.1),
+                ),
+                AGENT_INFO_QUEUE_TYPE => write_value(
+                    value,
+                    if gpu.is_none_or(|info| {
+                        info.queues
+                            .aql
+                            .is_some_and(|controls| controls.multiple_producers)
+                    }) {
+                        QUEUE_TYPE_MULTI
+                    } else {
+                        QUEUE_TYPE_SINGLE
+                    },
+                ),
                 AGENT_INFO_NODE => write_value(value, node),
                 AGENT_INFO_DEVICE => {
                     write_value(value, if gpu_only { DEVICE_GPU } else { DEVICE_CPU })
@@ -392,9 +409,10 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 ),
                 AMD_AGENT_INFO_HDP_FLUSH => write_value(value, hdp_flush),
                 AMD_AGENT_INFO_DOMAIN => write_value(value, pci.map_or(0, |info| info.domain)),
-                AMD_AGENT_INFO_COOPERATIVE_QUEUES => {
-                    write_value(value, gpu.is_some_and(|info| info.gws_count != 0))
-                }
+                AMD_AGENT_INFO_COOPERATIVE_QUEUES => write_value(
+                    value,
+                    gpu.and_then(crate::queue::cooperative_queue_size).is_some(),
+                ),
                 AMD_AGENT_INFO_UUID => {
                     let uuid = agent_uuid(gpu);
                     write_bytes(value, uuid.as_bytes(), 21)
@@ -453,8 +471,12 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                                 HsaAmdClockCounters {
                                     gpu_clock_counter: counters.gpu,
                                     cpu_clock_counter: counters.host,
-                                    system_clock_counter: counters.system,
-                                    system_clock_frequency: counters.system_frequency,
+                                    system_clock_counter: counters
+                                        .system
+                                        .map_or(0, |sample| sample.ticks),
+                                    system_clock_frequency: counters
+                                        .system
+                                        .map_or(0, |sample| sample.info.frequency_hz),
                                 },
                             ),
                             Err(error) => map_error(error),

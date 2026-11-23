@@ -560,3 +560,29 @@ TEST(kernel_replay_snapshot, restore_prevents_module_variable_accumulation_acros
     EXPECT_EQ(kernel_launch::read_module_counter(), kBase)
         << "module variable accumulated across passes instead of being restored";
 }
+
+TEST(kernel_replay_snapshot, rerecording_the_same_address_gets_a_new_allocation_lifetime)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U);
+    void* ptr = nullptr;
+    ASSERT_EQ(hipMalloc(&ptr, 4096), hipSuccess);
+    const auto before = mt::snap_allocation_identity(agent);
+    const auto first  = before.find(ptr);
+    ASSERT_NE(first, before.end());
+    EXPECT_NE(first->second.lifetime_id, 0U);
+    EXPECT_TRUE(mt::allocations_match(agent, before));
+
+    // Model address reuse without depending on HIP's allocator choosing the same address again.
+    mt::record_free(ptr);
+    mt::record_alloc(ptr, 4096);
+    const auto after  = mt::snap_allocation_identity(agent);
+    const auto second = after.find(ptr);
+    ASSERT_NE(second, after.end());
+    EXPECT_EQ(second->second.size, first->second.size);
+    EXPECT_NE(second->second.lifetime_id, first->second.lifetime_id);
+    EXPECT_FALSE(mt::allocations_match(agent, before));
+    EXPECT_EQ(hipFree(ptr), hipSuccess);
+}

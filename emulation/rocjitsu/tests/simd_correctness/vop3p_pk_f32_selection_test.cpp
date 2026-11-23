@@ -6,6 +6,7 @@
 /// policies between scalar and SIMD execution on CDNA2 through CDNA5.
 /// NaN selection and quieting must also agree with the architectural policy.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/host_target.h"
 #include "util/simd_test_hooks.h"
@@ -63,7 +64,7 @@ struct Machine {
   amdgpu::L2Cache cache{"packed_f32_selection_cache"};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::unique_ptr<Decoder> decoder;
-  amdgpu::Wavefront *wave;
+  amdgpu::Wavefront *wave = nullptr;
 
   explicit Machine(rj_code_arch_t arch) {
     amdgpu::ComputeUnitCore::Config config{};
@@ -73,11 +74,16 @@ struct Machine {
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     cache.set_backing_memory(&memory);
-    cu = amdgpu::ComputeUnitCore::create("packed_f32_selection", config, &memory, &cache);
+    rocjitsu::test::initialize_compute_unit(cu, "packed_f32_selection", config, &memory, &cache);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
   }
-  ~Machine() { wave->halt(); }
+  ~Machine() {
+    if (wave)
+      wave->halt();
+  }
 
   using Result = std::array<std::array<uint32_t, 2>, 64>;
   Result run(Instruction &inst, bool scalar, uint32_t mode, uint64_t exec, uint32_t dst) {
@@ -202,6 +208,7 @@ protected:
 TEST_P(PackedF32Selection, AllSelectionsPreservePolicies) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const unsigned selections = std::get<1>(GetParam()) == 2 ? 8 : 4;
   for (uint8_t lo = 0; lo < selections; ++lo)
     for (uint8_t hi = 0; hi < selections; ++hi)
@@ -217,6 +224,7 @@ TEST_P(PackedF32Selection, AllSelectionsPreservePolicies) {
 TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   // Only CDNA5 admits a literal source in this packed-F32 encoding.
   for (SourceKind source :
        {SourceKind::Vgpr, SourceKind::Sgpr, SourceKind::InlineFloat, SourceKind::Literal}) {
@@ -233,6 +241,23 @@ TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
 TEST_P(PackedF32Selection, RestoresHostEnvironment) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  if (std::get<0>(GetParam()) != ROCJITSU_CODE_ARCH_CDNA2) {
+    // rj-arith assumes default host controls and permits arithmetic sticky flags.
+    // Unlike the legacy executor, it never saves or writes host FP controls.
+    ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
+    std::feraiseexcept(FE_DIVBYZERO);
+#if RJ_HOST_ARCH_X86
+    const uint32_t controls = _mm_getcsr() & ~0x3fu;
+#endif
+    compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
+    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
+    EXPECT_NE(std::fetestexcept(FE_DIVBYZERO), 0);
+#if RJ_HOST_ARCH_X86
+    EXPECT_EQ(_mm_getcsr() & ~0x3fu, controls);
+#endif
+    return;
+  }
   for (int rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
     ASSERT_EQ(std::fesetround(rounding), 0);
     std::feclearexcept(FE_ALL_EXCEPT);

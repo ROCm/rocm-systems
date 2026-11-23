@@ -20,16 +20,18 @@ namespace cdna5 {
 
 void TensorLoadToLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::execute_tensor_load_to_lds(*this, wf).failed()) [[unlikely]] {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
 }
 
 void TensorStoreFromLdsVimage::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::execute_tensor_store_from_lds(*this, wf).failed()) [[unlikely]] {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
 }
