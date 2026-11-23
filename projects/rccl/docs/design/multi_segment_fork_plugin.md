@@ -160,7 +160,7 @@ The IB-MSEG host binaries compile the `net_ib` host test files and fakes a secon
 
 ```mermaid
 %% caption: How one net_ib host test runs against the fork
-flowchart LR
+flowchart TD
  base["net_ib test file and fakes"] --> alias["alias header from rename_map.txt"]
  alias --> shim["header shims to _mseg headers"]
  shim --> bin["IB-MSEG host binary"]
@@ -208,7 +208,7 @@ Today the old stack carries the same feature twice, once in `net_ib` and once in
 
 ```mermaid
 %% caption: From two edited transports to one plugin
-flowchart LR
+flowchart TD
  subgraph now["old stack"]
  ib5["net_ib with multi-segment"]
  cast5["net_ib_cast with multi-segment"]

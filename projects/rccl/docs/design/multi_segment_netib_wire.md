@@ -74,19 +74,19 @@ struct alignas(64) ncclIbSegLayout {   // 192 bytes, asserted
 ```mermaid
 %% caption: Classic NET/IB registration of a multi-segment buffer
 flowchart TD
- reg["NET proxy registration, N > 1"] --> sw{"switch on?"}
+ sw{"N > 1, switch on?"}
  sw -->|no| st["collective stages"]
- sw -->|yes| pb{"plugin sets NCCL_PTR_DMABUF_MULTISEG?"}
+ sw -->|yes| pb{"plugin multi-segment bit?"}
  pb -->|no| st
- pb -->|yes| walk{"walk covers the range, count within cap and max_mr?"}
+ pb -->|yes| walk{"walk ok, within caps?"}
  walk -->|no| st
- walk -->|yes| cap{"receiver and peer lacks the capability?"}
+ walk -->|yes| cap{"peer not capable?"}
  cap -->|yes| st
  cap -->|no| mrs["one MR per segment per device"]
  classDef netib fill:#e0f5f8,stroke:#008299,color:#1d1d1f
  classDef okpath fill:#e8f8ec,stroke:#34c759,color:#1d1d1f
  classDef stagepath fill:#fff9e0,stroke:#ffcc00,color:#1d1d1f
- class reg,sw,pb,walk,cap netib
+ class sw,pb,walk,cap netib
  class mrs okpath
  class st stagepath
 ```
