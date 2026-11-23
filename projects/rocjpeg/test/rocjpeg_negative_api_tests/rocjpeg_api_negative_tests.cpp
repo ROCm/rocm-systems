@@ -885,7 +885,37 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
         }
     }
 
-    // Scenario 2: Pass a batch size of 0 or -1 with a valid handle and destinations to rocJpegDecodeBatchedSync
+    // Scenario 2: Pass a batch whose second, and then whose first, stream handle is null to rocJpegDecodeBatched and
+    // rocJpegDecodeBatchedAsync. The whole batch must be rejected before it is submitted. The crop rectangle Scenario 1
+    // left in decode_params[1] is cleared first, so the null stream handle is the only invalid input.
+    decode_params[1] = {};
+    for (int null_index : {1, 0}) {
+        RocJpegStreamHandle stream_handles_with_null[2] = {rocjpeg_stream_handle_, rocjpeg_stream_handle_};
+        stream_handles_with_null[null_index] = nullptr;
+        rocjpeg_status = rocJpegDecodeBatched(rocjpeg_handle_, stream_handles_with_null, 2, decode_params, destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatched with a null stream handle at index " << null_index << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        rocjpeg_status = rocJpegDecodeBatchedAsync(rocjpeg_handle_, stream_handles_with_null, 2, decode_params, destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedAsync with a null stream handle at index " << null_index << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        // A rejected submit must not leave a decode pending for any destination in the batch.
+        for (int k = 0; k < 2; k++) {
+            rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destinations[k]);
+            if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+                std::cerr << "rocJpegDecodeSync for destination " << k << " after a rejected null stream handle at index " << null_index
+                          << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
+    // Scenario 3: Pass a batch size of 0 or -1 with a valid handle and destinations to rocJpegDecodeBatchedSync
     for (int batch_size : {0, -1}) {
         rocjpeg_status = rocJpegDecodeBatchedSync(rocjpeg_handle_, destinations, batch_size);
         if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
@@ -895,7 +925,7 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
         }
     }
 
-    // Scenario 3: Submit two images with rocJpegDecodeBatchedAsync, then pass rocJpegDecodeBatchedSync a third
+    // Scenario 4: Submit two images with rocJpegDecodeBatchedAsync, then pass rocJpegDecodeBatchedSync a third
     // destination that has nothing pending. The call must fail without taking the two pending decodes, so syncing
     // the original two afterwards must still succeed.
     RocJpegDecodeCaps decode_caps = {};

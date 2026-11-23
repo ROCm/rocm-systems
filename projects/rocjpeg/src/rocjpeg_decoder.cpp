@@ -536,6 +536,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
     }
     // Validate every image before submitting any, so an invalid one does not leave earlier images in flight.
     for (int i = 0; i < batch_size; i++) {
+        if (jpeg_streams[i] == nullptr) {
+            ErrorLog(g_rocjpeg_logger, "Null stream handle for the image at index " + ROCJPEG_TOSTR(i));
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
         auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
         if (ValidateCropRectangle(decode_params[i], *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters()) != ROCJPEG_STATUS_SUCCESS) {
             ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle for the image at index " + ROCJPEG_TOSTR(i));
@@ -612,6 +617,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
 
     std::vector<JpegStreamParameters> jpeg_streams_params(batch_size);
     for (int i = 0; i < batch_size; i++) {
+        if (jpeg_streams[i] == nullptr) {
+            ErrorLog(g_rocjpeg_logger, "Null stream handle for the image at index " + ROCJPEG_TOSTR(i));
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
         auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
         const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
         if (ValidateCropRectangle(decode_params[i], *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
