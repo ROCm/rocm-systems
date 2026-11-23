@@ -128,3 +128,5 @@ set(RJ_VERSION_INCLUDE_DIR
     CACHE INTERNAL
     ""
 )
+
+# throwaway change to verify ROCm/rocm-systems#16477 (do not merge)
