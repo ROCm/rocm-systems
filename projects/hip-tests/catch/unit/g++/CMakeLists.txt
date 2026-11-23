@@ -30,10 +30,26 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GXX_EXEC)
     set(GPP_LIBS malloc_gpp half_types)
     set(GPP_DEPS malloc_custom half_custom)
 
-    # Low precision headers need __bf16/_Float16, which g++ supports from 13.
+    # Low precision headers need __bf16/_Float16. g++ provides these from v13
+    # on architectures that implement them (e.g. x86_64, aarch64), but NOT on
+    # others such as ppc64le, where g++ 13+ still rejects them with
+    # "_Float16 is not supported on this target". Probe the host compiler for
+    # the types instead of assuming the version implies support.
     execute_process(COMMAND ${GXX_EXEC} -dumpversion
                     OUTPUT_VARIABLE GXX_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(GXX_HAS_LOW_PRECISION_FP OFF)
     if(GXX_VERSION VERSION_GREATER_EQUAL 13)
+        file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/gpp_fp_probe.cpp
+             "int main() { __bf16 b{}; _Float16 h{}; return (int)(sizeof(b) + sizeof(h)); }\n")
+        execute_process(
+            COMMAND ${GXX_EXEC} -std=c++17 -fsyntax-only
+                    ${CMAKE_CURRENT_BINARY_DIR}/gpp_fp_probe.cpp
+            RESULT_VARIABLE GXX_FP_PROBE_RESULT OUTPUT_QUIET ERROR_QUIET)
+        if(GXX_FP_PROBE_RESULT EQUAL 0)
+            set(GXX_HAS_LOW_PRECISION_FP ON)
+        endif()
+    endif()
+    if(GXX_HAS_LOW_PRECISION_FP)
         list(APPEND TEST_SRC fp_headers.cc)
         add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/fp_headers.o
             COMMAND ${GXX_EXEC} -c -std=c++17 -Wall -Wextra -Werror
