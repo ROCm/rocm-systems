@@ -1624,11 +1624,12 @@ int rj_arith_v_cvt_scalef32_sr_pk32_bf6_bf16_w64_gfx950(
     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c);
 
 // gfx1250 Wave32 wide narrowing writes 16 six-bit codes into three VGPRs.
-// A has 16 FP32 or eight packed FP16/BF16 VGPRs. RNE uses B[0] as the full
-// FP32 divisor; SR uses B[0] as the seed and C[0] as divisor, advancing the
-// seed per element. Finite rounding, NaN/Inf policy and tiny cutoffs match the
-// gfx950 forms above; FP16_OVFL is ignored. Special divisors participate in
-// FP32 division rather than suppressing writes. Sources may overlap D.
+// A has 16 FP32 or eight packed FP16/BF16 VGPRs. RNE reads the scale from B[0].
+// SR reads the scale from C[0] and advances the B[0] seed per element. Bits
+// [30:23] of the scale operand hold the E8M0 divisor. A scale byte of 0 is
+// 2^-127; 255 supplies a NaN to the narrowing conversion. Finite rounding,
+// NaN/Inf policy and tiny cutoffs match the gfx950 forms above. FP16_OVFL is
+// ignored. Every active lane writes its result. Sources may overlap D.
 // Loose/Compatibility only; strict exact modes are unsupported.
 int rj_arith_v_cvt_scalef32_pk16_fp6_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                                      uint64_t instruction_flags, uint32_t *const *d,
@@ -1673,7 +1674,7 @@ int rj_arith_v_cvt_scalef32_sr_pk16_bf6_bf16_w32_gfx1250(
     uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t *const *d,
     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c);
 
-// gfx1250 PK8 narrowing divides eight values by the full FP32 scale. A has
+// gfx1250 PK8 narrowing uses the E8M0 scale described above. A has
 // eight FP32 or four packed FP16/BF16 VGPRs; D has one FP4 or two FP8/BF8 VGPRs.
 // RNE uses B[0] as scale; SR uses B[0] seed/C[0] scale, advancing per element.
 // FP8/BF8 use OCP encodings and honor FP16_OVFL saturation; FP4 ignores it.

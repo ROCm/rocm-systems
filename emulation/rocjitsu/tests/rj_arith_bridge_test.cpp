@@ -115,6 +115,7 @@
 #include <cmath>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -15418,23 +15419,22 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
       {0, cdna5::kVCvtScalef32Pk8Bf8Bf16Vop3, 2, 4, false},
       {0, cdna5::kVCvtScalef32SrPk8Bf8Bf16Vop3, 2, 4, true},
   };
-  for (bool full_scale : {false, true}) {
+  for (bool gfx1250 : {false, true}) {
 
     for (auto form : forms) {
-      if (!full_scale && form.format >= 2)
+      if (!gfx1250 && form.format >= 2)
         continue;
       const int bits = form.format == 2 ? 4 : form.format >= 3 ? 8 : 6;
-      const int elements = full_scale ? (bits == 6 ? 16 : 8) : 32;
+      const int elements = gfx1250 ? (bits == 6 ? 16 : 8) : 32;
       const int output_words = elements * bits / 32;
       for (int lanes : {32, 64}) {
-        if (full_scale && lanes != 32)
+        if (gfx1250 && lanes != 32)
           continue;
         for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
           for (int aliasing : {50, 0, 28, 32, 48}) {
             ArithmeticPolicy policy{};
             policy.semantics = semantics;
-            BridgeFixture fixture(full_scale ? rocjitsu::IsaFamily::Cdna5
-                                             : rocjitsu::IsaFamily::Cdna4,
+            BridgeFixture fixture(gfx1250 ? rocjitsu::IsaFamily::Cdna5 : rocjitsu::IsaFamily::Cdna4,
                                   lanes, policy);
             if (aliasing == 28) {
               fixture.cu->set_plugin_group(nullptr);
@@ -15460,20 +15460,19 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
                 fixture.cu->write_vgpr(fixture.base() + reg, lane, raw);
               }
             }
-            bool ternary = form.stochastic || (!full_scale && form.source == 0);
-            auto words =
-                full_scale
-                    ? cdna5::build_vop3(form.gfx1250_opcode,
-                                        {.vdst = uint8_t(aliasing),
-                                         .abs = 7,
-                                         .opsel = 15,
-                                         .clamp = 1,
-                                         .src0 = 256,
-                                         .src1 = uint16_t(256 + (ternary ? 32 : 48)),
-                                         .src2 = 304,
-                                         .omod = 3,
-                                         .neg = 7})
-                    : cdna4::build_vop3(form.opcode, {.vdst = uint8_t(aliasing),
+            bool ternary = form.stochastic || (!gfx1250 && form.source == 0);
+            auto words = gfx1250 ? cdna5::build_vop3(form.gfx1250_opcode,
+                                                     {.vdst = uint8_t(aliasing),
+                                                      .abs = 7,
+                                                      .opsel = 15,
+                                                      .clamp = 1,
+                                                      .src0 = 256,
+                                                      .src1 = uint16_t(256 + (ternary ? 32 : 48)),
+                                                      .src2 = 304,
+                                                      .omod = 3,
+                                                      .neg = 7})
+                                 : cdna4::build_vop3(form.opcode,
+                                                     {.vdst = uint8_t(aliasing),
                                                       .abs = 7,
                                                       .op_sel = 15,
                                                       .clamp = 1,
@@ -15490,16 +15489,16 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
             }
             ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded());
-            // Scale-255 lanes do not observe source data. Check before verification
+            // gfx950 scale-255 lanes do not observe source data. Check before verification
             // reads themselves notify the recorder.
             if (fixture.recorder) {
               ASSERT_EQ(fixture.recorder->writes.size(), unsigned(output_words));
               for (auto write : fixture.recorder->writes) {
-                EXPECT_EQ(write.lanes, full_scale ? exec_mask : exec_mask & ~0x8888888888888888ULL);
+                EXPECT_EQ(write.lanes, gfx1250 ? exec_mask : exec_mask & ~0x8888888888888888ULL);
                 EXPECT_EQ(write.bytes, 15);
               }
               for (const auto &read : fixture.recorder->reads) {
-                if (!full_scale && read.reg != 48) {
+                if (!gfx1250 && read.reg != 48) {
                   EXPECT_EQ(read.lanes & 0x8888888888888888ULL, 0U);
                 }
               }
@@ -15509,20 +15508,20 @@ TEST(ArithBridgeTest, WideScaledNarrowLayoutsAndAliases) {
               for (int word = 0; word < output_words; ++word)
                 expected[word] = input[aliasing + word][lane];
               int exponent = (input[48][lane] >> 23) & 255;
-              if (((exec_mask >> lane) & 1) && (full_scale || exponent != 255)) {
+              if (((exec_mask >> lane) & 1) && (gfx1250 || exponent != 255)) {
                 uint8_t codes[32];
                 uint32_t seed = input[32][lane];
                 for (int element = 0; element < elements; ++element) {
                   uint32_t raw = form.source == 0
-                                     ? input[(form.stochastic || full_scale)
+                                     ? input[(form.stochastic || gfx1250)
                                                  ? element
                                                  : (element % 2 ? 32 : 0) + element / 2][lane]
                                      : input[element / 2][lane] >> ((element % 2) * 16);
                   float value = form.source == 0   ? std::bit_cast<float>(raw)
                                 : form.source == 1 ? util::f16_to_f32(uint16_t(raw))
                                                    : util::bf16_to_f32(uint16_t(raw));
-                  value = full_scale ? value / std::bit_cast<float>(input[48][lane])
-                                     : float(double(value) / std::ldexp(1.0, exponent - 127));
+                  value = exponent == 255 ? std::numeric_limits<float>::quiet_NaN()
+                                          : float(double(value) / std::ldexp(1.0, exponent - 127));
                   switch (form.format) {
                   case 0:
                     codes[element] = form.stochastic ? util::f32_to_fp6_e2m3_sr(value, seed)

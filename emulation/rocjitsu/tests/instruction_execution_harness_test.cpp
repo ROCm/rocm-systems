@@ -8664,6 +8664,77 @@ TEST(Gfx1250CvtScaleTest, UnitScalePackMatchesRegisterScaleWithOverlappingTuples
   wf->halt();
 }
 
+TEST(Gfx1250CvtScaleTest, PackUsesOnlyScaleExponent) {
+  amdgpu::GpuMemory memory("pk8_memory");
+  amdgpu::L2Cache l2("pk8_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = rocjitsu::IsaFamily::Cdna5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("pk8_cu", cfg, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(cfg.arch);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  const auto base = wf->vgpr_alloc().base;
+  wf->set_exec(0xff);
+
+  // Triton loads E8M0 bytes 0x80 and 0x7f as one word and shifts it twice.
+  // Compare the produced operands with clean encodings of the same scales.
+  constexpr uint32_t packed_scales = 0x7f80u;
+  constexpr uint32_t scales[] = {
+      0x40000000u, packed_scales << 23, // 2
+      0x3f800000u, packed_scales << 15, // 1
+      0x00000000u, 0x007fu << 15,       // 2^-127
+      0x7f800000u, 0xff812345u,         // NaN
+  };
+  struct Case {
+    uint16_t opcode;
+    uint32_t source_word;
+    unsigned source_words;
+    unsigned destination_words;
+    uint32_t double_scale_result;
+    uint32_t unit_scale_result;
+  };
+  constexpr Case cases[] = {
+      {cdna5::kVCvtScalef32Pk8Fp4F32Vop3, 0x40000000u, 8, 1, 0x22222222u, 0x44444444u},
+      {cdna5::kVCvtScalef32Pk8Fp4F16Vop3, 0x40004000u, 4, 1, 0x22222222u, 0x44444444u},
+      {cdna5::kVCvtScalef32Pk8Fp4Bf16Vop3, 0x40004000u, 4, 1, 0x22222222u, 0x44444444u},
+      {cdna5::kVCvtScalef32Pk8Fp8F32Vop3, 0x40000000u, 8, 2, 0x38383838u, 0x40404040u},
+      {cdna5::kVCvtScalef32Pk8Fp8F16Vop3, 0x40004000u, 4, 2, 0x38383838u, 0x40404040u},
+      {cdna5::kVCvtScalef32Pk8Fp8Bf16Vop3, 0x40004000u, 4, 2, 0x38383838u, 0x40404040u},
+      {cdna5::kVCvtScalef32Pk8Bf8F32Vop3, 0x40000000u, 8, 2, 0x3c3c3c3cu, 0x40404040u},
+      {cdna5::kVCvtScalef32Pk8Bf8F16Vop3, 0x40004000u, 4, 2, 0x3c3c3c3cu, 0x40404040u},
+      {cdna5::kVCvtScalef32Pk8Bf8Bf16Vop3, 0x40004000u, 4, 2, 0x3c3c3c3cu, 0x40404040u},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.opcode);
+    const auto words =
+        cdna5::build_vop3(test.opcode, {.vdst = 16, .src0 = vgpr_src(0), .src1 = vgpr_src(8)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    for (unsigned lane = 0; lane < std::size(scales); ++lane) {
+      // Zero remains zero when scaled by 2^-127.
+      const uint32_t input = lane / 2 == 2 ? 0 : test.source_word;
+      for (unsigned word = 0; word < test.source_words; ++word)
+        cu->write_vgpr(base + word, lane, input);
+      cu->write_vgpr(base + 8, lane, scales[lane]);
+    }
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    // FP4 maps NaN to zero. FP8 and BF8 write the positive NaN code.
+    const uint32_t nan_result = test.destination_words == 1 ? 0 : 0x7f7f7f7fu;
+    const uint32_t expected[] = {test.double_scale_result, test.unit_scale_result, 0, nan_result};
+    for (unsigned word = 0; word < test.destination_words; ++word)
+      for (unsigned lane = 0; lane < std::size(scales); ++lane)
+        EXPECT_EQ(cu->read_vgpr(base + 16 + word, lane), expected[lane / 2])
+            << "scale=" << std::hex << scales[lane] << " word=" << word;
+  }
+  wf->halt();
+}
+
 TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
   amdgpu::GpuMemory gpu_mem("gfx1250_cvt_scale_boundary_mem");
   amdgpu::L2Cache l2("gfx1250_cvt_scale_boundary_l2");
