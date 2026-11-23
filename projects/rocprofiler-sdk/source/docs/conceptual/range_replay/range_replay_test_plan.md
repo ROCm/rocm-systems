@@ -13,6 +13,7 @@ sitting and can be merged or dropped on its own. The table below lists what has 
 | Samples, GPU | `samples/range_replay/` | a replayed range with `divergence_count == 0`, a tool that opts out, a multi-queue decline |
 | Integration, GPU | `tests/range-replay-local-context/` | every per-dispatch service sees the replayed dispatches and honors per-pass toggles |
 | Declines, GPU | `tests/range-replay-declines/` | a device-writing copy between a range's kernels, through `hipMemcpyAsync` (C1) or `hsa_amd_memory_async_batch_copy` (C2), declines with `MEMORY_COPY_IN_RANGE` while nothing traces memory copies; `hipMalloc` / `hipFree` inside a bound range decline with `ALLOCATION_CHANGED_IN_RANGE` (C3); an empty range closes with `NO_DISPATCH` (C4); a HIP graph launch on the range's thread declines with `GRAPH_LAUNCH` (C5); another thread's kernel on the same agent while the range is open declines with `CONCURRENT_DISPATCH` (C6); no pass runs and the application's result is intact |
+| Recording budget and API errors, GPU | `tests/range-replay-declines/` | exceeding the 4096-dispatch recording budget declines with `PROGRAM_TOO_LARGE` and reports all 4097 observed dispatches (C7); nested `begin` and unmatched `end` calls return `INVALID_ARGUMENT` (C14) |
 | Concurrency, GPU | `tests/range-replay-concurrency/` | another thread's HIP graph launches on the agent, timed into the replay window, wait for it to close: the range replays with `divergence_count == 0`, its result is intact, and every launch's increment survives (C8) |
 | Verification, GPU | `tests/range-replay-verify/` | with `ROCPROF_RANGE_REPLAY_VERIFY=1`, a range of three in-place kernels over a 16 MiB buffer, and one that builds an integer histogram with contended `atomicAdd` and then adds each element's bin count to it in place, replay with `divergence_count == 0`, and the application's result matches a host computation element for element (C9) |
 | Performance, GPU, nightly | `tests/range-replay-perf/` | pass-count scaling, amortization of the window cost over dispatches, and, with range replay configured but no range opened, the dispatch gate (P1), `hipMemcpyAsync` through the copy wrappers (P2), and `hipGraphLaunch` off the fast path (P3) |
@@ -33,6 +34,12 @@ and an empty range, and C5 / C6 cover a graph launch and a concurrent dispatch:
 - a HIP graph launch on the range's own thread must decline with `GRAPH_LAUNCH` (C5); a kernel
   from another thread on the same agent, while the range is still open, must decline with
   `CONCURRENT_DISPATCH` (C6).
+
+C7 now drives the recorder one dispatch beyond its fixed 4096-dispatch budget and checks both the
+`PROGRAM_TOO_LARGE` close status and the full observed count. C14 exercises the public API's
+thread-local state machine end to end: a second `begin` leaves the original range open and returns
+`INVALID_ARGUMENT`, while an `end` with no open range returns the same error without emitting a
+range callback.
 
 A small `hipMemcpyAsync` is not declined at all. HIP performs a copy of up to
 `GPU_FORCE_BLIT_COPY_SIZE` (16 KiB by default) with a copy kernel on the application's own queue,
