@@ -50,7 +50,7 @@ The sample provides a user class `FileStreamProvider` derived from the existing 
 
 ## [Video decode async](videoDecodeAsync)
 
-This sample decodes a stream with a producer thread, which parses and decodes, and a consumer thread, which receives the decoded frames through a bounded queue. It uses the rocDecode parser and decoder APIs directly and compares ways of handing frames from the display callback to another thread: copying each frame in the callback (safe), or passing the decoded surface pointer on without a copy, which the decoder may reuse before the consumer reads it.
+This sample decodes a stream with a producer thread, which parses and decodes, and a consumer thread, which receives the decoded frames through a bounded queue. It uses the rocDecode parser and decoder APIs directly and compares two ways of handing frames from the display callback to another thread: copying each frame in the callback, which is safe, or passing the decoded surface pointer without a copy, which is unsafe because the decoder can reuse the surface before the consumer reads it.
 
 ## [Video decode multi files](videoDecodeMultiFiles)
 
