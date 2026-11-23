@@ -336,6 +336,8 @@ TEST_F(ph_ctx_test, get_track_samples_returns_empty_for_non_pmc_track)
     EXPECT_EQ(samples.list_size, 0U);
 }
 
+#if PROFILER_HUB_ENABLE_ROCPD_V2
+
 const ph_track_t*
 find_track(const ph_track_list_t& tracks, ph_track_category_t category)
 {
@@ -509,5 +511,7 @@ TEST(ph_ctx_schema2_test, load_exposes_node_lists_details_histogram_queries_and_
     std::filesystem::remove(path);
     std::filesystem::remove(trimmed);
 }
+
+#endif  // PROFILER_HUB_ENABLE_ROCPD_V2
 
 }  // namespace

@@ -165,12 +165,14 @@ protected:
     std::filesystem::path m_cache;
 };
 
+#if PROFILER_HUB_ENABLE_ROCPD_V2
 TEST_F(catalog_aggregate_store_test, schema2_aggregates_round_trip_and_reject_damage)
 {
     const auto trace = m_root / "trace.rpd";
     test::write_schema2(trace);
     check_round_trip(trace, "aggregates-0.bin");
 }
+#endif
 
 TEST_F(catalog_aggregate_store_test, schema3_derived_tracks_round_trip_and_reject_damage)
 {
@@ -181,8 +183,13 @@ TEST_F(catalog_aggregate_store_test, schema3_derived_tracks_round_trip_and_rejec
 
 TEST_F(catalog_aggregate_store_test, no_cache_directory_writes_nothing)
 {
+#if PROFILER_HUB_ENABLE_ROCPD_V2
     const auto trace = m_root / "trace.rpd";
     test::write_schema2(trace);
+#else
+    const auto trace = m_root / "trace.db";
+    test::write_gpu_trace(trace.string());
+#endif
     {
         ph_ctx ctx{ std::vector<std::string>{ trace.string() }, std::string{} };
         ctx.load();
