@@ -31,11 +31,17 @@ namespace rdc {
 
 class RdcDiagnostic {
  public:
-  // get support test cases
+  // get support test cases. test_cases[] holds MAX_TEST_CASES entries, of which the
+  // implementation writes the *test_case_count it reports.
   virtual rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
                                                  uint32_t* test_case_count) = 0;
 
-  // Run a specific test case
+  // Run a specific test case. gpu_index[] holds the group's entity ids, of which the
+  // implementation reads min(gpu_count, RDC_MAX_NUM_DEVICES): the RDC_MAX_NUM_DEVICES
+  // in the signature bounds nothing, as the parameter is a pointer, and the dispatcher
+  // passes at most RDC_GROUP_MAX_ENTITIES ids. result->gpu_results[] holds
+  // RDC_MAX_NUM_DEVICES entries, and the implementation sets
+  // result->per_gpu_result_count to the rows it wrote and never above that.
   virtual rdc_status_t rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                          uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
                                          uint32_t gpu_count, const char* config, size_t config_size,

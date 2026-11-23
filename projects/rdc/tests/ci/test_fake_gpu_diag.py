@@ -140,6 +140,20 @@ def _in_range(gpus):
     return " ".join(f"GPU {g}: {LIMITS} limits in range." for g in gpus)
 
 
+def _device_lines(details, check):
+    """The " Device N" lines rdci prints under one check's info line, before the next check's."""
+    lines = None
+    for line in details:
+        if line.startswith(check + ":"):
+            lines = []
+        elif lines is not None:
+            if not line.startswith(" Device "):
+                break
+            lines.append(line)
+    assert lines is not None, details
+    return lines
+
+
 def test_topology_pairs_the_groups_gpus_by_index(tools, tmp_path):
     with _rdcd(tools, tmp_path, gpus=3) as d:
         status, details = _diag(d, _group(d, "topology", [1, 2]))
@@ -211,10 +225,12 @@ def test_processes_that_start_while_the_list_is_read_are_named(tools, tmp_path):
     assert len(info) == 1, details
     pids = [int(p) for p in re.findall(r"Process: (\d+),", info[0])]
     assert len(pids) >= 3, info  # 2, and 1 more than the count call found
-    # The fake runs process 1000 + i on GPU i % RDC_FAKE_GPUS.
+    # The fake runs process 1000 + i on GPU i % RDC_FAKE_GPUS. Only this check's lines: the ROCr
+    # checks print a line per GPU too.
+    processes = _device_lines(details, PROCESSES)
     for gpu in range(NUM_GPUS):
         on_gpu = " ".join(str(p) for p in pids if (p - 1000) % NUM_GPUS == gpu)
-        lines = [line for line in details if line.startswith(f" Device {gpu} ")]
+        lines = [line for line in processes if line.startswith(f" Device {gpu} ")]
         assert lines == ([f" Device {gpu} Running process: {on_gpu}"] if on_gpu else []), details
 
 

@@ -282,5 +282,7 @@ The diagnostic feature when run on a GPU group provides the following details:
     No compute process:       No processes running on any devices.
     Node topology check:      No pair of available GPUs to check.
     GPU parameters check:     GPU 0: 6 limits in range.
-    Compute Queue ready:      Run binary search task on GPU 0 Pass.
-    System memory check:      Max Single Allocation Memory Test for GPU 0 Pass. CPUAccessToGPUMemoryTest for GPU 0 Pass. GPUAccessToCPUMemoryTest for GPU 0 Pass.
+    Compute Queue ready:      GPU 0: a kernel ran on a compute queue.
+     Device 0 A kernel ran on a compute queue.
+    System memory check:      GPU 0: its memory pools and the CPU's and the GPU's access to memory were checked.
+     Device 0 Memory pool 1: allocated and freed 64 MiB. Memory pool 2: allocated and freed 64 MiB. The CPU wrote and read back 8 KiB of GPU memory. The GPU read and wrote 4 KiB of the CPU's memory.
