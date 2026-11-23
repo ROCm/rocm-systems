@@ -1151,6 +1151,9 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
       }
     }
     parallel_streams_.clear();
+    if (lastLaunchDone_ != nullptr) {
+      lastLaunchDone_->release();
+    }
     std::scoped_lock lock(graphExecSetLock_);
     // Normally erased in hipGraphExecDestroy(), but child graph nodes use delete directly.
     graphExecSet_.erase(this);
@@ -1198,8 +1201,27 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) {}
 
  protected:
+  //! Wait until the previous launch of this exec completed, on whichever stream it ran
+  void WaitForPreviousLaunch() {
+    if (lastLaunchDone_ != nullptr) {
+      lastLaunchDone_->awaitCompletion();
+      lastLaunchDone_->release();
+      lastLaunchDone_ = nullptr;
+    }
+  }
+  //! Keep the command whose completion ends this launch, for WaitForPreviousLaunch()
+  void SetLastLaunchDone(amd::Command* cmd) {
+    cmd->retain();
+    if (lastLaunchDone_ != nullptr) {
+      lastLaunchDone_->release();
+    }
+    lastLaunchDone_ = cmd;
+  }
+
   uint64_t flags_ = 0;
   bool repeatLaunch_ = false;
+  //! AutoFreeOnLaunch without direct dispatch: the command that ends the last launch
+  amd::Command* lastLaunchDone_ = nullptr;
   //! MemAlloc nodes of topoOrder_, in order. Filled by TopologicalOrder() at Init time.
   std::vector<GraphMemAllocNode*> memAllocNodes_;
   //! parallel streams per device

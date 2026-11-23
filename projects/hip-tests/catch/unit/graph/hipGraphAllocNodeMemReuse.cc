@@ -1088,12 +1088,15 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch_CopyRightAfterLaun
  *    launched again before its previous launch has run. The launch stream first waits for an
  *    event of another stream that is recorded behind a delay kernel, then the graph (alloc ->
  *    fill kernel -> verify kernel -> count kernel, with or without a free node) is launched twice
- *    back to back. Both launches must succeed, run, and see the filled values.
+ *    back to back, the second time on the same stream or on a third stream that does not wait.
+ *    Both launches must succeed, run, and see the filled values.
  *  - Without direct dispatch (Windows) the runtime's worker thread holds the first launch at the
  *    event, so the second hipGraphLaunch runs while the first launch's alloc node is pending.
  *    Without a free node, a runtime that releases the graph's memory and resets its allocation
  *    count before that node has run fails the second launch with hipErrorInvalidValue. The
- *    variant with a free node checks the same relaunch for a graph that frees its memory.
+ *    variant with a free node checks the same relaunch for a graph that frees its memory. The
+ *    relaunch on a third stream checks that the relaunch is ordered behind the previous launch of
+ *    the same exec, not only behind earlier work of its own stream.
  * Test source
  * ------------------------
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
@@ -1105,12 +1108,16 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch_RelaunchBeforePrev
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
   const bool withFree = GENERATE(false, true);
-  INFO("free node in graph: " << withFree);
+  const bool relaunchOnOtherStream = GENERATE(false, true);
+  INFO("free node in graph: " << withFree << ", relaunch on another stream: "
+                              << relaunchOnOtherStream);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
   StreamGuard other_guard(Streams::created);
   hipStream_t other = other_guard.stream();
+  StreamGuard relaunch_guard(Streams::created);
+  hipStream_t relaunchStream = relaunchOnOtherStream ? relaunch_guard.stream() : stream;
   hipEvent_t event = nullptr;
   HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
 
@@ -1144,8 +1151,9 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch_RelaunchBeforePrev
     HIP_CHECK(hipEventRecord(event, other));
     HIP_CHECK(hipStreamWaitEvent(stream, event, 0));
     HIP_CHECK(hipGraphLaunch(exec, stream));
-    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipGraphLaunch(exec, relaunchStream));
     HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamSynchronize(relaunchStream));
   }
 
   int errors = -1;
