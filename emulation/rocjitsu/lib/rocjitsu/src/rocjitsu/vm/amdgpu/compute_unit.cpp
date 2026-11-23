@@ -3045,11 +3045,13 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   }
   Instruction *inst = decoded.value().get();
   const uint64_t instruction_pc = active->pc;
-  DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
-                                                       active->pc, vmid, words, reuse_decoded);
+  const auto finish_issue = [&](IssueOutcome outcome) {
+    if (reuse_decoded)
+      decoded_inst_cache_.return_completed(instruction_pc, vmid, words, decoded);
+    return outcome;
+  };
   const std::string_view instruction_mnemonic = inst->mnemonic();
   const auto fail_current_instruction = [&]() {
-    return_decoded.discard();
     if constexpr (EnableAsync) {
       if (window)
         window->drain();
@@ -3088,7 +3090,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     drain_async_window();
     active->set_wait_all();
     if (!active->wait_satisfied())
-      return IssueOutcome::NotIssued;
+      return finish_issue(IssueOutcome::NotIssued);
   }
   ++active->trace_inst_count_;
 
@@ -3099,18 +3101,18 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   // counter changes, or async matrix submission. Scalar instructions still run.
   if ((active->mode_raw() & Wavefront::VSKIP_BIT) && inst->is_vskip_affected()) {
     active->pc += inst_size;
-    return IssueOutcome::NotIssued;
+    return finish_issue(IssueOutcome::NotIssued);
   }
   if (gfx10 && !can_issue_clause_member(*active, *inst, words[0])) {
     --active->trace_inst_count_;
-    return IssueOutcome::NotIssued;
+    return finish_issue(IssueOutcome::NotIssued);
   }
   // S_WAIT_EVENT defers debugger single-step until the export grant.
   if (active->debug_single_step() && has_typed_export_waits(config_.arch) &&
       inst->mnemonic() == "s_wait_event" && active->waits_for_export_grant(words[0])) {
     active->set_state(WfState::EXPORT_WAIT);
     --active->trace_inst_count_;
-    return IssueOutcome::NotIssued;
+    return finish_issue(IssueOutcome::NotIssued);
   }
   // A held export has not issued or consumed its source registers. Recheck
   // its decoded target and DONE/EXEC rules after the frontend grants storage.
@@ -3122,7 +3124,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         active->shader_export_issue(*modifiers.shader_export) == ShaderExportIssue::WaitForReady) {
       active->set_state(WfState::EXPORT_WAIT);
       --active->trace_inst_count_;
-      return IssueOutcome::NotIssued;
+      return finish_issue(IssueOutcome::NotIssued);
     }
   }
   // Pixel parameters become available when the graphics stage sets LDS_PARAM_RDY.
@@ -3133,7 +3135,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       (inst->mnemonic() == "lds_direct_load" || inst->mnemonic() == "lds_param_load")) {
     active->set_state(WfState::PARAM_WAIT);
     --active->trace_inst_count_;
-    return IssueOutcome::NotIssued;
+    return finish_issue(IssueOutcome::NotIssued);
   }
   // VINTERP consumes its operands only after WAIT_EXP is satisfied. Park on
   // the instruction itself so a late LDS parameter return is visible on retry.
@@ -3145,7 +3147,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (threshold && active->wait_counters().expcnt > *threshold) {
       active->wait_for({.expcnt = static_cast<uint8_t>(*threshold)});
       --active->trace_inst_count_;
-      return IssueOutcome::NotIssued;
+      return finish_issue(IssueOutcome::NotIssued);
     }
   }
 
@@ -3201,7 +3203,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (window) {
       window->before(*inst);
       if (active->is_halted())
-        return IssueOutcome::NotIssued;
+        return finish_issue(IssueOutcome::NotIssued);
       if (wait_state && !check_prepared_memory) {
         wait_state->check_instruction(*inst, *active);
         wait_checked = true;
@@ -3222,7 +3224,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         }
         active->pc += inst_size;
         record_gws_instruction_progress(active->process_id());
-        return IssueOutcome::Issued;
+        return finish_issue(IssueOutcome::Issued);
       }
     }
   }
@@ -3327,9 +3329,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       }
       if (software_trap && observes_after_execute_instruction_)
         plugin_group_->onAmdgpuAfterExecuteInstruction(saved_pc, *inst, *active);
-      if (active->instruction_execution_failed()) [[unlikely]]
+      if (active->instruction_execution_failed()) [[unlikely]] {
         fail_current_instruction();
-      return IssueOutcome::Issued;
+        return IssueOutcome::Issued;
+      }
+      return finish_issue(IssueOutcome::Issued);
     }
     if (!begin_trap())
       return IssueOutcome::Issued;
@@ -3337,14 +3341,14 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       const bool delivered =
           !active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active);
       if (delivered && active->debug_halted())
-        return IssueOutcome::NotIssued;
+        return finish_issue(IssueOutcome::NotIssued);
       active->set_status_raw(active->status_raw() | Wavefront::kStatusFatalHaltMask);
       active->report_instruction_execution_error(InstructionExecutionError::IllegalInstruction);
       handle_instruction_failure(*active, "s_code_end issued", delivered);
       return IssueOutcome::NotIssued;
     }
     active->pc += inst_size;
-    return IssueOutcome::Issued;
+    return finish_issue(IssueOutcome::Issued);
   }
 
   if (!observe_before_execute())
@@ -3365,7 +3369,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         // The null-PC return sentinel terminates like s_endpgm, including its
         // implicit memory wait before registers and the wave slot are freed.
         active->end();
-        return IssueOutcome::Issued;
+        return finish_issue(IssueOutcome::Issued);
       }
     }
   }
@@ -3388,7 +3392,6 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     // Its retained error belongs to the halted slot, whose identity was reset.
     if (active->is_halted()) {
       execution_failure_detail_.clear();
-      return_decoded.discard();
     } else {
       fail_current_instruction();
     }
@@ -3413,7 +3416,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   // authoritative terminal hook and fires in both cases — consumers should observe
   // termination there, not via the after-execute hook.
   if (active->is_halted()) {
-    return IssueOutcome::Issued;
+    return finish_issue(IssueOutcome::Issued);
   }
 
   if (wait_state && checks_gds_source_lifetime(config_.arch) && !inst->is_memory_wait_producer())
@@ -3661,14 +3664,14 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
           probe_wait_issue->pc, probe_wait_issue->before);
       assert(cancelled && "Claimed memory probe has no matching wait-check issue");
     }
-    return IssueOutcome::Issued;
+    return finish_issue(IssueOutcome::Issued);
   }
   if (inst->is_memory_op()) {
     if (!inst->data()) {
       // A memory execute path can intentionally reject an invalid complete
       // register operand before constructing pipeline state. Treat that as a
       // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted. Retain the decode for ScopedReturn,
+      // or memory transaction is permitted. Retain the decode for reuse,
       // including warm LDS-direct entries whose EXEC mask is zero and whose
       // prior dynamic state is retired.
       if (deferred_gds_sources)
@@ -3690,7 +3693,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       if (memory_outcome != VmAccessOutcome::Complete) {
         if (memory_outcome == VmAccessOutcome::Unavailable) {
           request_functional_yield();
-          return IssueOutcome::Issued;
+          return finish_issue(IssueOutcome::Issued);
         }
         // Ordinary memory instructions may overlap independent matrix work.
         // Join that work before a terminal fault releases the wave's registers.
@@ -3707,7 +3710,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       if (active->state() == WfState::MEMORY_TRAP) {
         active->pc += inst_size;
         deliver_memory_trap(*active);
-        return IssueOutcome::Issued;
+        return finish_issue(IssueOutcome::Issued);
       }
     }
   }
@@ -3730,7 +3733,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
     if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
         alu_exception_handler_(*active))
-      return IssueOutcome::Issued;
+      return finish_issue(IssueOutcome::Issued);
   }
 
   // s_rfe follows the same target-minus-size convention as other control-flow
@@ -3749,7 +3752,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       if (watchpoint_handler_(*active, range.address, range.bytes, dbg_is_write, dbg_is_atomic))
         break;
   }
-  return IssueOutcome::Issued;
+  return finish_issue(IssueOutcome::Issued);
 }
 
 // Keep ordinary issue and step as concrete entry points. Async execution

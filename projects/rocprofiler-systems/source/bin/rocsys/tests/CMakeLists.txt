@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(rocsys-tests OBJECT test_cli_dispatcher.cpp)
+add_library(rocsys-tests OBJECT test_cli_dispatcher.cpp test_options.cpp test_schema.cpp)
 
 target_link_libraries(
     rocsys-tests
