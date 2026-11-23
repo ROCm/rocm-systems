@@ -332,6 +332,7 @@ foreach(
         state
         relative
         pseudo
+        gfx1150_fp
 )
     set(target "rj_arith_scalar_${family}_test")
     rj_arith_add_test(${target} scalar/${family}_test.cpp)
