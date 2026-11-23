@@ -169,6 +169,14 @@ MakeSymmetricTaskList_TuningFindsKernel(int nChannels, int nWarps) {
   };
 }
 
+// The in-place test runs on kInPlaceRanks ranks with kInPlaceCount floats per rank, so recvbuff holds
+// kInPlaceRanks slices of kInPlaceSliceBytes each. A count off the 1 KiB sym cell keeps nBytes and the slice size
+// from agreeing by accident.
+constexpr int kInPlaceRanks = 4;
+constexpr size_t kInPlaceCount = 100;
+constexpr size_t kInPlaceSliceBytes = kInPlaceCount * sizeof(float);
+constexpr uintptr_t kInPlaceRecvAddr = 0x100000;
+
 // Unlike ncclMakeSymmetricTaskList (raw list + output param), this takes an already-populated queue directly.
 class SymmetricTaskScheduler_Scene {
  public:
@@ -1973,6 +1981,31 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_FalseWh
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead, &scene.needGenkDevComm), ncclSuccess);
   EXPECT_FALSE(capturedNvlsSupport);
+}
+
+// At rank 0 an in-place AllGather also has sendbuff == recvbuff, so only the other ranks pin the rank offset.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_InPlace_AllGatherFromItsOwnSliceAtEveryRank) {
+  for (int rank = 0; rank < kInPlaceRanks; ++rank) {
+    MakeSymmetricTaskList_Scene scene;
+    scene.comm->nRanks = kInPlaceRanks;
+    scene.comm->rank = rank;
+    ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene, ncclFuncAllGather, ncclFloat32);
+    task.count = kInPlaceCount;
+    task.recvbuff = reinterpret_cast<void*>(kInPlaceRecvAddr);
+    task.sendbuff = reinterpret_cast<void*>(kInPlaceRecvAddr + rank * kInPlaceSliceBytes);
+    int inPlace = -1;
+    ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
+      inPlace = input->inPlace;
+      return ncclSuccess;
+    });
+    struct ncclTaskColl* remainTasksHead = nullptr;
+
+    ASSERT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead, &scene.needGenkDevComm),
+              ncclSuccess);
+
+    ASSERT_EQ(tuningHook.calls, 1) << "rank " << rank;
+    EXPECT_EQ(inPlace, 1) << "rank " << rank;
+  }
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_CollNetSupportAndRegBuff_WiredFromTheirOwnFakes) {
