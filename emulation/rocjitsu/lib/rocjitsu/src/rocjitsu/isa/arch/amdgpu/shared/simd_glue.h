@@ -34,6 +34,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -106,7 +107,6 @@ enum class SimdFastPath : uint8_t {
   VOP3_TERNARY_FP16,
   VOP3_TERNARY_RAW_FP,
   VOP3_TERNARY_TRUE16_RAW_FP16,
-  VOP3P_DOT_INT,
   VOP_WORDS,
   VOP1_UNARY,
   VOP2_BINARY,
@@ -160,8 +160,8 @@ inline bool dot2_src_needs_half_replication(uint32_t selector) {
 
 /// @brief Return whether floating CLAMP converts a NaN result to positive zero.
 /// @details GFX12 and gfx1250 always convert NaN. Earlier profiles require MODE.DX10_CLAMP.
-inline bool floating_clamp_nan_to_zero(rj_code_arch_t arch, bool dx10_clamp) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || dx10_clamp;
+inline bool floating_clamp_nan_to_zero(rocjitsu::IsaFamily arch, bool dx10_clamp) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || dx10_clamp;
 }
 
 /// @brief Return the floating NaN CLAMP policy for one wavefront.
@@ -336,16 +336,6 @@ inline std::make_unsigned_t<T> vop3_integer_sub(std::make_unsigned_t<T> lhs,
   }
 }
 
-/// @brief Return whether V_DOT4 integer instructions honor the encoded CLAMP bit.
-/// @details The RDNA4 ISA manual says V_DOT4_I32_IU8 and V_DOT4_U32_U8 ignore
-/// CLAMP, but experiments with those instructions on gfx1201 hardware show
-/// saturation when CLAMP is set. The CDNA5-backed gfx1250 profile still ignores
-/// it. Keep this policy shared by scalar and SIMD execution.
-inline bool dot4_clamp_supported(const Wavefront &wf) {
-  const rj_code_arch_t arch = wf.cu().arch();
-  return arch != ROCJITSU_CODE_ARCH_CDNA5;
-}
-
 inline uint32_t sign_extend_u32(uint32_t value, unsigned bits) {
   assert(bits >= 1 && bits <= 32 && "sign_extend_u32 requires a 1..32 bit width");
   const uint32_t sign = uint32_t{1} << (bits - 1);
@@ -432,17 +422,6 @@ inline util::native<uint32_t> simd_sign_extend_u32(util::native<uint32_t> v, uns
   return ((v & mask) ^ sign) - sign;
 }
 
-inline util::native<uint32_t> simd_mul_i24_u32(util::native<uint32_t> lhs,
-                                               util::native<uint32_t> rhs) {
-  return simd_sign_extend_u32(lhs, 24) * simd_sign_extend_u32(rhs, 24);
-}
-
-inline util::native<uint32_t> simd_mad_i24_u32(util::native<uint32_t> lhs,
-                                               util::native<uint32_t> rhs,
-                                               util::native<uint32_t> addend) {
-  return simd_mul_i24_u32(lhs, rhs) + addend;
-}
-
 inline util::native<uint32_t> simd_lshl_u32(util::native<uint32_t> v, util::native<uint32_t> sh) {
   return util::map_native_scalar<uint32_t>(
       v, sh, [](uint32_t value, uint32_t count) { return value << (count & 31u); });
@@ -467,44 +446,6 @@ inline util::native<uint64_t> simd_ashr_i64(util::native<uint64_t> v, util::nati
   return util::map_native64_scalar<uint64_t>(v, sh, [](uint64_t value, uint64_t count) {
     return static_cast<uint64_t>(static_cast<int64_t>(value) >> (count & 63u));
   });
-}
-
-inline util::native<uint32_t> simd_bfe_u32(util::native<uint32_t> src,
-                                           util::native<uint32_t> offset,
-                                           util::native<uint32_t> width) {
-  return util::map_native_scalar<uint32_t>(
-      src, offset, width, [](uint32_t value, uint32_t offset_value, uint32_t width_value) {
-        const uint32_t off = offset_value & 31u;
-        const uint32_t w = width_value & 31u;
-        if (w == 0)
-          return uint32_t{0};
-        const uint32_t mask = (uint32_t{1} << w) - 1u;
-        return (value >> off) & mask;
-      });
-}
-
-inline util::native<uint32_t> simd_bfe_i32(util::native<uint32_t> src,
-                                           util::native<uint32_t> offset,
-                                           util::native<uint32_t> width) {
-  return util::map_native_scalar<uint32_t>(
-      src, offset, width, [](uint32_t value, uint32_t offset_value, uint32_t width_value) {
-        const uint32_t off = offset_value & 31u;
-        const uint32_t w = width_value & 31u;
-        if (w == 0)
-          return uint32_t{0};
-        const uint32_t mask = (uint32_t{1} << w) - 1u;
-        const uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(value) >> off) & mask;
-        const uint32_t signbit = uint32_t{1} << (w - 1u);
-        return (extracted ^ signbit) - signbit;
-      });
-}
-
-inline util::native<uint32_t> simd_bfm_b32(util::native<uint32_t> width,
-                                           util::native<uint32_t> offset) {
-  return util::map_native_scalar<uint32_t>(width, offset,
-                                           [](uint32_t width_value, uint32_t offset_value) {
-                                             return bfm_b32(width_value, offset_value);
-                                           });
 }
 
 inline util::native<int32_t> simd_cvt_i32_f32(util::native<float32_t> s) {
@@ -622,10 +563,10 @@ inline util::native<uint32_t> select_vop3_true16_src(util::native<uint32_t> valu
 
 inline bool cdna_vop3_low_dst_zeroes_high(const Wavefront &wf) {
   switch (wf.cu().arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
   default:
     return false;
@@ -3925,9 +3866,9 @@ template <typename Encoding> inline uint32_t packed_opsel_hi_2(const Encoding &e
 // gfx1100 and gfx1201 apply NEG_LO/NEG_HI to the selected integer source halves.
 // RDNA3.5 follows RDNA3; CDNA5 follows RDNA4 for their common packed operations.
 template <typename Encoding>
-inline uint32_t packed_integer_negations(rj_code_arch_t arch, const Encoding &enc) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+inline uint32_t packed_integer_negations(rocjitsu::IsaFamily arch, const Encoding &enc) {
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+      arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
     return static_cast<uint32_t>(enc.neg) | (static_cast<uint32_t>(enc.neg_hi) << 16);
   return 0;
 }
@@ -4261,8 +4202,9 @@ template <typename Inst, typename Op>
   const bool neg0_hi = inst.inst_.neg_hi & 1u;
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   RegisterAccess regs(wf);
-  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
-                                                                      : ScalarPairMode::Preserve;
+  const auto scalar_mode = wf.cu().arch() == rocjitsu::IsaFamily::Cdna5
+                               ? ScalarPairMode::Replicate32
+                               : ScalarPairMode::Preserve;
   auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
   auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
   auto dst = regs.write_operand_pair32(inst.vdst, exec);
@@ -4338,8 +4280,9 @@ template <typename Inst, typename Op>
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   const bool neg2_hi = inst.inst_.neg_hi & 4u;
   RegisterAccess regs(wf);
-  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
-                                                                      : ScalarPairMode::Preserve;
+  const auto scalar_mode = wf.cu().arch() == rocjitsu::IsaFamily::Cdna5
+                               ? ScalarPairMode::Replicate32
+                               : ScalarPairMode::Preserve;
   auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
   auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
   auto src2 = regs.read_operand_pair32(inst.src2, exec, scalar_mode);
@@ -4427,129 +4370,6 @@ template <typename Inst> [[nodiscard]] bool try_execute_vop3p_mov_b32_simd(Inst 
   return false;
 }
 
-/// VOP3P integer dot-product SIMD fast path (v_dot4_i32_i8 / v_dot4_u32_u8 /
-/// v_dot8_i32_i4 / v_dot8_u32_u4 / v_dot2_i32_i16 / v_dot2_u32_u16). Unlike
-/// the packed-16 family the destination is a single 32-bit lane (NOT packed)
-/// and src2 is a per-lane accumulator; the dot reduction happens *within*
-/// each lane, so the fast path vectorizes across lanes (each lane computes
-/// its own reduction). ElemBits selects the sub-word width (16/8/4 -> 2/4/8
-/// products per lane); Signed selects sign- vs zero-extension and, for the
-/// signed forms when inst.clamp is set, saturation to [INT_MIN, INT_MAX]. Unsigned
-/// clamp saturates to UINT_MAX. Clamped accumulation is widened so overflow is
-/// detected before narrowing; unclamped accumulation remains in uint32_t bits
-/// and wraps. op_sel / op_sel_hi pick the source halves. The 16-bit forms gate
-/// on the default packing (op_sel == 0, op_sel_hi == 3) and bail otherwise; the
-/// 8/4-bit forms apply the selection to the packed sources, as gfx1201 and
-/// gfx1100 do.
-template <int ElemBits, bool Signed, typename Inst>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &inst, Wavefront &wf) {
-  static_assert(ElemBits == 16 || ElemBits == 8 || ElemBits == 4, "dot ElemBits must be 16/8/4");
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  if constexpr (ElemBits == 16) {
-    if (packed_opsel(inst.inst_) != 0u || packed_opsel_hi(inst.inst_) != 3u)
-      return false;
-  }
-  const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  if (clamp)
-    return false;
-#endif
-  constexpr int N = 32 / ElemBits;
-  constexpr uint32_t kElemMask = (ElemBits == 16) ? 0xFFFFu : (ElemBits == 8) ? 0xFFu : 0xFu;
-  using T = uint32_t;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  using U = util::native<uint32_t>;
-  using I = util::native<int32_t>;
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  auto src2 = regs.read_operand(inst.src2, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    U raw0 = src0.template load_native<uint32_t>(base);
-    U raw1 = src1.template load_native<uint32_t>(base);
-    if constexpr (ElemBits != 16) {
-      raw0 = select_packed_halves(raw0, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 0);
-      raw1 = select_packed_halves(raw1, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 1);
-    }
-    const U acc = src2.template load_native<uint32_t>(base);
-    if constexpr (Signed) {
-#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-      if (clamp) {
-        using I64 = util::stdx::fixed_size_simd<int64_t, W>;
-        I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
-        for (int i = 0; i < N; ++i) {
-          const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
-          const I src0_elem = std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits));
-          const I src1_elem = std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits));
-          sum += util::stdx::static_simd_cast<I64>(src0_elem * src1_elem);
-        }
-        util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
-            I64(std::numeric_limits<int32_t>::min());
-        util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
-            I64(std::numeric_limits<int32_t>::max());
-        if (dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk)
-                .failed())
-          return true;
-        continue;
-      }
-#endif
-      U sum = acc;
-      for (int i = 0; i < N; ++i) {
-        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I src0_elem = std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits));
-        const I src1_elem = std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits));
-        sum += std::bit_cast<U>(src0_elem * src1_elem);
-      }
-      if (dst.template store_native<uint32_t>(base, sum, chunk).failed())
-        return true;
-    } else {
-#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-      if (clamp) {
-        using U64 = util::stdx::fixed_size_simd<uint64_t, W>;
-        U64 sum = util::stdx::static_simd_cast<U64>(acc);
-        for (int i = 0; i < N; ++i) {
-          const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
-          sum += util::stdx::static_simd_cast<U64>(src0_bits * src1_bits);
-        }
-        util::stdx::where(sum > U64(std::numeric_limits<uint32_t>::max()), sum) =
-            U64(std::numeric_limits<uint32_t>::max());
-        if (dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk)
-                .failed())
-          return true;
-        continue;
-      }
-#endif
-      U sum = acc;
-      for (int i = 0; i < N; ++i) {
-        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
-        sum += src0_bits * src1_bits;
-      }
-      if (dst.template store_native<uint32_t>(base, sum, chunk).failed())
-        return true;
-    }
-  }
-  detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
-  return true;
-}
-
-template <int ElemBits, bool Signed, typename Inst>
-[[nodiscard]] bool try_execute_vop3p_dot_int_simd(Inst &, Wavefront &) {
-  return false;
-}
-
 /// Whether a VOP3P dot widens its 16-bit float halves as F16 or BF16. The two
 /// formats share the entire dot2 structure (op_sel packing and neg/neg_hi,
 /// left-to-right accumulate) and differ only in how each half is widened to f32.
@@ -4629,219 +4449,6 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
 
 template <Vop3pDotHalfFormat Fmt, typename Inst>
 [[nodiscard]] bool try_execute_vop3p_dot_f16_simd(Inst &, Wavefront &) {
-  return false;
-}
-
-/// VOP3P mixed-sign integer dot product (v_dot4_i32_iu8 / v_dot8_i32_iu4).
-/// Same structure as try_execute_vop3p_dot_int_simd but the per-operand
-/// signedness is chosen at RUNTIME from inst.neg (bit 0 -> src0 signed, bit 1
-/// -> src1 signed) — hoisted out of the chunk loop. src2 is the int32
-/// accumulator seed; clamp (when set) saturates to [INT_MIN, INT_MAX] before
-/// narrowing. Unclamped accumulation wraps in uint32_t bits. op_sel / op_sel_hi
-/// pick the source halves, as in the scalar bodies.
-template <int ElemBits, typename Inst>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_dot_int_mixed_simd(Inst &inst, Wavefront &wf) {
-  static_assert(ElemBits == 8 || ElemBits == 4, "iu dot ElemBits must be 8/4");
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  constexpr int N = 32 / ElemBits;
-  constexpr uint32_t kElemMask = (ElemBits == 8) ? 0xFFu : 0xFu;
-  using T = uint32_t;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  if (clamp)
-    return false;
-#endif
-  const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
-  const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
-  const uint32_t opsel = packed_opsel(inst.inst_);
-  const uint32_t opsel_hi = packed_opsel_hi(inst.inst_);
-  using U = util::native<uint32_t>;
-  using I = util::native<int32_t>;
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  auto src2 = regs.read_operand(inst.src2, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const U raw0 =
-        select_packed_halves(src0.template load_native<uint32_t>(base), opsel, opsel_hi, 0);
-    const U raw1 =
-        select_packed_halves(src1.template load_native<uint32_t>(base), opsel, opsel_hi, 1);
-    const U acc = src2.template load_native<uint32_t>(base);
-#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-    if (clamp) {
-      using I64 = util::stdx::fixed_size_simd<int64_t, W>;
-      I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
-      for (int i = 0; i < N; ++i) {
-        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I src0_elem = src0_signed
-                                ? std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits))
-                                : util::stdx::static_simd_cast<I>(src0_bits);
-        const I src1_elem = src1_signed
-                                ? std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits))
-                                : util::stdx::static_simd_cast<I>(src1_bits);
-        sum += util::stdx::static_simd_cast<I64>(src0_elem * src1_elem);
-      }
-      util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
-          I64(std::numeric_limits<int32_t>::min());
-      util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
-          I64(std::numeric_limits<int32_t>::max());
-      if (dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk)
-              .failed())
-        return true;
-      continue;
-    }
-#endif
-    U sum = acc;
-    for (int i = 0; i < N; ++i) {
-      const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
-      const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
-      const I src0_elem = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits))
-                                      : util::stdx::static_simd_cast<I>(src0_bits);
-      const I src1_elem = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits))
-                                      : util::stdx::static_simd_cast<I>(src1_bits);
-      sum += std::bit_cast<U>(src0_elem * src1_elem);
-    }
-    if (dst.template store_native<uint32_t>(base, sum, chunk).failed())
-      return true;
-  }
-  detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
-  return true;
-}
-
-template <int ElemBits, typename Inst>
-[[nodiscard]] bool try_execute_vop3p_dot_int_mixed_simd(Inst &, Wavefront &) {
-  return false;
-}
-
-/// VOP2/VOP3 dst-accumulate integer dot product (the "c" forms:
-/// v_dot2c_i32_i16, v_dot4c_i32_i8, v_dot8c_i32_i4). The accumulator is the
-/// DESTINATION register (inst.vdst), read as the accumulate source and written
-/// as the result. VOP2 reads its 2nd source as inst.vsrc1, VOP3 as inst.src1
-/// (selected by the Vop3 flag via if constexpr). All *c int forms are signed;
-/// products fit in int32, while accumulation wraps in uint32_t bits. The scalar
-/// bodies carry no op_sel/neg/clamp.
-template <int ElemBits, bool Vop3, typename Inst>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_dotc_int_simd(Inst &inst, Wavefront &wf) {
-  static_assert(ElemBits == 16 || ElemBits == 8 || ElemBits == 4, "dotc ElemBits must be 16/8/4");
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
-    return false;
-  if constexpr (Vop3) {
-    if (!inst.src1.simd_capable())
-      return false;
-  } else {
-    if (!inst.vsrc1.simd_capable())
-      return false;
-  }
-  constexpr int N = 32 / ElemBits;
-  constexpr uint32_t kElemMask = (ElemBits == 16) ? 0xFFFFu : (ElemBits == 8) ? 0xFFu : 0xFu;
-  using T = uint32_t;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  using U = util::native<uint32_t>;
-  using I = util::native<int32_t>;
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = [&]() {
-    if constexpr (Vop3)
-      return regs.read_operand(inst.src1, exec);
-    else
-      return regs.read_operand(inst.vsrc1, exec);
-  }();
-  auto acc = regs.readwrite_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
-    U sum = acc.template load_native<uint32_t>(base); // accumulator from dst
-    for (int i = 0; i < N; ++i) {
-      const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-      const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-      const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
-      const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
-      sum += std::bit_cast<U>(a * b);
-    }
-    if (acc.template store_native<uint32_t>(base, sum, chunk).failed())
-      return true;
-  }
-  return true;
-}
-
-template <int ElemBits, bool Vop3, typename Inst>
-[[nodiscard]] bool try_execute_dotc_int_simd(Inst &, Wavefront &) {
-  return false;
-}
-
-/// VOP2/VOP3 dst-accumulate f16 dot product (v_dot2c_f32_f16). Two f16 products
-/// of src0 and src1/vsrc1 (widened via f16_to_f32_simd) plus the f32
-/// accumulator read from the DESTINATION register. Bracketing matches the
-/// scalar `facc += a0*b0 + a1*b1` exactly: acc + ((a0*b0)+(a1*b1)). No
-/// op_sel/neg/clamp. NaN-payload divergence accepted (shared f16 carve-out).
-template <bool Vop3, typename Inst>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_dotc_f16_simd(Inst &inst, Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
-    return false;
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
-    return false;
-  if constexpr (Vop3) {
-    if (!inst.src1.simd_capable())
-      return false;
-  } else {
-    if (!inst.vsrc1.simd_capable())
-      return false;
-  }
-  using T = uint32_t;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  using F = util::native<float>;
-  using U = util::native<uint32_t>;
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = [&]() {
-    if constexpr (Vop3)
-      return regs.read_operand(inst.src1, exec);
-    else
-      return regs.read_operand(inst.vsrc1, exec);
-  }();
-  auto acc = regs.readwrite_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
-    const F acc_value = std::bit_cast<F>(acc.template load_native<uint32_t>(base));
-    const F a0 = util::f16_to_f32_simd(raw0 & 0xFFFFu);
-    const F a1 = util::f16_to_f32_simd(raw0 >> 16);
-    const F b0 = util::f16_to_f32_simd(raw1 & 0xFFFFu);
-    const F b1 = util::f16_to_f32_simd(raw1 >> 16);
-    const F r = acc_value + (a0 * b0 + a1 * b1);
-    if (acc.template store_native<uint32_t>(base, std::bit_cast<U>(r), chunk).failed())
-      return true;
-  }
-  return true;
-}
-
-template <bool Vop3, typename Inst>
-[[nodiscard]] bool try_execute_dotc_f16_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -5515,12 +5122,6 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_vop3p_mov_b32_simd(inst, wf))                                \
   return
 
-/// VOP3P integer dot-product probe. Args: (ElemBits, Signed) — e.g.
-/// (8, true) for v_dot4_i32_i8, (4, false) for v_dot8_u32_u4. Functorless.
-#define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT(...)                                                       \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_dot_int_simd<__VA_ARGS__>(inst, wf))                   \
-  return
-
 /// VOP3P v_dot2_f32_{f16,bf16} SIMD probe. Arg: the half-precision widening
 /// format (F16 or BF16) as a ::rocjitsu::amdgpu::Vop3pDotHalfFormat enumerator.
 #define ROCJITSU_TRY_SIMD_VOP3P_DOT_F16(Fmt)                                                       \
@@ -5528,22 +5129,7 @@ template <bool Vop3, typename Inst>
           ::rocjitsu::amdgpu::Vop3pDotHalfFormat::Fmt>(inst, wf))                                  \
   return
 
-/// VOP3P mixed-sign integer dot probe (v_dot4_i32_iu8 / v_dot8_i32_iu4). Arg:
-/// ElemBits (8 or 4). Per-operand sign read at runtime from inst.neg.
-#define ROCJITSU_TRY_SIMD_VOP3P_DOT_INT_MIXED(ElemBits)                                            \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_dot_int_mixed_simd<ElemBits>(inst, wf))                \
-  return
-
-/// VOP2/VOP3 dst-accumulate integer dot probe (the "c" forms). Args:
-/// (ElemBits, Vop3) — e.g. (8, true) for v_dot4c_i32_i8_vop3.
-#define ROCJITSU_TRY_SIMD_DOTC_INT(...)                                                            \
-  if (::rocjitsu::amdgpu::try_execute_dotc_int_simd<__VA_ARGS__>(inst, wf))                        \
-  return
-
 /// VOP2/VOP3 dst-accumulate f16 dot probe (v_dot2c_f32_f16). Arg: Vop3 bool.
-#define ROCJITSU_TRY_SIMD_DOTC_F16(...)                                                            \
-  if (::rocjitsu::amdgpu::try_execute_dotc_f16_simd<__VA_ARGS__>(inst, wf))                        \
-  return
 
 /// Exact packed F16/BF16 arithmetic, selected by PackedFloatOp and Bf16.
 #define ROCJITSU_TRY_SIMD_PACKED_FLOAT(Op, Bf16)                                                   \

@@ -15,6 +15,7 @@
 /// against the raw encoded word instead, per generation.
 
 #include "rocjitsu/code/builders/smem_builders.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/rj_code.h"
@@ -42,7 +43,7 @@ namespace {
 enum class SmemOffsetShape { CdnaEnableBits, RdnaSoffsetNull };
 
 struct SmemArch {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name; ///< For failure messages; the enum prints as an int.
   const char *load_mnemonic;
   uint32_t max_byte_offset;
@@ -55,37 +56,38 @@ struct SmemArch {
 // derived from the builder, so a generated table changing underneath us fails
 // here instead of the test silently agreeing with the new value.
 constexpr std::array<SmemArch, 10> kArchs{{
-    {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", "s_load_dwordx2", 0x0FFFFFu,
+    {rocjitsu::IsaFamily::Cdna1, "cdna1", "s_load_dwordx2", 0x0FFFFFu,
      SmemOffsetShape::CdnaEnableBits, std::nullopt, "s_waitcnt"},
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", "s_load_dwordx2", 0x0FFFFFu,
+    {rocjitsu::IsaFamily::Cdna2, "cdna2", "s_load_dwordx2", 0x0FFFFFu,
      SmemOffsetShape::CdnaEnableBits, std::nullopt, "s_waitcnt"},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", "s_load_dwordx2", 0x0FFFFFu,
+    {rocjitsu::IsaFamily::Cdna3, "cdna3", "s_load_dwordx2", 0x0FFFFFu,
      SmemOffsetShape::CdnaEnableBits, std::nullopt, "s_waitcnt"},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", "s_load_dwordx2", 0x0FFFFFu,
+    {rocjitsu::IsaFamily::Cdna4, "cdna4", "s_load_dwordx2", 0x0FFFFFu,
      SmemOffsetShape::CdnaEnableBits, std::nullopt, "s_waitcnt"},
     // NULL is 125 on RDNA1/2 and 124 from RDNA3 on. A dispatch that hardcoded
     // one value would encode a real SGPR as the offset on the other half.
-    {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", "s_load_dwordx2", 0x0FFFFFu,
+    {rocjitsu::IsaFamily::Rdna1, "rdna1", "s_load_dwordx2", 0x0FFFFFu,
      SmemOffsetShape::RdnaSoffsetNull, 125, "s_waitcnt"},
-    {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", "s_load_dwordx2", 0x0FFFFFu,
+    {rocjitsu::IsaFamily::Rdna2, "rdna2", "s_load_dwordx2", 0x0FFFFFu,
      SmemOffsetShape::RdnaSoffsetNull, 125, "s_waitcnt"},
-    {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "s_load_b64", 0x0FFFFFu, SmemOffsetShape::RdnaSoffsetNull,
+    {rocjitsu::IsaFamily::Rdna3, "rdna3", "s_load_b64", 0x0FFFFFu, SmemOffsetShape::RdnaSoffsetNull,
      124, "s_waitcnt"},
-    {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "s_load_b64", 0x0FFFFFu,
+    {rocjitsu::IsaFamily::Rdna3_5, "rdna3_5", "s_load_b64", 0x0FFFFFu,
      SmemOffsetShape::RdnaSoffsetNull, 124, "s_waitcnt"},
     // GFX12 widens the immediate to 24 bits and splits the wait counters.
-    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "s_load_b64", 0x7FFFFFu, SmemOffsetShape::RdnaSoffsetNull,
+    {rocjitsu::IsaFamily::Rdna4, "rdna4", "s_load_b64", 0x7FFFFFu, SmemOffsetShape::RdnaSoffsetNull,
      124, "s_wait_kmcnt"},
-    {ROCJITSU_CODE_ARCH_CDNA5, "cdna5", "s_load_b64", 0x7FFFFFu, SmemOffsetShape::RdnaSoffsetNull,
+    {rocjitsu::IsaFamily::Cdna5, "cdna5", "s_load_b64", 0x7FFFFFu, SmemOffsetShape::RdnaSoffsetNull,
      124, "s_wait_kmcnt"},
 }};
 
-constexpr std::array<rj_code_arch_t, 3> kNonAmdGpuArchs{
-    ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID};
+constexpr std::array<rocjitsu::IsaFamily, 3> kNonAmdGpuArchs{
+    rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid};
 
 // Decode the instruction starting at `words[0]`, or null if it did not decode.
 // Two words are always passed so an 8-byte encoding has its second word.
-std::unique_ptr<Instruction> decode_one(const std::array<uint32_t, 2> &words, rj_code_arch_t arch) {
+std::unique_ptr<Instruction> decode_one(const std::array<uint32_t, 2> &words,
+                                        rocjitsu::IsaFamily arch) {
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return nullptr;
@@ -224,8 +226,8 @@ TEST(SmemBuilder, OffsetIsBoundedByTheArchSignedImmediateRange) {
   }
 
   // GFX12's field is wider, so an offset legal there is not legal earlier.
-  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_CDNA4).failed());
-  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0x100000u, rocjitsu::IsaFamily::Cdna4).failed());
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0x100000u, rocjitsu::IsaFamily::Rdna4).succeeded());
 }
 
 // Scalar loads drop the low two address bits, so offset 1 would load from the
@@ -252,16 +254,16 @@ TEST(SmemBuilder, ScalarLoadWaitSelectsTheScalarCounter) {
 
   // Through RDNA3.5 the monolithic wait covers both counters; GFX12 splits them,
   // and only there is the distinction observable in the encoding.
-  const auto cdna3_wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+  const auto cdna3_wait = build_wait_scalar_loads_complete(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(cdna3_wait.succeeded());
   const util::FailureOr<uint32_t> maybe_wait_loads_complete_cdna3 =
-      build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+      build_wait_loads_complete(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_wait_loads_complete_cdna3.succeeded());
   EXPECT_EQ(cdna3_wait.value(), maybe_wait_loads_complete_cdna3.value());
-  const auto rdna4_wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto rdna4_wait = build_wait_scalar_loads_complete(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(rdna4_wait.succeeded());
   const util::FailureOr<uint32_t> maybe_wait_loads_complete_rdna4 =
-      build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+      build_wait_loads_complete(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_wait_loads_complete_rdna4.succeeded());
   EXPECT_NE(rdna4_wait.value(), maybe_wait_loads_complete_rdna4.value());
 }
@@ -274,7 +276,7 @@ TEST(SmemBuilder, EmitsOneDiagnosticOnlyOnFailure) {
     message = text;
   };
   const util::DiagnosticEmitter error(callback);
-  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr auto arch = rocjitsu::IsaFamily::Rdna4;
   EXPECT_TRUE(max_smem_byte_offset(arch, &error).succeeded());
   EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0, arch, &error).succeeded());
   EXPECT_TRUE(build_wait_scalar_loads_complete(arch, &error).succeeded());
@@ -289,19 +291,19 @@ TEST(SmemBuilder, EmitsOneDiagnosticOnlyOnFailure) {
 
   // The load delegates architecture validation to the offset helper. Its
   // failure must propagate without emitting a second diagnostic.
-  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0, ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0, rocjitsu::IsaFamily::Invalid, &error).failed());
   EXPECT_EQ(messages, 3u);
   EXPECT_EQ(message, "unsupported target architecture for the SMEM offset range");
-  EXPECT_TRUE(build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_TRUE(build_wait_scalar_loads_complete(rocjitsu::IsaFamily::Invalid, &error).failed());
   EXPECT_EQ(messages, 4u);
   EXPECT_EQ(message, "unsupported target architecture for the scalar-load wait");
-  EXPECT_TRUE(max_smem_byte_offset(ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_TRUE(max_smem_byte_offset(rocjitsu::IsaFamily::Invalid, &error).failed());
   EXPECT_EQ(messages, 5u);
   EXPECT_EQ(message, "unsupported target architecture for the SMEM offset range");
 }
 
 TEST(SmemBuilder, NonAmdGpuArchsReturnFailure) {
-  for (const rj_code_arch_t arch : kNonAmdGpuArchs) {
+  for (const rocjitsu::IsaFamily arch : kNonAmdGpuArchs) {
     EXPECT_TRUE(build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, /*byte_offset=*/0, arch).failed());
     EXPECT_TRUE(build_wait_scalar_loads_complete(arch).failed());
     EXPECT_TRUE(max_smem_byte_offset(arch).failed());

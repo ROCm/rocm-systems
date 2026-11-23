@@ -37,7 +37,8 @@ bool nullify_unallocated_memory_return(Instruction &inst, const amdgpu::Wavefron
                                        amdgpu::MemPipelineTag pipeline) {
   if (amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(inst))
     return false;
-  auto state = std::make_unique<amdgpu::VectorMemState>(pipeline);
+  std::unique_ptr<amdgpu::VectorMemState> state =
+      inst.acquire_data<amdgpu::VectorMemState>(pipeline);
   state->wf_size = wf.wf_size();
   inst.set_data(std::move(state));
   return true;
