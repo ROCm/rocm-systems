@@ -17,6 +17,7 @@
 
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -35,7 +36,7 @@
 namespace rocjitsu {
 namespace {
 
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
 constexpr uint32_t kWaveSize = 32;
 // Lanes active at the anchor: a strict subset, so a lost EXEC restore shows.
 constexpr uint32_t kAnchorMask = 3;

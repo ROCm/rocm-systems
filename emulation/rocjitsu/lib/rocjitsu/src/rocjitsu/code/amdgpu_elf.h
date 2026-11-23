@@ -5,6 +5,7 @@
 #define ROCJITSU_CODE_AMDGPU_ELF_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -79,27 +80,27 @@ inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
  * LLVM AMDGPU backend), then handle it in elf_mach_for_arch, arch_for_elf_mach, \
  * and elf_mach_name below.
  */
-inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
+inline constexpr uint32_t elf_mach_for_arch(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return EF_AMDGPU_MACH_AMDGCN_GFX908;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return EF_AMDGPU_MACH_AMDGCN_GFX90A;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return EF_AMDGPU_MACH_AMDGCN_GFX942;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return EF_AMDGPU_MACH_AMDGCN_GFX950;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return EF_AMDGPU_MACH_AMDGCN_GFX1010;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return EF_AMDGPU_MACH_AMDGCN_GFX1030;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return EF_AMDGPU_MACH_AMDGCN_GFX1100;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return EF_AMDGPU_MACH_AMDGCN_GFX1150;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return EF_AMDGPU_MACH_AMDGCN_GFX1200;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return EF_AMDGPU_MACH_AMDGCN_GFX1250;
   default:
     return EF_AMDGPU_MACH_NONE;
@@ -111,34 +112,34 @@ inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
 /// @details Several concrete GPU steppings share one rocjitsu decoder/translator
 /// family. Keep this mapping next to the ELF constants so code-object parsing,
 /// load-time hooks, and tests do not each grow their own copy.
-inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
+inline constexpr rocjitsu::IsaFamily arch_for_elf_mach(uint32_t mach) {
   switch (mach & EF_AMDGPU_MACH) {
   case EF_AMDGPU_MACH_AMDGCN_GFX908:
-    return ROCJITSU_CODE_ARCH_CDNA1;
+    return rocjitsu::IsaFamily::Cdna1;
   case EF_AMDGPU_MACH_AMDGCN_GFX90A:
-    return ROCJITSU_CODE_ARCH_CDNA2;
+    return rocjitsu::IsaFamily::Cdna2;
   case EF_AMDGPU_MACH_AMDGCN_GFX940:
   case EF_AMDGPU_MACH_AMDGCN_GFX941:
   case EF_AMDGPU_MACH_AMDGCN_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
+    return rocjitsu::IsaFamily::Cdna3;
   case EF_AMDGPU_MACH_AMDGCN_GFX950:
-    return ROCJITSU_CODE_ARCH_CDNA4;
+    return rocjitsu::IsaFamily::Cdna4;
   case EF_AMDGPU_MACH_AMDGCN_GFX1010:
-    return ROCJITSU_CODE_ARCH_RDNA1;
+    return rocjitsu::IsaFamily::Rdna1;
   case EF_AMDGPU_MACH_AMDGCN_GFX1030:
-    return ROCJITSU_CODE_ARCH_RDNA2;
+    return rocjitsu::IsaFamily::Rdna2;
   case EF_AMDGPU_MACH_AMDGCN_GFX1100:
-    return ROCJITSU_CODE_ARCH_RDNA3;
+    return rocjitsu::IsaFamily::Rdna3;
   case EF_AMDGPU_MACH_AMDGCN_GFX1150:
-    return ROCJITSU_CODE_ARCH_RDNA3_5;
+    return rocjitsu::IsaFamily::Rdna3_5;
   case EF_AMDGPU_MACH_AMDGCN_GFX1200:
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
-    return ROCJITSU_CODE_ARCH_RDNA4;
+    return rocjitsu::IsaFamily::Rdna4;
   case EF_AMDGPU_MACH_AMDGCN_GFX1250:
   case EF_AMDGPU_MACH_AMDGCN_GFX1251:
-    return ROCJITSU_CODE_ARCH_CDNA5;
+    return rocjitsu::IsaFamily::Cdna5;
   default:
-    return ROCJITSU_CODE_ARCH_INVALID;
+    return rocjitsu::IsaFamily::Invalid;
   }
 }
 
@@ -588,6 +589,41 @@ classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocat
     return TextSymbolRelocationAction::RequiresExecutableEntry;
   }
   return TextSymbolRelocationAction::RequiresSymbolMapping;
+}
+
+/// @brief Whether a supported modern ROCr dynamic write enters an address range.
+/// @details Includes writes starting before the range and overflowing intervals.
+/// Explicit-target/static, inert and unsupported forms keep their separate policy.
+[[nodiscard]] inline bool elf_has_rocr_dynamic_write_in_range(std::span<const uint8_t> image,
+                                                              const Elf64_Ehdr &header,
+                                                              std::span<const Elf64_Shdr> sections,
+                                                              uint64_t range_vaddr,
+                                                              uint64_t range_size) {
+  if (range_size == 0)
+    return false;
+  for (const Elf64_Shdr &relocs : sections) {
+    if (classify_rocr_relocation_section(header, sections, relocs) !=
+            RocrRelocationSectionMode::Dynamic ||
+        relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        (relocs.sh_offset > image.size() || relocs.sh_size > image.size() - relocs.sh_offset))
+      continue;
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela relocation = {};
+      std::memcpy(&relocation, image.data() + relocs.sh_offset + index * sizeof(relocation),
+                  sizeof(relocation));
+      const std::optional<uint64_t> write_size =
+          rocr_dynamic_relocation_write_size(elf_reloc_type(relocation.r_info));
+      if (!write_size)
+        continue;
+      const uint64_t place = relocation.r_offset;
+      if (*write_size > std::numeric_limits<uint64_t>::max() - place ||
+          (place >= range_vaddr && place - range_vaddr < range_size) ||
+          (place < range_vaddr && range_vaddr - place < *write_size))
+        return true;
+    }
+  }
+  return false;
 }
 
 /// @brief Return whether a relocation record applies to storage loaded at runtime.

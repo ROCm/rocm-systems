@@ -1008,7 +1008,7 @@ jobs:
             cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" \
             -DROCJITSU_ENABLE_INTERPOSER=OFF -DRJ_ENABLE_HOST_FAULT_RECOVERY=OFF
           cmake --build "${ROCJITSU_BUILD_DIR}" \
-            --target vm_embedding_api_test libc_passthrough_test host_access_guard_test -j4
+            --target vm_embedding_api_test libc_passthrough_test host_access_guard_test -j
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             -R '^VmEmbeddingApi(DeathTest)?\.' --no-tests=error --output-on-failure --timeout 60 -j4
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \

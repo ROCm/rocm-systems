@@ -120,12 +120,7 @@ public:
     static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
     static constexpr Register SQ_THREAD_TRACE_STATUS2_ADDR{};
-    static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
-        Register reg = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
-        reg.offset -= UCONFIG_SPACE_START;
-        return reg;
-    }();
-    static const uint32_t TT_BUFF_ALIGN_SHIFT = 12;
+    static const uint32_t     TT_BUFF_ALIGN_SHIFT = 12;
 
     static const uint32_t SDMA_COUNTER_BLOCK_NUM_INSTANCES = SdmaCounterBlockMaxInstances;
     static const uint32_t UMC_COUNTER_BLOCK_NUM_INSTANCES  = UmcCounterBlockMaxInstances;

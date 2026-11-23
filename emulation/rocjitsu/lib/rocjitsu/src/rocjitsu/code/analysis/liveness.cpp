@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
@@ -20,7 +21,7 @@
 #include <cstring>
 #include <deque>
 #include <limits>
-#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -65,13 +66,13 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 // Ordinary registers that du overwrites on every path and in every lane.
-[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
+[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before, bool may_skip) {
   // Ordinary registers only: special singletons (EXEC/VCC/...) live in du.defs
   // but are not part of scratch-allocation liveness and must not become kills.
   RegisterSet kills = du.defs.ordinary_only();
-  // Predicated defs preserve old values on at least one control-flow path, so
-  // they can never be unconditional kills.
-  if (du.has_predicated_def)
+  // Suppressed instructions preserve every result, including SGPR destinations
+  // of vector encodings. Predicated defs likewise cannot be unconditional kills.
+  if (may_skip || du.has_predicated_def)
     return {};
   if (du.conditional_vgpr_def)
     kills.erase(*du.conditional_vgpr_def);
@@ -98,22 +99,7 @@ void dfs_reverse_post_order(const BasicBlock &start,
   return (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION)) != 0;
 }
 
-// True if inst may reach VGPRs through M0-relative or GPR-index addressing,
-// which explicit operands do not show.
-[[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
-                                               std::span<const uint8_t> text, rj_code_arch_t arch) {
-  if ((inst.flags() & (RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) != 0) {
-    return true;
-  }
-  return may_enable_gpr_indexing(inst, text, arch);
-}
-
-} // namespace
-
-namespace {
-
-// nullopt means the instruction leaves this MODE bit unchanged; true includes
-// writes whose source cannot be proved clear from the supplied bytes.
+// nullopt leaves the bit unchanged; true includes writes not provably clear.
 std::optional<bool> mode_bit_write(const Instruction &inst, std::span<const uint8_t> text,
                                    uint16_t bit, uint64_t offset) {
   const amdgpu::Operation operation = inst.amdgpu_operation();
@@ -132,14 +118,44 @@ std::optional<bool> mode_bit_write(const Instruction &inst, std::span<const uint
   const std::optional<uint32_t> literal = text_word_at(text, offset + sizeof(uint32_t));
   if (!literal)
     return true;
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(hwreg);
   return ((*literal >> (bit - slice.begin)) & 1u) != 0;
+}
+
+std::optional<bool> vskip_write(const Instruction &inst, std::span<const uint8_t> text,
+                                uint64_t offset) {
+  if (inst.amdgpu_operation() != amdgpu::Operation::S_SETVSKIP)
+    return mode_bit_write(inst, text, amdgpu::MODE_VSKIP_SHIFT, offset);
+  const Operand *source = inst.src_operand(0);
+  const Operand *selector = inst.src_operand(1);
+  if (source == nullptr || selector == nullptr)
+    return true;
+  const std::optional<uint64_t> value = source->const_value();
+  if (!value)
+    return true;
+  if (*value == 0)
+    return false;
+  const std::optional<uint64_t> bit = selector->const_value();
+  if (!bit)
+    return true;
+  return ((*value >> (*bit & 31u)) & 1u) != 0;
+}
+
+// True if inst may reach VGPRs through M0-relative or GPR-index addressing,
+// which explicit operands do not show.
+[[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
+                                               std::span<const uint8_t> text,
+                                               rocjitsu::IsaFamily arch) {
+  if ((inst.flags() & (RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) != 0) {
+    return true;
+  }
+  return may_enable_gpr_indexing(inst, text, arch);
 }
 
 } // namespace
 
 bool may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text,
-                             rj_code_arch_t arch, std::optional<uint64_t> instruction_offset) {
+                             rocjitsu::IsaFamily arch, std::optional<uint64_t> instruction_offset) {
   if (!isa_properties(arch).mode_has_gpr_idx_en)
     return false;
   if (inst.amdgpu_operation() == amdgpu::Operation::S_SET_GPR_IDX_ON)
@@ -148,28 +164,10 @@ bool may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> t
       .value_or(false);
 }
 
-bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
-                      std::optional<uint64_t> instruction_offset) {
-  if (!arch_is_cdna_4_or_lower(arch))
-    return false;
-  if (inst.amdgpu_operation() == amdgpu::Operation::S_SETVSKIP) {
-    const Operand *source = inst.src_operand(0);
-    const Operand *selector = inst.src_operand(1);
-    if (source == nullptr || selector == nullptr)
-      return true;
-    const std::optional<uint64_t> value = source->const_value();
-    if (!value)
-      return true;
-    const uint64_t source_value = *value;
-    if (source_value == 0)
-      return false;
-    const std::optional<uint64_t> bit = selector->const_value();
-    if (!bit)
-      return true;
-    return ((source_value >> (*bit & 31u)) & 1u) != 0;
-  }
-  return mode_bit_write(inst, text, 28, instruction_offset.value_or(inst.src_loc()))
-      .value_or(false);
+bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text,
+                      rocjitsu::IsaFamily arch, std::optional<uint64_t> instruction_offset) {
+  return arch_is_cdna_4_or_lower(arch) &&
+         vskip_write(inst, text, instruction_offset.value_or(inst.src_loc())).value_or(false);
 }
 
 LivenessAnalysis::LivenessAnalysis(UnavailableTag) : available_(false) {}
@@ -257,6 +255,8 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
   assert(!(exec && options.exec_masked_defs_kill) &&
          "exec_masked_defs_kill has no effect alongside an ExecMaskAnalysis");
   exec_masked_defs_kill_ = options.exec_masked_defs_kill;
+  tracks_vskip_ =
+      options.arch == rocjitsu::IsaFamily::Invalid || arch_is_cdna_4_or_lower(options.arch);
   wave_size_ = wave_size;
   // Own the EXEC-state analysis; the backward dataflow is deferred to the first
   // query (ensure_analyzed), which consults it for kills. May be null: kills then
@@ -270,27 +270,35 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
       scoped_blocks_.insert(block);
   }
   deferred_extra_edges_.assign(extra_edges.begin(), extra_edges.end());
+  vskip_clear_entry_blocks_.insert(options.vskip_clear_entry_blocks.begin(),
+                                   options.vskip_clear_entry_blocks.end());
+  vskip_entry_blocks_ = vskip_clear_entry_blocks_;
+  if (options.entry_block != nullptr)
+    vskip_entry_blocks_.insert(options.entry_block);
+  vskip_entry_blocks_.insert(options.additional_entry_blocks.begin(),
+                             options.additional_entry_blocks.end());
   deferred_live_before_instructions_.assign(options.live_before_instructions.begin(),
                                             options.live_before_instructions.end());
   deferred_restrict_live_before_to_instructions_ = options.restrict_live_before_to_instructions;
 
   const KernelBlockScope deferred_scope(deferred_blocks_);
-  if (options.arch == ROCJITSU_CODE_ARCH_CDNA5 && options.entry_block != nullptr) {
+  if (options.arch == rocjitsu::IsaFamily::Cdna5 && options.entry_block != nullptr) {
     const IsaTargetRegistry &registry = default_isa_target_registry();
     const IsaTargetDescriptor *architecture = registry.find(options.arch);
     const IsaTargetDescriptor *target_architecture = registry.find(options.target);
-    const IsaGpuTargetDescription *target =
-        target_architecture != nullptr && target_architecture->architecture_id == options.arch
-            ? registry.find_gpu_target(options.target)
+    const IsaTargetBinding *target =
+        target_architecture != nullptr && target_architecture->family == options.arch
+            ? registry.find_target(options.target)
             : nullptr;
     if (target == nullptr && architecture != nullptr)
-      target = registry.find_default_gpu_target(*architecture);
+      target = registry.find_default_target(*architecture);
     gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(
         deferred_scope, options.entry_block, deferred_extra_edges_, options.text,
         options.additional_entry_blocks,
         target != nullptr && target->capabilities.setreg_vgpr_msb_fixup);
   }
-  collect_global_register_usage(deferred_scope, options.text, options.arch);
+  collect_global_register_usage(deferred_scope, options.text, options.arch,
+                                options.additional_uses);
 }
 
 LivenessAnalysis::~LivenessAnalysis() = default;
@@ -313,13 +321,29 @@ Result LivenessAnalysis::ensure_analyzed() const {
   return Result::success();
 }
 
-void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
-                                                     std::span<const uint8_t> text,
-                                                     rj_code_arch_t arch) {
+void LivenessAnalysis::collect_global_register_usage(
+    KernelBlockScope blocks, std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
+    std::span<const AdditionalRegisterUse> additional_uses) {
+  std::unordered_map<const Instruction *, RegisterSet> requested_before_uses;
+  std::unordered_map<const Instruction *, RegisterSet> requested_after_uses;
+  for (const AdditionalRegisterUse &use : additional_uses) {
+    const RegisterSet ordinary = use.registers.ordinary_only();
+    if (use.instruction == nullptr || ordinary.none())
+      continue;
+    std::unordered_map<const Instruction *, RegisterSet> &requested =
+        use.after_instruction ? requested_after_uses : requested_before_uses;
+    requested[use.instruction] |= ordinary;
+  }
   for (BasicBlock *block : blocks) {
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
+      tracks_vskip_ |= inst.is_vskip_affected();
+      const std::optional<bool> write = (inst.flags() & INDIRECT_CALL)
+                                            ? std::optional<bool>(true)
+                                            : vskip_write(inst, text, inst.src_loc());
+      if (write)
+        vskip_writes_.emplace(&inst, *write);
       if (is_sgpr_movrel(inst))
         global_sgpr_usage_is_complete_ = false;
       if (may_access_vgprs_indirectly(inst, text, arch))
@@ -329,6 +353,18 @@ void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
                                 UnknownVgprDefPolicy::ExpandAll);
       globally_used_registers_ |= accesses.defs.ordinary_only();
       globally_used_registers_ |= accesses.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator before =
+          requested_before_uses.find(&inst);
+      if (before != requested_before_uses.end()) {
+        additional_uses_before_.emplace(&inst, before->second);
+        globally_used_registers_ |= before->second;
+      }
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator after =
+          requested_after_uses.find(&inst);
+      if (after != requested_after_uses.end()) {
+        additional_uses_after_.emplace(&inst, after->second);
+        globally_used_registers_ |= after->second;
+      }
     }
   }
 }
@@ -389,6 +425,99 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
   for (const ScopedCfgEdge &edge : extra_edges)
     add_edge(edge.from, edge.to);
 
+  if (tracks_vskip_) {
+    // This forward may-be-set proof uses exactly the graph of the backward
+    // analysis. Arbitrary/external entries are unknown; dispatch-clear seeds
+    // contribute a clear incoming path without overriding loop backedges.
+    std::vector<bool> unknown_entry(blocks.size(), false);
+    std::vector<bool> reached(blocks.size(), false);
+    std::vector<std::optional<bool>> effects(blocks.size());
+    std::deque<size_t> pending;
+    for (const ScopedCfgEdge &edge : extra_edges) {
+      const std::unordered_map<const BasicBlock *, size_t>::const_iterator target =
+          block_index_.find(edge.to);
+      if (target != block_index_.end() && !block_index_.contains(edge.from))
+        unknown_entry[target->second] = true;
+    }
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      const BasicBlock *block = blocks[i];
+      if (block == nullptr)
+        continue;
+      // The scope projects away original predecessors, such as padding before
+      // a copied probe body. Only explicitly supplied outside edges introduce
+      // unknown incoming state in addition to this scope's entry contract.
+      bool outside_predecessor = unknown_entry[i];
+      const bool entry = predecessors[i].empty() || vskip_entry_blocks_.contains(block);
+      unknown_entry[i] =
+          outside_predecessor || (entry && !vskip_clear_entry_blocks_.contains(block));
+      if (entry || outside_predecessor) {
+        reached[i] = true;
+        pending.push_back(i);
+      }
+      for (const Instruction &inst : block->instructions()) {
+        const std::unordered_map<const Instruction *, bool>::const_iterator write =
+            vskip_writes_.find(&inst);
+        if (write != vskip_writes_.end())
+          effects[i] = write->second;
+      }
+    }
+    while (!pending.empty()) {
+      const size_t i = pending.front();
+      pending.pop_front();
+      for (size_t succ : successors[i]) {
+        if (!reached[succ]) {
+          reached[succ] = true;
+          pending.push_back(succ);
+        }
+      }
+    }
+    // Disconnected cycles have no proven entry state. Do not invent a clear
+    // state merely because their fixed point has no incoming edge.
+    std::vector<bool> before(blocks.size(), false);
+    std::vector<bool> after(blocks.size(), false);
+    std::vector<bool> queued(blocks.size(), true);
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      unknown_entry[i] = unknown_entry[i] || !reached[i];
+      pending.push_back(i);
+    }
+    while (!pending.empty()) {
+      const size_t i = pending.front();
+      pending.pop_front();
+      queued[i] = false;
+      bool may_skip = unknown_entry[i];
+      for (size_t pred : predecessors[i])
+        may_skip = may_skip || after[pred];
+      before[i] = may_skip;
+      const bool out = effects[i].value_or(may_skip);
+      if (out == after[i])
+        continue;
+      after[i] = out;
+      for (size_t succ : successors[i]) {
+        if (!queued[succ]) {
+          queued[succ] = true;
+          pending.push_back(succ);
+        }
+      }
+    }
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      if (blocks[i] == nullptr)
+        continue;
+      bool may_skip = before[i];
+      for (const Instruction &inst : blocks[i]->instructions()) {
+        if (!may_skip)
+          vskip_clear_before_.insert(&inst);
+        const std::unordered_map<const Instruction *, bool>::const_iterator write =
+            vskip_writes_.find(&inst);
+        if (write != vskip_writes_.end())
+          may_skip = write->second;
+      }
+    }
+  }
+
+  const auto may_skip = [this](const Instruction &inst) {
+    return inst.is_vskip_affected() && !vskip_clear_before_.contains(&inst);
+  };
+
   // Compute each block's local transfer function before iterating across CFG
   // edges. `gen` keeps only uses that occur before a local definition, because
   // later uses are satisfied inside the block. `kill` is every local def.
@@ -403,11 +532,22 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       if (filter_live_before && requested_live_before.contains(&inst))
         ++requested_live_before_by_block[i];
       InstDefUse du(inst, wave_size_, gfx1250_vgpr_msb_.get());
-      RegisterSet kills = kill_defs(du, exec_before(inst));
+      RegisterSet kills = kill_defs(du, exec_before(inst), may_skip(inst));
       RegisterSet upward_uses = du.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator before =
+          additional_uses_before_.find(&inst);
+      if (before != additional_uses_before_.end())
+        upward_uses |= before->second;
       upward_uses -= state.kill;
       state.gen |= upward_uses;
       state.kill |= kills;
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator after =
+          additional_uses_after_.find(&inst);
+      if (after != additional_uses_after_.end()) {
+        RegisterSet after_uses = after->second;
+        after_uses -= state.kill;
+        state.gen |= after_uses;
+      }
     }
   }
   if (!filter_live_before)
@@ -472,9 +612,17 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       --it;
       const Instruction *inst = &*it;
       InstDefUse du(*inst, wave_size_, gfx1250_vgpr_msb_.get());
-      RegisterSet kills = kill_defs(du, exec_before(*inst));
+      RegisterSet kills = kill_defs(du, exec_before(*inst), may_skip(*inst));
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator after =
+          additional_uses_after_.find(inst);
+      if (after != additional_uses_after_.end())
+        live |= after->second;
       live -= kills;
       live |= du.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator before =
+          additional_uses_before_.find(inst);
+      if (before != additional_uses_before_.end())
+        live |= before->second;
       if (!filter_live_before || requested_live_before.contains(inst)) {
         live_before_.emplace(inst, live);
         if (filter_live_before && --remaining_requested == 0)
@@ -532,6 +680,13 @@ FailureOr<bool> LivenessAnalysis::global_sgpr_usage_is_complete() const {
   if (require_available().failed())
     return Result::failure();
   return global_sgpr_usage_is_complete_;
+}
+
+FailureOr<bool> LivenessAnalysis::vskip_clear_before(const Instruction &inst) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
+  return scoped_blocks_.contains(inst.parent()) &&
+         (!tracks_vskip_ || vskip_clear_before_.contains(&inst));
 }
 
 FailureOr<std::optional<uint16_t>>
