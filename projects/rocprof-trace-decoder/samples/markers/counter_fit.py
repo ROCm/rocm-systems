@@ -355,7 +355,11 @@ def main() -> int:
             if not name.startswith(SITE_PREFIX) or not marker_selected(marker, args):
                 continue
             kind = name[len(SITE_PREFIX) :]
-            if kind not in kinds or (args.loads_only and "store" in kind):
+            # lds_block: one marker for all LDS instructions of a basic block
+            # (sqtt_site_rewrite.py --per-block).
+            if kind == "lds_block" and kinds & LDS_KINDS:
+                pass
+            elif kind not in kinds or (args.loads_only and "store" in kind):
                 continue
             site = f"{kind}@{marker.source_location or f'marker#{marker.marker_id}'}"
             time = marker_time(marker)
