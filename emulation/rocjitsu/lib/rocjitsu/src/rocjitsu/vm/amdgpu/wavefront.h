@@ -650,7 +650,7 @@ public:
   static constexpr uint32_t IEEE_BIT = 1u << 9;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t kRdna2MemoryViolationEnable = 1u << 20;
-  static constexpr uint32_t VSKIP_BIT = 1u << 28;
+  static constexpr uint32_t VSKIP_BIT = 1u << MODE_VSKIP_SHIFT;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
   /// Short for conditional stack pointer, used by fork/join instructions
   static constexpr uint32_t CSP_SHIFT = 29;

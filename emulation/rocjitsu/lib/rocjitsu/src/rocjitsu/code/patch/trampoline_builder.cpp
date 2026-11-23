@@ -116,10 +116,17 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
     report(err, "trampoline plan: arch was not set");
     return false;
   }
-  if (plan.original_size == 0 || plan.original_size % 4 != 0 ||
-      ((plan.emit_original || plan.patch_anchor) && plan.original_size != 4 &&
-       plan.original_size != 8)) {
-    report(err, "trampoline plan: original_size must be 4 or 8 when patching or relocating");
+  if (plan.original_size == 0 || plan.original_size % 4 != 0) {
+    report(err, "trampoline plan: original_size must be nonzero and dword aligned");
+    return false;
+  }
+  if (plan.emit_original && plan.original_size != 4 && plan.original_size != 8) {
+    report(err, "trampoline plan: original_size must be 4 or 8 when relocating the original");
+    return false;
+  }
+  if (plan.patch_anchor && plan.original_size != 4 && plan.original_size != 8 &&
+      plan.original_size != 12) {
+    report(err, "trampoline plan: original_size must be 4, 8 or 12 when patching the anchor");
     return false;
   }
   const size_t expected_words = plan.original_size / sizeof(uint32_t);
@@ -345,7 +352,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
     if (forward.failed())
       return std::nullopt;
     append_word(out.patched_anchor_bytes, forward.value());
-    if (plan.original_size == 8) {
+    while (out.patched_anchor_bytes.size() < plan.original_size) {
       util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
       if (nop.failed())
         return std::nullopt;
@@ -1148,7 +1155,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // SOPP range checks are shared with the inline path.
   TrampolinePlan emit_plan = plan;
   emit_plan.before_items.clear();
-  emit_plan.after_items.clear();
+  // Replay plans retain the generated placement shape. Omitted-original plans
+  // keep their explicit replacement body after the restored envelope.
+  if (plan.emit_original)
+    emit_plan.after_items.clear();
   std::vector<InlineAsmItem> &items =
       after_original ? emit_plan.after_items : emit_plan.before_items;
   items.push_back(InlineAsmItem{.words = std::move(env)});

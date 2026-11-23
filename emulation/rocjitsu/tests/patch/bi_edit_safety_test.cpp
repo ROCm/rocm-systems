@@ -3,16 +3,13 @@
 
 #include "../dbi_test_util.h"
 #include "../elf_test_support.h"
+#include "loaded_prefix_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instrumentor.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
-#include "rocjitsu/isa/decoder.h"
-#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
-#include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
 
@@ -22,7 +19,6 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
-#include <memory>
 #include <optional>
 #include <span>
 #include <utility>
@@ -157,88 +153,12 @@ void expect_rejected_without_output(const InstrumentedCodeObjectDebug &result) {
 }
 
 void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool overlaps_text) {
-  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5;
-  constexpr uint64_t loaded_prefix_size = sizeof(uint64_t);
-  const util::FailureOr<uint32_t> barrier =
-      build_sop1_encoding(arch, cdna5::kSBarrierSignalSop1, 0, 193);
-  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
-  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
-  ASSERT_TRUE(barrier.succeeded());
-  ASSERT_TRUE(nop.succeeded());
-  ASSERT_TRUE(endpgm.succeeded());
-  KernelElf elf(test::make_amdgpu_kernel_elf({barrier.value(), nop.value(), endpgm.value()}, 0, 3,
-                                             EF_AMDGPU_MACH_AMDGCN_GFX1250));
-  ASSERT_NO_FATAL_FAILURE(elf.initialize());
-  const Section &original_text = *elf.original.text_sections().front();
-  const std::vector<Elf64_Phdr>::iterator text_load =
-      std::ranges::find_if(elf.segments, [](const Elf64_Phdr &segment) {
-        return segment.p_type == PT_LOAD && (segment.p_flags & PF_X) != 0;
-      });
-  ASSERT_NE(text_load, elf.segments.end());
-  ASSERT_EQ(text_load->p_offset, original_text.sectionOffset());
-  ASSERT_EQ(text_load->p_vaddr, original_text.vaddr());
-  ASSERT_GE(text_load->p_offset, loaded_prefix_size);
-  ASSERT_LE(bytes_before_text, loaded_prefix_size);
-  text_load->p_offset -= loaded_prefix_size;
-  text_load->p_vaddr -= loaded_prefix_size;
-  text_load->p_paddr -= loaded_prefix_size;
-  text_load->p_filesz += loaded_prefix_size;
-  text_load->p_memsz += loaded_prefix_size;
-  text_load->p_flags |= 0x2u; // PF_W
-  std::fill_n(elf.image.data() + text_load->p_offset, loaded_prefix_size, uint8_t{0x5a});
-
-  // This is actual loaded, file-backed padding, not an address before the LOAD.
-  // ABS64 writes eight bytes even when only its tail reaches the first instruction.
-  Abs64Write write = {};
+  constexpr rocjitsu::IsaFamily arch = test::kLoadedPrefixArch;
+  test::LoadedPrefixRelocation fixture;
   ASSERT_NO_FATAL_FAILURE(
-      append_abs64_write(elf, original_text.vaddr() - bytes_before_text, write));
-  elf.write_tables();
-  const Elf64_Rela &relocation = write.relocation;
-  const uint32_t symbol_table_index = write.symbol_table_index;
-
-  const std::vector<uint8_t> pristine = elf.image;
-  const AmdGpuCodeObject source(elf.image.data(), elf.image.size());
-  ASSERT_TRUE(source.is_valid());
-  ASSERT_EQ(source.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
-  ASSERT_EQ(source.text_sections().size(), 1u);
-  const Section &text = *source.text_sections().front();
-  ASSERT_EQ(text.vaddr(), original_text.vaddr());
-  ASSERT_EQ(classify_rocr_relocation_section(elf.header, elf.sections, elf.sections.back()),
-            RocrRelocationSectionMode::Dynamic);
-  ASSERT_EQ(elf.sections[symbol_table_index].sh_type, SHT_DYNSYM);
-  Elf64_Sym symbol = {};
-  std::memcpy(&symbol,
-              elf.image.data() + elf.sections[symbol_table_index].sh_offset + sizeof(symbol),
-              sizeof(symbol));
-  ASSERT_NE(symbol.st_shndx, *text.sectionHeaderIndex());
-  ASSERT_NE(symbol.st_shndx, SHN_UNDEF);
-  ASSERT_EQ(elf_reloc_type(relocation.r_info), R_AMDGPU_ABS64);
-  ASSERT_LT(relocation.r_offset, text.vaddr());
-  ASSERT_GE(relocation.r_offset, text_load->p_vaddr);
-  ASSERT_LE(relocation.r_offset + sizeof(uint64_t), text_load->p_vaddr + text_load->p_filesz);
-  ASSERT_EQ(relocation.r_offset + sizeof(uint64_t) > text.vaddr(), overlaps_text);
-  ASSERT_TRUE(std::ranges::none_of(elf.sections, [&](const Elf64_Shdr &section) {
-    return (section.sh_flags & SHF_ALLOC) != 0 && relocation.r_offset >= section.sh_addr &&
-           relocation.r_offset - section.sh_addr < section.sh_size;
-  }));
-  const uint64_t write_file_offset = text_load->p_offset + relocation.r_offset - text_load->p_vaddr;
-  ASSERT_LT(write_file_offset, text.sectionOffset());
-  ASSERT_LE(write_file_offset + sizeof(uint64_t), elf.image.size());
-  ASSERT_EQ(elf.image[write_file_offset], 0x5a);
-  std::unique_ptr<Decoder> decoder =
-      Decoder::create(default_isa_target_registry(), source.target_id());
-  ASSERT_NE(decoder, nullptr);
-  const std::array<uint32_t, 1> barrier_words = {barrier.value()};
-  const DecodeResult decoded = decoder->decode_window(barrier_words);
-  ASSERT_TRUE(decoded.succeeded());
-  ASSERT_EQ(decoded.value()->mnemonic(), "s_barrier_signal");
-  ASSERT_EQ(decoded.value()->size(), sizeof(uint32_t));
-  const CodeObjectPatcher patcher(source);
-  EXPECT_FALSE(patcher.has_malformed_rocr_relocation_section());
-  EXPECT_FALSE(patcher.has_rocr_rejected_none_relocation());
-  EXPECT_FALSE(patcher.has_unsupported_relocation_to_text());
-  EXPECT_EQ(patcher.has_relocations_within_text(), overlaps_text);
-
+      test::make_loaded_prefix_relocation(bytes_before_text, overlaps_text, fixture));
+  const std::vector<uint8_t> pristine = fixture.image;
+  const AmdGpuCodeObject source(fixture.image.data(), fixture.image.size());
   InstrumentedCodeObjectDebug result = {};
   ASSERT_NO_FATAL_FAILURE(patch_eligible_points(source, result, {4, 0}, arch));
   if (overlaps_text) {
@@ -260,13 +180,13 @@ void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool ove
       ASSERT_LE(site.guest_offset, emitted_text.size());
       ASSERT_LE(sizeof(relocated), emitted_text.size() - site.guest_offset);
       std::memcpy(&relocated, emitted_text.data() + site.guest_offset, sizeof(relocated));
-      EXPECT_EQ(relocated, site.original_offset == 0 ? barrier.value() : nop.value());
+      EXPECT_EQ(relocated, site.original_offset == 0 ? fixture.barrier_word : fixture.nop_word);
     }
-    EXPECT_EQ(std::memcmp(result.elf_bytes.data() + text_load->p_offset,
-                          pristine.data() + text_load->p_offset, loaded_prefix_size),
+    EXPECT_EQ(std::memcmp(result.elf_bytes.data() + fixture.prefix_file_offset,
+                          pristine.data() + fixture.prefix_file_offset, test::kLoadedPrefixSize),
               0);
   }
-  EXPECT_EQ(elf.image, pristine);
+  ASSERT_EQ(source.image_size(), pristine.size());
   EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
 }
 

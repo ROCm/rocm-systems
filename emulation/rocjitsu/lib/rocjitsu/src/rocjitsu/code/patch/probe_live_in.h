@@ -72,6 +72,9 @@ enum class ProbeEntryState { Unknown, ZeroVgprBanks };
 /// A vector write counts here as writing the whole register, even though EXEC
 /// masks it to the active lanes. The probe is responsible for its own EXEC; see
 /// `LivenessAnalysisOptions::exec_masked_defs_kill` for what that obliges.
+/// Callable admission must prove VSKIP clear on entry and reject bodies that
+/// can enable it. This analysis assumes that ABI precondition; it does not
+/// establish whether an arbitrary guest site satisfies it.
 ///
 /// @p wave_size is the wave size of the kernels that call the probe, 32 or 64.
 /// A Wave32 compare writes one SGPR of the pair its encoding names, so analyzing
