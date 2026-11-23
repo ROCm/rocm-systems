@@ -303,6 +303,9 @@ TEST(BufferFormatTest, RdnaSwizzleUsesIndexOrLaneAndKeepsScalarOffsetLinear) {
   EXPECT_EQ(rdna_buffer_address(1u << 30, add_tid, 32, false, 0, 0, 0, 63).offset, 1820);
   EXPECT_EQ(rdna_buffer_address(0, add_tid, 32, true, 1, 4, 4, 5).offset, 40);
   EXPECT_EQ(rdna_buffer_address(0, add_tid, 32, false, 0, 4, 4, 5).offset, 168);
+  // Bit 30 is SWIZZLE_ENABLE: swizzle encoding 2 (bit 31 only) stays linear.
+  EXPECT_FALSE(rdna_buffer_address(2u << 30, 0, 64, true, 1, 4, 0, 0).swizzled);
+  EXPECT_EQ(rdna_buffer_address(2u << 30, 0, 64, true, 1, 4, 0, 0).offset, 68u);
 }
 
 TEST(BufferFormatTest, Cdna4FormattedLoadCanWriteLdsWithoutClobberingVgprs) {
@@ -1289,7 +1292,7 @@ TEST_P(BufferFormatExecutionTest, NormalizedLoadsIgnoreAndRestoreHostRoundingMod
   }
 }
 
-TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBoundaries) {
+TEST_P(BufferFormatExecutionTest, RdnaSwizzledTransfersKeepPayloadContiguousFromStartAddress) {
   if (GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5 &&
       GetParam() != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "RDNA3+ swizzle geometry";
@@ -1307,7 +1310,9 @@ TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBo
     for (uint32_t unit : {4u, 16u}) {
       const uint32_t stride = unit * 2, offset = unit - 4;
       constexpr uint32_t base = 0x1000, soffset = 3;
-      // Index 1, group size 8, and two records. SOFFSET stays outside swizzling.
+      // Index 1, group size 8, and two records. Hardware swizzles the starting
+      // byte address once (keeping SOFFSET linear) and transfers multi-dword
+      // and unaligned payloads contiguously from that address.
       cu->write_sgpr(sb, soffset);
       cu->write_sgpr(sb + 4, base);
       cu->write_sgpr(sb + 5, (stride << 16) | ((unit == 4 ? 1u : 3u) << 30));
@@ -1315,7 +1320,7 @@ TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBo
       cu->write_sgpr(sb + 7, identity | (48u << 12) | (1u << 28));
       cu->write_vgpr(vb, 0, 1);
       const uint64_t first = base + unit + offset + soffset;
-      const uint64_t second = base + unit + unit * 8 + soffset;
+      const uint64_t next_row = base + unit + unit * 8 + soffset;
       for (bool typed : {false, true}) {
         for (bool load : {true, false}) {
           SCOPED_TRACE(testing::Message() << "translated=" << translated << " unit=" << unit
@@ -1323,8 +1328,8 @@ TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBo
           cu->l1_vector().invalidate_all();
           l2.invalidate_all();
           memory.write32(first, load ? 0x11223344 : 0);
-          memory.write32(second, load ? 0x55667788 : 0);
-          memory.write32(first + 4, 0xdeadbeef);
+          memory.write32(first + 4, load ? 0x55667788 : 0);
+          memory.write32(next_row, 0xdeadbeef);
           cu->write_vgpr(vb + 8, 0, load ? 0 : 0x11223344);
           cu->write_vgpr(vb + 9, 0, load ? 0 : 0x55667788);
           std::unique_ptr<Instruction> inst;
@@ -1359,8 +1364,7 @@ TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBo
           ASSERT_EQ(state.lane_mask, 1u);
           ASSERT_EQ(state.elem_size * state.num_elems, 8u);
           ASSERT_EQ(state.per_lane_addr[0], first);
-          ASSERT_EQ(state.scratch_swizzle_unit, unit);
-          ASSERT_EQ(state.scratch_addr_base_offset, soffset);
+          ASSERT_FALSE(state.scratch_swizzle);
           amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
           ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
           cu->l1_vector().flush_all();
@@ -1368,14 +1372,63 @@ TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBo
           EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11223344u);
           EXPECT_EQ(cu->read_vgpr(vb + 9, 0), 0x55667788u);
           EXPECT_EQ(memory.read32(first), 0x11223344u);
-          EXPECT_EQ(memory.read32(second), 0x55667788u);
-          EXPECT_EQ(memory.read32(first + 4), 0xdeadbeefu);
+          EXPECT_EQ(memory.read32(first + 4), 0x55667788u);
+          EXPECT_EQ(memory.read32(next_row), 0xdeadbeefu);
         }
       }
     }
   }
   wf->set_address_space({});
   cu->set_gpu_vm(nullptr);
+}
+
+TEST_P(BufferFormatExecutionTest, RdnaAddTidSwizzleRepeatsForEachDword) {
+  const bool rdna4 = GetParam() == rocjitsu::IsaFamily::Rdna4;
+  if (!rdna4 && GetParam() != rocjitsu::IsaFamily::Rdna3)
+    GTEST_SKIP() << "measured on gfx1100 and gfx1201";
+  // Measured on gfx1100 and gfx1201: lane 1 of an ADD_TID buffer_load_b32 at OFFSET 1 reads
+  // three bytes from its swizzled start and the fourth from the next dword row, 4 * 8 bytes
+  // further on. gfx1201 does the same with 16-byte swizzle elements.
+  wf->set_exec(1u << 1);
+  auto decoder = Decoder::create(GetParam());
+  const auto sb = wf->sgpr_alloc().base, vb = wf->vgpr_alloc().base;
+  constexpr uint32_t base = 0x1000, stride = 16;
+  for (uint32_t addr = base; addr < base + 0x100; addr += 4)
+    memory.write32(addr, (addr & 0xff) | ((addr + 1) & 0xff) << 8 | ((addr + 2) & 0xff) << 16 |
+                             ((addr + 3) & 0xff) << 24);
+  for (uint32_t unit : {4u, 16u}) {
+    if (unit == 16 && !rdna4)
+      continue;
+    SCOPED_TRACE(testing::Message() << "unit=" << unit);
+    cu->write_sgpr(sb, 0);
+    cu->write_sgpr(sb + 4, base);
+    cu->write_sgpr(sb + 5, (stride << 16) | ((unit == 4 ? 1u : 3u) << 30));
+    cu->write_sgpr(sb + 6, 0x1000);
+    cu->write_sgpr(sb + 7, identity | (1u << 23) | (3u << 28) | (48u << 12));
+    cu->write_vgpr(vb, 1, 1);
+    cu->write_vgpr(vb + 8, 1, 0);
+    cu->l1_vector().invalidate_all();
+    l2.invalidate_all();
+    std::unique_ptr<Instruction> inst;
+    if (rdna4) {
+      const auto words = rdna4::build_vbuffer(rdna4::kBufferLoadB32Vbuffer,
+                                              {.soffset = 0, .vdata = 8, .rsrc = 4, .offen = 1});
+      inst.reset(decode_valid(*decoder, words.data()));
+    } else {
+      const auto words = rdna3::build_mubuf(rdna3::kBufferLoadB32Mubuf,
+                                            {.vdata = 8, .srsrc = 1, .offen = 1, .soffset = 0});
+      inst.reset(decode_valid(*decoder, words.data()));
+    }
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    const uint32_t start = base + unit + 1;
+    ASSERT_EQ(inst->data_as<amdgpu::VectorMemState>()->per_lane_addr[1], start);
+    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    const uint32_t next_row = start - 1 + 4 * 8;
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 1), (start & 0xff) | ((start + 1) & 0xff) << 8 |
+                                            ((start + 2) & 0xff) << 16 | (next_row & 0xff) << 24);
+  }
 }
 
 TEST_P(BufferFormatExecutionTest, UnsupportedDescriptorFailsBeforeIssuingMemory) {

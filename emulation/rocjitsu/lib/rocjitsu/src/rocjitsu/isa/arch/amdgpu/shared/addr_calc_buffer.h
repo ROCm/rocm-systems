@@ -236,8 +236,11 @@ struct RdnaBufferAddress {
   uint64_t offset;
 };
 
-/// IDXEN supplies the index instead of ADD_TID. Swizzling requires an index source.
-/// Physical gfx11/gfx12 keep SOFFSET outside the swizzle, including 16-byte elements.
+/// IDXEN supplies the index instead of ADD_TID. Swizzling requires an index source
+/// and bit 30 (SWIZZLE_ENABLE) set; bit 31 selects 16-byte vs 4-byte elements.
+/// Physical gfx11/gfx12 keep SOFFSET outside the swizzle, including 16-byte elements,
+/// and transfer multi-dword or unaligned payloads contiguously from the swizzled
+/// starting byte address.
 constexpr RdnaBufferAddress rdna_buffer_address(uint32_t srd1, uint32_t srd3, uint32_t stride,
                                                 bool idxen, uint32_t index, uint32_t offset,
                                                 uint32_t soffset, uint32_t lane) {
@@ -245,7 +248,7 @@ constexpr RdnaBufferAddress rdna_buffer_address(uint32_t srd1, uint32_t srd3, ui
   const uint32_t swizzle = srd1 >> 30;
   if (!idxen)
     index = add_tid ? lane : 0;
-  const bool swizzled = swizzle != 0 && (idxen || add_tid);
+  const bool swizzled = (swizzle & 1u) != 0 && (idxen || add_tid);
   if (!swizzled)
     return {index, false, buffer_total_offset(index, stride, offset, soffset)};
   const uint32_t size = swizzle == 3 ? 16 : 4;
@@ -255,16 +258,21 @@ constexpr RdnaBufferAddress rdna_buffer_address(uint32_t srd1, uint32_t srd3, ui
               (index % group) * size + offset % size + soffset};
 }
 
-inline void rdna_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_t srd3, bool idxen,
-                                      uint64_t exec, uint64_t base, uint32_t soffset) {
-  const uint32_t swizzle = srd1 >> 30;
-  if (!swizzle || (!idxen && !(srd3 & (1u << 23))))
+/// gfx1100 and gfx1201 re-swizzle every dword of a swizzled ADD_TID access that has no IDXEN,
+/// at 4-byte granularity even when the descriptor selects 16-byte elements. Other swizzled
+/// accesses stay contiguous from the swizzled first byte.
+inline void rdna_buffer_apply_add_tid_swizzle(VectorMemState &d, uint32_t srd1, uint32_t srd3,
+                                              bool idxen, uint64_t exec, uint64_t base,
+                                              uint32_t soffset) {
+  const bool swizzle_enable = (srd1 & (1u << 30)) != 0;
+  const bool add_tid = (srd3 & (1u << 23)) != 0;
+  if (!swizzle_enable || !add_tid || idxen)
     return;
   d.scratch_swizzle = true;
   d.scratch_lane_mask = exec;
-  d.scratch_swizzle_unit = swizzle == 3 ? 16 : 4;
-  d.scratch_addr_stride = d.scratch_swizzle_unit * (8u << ((srd3 >> 21) & 3));
-  d.scratch_addr_base_offset = (base + soffset) % d.scratch_swizzle_unit;
+  d.scratch_swizzle_unit = 4;
+  d.scratch_addr_stride = 4 * (8u << ((srd3 >> 21) & 3));
+  d.scratch_addr_base_offset = static_cast<uint32_t>((base + soffset) % 4);
 }
 
 /// @brief Apply the GFX10+ buffer bounds policy, hardware-qualified on GFX11/12.
@@ -491,7 +499,7 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   else if (gfx10)
     gfx10_buffer_apply_swizzle(d, srd1, srd3, exec, base_addr, soffset_val);
   else
-    rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
+    rdna_buffer_apply_add_tid_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
   const auto address_regs =
       read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
@@ -604,7 +612,7 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   else if (gfx10)
     gfx10_buffer_apply_swizzle(d, srd1, srd3, exec, base_addr, soffset_val);
   else
-    rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
+    rdna_buffer_apply_add_tid_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
   const auto address_regs =
       read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
