@@ -2568,7 +2568,11 @@ void* Device::virtualAlloc(void* addr, size_t size, size_t alignment) {
   constexpr bool kParent = true;
   constexpr bool kForceAlloc = true;
   amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, -1, kParent, kForceAlloc);
-  assert(mem != nullptr);
+  if (mem == nullptr) {
+    // The SVM VA range is exhausted (or the request is invalid): report it, don't crash
+    LogPrintfError("Cannot reserve virtual address range of size: %zu", size);
+    return nullptr;
+  }
   return mem->getSvmPtr();
 }
 

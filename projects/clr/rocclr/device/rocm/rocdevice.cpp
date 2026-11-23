@@ -2872,7 +2872,12 @@ void* Device::virtualAlloc(void* req_addr, size_t size, size_t alignment) {
   constexpr bool kParent = true;
   amd::Memory* mem = CreateVirtualBuffer(context(), vptr, size, -1, -1, kParent);
   if (mem == nullptr) {
-    LogPrintfError("Cannot create Virtual Buffer for vptr: %p of size: %u", vptr, size);
+    LogPrintfError("Cannot create Virtual Buffer for vptr: %p of size: %zu", vptr, size);
+    hsa_status = Hsa::vmem_address_free(vptr, size);
+    if (hsa_status != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_amd_vmem_address_free. Failed with status: %d", hsa_status);
+    }
+    return nullptr;
   }
 
   return mem->getSvmPtr();
