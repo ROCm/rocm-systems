@@ -63,12 +63,17 @@ compute.insts_internal:
   name: Instructions - Internal
   formula: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of internal (non-user-visible) instructions issued.
+  description: >-
+    Number of internal SQ instructions issued: bookkeeping or other work that is not
+    visible to the user.
 compute.insts_lds:
   name: Instructions - LDS
   formula: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS instructions issued.
+  description: >-
+    Number of LDS instructions issued, including FLAT instructions that resolve to LDS.
+    It counts instructions, not data movement, so it does not distinguish reads from
+    writes.
 compute.insts_lds_atomic_non_return:
   name: Instructions - LDS Atomic Non-Return
   formula: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum) / SUM($denom)
@@ -103,12 +108,18 @@ compute.insts_salu:
   name: Instructions - SALU
   formula: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of SALU instructions issued.
+  description: >-
+    Number of SALU instructions issued. The SALU runs operations on values that are
+    uniform across the wavefront. Efficient kernels often have a balance of VALU and
+    SALU operations.
 compute.insts_smem:
   name: Instructions - SMEM
   formula: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of scalar memory instructions issued.
+  description: >-
+    Number of scalar memory (SMEM) instructions issued. SMEM loads constant and uniform
+    data through the scalar cache. High counts may indicate heavy use of constant
+    buffers or kernel arguments.
 compute.insts_tdm:
   name: Instructions - TDM
   formula: SUM(SQ_INSTS_TDM_sum) / SUM($denom)
@@ -118,17 +129,25 @@ compute.insts_transcendental:
   name: Instructions - Transcendental
   formula: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of transcendental VALU instructions issued.
+  description: >-
+    Number of transcendental VALU instructions issued. These are hardware approximations
+    such as sin, cos and log on the VALU.
 compute.insts_valu:
   name: Instructions - VALU
   formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of VALU instructions issued.
+  description: >-
+    Number of VALU instructions issued. The VALU runs arithmetic and logic operations
+    across all work-items in a wavefront. High VALU counts indicate compute-intensive
+    kernels.
 compute.insts_vmem:
   name: Instructions - VMEM
   formula: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of VMEM instructions issued.
+  description: >-
+    Number of vector memory (VMEM) instructions issued, including global, buffer and
+    texture operations. High VMEM counts relative to VALU may indicate memory-bound
+    workloads.
 compute.insts_vmem_atomic_non_return:
   name: Instructions - VMEM Atomic Non-Return
   formula: SUM(SQ_INSTS_TEX_ATOMIC_NORTN_sum) / SUM($denom)
