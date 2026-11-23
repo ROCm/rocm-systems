@@ -872,6 +872,17 @@ if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
     endforeach()
 endif()
 
+add_test(
+    NAME ConSanPrefillHarness.Guards
+    COMMAND
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_iree_prefill_e2e.py
+)
+set_tests_properties(
+    ConSanPrefillHarness.Guards
+    PROPERTIES TIMEOUT 30 LABELS "consan;required-consan"
+)
+
 if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
     foreach(_groups IN ITEMS 1 16 512)
         set(_test ConSanExecutionTraceSim.Groups${_groups})

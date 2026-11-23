@@ -714,6 +714,54 @@ layout; correct attribution depends on the runtime's validated kernel-object
 binding. Checksums preserve recorded bytes, without providing a security
 attestation of guest identity.
 
+### Toy Llama prefill integration
+
+The Release CI lane runs one bounded toy Llama TP1 prefill through the
+production ConSan plugin. It reuses the three-layer model, fixed weights,
+tokens, and numerical oracle from
+[`iree-test-suites` at `08a7187a`](https://github.com/iree-org/iree-test-suites/tree/08a7187a92d6496e50c7f2f7fb0251711990ed09/sharktank_models/llama3.1).
+The model inputs stay upstream; they are not generated or downloaded while the
+application is running.
+
+The [integration driver](../tests/patch/consan/consan_iree_prefill_e2e.py) compiles
+the model once and uses ROCr's existing `LOADER_OPTIONS_APPEND=-dump-code`
+option during the original baseline to save its model and native helper code
+objects in a private directory. It prepares two executed model entries and
+runs the same prefill with `HSA_TOOLS_LIB` and the ConSan application
+environment. It checks the original numerical oracle, complete logits,
+selected entry/exit observations, and the closed capture. A fresh analyzer
+process must produce the same result after this test's original inputs and
+prepared artifact become unavailable. This is offline capture replay, not
+re-execution of captured kernels.
+
+The test requires 9 selected executions producing 99 entry/exit rows, with
+the whole model inventory retaining 2 selected and 53 native-uncovered entries.
+Its trace result explicitly
+says `lds_analysis: not_performed`; it does not establish full-model LDS race
+analysis or physical-GPU coverage.
+
+The test uses the checkout's own build and pinned ROCm SDK, Python 3.12, and a
+separate environment with IREE compiler/runtime `3.13.0rc20261006`, NumPy, and
+pytest. The exact wheel pins and hashes are in the
+[CI workflow](../../../.github/workflows/rocjitsu-corpus-tests.yml). It runs once
+as a separate Release step rather than being repeated by full CTest and
+required-ConSan selection. Each application uses four simulator CPU threads
+in CI, with a 60-second deadline shared by the compile and execution stages.
+Setup/download time is separate
+from application execution time.
+
+After building the ConSan tools and test dependencies, run from the repository
+root with the pinned upstream checkout available:
+
+```bash
+/path/to/prefill-venv/bin/python \
+  emulation/rocjitsu/tests/patch/consan/consan_iree_prefill_e2e.py \
+  --source emulation/rocjitsu --build emulation/rocjitsu/build \
+  --suite /path/to/iree-test-suites/sharktank_models/llama3.1 \
+  --root emulation/rocjitsu/build/Testing/ConSanPrefill \
+  --cpu-thread-budget 4 --timeout 60
+```
+
 ## Extending ConSan
 
 Preparation uses the shared `Instrumentor` and `TrampolineBuilder` with
