@@ -2166,8 +2166,8 @@ gfx1250 wave32.</p>
 </table>
 <h3 id="analysis-and-admission">Analysis and admission<a class="headerlink" href="#analysis-and-admission" title="Permanent link">&para;</a></h3>
 <p>Preparation accepts a limited instruction/access subset with no synchronization,
-or multiple qualified full-workgroup barriers on <strong>gfx1250 wave32</strong>. Other barrier
-forms and atomics are rejected. Exact
+or qualified full-workgroup barriers on the supported target/wave profiles.
+Other barrier forms and atomics are rejected. Exact
 conditions are defined by <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp">compiler qualification</a>
 and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp">runtime admission</a>.</p>
 <p>The input code object must contain exactly one kernel, matching the requested
@@ -2202,8 +2202,16 @@ All supported target/wave profiles admit up to sixteen complete 1D workgroups,
 including partial final waves. Multi-group launches require the original
 kernel's workgroup-X input, which entry snapshots preserve before guest
 instructions can overwrite it.</p>
-<p>Barrier qualification recognizes an original LDS drain followed by a matching
-full-workgroup signal/wait pair. It requires at least two waves per workgroup.
+<p>Barrier qualification recognizes an original LDS drain followed by a
+full-workgroup barrier: <code>s_barrier</code> on gfx942/gfx950/gfx1100, or a matching
+signal/wait pair on gfx1201/gfx1250. It requires at least two waves per workgroup.
+Legacy barriers require an original <code>s_waitcnt</code> with a zero LGKM threshold
+immediately before <code>s_barrier</code>. Preparation rejects sequences with an intervening
+instruction, including a global store or <code>s_waitcnt_vscnt</code>, even if an earlier
+wait drained LDS.
+Split-barrier drains may use <code>s_wait_dscnt</code> or a combined load/DS or store/DS
+wait, provided the DS threshold is zero. The additional load/store threshold
+may be nonzero.
 In acyclic flow, every path to an exit must pass through each barrier group.
 A barrier loop may instead use one basic block with a conditional self-backedge
 and a forward exit, with all barrier groups inside that block. A preheader may
