@@ -5,6 +5,7 @@
 #include "common/internal.h"
 #include "mfma/backends.h"
 #include "mfma/fp8_formats.h"
+#include "mfma/gfx942_exact.h"
 #include "mfma/reduction.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
@@ -19,6 +20,16 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   if (int error = validate(flags, controls & ~0x3ffULL,
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
+  }
+  // Only the captured gfx942 forms with default source controls are qualified.
+  // Compatibility retains the existing fast approximate implementation.
+  if constexpr (Fnuz) {
+    if (is_exact(flags) && !controls && !(flags & RJ_ARITH_FP16_OVFL)) {
+      mfma_gfx942_exact(Bf8A ? (Bf8B ? MfmaGfx942Format::Bf8Bf8 : MfmaGfx942Format::Bf8Fp8)
+                             : (Bf8B ? MfmaGfx942Format::Fp8Bf8 : MfmaGfx942Format::Fp8Fp8),
+                        M, K, 1, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;

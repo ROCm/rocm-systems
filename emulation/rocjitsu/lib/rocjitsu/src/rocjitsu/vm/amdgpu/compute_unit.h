@@ -2246,6 +2246,13 @@ inline void
 InstructionComputeUnitView::report_tensor_dma_issue(const TensorDmaIssueObservation &issue) {
   raw_cu().plugin_group().onAmdgpuTensorDmaIssued(issue, raw_wavefront());
 }
+inline bool InstructionComputeUnitView::observes_lds_barrier_arrival() const {
+  return raw_cu().plugin_group().observes_lds_barrier_arrival(raw_wavefront());
+}
+inline void InstructionComputeUnitView::report_lds_barrier_arrival(
+    const LdsBarrierArrivalObservation &arrival) {
+  raw_cu().plugin_group().onAmdgpuLdsBarrierArrived(arrival, raw_wavefront());
+}
 
 /// @brief Execution-mode-aware compute unit shell.
 ///
