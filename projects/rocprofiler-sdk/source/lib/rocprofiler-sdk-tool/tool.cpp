@@ -231,9 +231,9 @@ get_disabled_signals()
         for(const auto& itr :
             rocprofiler::sdk::parse::tokenize(tool::get_config().signal_handlers_disabled, ", "))
         {
-            auto sig = std::find_if(rocprofv3_handled_signals.begin(),
-                                    rocprofv3_handled_signals.end(),
-                                    [&itr](const auto& val) { return val.first == itr; });
+            const auto* sig = std::find_if(rocprofv3_handled_signals.begin(),
+                                           rocprofv3_handled_signals.end(),
+                                           [&itr](const auto& val) { return val.first == itr; });
 
             if(sig == rocprofv3_handled_signals.end())
                 ROCP_WARNING << "ignoring '" << itr

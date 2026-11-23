@@ -10,9 +10,15 @@ endif()
 
 foreach(
     _FILE IN
-    ITEMS conftest.py pytest.ini test_att_resource_mode.py test_attach_config.py
-          test_mpi_env_variables.py test_multipass_parsing.py test_preload_ordering.py
-          test_rocprof_attach.py test_disable_signal_handlers.py)
+    ITEMS conftest.py
+          pytest.ini
+          test_att_resource_mode.py
+          test_attach_config.py
+          test_mpi_env_variables.py
+          test_multipass_parsing.py
+          test_preload_ordering.py
+          test_rocprof_attach.py
+          test_disable_signal_handlers.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${_FILE}
                    ${CMAKE_CURRENT_BINARY_DIR}/${_FILE} COPYONLY)
 endforeach()
