@@ -204,7 +204,7 @@ TEST(FieldValues, EepromValidityIsOneOrZero) {
               rdc_field_value value = dirty_value();
               EXPECT_EQ(fetcher.fetch_smi_field(0, RDC_HEALTH_EEPROM_CONFIG_VALID, &value),
                         RDC_ST_OK);
-              EXPECT_EQ(value.status, AMDSMI_STATUS_SUCCESS);
+              EXPECT_EQ(value.status, static_cast<int>(RDC_ST_OK));
               EXPECT_EQ(value.type, INTEGER);
               EXPECT_EQ(value.value.l_int, 0);
             });
@@ -213,7 +213,7 @@ TEST(FieldValues, EepromValidityIsOneOrZero) {
               rdc_field_value value = dirty_value();
               EXPECT_NE(fetcher.fetch_smi_field(0, RDC_HEALTH_EEPROM_CONFIG_VALID, &value),
                         RDC_ST_OK);
-              EXPECT_NE(value.status, AMDSMI_STATUS_SUCCESS);
+              EXPECT_NE(value.status, static_cast<int>(RDC_ST_OK));
               EXPECT_EQ(value.type, INTEGER);
               EXPECT_EQ(value.value.l_int, 0);
             });

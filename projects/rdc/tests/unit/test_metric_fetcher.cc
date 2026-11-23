@@ -242,7 +242,7 @@ TEST_F(EccLookupTest, AGpuThatIsNoLongerListedReadsNotFound) {
     g_gpu_listed_until = g_listings + 2;
     rdc_field_value value = {};
     fetcher_.fetch_smi_field(0, field, &value);
-    EXPECT_EQ(value.status, AMDSMI_STATUS_NOT_FOUND) << "field " << field;
+    EXPECT_EQ(value.status, RDC_ST_NOT_FOUND) << "field " << field;
     EXPECT_EQ(g_listings, g_gpu_listed_until) << "field " << field << ": not two lookups";
   }
 }
