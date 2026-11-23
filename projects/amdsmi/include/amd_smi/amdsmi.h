@@ -8860,11 +8860,15 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
  *
  *  @details Reads the calling process's own DRM client usage stats, so unlike
  *  ::amdsmi_get_gpu_process_list it needs neither the host PID nor access to other
- *  processes, and works inside a container with its own PID namespace. Memory is
- *  the size of the process's buffers on the device, whether or not they are
- *  currently resident. @p info->pid is the PID in the caller's namespace.
- *  cu_occupancy, evicted_time and sdma_usage come from KFD, which identifies
- *  processes by host PID, and are set to their maximum values (unavailable).
+ *  processes, and works inside a container with its own PID namespace. Usage is
+ *  for the physical PCI device of @p processor_handle: amdgpu fdinfo reports the
+ *  physical BDF, so sibling compute partitions of the same package share the
+ *  same totals. Memory prefers drm-total-* (buffer size, including non-resident
+ *  allocations). On older kernels that only print drm-memory-*, the values are
+ *  resident size and can drop when buffers are evicted without being freed.
+ *  @p info->pid is the PID in the caller's namespace. cu_occupancy, evicted_time
+ *  and sdma_usage come from KFD, which identifies processes by host PID, and are
+ *  set to their maximum values (unavailable).
  *
  *  @ingroup tagProcessInfo
  *
@@ -8876,7 +8880,8 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_NOT_FOUND if the calling process has not
- * opened the device.
+ * opened the device,
+ *                            | ::AMDSMI_STATUS_FILE_ERROR if an fdinfo entry could not be read.
  */
 amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle processor_handle,
                                                  amdsmi_proc_info_t* info);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <dirent.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -209,25 +210,56 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
 amdsmi_status_t gpuvsmi_get_self_info(const amdsmi_bdf_t& bdf, amdsmi_proc_info_t& info,
                                       const char* fdinfo_dir) {
+  // amdgpu prints the physical PCI BDF in drm-pdev (function 0). Partition
+  // handles may carry the partition index in function_number; match physical.
   char bdf_str[13];
-  snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
+  snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".0",
            static_cast<uint32_t>(bdf.domain_number & 0xffff),
            static_cast<uint32_t>(bdf.bus_number & 0xff),
-           static_cast<uint32_t>(bdf.device_number & 0x1f),
-           static_cast<uint32_t>(bdf.function_number & 0x7));
+           static_cast<uint32_t>(bdf.device_number & 0x1f));
 
   DIR* d = opendir(fdinfo_dir);
-  if (!d) return AMDSMI_STATUS_NO_PERM;
+  if (!d) {
+    return (errno == EACCES || errno == EPERM) ? AMDSMI_STATUS_NO_PERM : AMDSMI_STATUS_FILE_ERROR;
+  }
 
   std::map<std::string, amd::smi::DrmClientUsage> clients;
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
   for (struct dirent* dir; (dir = readdir(d)) != NULL;) {
-    std::ifstream fdinfo(std::string(fdinfo_dir) + dir->d_name);
+    // /proc/*/fdinfo entries are named by descriptor number; skip . / .. and
+    // any other nonnumeric name.
+    const char* name = dir->d_name;
+    if (name[0] == '\0') continue;
+    bool numeric = true;
+    for (const char* p = name; *p != '\0'; ++p) {
+      if (*p < '0' || *p > '9') {
+        numeric = false;
+        break;
+      }
+    }
+    if (!numeric) continue;
+
+    errno = 0;
+    std::ifstream fdinfo(std::string(fdinfo_dir) + name);
+    if (!fdinfo) {
+      // Descriptor closed between readdir and open: skip. Other failures
+      // (for example EMFILE after opendir consumed the last fd) must not be
+      // reported as complete usage.
+      if (errno == ENOENT) continue;
+      status = AMDSMI_STATUS_FILE_ERROR;
+      break;
+    }
     std::stringstream text;
     text << fdinfo.rdbuf();
+    if (fdinfo.bad()) {
+      status = AMDSMI_STATUS_FILE_ERROR;
+      break;
+    }
     auto usage = amd::smi::ParseDrmFdinfo(text.str());
     if (usage.driver == "amdgpu" && usage.pdev == bdf_str) clients[usage.client] = usage;
   }
   closedir(d);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
 
   if (clients.empty()) return AMDSMI_STATUS_NOT_FOUND;
 

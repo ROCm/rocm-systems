@@ -25,9 +25,11 @@ amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t& bdf, long pid, uint64_t kn
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
                                      amdsmi_proc_info_t& info, uint64_t kfd_gpu_id);
 
-// Populate `info` with the calling process's usage of the device `bdf`, from
-// the DRM clients in `fdinfo_dir`. Needs no host PID, so it works inside a PID
-// namespace. KFD-only fields are set to their unavailable sentinels.
+// Populate `info` with the calling process's usage of the physical PCI device
+// of `bdf`, from the DRM clients in `fdinfo_dir`. Matches `drm-pdev` with
+// function bits forced to 0, because amdgpu fdinfo always reports the physical
+// BDF. Needs no host PID, so it works inside a PID namespace. KFD-only fields
+// are set to their unavailable sentinels.
 amdsmi_status_t gpuvsmi_get_self_info(const amdsmi_bdf_t& bdf, amdsmi_proc_info_t& info,
                                       const char* fdinfo_dir = "/proc/self/fdinfo/");
 

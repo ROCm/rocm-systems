@@ -6381,6 +6381,7 @@ amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle process
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
+  // Collector matches drm-pdev on the physical PCI BDF (function 0).
   return gpuvsmi_get_self_info(gpu_device->get_bdf(), *info);
 }
 
