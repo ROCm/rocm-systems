@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "ProcessIsolatedTestRunner.hpp"
+#include "UniqueIdHex.hpp"
 
 namespace RcclUnitTesting {
 namespace {
@@ -84,30 +85,6 @@ enum WorkerStatus {
   kWorkerFailed = 1,
   kCoordSkip = 2,
 };
-
-std::string toHex(const ncclUniqueId& id) {
-  const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&id);
-  std::string out;
-  out.reserve(sizeof(ncclUniqueId) * 2);
-  char buf[3];
-  for (size_t i = 0; i < sizeof(ncclUniqueId); ++i) {
-    snprintf(buf, sizeof(buf), "%02x", bytes[i]);
-    out += buf;
-  }
-  return out;
-}
-
-bool fromHex(const std::string& hex, ncclUniqueId& id) {
-  if (hex.size() != sizeof(ncclUniqueId) * 2) { return false; }
-  unsigned char* bytes = reinterpret_cast<unsigned char*>(&id);
-  for (size_t i = 0; i < sizeof(ncclUniqueId); ++i) {
-    unsigned int v = 0;
-    const int parsed = sscanf(hex.c_str() + i * 2, "%02x", &v);
-    if (parsed != 1) { return false; }
-    bytes[i] = static_cast<unsigned char>(v);
-  }
-  return true;
-}
 
 // RAII holder for a worker's AllReduce resources, so every early return
 // cleans up automatically instead of duplicating hipFree/hipStreamDestroy at
@@ -269,7 +246,7 @@ int runCoordinator(VisibilityLayout layout) {
   ncclUniqueId id;
   ncclResult_t nres;
   ASYM_NCCLCHECK(ncclGetUniqueId(&id), tag, return kWorkerFailed);
-  const std::string uidHex = toHex(id);
+  const std::string uidHex = uniqueIdToHex(id);
 
   std::vector<pid_t> children;
   for (int rank = 0; rank < numRanks; ++rank) {
@@ -334,7 +311,7 @@ TEST(AsymmetricVisibilityWorker, Run) {
   ASSERT_NE(uidEnv, nullptr);
 
   ncclUniqueId id;
-  ASSERT_TRUE(fromHex(uidEnv, id)) << "malformed ncclUniqueId in environment";
+  ASSERT_TRUE(uniqueIdFromHex(uidEnv, id)) << "malformed ncclUniqueId in environment";
 
   // Exit with the WorkerStatus code so the orchestrator's WEXITSTATUS reflects
   // this worker's own result rather than gtest's generic exit code.

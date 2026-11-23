@@ -18,11 +18,7 @@
 #include <amd_smi/amdsmi.h>
 #endif
 
-#include <arpa/inet.h>
 #include <dlfcn.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -47,8 +43,10 @@
 
 #include "common/EnvVars.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/RasClientHelpers.hpp"
 #include "common/ResourceGuards.hpp"
 #include "common/TestChecks.hpp"
+#include "common/UniqueIdHex.hpp"
 
 namespace RcclUnitTesting
 {
@@ -259,25 +257,6 @@ private:
     int saved_ = -1;
 };
 
-// Picks a likely-free loopback TCP port (bind to port 0, read the assignment, close). The RAS client listener binds
-// with SO_REUSEADDR, so the closed probe does not block it; another process may still take the port in between.
-static int pickFreePort()
-{
-    const int s = ::socket(AF_INET, SOCK_STREAM, 0);
-    if(s < 0)
-        return 0;
-    sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    socklen_t len        = sizeof(addr);
-    int port             = 0;
-    if(::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0
-       && ::getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) == 0)
-        port = ntohs(addr.sin_port);
-    ::close(s);
-    return port;
-}
-
 // The parent test environment (e.g. CI categories) may carry these; each case sets what it needs. The RAS client
 // listener of every case binds a free loopback port: the default port 28028 may be held by another job on a shared
 // host, and a client would then silently talk to that job. Returns the port, 0 on failure.
@@ -295,58 +274,6 @@ static int setRasEnv(bool runDiagnostics)
     if(port > 0)
         setenv("NCCL_RAS_ADDR", ("127.0.0.1:" + std::to_string(port)).c_str(), 1);
     return port;
-}
-
-// Sends one command to the RAS client listener on 127.0.0.1:port, optionally after "SET FORMAT <format>", and
-// returns everything the server writes until it closes the connection. Returns "" if the connection fails.
-static std::string rasRequest(int port, const std::string& command, const std::string& format = "")
-{
-    int sock = -1;
-    for(int attempt = 0; attempt < 50 && sock < 0; ++attempt)
-    {
-        const int s = ::socket(AF_INET, SOCK_STREAM, 0);
-        if(s < 0)
-            return {};
-        sockaddr_in addr{};
-        addr.sin_family      = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        addr.sin_port        = htons(static_cast<uint16_t>(port));
-        if(::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0)
-            sock = s;
-        else
-        {
-            ::close(s);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
-    if(sock < 0)
-        return {};
-    timeval tv{static_cast<time_t>(kReportWait.count()), 0};
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    std::string body;
-    char buf[4096];
-    if(!format.empty())
-    {
-        const std::string setFormat = "SET FORMAT " + format + "\n";
-        ::send(sock, setFormat.c_str(), setFormat.size(), 0);
-        const ssize_t n = ::recv(sock, buf, sizeof(buf), 0);
-        if(n <= 0 || std::string(buf, n).find("OK") == std::string::npos)
-        {
-            ::close(sock);
-            return {};
-        }
-    }
-    const std::string line = command + "\n";
-    ::send(sock, line.c_str(), line.size(), 0);
-    ssize_t n;
-    while((n = ::recv(sock, buf, sizeof(buf), 0)) > 0)
-        body.append(buf, n);
-    if(n < 0)
-        ADD_FAILURE() << "RAS client request \"" << command << "\": recv failed before the server closed the "
-                      << "connection (" << strerror(errno) << ", timeout " << kReportWait.count() << " s)";
-    ::close(sock);
-    return body;
 }
 
 // Called only in a case process. The gtest parent must not initialize HIP: it forks the TestBed children of the
@@ -634,34 +561,6 @@ static void runRasCases(const std::vector<RasCase>& cases)
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests()) << "One or more isolated tests failed";
 }
 
-static std::string uniqueIdToHex(const ncclUniqueId& id)
-{
-    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&id);
-    std::string out;
-    char buf[3];
-    for(size_t i = 0; i < sizeof(ncclUniqueId); ++i)
-    {
-        snprintf(buf, sizeof(buf), "%02x", bytes[i]);
-        out += buf;
-    }
-    return out;
-}
-
-static bool uniqueIdFromHex(const std::string& hex, ncclUniqueId& id)
-{
-    if(hex.size() != sizeof(ncclUniqueId) * 2)
-        return false;
-    unsigned char* bytes = reinterpret_cast<unsigned char*>(&id);
-    for(size_t i = 0; i < sizeof(ncclUniqueId); ++i)
-    {
-        unsigned int v = 0;
-        if(sscanf(hex.c_str() + i * 2, "%02x", &v) != 1)
-            return false;
-        bytes[i] = static_cast<unsigned char>(v);
-    }
-    return true;
-}
-
 // Starts one env-mismatch worker: a fresh image of this binary running RasDiagnosticsWorker.Run as the given rank.
 static pid_t spawnWorker(int rank, const std::string& uidHex, const std::string& outPath)
 {
@@ -867,7 +766,7 @@ TEST_F(RasDiagnostics, OnDemandClientRequest)
         ASSERT_NO_FATAL_FAILURE(initAll(others, nGpus));
         const auto otherGuards = guardComms(others);
 
-        const std::string response = rasRequest(port, "DIAGNOSTICS");
+        const std::string response = rasRequest(port, "DIAGNOSTICS", "", kReportWait);
         ASSERT_FALSE(response.empty()) << "no response from the RAS client listener on port " << port;
         const RasReport report = parseRasReport(response);
         EXPECT_EQ(report.count(kRasHeader), 1) << report.dump();
@@ -881,7 +780,7 @@ TEST_F(RasDiagnostics, OnDemandClientRequest)
         ASSERT_NO_FATAL_FAILURE(initAll(comms, usableGpus()));
         const auto commGuards = guardComms(comms);
 
-        const std::string response = rasRequest(port, "DIAGNOSTICS", "json");
+        const std::string response = rasRequest(port, "DIAGNOSTICS", "json", kReportWait);
         ASSERT_FALSE(response.empty()) << "no response from the RAS client listener on port " << port;
         EXPECT_NE(response.find("ERROR: diagnostics only supports text output"), std::string::npos) << response;
         EXPECT_TRUE(parseRasReport(response).lines.empty()) << response;
