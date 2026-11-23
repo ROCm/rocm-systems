@@ -1511,17 +1511,16 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
   }
   if (!pending)
     return;
-  const auto classified = WaitcheckTarget::classify_events(inst, wf.cu().arch());
-  if (classified.failed())
+  auto &classified = classification_scratch_;
+  if (WaitcheckTarget::classify_events_into(inst, wf.cu().arch(), classified).failed())
     return;
-  const auto xevent =
-      std::ranges::find(classified.value(), WaitCounterKind::X, &ClassifiedEvent::counter);
-  const bool replay = outstanding(WaitCounterKind::X) != 0 && xevent != classified.value().end();
+  const auto xevent = std::ranges::find(classified, WaitCounterKind::X, &ClassifiedEvent::counter);
+  const bool replay = outstanding(WaitCounterKind::X) != 0 && xevent != classified.end();
   if (replay)
     xcnt_group(xevent->kind == WaitEventKind::Smem);
-  const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
-                                      &ClassifiedEvent::registers);
-  const bool has_defs = defs != classified.value().end();
+  const auto defs =
+      std::ranges::find(classified, TrackedRegisterSource::Defs, &ClassifiedEvent::registers);
+  const bool has_defs = defs != classified.end();
   const auto order = has_defs && has_ordered_writeback(*defs, wf.cu().arch())
                          ? ordered_write_order(*defs, wf.cu().arch())
                          : kUnordered;
@@ -2010,9 +2009,9 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rocjitsu::IsaFamily a
                maximum + 1;
       });
   if (full) {
-    const auto events = WaitcheckTarget::classify_events(inst, arch);
-    if (events.succeeded())
-      for (const auto &event : events.value()) {
+    auto &events = classification_scratch_;
+    if (WaitcheckTarget::classify_events_into(inst, arch, events).succeeded())
+      for (const auto &event : events) {
         // Fixed-domain FLAT reserves both counter slots before reading its address.
         // Targets with address-dependent counters apply capacity after routing.
         if (!flat_issues_both_counter_domains(arch) &&
