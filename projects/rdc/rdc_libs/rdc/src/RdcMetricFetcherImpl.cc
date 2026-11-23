@@ -291,17 +291,23 @@ void RdcMetricFetcherImpl::get_afid(uint32_t gpu_index, rdc_field_value* value) 
   }
   // No more entries than the headers buffer holds, whatever the library reports.
   entry_count = std::min<uint64_t>(entry_count, cper_hdrs.size());
+  // The headers point into cper_data, of which the library wrote buf_size bytes.
+  const uintptr_t data_begin = reinterpret_cast<uintptr_t>(cper_data.data());
+  const uintptr_t data_end = data_begin + std::min<uint64_t>(buf_size, cper_data.size());
 
   std::string result;
   for (uint64_t i = 0; i < entry_count; ++i) {
     amdsmi_cper_hdr_t* hdr = cper_hdrs[i];
-    if (hdr == nullptr) {
+    const uintptr_t at = reinterpret_cast<uintptr_t>(hdr);
+    if (at < data_begin || at >= data_end) {  // a null header too
       continue;
     }
     uint64_t afids[AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD] = {0};
     uint32_t num_afids = AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD;
-    amdsmi_status_t afid_err = amdsmi_get_afids_from_cper(reinterpret_cast<char*>(hdr),
-                                                          hdr->record_length, afids, &num_afids);
+    // AMD SMI checks the record's own length against the bytes from the record's start to the
+    // end of the data it wrote, so it does not read a record that claims to run past them.
+    amdsmi_status_t afid_err = amdsmi_get_afids_from_cper(
+        reinterpret_cast<char*>(hdr), static_cast<uint32_t>(data_end - at), afids, &num_afids);
     if (afid_err != AMDSMI_STATUS_SUCCESS) {
       continue;
     }
@@ -1429,8 +1435,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_HEALTH_EEPROM_CONFIG_VALID: {
       ret = amdsmi_gpu_validate_ras_eeprom(processor_handle);
       value->type = INTEGER;
+      // 1 if the EEPROM is valid, 0 if AMD SMI finds it corrupted; any other error is a failure
+      // to check.
       value->value.l_int = (ret == AMDSMI_STATUS_SUCCESS) ? 1 : 0;
-      value->status = Smi2RdcError(ret);
+      value->status =
+          Smi2RdcError(ret == AMDSMI_STATUS_CORRUPTED_EEPROM ? AMDSMI_STATUS_SUCCESS : ret);
       break;
     }
     case RDC_HEALTH_POWER_THROTTLE_TIME:
@@ -1603,7 +1612,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
       valid_clocks.reserve(AMDSMI_MAX_NUM_GFX_CLKS);
       for (uint32_t i = 0; i < AMDSMI_MAX_NUM_GFX_CLKS; i++) {
         uint16_t clk = clock_array[i];
-        if (clk != 0 && clk != 0xFFFF) {
+        // 0 MHz is a reading; only UINT16_MAX marks a clock that is not there.
+        if (!smi_not_available(clk)) {
           valid_clocks.push_back(clk);
         }
       }
@@ -1619,8 +1629,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
         return RDC_ST_NO_DATA;
       }
 
-      // Each partition averages its share of the valid clocks: one each when there
-      // are as many valid clocks as partitions.
+      // Each partition averages its share of the valid clocks, in order: one each when
+      // there are as many valid clocks as partitions. The clocks past the last whole
+      // share count for no partition.
       uint32_t chunk_size = vc / pCount;
       uint32_t start_idx = partIdx * chunk_size;
       uint32_t end_idx = start_idx + chunk_size;
@@ -2011,6 +2022,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     return RDC_ST_NOT_SUPPORTED;
   }
 
+  // A device type that nothing below reads from returns before the timestamp.
+  if (info.device_type != RDC_DEVICE_TYPE_CPU &&
+      info.entity_role != RDC_DEVICE_ROLE_PARTITION_INSTANCE &&
+      info.device_type != RDC_DEVICE_TYPE_GPU) {
+    RDC_LOG(RDC_ERROR, "Unsupported device type for fetching field: " << field_id_string(field_id));
+    return RDC_ST_NOT_SUPPORTED;
+  }
+
   value->ts = now();
   if (info.device_type == RDC_DEVICE_TYPE_CPU) {
 // don't care about partition for CPUs
@@ -2021,11 +2040,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
 #endif
   } else if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
     status = fetch_gpu_partition_field_(gpu_index, field_id, value);
-  } else if (info.device_type == RDC_DEVICE_TYPE_GPU) {
-    status = fetch_gpu_field_(gpu_index, field_id, value, processor_handle);
   } else {
-    RDC_LOG(RDC_ERROR, "Unsupported device type for fetching field: " << field_id_string(field_id));
-    return RDC_ST_NOT_SUPPORTED;
+    status = fetch_gpu_field_(gpu_index, field_id, value, processor_handle);
   }
 
   if (status != RDC_ST_OK) {

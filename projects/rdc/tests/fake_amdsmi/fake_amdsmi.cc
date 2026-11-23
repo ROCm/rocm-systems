@@ -129,6 +129,9 @@ struct Config {
   std::vector<Rule> unfilled;       // SUCCESS without writing the outputs
   std::vector<Rule> delay;          // sleep ms before the call
   int64_t cper_count = -1;          // CPER entries to report, -1 = none
+  int64_t cper_length = -1;         // record_length of each CPER record, -1 = its size
+  int64_t cper_afid = -1;           // AF ID of each CPER record, -1 = none
+  int64_t cper_bytes = -1;          // CPER data bytes to report, -1 = those written
   std::vector<EventSpec> events;    // events delivered once
   int64_t events_count = -1;        // event count to report, -1 = events.size()
   int64_t num_freq = -1;            // levels in every clock frequency table, -1 = normal
@@ -138,6 +141,7 @@ struct Config {
   bool version_build_null = false;  // amdsmi_get_lib_version() build string is NULL
   bool long_strings = false;        // ASIC info names fill their buffers, no NUL
   uint32_t gfxclk_holes = 0;        // leading current_gfxclks[] entries not available
+  std::vector<uint16_t> gfxclks;    // current_gfxclks[] from the first, if not empty
 };
 
 std::mutex g_mutex;  // guards everything below that is not atomic
@@ -265,6 +269,28 @@ std::vector<Rule> parse_rules(const char* env, amdsmi_status_t dflt, int64_t las
   return rules;
 }
 
+// RDC_FAKE_GFXCLKS=mhz,...: current_gfxclks[] of amdsmi_get_gpu_metrics_info from the first
+// entry, each 0..65535; the entries after the list are not available.
+std::vector<uint16_t> parse_gfxclks(const char* v) {
+  std::vector<uint16_t> clks;
+  if (v == nullptr) return clks;
+  const std::string all(v);
+  size_t pos = 0;
+  while (pos <= all.size()) {
+    size_t end = all.find(',', pos);
+    if (end == std::string::npos) end = all.size();
+    clks.push_back(
+        static_cast<uint16_t>(parse_int("RDC_FAKE_GFXCLKS", all.substr(pos, end - pos), 0, 65535)));
+    pos = end + 1;
+  }
+  if (clks.size() > AMDSMI_MAX_NUM_GFX_CLKS) {
+    fprintf(stderr, "fake amd-smi: RDC_FAKE_GFXCLKS: more than %d clocks\n",
+            AMDSMI_MAX_NUM_GFX_CLKS);
+    abort();
+  }
+  return clks;
+}
+
 uint32_t env_u32(const char* name, uint32_t dflt, uint32_t lo, uint32_t hi) {
   const char* v = getenv(name);
   if (v == nullptr || *v == '\0') return dflt;
@@ -322,6 +348,9 @@ void load_config_locked() {
   c.unfilled = parse_rules("RDC_FAKE_UNFILLED", AMDSMI_STATUS_SUCCESS, last);
   c.delay = parse_rules("RDC_FAKE_DELAY_MS", AMDSMI_STATUS_SUCCESS, last, true);
   c.cper_count = env_int("RDC_FAKE_CPER_COUNT", -1, 0, 1 << 20);
+  c.cper_length = env_int("RDC_FAKE_CPER_LENGTH", -1, 0, 1 << 20);
+  c.cper_afid = env_int("RDC_FAKE_CPER_AFID", -1, 0, 1 << 30);
+  c.cper_bytes = env_int("RDC_FAKE_CPER_BYTES", -1, 0, 1 << 20);
   parse_events(getenv("RDC_FAKE_EVENTS"), &c);
   c.num_freq = env_int("RDC_FAKE_NUM_FREQ", -1, 0, AMDSMI_MAX_NUM_FREQUENCIES);
   c.procs = static_cast<uint32_t>(env_int("RDC_FAKE_PROCS", 0, 0, 1024));
@@ -336,6 +365,7 @@ void load_config_locked() {
   c.long_strings = env_int("RDC_FAKE_LONG_STRINGS", 0, 0, 1) != 0;
   c.gfxclk_holes =
       static_cast<uint32_t>(env_int("RDC_FAKE_GFXCLK_HOLES", 0, 0, AMDSMI_MAX_NUM_GFX_CLKS));
+  c.gfxclks = parse_gfxclks(getenv("RDC_FAKE_GFXCLKS"));
   g_cfg = c;
   g_fail_once_fired.assign(g_cfg.fail_once.size(), false);
   memcpy(g_cper_hdr.signature, "CPER", 4);
@@ -904,7 +934,11 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
     m.xgmi_write_data_acc[i] = acc * (p->gpu + 1) * (i + 2);
   }
   for (uint32_t i = 0; i < AMDSMI_MAX_NUM_GFX_CLKS; ++i) {
-    m.current_gfxclks[i] = i < g_cfg.gfxclk_holes ? UINT16_MAX : m.current_gfxclk;
+    if (!g_cfg.gfxclks.empty()) {
+      m.current_gfxclks[i] = i < g_cfg.gfxclks.size() ? g_cfg.gfxclks[i] : UINT16_MAX;
+    } else {
+      m.current_gfxclks[i] = i < g_cfg.gfxclk_holes ? UINT16_MAX : m.current_gfxclk;
+    }
   }
   m.vcn_activity[0] = V(kVCN_ACTIVITY_PCT, p->gpu);  // one decoder, the others not available
   m.num_partition = static_cast<uint16_t>(g_cfg.parts);
@@ -1381,6 +1415,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
   return AMDSMI_STATUS_SUCCESS;
 }
 
+static_assert(sizeof(amdsmi_cper_hdr_t) == 128, "README.md gives a CPER record as 128 bytes");
+
 amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle,
                                             uint32_t severity_mask, char* cper_data,
                                             uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
@@ -1393,13 +1429,22 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
   }
   (void)severity_mask;
   if (g_cfg.cper_count >= 0 && armed()) {
-    // RDC_FAKE_CPER_COUNT: report that many entries. Past the caller's capacity this breaks the
-    // contract (amd-smi stops there with AMDSMI_STATUS_MORE_DATA); header pointers are written
-    // only up to the capacity.
+    // RDC_FAKE_CPER_COUNT: report that many entries. As amd-smi, write each record that fits in
+    // both of the caller's buffers into cper_data, with a header pointer to it. Past that capacity
+    // this breaks the contract (amd-smi stops there with AMDSMI_STATUS_MORE_DATA).
     const uint64_t n = static_cast<uint64_t>(g_cfg.cper_count);
-    for (uint64_t i = 0; i < std::min(n, *entry_count); ++i) cper_hdrs[i] = &g_cper_hdr;
+    amdsmi_cper_hdr_t record = g_cper_hdr;
+    if (g_cfg.cper_length >= 0) record.record_length = static_cast<uint32_t>(g_cfg.cper_length);
+    const uint64_t fit = std::min({n, *entry_count, *buf_size / sizeof(record)});
+    for (uint64_t i = 0; i < fit; ++i) {
+      char* at = cper_data + i * sizeof(record);
+      memcpy(at, &record, sizeof(record));
+      cper_hdrs[i] = reinterpret_cast<amdsmi_cper_hdr_t*>(at);
+    }
     *entry_count = n;
-    *buf_size = 0;
+    // RDC_FAKE_CPER_BYTES: report fewer bytes than the records span, which amd-smi never does.
+    *buf_size =
+        g_cfg.cper_bytes >= 0 ? static_cast<uint64_t>(g_cfg.cper_bytes) : fit * sizeof(record);
     return AMDSMI_STATUS_SUCCESS;
   }
   *buf_size = 0;
@@ -1413,8 +1458,18 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
   if (cper_buffer == nullptr || afids == nullptr || num_afids == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  (void)buf_size;
-  *num_afids = 0;
+  // As amd-smi: the record's own length must fit in buf_size.
+  amdsmi_cper_hdr_t hdr;
+  if (buf_size < sizeof(hdr)) return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  memcpy(&hdr, cper_buffer, sizeof(hdr));
+  if (hdr.record_length < sizeof(hdr) || hdr.record_length > buf_size) {
+    return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  }
+  if (memcmp(hdr.signature, "CPER", 4) != 0) return AMDSMI_STATUS_UNEXPECTED_DATA;
+  // RDC_FAKE_CPER_AFID: one AF ID per record.
+  const uint32_t room = *num_afids;
+  *num_afids = g_cfg.cper_afid >= 0 ? 1 : 0;
+  if (*num_afids != 0 && room != 0) afids[0] = static_cast<uint64_t>(g_cfg.cper_afid);
   return AMDSMI_STATUS_SUCCESS;
 }
 
