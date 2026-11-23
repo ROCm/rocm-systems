@@ -22,6 +22,7 @@
 /// CP documentation</a>
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -142,7 +143,7 @@ public:
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
   bool packed_tid() const { return packed_tid_; }
   /// @brief Configure launch and packet behavior derived from the GPU architecture.
-  void configure_for_arch(rj_code_arch_t arch);
+  void configure_for_arch(rocjitsu::IsaFamily arch);
   void set_shared_dispatch_pool(CpuDispatchPool *pool);
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
@@ -216,9 +217,7 @@ public:
 
   /// @brief Register a queue and return its CP-local lifetime identity.
   /// @details Invalid layout and VM capability publication failures return zero.
-  /// Exceptions from VM capability access propagate before queue publication.
-  /// Monitor thread-creation errors propagate after rolling back owner and peer
-  /// registrations. Replicas do not repeat capability publication.
+  /// Replicas do not repeat capability publication.
   uint64_t register_queue(ComputeQueueConfig queue);
 
   /// @brief Remove only the queue incarnation identified by @p registration_id.
@@ -537,11 +536,6 @@ public:
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
     return doorbell_running_;
   }
-  /// @brief Fail the next monitor startup with a thread-creation error.
-  void fail_next_doorbell_monitor_start_for_testing() {
-    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
-    fail_next_doorbell_monitor_start_for_testing_ = true;
-  }
   /// @brief Test-only check that teardown reaped the monitor's thread handle.
   [[nodiscard]] bool doorbell_monitor_joinable_for_test() {
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
@@ -755,6 +749,7 @@ private:
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
   void cancel_queue_dispatches(const ComputeQueueRecord &queue);
+  void reset_ordered_ids(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void complete_failed_queue(ComputeQueueRecord &queue);
   void drain_pending_queue_failures();
@@ -1032,8 +1027,13 @@ private:
   struct PendingClusterBarrierCompletion {
     uint32_t dispatch_id = 0;
     uint8_t completion_bit = 0;
+    uint64_t generation = 0; ///< The round that completed.
     std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
   };
+  /// Complete a cluster round on each peer workgroup and report it to plugins.
+  void
+  complete_cluster_barrier_round(uint32_t dispatch_id, uint8_t completion_bit, uint64_t generation,
+                                 std::span<const std::pair<ComputeUnitCore *, uint32_t>> peers);
   std::vector<PendingClusterBarrierCompletion> pending_cluster_barrier_completions_;
 
   class ClusterWorkgroupPlacement {
@@ -1063,6 +1063,8 @@ private:
     uint32_t member_count = 0;
     std::unordered_set<uint32_t> registered_workgroups;
     std::array<std::unordered_set<uint32_t>, 2> signaled_workgroups;
+    /// The current round of the cluster barrier and cluster trap barrier.
+    std::array<uint64_t, 2> generation{};
   };
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
@@ -1126,7 +1128,9 @@ private:
   /// @details Serialized by doorbell_thread_mutex_. Caller MUST NOT hold
   /// hw_queue_mutex_ so lifecycle operations consistently acquire
   /// doorbell_thread_mutex_ before hw_queue_mutex_.
-  void ensure_doorbell_monitor();
+  /// Startup failures are fatal: registrations are already visible, and KFD
+  /// must not recover with a live queue whose registration handle was lost.
+  void ensure_doorbell_monitor() noexcept;
   bool scan_doorbells();
   bool schedule_retry_event();
 
@@ -1180,7 +1184,6 @@ private:
   std::mutex doorbell_thread_mutex_;
   // True while the lifecycle owns a running monitor.
   bool doorbell_running_ = false;
-  bool fail_next_doorbell_monitor_start_for_testing_ = false;
   std::jthread doorbell_thread_;
 };
 

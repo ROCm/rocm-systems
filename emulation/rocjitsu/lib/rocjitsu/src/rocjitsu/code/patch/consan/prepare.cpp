@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/prepare.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
@@ -10,7 +12,6 @@
 #include "rocjitsu/code/patch/consan/probes.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/scoped_cfg_edges.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -55,8 +56,10 @@ Result finish_manifest(const InputProgram &program, PreparedArtifact &artifact, 
   manifest.target = program.target->id;
   manifest.wave_size = program.wave_size;
   manifest.code_object_abi = 5;
-  manifest.scope = program.barriers.empty() ? ScopeKind::NativeLdsNoSynchronization
-                                            : ScopeKind::NativeLdsWorkgroupBarrier;
+  manifest.scope = program.barriers.empty()
+                       ? ScopeKind::NativeLdsNoSynchronization
+                       : (program.repeated ? ScopeKind::NativeLdsWorkgroupBarrierLoop
+                                           : ScopeKind::NativeLdsWorkgroupBarrier);
   manifest.original_text_bytes = program.text_bytes;
   manifest.prepared_text_bytes = section.size();
   manifest.entry = {.name = program.kernel.kernel_name,
@@ -135,6 +138,7 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     args.push_back(program.wave_size == 64 ? ProbeArgValue{ProbeArgSource::AnchorExecHi}
                                            : probe_arg_imm(0));
     args.push_back(probe_arg_imm(access.width));
+    args.push_back(probe_arg_imm(program.repeated));
     add(access.original_offset, InstrumentationKind::BeforeInst, "rj_consan_access",
         std::move(args));
   }
@@ -144,6 +148,7 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     std::vector<ProbeArgValue> args = context_args;
     args.push_back(probe_arg_imm(group));
     args.push_back(probe_arg_imm(static_cast<uint32_t>(sync_offset(program.accesses.size()))));
+    args.push_back(probe_arg_imm(static_cast<uint32_t>(program.barriers.size())));
     add(program.barriers[group].original_wait, InstrumentationKind::AfterInst, "rj_consan_barrier",
         std::move(args));
   }
@@ -206,7 +211,7 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
   if (verify_artifact_images(artifact.manifest, original, artifact.image, &contract_error).failed())
     return reject(error, contract_error.message);
   const TargetProfile *target = target_profile(artifact.manifest.target);
-  const rj_code_arch_t arch = target->arch;
+  const rocjitsu::IsaFamily arch = target->arch;
   const FailureOr<InputProgram> program =
       build_input_program(original, *target, artifact.manifest.entry.name, error);
   if (program.failed())

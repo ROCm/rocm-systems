@@ -29,7 +29,6 @@
 #include <mutex>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <sys/mman.h>
 #include <thread>
 #include <unistd.h>
@@ -619,7 +618,7 @@ TEST_F(SdmaQueueSchedulerTest, RetriesUnavailableProducerPointerWithoutAnotherDo
   EXPECT_TRUE(scheduler_.detach(queue));
 }
 
-TEST_F(SdmaQueueSchedulerTest, ThrowingProducerIngressFailsQueueAndWorkerServicesNextQueue) {
+TEST_F(SdmaQueueSchedulerTest, FaultedProducerIngressFailsQueueAndWorkerServicesNextQueue) {
   memory_->store<uint32_t>(kRing, 0);
   memory_->store<uint64_t>(kWritePointer, sizeof(uint32_t));
   alignas(8) uint64_t doorbell = 0;
@@ -632,7 +631,7 @@ TEST_F(SdmaQueueSchedulerTest, ThrowingProducerIngressFailsQueueAndWorkerService
       [&](const GpuVmAccess &, std::span<const MemoryIngressSpan> spans) -> MemoryIngressAdmission {
     if (spans.size() == 1 && spans.front().address == kWritePointer)
       ++admissions;
-    throw std::runtime_error("injected producer ingress failure");
+    return {.outcome = VmAccessOutcome::Faulted, .permit = {}};
   };
   const SdmaQueueScheduler::Handle queue = scheduler_.attach(info, std::move(callbacks));
   ASSERT_TRUE(queue);
@@ -1192,12 +1191,12 @@ TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesTerminalWithoutRetirement) {
   EXPECT_FALSE(scheduler_.contains(queue));
 }
 
-TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesAfterPacketCallbackThrows) {
+TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesAfterPacketCallbackFault) {
   const std::array<uint32_t, 2> trap = {6, 37};
   memory_->store(kRing, trap);
   SdmaPacketCallbacks callbacks;
   callbacks.deliver_interrupt = [](uint32_t) -> VmAccessOutcome {
-    throw std::runtime_error("injected interrupt failure");
+    return VmAccessOutcome::Faulted;
   };
   const SdmaQueueScheduler::Handle queue = scheduler_.attach(queue_info(), std::move(callbacks));
   ASSERT_TRUE(queue);
@@ -1249,8 +1248,8 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, PreEffectRefusalBlocksAndRetriesSam
     EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
     attempts.fetch_add(1, std::memory_order_relaxed);
     if (!allow_maintenance.load(std::memory_order_acquire))
-      throw CacheMaintenanceUnavailable("prepared writeback is unavailable");
-    return SdmaCacheLease{};
+      return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+    return CacheMaintenanceResult{};
   };
   SdmaQueueScheduler scheduler(gpu_vm);
   const SdmaQueueScheduler::Handle queue = scheduler.attach(
@@ -1281,6 +1280,7 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, PreEffectRefusalBlocksAndRetriesSam
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePacketWrite) {
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 11;
@@ -1325,7 +1325,11 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   SdmaQueueScheduler scheduler(gpu_vm, coherence);
   SdmaPacketCallbacks callbacks;
   callbacks.acquire_cache_maintenance = [coherence](SdmaCacheOperation operation) {
-    return coherence->acquire_cache_maintenance(operation);
+    auto acquired = coherence->acquire_cache_maintenance(operation);
+    if (acquired.failed())
+      return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+    return util::FailureOr<CacheMaintenanceResult>(
+        CacheMaintenanceResult{.lease = std::move(acquired.value())});
   };
   const SdmaQueueScheduler::Handle queue = scheduler.attach(
       {.ring = {.address_space = queue_address_space,
@@ -1358,6 +1362,7 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   EXPECT_TRUE(legacy_vm.unregister_vmid(kProcessId));
   EXPECT_TRUE(gpu_vm.unregister_address_space(queue_address_space));
 }
+#endif
 
 class SdmaCacheInvalidateTest : public ::testing::TestWithParam<std::pair<bool, bool>> {};
 
@@ -1397,7 +1402,11 @@ TEST_P(SdmaCacheInvalidateTest, DiscardsDirtyStateBeforeWritebackOrAtomic) {
 
   SdmaPacketCallbacks callbacks;
   callbacks.acquire_cache_maintenance = [coherence](SdmaCacheOperation operation) {
-    return coherence->acquire_cache_maintenance(operation);
+    auto acquired = coherence->acquire_cache_maintenance(operation);
+    if (acquired.failed())
+      return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+    return util::FailureOr<CacheMaintenanceResult>(
+        CacheMaintenanceResult{.lease = std::move(acquired.value())});
   };
   SdmaPacketProcessor first(SdmaPacketDialect::Gfx1250, callbacks);
   SdmaPacketProcessor second(SdmaPacketDialect::Gfx1250, callbacks);

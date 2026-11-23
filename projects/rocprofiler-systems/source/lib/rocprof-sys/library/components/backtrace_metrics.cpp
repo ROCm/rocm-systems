@@ -70,10 +70,8 @@ using namespace ::rocprofsys::tracing;
 
 namespace rocprofsys::component
 {
-using hw_counters           = backtrace_metrics::hw_counters;
-using signal_type_instances = thread_data<std::set<int>, category::sampling>;
-using backtrace_metrics_init_instances =
-    thread_data<backtrace_metrics, category::sampling>;
+using hw_counters               = backtrace_metrics::hw_counters;
+using signal_type_instances     = thread_data<std::set<int>, category::sampling>;
 using sampler_running_instances = thread_data<bool, category::sampling>;
 using papi_vector_instances     = thread_data<hw_counters, category::sampling>;
 using papi_label_instances = thread_data<std::vector<std::string>, category::sampling>;
@@ -90,12 +88,6 @@ unique_ptr_t<hw_counters>&
 get_papi_vector(std::int64_t _tid)
 {
     return papi_vector_instances::instance(construct_on_thread{ _tid });
-}
-
-unique_ptr_t<backtrace_metrics>&
-get_backtrace_metrics_init(std::int64_t _tid)
-{
-    return backtrace_metrics_init_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<bool>&
@@ -115,13 +107,6 @@ std::string
 backtrace_metrics::description()
 {
     return "Records sampling data";
-}
-
-std::vector<std::string>
-backtrace_metrics::get_hw_counter_labels(std::int64_t _tid)
-{
-    auto const& _v = get_papi_labels(_tid);
-    return _v ? *_v : std::vector<std::string>{};
 }
 
 void

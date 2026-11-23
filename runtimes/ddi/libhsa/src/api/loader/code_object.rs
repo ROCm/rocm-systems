@@ -9,9 +9,10 @@ use std::ffi::{c_char, c_void};
 use rocloader::CodeObject as LoaderCodeObject;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::code_object::*;
 use crate::loader::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -62,7 +63,7 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
         };
         runtime.loader.code_objects.insert(
             handle,
-            CodeObject {
+            CodeObjectRecord {
                 bytes: bytes.into(),
                 names: HashMap::new(),
                 symbol_handles: Vec::new(),
@@ -211,7 +212,10 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
                     value.cast::<u32>().write(MACHINE_MODEL_LARGE);
                 }
                 CODE_OBJECT_INFO_PROFILE => {
-                    value.cast::<u32>().write(match object.contract().profile {
+                    let Some(profile) = object.contract().profile else {
+                        return INVALID_CODE_OBJECT;
+                    };
+                    value.cast::<u32>().write(match profile {
                         rocloader::Profile::Base => PROFILE_BASE,
                         rocloader::Profile::Full => PROFILE_FULL,
                     })

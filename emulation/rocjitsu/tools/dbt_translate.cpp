@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "dbt_translate.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -38,16 +39,16 @@ struct CodeObjectInspection {
   std::string disassembly;
 };
 
-[[nodiscard]] std::unique_ptr<Decoder> create_inspection_decoder(rj_code_target_id_t target,
-                                                                 rj_code_arch_t fallback_arch) {
+[[nodiscard]] std::unique_ptr<Decoder>
+create_inspection_decoder(rj_code_target_id_t target, rocjitsu::IsaFamily fallback_arch) {
   if (target != ROCJITSU_CODE_TARGET_INVALID)
     return Decoder::create(default_isa_target_registry(), target);
   return Decoder::create(fallback_arch);
 }
 
 [[nodiscard]] rj_code_target_id_t target_for_machine(uint32_t machine) {
-  const IsaGpuTargetDescription *target =
-      default_isa_target_registry().find_gpu_target_by_elf_machine(machine & EF_AMDGPU_MACH);
+  const IsaTargetBinding *target =
+      default_isa_target_registry().find_target_by_elf_machine(machine & EF_AMDGPU_MACH);
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
 
@@ -63,7 +64,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
 
 [[nodiscard]] CodeObjectInspection inspect_code_object(const AmdGpuCodeObject &obj,
                                                        rj_code_target_id_t target,
-                                                       rj_code_arch_t fallback_arch,
+                                                       rocjitsu::IsaFamily fallback_arch,
                                                        const std::string &label,
                                                        bool include_disassembly) {
   CodeObjectInspection inspection;
@@ -104,7 +105,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
       // Linked gfx1250 objects use zero-filled holes between independently
       // aligned function bodies. BasicBlock::build() treats these words as
       // padding rather than instructions, so host validation must do the same.
-      if (fallback_arch == ROCJITSU_CODE_ARCH_CDNA5 && words[pc] == 0) {
+      if (fallback_arch == rocjitsu::IsaFamily::Cdna5 && words[pc] == 0) {
         ++pc;
         continue;
       }
@@ -306,7 +307,7 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 [[nodiscard]] std::string disassemble_source_instruction(const AmdGpuCodeObject &obj,
                                                          uint64_t offset,
                                                          rj_code_target_id_t target,
-                                                         rj_code_arch_t fallback_arch) {
+                                                         rocjitsu::IsaFamily fallback_arch) {
   auto decoder = create_inspection_decoder(target, fallback_arch);
   if (!decoder)
     return "<decoder unavailable>";
@@ -334,7 +335,7 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 
 [[nodiscard]] std::vector<std::string> disassemble_words(std::span<const uint32_t> words,
                                                          rj_code_target_id_t target,
-                                                         rj_code_arch_t fallback_arch) {
+                                                         rocjitsu::IsaFamily fallback_arch) {
   std::vector<std::string> lines;
   auto decoder = create_inspection_decoder(target, fallback_arch);
   if (!decoder) {
@@ -363,8 +364,8 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 
 [[nodiscard]] InstructionTranslationReport
 build_instruction_report(const TranslationTraceEvent &trace, const AmdGpuCodeObject &source,
-                         rj_code_target_id_t guest_target, rj_code_arch_t guest_arch,
-                         rj_code_target_id_t host_target, rj_code_arch_t host_arch) {
+                         rj_code_target_id_t guest_target, rocjitsu::IsaFamily guest_arch,
+                         rj_code_target_id_t host_target, rocjitsu::IsaFamily host_arch) {
   InstructionTranslationReport report;
   report.source_offset = trace.source_offset;
   report.source_size = trace.source_size;

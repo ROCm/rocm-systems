@@ -6,11 +6,12 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::interop::*;
 use crate::memory::*;
 use crate::platform::memory as native_memory;
 use crate::platform::{AisOperation, ais_file_io};
-use crate::runtime::{boundary, initialized_mut, lock, map_error};
+use crate::status::{boundary, map_error};
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -37,7 +38,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
         let Some(memory) = runtime.memory_state.allocations.values().find(|memory| {
             memory.description.agent_base == pointer as usize
                 && memory.description.size == size
-                && !runtime.is_cpu_agent(memory.description.owner)
+                && !runtime.agents.is_cpu_agent(memory.description.owner)
         }) else {
             return INVALID_ARGUMENT;
         };
@@ -91,7 +92,9 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
             // SAFETY: The caller supplied num_agents readable entries.
             Some(unsafe { std::slice::from_raw_parts(mapping_agents, num_agents as usize) })
         };
-        if requested.is_some_and(|agents| agents.iter().any(|agent| !runtime.is_agent(*agent))) {
+        if requested
+            .is_some_and(|agents| agents.iter().any(|agent| !runtime.agents.is_agent(*agent)))
+        {
             return INVALID_AGENT;
         }
 
@@ -107,19 +110,21 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
                 if !accessible.contains(agent) {
                     accessible.push(*agent);
                 }
-                if let Some(index) = runtime.gpu_index(*agent) {
+                if let Some(index) = runtime.agents.gpu_index(*agent) {
                     if !mapping_indices.contains(&index) {
                         mapping_indices.push(index);
                     }
                 }
             }
         } else {
-            if accessible.try_reserve(runtime.gpus.len()).is_err()
-                || mapping_indices.try_reserve(runtime.gpus.len()).is_err()
+            if accessible.try_reserve(runtime.agents.gpus.len()).is_err()
+                || mapping_indices
+                    .try_reserve(runtime.agents.gpus.len())
+                    .is_err()
             {
                 return OUT_OF_RESOURCES;
             }
-            for index in 0..runtime.gpus.len() {
+            for index in 0..runtime.agents.gpus.len() {
                 accessible.push(HsaAgent {
                     handle: GPU_AGENT_BASE + index as u64,
                 });
@@ -129,15 +134,16 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
 
         let allocation = {
             let devices = runtime
+                .agents
                 .gpus
                 .iter()
                 .map(|gpu| &gpu.device)
                 .collect::<Vec<_>>();
             let mapping_devices = mapping_indices
                 .iter()
-                .map(|index| &runtime.gpus[*index].device)
+                .map(|index| &runtime.agents.gpus[*index].device)
                 .collect::<Vec<_>>();
-            let Some(session) = runtime.session() else {
+            let Some(session) = runtime.native_session() else {
                 return ERROR;
             };
             match native_memory::import_ipc_memory(
@@ -161,6 +167,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
         let info = allocation.info();
         let imported_pointer = info.device_address as usize;
         let owner = runtime
+            .agents
             .gpus
             .iter()
             .enumerate()
@@ -248,7 +255,7 @@ pub unsafe extern "C" fn hsa_amd_external_semaphore_handle_open(
         if descriptor.is_null() || semaphore.is_null() {
             return INVALID_ARGUMENT;
         }
-        if runtime.gpu_index(agent).is_none() {
+        if runtime.agents.gpu_index(agent).is_none() {
             return INVALID_AGENT;
         }
         NOT_SUPPORTED
@@ -458,38 +465,13 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.full_profile {
+        if runtime.agents.full_profile {
             return SUCCESS;
         }
         if host_ptr.is_null() {
             return INVALID_ARGUMENT;
         }
-        let Some(index) = runtime
-            .memory_state
-            .locked_allocations
-            .iter()
-            .rposition(|memory| memory.description.host_base == Some(host_ptr as usize))
-        else {
-            return INVALID_ARGUMENT;
-        };
-        if runtime.memory_state.copy_borrowed(
-            runtime.memory_state.locked_allocations[index]
-                .description
-                .agent_base,
-        ) {
-            return OUT_OF_RESOURCES;
-        }
-        let mut memory = runtime.memory_state.locked_allocations.remove(index);
-        match memory.free() {
-            Ok(()) => SUCCESS,
-            Err(error) => {
-                runtime
-                    .memory_state
-                    .locked_allocations
-                    .insert(index, memory);
-                map_error(error)
-            }
-        }
+        runtime.memory_state.unlock_host(host_ptr as usize)
     })
 }
 

@@ -6,5 +6,5 @@
 mod loader;
 mod trap;
 
-pub(crate) use loader::{ExecutableDebugInfo, record_address};
+pub(crate) use loader::{ExecutableDebugInfo, diagnostic_record, record_address};
 pub(crate) use trap::{PendingDebugger, TrapRestore, trap_bytes};
