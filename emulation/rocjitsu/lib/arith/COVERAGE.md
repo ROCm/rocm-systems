@@ -72,7 +72,10 @@ All have scalar, AVX2 and AVX-512-v4 approximate implementations. Loose and
 Compatibility retain those paths. The twenty gfx942 forms additionally support
 the integer empirical model contributed in #14809, with default CBSZ/ABID/BLGP
 and FP16_OVFL clear. Exact modes use that model; exact-allow-Loose falls back
-outside its qualified controls. This qualification does not extend to gfx950
+outside its qualified controls. All-negative-zero sums (+0) and subnormal C
+preservation are hardware-captured; XF32 NaNs with payload only in bits 12:0
+(truncating to infinity) and subnormal BF16 product ties are inferred from the
+model. This qualification does not extend to gfx950
 or gfx1250, whose strict modes remain unsupported.
 Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported

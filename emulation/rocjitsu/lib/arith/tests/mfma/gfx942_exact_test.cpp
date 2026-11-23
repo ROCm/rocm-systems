@@ -167,10 +167,21 @@ void captured_wave(const Form &form, Placement position = {}, bool zero_other_ou
 
 TEST(MfmaGfx942Exact, CapturedOutputsAndAliasing) {
   for (const auto &form : kForms) {
-    for (Placement position :
-         {Placement{0, 0, 0}, Placement{form.batches / 2, form.m / 2, form.m / 2 + 1},
-          Placement{form.batches - 1, form.m - 1, form.m - 1}}) {
-      captured_wave(form, position);
+    const size_t row_words = size_t(2 * form.k + 2);
+    ASSERT_EQ(form.captured.size() % row_words, 0U);
+    for (size_t offset = 0; offset < form.captured.size(); offset += row_words) {
+      SCOPED_TRACE(offset / row_words);
+      auto test = form;
+      test.captured = form.captured.subspan(offset, row_words);
+      bool finite_factors = true;
+      for (int i = 0; i < 2 * form.k; ++i) {
+        finite_factors &= ((test.captured[i] >> 23) & 0xffU) != 0xffU;
+      }
+      for (Placement position :
+           {Placement{0, 0, 0}, Placement{form.batches / 2, form.m / 2, form.m / 2 + 1},
+            Placement{form.batches - 1, form.m - 1, form.m - 1}}) {
+        captured_wave(test, position, finite_factors);
+      }
     }
   }
 }
@@ -191,6 +202,34 @@ TEST(MfmaGfx942Exact, SpecialValues) {
     auto test = form;
     test.captured = std::span<const uint32_t>(values).first(2 * form.k + 2);
     captured_wave(test, {}, false);
+  }
+}
+
+TEST(MfmaGfx942Exact, Bf16OutputDenormals) {
+  // Model-derived subnormal BF16 product outputs and nearest-even ties at C = 0.
+  struct DenormalCase {
+    uint16_t a, b;
+    uint32_t expected;
+  };
+  constexpr DenormalCase kDenormals[] = {
+      {0x0080U, 0x3f00U, 0x00400000U},
+      {0x0001U, 0x3780U, 0x00000001U},
+      {0x0001U, 0x3700U, 0x00000000U},
+      {0x0001U, 0x37c0U, 0x00000002U},
+  };
+  for (const auto &form : kForms) {
+    if (form.format_a != 1 || form.format_b != 1) {
+      continue;
+    }
+    for (const auto &denormal : kDenormals) {
+      std::array<uint32_t, 34> values{};
+      values[0] = uint32_t(denormal.a) << 16;
+      values[form.k] = uint32_t(denormal.b) << 16;
+      values[2 * form.k + 1] = denormal.expected;
+      auto test = form;
+      test.captured = std::span<const uint32_t>(values).first(2 * form.k + 2);
+      captured_wave(test);
+    }
   }
 }
 

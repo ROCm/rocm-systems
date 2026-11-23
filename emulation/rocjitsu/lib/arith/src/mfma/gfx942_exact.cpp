@@ -54,6 +54,9 @@ constexpr uint32_t kNan = 0xFFC00000u;
 constexpr int32_t kProductAtLeastTwoShift = 21;
 
 // Return the staged source encoding after format truncation.
+// XF32 NaNs whose payload lies only in bits 12:0 (such as 0x7f800001) truncate
+// to +-Inf; that case was not in the MI300X capture corpus and is inferred from
+// the pre-reduction truncation rule.
 inline uint32_t source_bits(float value, Cdna3MfmaSource source) {
   const uint32_t bits = bit_cast<uint32_t>(value);
   return source.ignores_low_13_bits ? bits & 0xFFFFE000u : bits;
@@ -171,6 +174,7 @@ inline bool add_accumulators(const int32_t *dot, const int32_t *dot_exponents,
     const uint64_t bits = (static_cast<uint64_t>(exponent + 126) << 23) + kept + round_up;
     const uint64_t bounded = minimum<uint64_t>(bits, kPositiveInfinity);
     const uint64_t signed_bits = bounded | (fixed < 0 ? uint64_t{0x80000000u} : uint64_t{0});
+    // Zero sums (including all -0 products with C = -0, captured on MI300X) return +0.
     results[col] = magnitude != 0 ? static_cast<uint32_t>(signed_bits) : 0u;
   }
   return inf_nan != 0;

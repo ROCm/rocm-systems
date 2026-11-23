@@ -188,7 +188,9 @@ int rj_arith_v_mfma_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t instruction_f
                                           const uint32_t *const *b, const uint32_t *const *c);
 
 // gfx942 XF32 MFMA: A/B two FP32 VGPRs, C/D four for 16x16 or sixteen
-// for 32x32. Both inputs are truncated to ten fraction bits before the FP32 reduction.
+// for 32x32. Both inputs are truncated to ten fraction bits before the FP32 reduction
+// (inferred to turn NaNs with payload only in bits 12:0 into infinities; the
+// MI300X captures exercised canonical quiet NaNs).
 // Exact-mode qualification follows the gfx942 half-input contract above.
 // Source controls, whole-wave participation, aliasing and error rules above apply.
 int rj_arith_v_mfma_f32_16x16x8_xf32_w64(uint64_t flags, uint64_t instruction_flags,
