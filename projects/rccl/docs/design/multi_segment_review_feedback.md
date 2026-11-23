@@ -2,11 +2,11 @@
 
 The review feedback in this doc was given on the old multi-segment pull requests, which the IB-MSEG fork stack supersedes: layer 05 ([PR 10884](https://github.com/ROCm/rocm-systems/pull/10884)) is superseded by forks 1 and 4, layer 06 ([PR 10886](https://github.com/ROCm/rocm-systems/pull/10886)) by fork 3, layer 08 ([PR 10889](https://github.com/ROCm/rocm-systems/pull/10889)) and the IB-CAST GIN/RMA "wire" layer ([PR 10888](https://github.com/ROCm/rocm-systems/pull/10888)) by planned fork 6, and layer 07 ([PR 10890](https://github.com/ROCm/rocm-systems/pull/10890)) and the coverage layer 09 by the fork tests commits. This doc records each review item and the fork commit that carries the response. The fork design itself is in the [fork plugin](multi_segment_fork_plugin.md) note.
 
-Every item marked fixed was checked by reading the fork code at fork 4 `9c67177e1f99` (branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`, on develop `c43b4a9e7307`). The host-test rerun on the current tips (fork 2 `9f125db92b47`, fork 3 `68042a159272`, fork 4 `9c67177e1f99`) is in progress, and the last full hardware run (214 of 214 units on ROCm 7.0.2.1 build 55 and 10.3) was on fork 4 `7f84f495265d`, before the fork 3 mismatch-check amend. None of the fork branches is pushed, and no fork PR is open yet.
+Every item marked fixed was checked by reading the fork code on the fork 4 branch (`users/atulkulk/netib-mseg/04-rma-gin-multiseg`), which carries forks 1 to 4 on develop. The host tests pass on forks 3 and 4 with ROCm 7.0.2.1 build 55 and 10.3, and the latest full hardware run, on fork 4 after the test reductions, passed 214 of 214 units on each of those ROCm versions on two MI355X Thor2 nodes. None of the fork branches is pushed, and no fork PR is open yet.
 
 Status words:
 
-- **fixed**: the fix is in fork code at fork 4 `9c67177e1f99`, under the name given in the row.
+- **fixed**: the fix is in fork code on the fork 4 branch, under the name given in the row.
 - **not verified in fork**: the item was recorded as done, but this pass could not find the fix in fork code.
 - **no longer applies**: the code the item was about does not exist in the fork design.
 - **fork 6 requirement**: an IB-CAST item that the planned fork 6 must satisfy; no fork code exists for it yet.
@@ -16,9 +16,9 @@ Status words:
 
 | Group | Items | Fixed | Not verified in fork |
 |---|---|---|---|
-| [Fork 1](#fork-1-core-gate) (`a0578eda57e6` code, `8d8b991c2e7c` tests, `3f5973a3fe00` fix) | 15 | 14 | 1 |
-| [Fork 3](#fork-3-registration-and-p2p) (`4b5968c3b120` code, `68042a159272` tests) | 22 | 19 | 3 |
-| [Fork 4](#fork-4-rma-and-gin) (`e15bec575504` code, `933c24ae63d5` tests, `568d71f9a2ea` review fixes) | 11 | 8 | 3 |
+| [Fork 1](#fork-1-core-gate) (code, tests and owner-fd fix commits) | 15 | 14 | 1 |
+| [Fork 3](#fork-3-registration-and-p2p) (code and tests commits) | 22 | 19 | 3 |
+| [Fork 4](#fork-4-rma-and-gin) (code, tests and review-fix commits) | 11 | 8 | 3 |
 | [No longer applies](#no-longer-applies) | 18 | | |
 | [Fork 6 requirements](#fork-6-requirements) | 12 | | |
 | [Open](#open-items) | 10 | | |
@@ -30,7 +30,7 @@ Comment ids are GitHub review comment ids on the PR in the "Superseded PR" colum
 
 ## Fork 1: core gate
 
-Branch `users/atulkulk/netib-mseg/01-core-backend-multiseg-gate`: code `a0578eda57e6`, tests `8d8b991c2e7c`, fix `3f5973a3fe00`.
+Branch `users/atulkulk/netib-mseg/01-core-backend-multiseg-gate`: a code commit, a tests commit and the owner-fd fix commit.
 
 | Comment | Superseded PR | Reviewer | Request | Fork code | Status |
 |---|---|---|---|---|---|
@@ -52,7 +52,7 @@ Branch `users/atulkulk/netib-mseg/01-core-backend-multiseg-gate`: code `a0578eda
 
 ## Fork 3: registration and P2P
 
-Branch `users/atulkulk/netib-mseg/03-registration-p2p-multiseg`: code `4b5968c3b120`, tests `68042a159272`. The shared segment helpers are in `src/transport/net_ib_multiseg/` (`seg_mseg.h`, `seg_reg_mseg.h`, `seg_wr_mseg.h`, `seg_p2p_mseg.h`, `seg_p2p.cc`), and the classic P2P hooks are in `p2p_multiseg.cc`.
+Branch `users/atulkulk/netib-mseg/03-registration-p2p-multiseg`: a code commit and a tests commit. The shared segment helpers are in `src/transport/net_ib_multiseg/` (`seg_mseg.h`, `seg_reg_mseg.h`, `seg_wr_mseg.h`, `seg_p2p_mseg.h`, `seg_p2p.cc`), and the classic P2P hooks are in `p2p_multiseg.cc`.
 
 | Comment | Superseded PR | Reviewer | Request | Fork code | Status |
 |---|---|---|---|---|---|
@@ -81,20 +81,20 @@ Branch `users/atulkulk/netib-mseg/03-registration-p2p-multiseg`: code `4b5968c3b
 
 ## Fork 4: RMA and GIN
 
-Branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`: code `e15bec575504`, tests `933c24ae63d5`, review fixes `568d71f9a2ea`, compile-twice host tests `9c67177e1f99`.
+Branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`: a code commit, a tests commit, a review-fix commit and the compile-twice host-test commit.
 
 | Comment | Superseded PR | Reviewer | Request | Fork code | Status |
 |---|---|---|---|---|---|
 | 4466041034, 4466043272 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | No magic numbers in the RMA WR budget | named macros in `seg_rma_mseg.h`: `RCCL_RMA_MAX_DATA_WRS` (64), `RCCL_RMA_MAX_SIGNAL_WRS` and `RCCL_RMA_SEND_QP_WRS`; none depends on the segment count | fixed |
-| local 11-14, 05 Medium | [PR 10884](https://github.com/ROCm/rocm-systems/pull/10884) | local Argus | Every sender QP grows to 2080 and the in-flight cap silently lowers `NCCL_GIN_PROXY_QUEUE_SIZE` | `rcclIbSendQpWrs` (`connect.cc`) gives 2080 only to RMA comms (`base.isRma`); fork 1's RMA and GIN proxies log an INFO line when the cap lowers the queue; the fork 4 changelog fragment states the cap and the deeper send queue (`env.rst` does not) | fixed |
-| local 11-14, wire Medium | [PR 10888](https://github.com/ROCm/rocm-systems/pull/10888) | local Argus | In-flight cap and 2080-entry send queue even for single-segment windows | kept by design and made visible: logged by the proxies and stated in the fork 4 changelog fragment | fixed |
+| local 11-14, 05 Medium | [PR 10884](https://github.com/ROCm/rocm-systems/pull/10884) | local Argus | Every sender QP grows to 2080 and the in-flight cap silently lowers `NCCL_GIN_PROXY_QUEUE_SIZE` | `rcclIbSendQpWrs` (`connect.cc`) gives 2080 only to RMA comms (`base.isRma`); fork 1's RMA proxy (`rma_proxy.cc`) and GIN proxy (`gin_host_proxy.cc`) log an INFO line with the lowered request count (32) when the cap lowers the queue, so the lowering is no longer silent; the fork 4 changelog fragment says only that the GIN proxy caps in-flight requests per peer, and neither it nor `env.rst` states 32 or 2080 | fixed |
+| local 11-14, wire Medium | [PR 10888](https://github.com/ROCm/rocm-systems/pull/10888) | local Argus | In-flight cap and 2080-entry send queue even for single-segment windows | kept by design; the cap is visible in the proxies' INFO line (which prints 32) and named, without a number, in the fork 4 changelog fragment; the 2080-entry send queue is not logged or documented and shows only in code (`RCCL_RMA_SEND_QP_WRS` in `seg_rma_mseg.h`, `RCCL_RMA_MAX_INFLIGHT_REQUESTS` in `transport/rccl_mseg_rma.h`); `env.rst` states neither number | fixed |
 | class 2 | several | GitHub Argus, Copilot | Send and flush queues sized for one maximum chain | P2P posts one slice per progress call (fork 3); RMA posts rounds of at most `RCCL_RMA_MAX_SIGNAL_WRS` (65) WRs with 32 requests in flight (`RCCL_RMA_MAX_INFLIGHT_REQUESTS`); there is no credit scheme | fixed |
 | class 3 | several | GitHub Argus, Copilot | Events armed for WRs that never post | RMA through `rcclRmaCompletePostedRequest` (`gin.cc`), classic sends through `rcclIbSendHoldSlice` (fork 3); IB-CAST is a [fork 6 requirement](#fork-6-requirements) | fixed |
 | class 8 | several | GitHub Argus, Copilot | Tests that pass with the fix reverted | tests read the segment count from the handle: `RegistrationMPITests.cpp` asserts `rcclRmaMrSegmentCount` on the RMA and GIN windows, and the multi-segment MR carries `rcclRmaSegMrTag` | fixed |
-| class 15 | several | GitHub Argus, Copilot | Env docs and CHANGELOG | `env.rst` states the `RCCL_IB_REG_SEG_DEFAULT` segment limit, `max_mr` and the CTS memory; the fork 4 changelog fragment states the 1,048,576-entry ranks times segments limit (`RCCL_RMA_SEG_TABLE_MAX_ENTRIES`) | fixed |
+| class 15 | several | GitHub Argus, Copilot | Env docs and CHANGELOG | `env.rst` states the `RCCL_IB_REG_SEG_DEFAULT` segment limit, `max_mr` and the CTS memory; the fork 4 changelog fragment says ranks times segments is bounded, and the bound is `RCCL_RMA_SEG_TABLE_MAX_ENTRIES` in `transport/rccl_mseg_rma.h` | fixed |
 | local 11-04, R07-1 | [PR 10890](https://github.com/ROCm/rocm-systems/pull/10890) | local Argus | RMA multi-node jobs without `RCCL_TEST_RMA_MSEG_REQUIRE=1` | the fork's RMA multi-segment jobs set it in `mi300x_mellanox_ib`, `mi300_mellanox_ib_func`, `mi355x_thor2_roce`, `mi355x_thor2_roce_func` and `net_ib_transport`; the IB-CAST job is a [fork 6 requirement](#fork-6-requirements) | fixed |
 | class 12 | several | GitHub Argus, Copilot | Export and registration rounded differently | `rcclIbSegExportNext` (`seg_export_mseg.h`) exports the whole pages the MR spans; this pass did not confirm that every registration path rounds the same way | not verified in fork |
-| class 9 | several | GitHub Argus, Copilot | Fakes with stale signatures across stacked layers | not re-audited; the compile-twice host tests in `9c67177e1f99` build the fork's fakes, but no pass checked them against this class | not verified in fork |
+| class 9 | several | GitHub Argus, Copilot | Fakes with stale signatures across stacked layers | not re-audited; fork 4's compile-twice host tests build the fork's fakes, but no pass checked them against this class | not verified in fork |
 | local 10-30, 07 F3 and F4 | [PR 10890](https://github.com/ROCm/rocm-systems/pull/10890) | local Argus | Hybrid require knob and `hipMemLocationTypeHost` shim placement | not re-checked in the fork's hybrid tests (`test/common/HybridVmmHelpers.hpp`) | not verified in fork |
 
 ## No longer applies
@@ -151,21 +151,21 @@ These IB-CAST items are not fixed in fork code; planned fork 6 must satisfy them
 | 4466591874 | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | Aleksandr | Is the `ncclIbMalloc` buffer still page aligned | reply drafted, not posted: `ncclIbMalloc` already uses `posix_memalign` on a page boundary (`include/alloc.h`) |
 | 4126266662 | [PR 10887](https://github.com/ROCm/rocm-systems/pull/10887) (merged layer 01) | nusislam | World rank and LSA rank treated as one index in the CE slow path | no reply on the thread |
 | 4136961982 | [PR 10887](https://github.com/ROCm/rocm-systems/pull/10887) (merged layer 01) | alexander-sannikov | Descriptive test comments | no reply on the thread |
-| 4309321625 | [PR 10887](https://github.com/ROCm/rocm-systems/pull/10887) (merged layer 01) | garzaran | Document the new env variable | `env.rst` landed in `d70f5e480a09`; no reply points to it |
+| 4309321625 | [PR 10887](https://github.com/ROCm/rocm-systems/pull/10887) (merged layer 01) | garzaran | Document the new env variable | `env.rst` landed in develop; no reply points to it |
 | local 11-14, 06 Medium | [PR 10886](https://github.com/ROCm/rocm-systems/pull/10886) | local Argus | With IB-MSEG selected, every classic send, single-segment included, builds through `rcclIbFillSendWrs` | no switch-off latency or bandwidth comparison for single-segment sends yet (performance work, P2) |
 | local 11-04, R05-M1 | [PR 10884](https://github.com/ROCm/rocm-systems/pull/10884) | local Argus | The `reg.cc` unwind is tested only by develop's disabled AICOMRCCL-3112 test | stays disabled by decision |
 | issue comment | [PR 10884](https://github.com/ROCm/rocm-systems/pull/10884) | nusislam | Check the RMA send depth against the HCA `max_qp_wr` | the in-flight cap is 32 requests per peer and context (`rcclRmaInflightRequestsCap`), so RMA comms get 2080 send WRs; that fits Thor2's `max_qp_wr` of 4351, Mellanox is not checked, and only a `static_assert` in `connect.cc` guards the size |
 
 ## Local Argus passes on the fork branches
 
-The fork branches were reviewed locally before each commit. Reports are under `~/ginocc/sw/oneplugin/fork{1,2,3,4}/`; the report file names carry the commit that was reviewed.
+The fork branches were reviewed locally before each commit. Reports are under `~/ginocc/sw/oneplugin/fork{1,2,3,4}/`, one per fork.
 
 | Fork | Report | Findings | What landed |
 |---|---|---|---|
-| 1 | `argus-fork1-7b7be09.md` | 1 latent High (the GIN proxy read the RMA flag before it was set), Lows and Nits | all except restoring the removed `TODO(ROCM-29810)`, which stays removed because the runtime fix landed; the High is fixed by the setter `rcclGinProxySetMultiSeg` (fork 1 code `a0578eda57e6`), which fork 4's review-fix commit `568d71f9a2ea` calls from `ginDevCommSetupWithBackend` |
-| 2 | `argus-fork2-4336d05.md` | 10, no Medium or High | all 10 in the copy commit `04b94a1636b6` and tests commit `9f125db92b47` of `users/atulkulk/netib-mseg/02-net-ib-multiseg-copy`, plus `RCCL_IB_GDR_FLUSH_FLAG` on IB-MSEG through `rcclIbGdrFlushOpsFor` |
-| 3 | `argus-fork3-local.md` | 29 (V1 to V29), no High after verification | V1 (per-line idx stamp in the layout, `rcclIbCtsFlagLayout` and `rcclIbCtsLayoutsArrived`), V4, V5, V6, V7, V8, V9, V10, V12, V13 and V16 are in code `4b5968c3b120` and tests `68042a159272` of `users/atulkulk/netib-mseg/03-registration-p2p-multiseg`; V23 (copied host tests) is superseded by the compile-twice host tests in fork 4 `9c67177e1f99`; the rest are recorded follow-ups, not re-checked here |
-| 4 | `argus-fork4-local.md` | 10 (F4-1 to F4-10): 2 Medium, 6 Low, 2 Nit | F4-1, F4-2, F4-3, F4-7 and F4-9 in code `e15bec575504` and tests `933c24ae63d5` of `users/atulkulk/netib-mseg/04-rma-gin-multiseg`; F4-4, F4-5, F4-6, F4-8 and F4-10 in its review-fix commit `568d71f9a2ea` |
+| 1 | `argus-fork1-*.md` | 1 latent High (the GIN proxy read the RMA flag before it was set), Lows and Nits | all except restoring the removed `TODO(ROCM-29810)`, which stays removed because the runtime fix landed; the High is fixed by the setter `rcclGinProxySetMultiSeg` in fork 1's code commit, which fork 4's review-fix commit calls from `ginDevCommSetupWithBackend` |
+| 2 | `argus-fork2-*.md` | 10, no Medium or High | all 10 in fork 2's copy commit and tests commit (`users/atulkulk/netib-mseg/02-net-ib-multiseg-copy`), plus `RCCL_IB_GDR_FLUSH_FLAG` on IB-MSEG through `rcclIbGdrFlushOpsFor` |
+| 3 | `argus-fork3-local.md` | 29 (V1 to V29), no High after verification | V1 (per-line idx stamp in the layout, `rcclIbCtsFlagLayout` and `rcclIbCtsLayoutsArrived`), V4, V5, V6, V7, V8, V9, V10, V12, V13 and V16 are in fork 3's code and tests commits (`users/atulkulk/netib-mseg/03-registration-p2p-multiseg`); V23 (copied host tests) is superseded by fork 4's compile-twice host-test commit; the rest are recorded follow-ups, not re-checked here |
+| 4 | `argus-fork4-local.md` | 10 (F4-1 to F4-10): 2 Medium, 6 Low, 2 Nit | F4-1, F4-2, F4-3, F4-7 and F4-9 in fork 4's code and tests commits (`users/atulkulk/netib-mseg/04-rma-gin-multiseg`); F4-4, F4-5, F4-6, F4-8 and F4-10 in its review-fix commit |
 
 ## Where to look
 

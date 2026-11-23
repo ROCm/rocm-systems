@@ -7,7 +7,7 @@ IB-CAST RMA multi-segment is not added to develop's `IbCastRmaIbProxy` again. IB
 
 ## What fork 6 builds on
 
-GIN/RMA never touches the CTS, so none of the [IB-CAST P2P](multi_segment_netib_cast.md) work applies here. These pieces exist in the fork at fork 4 `9c67177e1f99` and fork 6 reuses them:
+GIN/RMA never touches the CTS, so none of the [IB-CAST P2P](multi_segment_netib_cast.md) work applies here. These pieces exist in the fork at fork 4 and fork 6 reuses them:
 
 | Piece | Fork symbols (`net_ib_multiseg/gin.cc` unless noted) |
 |---|---|

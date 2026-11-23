@@ -1,7 +1,7 @@
 # Multi-segment: current contract
 
 > [!NOTE]
-> This note describes the IB-MSEG fork stack at fork 4 `9c67177e1f99` on develop `c43b4a9e7307`. Multi-segment support lives in the IB-MSEG plugin (`src/transport/net_ib_multiseg/`) and in RCCL-marked core gates; classic `net_ib` and `net_ib_cast` stay at develop. IB-CAST support is planned for fork 6; see [the fork plugin](multi_segment_fork_plugin.md). File names below are relative to `src/`, and plugin files without a directory are in `transport/net_ib_multiseg/`.
+> This note describes the IB-MSEG fork stack at the fork 4 tip (`users/atulkulk/netib-mseg/04-rma-gin-multiseg`) on develop. Multi-segment support lives in the IB-MSEG plugin (`src/transport/net_ib_multiseg/`) and in RCCL-marked core gates; classic `net_ib` and `net_ib_cast` stay at develop. IB-CAST support is planned for fork 6; see [the fork plugin](multi_segment_fork_plugin.md). File names below are relative to `src/`, and plugin files without a directory are in `transport/net_ib_multiseg/`.
 
 This doc lists the rules the multi-segment code must keep, its limits, and what the switch does when it is off. It is the checklist for reviewing a change, not a design explanation; each item links to the doc that explains it. Terms are defined in the [overview](multi_segment_overview.md#terms). The review history behind these rules is in [review feedback](multi_segment_review_feedback.md).
 
@@ -56,7 +56,7 @@ This doc lists the rules the multi-segment code must keep, its limits, and what 
 
 ### QP depths
 
-Depths at fork 4 `9c67177e1f99`. With the switch off, every queue has develop's depth.
+Depths at the fork 4 tip. With the switch off, every queue has develop's depth.
 
 | Queue | IB-MSEG, switch on | Switch off |
 |---|---|---|
@@ -77,7 +77,7 @@ With `NCCL_MULTI_SEGMENT_REGISTER=0` (the HIP default):
 - `symMemoryRegisterGin` fails a device-only multi-segment window with `ncclInvalidUsage` unless `rcclDevrGinRegistersMultiSegment` holds. Windows that contain sysmem keep develop's per-segment path.
 - `symMemoryRegisterRma` registers a multi-segment window only when `rcclDevrRmaRegistersMultiSegment` holds: `comm->rcclMultiSegRma` (the switch on, `NCCL_DMABUF_ENABLE=1` and the `IbMsegRmaIbProxy` backend), an equal count on every rank, and a table that fits; a window with host segments also needs `NCCL_SYM_REUSE_SYSMEM_HANDLES=1`. See [window gates](multi_segment_gin_rma.md#window-gates).
 
-The switch selects the plugin, the handle type and the data path, so it is fixed for the life of the process and must match on every rank. Fork 3 checks this at connect time: two IB-MSEG ends exchange their `useMultiSeg` decision, and `IbMsegCheckPeerUseMultiSeg` (`connect.cc`) fails the connect with `ncclInvalidUsage` and a WARN that asks for the same `NCCL_MULTI_SEGMENT_REGISTER` and `NCCL_DMABUF_ENABLE` on every rank.
+The switch selects the plugin, the handle type and the data path, so it is fixed for the life of the process. Fork 3 checks agreement per connection: the two IB-MSEG ends exchange their `useMultiSeg` decision, and a connection whose ends reach different multi-segment decisions fails at connect with `ncclInvalidUsage`. Both the send and the receive side run the check (`IbMsegCheckPeerUseMultiSeg`, `connect.cc`), and its WARN asks for the same `NCCL_MULTI_SEGMENT_REGISTER` and `NCCL_DMABUF_ENABLE` on every rank.
 
 ## Version gates and runtime tickets
 
@@ -101,7 +101,7 @@ This table is the per-fork summary. The [code map](multi_segment_code_map.md) li
 
 - **IB-CAST requirements for fork 6**: the multi-segment scope must exclude AINIC inline CTS (`IbCastAinicCtsInlineData`); the receiver must size its CTS slots from the peer's raw capability, not from `peerCaps` masked by its own scope; and the send-resume path must bound the peer-written `nreqs` to 1 to 8 as `IbCastIsend` does.
 - **Forks 5 and 6** are planned and have no branch yet. AINIC runner entries come with fork 5.
-- **Hardware on the current tips**: the last full run (214 of 214 units on 7.0.2.1 build 55 and 10.3) was on fork 4 `7f84f495265d`, before the fork 3 mismatch-check amend. The current fork 3 and fork 4 tips have not run on hardware, and the Mellanox IB configs have not run any fork. The host validation rerun on the current tips is in progress.
+- **Hardware coverage**: the last full run (214 of 214 units on 7.0.2.1 build 55 and 10.3, two MI355X Thor2 nodes, 0 gtest failures) was on fork 4 after the test reductions, and the current tip differs from it only in changelog text. The Mellanox IB configs have not run any fork. Host validation is clean on forks 2, 3 and 4; see [the fork plugin](multi_segment_fork_plugin.md#validation).
 - **RMA send-queue depth on Mellanox**: 2080 fits Thor2 `max_qp_wr` 4351; Mellanox is not checked, and only a `static_assert` guards the size.
 - **Tests not ported yet**: the hierarchical CE multi-segment tests (`MultiNodeHierarchicalMultiSegment`) and two shared-math tests, `OffsetRangeOkRejectsPastEnd` and `RmaRoundTest.DropUnlinksTheMiddleTailAndHead`.
 - **`reg.cc` unwind** is covered only by develop's disabled AICOMRCCL-3112 test, by decision.

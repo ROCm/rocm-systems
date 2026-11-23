@@ -1,7 +1,7 @@
 # GIN/RMA: per-segment registration and RMA rounds
 
 > [!NOTE]
-> Core part in fork 1 (`users/atulkulk/netib-mseg/01-core-backend-multiseg-gate`), plugin part in fork 4 (`users/atulkulk/netib-mseg/04-rma-gin-multiseg`), checked against fork 4 `9c67177e1f99`. Fork 1 carries the comm-level multi-segment flag, the window gates, the in-flight cap and the host owner DMA-BUF rule; fork 4 carries the RMA backend of the IB-MSEG plugin (`src/transport/net_ib_multiseg/gin.cc`). The old-stack GIN/RMA layer that edited `net_ib` in place is superseded by forks 1 and 4. See [the fork plugin](multi_segment_fork_plugin.md#fork-4-rma-and-gin).
+> Core part in fork 1 (`users/atulkulk/netib-mseg/01-core-backend-multiseg-gate`), plugin part in fork 4 (`users/atulkulk/netib-mseg/04-rma-gin-multiseg`), checked against fork 4. Fork 1 carries the comm-level multi-segment flag, the window gates, the in-flight cap and the host owner DMA-BUF rule; fork 4 carries the RMA backend of the IB-MSEG plugin (`src/transport/net_ib_multiseg/gin.cc`). The old-stack GIN/RMA layer that edited `net_ib` in place is superseded by forks 1 and 4. See [the fork plugin](multi_segment_fork_plugin.md#fork-4-rma-and-gin).
 
 GIN on the host-proxy type posts every put, get, signal and flush through an RMA backend, so multi-segment support for GIN is a host-side change in that backend. This doc covers the IB-MSEG backend `IbMsegRmaIbProxy` and the device-runtime pieces that DeepEP windows need: the window gates, the in-flight cap and the host owner DMA-BUF path. IB-CAST's multi-segment GIN/RMA is the fork 6 design in [IB-CAST GIN/RMA](multi_segment_netib_cast_gin.md).
 

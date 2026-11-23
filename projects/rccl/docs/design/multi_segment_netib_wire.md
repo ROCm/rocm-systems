@@ -1,7 +1,7 @@
 # IB-MSEG NET/IB P2P: one-write CTS and sliced send
 
 > [!NOTE]
-> Fork 3 (`users/atulkulk/netib-mseg/03-registration-p2p-multiseg`), checked against fork 4 `9c67177e1f99`. All code is in the IB-MSEG plugin (`src/transport/net_ib_multiseg/`); `net_ib` and `net_ib_cast` stay develop code. The old-stack P2P layer that edited `net_ib` in place is superseded by fork 3. See [the fork plugin](multi_segment_fork_plugin.md#fork-3-registration-and-p2p).
+> Fork 3 (`users/atulkulk/netib-mseg/03-registration-p2p-multiseg`), checked against fork 4. All code is in the IB-MSEG plugin (`src/transport/net_ib_multiseg/`); `net_ib` and `net_ib_cast` stay develop code. The old-stack P2P layer that edited `net_ib` in place is superseded by fork 3. See [the fork plugin](multi_segment_fork_plugin.md#fork-3-registration-and-p2p).
 
 IB-MSEG NET/IB P2P registers one MR per segment and splits each RDMA write at local and remote segment boundaries. A receiver that holds a multi-segment buffer sends its layout in front of the CTS entries, in the same RDMA write. The sender posts one slice per QP per progress call, so its queues keep develop's depths. Both ends decide at connect time whether the comm uses the multi-segment CTS, and the connect fails when they disagree. This doc covers the data structures, registration, the send and flush paths, the connect-time match, and the alternatives that were rejected.
 

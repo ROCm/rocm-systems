@@ -5,7 +5,7 @@ This plan lists every test the IB-MSEG fork stack adds (forks 1 to 4, with forks
 *Terms follow the [overview](multi_segment_overview.md#terms).*
 
 > [!NOTE]
-> Counted on 2026-11-23 at fork 4 `9c67177e1f99` (branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`, on develop `c43b4a9e7307`) with `git grep` for `TEST`, `TEST_F` and `TEST_P` definitions under `projects/rccl/test`. A test is counted in the first fork tip that defines it (fork 1 `3f5973a3fe00`, fork 2 `9f125db92b47`, fork 3 `68042a159272`, fork 4 `9c67177e1f99`) and only if it still exists at fork 4. Tests that already exist in develop are listed only where a job depends on them. The scripts and their output are in `~/ginocc/sw/docs_update_1123/forkbook/testing/`.
+> Counted on 2026-11-23 at fork 4 (branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`, on develop) with `git grep` for `TEST`, `TEST_F` and `TEST_P` definitions under `projects/rccl/test`. A test is counted in the first fork that defines it and only if it still exists at fork 4. The later test reductions in forks 3 and 4 kept every test name, so the counts still hold. Tests that already exist in develop are listed only where a job depends on them. The scripts and their output are in `~/ginocc/sw/docs_update_1123/forkbook/testing/`.
 
 ## Summary
 
@@ -160,12 +160,21 @@ Every job the stack defines is enabled where it is defined; no config disables o
 
 The coverage pull request (layer 09) is superseded by forks 3 and 4: its registration tests are ported where they apply, for example `UBR_MultiSegment.NetProxyPartialFinalSegment` in fork 3 and `DeepEP_HybridElasticRegistrationDisabled` and `Symmetric_Elastic_RmaRegistration` in fork 4, all in `test/RegistrationMPITests.cpp`.
 
+## Results
+
+| Run | Tree | Result |
+|---|---|---|
+| Hostval (7.0.2.1 build 55, 10.3, pytest, gate-off build) | fork 2 after the tool split | passed; pytest 156 passed; gate-off build 193 binaries, 13,003 tests passed |
+| Hostval | fork 3 after the test reductions | passed; 0 failed binaries on 7.0.2.1 build 55 and 10.3; gate-off build 197 binaries, 13,197 tests passed |
+| Hostval | fork 4 after the test reductions | passed; 0 failed binaries on 7.0.2.1 build 55 and 10.3; pytest 156 passed; gate-off build 197 binaries, 13,272 tests passed |
+| Hardware, two MI355X Thor2 nodes | fork 4 after the test reductions, ROCm 7.0.2.1 build 55 and 10.3 | 214 of 214 units on each ROCm version; gtest 23,702 passed and 13 skipped on 10.3, 23,622 passed and 75 skipped on 7.0.2.1 build 55; 0 failed (`~/ginocc/sw/fork4-hw6-reduce/summary.txt`) |
+
+Earlier runs are in [Testing](multi_segment_testing.md#results).
+
 ## Known gaps
 
 | Gap | Effect | Proposed fix or test |
 |---|---|---|
-| Hardware has not run on the current fork 3 and fork 4 tips; the last full run was 214 of 214 units on fork 4 `7f84f495265d`, before the fork 3 mismatch-check amend | the connect-time check and the tool-split tips are proven only by host tests | `launch.sh` on fork 4 `9c67177e1f99` on both ROCm versions |
-| Hostval on the tool-split tips (fork 2 `9f125db92b47`, fork 3 `68042a159272`, fork 4 `9c67177e1f99`) | rerun in progress | finish the rerun before pushing |
 | The Mellanox IB configs (`mi300x_mellanox_ib`, `mi300_mellanox_ib_func`) have not run any fork | the RMA send-queue depth of 2080 is not checked against Mellanox `max_qp_wr` (it fits Thor2's 4351; only a `static_assert` guards the size) | run both configs on an MI300X allocation and query `max_qp_wr` |
 | AINIC configs have no fork jobs | no AINIC coverage of IB-MSEG | fork 5 adds the AINIC runner entries |
 | The hierarchical CE multi-segment tests (`MultiNodeHierarchicalMultiSegment`) are not ported | no hierarchical CE run on multi-segment windows; only the fork 1 fallback microtest | port them with an 8-node job in every config whose allocation fits |

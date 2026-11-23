@@ -3,7 +3,7 @@
 This note describes the multi-segment PR stack. Instead of editing classic `net_ib` and `net_ib_cast` in place, multi-segment support goes into one separate plugin, IB-MSEG (`src/transport/net_ib_multiseg/`), a renamed copy of `net_ib` that `NCCL_MULTI_SEGMENT_REGISTER=1` selects. It covers why the fork exists, how it is selected, the six fork branches and their status, the copy and its rename map, the compile-twice host tests, the phases, how IB-CAST joins in phase 3, validation, and how the code can later move back into `net_ib` and `net_ib_cast`. Terms follow the [overview](multi_segment_overview.md#terms).
 
 > [!NOTE]
-> **Status (2026-11-23).** Forks 1 to 4 are committed locally on `users/atulkulk/netib-mseg/01` to `04`, on develop `c43b4a9e7307`, and are not pushed. They will be opened as a new PR stack that supersedes the earlier multi-segment PRs. Forks 5 and 6 are planned and have no branch. The source of truth for the plan is `~/ginocc/sw/oneplugin/plan_fork_net_ib_multiseg.md`; where this note and the fork branches differ from it, the branches win and the difference is listed under [open items](#open-items-and-differences-from-the-plan).
+> **Status (2026-11-23).** Forks 1 to 4 are committed locally on `users/atulkulk/netib-mseg/01` to `04`, on develop, and are not pushed. They will be opened as a new PR stack that supersedes the earlier multi-segment PRs. Forks 5 and 6 are planned and have no branch. The source of truth for the plan is `~/ginocc/sw/oneplugin/plan_fork_net_ib_multiseg.md`; where this note and the fork branches differ from it, the branches win and the difference is listed under [open items](#open-items-and-differences-from-the-plan).
 
 ## Why a fork
 
@@ -60,17 +60,17 @@ flowchart TD
  class f5,f6 planned
 ```
 
-| Fork | Branch (`users/atulkulk/netib-mseg/...`) | Commits | Change over the parent (whole tree) |
-|---|---|---|---|
-| 1 | `01-core-backend-multiseg-gate` | `a0578eda57e6` code, `8d8b991c2e7c` tests, `3f5973a3fe00` owner-fd fix | 34 files, +1,612 / −40 over develop `c43b4a9e7307` |
-| 2 | `02-net-ib-multiseg-copy` | `04b94a1636b6` copy, `9f125db92b47` tests | 61 files, +12,484 / −113 over fork 1 |
-| 3 | `03-registration-p2p-multiseg` | `4b5968c3b120` code, `68042a159272` tests | 62 files, +13,061 / −131 over fork 2 |
-| 4 | `04-rma-gin-multiseg` | `e15bec575504` code, `933c24ae63d5` tests, `568d71f9a2ea` review fixes, `9c67177e1f99` compile-twice host tests | 63 files, +9,457 / −5,301 over fork 3 (the compile-twice commit removes the hand-copied host tests) |
-| 5 | none yet | planned, phase 3 | the develop `net_ib` to `net_ib_cast` delta, a few thousand lines |
-| 6 | none yet | planned, phase 3 | CAST-specific multi-segment hooks |
-| PD fix | `users/atulkulk/fix/ibcast-failed-pd-ref` | standalone branch from develop | the AICOMRCCL-3085 PD-reference fix |
+| Fork | Branch (`users/atulkulk/netib-mseg/...`) | Approximate change over the parent (whole tree) |
+|---|---|---|
+| 1 | `01-core-backend-multiseg-gate` | 34 files, about +1,600 / −40 over develop |
+| 2 | `02-net-ib-multiseg-copy` | 61 files, about +12,500 / −110 over fork 1 |
+| 3 | `03-registration-p2p-multiseg` | 62 files, about +13,000 / −130 over fork 2 |
+| 4 | `04-rma-gin-multiseg` | 63 files, about +9,200 / −5,300 over fork 3 (the compile-twice test commit removes the hand-copied host tests) |
+| 5 | none yet; planned, phase 3 | the develop `net_ib` to `net_ib_cast` delta, a few thousand lines |
+| 6 | none yet; planned, phase 3 | CAST-specific multi-segment hooks |
+| PD fix | `users/atulkulk/fix/ibcast-failed-pd-ref`, a standalone branch from develop | the AICOMRCCL-3085 PD-reference fix |
 
-All four committed forks are local and stacked on develop `c43b4a9e7307`; none is pushed.
+All four committed forks are local and stacked on develop; none is pushed.
 
 ### Fork 1: core gate
 
@@ -81,7 +81,7 @@ All four committed forks are local and stacked on develop `c43b4a9e7307`; none i
 - Host owner fd for hybrid windows under `NCCL_SYM_REUSE_SYSMEM_HANDLES=1`: a rank that exported its own host handle uses its fd; otherwise it borrows the fd of the one rank that exported the segment, and with several exporters it borrows none. The decision counts exporters, not host-typed handles, because an imported handle reads as host or device depending on the ROCm version. Every rank agrees on the fetch result, also with GIN off; see [host owner DMA-BUF](multi_segment_gin_rma.md#host-owner-dma-buf).
 - `TODO(ROCM-29810)` is removed: the runtime fix ships in 7.0.2.x and 10.3. The host-owner type propagation it described stays.
 - Headers: `transport/rccl_mseg.h` (the per-registration cap `RCCL_IB_REG_SEG_DEFAULT`) and `rccl_mseg_rma.h` (segment-table fit, in-flight cap `RCCL_RMA_MAX_INFLIGHT_REQUESTS`). They are the only `rccl_mseg*` headers in `src/transport/` at the fork 4 tip.
-- Changelog fragment `changelog.d/mseg-core-dmabuf-multiseg.changed.md`; its wording was amended on 2026-11-23 to "the single exporter's fd".
+- Changelog fragment `changelog.d/mseg-core-dmabuf-multiseg.changed.md`; it says that with `NCCL_SYM_REUSE_SYSMEM_HANDLES=1`, GIN registers a host segment "through its owner's fd".
 
 ### Fork 2: net_ib copy
 
@@ -107,7 +107,7 @@ All four committed forks are local and stacked on develop `c43b4a9e7307`; none i
 ### Fork 4: RMA and GIN
 
 - `init.cc` sets `comm->rcclMultiSegRma` when IB-MSEG's RMA proxy is the comm's RMA backend and `rcclMultiSegOn()` holds; a child comm takes its parent's flag. `ginDevCommSetupWithBackend` hands each comm's flag to the GIN proxy just before it creates that comm's contexts, so a later comm cannot change an earlier comm's in-flight cap.
-- Registration: one DMA-BUF MR per segment, up to `RCCL_IB_REG_SEG_DEFAULT` segments and within `max_mr` (`rcclIbMrAdmit`); every rank needs the same count, or registration fails on every rank with `ncclInvalidUsage` before the tables are gathered; ranks times segments is capped at 1,048,576 entries. Connect allocates the per-rank registration records before the first registration collective; close frees them.
+- Registration: one DMA-BUF MR per segment, up to `RCCL_IB_REG_SEG_DEFAULT` segments and within `max_mr` (`rcclIbMrAdmit`); every rank needs the same count, or registration fails on every rank with `ncclInvalidUsage` before the tables are gathered; ranks times segments is capped at `RCCL_RMA_SEG_TABLE_MAX_ENTRIES`. Connect allocates the per-rank registration records before the first registration collective; close frees them.
 - Data path: `iput`, `iget` and `iputSignal` split at segment boundaries and post in fixed-size rounds; the in-flight cap bounds the send queue; RMA QPs get `RCCL_RMA_SEND_QP_WRS` send WRs, and only GIN and RMA connects pass `nQpsPerDev`, which marks the comm as RMA. `iflush` reads one device segment, or nothing when every segment is host memory.
 - Hybrid windows register host segments with the fd the core publishes by VA.
 - `alloc.h`'s host-segment query is `rcclCuMemIsSysmemSegment` and releases the retained handle when the properties query fails.
@@ -216,12 +216,14 @@ flowchart TD
 | Fork 4 hardware | fork 4 tests commit | 214 of 214 units on 7.0.2.1 build 55 and 10.3 | `~/ginocc/sw/fork4-hw3-b55/status` |
 | Fork 4 hardware with review fixes | uncommitted review fixes | 212 of 214 on each version; both failures were the alloc test pinning the old handle leak, flipped since | `~/ginocc/sw/fork4-hw4-argus/status` |
 | Fork 4 hostval | final fork 4 tip | pytest 167 passed; 7.0.2.1 build 55 and 10.3 0 failed binaries; gate-off build 197 binaries, 13,271 passed | `~/ginocc/sw/oneplugin/fork4/hv-final/status` |
-| Fork 4 hardware, final tip | fork 4 `7f84f495265d`, before the fork 3 amend | 214 of 214 units on 7.0.2.1 build 55 and 10.3, 0 gtest failures | `~/ginocc/sw/fork4-hw5-final/status` |
-| Fork 3 hostval after the amend | fork 3 `a36ed4043329` | pytest 166 passed; 7.0.2.1 build 55 and 10.3 0 failed binaries; gate-off build 197 binaries, 13,197 passed | `~/ginocc/sw/oneplugin/fork3/fix-hv/status` |
-| Fork 4 hostval after the restack | fork 4 `21d89ca9d755` | pytest 167 passed; 7.0.2.1 build 55 and 10.3 0 failed binaries; gate-off build 197 binaries, 13,272 passed | `~/ginocc/sw/oneplugin/fork4/hv-vercheck/status` |
-| Tool-split tips, hostval | fork 2 `9f125db92b47`, fork 3 `68042a159272`, fork 4 `9c67177e1f99` | rerun in progress | |
+| Fork 4 hardware, before the fork 3 amend | fork 4 before the fork 3 mismatch-check amend | 214 of 214 units on 7.0.2.1 build 55 and 10.3, 0 gtest failures | `~/ginocc/sw/fork4-hw5-final/status` |
+| Fork 3 hostval after the amend | fork 3 after the mismatch-check amend | pytest 166 passed; 7.0.2.1 build 55 and 10.3 0 failed binaries; gate-off build 197 binaries, 13,197 passed | `~/ginocc/sw/oneplugin/fork3/fix-hv/status` |
+| Fork 4 hostval after the restack | fork 4 after the restack on the amended fork 3 | pytest 167 passed; 7.0.2.1 build 55 and 10.3 0 failed binaries; gate-off build 197 binaries, 13,272 passed | `~/ginocc/sw/oneplugin/fork4/hv-vercheck/status` |
+| Fork 2 hostval after the tool split | fork 2 with the rename tool moved to the side branch | pytest 156 passed; 7.0.2.1 build 55 and 10.3 0 failed binaries; gate-off build 193 binaries, 13,003 passed | `~/ginocc/sw/oneplugin/toolsplit/hv/fork2/status` |
+| Forks 3 and 4 hostval after the test reductions | forks 3 and 4 with the reduced tests | pytest 156 passed; 7.0.2.1 build 55 and 10.3 0 failed binaries on both forks; gate-off build 197 binaries, 13,197 passed on fork 3 and 13,272 on fork 4 | `~/ginocc/sw/oneplugin/reduce1123/hv/fork3/status`, `.../fork4/status` |
+| Fork 4 hardware after the test reductions | fork 4 with the reduced tests | 214 of 214 units on 7.0.2.1 build 55 and 10.3, two MI355X Thor2 nodes; gtest 23,702 passed / 13 skipped on 10.3 and 23,622 passed / 75 skipped on 7.0.2.1 build 55, 0 failed | `~/ginocc/sw/fork4-hw6-reduce/summary.txt` |
 
-Forks 1 and 2 were validated with hostval (pytest, both ROCm versions, gate-off), and fork 2's `*_mseg` jobs ran in the stack-top hardware runs. Hardware has not run on the current fork 3 and fork 4 tips. The Mellanox IB configs have not run any fork yet.
+Forks 1 and 2 were validated with hostval (pytest, both ROCm versions, gate-off), and fork 2's `*_mseg` jobs ran in the stack-top hardware runs. The current fork 4 tip differs from the tree of the last hardware run only in changelog text. The Mellanox IB configs have not run any fork yet.
 
 ## Open items and differences from the plan
 
@@ -230,7 +232,7 @@ Forks 1 and 2 were validated with hostval (pytest, both ROCm versions, gate-off)
 - There is no switch-off latency and bandwidth comparison for single-segment sends yet (performance work, P2).
 - The `reg.cc` unwind is covered only by develop's disabled AICOMRCCL-3112 test, by decision.
 - The 2080-entry RMA send queue fits Thor2's `max_qp_wr` (4351); Mellanox has not been checked, and only a `static_assert` guards the size.
-- Hardware has not run on the current fork 3 and fork 4 tips; the last full run was 214 of 214 units on fork 4 `7f84f495265d`, before the fork 3 mismatch-check amend. The Mellanox IB configs have not run any fork.
+- The Mellanox IB configs have not run any fork; the hardware runs so far are on MI355X Thor2.
 - AINIC runner entries come with fork 5. The hierarchical CE multi-segment tests (`MultiNodeHierarchicalMultiSegment`) are not ported yet, nor are two shared-math tests, `OffsetRangeOkRejectsPastEnd` and `RmaRoundTest.DropUnlinksTheMiddleTailAndHead`.
 - The test_runner include (a shared job fragment for the near-identical configs) is a separate pending PR.
 - Runtime tickets: ROCM-29812 (CPU access to imported host VMM; hybrid tests skip collectively without it), AIRUNTIME-2638 (`HostNuma` rejected), AIRUNTIME-2351 (the original single-segment export limitation). ROCM-29810 is fixed in the runtime and its TODO is removed in fork 1.
@@ -256,7 +258,7 @@ Rules the fork follows, from the plan appendix:
 2. The copied files change only at hook points: registration, CTS post, send, completion, flush, `iput`, `iget` and QP creation. The hook diff is tracked against develop's `net_ib` at the copy point, rendered through `rename_map.txt`; the target is a few hundred lines.
 3. Single-segment buffers take develop's code unchanged: every hook first asks whether the buffer has more than one segment.
 4. The rename is mechanical and recorded, so the reverse map turns the fork's hook diff back into a patch against `net_ib`. Fork 2 stays a pure rename.
-5. The copy point is develop `c43b4a9e7307`'s `net_ib` (its last `net_ib` change is `138896d1c4ad`). Re-syncing with a later develop is done with the copy tool from the side branch `users/atulkulk/netib-mseg/net-ib-multiseg-tools`.
+5. The copy point is develop's `net_ib` at the time of the copy. Re-syncing with a later develop is done with the copy tool from the side branch `users/atulkulk/netib-mseg/net-ib-multiseg-tools`.
 6. Decisions that depend on the switch go through one helper each (send-queue depth, in-flight cap); the core already checks the comm-level flags rather than a plugin name.
 7. The connect check is designed to outlive the fork, so no capability negotiation or old-peer fallback has to come back. Fork 3 compares the two ends' `useMultiSeg` in the connect metadata and fails on a mismatch.
 8. CAST features enter the fork as develop code, kept apart from the hooks; at merge time that replayed code is dropped and only the CAST hooks are applied to `net_ib_cast`.

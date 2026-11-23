@@ -7,7 +7,7 @@ Multi-segment support for IB-CAST is not added to `net_ib_cast` again. IB-MSEG f
 
 ## What fork 6 builds on
 
-These pieces exist in the fork at fork 4 `9c67177e1f99` (`src/transport/net_ib_multiseg/`) and fork 6 reuses them unchanged:
+These pieces exist in the fork at fork 4 (`src/transport/net_ib_multiseg/`) and fork 6 reuses them unchanged:
 
 | Piece | Fork symbols |
 |---|---|

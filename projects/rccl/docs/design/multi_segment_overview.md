@@ -10,7 +10,7 @@ This is the entry point to the multi-segment design docs. It explains why RCCL r
 
 **Why DeepEP needs it.** DeepEP-style workloads allocate elastic symmetric windows that mix GPU and host memory in one address range, for example `[GPU][CPU]` or `[GPU k][CPU 0]…[CPU N-1]` with one host segment per local rank. They use LSA for peers on the same node and GIN for peers on other nodes, through the RMA proxy, and they move bulk data with NET/IB P2P. Without per-segment registration those windows cannot be registered for GIN at all, and P2P buffers built from several allocations fall back to slow host staging. With it, a remote CPU segment can be read straight into a local GPU segment at independent offsets.
 
-**Status.** Layers 01 to 03 are merged into develop. Forks 1 to 4 are committed locally on develop `c43b4a9e7307` and are not pushed; their pull requests are not opened yet. The last full hardware run passed 214 of 214 units on ROCm 7.0.2.1 build 55 and 10.3 at fork 4 `7f84f495265d`, before the fork 3 mismatch-check amend, so the current fork 3 and fork 4 tips have not run on hardware, and no fork has run on the Mellanox IB configs. Host validation was clean at fork 3 `a36ed4043329` and fork 4 `21d89ca9d755`; a rerun on the current tips (fork 2 `9f125db92b47`, fork 3 `68042a159272`, fork 4 `9c67177e1f99`) is in progress. Review status is in [review feedback](multi_segment_review_feedback.md).
+**Status.** Layers 01 to 03 are merged into develop. Forks 1 to 4 are committed locally on develop and are not pushed; their pull requests are not opened yet. The last full hardware run, on fork 4 after the test reductions, passed 214 of 214 units on ROCm 7.0.2.1 build 55 and 10.3 on two MI355X Thor2 nodes with 0 gtest failures; the current fork 4 tip differs from that tree only in changelog text. No fork has run on the Mellanox IB configs. Host validation is clean on forks 2, 3 and 4 on both ROCm versions and the gate-off build; the results are in [the fork plugin](multi_segment_fork_plugin.md#validation). Review status is in [review feedback](multi_segment_review_feedback.md).
 
 **Where it is going.** Fork 5 (planned) replays develop's `net_ib` to `net_ib_cast` differences onto the fork (multiplane, QP sharing, CTS offload, ionicdv, AINIC recovery) and adds the AINIC runner entries. Fork 6 (planned) adds the IB-CAST-specific multi-segment pieces on top. See [the fork plugin](multi_segment_fork_plugin.md) for the forks, the compile-twice host tests and how the code can later move back into `net_ib`.
 
@@ -126,14 +126,14 @@ With the switch off, IB-MSEG is not selected unless `NCCL_NET=IB-MSEG` asks for 
 
 ## Stack and pull requests
 
-The stack is linear on develop `c43b4a9e7307`, one fork branch per pull request on [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems). Branch names share the prefix `users/atulkulk/netib-mseg/`. The fork pull requests are not opened yet, and nothing is pushed.
+The stack is linear on develop, one fork branch per pull request on [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems). Branch names share the prefix `users/atulkulk/netib-mseg/`. The fork pull requests are not opened yet, and nothing is pushed.
 
 | Fork | Branch | Scope | State |
 |---|---|---|---|
-| 1 | `01-core-backend-multiseg-gate` | comm-level plugin multi-segment flags in core, GIN/RMA window gates, RMA in-flight cap, host owner fd borrowed only when exactly one rank can export it; removes the ROCM-29810 TODO | committed locally: `a0578eda57e6` code, `8d8b991c2e7c` tests, `3f5973a3fe00` fix |
-| 2 | `02-net-ib-multiseg-copy` | byte-identical renamed copy of `net_ib` as IB-MSEG plus `rename_map.txt`; plugin selection, RMA backend choice, P2P policy, RAS list; `*_mseg` runner jobs | committed locally: `04b94a1636b6` copy, `9f125db92b47` tests |
-| 3 | `03-registration-p2p-multiseg` | per-segment registration and multi-segment P2P in IB-MSEG: one-write CTS with the layout prefix, sliced send, one-read flush; connect-time `useMultiSeg` match | committed locally: `4b5968c3b120` code, `68042a159272` tests |
-| 4 | `04-rma-gin-multiseg` | IB-MSEG GIN and RMA windows: one MR per physical segment, consensus, RMA rounds, RMA send-queue depth; compile-twice host tests | committed locally: `e15bec575504` code, `933c24ae63d5` tests, `568d71f9a2ea` review fixes, `9c67177e1f99` compile-twice host tests |
+| 1 | `01-core-backend-multiseg-gate` | comm-level plugin multi-segment flags in core, GIN/RMA window gates, RMA in-flight cap, host owner fd borrowed only when exactly one rank can export it; removes the ROCM-29810 TODO | committed locally: code, tests, owner-fd fix |
+| 2 | `02-net-ib-multiseg-copy` | byte-identical renamed copy of `net_ib` as IB-MSEG plus `rename_map.txt`; plugin selection, RMA backend choice, P2P policy, RAS list; `*_mseg` runner jobs | committed locally: copy, tests |
+| 3 | `03-registration-p2p-multiseg` | per-segment registration and multi-segment P2P in IB-MSEG: one-write CTS with the layout prefix, sliced send, one-read flush; connect-time `useMultiSeg` match | committed locally: code, tests |
+| 4 | `04-rma-gin-multiseg` | IB-MSEG GIN and RMA windows: one MR per physical segment, consensus, RMA rounds, RMA send-queue depth; compile-twice host tests | committed locally: code, tests, review fixes, compile-twice host tests |
 | 5 | none yet | develop's `net_ib` to `net_ib_cast` differences replayed onto the fork; AINIC runner entries | planned |
 | 6 | none yet | IB-CAST-specific multi-segment pieces: BY_INDEX immediate flag, one segmented group at a time, CAST CQ poll, IB-CAST RMA record with magic and version | planned |
 

@@ -3,7 +3,7 @@
 The tests put the correctness burden on pure boundary math and fake-verbs microtests that run on the host without a NIC or GPU, compile develop's `net_ib` host tests a second time against the IB-MSEG fork, and use two-node MPI hardware tests for the ibverbs wiring, the collective agreement, the queue limits and the DeepEP window shapes. This doc lists the suites, what they cover, the hybrid DeepEP tests, the runner jobs, how to run them, and the known failures. The per-fork inventory with every test, its category, the jobs and platforms that run it, and the open gaps is the [validation plan](multi_segment_validation_plan.md). Behavior under test is described in the transport docs linked from the [overview](multi_segment_overview.md#reading-guide).
 
 > [!NOTE]
-> Updated 2026-11-23 for the fork stack at fork 4 `9c67177e1f99` (branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`) on develop `c43b4a9e7307`. Every test and job named here exists at that tip. Forks 5 and 6 (IB-CAST) are planned and add no tests yet, so there are no IB-CAST multi-segment tests in the stack.
+> Updated 2026-11-23 for the fork stack at fork 4 (branch `users/atulkulk/netib-mseg/04-rma-gin-multiseg`) on develop. Every test and job named here exists in fork 4. Forks 5 and 6 (IB-CAST) are planned and add no tests yet, so there are no IB-CAST multi-segment tests in the stack.
 
 ## Strategy
 
@@ -65,7 +65,7 @@ Host microtests are separate `rccl-UnitTestsMicro*` binaries under `test/host/`,
 | `NetIbMsegRegMicrotest` (7), `NetIbMsegRegRangeMicrotest` (3) | `transport/net_ib_multiseg/reg-test.cc` | 3 | per-segment MR failures unwind and leave the handle untouched, resilient comms and past-the-max-MR counts decline, deregistration keeps going after an error, layout publishing |
 | `InitMicrotest` (3), `AllocMicrotest` (1), `GinHostDevCommSetupMicrotest` (1) | `init-test.cc`, `alloc-test.cc`, `gin/gin-host-test.cc` | 3 (2), 4 (3) | the comm flags follow the IB-MSEG plugin and RMA proxy; the address-range walk releases its retained handle; the RMA flag is set before each GIN context |
 
-Shared helpers are `test/common/MultiSegmentVmmHelpers.hpp`, `test/common/HybridVmmHelpers.hpp`, `test/common/MultiSegmentTestSupport.hpp` and `test/common/IbFakePostSend.hpp`.
+Shared helpers are `test/common/MultiSegmentVmmHelpers.hpp`, `test/common/HybridVmmHelpers.hpp`, `test/common/MultiSegmentTestSupport.hpp` and `test/common/IbFakePostSend.hpp`. The hybrid helper builds on the segmented one: `AllocHybridVmm` maps its host and device segments through `AllocSegmentedVmm`.
 
 ## Coverage
 
@@ -209,12 +209,15 @@ Validate multi-segment changes on ROCm 7.0.2.1 build 55 and on 10.3; the version
 
 | Run | Tree | Result |
 |---|---|---|
-| Hostval (7.0.2.1 build 55, 10.3, pytest, gate-off build) | fork 3 `a36ed4043329` | clean; gate-off build 13,197 tests passed |
-| Hostval | fork 4 `21d89ca9d755` | clean; pytest 167 passed; gate-off build 13,272 tests passed |
-| Hostval | fork 2 `9f125db92b47`, fork 3 `68042a159272`, fork 4 `9c67177e1f99` | rerun in progress |
-| Hardware, two MI355X Thor2 nodes | fork 4 `7f84f495265d`, before the fork 3 mismatch-check amend | 214 of 214 units on 7.0.2.1 build 55 and on 10.3 (`~/ginocc/sw/fork4-hw5-final/status`) |
+| Hostval (7.0.2.1 build 55, 10.3, pytest, gate-off build) | fork 3 before the tool split | clean; gate-off build 13,197 tests passed |
+| Hostval | fork 4 before the tool split | clean; pytest 167 passed; gate-off build 13,272 tests passed |
+| Hostval | fork 2 after the tool split | passed; pytest 156 passed; gate-off build 193 binaries, 13,003 tests passed |
+| Hostval | fork 3 after the test reductions | passed; 0 failed binaries on 7.0.2.1 build 55 and 10.3; gate-off build 197 binaries, 13,197 tests passed |
+| Hostval | fork 4 after the test reductions | passed; 0 failed binaries on 7.0.2.1 build 55 and 10.3; pytest 156 passed; gate-off build 197 binaries, 13,272 tests passed |
+| Hardware, two MI355X Thor2 nodes | fork 4 before the fork 3 mismatch-check amend | 214 of 214 units on 7.0.2.1 build 55 and on 10.3 (`~/ginocc/sw/fork4-hw5-final/status`) |
+| Hardware, two MI355X Thor2 nodes | fork 4 after the test reductions, ROCm 7.0.2.1 build 55 and 10.3 | 214 of 214 units on each ROCm version; gtest 23,702 passed and 13 skipped on 10.3, 23,622 passed and 75 skipped on 7.0.2.1 build 55; 0 failed (`~/ginocc/sw/fork4-hw6-reduce/summary.txt`) |
 
-Hardware has not run on the current fork 3 and fork 4 tips, and the Mellanox IB configs have not run any fork. The full record, including earlier fork runs, is in [the fork plugin](multi_segment_fork_plugin.md#validation).
+The Mellanox IB configs have not run any fork. The full record, including earlier fork runs, is in [the fork plugin](multi_segment_fork_plugin.md#validation).
 
 ## Known failures and dependencies
 
