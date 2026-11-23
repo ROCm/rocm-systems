@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -179,7 +180,7 @@ public:
   /// mutates descriptor bytes and redirects the descriptor to the already-known
   /// relocated entry offset.
   [[nodiscard]] bool apply_kernel_descriptor_translation(const KdTranslation &translation,
-                                                         rj_code_arch_t target_arch);
+                                                         rocjitsu::IsaFamily target_arch);
 
   /// @brief Append non-symbolized sidecar descriptors in loaded memory after .text.
   ///
@@ -190,7 +191,7 @@ public:
   /// itself. Runtime metadata records the returned virtual addresses.
   [[nodiscard]] std::optional<std::vector<AppendedSidecarDescriptor>>
   append_sidecar_descriptor_translations(std::span<const KdTranslation> translations,
-                                         rj_code_arch_t target_arch, uint64_t alignment = 64);
+                                         rocjitsu::IsaFamily target_arch, uint64_t alignment = 64);
 
   /// @brief Append a named, non-allocated ELF section without moving loadable bytes.
   ///

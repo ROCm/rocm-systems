@@ -774,6 +774,38 @@ TEST(SmiDiagProcesses, AnInsufficientSizeGpuListUsesTheEntriesWritten) {
   EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
   EXPECT_EQ(entries(*r), (std::vector<std::pair<uint32_t, std::string>>{
                              {1, "Running process: 100"}, {2, "Running process: 100"}}));
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 1.");
+}
+
+// The GPUs past a list too long for RDC may be the group's: a process whose
+// list names none of the group's GPUs is one whose GPUs could not be read.
+// Here the process runs on 129 GPUs, and GPU 0 is the one past the list.
+TEST(SmiDiagProcesses, ACutShortGpuListWithoutTheGroupsGpusIsSkipped) {
+  reset_fake(1);
+  std::vector<uint32_t> gpus;
+  for (uint32_t gpu = 1; gpu <= RDC_MAX_NUM_DEVICES; ++gpu) gpus.push_back(gpu);
+  gpus.push_back(0);
+  add_process(100, gpus);
+  g_gpu_lists[100].status = AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_SKIP);
+  EXPECT_EQ(info(*r), "Could not read the GPUs of 1 process.");
+  EXPECT_EQ(r->per_gpu_result_count, 0u);
+}
+
+// ... and a process on the group's GPUs still fails the check.
+TEST(SmiDiagProcesses, ACutShortGpuListWithoutTheGroupsGpusKeepsAFail) {
+  reset_fake(2);
+  add_process(100, {1});
+  g_gpu_lists[100].status = AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  add_process(101, {0});
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r),
+            (std::vector<std::pair<uint32_t, std::string>>{{0, "Running process: 101"}}));
+  EXPECT_EQ(info(*r),
+            "Could not read the GPUs of 1 process. "
+            "Process: 101, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 1.");
 }
 
 TEST(SmiDiagProcesses, NoProcessIsAPass) {
@@ -1433,7 +1465,9 @@ TEST(SmiDiagModule, AnEntryAModuleDidNotWriteIsSkipped) {
 }
 
 TEST(SmiDiagModule, TheTestCasesGatheredStayInTheCallersArray) {
-  // Hardening: two modules of 10 cases each would write 20 entries into 14.
+  // Hardening: the cases gathered stay in the caller's 14 entries. Two modules
+  // of 10 cases each, 6 of them shared, give the 14 cases once each; a shared
+  // case runs on the first module.
   auto first = std::make_shared<FakeModule>(cases_from(0, 10));
   auto second = std::make_shared<FakeModule>(cases_from(4, 10));
   amd::rdc::RdcDiagnosticModule diag({first, second});
@@ -1445,8 +1479,15 @@ TEST(SmiDiagModule, TheTestCasesGatheredStayInTheCallersArray) {
   std::fill(std::begin(out.guard), std::end(out.guard), RDC_DIAG_TEST_LAST);
   uint32_t count = 0;
   EXPECT_EQ(diag.rdc_diag_test_cases_query(out.cases, &count), RDC_ST_OK);
-  EXPECT_EQ(count, static_cast<uint32_t>(MAX_TEST_CASES));
+  ASSERT_EQ(count, static_cast<uint32_t>(MAX_TEST_CASES));
+  EXPECT_EQ(std::vector<rdc_diag_test_cases_t>(out.cases, out.cases + count),
+            cases_from(0, MAX_TEST_CASES));
   for (auto g : out.guard) EXPECT_EQ(g, RDC_DIAG_TEST_LAST);
+  auto result = std::make_unique<rdc_diag_test_result_t>();
+  uint32_t ids[RDC_MAX_NUM_DEVICES] = {};
+  diag.rdc_test_case_run(cases_from(4, 1)[0], ids, 1, nullptr, 0, result.get(), nullptr);
+  EXPECT_EQ(first->gpu_counts.size(), 1u);
+  EXPECT_TRUE(second->gpu_counts.empty());
 
   // A module that reports more cases than it wrote is held to MAX_TEST_CASES.
   auto overreporting = std::make_shared<FakeModule>(cases_from(0, MAX_TEST_CASES), 20);

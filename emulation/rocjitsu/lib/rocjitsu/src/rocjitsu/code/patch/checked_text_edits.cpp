@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/checked_text_edits.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -128,7 +129,7 @@ Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint
 
 } // namespace
 
-CheckedTextEdits::CheckedTextEdits(const AmdGpuCodeObject &source, rj_code_arch_t architecture,
+CheckedTextEdits::CheckedTextEdits(const AmdGpuCodeObject &source, rocjitsu::IsaFamily architecture,
                                    Decoder &decoder, const InstructionBoundaries &boundaries,
                                    const CodeObjectPatcher &patcher,
                                    std::span<const uint64_t> kernel_entries)

@@ -72,11 +72,13 @@ rdc_status_t RdcDiagnosticModule::rdc_diag_test_cases_query(
       if (!is_test_case(module_cases[i])) {
         continue;
       }
-      if (*test_case_count < MAX_TEST_CASES) {
+      // A case that is already listed is skipped: the constructor's map runs it on the first
+      // module that has it. The distinct cases fit in MAX_TEST_CASES; the bound only guards
+      // the caller's array.
+      rdc_diag_test_cases_t* const listed_end = test_cases + *test_case_count;
+      if (std::find(test_cases, listed_end, module_cases[i]) == listed_end &&
+          *test_case_count < MAX_TEST_CASES) {
         test_cases[(*test_case_count)++] = module_cases[i];
-      } else {
-        RDC_LOG(RDC_ERROR, "More than " << MAX_TEST_CASES << " test cases, dropped test case "
-                                        << module_cases[i]);
       }
     }
   }

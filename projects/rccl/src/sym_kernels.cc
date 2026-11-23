@@ -11,6 +11,7 @@
 #include "comm.h"
 #include "checks.h"
 #include "device.h"
+#include "param.h"
 #include "nccl_device/core_tmp.h"
 #include "transport.h"
 #include "tuning.h"
@@ -20,6 +21,7 @@
 #include <atomic>
 #include <cmath>
 #include <cfloat>
+#include <mutex>
 
 constexpr ncclSymkKernelMask kernelMask_STMC =
   1ull << ncclSymkKernelId_AllGather_LLMC | 1ull << ncclSymkKernelId_AllGather_STMC |
@@ -403,6 +405,39 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
   }
 }
 
+// 0 keeps the compiled-in default.
+NCCL_PARAM(SymAgHierCtas, "SYM_AG_HIER_CTAS", 0);
+NCCL_PARAM(SymAgHierChunkBytes, "SYM_AG_HIER_CHUNK_BYTES", 0);
+
+static constexpr int64_t ncclSymkAgHierMaxChunkBytesEnv = int64_t(1) << 30;
+
+int ncclSymkAgHierMaxBlocksLimit() {
+  int64_t requested = ncclParamSymAgHierCtas();
+  if (requested < 1) return ncclSymkAgHierMaxBlocks;
+  if (requested > MAXCHANNELS) {
+    static std::once_flag warned;
+    std::call_once(warned, [&] {
+      INFO(NCCL_ENV, "NCCL_SYM_AG_HIER_CTAS=%lld exceeds %d, using %d", (long long)requested, MAXCHANNELS, MAXCHANNELS);
+    });
+    return MAXCHANNELS;
+  }
+  return static_cast<int>(requested);
+}
+
+size_t ncclSymkAgHierMaxChunkBytesLimit() {
+  int64_t requested = ncclParamSymAgHierChunkBytes();
+  if (requested < 1) return ncclSymkAgHierMaxChunkBytes;
+  if (requested > ncclSymkAgHierMaxChunkBytesEnv) {
+    static std::once_flag warned;
+    std::call_once(warned, [&] {
+      INFO(NCCL_ENV, "NCCL_SYM_AG_HIER_CHUNK_BYTES=%lld exceeds %lld, using %lld", (long long)requested,
+           (long long)ncclSymkAgHierMaxChunkBytesEnv, (long long)ncclSymkAgHierMaxChunkBytesEnv);
+    });
+    return static_cast<size_t>(ncclSymkAgHierMaxChunkBytesEnv);
+  }
+  return static_cast<size_t>(requested);
+}
+
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // The block width tuning is fitted to gfx950 and must not reach other architectures. It sizes the
 // shared LL slots and blockDim, which peers must agree on, so every rank has to share this arch.
@@ -420,7 +455,7 @@ bool ncclSymkIsGfx1250(struct ncclComm* comm) {
 #endif
 
 // The hierarchical AllGather is tuned and validated only on gfx1250 in partition mode.
-static bool ncclSymkAgHierAvailable(struct ncclComm* comm) {
+bool ncclSymkAgHierAvailable(struct ncclComm* comm) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   return ncclSymkIsGfx1250(comm) && comm->hasMloPart;
 #else
@@ -451,16 +486,18 @@ static int computeHierScaleInSize(struct ncclComm* comm) {
 
 // Packages the hierarchical AllGather spans, or 0 where it can't run: it needs gfx1250 in partition
 // mode and an LSA team of at least two equal packages, so there is a cross-package hop to save.
-static int ncclSymkAgHierGroups(struct ncclComm* comm) {
+int ncclSymkAgHierGroups(struct ncclComm* comm) {
   int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0) return 0;
   int lsaRanks = ncclTeamLsa(comm).nRanks;
-  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0 || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
+  if (lsaRanks < comm->nRanks || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
   return lsaRanks / scaleIn;
 }
 
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks) {
   int nGroups = ncclSymkAgHierGroups(comm);
   if (nGroups == 0) return nBlocks;
+  nBlocks = std::min(nBlocks, comm->symkState.agHierMaxBlocks);
   int nUsed = ncclSymkAgHierG0Blocks(nBlocks, nGroups) + (nGroups - 1) * ncclSymkAgHierGroupBlocks(nBlocks, nGroups);
   return std::min(nBlocks, nUsed);
 }
@@ -478,6 +515,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     }
 
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
+    symk->kcomm.hierMaxChunkBytes = static_cast<uint32_t>(ncclSymkAgHierMaxChunkBytesLimit());
+    int agHierBlocks = std::max(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierTmaMaxBlocks);
+    symk->agHierMaxBlocks = agHierBlocks;
     int agHierGroups = ncclSymkAgHierGroups(comm);
     if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,
@@ -490,7 +530,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques.
     symk->hasLsaMultimem = ncclNvlsSymmetricMultimemEnabled(comm) && lsaRanks > 2 && !comm->p2pCrossClique;
     reqs.lsaMultimem = symk->hasLsaMultimem;
-    reqs.lsaBarrierCount = agHierGroups > 0 ? std::max(ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks) : ncclSymkMaxBlocks;
+    reqs.lsaBarrierCount = agHierGroups > 0 ? std::max(ncclSymkMaxBlocks, agHierBlocks) : ncclSymkMaxBlocks;
     reqs.ginStrongSignalsRequired = false;
     reqs.ginVaSignalsRequired = false;
 
@@ -512,7 +552,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
 
     struct ncclDevResourceRequirements hierPushFlagsReq = {};
     if (agHierGroups > 0) {
-      hierPushFlagsReq.bufferSize = size_t(ncclSymkAgHierMaxBlocks) * agHierGroups * sizeof(uint64_t);
+      hierPushFlagsReq.bufferSize =
+          size_t(agHierBlocks) * ncclSymkAgHierFlagStride(agHierGroups) * sizeof(uint64_t);
       hierPushFlagsReq.bufferAlign = 128;
       hierPushFlagsReq.outBufferHandle = &symk->kcomm.hierPushFlags;
       hierPushFlagsReq.next = reqs.resourceRequirementsList;
@@ -689,7 +730,7 @@ static bool ncclSymkImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncc
 }
 
 ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                                size_t nElts, bool symAligned16B) {
+                                size_t nElts, bool symAligned16B, bool ginWindowsUnregistered) {
   ncclSymkKernelMask kmask = kernelMask_coll(coll);
 
   bool const isReduction = coll == ncclFuncReduce || coll == ncclFuncAllReduce || coll == ncclFuncReduceScatter;
@@ -752,7 +793,8 @@ ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*nc
   kmask &= ~kernelMask_Genk;
 #endif
 
-  bool const hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported;
+  bool const hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported &&
+                      !ginWindowsUnregistered;
   bool const hasMultipleLsaTeams = ncclTeamLsa(comm).nRanks < comm->nRanks;
   if (hasMultipleLsaTeams) {
     kmask &= kernelMask_GinCapable | kernelMask_A2A;

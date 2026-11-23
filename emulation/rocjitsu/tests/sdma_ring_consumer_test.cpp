@@ -703,13 +703,13 @@ TEST(SdmaRingConsumerTest, CacheMaintenanceFailureIsTerminalAndRetiresOnlyCommit
     uint32_t maintenance_rejections = 0;
     SdmaPacketCallbacks callbacks;
     callbacks.acquire_cache_maintenance =
-        [&](SdmaCacheOperation) -> util::FailureOr<SdmaCacheLease> {
+        [&](SdmaCacheOperation) -> util::FailureOr<CacheMaintenanceResult> {
       ++maintenance_calls;
       if (!committed_prefix || fixture.memory->write_attempts(kDestination + 16) != 0) {
         ++maintenance_rejections;
         return util::Result::failure();
       }
-      return SdmaCacheLease{};
+      return CacheMaintenanceResult{};
     };
     if (committed_prefix)
       fixture.memory->return_next_write(kDestination + 16, VmAccessOutcome::Unavailable);

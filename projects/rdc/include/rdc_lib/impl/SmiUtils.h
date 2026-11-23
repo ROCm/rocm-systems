@@ -54,6 +54,8 @@ double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
 
 // Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
 // a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
+// Either way the handle comes from the flat GPU table: AMDSMI_STATUS_NOT_FOUND for an
+// unavailable slot, AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS for an index with no slot.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
 // The flat index of an available GPU's handle: its slot in the flat GPU table.
@@ -98,11 +100,12 @@ using GpuHandleTable = std::vector<GpuHandleEntry>;
 
 // The flat GPU table (index = RDC GPU index, at most RDC_MAX_NUM_DEVICES slots), built on first
 // use. Thread-safe; a snapshot can be read while it is held, and its handles are valid while an
-// SmiSession lives. Slots never move and the table never shrinks until it is reset. While a
-// placeholder may still be filled, or the first listing failed, the first use at least 5 s after
-// the last listing lists the processors again: a placeholder whose processor is now a GPU takes
-// its handle, one whose processor is of another kind is no longer retried, a GPU that is no
-// longer listed becomes unavailable, and other slots stay as they are.
+// SmiSession lives. A slot keeps its index, and the table never shrinks until it is reset. While
+// a placeholder may still be filled, or the first listing failed, the first use at least 5 s
+// after the last listing lists the processors again. A retry finds each slot's processor by its
+// handle: a placeholder whose processor is now a GPU becomes available, one whose processor is of
+// another kind is no longer retried, a GPU that is no longer listed becomes unavailable, and a GPU
+// listed in another place takes that place.
 std::shared_ptr<const GpuHandleTable> get_flat_gpu_table();
 
 // Drops the table; the next use builds a new one. SmiSession resets it whenever AMD SMI is
