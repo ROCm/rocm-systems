@@ -1260,7 +1260,13 @@ public:
       return CopyOutcome::Complete;
     // Same split the control paths already make: a fault is permanent and must
     // halt the queue, while an address that simply is not mapped yet is what a
-    // wait exists to wait for.
+    // wait exists to wait for. Under passthrough, the null page and addresses
+    // outside user space cannot become mapped by waiting.
+    if (!faults.observed() && passthrough_for_vmid(vmid) &&
+        (addr < PAGE_SIZE || addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)) {
+      note_rejected_identity_access(addr, vmid);
+      return CopyOutcome::Faulted;
+    }
     return faults.observed() ? CopyOutcome::Faulted : CopyOutcome::Unavailable;
   }
 
@@ -2266,11 +2272,13 @@ private:
       return CopyOutcome::Unavailable;
 
     auto apply_identity = [&](bool passthrough) -> CopyOutcome {
-      if (!passthrough || addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
+      if (!passthrough)
         return CopyOutcome::Unavailable;
+      if (addr == 0 || addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr) {
+        note_rejected_identity_access(addr, vmid);
+        return CopyOutcome::Faulted;
+      }
       auto *target = reinterpret_cast<uint8_t *>(addr);
-      if (target == nullptr)
-        return CopyOutcome::Unavailable;
 
       auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
       if (addressable_prefix(target, size) != size) {
@@ -3340,6 +3348,11 @@ private:
     }
     if (has_page_mapping(addr, vmid)) {
       note_clipped_mapped_access(into_memory ? "write" : "read", addr, size, vmid);
+      note_rejected_identity_access(addr, vmid);
+      return CopyOutcome::Faulted;
+    }
+    if (passthrough_for_vmid(vmid) &&
+        (addr == 0 || addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)) {
       note_rejected_identity_access(addr, vmid);
       return CopyOutcome::Faulted;
     }
