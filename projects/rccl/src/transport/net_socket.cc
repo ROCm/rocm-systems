@@ -135,6 +135,7 @@ struct ncclNetSocketRequest {
   struct ncclNetSocketComm* comm;
   struct ncclNetSocketTask* tasks[MAX_SOCKETS];
   int nSubs;
+  ncclResult_t result;
   struct ncclProfilerInfo pInfo;
 };
 
@@ -386,6 +387,22 @@ ncclResult_t ncclNetSocketConnect(void* ctx, int dev, void* opaqueHandle, void**
   return ncclSuccess;
 }
 
+// Drops a half-built handshake so the next Accept starts from scratch. stage->sock must already be released.
+static void ncclNetSocketResetStage(struct ncclNetSocketCommStage* stage) {
+  struct ncclNetSocketComm* comm = stage->comm;
+  if (comm) {
+    if (comm->ctrlSock.state == ncclSocketStateReady) (void)ncclSocketClose(&comm->ctrlSock);
+    for (int i = 0; i < comm->nSocks; i++) {
+      if (comm->socks[i].state == ncclSocketStateReady) (void)ncclSocketClose(&comm->socks[i]);
+    }
+    delete comm;
+  }
+  stage->state = ncclNetSocketCommStateStart;
+  stage->iteration = 0;
+  stage->sock = NULL;
+  stage->comm = NULL;
+}
+
 ncclResult_t ncclNetSocketAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/) {
   struct ncclNetSocketListenComm* lComm = (struct ncclNetSocketListenComm*)listenComm;
   struct ncclNetSocketCommStage* stage = &lComm->stage;
@@ -431,6 +448,7 @@ ncclResult_t ncclNetSocketAccept(void* listenComm, void** recvComm, ncclNetDevic
       WARN("NET/Socket : peer sent invalid or duplicate socket index %d (nSocks %d)", sendSockIdx, rComm->nSocks);
       (void)ncclSocketClose(sock);
       free(sock);
+      ncclNetSocketResetStage(stage);
       return ncclInternalError;
     }
     ncclSocketMove(slot, sock);
@@ -440,10 +458,8 @@ ncclResult_t ncclNetSocketAccept(void* listenComm, void** recvComm, ncclNetDevic
   *recvComm = rComm;
 
   /* reset lComm state */
-  stage->state = ncclNetSocketCommStateStart;
-  stage->iteration = 0;
-  stage->sock = NULL;
   stage->comm = NULL;
+  ncclNetSocketResetStage(stage);
   return ncclSuccess;
 }
 
@@ -456,9 +472,11 @@ ncclResult_t ncclNetSocketGetRequest(struct ncclNetSocketComm* comm, int op, voi
       r->data = data;
       r->size = size;
       r->ctrlSock = &comm->ctrlSock;
+      r->offset = 0;
       r->used = 1;
       r->comm = comm;
       r->nSubs = 0;
+      r->result = ncclSuccess;
       r->inlineData = (uint8_t*)comm->inlineData + i * (SOCKET_CTRL_SIZE + ncclParamSocketInlineSize());
       *req = r;
       return ncclSuccess;
@@ -523,6 +541,8 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
     WARN("NET/Socket : test called with NULL request");
     return ncclInternalError;
   }
+  // A failed task split leaves the request unusable: some tasks may already be queued on the data sockets.
+  if (r->result != ncclSuccess) return r->result;
   if (r->used == 1) { /* try to send/recv size (+ inline data if any) */
     int msgSize;
     uint8_t* msg = (uint8_t*)r->inlineData;
@@ -530,15 +550,19 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
       // sender side has the right data size, copy size info + inline data to the buffer
       int inlineSize = ncclNetSocketInlineSize(r->size);
       msgSize = inlineSize + SOCKET_CTRL_SIZE;
-      memcpy(msg, &r->size, SOCKET_CTRL_SIZE);
-      if (inlineSize > 0) memcpy(msg + SOCKET_CTRL_SIZE, r->data, inlineSize);
+      // Avoid duplicate memcpy on retry if a previous nonblocking send made partial progress
+      if (r->offset == 0) {
+        memcpy(msg, &r->size, SOCKET_CTRL_SIZE);
+        if (inlineSize > 0) memcpy(msg + SOCKET_CTRL_SIZE, r->data, inlineSize);
+      }
+      NCCLCHECK(ncclSocketProgress(r->op, r->ctrlSock, msg, msgSize, &r->offset));
+      if (r->offset < msgSize) return ncclSuccess; /* not ready yet*/
+      r->offset = inlineSize;
     } else {
       // receiver side doesn't have the right data size, wait for the sender to send it
-      int sizeOffset = 0, senderSize = 0;
-      while (sizeOffset < SOCKET_CTRL_SIZE) {
-        NCCLCHECK(ncclSocketProgress(r->op, r->ctrlSock, msg, SOCKET_CTRL_SIZE, &sizeOffset));
-        if (sizeOffset == 0) return ncclSuccess; /* not ready yet*/
-      }
+      int senderSize = 0;
+      NCCLCHECK(ncclSocketProgress(r->op, r->ctrlSock, msg, SOCKET_CTRL_SIZE, &r->offset));
+      if (r->offset < SOCKET_CTRL_SIZE) return ncclSuccess; /* not ready yet*/
       memcpy(&senderSize, msg, SOCKET_CTRL_SIZE);
       if (senderSize > r->size) {
         char line[SOCKET_NAME_MAXLEN + 1];
@@ -551,31 +575,20 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
              ncclSocketToString(&addr, line, sizeof(line)), senderSize, r->size);
         return ncclInvalidUsage;
       }
-      // copy to the data buffer if we have received some inline data already
-      int receivedInline = sizeOffset - SOCKET_CTRL_SIZE;
-      if (receivedInline > 0) memcpy(r->data, msg + SOCKET_CTRL_SIZE, receivedInline);
-      // from the actual size, extract the remaining inline size to be received and redirect the msg buffer to the
-      // user data
       r->size = senderSize;
-      msgSize = ncclNetSocketInlineSize(r->size) - receivedInline;
-      msg = (uint8_t*)r->data + receivedInline;
-    }
-    int offset = 0;
-    while (offset < msgSize) {
-      NCCLCHECK(ncclSocketProgress(r->op, r->ctrlSock, msg, msgSize, &offset));
-      if (offset == 0) return ncclSuccess; /* not ready yet*/
+      r->offset = 0;
     }
     // done exchanging sizes, r->size now contains the actual size
     r->used = 2;
-    r->offset = ncclNetSocketInlineSize(r->size);
-    int chunkOffset = r->offset, i = 0;
+    int chunkOffset = ncclNetSocketInlineSize(r->size), i = 0;
     if (r->comm->nSocks > 0) {
       // each request can be divided up to nSocks tasks, we use the size left to transfer
-      int taskSize = std::max((int)ncclParamSocketMinTaskSize(), DIVUP(r->size - r->offset, r->comm->nSocks));
+      int taskSize = std::max((int)ncclParamSocketMinTaskSize(), DIVUP(r->size - chunkOffset, r->comm->nSocks));
       while (chunkOffset < r->size) {
         int chunkSize = std::min(taskSize, r->size - chunkOffset);
-        NCCLCHECK(ncclNetSocketGetTask(r->comm, &r->pInfo, r->op, (char*)(r->data) + chunkOffset, chunkSize,
-                                       r->tasks + i++));
+        r->result =
+          ncclNetSocketGetTask(r->comm, &r->pInfo, r->op, (char*)(r->data) + chunkOffset, chunkSize, r->tasks + i++);
+        if (r->result != ncclSuccess) return r->result;
         chunkOffset += chunkSize;
       }
     }
