@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 
@@ -27,6 +28,16 @@ TEST(GpuUnit, UuidGenAcceptsRealSerial) {
   amdsmi_status_t status = amdsmi_uuid_gen(uuid, 0x1234, 0x1586, 0xff);
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_STREQ(uuid, "00ff1586-0000-1000-8000-000000001234");
+}
+
+TEST(GpuUnit, UuidGenFormatsHighBitsWithinExactBuffer) {
+  std::array<char, 39> buffer;
+  buffer.fill('!');
+  EXPECT_EQ(amdsmi_uuid_gen(buffer.data() + 1, UINT64_C(0xfedcba9876543210), 0x1586, 0xff),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_STREQ(buffer.data() + 1, "feff1586-0000-1000-80dc-ba9876543210");
+  EXPECT_EQ(buffer.front(), '!');
+  EXPECT_EQ(buffer.back(), '!');
 }
 
 }  // namespace
