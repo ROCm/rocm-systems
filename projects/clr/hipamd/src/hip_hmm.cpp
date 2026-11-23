@@ -548,7 +548,9 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
     }
   }
   hip::Stream* hip_stream = nullptr;
-  // Pick the specified stream or Null one from the provided target device
+  // Pick the specified stream, or the current device's null stream. The null stream belongs to
+  // the current device, as in CUDA, and is the only one hipStreamSynchronize(nullptr) waits on;
+  // the prefetch target is conveyed by `dev`, the stream is only the submission vehicle.
   if (cpuAccess == true) {
     hip_stream = (stream == nullptr || stream == hipStreamLegacy)
                      ? hip::getCurrentDevice()->NullStream()
@@ -556,7 +558,7 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   } else {
     dev = g_devices[targetDevice]->devices()[0];
     hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-                     ? g_devices[targetDevice]->NullStream()
+                     ? hip::getCurrentDevice()->NullStream()
                      : hip::getStream(stream);
   }
 
