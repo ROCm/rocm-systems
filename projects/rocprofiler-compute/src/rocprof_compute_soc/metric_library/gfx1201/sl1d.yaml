@@ -11,8 +11,7 @@ sl1d.req:
   name: sL1D Requests
   formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Scalar data cache requests after bank serialization, normalized by the chosen unit.
+  description: Scalar data cache requests after bank serialization.
 sl1d.req_bw:
   name: sL1D Load Bandwidth
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)

@@ -93,15 +93,14 @@ l2.evict_internal:
   formula: SUM(TCC_NORMAL_EVICT_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
-    The total number of L2 cache lines evicted from the cache due to capacity limits,
-    per normalization unit.
+    The total number of L2 cache lines evicted from the cache due to capacity limits.
 l2.evict_vl1d_req:
   name: L2 Evictions (vL1D Requests)
   formula: SUM(TCC_ALL_TC_OP_INV_EVICT_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines evicted from the cache due to invalidation
-    requests initiated by the vL1D cache, per normalization unit.
+    requests initiated by the vL1D cache.
 l2.hit_rate:
   name: L2 Cache Hit Rate
   formula: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
@@ -131,7 +130,7 @@ l2.nc_req:
   unit: (Requests + $normUnit)
   description: >-
     The total number of requests to the L2 to Not-hardware-Coherent (NC) memory
-    allocations, per normalization unit.
+    allocations.
 l2.peak_bw:
   name: L2 Peak Bandwidth
   formula: 100 * 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 64 * TO_INT($total_l2_chan))
@@ -161,7 +160,7 @@ l2.req:
   unit: (Requests + $normUnit)
   description: >-
     The total number of incoming requests to the L2 from all clients for all request
-    types, per normalization unit.
+    types.
 l2.rw_req:
   name: L2 RW Requests
   formula: SUM(TCC_RW_REQ_sum) / SUM($denom)
@@ -211,11 +210,11 @@ l2.writeback_internal:
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines written back to memory for internal hardware
-    reasons, per normalization unit.
+    reasons.
 l2.writeback_vl1d_req:
   name: L2 Writebacks (vL1D Requests)
   formula: SUM(TCC_ALL_TC_OP_WB_WRITEBACK_sum) / SUM($denom)
   unit: (Cachelines + $normUnit)
   description: >-
     The total number of L2 cache lines written back to memory due to requests initiated
-    by the vL1D cache, per normalization unit.
+    by the vL1D cache.

@@ -12,12 +12,12 @@ compute.f6f4_ops:
   unit: (FLOPs + $normUnit)
   description: >-
     The total number of 4-bit and 6-bit floating-point operations executed on MFMA
-    units, per normalization unit. F6/F4 formats are supported in AMD Instinct MI350
-    series (gfx950) and later only.
+    units. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later
+    only.
 compute.f8_ops:
   description: >-
-    The total number of 8-bit floating-point operations executed on MFMA units, per
-    normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
+    The total number of 8-bit floating-point operations executed on MFMA units. F8 (FP8)
+    uses either E4M3 or E5M2 format.
 compute.flops_per_norm:
   formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($denom)
 compute.inst_mix_mfma_f6f4:
@@ -25,9 +25,8 @@ compute.inst_mix_mfma_f6f4:
   formula: SUM(SQ_INSTS_VALU_MFMA_F6F4) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of 4-bit and 6-bit floating point MFMA instructions issued per
-    normalization unit. This is supported in AMD Instinct MI350 series (gfx950) and
-    later only.
+    The total number of 4-bit and 6-bit floating point MFMA instructions issued. This is
+    supported in AMD Instinct MI350 series (gfx950) and later only.
 compute.l1_cache_vmem_stalled_by_l1_cache:
   name: L1 Cache - VMEM Stalled by L1 Cache
   formula: 100 * SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM(SQ_BUSY_CYCLES)

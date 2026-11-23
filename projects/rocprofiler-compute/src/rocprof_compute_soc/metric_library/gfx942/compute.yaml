@@ -3,8 +3,7 @@ compute.f8_ops:
   formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM($denom)
   unit: (FLOPs + $normUnit)
   description: >-
-    The total number of 8-bit floating-point operations executed on the MFMA units, per
-    normalization unit.
+    The total number of 8-bit floating-point operations executed on the MFMA units.
 compute.flops_per_norm:
   formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops) / SUM($denom)
 compute.inst_mix_mfma_f8:
@@ -12,8 +11,8 @@ compute.inst_mix_mfma_f8:
   formula: SUM(SQ_INSTS_VALU_MFMA_F8) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of 8-bit floating point MFMA instructions issued per normalization
-    unit. This is supported in AMD Instinct MI300 series and later only.
+    The total number of 8-bit floating point MFMA instructions issued. This is supported
+    in AMD Instinct MI300 series and later only.
 compute.inst_mix_vmem:
   formula: SUM(SQ_INSTS_VMEM) / SUM($denom)
 compute.mfma_flops_bf16:
@@ -38,12 +37,12 @@ compute.valu_active_threads:
 compute.vmem_ta_addr_stall:
   description: >-
     The number of cycles the sequencer was stalled waiting to send address requests to
-    the address processor due to a full address FIFO, per normalization unit.
+    the address processor due to a full address FIFO.
 compute.vmem_ta_cmd_stall:
   description: >-
     The number of cycles the sequencer was stalled waiting to send commands to the
-    address processor due to a full command FIFO, per normalization unit.
+    address processor due to a full command FIFO.
 compute.vmem_ta_data_stall:
   description: >-
     The number of cycles the sequencer was stalled waiting to send write data to the
-    address processor due to a full data FIFO, per normalization unit.
+    address processor due to a full data FIFO.

@@ -11,4 +11,4 @@ l1i.req:
   name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: Instruction cache requests from the SQ, normalized by the chosen unit.
+  description: Instruction cache requests from the SQ.

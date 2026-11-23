@@ -3,9 +3,8 @@ compute.insts_dual_valu_vopd:
   formula: SUM(SQ_INSTS_DUAL_VALU_WAVE32_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    The number of dual-issue VALU instructions issued in wave32 mode per normalization
-    unit. The VOPD encoding pairs two independent VALU operations that issue in the same
-    cycle.
+    The number of dual-issue VALU instructions issued in wave32 mode. The VOPD encoding
+    pairs two independent VALU operations that issue in the same cycle.
 compute.insts_flat_load:
   name: Instructions - Flat Load
   formula: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
@@ -21,8 +20,8 @@ compute.insts_internal:
   formula: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These represent
-    bookkeeping or non-user-visible work issued by the SQ.
+    Internal SQ instructions (SQ_INSTS_INTERNAL). These represent bookkeeping or
+    non-user-visible work issued by the SQ.
 compute.insts_lds:
   name: Instructions - LDS
   formula: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
@@ -62,8 +61,8 @@ compute.insts_transcendental:
   formula: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These
-    cover hardware approximations such as sin, cos, and log on the vector ALU.
+    Transcendental VALU instructions (SQ_INSTS_VALU_TRANS). These cover hardware
+    approximations such as sin, cos, and log on the vector ALU.
 compute.insts_valu:
   name: Instructions - VALU
   formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)

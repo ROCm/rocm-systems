@@ -4,7 +4,7 @@ lds.atomic:
   name: LDS ATOMIC
   formula: SUM(SQ_INSTS_LDS_ATOMIC) / SUM($denom)
   unit: (Instructions + $normUnit)
-  description: The total number of LDS atomic instructions per normalization unit.
+  description: The total number of LDS atomic instructions.
 lds.atomic_bw:
   name: LDS ATOMIC Bandwidth
   formula: 64 * SUM(SQ_INSTS_LDS_ATOMIC_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
@@ -17,22 +17,22 @@ lds.command_fifo_full_rate:
   formula: SUM(SQ_LDS_CMD_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The number of cycles where the LDS command FIFO was full, per normalization unit.
-    High values indicate backpressure in LDS instruction dispatch, which may stall
-    wavefronts waiting to issue LDS operations.
+    The number of cycles where the LDS command FIFO was full. High values indicate
+    backpressure in LDS instruction dispatch, which may stall wavefronts waiting to
+    issue LDS operations.
 lds.data_fifo_full_rate:
   name: LDS Data FIFO Full Rate
   formula: SUM(SQ_LDS_DATA_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The number of cycles where the LDS data FIFO was full, per normalization unit. High
-    values indicate backpressure in LDS data return path, which may stall wavefronts
-    waiting for LDS read/atomic results.
+    The number of cycles where the LDS data FIFO was full. High values indicate
+    backpressure in LDS data return path, which may stall wavefronts waiting for LDS
+    read/atomic results.
 lds.load:
   name: LDS LOAD
   formula: SUM(SQ_INSTS_LDS_LOAD) / SUM($denom)
   unit: (Instructions + $normUnit)
-  description: The total number of LDS load instructions per normalization unit.
+  description: The total number of LDS load instructions.
 lds.load_bw:
   name: LDS LOAD Bandwidth
   formula: 64 * SUM(SQ_INSTS_LDS_LOAD_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
@@ -44,7 +44,7 @@ lds.store:
   name: LDS STORE
   formula: SUM(SQ_INSTS_LDS_STORE) / SUM($denom)
   unit: (Instructions + $normUnit)
-  description: The total number of LDS store instructions per normalization unit.
+  description: The total number of LDS store instructions.
 lds.store_bw:
   name: LDS STORE Bandwidth
   formula: 64 * SUM(SQ_INSTS_LDS_STORE_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)

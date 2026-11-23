@@ -89,7 +89,7 @@ gl2.total_req:
   name: GL2 Total Requests
   formula: SUM(GL2C_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: L2 requests, normalized by the chosen unit.
+  description: L2 requests.
 gl2.wr_req:
   name: GL2 Write Requests
   formula: SUM(GL2C_WRITE_sum) / SUM($denom)

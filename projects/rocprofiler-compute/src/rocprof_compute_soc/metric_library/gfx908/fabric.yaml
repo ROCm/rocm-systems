@@ -4,10 +4,10 @@ fabric.atomic:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to atomically update 32B or 64B
-    of data in any memory location, per normalization unit. Note that on current CDNA
-    accelerators, such as the MI2XX, requests are only considered atomic by Infinity
-    Fabric if they are targeted at non-write-cacheable memory, such as fine-grained
-    memory allocations or uncached memory allocations on the MI2XX.
+    of data in any memory location. Note that on current CDNA accelerators, such as the
+    MI2XX, requests are only considered atomic by Infinity Fabric if they are targeted
+    at non-write-cacheable memory, such as fine-grained memory allocations or uncached
+    memory allocations on the MI2XX.
 fabric.atomic_lat:
   name: L2-Fabric Atomic Latency
   formula: SUM(TCC_EA_ATOMIC_LEVEL_sum) / SUM(TCC_EA_ATOMIC_sum)
@@ -42,7 +42,7 @@ fabric.hbm_rd:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from
-    the accelerator's local HBM, per normalization unit.
+    the accelerator's local HBM.
 fabric.hbm_rd_traffic:
   name: HBM Read Traffic
   formula: 100 * SUM(TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
@@ -59,7 +59,7 @@ fabric.hbm_wr_atomic:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update 32B
-    or 64B of data in the accelerator's local HBM, per normalization unit.
+    or 64B of data in the accelerator's local HBM.
 fabric.hbm_wr_atomic_traffic:
   name: HBM Write and Atomic Traffic
   formula: 100 * SUM(TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
@@ -79,14 +79,14 @@ fabric.rd_32b:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 32B of data from any
-    memory location, per normalization unit.
+    memory location.
 fabric.rd_64b:
   name: L2-Fabric Read Requests (64B)
   formula: SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 64B of data from any
-    memory location, per normalization unit.
+    memory location.
 fabric.rd_bw:
   name: L2-Fabric Read Bandwidth
   formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
@@ -113,15 +113,15 @@ fabric.rd_uncached:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read uncached data from any
-    memory location, per normalization unit. 64B requests for uncached data are counted
-    as two 32B uncached data requests.
+    memory location. 64B requests for uncached data are counted as two 32B uncached data
+    requests.
 fabric.remote_rd:
   name: L2-Fabric Remote Read Requests
   formula: SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from
-    any source other than the accelerator's local HBM, per normalization unit.
+    any source other than the accelerator's local HBM.
 fabric.remote_rd_traffic:
   name: L2-Fabric Remote Read Traffic
   formula: 100 * SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
@@ -139,8 +139,7 @@ fabric.remote_wr_atomic:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update 32B
-    or 64B of data in any memory location other than the accelerator's local HBM, per
-    normalization unit.
+    or 64B of data in any memory location other than the accelerator's local HBM.
 fabric.remote_wr_atomic_traffic:
   name: L2-Fabric Remote Write and Atomic Traffic
   formula: 100 * SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
@@ -177,14 +176,14 @@ fabric.wr_atomic_32b:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update 32B
-    of data to any memory location, per normalization unit.
+    of data to any memory location.
 fabric.wr_atomic_64b:
   name: L2-Fabric Write and Atomic Requests (64B)
   formula: SUM(TCC_EA_WRREQ_64B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update 64B
-    of data in any memory location, per normalization unit.
+    of data in any memory location.
 fabric.wr_atomic_bw:
   name: L2-Fabric Write and Atomic Bandwidth
   formula: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
@@ -211,7 +210,7 @@ fabric.wr_atomic_uncached:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to write or atomically update 32B
-    or 64B of uncached data, per normalization unit.
+    or 64B of uncached data.
 fabric.wr_credit_starvation:
   name: L2-Fabric Write Credit Starvation
   formula: 100 * SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)

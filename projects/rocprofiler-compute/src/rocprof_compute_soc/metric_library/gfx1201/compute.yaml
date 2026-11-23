@@ -2,19 +2,19 @@ compute.insts_flat_load:
   name: Instructions - Flat Load
   formula: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Issued flat-addressed load instructions, normalized by the chosen unit.
+  description: Issued flat-addressed load instructions.
 compute.insts_flat_store:
   name: Instructions - Flat Store
   formula: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Issued flat-addressed store instructions, normalized by the chosen unit.
+  description: Issued flat-addressed store instructions.
 compute.insts_internal:
   name: Instructions - Internal
   formula: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These represent
-    bookkeeping or non-user-visible work issued by the SQ.
+    Internal SQ instructions (SQ_INSTS_INTERNAL). These represent bookkeeping or
+    non-user-visible work issued by the SQ.
 compute.insts_lds:
   name: Instructions - LDS
   formula: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
@@ -44,22 +44,19 @@ compute.insts_tex_load:
   formula: SUM(SQ_INSTS_TEX_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Issued buffer loads, image loads, samples, and atomics with a return value,
-    normalized by the chosen unit.
+    Issued buffer loads, image loads, samples, and atomics with a return value.
 compute.insts_tex_store:
   name: Instructions - TEX Store
   formula: SUM(SQ_INSTS_TEX_STORE_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Issued buffer stores, image stores, and atomics without a return value, normalized
-    by the chosen unit.
+  description: Issued buffer stores, image stores, and atomics without a return value.
 compute.insts_transcendental:
   name: Instructions - Transcendental
   formula: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These
-    cover hardware approximations such as sin, cos, and log on the vector ALU.
+    Transcendental VALU instructions (SQ_INSTS_VALU_TRANS). These cover hardware
+    approximations such as sin, cos, and log on the vector ALU.
 compute.insts_valu:
   name: Instructions - VALU
   formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
@@ -79,8 +76,7 @@ compute.insts_vmem_flat:
   name: Instructions - VMEM Flat
   formula: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Issued flat-addressed vector memory instructions, normalized by the chosen unit.
+  description: Issued flat-addressed vector memory instructions.
 compute.ipc:
   name: IPC
   formula: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)

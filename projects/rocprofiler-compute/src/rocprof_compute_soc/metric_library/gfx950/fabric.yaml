@@ -100,7 +100,7 @@ fabric.rd_128b_ea0:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 128B of data from any
-    memory location, per normalization unit.
+    memory location.
 fabric.rd_64b:
   formula: SUM(TCC_EA0_RDREQ_64B_sum) / SUM($denom)
 fabric.rd_bw:

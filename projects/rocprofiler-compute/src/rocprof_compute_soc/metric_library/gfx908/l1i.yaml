@@ -38,8 +38,7 @@ l1i.hits:
   formula: SUM(SQC_ICACHE_HITS) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of L1I requests that hit on a previously loaded cache line, per
-    normalization-unit.
+    The total number of L1I requests that hit on a previously loaded cache line.
 l1i.hits_per_req:
   name: L1I Hit Rate
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ)
@@ -69,16 +68,16 @@ l1i.misses_duplicated:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L1I requests that missed on a cache line that were already
-    pending due to another request, per normalization-unit.
+    pending due to another request.
 l1i.misses_non_duplicated:
   name: L1I Misses - Non Duplicated
   formula: SUM(SQC_ICACHE_MISSES) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     The total number of L1I requests that missed on a cache line that were not already
-    pending due to another request, per normalization-unit.
+    pending due to another request.
 l1i.req:
   name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: The total number of requests made to the L1I per normalization unit.
+  description: The total number of requests made to the L1I.
