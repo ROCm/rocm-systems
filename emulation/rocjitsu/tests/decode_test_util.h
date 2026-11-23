@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -39,7 +40,7 @@ inline bool decode_fails(Decoder &decoder, const rj_code_binary_inst_t *inst) {
 
 /// Unwrap a block build expected to succeed by the surrounding test.
 inline std::vector<std::unique_ptr<BasicBlock>>
-build_valid_blocks(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+build_valid_blocks(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                    std::span<const uint64_t> extra_leaders = {},
                    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
                    std::span<const uint64_t> extra_split_points = {}) {

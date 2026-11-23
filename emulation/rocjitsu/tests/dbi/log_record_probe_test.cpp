@@ -9,6 +9,7 @@
 // The wait's encoding is from `llvm-mc -triple=amdgcn -mcpu=gfx1200 -show-encoding`.
 
 #include "log_record_probe.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/probe_callable.h"
@@ -47,7 +48,7 @@ TEST(LogRecordProbe, RejectsInvalidSlotCountsBeforeEmission) {
   for (uint32_t slots : {0u, 3u, 128u}) {
     std::vector<uint32_t> body = sentinel;
     util::StringDiagnostic diagnostic;
-    EXPECT_TRUE(build_log_record_probe_body(ROCJITSU_CODE_ARCH_CDNA3, kRecordType, slots, body,
+    EXPECT_TRUE(build_log_record_probe_body(rocjitsu::IsaFamily::Cdna3, kRecordType, slots, body,
                                             diagnostic.emitter())
                     .failed());
     EXPECT_EQ(diagnostic.message(), "slot_count must be a power of two no larger than 64");
@@ -58,8 +59,8 @@ TEST(LogRecordProbe, RejectsInvalidSlotCountsBeforeEmission) {
 TEST(LogRecordProbe, UnsupportedArchitectureStopsEmission) {
   std::vector<uint32_t> body;
   util::StringDiagnostic diagnostic;
-  EXPECT_TRUE(build_log_record_probe_body(ROCJITSU_CODE_ARCH_INVALID, kRecordType, kSlotCount, body,
-                                          diagnostic.emitter())
+  EXPECT_TRUE(build_log_record_probe_body(rocjitsu::IsaFamily::Invalid, kRecordType, kSlotCount,
+                                          body, diagnostic.emitter())
                   .failed());
   EXPECT_EQ(diagnostic.message(),
             "Unimplemented instruction: v_readfirstlane_b32 for target architecture");
@@ -69,7 +70,7 @@ TEST(LogRecordProbe, UnsupportedArchitectureStopsEmission) {
 // The header's footprint is the one the body has. Tests rely on it to keep the
 // probe's registers dead at their anchors, and nothing checks a probe's
 // registers against the kernel's allocation.
-void expect_declared_footprint(rj_code_arch_t arch) {
+void expect_declared_footprint(rocjitsu::IsaFamily arch) {
   ProbeCallable callable;
   callable.symbol = "rj_log_record_probe";
   callable.arch = arch;
@@ -106,7 +107,7 @@ void expect_declared_footprint(rj_code_arch_t arch) {
 constexpr uint32_t kSWaitAluSaSdst = 0xbf88fffe; // s_wait_alu 0xfffe on gfx1200
 
 TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   std::vector<uint32_t> body;
   ASSERT_TRUE(build_log_record_probe_body(kArch, kRecordType, kSlotCount, body).succeeded());
   EXPECT_EQ(std::ranges::count(body, kSWaitAluSaSdst), 4);
@@ -137,7 +138,7 @@ TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
 }
 
 TEST(LogRecordProbe, CdnaBodiesCarryNoRdna4Wait) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     std::vector<uint32_t> body;
     ASSERT_TRUE(build_log_record_probe_body(arch, kRecordType, kSlotCount, body).succeeded());
     EXPECT_EQ(std::ranges::count(body, kSWaitAluSaSdst), 0);
@@ -145,13 +146,13 @@ TEST(LogRecordProbe, CdnaBodiesCarryNoRdna4Wait) {
 }
 
 TEST(LogRecordProbe, DeclaredFootprintMatchesTheBodyOnCdna3) {
-  expect_declared_footprint(ROCJITSU_CODE_ARCH_CDNA3);
+  expect_declared_footprint(rocjitsu::IsaFamily::Cdna3);
 }
 TEST(LogRecordProbe, DeclaredFootprintMatchesTheBodyOnCdna4) {
-  expect_declared_footprint(ROCJITSU_CODE_ARCH_CDNA4);
+  expect_declared_footprint(rocjitsu::IsaFamily::Cdna4);
 }
 TEST(LogRecordProbe, DeclaredFootprintMatchesTheBodyOnRdna4) {
-  expect_declared_footprint(ROCJITSU_CODE_ARCH_RDNA4);
+  expect_declared_footprint(rocjitsu::IsaFamily::Rdna4);
 }
 
 } // namespace

@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "config_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "test_paths.h"
 
 #include "rocjitsu/code/basic_block.h"
@@ -100,7 +101,7 @@ protected:
     const std::array<uint64_t, 1> entries{selected_kernel->entry_text_offset};
     util::StringDiagnostic cfg_error;
     FailureOr<std::vector<std::unique_ptr<BasicBlock>>> reachable = BasicBlock::build_reachable(
-        *code_object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries, cfg_error.emitter(),
+        *code_object, *decoder, rocjitsu::IsaFamily::Cdna5, entries, cfg_error.emitter(),
         function_ranges, {}, {}, ROCJITSU_CODE_TARGET_GFX1251);
     ASSERT_FALSE(reachable.failed()) << cfg_error.message();
 

@@ -10,10 +10,12 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
+#include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "test_common.h"
 #include "test_fixture_utils.h"
@@ -157,6 +159,65 @@ TEST(SystemUnit, KfdNodeInitializeFindsXgmiCpuIoLink) {
   EXPECT_EQ(node.numa_node_number(), kCpuNode);
   EXPECT_EQ(node.numa_node_weight(), kXgmiWeight);
   EXPECT_EQ(node.numa_node_type(), amd::smi::IOLINK_TYPE_XGMI);
+}
+
+// A link whose properties cannot be read names node 0 with weight 0, so if discovery kept it,
+// it would outrank the real CPU link on node 1.
+TEST(SystemUnit, KFD_TOPOLOGY__KfdNodeInitializeIgnoresUnreadableIoLink) {
+  constexpr uint32_t kOtherCpuNode = 0;
+  constexpr uint32_t kCpuNode = 1;
+  constexpr uint32_t kGpuNode = 2;
+  constexpr uint32_t kGpuCard = 0;
+  constexpr uint32_t kLinkIndex = 0;
+  constexpr uint32_t kUnreadableLinkIndex = 1;
+  constexpr uint64_t kGpuId = 23456;
+  constexpr uint64_t kPcieWeight = 20;
+
+  FakeSysfsTree tree;
+  WriteGpuNode(tree, kGpuNode, kGpuCard, kGpuId);
+  WriteIoLink(tree, kGpuNode, kLinkIndex, kCpuNode, amd::smi::IOLINK_TYPE_PCIEXPRESS, kPcieWeight);
+  tree.WriteFile(
+      std::to_string(kGpuNode) + "/io_links/" + std::to_string(kUnreadableLinkIndex) + "/.keep",
+      "");
+  WriteCpuNode(tree, kOtherCpuNode);
+  WriteCpuNode(tree, kCpuNode);
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          tree.root());
+
+  amd::smi::KFDNode node(kGpuNode);
+  ASSERT_EQ(node.Initialize(), 0);
+
+  EXPECT_EQ(node.numa_node_number(), kCpuNode);
+  EXPECT_EQ(node.numa_node_weight(), kPcieWeight);
+  EXPECT_EQ(node.numa_node_type(), amd::smi::IOLINK_TYPE_PCIEXPRESS);
+}
+
+// The fields a failed Initialize() never reached must read 0. Allocated on the heap like
+// discovery's links, so under ASAN a field left uninitialized reads as malloc fill rather than 0.
+TEST(SystemUnit, KFD_TOPOLOGY__IoLinkMissingKeysReadZero) {
+  constexpr uint32_t kGpuNode = 1;
+  constexpr uint32_t kLinkIndex = 0;
+
+  FakeSysfsTree tree;
+  tree.WriteFile(
+      std::to_string(kGpuNode) + "/io_links/" + std::to_string(kLinkIndex) + "/properties",
+      "type " + std::to_string(amd::smi::IOLINK_TYPE_XGMI) + "\nnode_from " +
+          std::to_string(kGpuNode) + "\n");
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          tree.root());
+
+  auto link = std::make_shared<amd::smi::IOLink>(kGpuNode, kLinkIndex, amd::smi::IO_LINK_DIRECTORY);
+  EXPECT_NE(link->Initialize(), 0);
+
+  EXPECT_EQ(link->type(), amd::smi::IOLINK_TYPE_XGMI);
+  EXPECT_EQ(link->node_from(), kGpuNode);
+  EXPECT_EQ(link->node_to(), 0u);
+  EXPECT_EQ(link->flag(), 0u);
+  EXPECT_EQ(link->weight(), 0u);
+  EXPECT_EQ(link->min_bandwidth(), 0u);
+  EXPECT_EQ(link->max_bandwidth(), 0u);
 }
 
 }  // namespace

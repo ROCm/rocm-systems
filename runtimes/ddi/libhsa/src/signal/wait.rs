@@ -7,6 +7,53 @@ use super::*;
 
 /// Time spent spinning before a blocked wait yields the CPU.
 const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
+/// Active hints retain a longer low-latency polling window before backing off.
+const ACTIVE_SPIN_BUDGET: Duration = Duration::from_millis(10);
+/// Initial sleep for an opted-in polling-only scalar wait.
+const POLL_SLEEP_FLOOR: Duration = Duration::from_micros(20);
+/// Bounds completion and cancellation observation latency during a long wait.
+const POLL_SLEEP_CEILING: Duration = Duration::from_millis(2);
+
+/// Per-call backoff for `ROCr`'s opt-in polling-only signal wait policy.
+struct PollBackoff {
+    /// Time spent actively polling before the first sleep.
+    hot_window: Duration,
+    /// Duration of the next bounded polling backoff.
+    next_sleep: Duration,
+}
+
+impl PollBackoff {
+    /// Selects the initial polling window from the caller's wait-state hint.
+    fn new(wait_state_hint: u32) -> Self {
+        Self {
+            hot_window: if wait_state_hint == WAIT_STATE_ACTIVE {
+                ACTIVE_SPIN_BUDGET
+            } else {
+                BLOCKED_SPIN_BUDGET
+            },
+            next_sleep: POLL_SLEEP_FLOOR,
+        }
+    }
+
+    /// Returns zero while hot or expired, otherwise a deadline-bounded sleep.
+    fn sleep_duration(&mut self, elapsed: Duration, timeout: u64, frequency: u64) -> Duration {
+        if elapsed < self.hot_window {
+            return Duration::ZERO;
+        }
+        let mut sleep = self.next_sleep;
+        if timeout != u64::MAX {
+            if frequency == 0 {
+                return Duration::ZERO;
+            }
+            let deadline_ns = (u128::from(timeout) * 1_000_000_000).div_ceil(u128::from(frequency));
+            let remaining_ns = deadline_ns.saturating_sub(elapsed.as_nanos());
+            // The minimum is bounded by the two-millisecond sleep ceiling.
+            sleep = Duration::from_nanos(remaining_ns.min(sleep.as_nanos()) as u64);
+        }
+        self.next_sleep = (self.next_sleep * 2).min(POLL_SLEEP_CEILING);
+        sleep
+    }
+}
 #[cfg(test)]
 thread_local! {
     /// Pauses one single-signal wait after admission and before its first read.
@@ -23,6 +70,9 @@ pub(crate) fn pause_after_wait_admission(entered: Sender<()>, release: Receiver<
 thread_local! {
     /// Notifies a wait test after this thread has observed an unsatisfied poll.
     static FIRST_UNSATISFIED_POLL: std::cell::RefCell<Option<Sender<()>>> =
+        const { std::cell::RefCell::new(None) };
+    /// Notifies a test when a scalar wait first enters its sleep phase.
+    static BEFORE_POLL_SLEEP: std::cell::RefCell<Option<Sender<()>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -118,6 +168,8 @@ pub(crate) unsafe fn signal_wait(
         let Some(registration) = (unsafe { prepare_multi_wait(runtime, &[signal]) }) else {
             return observed;
         };
+        let yielding_poll = runtime.config.yielding_poll_enabled
+            && !runtime.signal_state.is_interrupt_signal(signal);
         drop(guard);
         let Some(entry) = registration.entries.first() else {
             return observed;
@@ -135,6 +187,7 @@ pub(crate) unsafe fn signal_wait(
                 compare_value,
                 timeout_hint,
                 wait_state_hint,
+                yielding_poll,
                 order,
             },
         )
@@ -152,6 +205,8 @@ pub(crate) struct SignalWaitConfig {
     pub(crate) timeout_hint: u64,
     /// Active or blocked pause policy.
     pub(crate) wait_state_hint: u32,
+    /// Opt-in backoff for signals without an interrupt event.
+    pub(crate) yielding_poll: bool,
     /// Ordering of the signal value load.
     pub(crate) order: Ordering,
 }
@@ -165,6 +220,7 @@ pub(crate) fn signal_wait_open(
 ) -> SignalValue {
     let start = Instant::now();
     let frequency = rocddi::host::clock::info().frequency_hz;
+    let mut backoff = PollBackoff::new(config.wait_state_hint);
     loop {
         let observed = signal.value.load(config.order);
         if stop.load(Ordering::Acquire)
@@ -174,6 +230,19 @@ pub(crate) fn signal_wait_open(
                 && timeout_elapsed(start.elapsed(), config.timeout_hint, frequency))
         {
             return observed;
+        }
+        if config.yielding_poll {
+            let sleep = backoff.sleep_duration(start.elapsed(), config.timeout_hint, frequency);
+            if !sleep.is_zero() {
+                #[cfg(test)]
+                BEFORE_POLL_SLEEP.with(|slot| {
+                    if let Some(sender) = slot.borrow_mut().take() {
+                        let _ = sender.send(());
+                    }
+                });
+                thread::sleep(sleep);
+                continue;
+            }
         }
         wait_pause(config.wait_state_hint, &start);
     }
@@ -540,7 +609,7 @@ pub(crate) unsafe fn signal_wait_all_open(
 ) -> u32 {
     if !satisfying_values.is_null() {
         // SAFETY: The caller supplied signal_count writable output entries.
-        // ROCr publishes zero for invalid and not-yet-satisfied signals even
+        // `ROCr` publishes zero for invalid and not-yet-satisfied signals even
         // when the wait ultimately times out.
         unsafe { std::ptr::write_bytes(satisfying_values, 0, pending.len()) };
     }
@@ -581,5 +650,103 @@ pub(crate) unsafe fn signal_wait_all_open(
             return u32::MAX;
         }
         wait_pause(wait_state_hint, &start);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yielding_poll_keeps_hint_specific_hot_windows_and_caps_backoff() {
+        for (hint, hot) in [
+            (WAIT_STATE_BLOCKED, BLOCKED_SPIN_BUDGET),
+            (WAIT_STATE_ACTIVE, ACTIVE_SPIN_BUDGET),
+        ] {
+            let mut backoff = PollBackoff::new(hint);
+            assert_eq!(
+                backoff.sleep_duration(
+                    hot.checked_sub(Duration::from_nanos(1)).unwrap(),
+                    u64::MAX,
+                    0
+                ),
+                Duration::ZERO
+            );
+            for us in [20, 40, 80, 160, 320, 640, 1280, 2000, 2000] {
+                assert_eq!(
+                    backoff.sleep_duration(hot, u64::MAX, 0),
+                    Duration::from_micros(us)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn yielding_poll_clamps_finite_timeouts_in_timestamp_ticks() {
+        let elapsed = Duration::from_micros(200);
+        let mut backoff = PollBackoff::new(WAIT_STATE_BLOCKED);
+        // At 100 MHz, one remaining timestamp tick is ten nanoseconds.
+        assert_eq!(
+            backoff.sleep_duration(elapsed, 20_001, 100_000_000),
+            Duration::from_nanos(10)
+        );
+        assert_eq!(
+            backoff.sleep_duration(elapsed, 20_000, 100_000_000),
+            Duration::ZERO
+        );
+        assert_eq!(backoff.sleep_duration(elapsed, 1, 0), Duration::ZERO);
+        // A fractional nanosecond rounds up; large finite deadlines do not overflow.
+        assert_eq!(
+            backoff.sleep_duration(elapsed, 400_001, 2_000_000_000),
+            Duration::from_nanos(1)
+        );
+        assert_eq!(
+            backoff.sleep_duration(elapsed, u64::MAX - 1, 1),
+            Duration::from_micros(160)
+        );
+    }
+
+    #[test]
+    fn yielding_poll_observes_completion_retirement_and_shutdown_after_sleep() {
+        for mode in 0..3 {
+            let signal = Arc::new(AmdSignal::user(3));
+            let retired = Arc::new(AtomicBool::new(false));
+            let stop = Arc::new(AtomicBool::new(false));
+            let (ready_send, ready_recv) = std::sync::mpsc::channel();
+            let (done_send, done_recv) = std::sync::mpsc::channel();
+            let worker_signal = signal.clone();
+            let worker_retired = retired.clone();
+            let worker_stop = stop.clone();
+            let worker = thread::spawn(move || {
+                BEFORE_POLL_SLEEP.with(|slot| *slot.borrow_mut() = Some(ready_send));
+                let value = signal_wait_open(
+                    &worker_signal,
+                    Some(&worker_retired),
+                    &worker_stop,
+                    SignalWaitConfig {
+                        condition: SIGNAL_CONDITION_EQ,
+                        compare_value: 4,
+                        timeout_hint: u64::MAX,
+                        wait_state_hint: WAIT_STATE_BLOCKED,
+                        yielding_poll: true,
+                        order: Ordering::Acquire,
+                    },
+                );
+                done_send.send(value).unwrap();
+            });
+            ready_recv.recv_timeout(Duration::from_secs(1)).unwrap();
+            match mode {
+                0 => signal.value.store(4, Ordering::Release),
+                1 => retired.store(true, Ordering::Release),
+                _ => stop.store(true, Ordering::Release),
+            }
+            let result = done_recv.recv_timeout(Duration::from_secs(1));
+            // Release the worker even if one of the cancellation paths regresses.
+            stop.store(true, Ordering::Release);
+            signal.value.store(4, Ordering::Release);
+            worker.join().unwrap();
+            assert_eq!(result.unwrap(), if mode == 0 { 4 } else { 3 });
+        }
     }
 }

@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -62,7 +63,7 @@ struct BenchFixture {
 
   BenchFixture() : gpu_mem("mfma_simd_bench_mem"), l2("mfma_simd_bench_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -223,7 +224,7 @@ TEST(MfmaSimdBenchmark, F32Scaled_16x16x128_fp8) {
     fx.cu->write_vgpr(fx.vbase + SCALE_A, lane, 0x7F7F7F7Fu); // e8m0 = 127 per block
     fx.cu->write_vgpr(fx.vbase + SCALE_B, lane, 0x7F7F7F7Fu);
   }
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   const auto words = mma_test::make_cdna4_mfma_scale_words(
       45, /*abid=*/1, vgpr_src(SCALE_A), vgpr_src(SCALE_B), /*a_byte=*/0,

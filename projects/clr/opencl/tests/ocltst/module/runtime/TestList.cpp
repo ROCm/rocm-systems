@@ -39,6 +39,7 @@
 #include "OCLOfflineCompilation.h"
 #include "OCLP2PBuffer.h"
 #include "OCLPartialWrkgrp.h"
+#include "OCLLargeGridYZ.h"
 #include "OCLPerfCounters.h"
 #include "OCLPersistent.h"
 #include "OCLPinnedMemory.h"
@@ -72,6 +73,7 @@ TestEntry TestList[] = {
     TEST(OCLMemObjs),
     TEST(OCLSemaphore),
     TEST(OCLPartialWrkgrp),
+    TEST(OCLLargeGridYZ),
     TEST(OCLCreateBuffer),
     TEST(OCLCreateImage),
     TEST(OCLCPUGuardPages),
