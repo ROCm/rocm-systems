@@ -502,6 +502,8 @@ static ncclResult_t ginDevCommSetupWithBackend(
     peerArrayCount,
   };
 
+  // RCCL: the GIN proxy's in-flight cap reads this comm's RMA flag inside createContext.
+  rcclGinProxySetMultiSeg(comm->rcclMultiSegRma);
   for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
     NCCLCHECKGOTO(backend->ncclGin->createContext(backend->ginComms[commIdx], &ginConfig,
                                                   &ginStateDevComm->ginCtx[commIdx],

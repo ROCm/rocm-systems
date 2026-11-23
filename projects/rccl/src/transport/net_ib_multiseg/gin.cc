@@ -527,6 +527,21 @@ struct IbMsegRmaIbProxyCtx {
   struct rcclRmaRoundQueues pending; // RCCL: multi-segment ops wider than one round, per peer.
 };
 
+// RCCL: a failed doorbell loses the batch's signaled tail, so no CQE completes its requests and a later one would hide
+// them. Fail every request with a WR in the batch.
+static void rcclRmaIbProxyFailBatch(struct IbMsegRmaIbProxyCtx* ctx) {
+  struct IbMsegRmaIbProxyWrBatch* batch = &ctx->batch;
+  for (int r = 0; ctx->fullSendComm && r < ctx->nranks; r++) {
+    struct IbMsegSendComm* comm = (struct IbMsegSendComm*)ctx->fullSendComm[r];
+    if (comm == NULL) continue;
+    for (int q = 0; q < comm->base.nqps; q++) {
+      if (comm->base.qps[q].qp != batch->qp) continue;
+      for (int i = 0; i < batch->nWrs; i++) comm->base.reqs[batch->wrs[i].wr_id].type = NCCL_NET_IB_REQ_FAILED;
+      return;
+    }
+  }
+}
+
 // Ring the doorbell for the pending chain, if any.
 static ncclResult_t IbMsegRmaIbProxyPostBatch(struct IbMsegRmaIbProxyCtx* ctx) {
   struct IbMsegRmaIbProxyWrBatch* batch = &ctx->batch;
@@ -539,6 +554,7 @@ static ncclResult_t IbMsegRmaIbProxyPostBatch(struct IbMsegRmaIbProxyCtx* ctx) {
   struct ibv_send_wr* bad_wr;
   // RCCL: reset even on failure, so a later post cannot resend WRs the HCA accepted.
   ncclResult_t ret = wrap_ibv_post_send(batch->qp, &batch->wrs[0], &bad_wr);
+  if (ret != ncclSuccess) rcclRmaIbProxyFailBatch(ctx);
 
   // reset the batch
   batch->nWrs = 0;
@@ -1226,9 +1242,13 @@ ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   int registered = 0;
 
   *mhandle = NULL;
+  if (size == 0) {
+    WARN("NET/IB/RMA: Invalid memory registration size %zu, expected > 0", size);
+    ret = ncclInternalError;
+    goto reconcile;
+  }
   ret = ncclCalloc(&rmaMrHandle, 1);
   if (ret != ncclSuccess) goto reconcile;
-  // Fail paths deregister only the `registered` complete handles.
 
   // A HIP export describes only its first physical segment, so count them and register one MR each.
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
@@ -1238,7 +1258,6 @@ ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
     NCCLCHECKGOTO(ncclCuMemGetAddressRange((CUdeviceptr)data, size, &base, &baseSize, &nSeg), ret, reconcile);
   }
 #endif
-  if (nSeg < 1) nSeg = 1;
   if (!rcclIbSegCountSupported(nSeg)) {
     WARN("NET/IB/RMA: buffer %p (size %zu) spans %d segments, more than the supported %d", data, size, nSeg,
          RCCL_IB_REG_SEG_DEFAULT);
@@ -1349,7 +1368,7 @@ reconcile:
   return ncclSuccess;
 
 fail:
-  // rcclIbSegRegister has already released a failed multi-segment walk, so `registered` stays 0 for that path.
+  // Deregister only the `registered` complete MRs; rcclIbSegRegister already released a failed walk, so it is 0 there.
   if (rmaMrHandle) (void)rcclRmaIbProxySegMrHandleFree(cComm->recvComm, rmaMrHandle, registered);
   free(localVas);
   free(localRkeys);
@@ -1540,7 +1559,8 @@ ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
                                  wr.sg_list, 1, /*optFlags=*/0, /*addEvent=*/false, request);
 }
 
-// RCCL: a signaled tail that never posted has no CQE. Later completions must not hide it.
+// RCCL: a signaled tail that never posted has no CQE, so later completions must not hide it. The error is fatal for
+// the context: accepted prefix WRs may still be moving data after the slot is freed.
 ncclResult_t rcclRmaIbProxyTestFailed(struct IbMsegRequest* req, int* done) {
   *done = 1;
   NCCLCHECK(IbMsegFreeRequest(req));

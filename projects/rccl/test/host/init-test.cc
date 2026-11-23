@@ -2718,9 +2718,7 @@ TEST_F(InitMicrotest, CommAlloc_MultiSegNetFollowsIbMsegPlugin) {
   EXPECT_EQ((std::vector<bool>{true, false, false, false}), asked);
 }
 
-extern bool g_rcclGinProxyMultiSeg;
-
-// The RMA flag follows IbMsegRmaIbProxy and reaches the GIN proxy; a split comm takes its parent's flag.
+// The RMA flag follows IbMsegRmaIbProxy; a split comm takes its parent's flag.
 TEST_F(InitMicrotest, CommAlloc_MultiSegRmaFollowsIbMsegRmaProxy) {
   InstallCommAllocSuccess();
   g_multiSegOn = [](bool perSegment) { return perSegment; };
@@ -2728,17 +2726,15 @@ TEST_F(InitMicrotest, CommAlloc_MultiSegRmaFollowsIbMsegRmaProxy) {
   comm->rmaState.rmaProxyState.ncclRma = &IbMsegRmaIbProxy;
   ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
   EXPECT_TRUE(comm->rcclMultiSegRma);
-  EXPECT_TRUE(g_rcclGinProxyMultiSeg);
 
   auto other = FreshComm();
   ASSERT_EQ(ncclSuccess, commAlloc(other.get(), nullptr, 8, 0));
   EXPECT_FALSE(other->rcclMultiSegRma) << "another RMA backend keeps one MR per registration";
-  EXPECT_FALSE(g_rcclGinProxyMultiSeg);
+  EXPECT_TRUE(comm->rcclMultiSegRma) << "a later comm leaves an earlier comm's flag alone";
 
   auto child = FreshComm();
   ASSERT_EQ(ncclSuccess, commAlloc(child.get(), comm.get(), 8, 0));
   EXPECT_TRUE(child->rcclMultiSegRma) << "the split comm keeps the parent's RMA backend";
-  EXPECT_TRUE(g_rcclGinProxyMultiSeg);
 }
 
 // The switch and DMA-BUF gates live in rcclMultiSegOn; its false wins even for IB-MSEG.

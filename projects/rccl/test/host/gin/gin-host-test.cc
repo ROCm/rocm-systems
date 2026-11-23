@@ -160,6 +160,10 @@ int64_t ncclParamGinType() { return g_paramGinType; }
 
 #include GIN_HOST_CC_PATH
 
+// The rcclGinProxySetMultiSeg link seam (src/gin/gin_host_proxy.cc); createContext records the value in force.
+static bool g_rcclGinProxyMultiSeg = false;
+void rcclGinProxySetMultiSeg(bool multiSeg) { g_rcclGinProxyMultiSeg = multiSeg; }
+
 // The ncclGinBarrierSizeRequirement link seam (defined below, after gin_host.cc).
 ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm*, struct ncclGinBackendState const* backend,
                                            struct ncclDevCommCompat const* devCompat,
@@ -260,6 +264,8 @@ struct FakeGin {
   std::vector<ncclGinConfig_t> createdConfigs;
   // Each config's peerArray, copied: production frees it once setup returns.
   std::vector<std::vector<int>> createdPeerArrays;
+  // The GIN proxy's multi-segment RMA flag at each createContext.
+  std::vector<bool> createdMultiSeg;
   // The abortFlag of every connect, in call order.
   std::vector<volatile uint32_t*> connectAbortFlags;
   BadContext badContext = BadContext::None;
@@ -357,6 +363,7 @@ struct FakeGin {
 
   ncclResult_t createContext(ncclGinConfig_t* config, void** ginCtx, ncclNetDeviceHandle_t** devHandle) {
     ++createContextCalls;
+    createdMultiSeg.push_back(g_rcclGinProxyMultiSeg);
     if (config) {
       createdConfigs.push_back(*config);
       createdPeerArrays.emplace_back(config->peerArray,
@@ -1658,6 +1665,23 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ExclusiveContextsRequestedTwic
   EXPECT_NE(first.ginHandles[0], devComm_.ginHandles[0]);
 
   EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &first));
+}
+
+// The GIN proxy caps its queue from a process-wide flag, so each setup sets it from its own comm
+// before any createContext; a comm set up later must not inherit an earlier comm's value.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_SetsTheCommRmaFlagBeforeEachContext) {
+  gin()->backends[0].ginCommCount = 2;
+  gin()->backends[0].ginComms[1] = fake_.collCommHandle(1);
+  auto reqs = proxyReqs();
+  reqs.ginContextCount = 2;
+  for (bool multiSeg : {true, false, true}) {
+    SCOPED_TRACE(multiSeg);
+    fake_.createdMultiSeg.clear();
+    g_rcclGinProxyMultiSeg = !multiSeg;
+    comm_->rcclMultiSegRma = multiSeg;
+    ASSERT_EQ(ncclSuccess, setupAndFree(reqs, NCCL_VERSION_CODE));
+    EXPECT_EQ(std::vector<bool>(2, multiSeg), fake_.createdMultiSeg);
+  }
 }
 
 // The traffic class in the requirements is what the plugin is configured with.

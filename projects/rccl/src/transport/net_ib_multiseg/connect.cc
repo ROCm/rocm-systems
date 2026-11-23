@@ -1102,7 +1102,9 @@ ib_recv_dev_list:
   isP2p = handle->isP2p;
   INFO(NCCL_NET, "NET/IB: IbMsegConnect isP2p=%d", isP2p);
   comm->base.nqps = rcclIbSelectNqps(nQpsPerDev, isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
-  comm->base.isRma = nQpsPerDev > 0; // RCCL: only GIN/RMA connects pass nQpsPerDev
+  // RCCL: only GIN/RMA connects pass nQpsPerDev. GIN connects that never post multi-segment chains (the collComm
+  // ring, GDAKI) also get the deeper send queue; that costs memory only.
+  comm->base.isRma = nQpsPerDev > 0;
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -1115,6 +1117,8 @@ ib_recv_dev_list:
   // Sender's CQ size needs to accomodate the upper bound of number of send
   // requests multiplied by the number of QPs used per request.
   int cqSize;
+  // RCCL: the deeper RMA send queue keeps this CQ size, since a request has at most one signaled WR (its round's
+  // tail) outstanding. Signaling more WRs per request would need a deeper CQ.
   cqSize = NET_IB_MAX_REQUESTS * rcclIbCqQpsPerDev(nQpsPerDev);
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     int ibDevN = comm->base.vProps.devs[i];

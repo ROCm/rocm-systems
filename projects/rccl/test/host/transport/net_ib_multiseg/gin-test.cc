@@ -1471,6 +1471,32 @@ TEST_F(NetIbMsegGinMicrotest, RegMrSymDmaBuf_LocationQueryFails_FailsBeforeRegis
   EXPECT_EQ(fcntl(exported, F_GETFD), -1) << "the exported fd is closed";
 }
 
+// A failed properties query after a successful retain still releases the retained handle.
+TEST_F(NetIbMsegGinMicrotest, RegMrSymDmaBuf_PropertiesQueryFails_ReleasesTheRetainedHandle) {
+  GinTwoSegmentScene scene;
+  ScopedHook<int()> cuMemEnable{g_cuMemEnable, [] { return 1; }};
+  ScopedHook ranges(g_hipMemGetAddressRange, TwoSegmentRanges());
+  ScopedHook exportFd(g_hipMemGetHandleForAddressRange, ExportsDevNull());
+  ScopedHook regMrDmaBuf(g_ginRegMrDmaBuf, [](void*, void*, size_t, int, uint64_t, int, uint64_t, void**) {
+    return ncclSuccess;
+  });
+  ScopedHook gather(g_ginCollAllGather, CopyGather);
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* handle, void* ptr) {
+    *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(ptr);
+    return hipSuccess;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  void* handle = nullptr;
+
+  EXPECT_NE(RegSegments(scene, 2 * GinTwoSegmentScene::kSegBytes, &handle), ncclSuccess);
+  EXPECT_EQ(handle, nullptr);
+  EXPECT_EQ(regMrDmaBuf.calls, 0);
+  EXPECT_GE(retain.calls, 1);
+  EXPECT_EQ(release.calls, retain.calls) << "every retained handle is released";
+}
+
 // Past the old 16-segment limit: 17 segments register one MR each and agree on the count.
 TEST_F(NetIbMsegGinMicrotest, RegMrSymDmaBuf_SeventeenSegments_RegistersEachSegment) {
   constexpr int kSeg = 17;
@@ -2125,6 +2151,41 @@ TEST_F(NetIbMsegGinMicrotest, IPut_BatchDoorbellFailure_PublishesNoRequest) {
             ncclSuccess);
   EXPECT_EQ(request, nullptr);
   EXPECT_EQ(scene.sendQueues[1].head, nullptr);
+}
+
+// The aggregated requests of a batch whose doorbell failed lost their signaled tail. They report the error, even
+// after a later request on the same QP completes.
+TEST_F(NetIbMsegGinMicrotest, IPut_BatchDoorbellFailure_FailsTheAggregatedRequests) {
+  GinRoundScene scene;
+  GinSegHandle src(70, 0x10000000, 0xa00, 0xb00);
+  GinSegHandle dst(70, 0x20000000, 0xc00, 0xd00);
+  void* first = nullptr;
+  void* second = nullptr;
+  ASSERT_EQ(rcclRmaIbProxyIPut(&scene.context, 0, 0, &src.h, 8, 0, &dst.h, 1, ncclRmaOptFlagsAggregateRequests,
+                               &first),
+            ncclSuccess);
+  ASSERT_EQ(rcclRmaIbProxyIPut(&scene.context, 0, 8, &src.h, 8, 8, &dst.h, 1, ncclRmaOptFlagsAggregateRequests,
+                               &second),
+            ncclSuccess);
+  ASSERT_EQ(scene.verbs.posted.size(), 0u);
+  scene.verbs.postSendFailOnCall = 1;
+  void* request = nullptr;
+  EXPECT_NE(rcclRmaIbProxyIPut(&scene.context, 0, GinSegHandle::kSegBytes / 2, &src.h, 69 * GinSegHandle::kSegBytes,
+                               0, &dst.h, 1, 0, &request),
+            ncclSuccess);
+  auto* firstReq = static_cast<IbMsegRequest*>(first);
+  auto* secondReq = static_cast<IbMsegRequest*>(second);
+  EXPECT_EQ(firstReq->type, NCCL_NET_IB_REQ_FAILED);
+  EXPECT_EQ(secondReq->type, NCCL_NET_IB_REQ_FAILED);
+
+  void* later = nullptr;
+  ASSERT_EQ(rcclRmaIbProxyIPut(&scene.context, 0, 16, &src.h, 8, 16, &dst.h, 1, 0, &later), ncclSuccess);
+  auto* laterReq = static_cast<IbMsegRequest*>(later);
+  ASSERT_NE(laterReq, nullptr);
+  scene.QueueCompletion(laterReq);
+  EXPECT_EQ(scene.Test(laterReq), 1);
+  EXPECT_EQ(scene.Test(firstReq, ncclRemoteError), 1);
+  EXPECT_EQ(scene.Test(secondReq, ncclRemoteError), 1);
 }
 
 // A multi-segment flush is one signaled read of the flush segment, through that segment's local MR.

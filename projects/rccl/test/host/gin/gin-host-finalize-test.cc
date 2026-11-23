@@ -74,6 +74,8 @@ int ncclTeamRankToWorld(ncclComm_t, ncclTeam_t team, int rank) { return rank * t
 
 void ncclSetThreadName(std::thread&, const char*, ...) {}
 
+void rcclGinProxySetMultiSeg(bool) {}
+
 // ncclGinDevCommSetup sizes NCCL's barrier requirements through src/dev_runtime.cc. These tests pass no
 // barrier requirements (nBarrierReqs == 0), so reaching this seam is a bug.
 ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm*, struct ncclGinBackendState const*,

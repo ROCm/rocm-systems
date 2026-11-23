@@ -964,16 +964,15 @@ TEST_F(AllocMicrotest, GetAddressRange_ProbesForSysmemUntilFound) {
   }
 }
 
-// A failed properties read never releases the handle retained to probe for sysmem.
-// Pins AICOMRCCL-3043; a fix flips this pin.
-TEST_F(AllocMicrotest, GetAddressRange_KnownBug_PropertiesFailureLeaksTheRetainedHandle) {
+// A failed properties read still releases the handle retained to probe for sysmem (AICOMRCCL-3043).
+TEST_F(AllocMicrotest, GetAddressRange_PropertiesFailureReleasesTheRetainedHandle) {
   hipDeviceptr_t base = nullptr;
   size_t total = 0;
   bool sysmem = false;
   failing_ = {"props"};
   EXPECT_EQ(ncclCuMemGetAddressRange(Va(), kGran, &base, &total, nullptr, &sysmem), ncclUnhandledCudaError);
   EXPECT_EQ(Count("retain"), 1);
-  EXPECT_EQ(Count("release"), 0);
+  EXPECT_EQ(Count("release"), 1);
 }
 
 // ncclCudaMalloc / ncclCudaCalloc / ncclCudaCallocAsync

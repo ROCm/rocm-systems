@@ -13,9 +13,8 @@
 #include "seg_rma_mseg.h"
 #include "seg_wr_mseg.h"
 
-// RCCL: multi-segment RMA ops wider than one round. An op posts at most RCCL_RMA_MAX_DATA_WRS data WRs per round,
-// and its next round once the plugin reports the previous one done. Ops queue per peer in request order, so a later
-// op never passes an earlier one.
+// RCCL: multi-segment RMA ops wider than one round of RCCL_RMA_MAX_DATA_WRS data WRs post the next round when the
+// previous one is done. Ops queue per peer in request order, so a later op never passes an earlier one.
 
 struct rcclRmaRoundOp {
   struct rcclRmaRoundOp* next;

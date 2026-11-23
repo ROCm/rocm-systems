@@ -20,7 +20,6 @@
 #include "gin/gin_host_win_stub.h"
 #else
 #include "gin.h"
-#include "gin/gin_host_proxy.h"
 #endif
 #include "rma.h"
 #include "diagnostics.h"
@@ -960,7 +959,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   // RCCL: a child comm takes the parent's RMA flag; a non-shared split re-inits RMA later but picks the same backend.
   comm->rcclMultiSegRma =
       parent ? parent->rcclMultiSegRma : rcclMultiSegOn(comm->rmaState.rmaProxyState.ncclRma == &IbMsegRmaIbProxy);
-  rcclGinProxySetMultiSeg(comm->rcclMultiSegRma);
 
   // Initialize memory manager
   if (parent && parent->shareResources && parent->memManager) {

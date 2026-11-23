@@ -4516,7 +4516,7 @@
         },
         {
           "name": "NetIB_RMA_MultiSeg_PostPath",
-          "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
+          "description": "Post path at the default WR batch size (64): chains up to 34 WRs, ops wider than one 64-WR round with ops queued behind them, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
           "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         },
         {
@@ -4725,11 +4725,6 @@
           "name": "DeepEP_Hybrid_Window_Registration",
           "description": "DeepEP hybrid [GPU][CPU per local rank] window with SYM_REUSE handle reuse",
           "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse"
-        },
-        {
-          "name": "DeepEP_Hybrid_Rma_Positive_And_Stress",
-          "description": "Hybrid imported-CPU RMA IGet positive, multi-node stress, and OOR reject",
-          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
         },
         {
           "name": "DeepEP_Hybrid_Elastic_Gating",
@@ -5551,7 +5546,7 @@
     },
     {
       "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
-      "description": "Two-node UBR multi-segment tests including Generic rcclNet.nSegments",
+      "description": "Two-node UBR multi-segment tests: GenericGraph rcclNet.nSegments, LSA plus GIN, DeepEP hybrid and elastic window registration, and the register-off slices",
       "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     }

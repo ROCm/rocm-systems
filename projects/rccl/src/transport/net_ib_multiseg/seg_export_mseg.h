@@ -77,7 +77,7 @@ static inline ncclResult_t rcclIbSegExportNext(const struct rcclIbSegWalkState* 
 static inline ncclResult_t rcclIbSegExportIsHost(const struct rcclIbSegExport* e, bool* host) {
   *host = true;
   if (e->fd >= 0 && !e->exported) return ncclSuccess;
-  return ncclCuMemIsSysmemSegment((CUdeviceptr)e->ptr, host);
+  return rcclCuMemIsSysmemSegment((CUdeviceptr)e->ptr, host);
 }
 #endif
 

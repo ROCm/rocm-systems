@@ -2219,7 +2219,7 @@
         },
         {
           "name": "NetIB_RMA_MultiSeg_PostPath",
-          "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
+          "description": "Post path at the default WR batch size (64): chains up to 34 WRs, ops wider than one 64-WR round with ops queued behind them, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
           "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         },
         {
@@ -2884,7 +2884,7 @@
     },
     {
       "name": "NET IB - RMA Multi-Segment",
-      "description": "AIRUNTIME-2351: per-segment DMA-BUF registration of multi-segment VMM windows, boundary-split iput/iget/iputSignal/iflush, range and segment-cap rejection, and the DeepEP Engram mixed GPU+CPU window",
+      "description": "AIRUNTIME-2351: per-segment DMA-BUF registration of multi-segment VMM windows, boundary-split iput/iget/iputSignal/iflush, range and segment-cap rejection, and the DeepEP Engram mixed GPU+CPU window. The UBR multi-segment registration jobs (ubr_multisegment_comprehensive, ubr_multisegment_lsagin_multinode) run in the hardware configs; this config covers the NET IB plugin API only.",
       "config": "net_ib_rma_multisegment",
       "enabled": true
     },

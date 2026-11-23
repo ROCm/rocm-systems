@@ -91,7 +91,8 @@ struct ginProxyCtx {
 };
 
 static ncclRma_t* rmaBackend;
-static bool rmaMultiSeg; // RCCL: comm->rcclMultiSegRma, via rcclGinProxySetMultiSeg
+// RCCL: comm->rcclMultiSegRma, set by rcclGinProxySetMultiSeg on the thread that then calls createContext.
+static thread_local bool rmaMultiSeg;
 
 static struct ginProxyOutstandingOp* proxyGinAllocOutstandingOp(struct ginProxyHostGpuCtx* hostGpuCtx) {
   struct ginProxyOutstandingOp* op = hostGpuCtx->freeOps;

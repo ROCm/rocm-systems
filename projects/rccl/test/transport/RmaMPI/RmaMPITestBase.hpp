@@ -108,6 +108,9 @@ protected:
     // rma_->devices(), so an override may inspect nDevices_ and build vNICs.
     virtual int SelectDevice() { return 0; }
 
+    // Called before a skip for a missing RMA backend or device; an override may turn it into a failure.
+    virtual void OnMissingRmaPrereq(const char* /*what*/) {}
+
     std::string skipReason_;
 
     // Bail out on every rank at once: a lone return strands the peers in the next
@@ -134,6 +137,7 @@ protected:
                              envNet ? envNet : "<unset>");
                 warned = true;
             }
+            OnMissingRmaPrereq("no RMA backend for the current NCCL_NET");
             GTEST_SKIP() << "No RMA backend available for current NCCL_NET";
             return;
         }
@@ -316,6 +320,7 @@ protected:
         }
         if(nDevices_ <= 0)
         {
+            OnMissingRmaPrereq("no IB RMA-capable devices on this host");
             // See comment above on the bool-vs-void GTEST_SKIP wrapping.
             [&]() { GTEST_SKIP() << "No IB RMA-capable devices on this host"; }();
             return false;
@@ -326,6 +331,7 @@ protected:
         int selected = SelectDevice();
         if(AnyRankFailed(selected < 0))
         {
+            OnMissingRmaPrereq("the requested RMA device is unavailable on a rank");
             // See comment above on the bool-vs-void GTEST_SKIP wrapping.
             [&]() {
                 GTEST_SKIP() << (skipReason_.empty() ? "Requested RMA device unavailable on a peer"

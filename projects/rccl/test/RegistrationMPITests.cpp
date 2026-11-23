@@ -176,21 +176,6 @@ public:
         return hasPattern(collective + " [Symmetric]:");
     }
 
-    // Symmetric kernel the scheduler launched (NCCL_TUNING, communicator rank 0 only); empty if none.
-    std::string symmetricKernel(const std::string& collective) const
-    {
-        std::smatch m;
-        const std::regex re(collective + " \\[Symmetric\\]: \\d+ Bytes -> Kernel (\\S+)");
-        return std::regex_search(m_content, m, re) ? m[1].str() : std::string();
-    }
-
-    // The NIC (GIN/RMA proxy) registration of a window, one DMA-BUF MR per segment.
-    bool hasMultiSegmentNicRegistration(int n) const
-    {
-        const std::regex re("registered multi-segment buffer \\S+ size \\d+ as " + std::to_string(n) + " DMA-BUF MRs");
-        return std::regex_search(m_content, re);
-    }
-
     bool usedLegacyCollective(const std::string& collective) const
     {
         const std::regex re(collective + ": [^\\n]*-> Algo ");
@@ -330,13 +315,6 @@ protected:
         if (en && std::string(en) == "0") return false;
         const char* type = getenv("NCCL_GIN_TYPE");
         return (type && std::string(type) == "2");
-    }
-
-    bool isTuningLoggingEnabled()
-    {
-        const char* subsys = getenv("NCCL_DEBUG_SUBSYS");
-        const std::string s = subsys ? subsys : "";
-        return s.find("TUNING") != std::string::npos || s.find("ALL") != std::string::npos;
     }
 
     bool isElasticBufferRegisterEnabled()
@@ -1350,6 +1328,14 @@ protected:
         ASSERT_MPI_EQ(numSegments, rcclRmaMrSegmentCount(mem->rmaHostWins[0]));
     }
 
+    // A device-only window is one GIN window; the GIN proxy's RMA handle holds one MR per segment.
+    void expectWindowGinRegistration(const struct ncclDevrMemory* mem, int numSegments)
+    {
+        ASSERT_MPI_EQ(1, mem->numGinSegments);
+        ASSERT_MPI_NE(mem->ginHostWins[0], nullptr);
+        ASSERT_MPI_EQ(numSegments, rcclRmaMrSegmentCount(mem->ginHostWins[0]));
+    }
+
     /**
      * @brief Reproduce DeepEP ElasticSymmetricMemory exactly: a 2 MiB-aligned
      *        contiguous VA range containing one GPU segment followed by one
@@ -2162,9 +2148,7 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
 
     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
     ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
-    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
     ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
-    ASSERT_TRUE(isTuningLoggingEnabled()) << "NCCL_DEBUG_SUBSYS must include TUNING to see the launched kernel";
 
     int dev = 0;
     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
@@ -2221,28 +2205,27 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
     ASSERT_MPI_NE(sendWin, nullptr);
     ASSERT_MPI_NE(recvWin, nullptr);
 
+    struct ncclComm* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    for (void* base : {sendSeg.vaBase, recvSeg.vaBase}) {
+        struct ncclDevrWindow* devrWin = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclDevrFindWindow(comm, base, &devrWin));
+        ASSERT_MPI_NE(devrWin, nullptr);
+        ASSERT_MPI_EQ(kNumSegments, devrWin->memory->numSegments);
+        ASSERT_NO_FATAL_FAILURE(expectWindowGinRegistration(devrWin->memory, kNumSegments));
+    }
+
+    int algo = 0, proto = 0, nCh = 0;
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllGather, sendCount,
+                                                   getNcclDataType<T>(), ncclSum, sendSeg.vaBase, recvSeg.vaBase,
+                                                   /*graphCapturing=*/0, &algo, &proto, &nCh));
+    EXPECT_EQ(RCCL_SYMMETRIC, algo) << "the windowed AllGather must take the symmetric (LSA+GIN) path";
+
     initSendBuffer<T>(sendSeg.vaBase, sendCount, rank);
 
     ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(sendSeg.vaBase, recvSeg.vaBase, sendCount, getNcclDataType<T>(),
                                              getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
     ASSERT_TRUE(verifyAllGatherResult<T>(recvSeg.vaBase, sendCount, nRanks));
-
-    REGLogChecker checker = getLogChecker();
-    TEST_INFO("LsaGin_MultiSegment_AllGather: %s (log size: %zu bytes)",
-              checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
-        << "Expected 'numSegments " << kNumSegments
-        << "' in log - the symmetric-window multi-segment registration "
-           "(symMemoryMapLsaTeam) did not fire for the LSA+GIN AllGather path";
-    EXPECT_TRUE(checker.hasMultiSegmentNicRegistration(kNumSegments))
-        << "Expected the GIN registration to register each window as " << kNumSegments << " DMA-BUF MRs";
-    if (rank == 0) {
-        const std::string kernel = checker.symmetricKernel("AllGather");
-        TEST_INFO("LsaGin_MultiSegment_AllGather kernel: %s", kernel.empty() ? "<none>" : kernel.c_str());
-        EXPECT_EQ(0u, kernel.rfind("AllGather_RailRing_Lsa", 0))
-            << "Expected a GIN RailRing AllGather kernel, got '" << kernel << "'";
-    }
 }
 
 /**
@@ -2613,10 +2596,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_RmaRegistration)
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(
         createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
-    if (buf.totalSize == 0) {
-        GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
-    }
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
 
     ncclWindow_t win = nullptr;
     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win,
