@@ -787,10 +787,28 @@ RocJpegStatus RocJpegVappiDecoder::DestroyDataBuffers() {
 }
 
 /**
+ * @brief Checks whether the VCN JPEG decoder can decode the sampling layout of a JPEG stream.
+ *
+ * Two layouts are classified as 4:4:0: Y 1x2 with Cb and Cr 1x1, and Y 2x2 with Cb and Cr 2x1 (horizontal x vertical
+ * sampling factors). Only the first one is accepted. The VCN JPEG decoder writes no output for the second one: on
+ * VCN 4.0 none of the 422V, YUY2, 444P, and NV12 surfaces receives any, so submitting it would report success and leave
+ * the surface's previous contents in the output, zeros for a new surface or an earlier image for a reused one.
+ *
+ * @param jpeg_stream_params The parsed JPEG stream parameters.
+ * @return true if the sampling layout can be decoded, false otherwise.
+ */
+static bool IsSamplingLayoutSupported(const JpegStreamParameters &jpeg_stream_params) {
+    return jpeg_stream_params.chroma_subsampling != CSS_440 ||
+           (jpeg_stream_params.picture_parameter_buffer.components[0].h_sampling_factor == 1 &&
+            jpeg_stream_params.picture_parameter_buffer.components[0].v_sampling_factor == 2);
+}
+
+/**
  * @brief Submits a JPEG decode operation to the VAAPI decoder.
  *
  * This function submits a JPEG decode operation to the VAAPI decoder using the provided JPEG stream parameters.
- * It checks for invalid parameters and unsupported image resolutions before proceeding with the decode operation.
+ * It checks for invalid parameters, unsupported image resolutions, and unsupported sampling layouts before proceeding
+ * with the decode operation.
  * The output format is determined based on the requested format and the capabilities of the hardware decoder.
  *
  * @param jpeg_stream_params The JPEG stream parameters for the decode operation.
@@ -820,6 +838,11 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
             ErrorLog(g_rocjpeg_logger, "The JPEG image resolution is not supported!");
             return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
         }
+
+    if (!IsSamplingLayoutSupported(*jpeg_stream_params)) {
+        ErrorLog(g_rocjpeg_logger, "The 4:4:0 chroma subsampling is only supported by the VCN hardware with Y sampled 1x2 (Cb and Cr 1x1)!");
+        return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
+    }
 
     uint32_t surface_format;
     std::vector<VASurfaceAttrib> surface_attribs;
@@ -966,6 +989,11 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                 ErrorLog(g_rocjpeg_logger, "The JPEG image resolution is not supported!");
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
             }
+
+        if (!IsSamplingLayoutSupported(jpeg_streams_params[i])) {
+            ErrorLog(g_rocjpeg_logger, "The 4:4:0 chroma subsampling is only supported by the VCN hardware with Y sampled 1x2 (Cb and Cr 1x1)!");
+            return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
+        }
 
         // Keep in sync with the hw_rgb_* fields reported by RocJpegDecoder::GetDecoderCaps().
         if ((decode_params[i].output_format == ROCJPEG_OUTPUT_RGB || decode_params[i].output_format == ROCJPEG_OUTPUT_RGB_PLANAR) && current_vcn_jpeg_spec_.can_convert_to_rgb && jpeg_streams_params[i].chroma_subsampling != CSS_440) {

@@ -60,4 +60,4 @@ For example:
 
 .. note::
 
-  The VCN hardware-accelerated JPEG decoder in AMD GPUs only supports decoding JPEG images with ``ROCJPEG_CSS_444``, ``ROCJPEG_CSS_440``, ``ROCJPEG_CSS_422``, ``ROCJPEG_CSS_420``, and ``ROCJPEG_CSS_400`` chroma subsampling.
+  The VCN hardware-accelerated JPEG decoder in AMD GPUs only supports decoding JPEG images with ``ROCJPEG_CSS_444``, ``ROCJPEG_CSS_440``, ``ROCJPEG_CSS_422``, ``ROCJPEG_CSS_420``, and ``ROCJPEG_CSS_400`` chroma subsampling. ``ROCJPEG_CSS_440`` images can only be decoded if their luma (Y) sampling factors are 1x2 (horizontal x vertical). The decode functions return ``ROCJPEG_STATUS_JPEG_NOT_SUPPORTED`` for ``ROCJPEG_CSS_440`` images whose luma is sampled 2x2 and whose chroma (Cb and Cr) is sampled 2x1.

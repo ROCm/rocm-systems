@@ -1002,15 +1002,15 @@ ChromaSubsampling RocJpegStreamParser::GetChromaSubsampling(uint8_t c1_h_samplin
         (c1_h_sampling_factor == 4 && c2_h_sampling_factor == 4 && c3_h_sampling_factor == 4 &&
          c1_v_sampling_factor == 4 && c2_v_sampling_factor == 4 && c3_v_sampling_factor == 4)) {
             subsampling = CSS_444;
-    } else if (c1_h_sampling_factor == 1 && c2_h_sampling_factor == 1 && c3_h_sampling_factor == 1 &&
-               c1_v_sampling_factor == 2 && c2_v_sampling_factor == 1 && c3_v_sampling_factor == 1) {
+    } else if ((c1_h_sampling_factor == 1 && c2_h_sampling_factor == 1 && c3_h_sampling_factor == 1 &&
+                c1_v_sampling_factor == 2 && c2_v_sampling_factor == 1 && c3_v_sampling_factor == 1) ||
+               (c1_h_sampling_factor == 2 && c2_h_sampling_factor == 2 && c3_h_sampling_factor == 2 &&
+                c1_v_sampling_factor == 2 && c2_v_sampling_factor == 1 && c3_v_sampling_factor == 1)) {
                     subsampling = CSS_440;
     } else if ((c1_h_sampling_factor == 2 && c2_h_sampling_factor == 1 && c3_h_sampling_factor == 1 &&
                 c1_v_sampling_factor == 1 && c2_v_sampling_factor == 1 && c3_v_sampling_factor == 1) ||
                (c1_h_sampling_factor == 2 && c2_h_sampling_factor == 1 && c3_h_sampling_factor == 1 &&
-                c1_v_sampling_factor == 2 && c2_v_sampling_factor == 2 && c3_v_sampling_factor == 2) ||
-               (c1_h_sampling_factor == 2 && c2_h_sampling_factor == 2 && c3_h_sampling_factor == 2 &&
-                c1_v_sampling_factor == 2 && c2_v_sampling_factor == 1 && c3_v_sampling_factor == 1)) {
+                c1_v_sampling_factor == 2 && c2_v_sampling_factor == 2 && c3_v_sampling_factor == 2)) {
                     subsampling = CSS_422;
     } else if (c1_h_sampling_factor == 2 && c2_h_sampling_factor == 1 && c3_h_sampling_factor == 1 &&
                c1_v_sampling_factor == 2 && c2_v_sampling_factor == 1 && c3_v_sampling_factor == 1) {

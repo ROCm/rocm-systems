@@ -69,6 +69,7 @@ class RocJpegApiNegativeTests {
         int TestInvalidGetImageInfo();
         int TestInvalidDecode();
         int TestInvalidDecodeBatched();
+        int TestUnsupportedSamplingDecode();
         int TestInvalidGetErrorName();
         int TestInvalidGetDecoderCaps();
         int TestStreamParseFuzz();
