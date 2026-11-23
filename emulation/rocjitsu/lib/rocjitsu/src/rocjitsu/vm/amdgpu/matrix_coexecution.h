@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/matrix_input_snapshot.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/host_target.h"
 #include "util/result.h"
@@ -85,9 +86,14 @@ public:
     submit(&chain, 1, wave);
   }
   /// Execute same-wave instructions back to back in program order with one handoff.
-  void submit(Instruction *const *chain, unsigned count, void *wave) {
+  void submit(Instruction *const *chain, unsigned count, void *wave,
+              const MatrixInputSnapshot *const *snapshots = nullptr) {
     assert(count != 0 && count <= kMaxChain);
     std::copy_n(chain, count, chain_.begin());
+    if (snapshots)
+      std::copy_n(snapshots, count, snapshots_.begin());
+    else
+      std::fill_n(snapshots_.begin(), count, nullptr);
     count_ = count;
     wave_ = wave;
     publish(1);
@@ -135,14 +141,18 @@ private:
         wait_while(0);
         continue;
       }
-      for (unsigned i = 0; i != count_; ++i)
+      for (unsigned i = 0; i != count_; ++i) {
+        matrix_input_snapshot = snapshots_[i];
         chain_[i]->execute(*chain_[i], wave_);
+      }
+      matrix_input_snapshot = nullptr;
       publish(0);
     }
   }
 
   alignas(64) std::atomic<int> state_{0};
   alignas(64) std::array<Instruction *, kMaxChain> chain_{};
+  std::array<const MatrixInputSnapshot *, kMaxChain> snapshots_{};
   unsigned count_ = 0;
   void *wave_ = nullptr;
   std::thread thread_;
@@ -177,8 +187,9 @@ public:
     Instruction *chain = &instruction;
     return {try_submit(&chain, 1, context)};
   }
-  Ticket submit(Instruction *const *chain, unsigned count, void *context) {
-    return {try_submit(chain, count, context)};
+  Ticket submit(Instruction *const *chain, unsigned count, void *context,
+                const MatrixInputSnapshot *const *snapshots = nullptr) {
+    return {try_submit(chain, count, context, snapshots)};
   }
   /// A true result permits finish() without waiting for the helper.
   static bool ready(Ticket ticket) { return !helpers_enabled() || ticket.slot->helper.ready(); }
@@ -224,7 +235,8 @@ public:
   }
 
 private:
-  Slot *try_submit(Instruction *const *chain, unsigned count, void *wave) {
+  Slot *try_submit(Instruction *const *chain, unsigned count, void *wave,
+                   const MatrixInputSnapshot *const *snapshots = nullptr) {
     if (!helpers_enabled())
       return nullptr;
     // A stable preference may reuse a still-awake helper without pinning or a
@@ -253,7 +265,7 @@ private:
                                                  std::memory_order_relaxed))
           continue;
         auto *slot = slots_[word * 64 + bit].get();
-        slot->helper.submit(chain, count, wave);
+        slot->helper.submit(chain, count, wave, snapshots);
         return slot;
       }
     }

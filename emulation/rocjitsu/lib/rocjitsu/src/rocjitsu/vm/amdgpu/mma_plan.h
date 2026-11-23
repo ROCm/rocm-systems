@@ -39,6 +39,12 @@ enum class StepKind : uint8_t {
   Ordinary,  ///< Ordinary issue: memory, waits and other stateful instructions.
 };
 
+/// @brief Factor registers copied at submission because a later issuer step overwrites them.
+struct SnapshotSpec {
+  uint16_t a_base = 0, b_base = 0; ///< Wave-relative; AccVGPRs start at 256.
+  uint8_t a_regs = 0, b_regs = 0;
+};
+
 struct Step {
   StepKind kind = StepKind::Ordinary;
   uint8_t size = 0;
@@ -47,6 +53,8 @@ struct Step {
   uint8_t members = 0;
   Instruction *inst = nullptr;
   std::array<Instruction *, kMaxChain> chain{};
+  bool snapshots = false;
+  std::array<SnapshotSpec, kMaxChain> snapshot{};
 };
 
 /// @brief Matrix instructions a helper may execute: register-only operands.
@@ -93,6 +101,11 @@ inline bool alu_enabled() {
   static const bool enabled = knob("RJ_MMA_PLAN_ALU");
   return enabled;
 }
+/// RJ_MMA_PLAN_SNAPSHOT=0 keeps write-after-read hazards as joins.
+inline bool snapshot_enabled() {
+  static const bool enabled = knob("RJ_MMA_PLAN_SNAPSHOT");
+  return enabled;
+}
 /// RJ_MMA_PLAN_INLINE=1 replays plans entirely on the issuer, isolating the
 /// saved fetch, decode and scoreboard work from helper parallelism.
 inline bool inline_only() {
@@ -105,6 +118,73 @@ inline bool inline_only() {
 
 using Access = async_execution::Access;
 inline bool overlaps(const Access &a, const Access &b) { return a.conflicts(b) || b.conflicts(a); }
+
+/// @brief Register operands of one chain member, split into factors and the rest.
+struct MemberOperands {
+  unsigned step = 0;
+  uint16_t a_base = 0, b_base = 0;
+  uint8_t a_regs = 0, b_regs = 0;
+  bool a_snap = false, b_snap = false;
+  Access other; ///< Accumulator, scale and result registers.
+
+  decltype(Access::reads) factors(bool snapped_only) const {
+    decltype(Access::reads) bits;
+    for (unsigned r = 0; r != a_regs; ++r)
+      if (!snapped_only || a_snap)
+        bits.set(a_base + r);
+    for (unsigned r = 0; r != b_regs; ++r)
+      if (!snapped_only || b_snap)
+        bits.set(b_base + r);
+    return bits;
+  }
+};
+
+inline std::optional<MemberOperands> member_operands(const Instruction &inst, unsigned step,
+                                                     uint32_t num_vgprs, bool has_accvgprs) {
+  MemberOperands member;
+  member.step = step;
+  const auto range = [&](const Operand *operand, uint16_t &base,
+                         uint8_t &regs) -> std::optional<bool> {
+    const auto ref = operand ? operand->to_register_ref() : std::nullopt;
+    if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
+      return false;
+    const bool acc = ref->cls == RegClass::ACC_VGPR;
+    const uint32_t limit = acc ? (has_accvgprs ? Access::kRegistersPerBank : 0)
+                               : std::min(Access::kRegistersPerBank, num_vgprs);
+    if (ref->index >= limit || ref->width > limit - ref->index)
+      return std::nullopt;
+    base = uint16_t(ref->index + (acc ? Access::kRegistersPerBank : 0));
+    regs = uint8_t(ref->width);
+    return true;
+  };
+  for (int i = 0; i != inst.num_src_operands(); ++i) {
+    uint16_t base = 0;
+    uint8_t regs = 0;
+    const auto found = range(inst.src_operand(i), base, regs);
+    if (!found)
+      return std::nullopt;
+    if (!*found)
+      continue;
+    if (i == 0) {
+      member.a_base = base;
+      member.a_regs = regs;
+    } else if (i == 1) {
+      member.b_base = base;
+      member.b_regs = regs;
+    } else {
+      for (unsigned r = 0; r != regs; ++r)
+        member.other.reads.set(base + r);
+    }
+  }
+  uint16_t base = 0;
+  uint8_t regs = 0;
+  const auto found = range(inst.dst_operand(0), base, regs);
+  if (!found || !*found)
+    return std::nullopt;
+  for (unsigned r = 0; r != regs; ++r)
+    member.other.writes.set(base + r);
+  return member;
+}
 
 struct Plan {
   using Words = std::array<uint32_t, 4>;
@@ -159,6 +239,16 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     bool active = false, open = false;
     unsigned head = 0, id = 0;
     Access access;
+    unsigned count = 0;
+    std::array<MemberOperands, kMaxChain> members{};
+    void refresh() {
+      access = {};
+      for (unsigned i = 0; i != count; ++i) {
+        access.reads |= members[i].other.reads | (members[i].factors(false) &
+                                                  ~members[i].factors(true));
+        access.writes |= members[i].other.writes;
+      }
+    }
   };
   std::array<Chain, kSlots> slots{};
   // Every helper chain ever started, with the step that joined it. A bundled
@@ -180,6 +270,46 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         history[slots[s].id].joined = current;
         slots[s] = {};
       }
+  };
+  // A later step that only overwrites factor registers of a running chain need
+  // not wait: those factors are copied when the chain is submitted. Any read
+  // of its results, write of its results, or overwrite of an accumulator or
+  // scale register still joins it.
+  const auto break_war = [&](unsigned s, const Access &next) {
+    auto &chain = slots[s];
+    if ((chain.access.writes & (next.reads | next.writes)).any())
+      return false;
+    const auto war = chain.access.reads & next.writes;
+    decltype(Access::reads) other, factors;
+    for (unsigned i = 0; i != chain.count; ++i) {
+      other |= chain.members[i].other.reads;
+      factors |= chain.members[i].factors(false);
+    }
+    if ((war & other).any() || (war & ~factors).any())
+      return false;
+    for (unsigned i = 0; i != chain.count; ++i) {
+      auto &member = chain.members[i];
+      for (unsigned r = 0; r != member.a_regs; ++r)
+        member.a_snap |= war.test(member.a_base + r);
+      for (unsigned r = 0; r != member.b_regs; ++r)
+        member.b_snap |= war.test(member.b_base + r);
+      auto &spec = plan.steps[chain.head].snapshot[i];
+      if (member.a_snap)
+        spec.a_base = member.a_base, spec.a_regs = member.a_regs;
+      if (member.b_snap)
+        spec.b_base = member.b_base, spec.b_regs = member.b_regs;
+    }
+    plan.steps[chain.head].snapshots = true;
+    chain.refresh();
+    history[chain.id].access = chain.access;
+    return true;
+  };
+  const auto break_wars = [&](uint8_t &conflicts, const Access &next) {
+    if (!snapshot_enabled())
+      return;
+    for (unsigned s = 0; s != kSlots; ++s)
+      if ((conflicts & (1u << s)) && break_war(s, next))
+        conflicts &= uint8_t(~(1u << s));
   };
   for (unsigned k = 0; k != kMaxSteps; ++k) {
     current = k;
@@ -208,7 +338,10 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     for (unsigned s = 0; s != kSlots; ++s)
       if (slots[s].active && overlaps(slots[s].access, *access))
         conflicts |= uint8_t(1u << s);
-    if (offloadable(*inst, has_accvgprs)) {
+    std::optional<MemberOperands> operands;
+    if (offloadable(*inst, has_accvgprs))
+      operands = member_operands(*inst, k, num_vgprs, has_accvgprs);
+    if (operands) {
       // A same-accumulator successor joins a running chain only when its other
       // inputs already exist at the chain's head: no step in between may touch
       // its registers, and none may be able to stall or fault, since an early
@@ -233,13 +366,14 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         auto &chain = slots[bundle];
         auto &head = plan.steps[chain.head];
         head.chain[head.members++] = inst.get();
-        chain.access.reads |= access->reads;
-        chain.access.writes |= access->writes;
+        chain.members[chain.count++] = *operands;
+        chain.refresh();
         history[chain.id].access = chain.access;
         step.kind = StepKind::Chained;
         step.slot = uint8_t(bundle);
         step_slot.push_back(int8_t(bundle));
       } else {
+        break_wars(conflicts, *access);
         step.wait = conflicts;
         join(conflicts);
         unsigned slot = kSlots;
@@ -255,8 +389,13 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
           step.wait |= uint8_t(1u << slot);
           join(uint8_t(1u << slot));
         }
-        slots[slot] = {true, true, k, unsigned(history.size()), *access};
-        history.push_back({*access, k});
+        slots[slot] = {};
+        slots[slot].active = slots[slot].open = true;
+        slots[slot].head = k;
+        slots[slot].id = unsigned(history.size());
+        slots[slot].members[slots[slot].count++] = *operands;
+        slots[slot].refresh();
+        history.push_back({slots[slot].access, k});
         started[slot] = ++age;
         step.kind = StepKind::Offload;
         step.slot = uint8_t(slot);
@@ -266,6 +405,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
       }
       step.inst = inst.get();
     } else {
+      break_wars(conflicts, *access);
       step.wait = conflicts;
       join(conflicts);
       // Retain only stateless arithmetic. Memory instructions keep per-issue
@@ -328,8 +468,9 @@ public:
   Replay(const Replay &) = delete;
   Replay &operator=(const Replay &) = delete;
 
-  bool submit(unsigned slot, Instruction *const *chain, unsigned count, void *wave) {
-    tickets_[slot] = pool_.submit(chain, count, wave);
+  bool submit(unsigned slot, Instruction *const *chain, unsigned count, void *wave,
+              const MatrixInputSnapshot *const *snapshots = nullptr) {
+    tickets_[slot] = pool_.submit(chain, count, wave, snapshots);
     if (!tickets_[slot])
       return false;
     active_ |= uint8_t(1u << slot);
@@ -364,7 +505,15 @@ public:
     uint64_t decodes = 0, builds = 0, accept = 0, reject = 0, hits = 0, validations = 0;
     uint64_t replays = 0, offloads = 0, chained = 0, issuer_mma = 0, alu = 0, ordinary = 0;
     uint64_t pool_full = 0, early_exit = 0, entry_rejects = 0;
+    uint64_t snapshot_chains = 0, snapshot_bytes = 0;
   };
+  /// Factor copies for the chain in each helper slot; reused once the slot is joined.
+  struct SlotSnapshots {
+    std::array<MatrixInputSnapshot, kMaxChain> entries{};
+    std::array<const MatrixInputSnapshot *, kMaxChain> pointers{};
+    std::vector<uint32_t> data;
+  };
+  std::array<SlotSnapshots, kSlots> snapshots;
   explicit PlanCache(size_t capacity = 4096) : capacity_(capacity) {}
   ~PlanCache() { flush(); }
 
@@ -412,6 +561,19 @@ public:
     return it->second.accept ? &it->second : nullptr;
   }
 
+  /// Wave whose lazy VGPR chunks were last allocated in a slot.
+  struct Materialized {
+    const void *wave = nullptr;
+    uint64_t generation = ~uint64_t{0};
+    uint32_t base = 0, count = 0;
+    bool operator==(const Materialized &) const = default;
+  };
+  Materialized &materialized(uint32_t wave_slot) {
+    if (wave_slot >= materialized_.size())
+      materialized_.resize(wave_slot + 1);
+    return materialized_[wave_slot];
+  }
+
   /// @brief Destroy every retained decode, e.g. when the decoder is replaced.
   void clear() { plans_.clear(); }
 
@@ -422,11 +584,13 @@ public:
     std::fprintf(stderr, "%s\n",
                  std::format("RJ_PLAN builds={} accept={} reject={} hits={} validations={} "
                              "decodes={} replays={} offloads={} chained={} issuer_mma={} alu={} "
-                             "ordinary={} pool_full={} early_exit={} entry_rejects={}",
+                             "ordinary={} pool_full={} early_exit={} entry_rejects={} "
+                             "snapshot_chains={} snapshot_bytes={}",
                              stats.builds, stats.accept, stats.reject, stats.hits,
                              stats.validations, stats.decodes, stats.replays, stats.offloads,
                              stats.chained, stats.issuer_mma, stats.alu, stats.ordinary,
-                             stats.pool_full, stats.early_exit, stats.entry_rejects)
+                             stats.pool_full, stats.early_exit, stats.entry_rejects,
+                             stats.snapshot_chains, stats.snapshot_bytes)
                      .c_str());
     stats = {};
   }
@@ -447,6 +611,7 @@ private:
   };
   size_t capacity_;
   std::unordered_map<Key, Plan, Hash> plans_;
+  std::vector<Materialized> materialized_;
 };
 
 } // namespace rocjitsu::amdgpu::mma_plan

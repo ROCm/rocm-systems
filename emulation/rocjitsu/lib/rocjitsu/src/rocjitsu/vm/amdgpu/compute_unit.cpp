@@ -2884,13 +2884,22 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
   }
 
   // Inline steps can touch new registers while helpers run. Allocate all lazy
-  // chunks before the first job can race with that allocation.
+  // chunks before the first job can race with that allocation. Chunks stay
+  // allocated until the wave's block is freed, so once per wave suffices.
   const uint32_t vgpr_base = active->vgpr_alloc().base;
-  for (uint32_t reg = 0; reg != active->num_vgprs(); ++reg)
-    (void)raw_vgpr_data(vgpr_base + reg);
-  if (has_accvgprs)
-    for (uint32_t reg = 256; reg != 512; ++reg)
-      (void)raw_vgpr_data(vgpr_base + reg);
+  if (!inline_only) {
+    auto &materialized = cache.materialized(active->wf_id());
+    const mma_plan::PlanCache::Materialized current{active, active->dispatch_generation(),
+                                                    vgpr_base, active->num_vgprs()};
+    if (materialized != current) {
+      for (uint32_t reg = 0; reg != active->num_vgprs(); ++reg)
+        (void)raw_vgpr_data(vgpr_base + reg);
+      if (has_accvgprs)
+        for (uint32_t reg = 256; reg != 512; ++reg)
+          (void)raw_vgpr_data(vgpr_base + reg);
+      materialized = current;
+    }
+  }
 
   mma_plan::Replay replay(pool);
   struct ActiveScope {
@@ -2958,13 +2967,42 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       check_waits(*step.inst);
       advance(step);
       break;
-    case mma_plan::StepKind::Offload:
+    case mma_plan::StepKind::Offload: {
       check_waits(*step.inst);
       // Submission bypasses execute_instruction(); keep its per-issue effects.
       for (unsigned i = 0; i != step.members; ++i)
         check_static_isa_diagnostics(*step.chain[i], *active);
       active->clear_setreg_vgpr_msb_hazard();
-      if (!inline_only && replay.submit(step.slot, step.chain.data(), step.members, active)) {
+      // Copy only the factor registers a later step overwrites; the slot's
+      // previous chain was joined before this step, so its buffer is free.
+      const MatrixInputSnapshot *const *snapshots = nullptr;
+      if (step.snapshots && !inline_only) {
+        auto &slot = cache.snapshots[step.slot];
+        size_t words = 0;
+        for (unsigned i = 0; i != step.members; ++i)
+          words += size_t(step.snapshot[i].a_regs + step.snapshot[i].b_regs) * wave_size;
+        slot.data.resize(words);
+        uint32_t *out = slot.data.data();
+        const auto copy = [&](uint16_t base, uint8_t regs, MatrixInputSnapshot::Operand &operand) {
+          if (!regs)
+            return;
+          operand = {vgpr_base + base, regs, out};
+          for (uint32_t r = 0; r != regs; ++r, out += wave_size)
+            std::memcpy(out, raw_vgpr_data(vgpr_base + base + r), wave_size * sizeof(uint32_t));
+        };
+        for (unsigned i = 0; i != step.members; ++i) {
+          const mma_plan::SnapshotSpec &spec = step.snapshot[i];
+          slot.entries[i] = {};
+          copy(spec.a_base, spec.a_regs, slot.entries[i].a);
+          copy(spec.b_base, spec.b_regs, slot.entries[i].b);
+          slot.pointers[i] = spec.a_regs || spec.b_regs ? &slot.entries[i] : nullptr;
+        }
+        snapshots = slot.pointers.data();
+        ++cache.stats.snapshot_chains;
+        cache.stats.snapshot_bytes += words * sizeof(uint32_t);
+      }
+      if (!inline_only &&
+          replay.submit(step.slot, step.chain.data(), step.members, active, snapshots)) {
         ++cache.stats.offloads;
         cache.stats.chained += step.members - 1u;
         // A replay is one asynchronous window; every accepted job is joined.
@@ -2982,6 +3020,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       }
       advance(step);
       break;
+    }
     case mma_plan::StepKind::IssuerMma:
     case mma_plan::StepKind::Alu: {
       ++(step.kind == mma_plan::StepKind::Alu ? cache.stats.alu : cache.stats.issuer_mma);

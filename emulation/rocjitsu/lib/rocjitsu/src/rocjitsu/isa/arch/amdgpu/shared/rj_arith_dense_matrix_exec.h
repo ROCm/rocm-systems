@@ -8,9 +8,11 @@
 #include "rj_arith/detail/rj_arith_mfma.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/matrix_input_snapshot.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include <algorithm>
 #include <array>
 #include <optional>
 
@@ -52,6 +54,16 @@ inline void exec_dense_fp_matrix(Wavefront &wave, Function function, uint64_t fl
   std::array<const uint32_t *, AccumulatorRegisters> c{};
   if (!read_matrix_pointers(a_region, a.data()) || !read_matrix_pointers(b_region, b.data())) {
     return;
+  }
+  if (const MatrixInputSnapshot *snapshot = matrix_input_snapshot) [[unlikely]] {
+    const auto redirect = [](const MatrixInputSnapshot::Operand &operand, uint32_t source,
+                             uint32_t count, auto &pointers) {
+      if (operand.regs && operand.base == source)
+        for (uint32_t reg = 0; reg < std::min(count, operand.regs); ++reg)
+          pointers[reg] = operand.lanes + reg * Lanes;
+    };
+    redirect(snapshot->a, source_a, a_registers, a);
+    redirect(snapshot->b, source_b, b_registers, b);
   }
   std::array<uint32_t, 64> broadcast{}, broadcast_high{};
   std::optional<RegisterAccess::VgprReadRegion> c_region;
