@@ -40,9 +40,18 @@ target_link_libraries(rdc_race_tests PRIVATE GTest::gtest Threads::Threads)
 add_test(NAME rdc_race_tests COMMAND rdc_race_tests)
 
 # Each race test adds its test file and the RDC sources it drives below, in a
-# target_sources() block of its own. The job-limits block compiles in
-# RdcLogger.cc and adds the include directories RDC's sources need: a later
-# block that drives other RDC sources must not add them again.
+# target_sources() block of its own. The first block adds the other include
+# directories RDC's sources need, so a later block need not add them again.
+
+# RdcPolicyImpl calls policy callbacks without its policy lock (rdcd's policy
+# streams rely on it). Compiles RdcPolicyImpl.cc with fakes for what it calls.
+target_sources(
+    rdc_race_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_policy_callback.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcPolicyImpl.cc
+)
+target_include_directories(rdc_race_tests PRIVATE ${PROJECT_SOURCE_DIR} ${AMD_SMI_INCLUDE_DIR})
 
 # RdcWatchTableImpl checks for a job and enters it as one step, and the cache
 # removes stopped jobs to make room while other threads read job stats.
@@ -56,4 +65,3 @@ target_sources(
         ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcCacheManagerImpl.cc
         ${PROJECT_SOURCE_DIR}/rdc_libs/bootstrap/src/RdcLogger.cc
 )
-target_include_directories(rdc_race_tests PRIVATE ${PROJECT_SOURCE_DIR} ${AMD_SMI_INCLUDE_DIR})

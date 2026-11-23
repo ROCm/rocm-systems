@@ -175,12 +175,14 @@ pub(crate) unsafe fn get(
     let service = svm_service(runtime, selected)?;
     let mut queries = storage(count)?;
     for &(attribute, agent) in &inputs {
+        if attribute == AMD_SVM_ATTRIB_PREFETCH_LOCATION {
+            continue;
+        }
         queries.push(if let Some(property) = property(attribute) {
             AdviceQuery::Property(property)
         } else {
             match attribute {
                 AMD_SVM_ATTRIB_PREFERRED_LOCATION => AdviceQuery::PreferredLocation,
-                AMD_SVM_ATTRIB_PREFETCH_LOCATION => AdviceQuery::PrefetchLocation,
                 AMD_SVM_ATTRIB_MIGRATION_GRANULARITY => AdviceQuery::MigrationGranularity,
                 AMD_SVM_ATTRIB_ACCESS_QUERY => {
                     let agent = agent.ok_or(INVALID_AGENT)?;
@@ -194,9 +196,34 @@ pub(crate) unsafe fn get(
             }
         });
     }
-    let values = service.query(address, size, &queries).map_err(map_error)?;
+    let values = if queries.is_empty() {
+        Vec::new()
+    } else {
+        service.query(address, size, &queries).map_err(map_error)?
+    };
+    let mut values = values.into_iter();
     let mut outputs = storage(count)?;
-    for ((attribute, _), value) in inputs.into_iter().zip(values) {
+    for (attribute, _) in inputs {
+        if attribute == AMD_SVM_ATTRIB_PREFETCH_LOCATION {
+            let agent =
+                runtime
+                    .memory_state
+                    .pending_prefetches
+                    .query(address, size, |start, length| {
+                        let values = service
+                            .query(start, length, &[AdviceQuery::PrefetchLocation])
+                            .map_err(map_error)?;
+                        match values.into_iter().next() {
+                            Some(AdviceValue::Location(location)) => {
+                                svm_agent_from_location(runtime, location)
+                            }
+                            _ => Err(ERROR),
+                        }
+                    })?;
+            outputs.push(agent.handle);
+            continue;
+        }
+        let value = values.next().ok_or(ERROR)?;
         outputs.push(match (attribute, value) {
             (AMD_SVM_ATTRIB_GLOBAL_FLAG, AdviceValue::Property(state)) => match state {
                 AdviceState::Enabled => AMD_SVM_GLOBAL_FLAG_FINE_GRAINED,

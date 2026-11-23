@@ -10,7 +10,10 @@
 
 #include "instruction_failure_test_util.h"
 #include "sanitizer_diagnostic_test_util.h"
+#include "scoped_temp.h"
+#include "shell_quote.h"
 
+#include <flatbuffers/util.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -25,16 +28,21 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
-#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
 
 namespace {
+
+using rocjitsu::test::initialize_runtime_directory;
+using rocjitsu::test::ScopedTempDirectory;
+
+using rocjitsu::test::shell_quote;
 
 struct ProcessResult {
   std::string output;
@@ -180,16 +188,9 @@ const char *daemon_logging_config() { return test_paths().daemon_logging_config.
 const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
 
 TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
-  const char *xdg = std::getenv("XDG_RUNTIME_DIR");
-  std::string tmp_dir = std::string(xdg ? xdg : "/tmp") + "/rocjitsu-launch-XXXXXX";
-  ASSERT_NE(mkdtemp(tmp_dir.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
-  struct TempCleanup {
-    std::string path;
-    ~TempCleanup() {
-      std::error_code error;
-      std::filesystem::remove_all(path, error);
-    }
-  } cleanup{tmp_dir};
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-l-"));
+  const std::string &tmp_dir = directory.path();
   const std::string runtime_dir = tmp_dir + "/rocjitsu";
   const std::string socket_path = runtime_dir + "/daemon.sock";
 
@@ -222,14 +223,9 @@ protected:
   virtual std::string daemon_config_for_test() { return daemon_config(); }
 
   void SetUp() override {
-    // Each test gets its own unique subdirectory under XDG_RUNTIME_DIR
-    // for the daemon socket, preventing conflicts when tests run in parallel.
-    const char *xdg = std::getenv("XDG_RUNTIME_DIR");
-    std::string base = xdg ? xdg : "/tmp";
-    std::string tmpl = base + "/rocjitsu-test-XXXXXX";
-    ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
-    tmp_dir_ = tmpl;
-    runtime_dir_ = tmp_dir_ + "/rocjitsu";
+    // Give each daemon socket its own directory so parallel tests cannot collide.
+    ASSERT_TRUE(initialize_runtime_directory(tmp_dir_, "rj-d-"));
+    runtime_dir_ = tmp_dir_.path() + "/rocjitsu";
     sock_path_ = runtime_dir_ + "/daemon.sock";
 
     ASSERT_NO_FATAL_FAILURE(config_path_ = daemon_config_for_test());
@@ -239,8 +235,8 @@ protected:
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
-      redirect_output_or_exit(tmp_dir_ + "/daemon.log");
-      setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+      redirect_output_or_exit(tmp_dir_.path() + "/daemon.log");
+      setenv("XDG_RUNTIME_DIR", tmp_dir_.path().c_str(), 1);
       setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", config_path_.c_str(), nullptr);
       _exit(127);
@@ -282,7 +278,9 @@ protected:
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
-    const std::string output = read_file(tmp_dir_ + "/daemon.log");
+    if (tmp_dir_.path().empty())
+      return;
+    const std::string output = read_file(tmp_dir_.path() + "/daemon.log");
     EXPECT_FALSE(rocjitsu::test::has_unexpected_failure_diagnostic(output))
         << "daemon output contains " << rocjitsu::test::kUnexpectedFailureDiagnostics;
     if (expected_daemon_diagnostic_) {
@@ -293,7 +291,6 @@ protected:
     }
     if (HasFailure())
       std::fputs(output.c_str(), stderr);
-    std::filesystem::remove_all(tmp_dir_);
   }
 
   ProcessResult run_hip_test(const char *binary, const char *gtest_filter) {
@@ -301,9 +298,9 @@ protected:
     // over XDG_RUNTIME_DIR. Override both here so the daemon and all client
     // subprocesses agree on the same socket and config-path directory.
     std::string cmd = "ROCJITSU_RUNTIME_DIR=";
-    cmd += runtime_dir_;
+    cmd += shell_quote(runtime_dir_);
     cmd += " XDG_RUNTIME_DIR=";
-    cmd += tmp_dir_;
+    cmd += shell_quote(tmp_dir_.path());
     cmd += " LD_PRELOAD=";
     cmd += sanitizer_preload();
     cmd += preload_lib();
@@ -336,9 +333,9 @@ protected:
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
     std::string cmd = "ROCJITSU_RUNTIME_DIR=";
-    cmd += runtime_dir_;
+    cmd += shell_quote(runtime_dir_);
     cmd += " XDG_RUNTIME_DIR=";
-    cmd += tmp_dir_;
+    cmd += shell_quote(tmp_dir_.path());
     cmd += " ";
     cmd += daemon_bin();
     cmd += " --attach --config ";
@@ -350,7 +347,7 @@ protected:
     cmd += " --world-size=";
     cmd += std::to_string(world_size);
     cmd += " --shared-dir=";
-    cmd += shared_dir;
+    cmd += shell_quote(shared_dir);
     if (gtest_filter && gtest_filter[0]) {
       cmd += " --gtest_filter=";
       cmd += gtest_filter;
@@ -372,9 +369,9 @@ protected:
   }
 
   void run_collective(const char *filter, int world_size = 2) {
-    std::string shared_tmpl = tmp_dir_ + "/coll-XXXXXX";
-    ASSERT_NE(mkdtemp(shared_tmpl.data()), nullptr) << strerror(errno);
-    std::string shared_dir = shared_tmpl;
+    ScopedTempDirectory shared;
+    ASSERT_TRUE(shared.initialize("coll-", tmp_dir_.path()));
+    const std::string &shared_dir = shared.path();
 
     std::vector<std::thread> threads(world_size);
     std::vector<ProcessResult> results(world_size);
@@ -387,13 +384,11 @@ protected:
 
     for (int r = 0; r < world_size; ++r)
       EXPECT_EQ(results[r].exit_code, 0) << "Rank " << r << " failed:\n" << results[r].output;
-
-    std::filesystem::remove_all(shared_dir);
   }
 
   pid_t daemon_pid_ = -1;
   int expected_daemon_exit_ = 0;
-  std::string tmp_dir_;
+  ScopedTempDirectory tmp_dir_;
   std::string runtime_dir_;
   std::string sock_path_;
   std::string config_path_;
@@ -425,8 +420,8 @@ TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
 }
 
 TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
-  const std::string ready_path = tmp_dir_ + "/valid-client-ready";
-  const std::string output_path = tmp_dir_ + "/valid-client.log";
+  const std::string ready_path = tmp_dir_.path() + "/valid-client-ready";
+  const std::string output_path = tmp_dir_.path() + "/valid-client.log";
   const pid_t valid_client = fork();
   ASSERT_GE(valid_client, 0);
   if (valid_client == 0) {
@@ -434,7 +429,7 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
     if (setpgid(0, 0) != 0)
       _exit(127);
     redirect_output_or_exit(output_path);
-    setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+    setenv("XDG_RUNTIME_DIR", tmp_dir_.path().c_str(), 1);
     setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
     setenv("ROCJITSU_TEST_CLIENT_READY", ready_path.c_str(), 1);
     if (const char *tsan_options = std::getenv("ROCJITSU_TEST_HIP_TSAN_OPTIONS"))
@@ -485,7 +480,7 @@ TEST_F(DaemonTest, AttachExecFailurePreservesDaemonSocket) {
   const pid_t client = fork();
   ASSERT_GE(client, 0) << "fork failed: " << strerror(errno);
   if (client == 0) {
-    setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+    setenv("XDG_RUNTIME_DIR", tmp_dir_.path().c_str(), 1);
     setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
     execl(daemon_bin(), daemon_bin(), "--attach", "--config", daemon_config(), "--",
           "/does/not/exist", nullptr);
@@ -574,7 +569,8 @@ protected:
   // Rewrite the logging-plugin config template's placeholder sink dir to a
   // private, writable directory for this test, then run the daemon on it.
   std::string daemon_config_for_test() override {
-    sink_dir_ = tmp_dir_ + "/plugin_sink";
+    // Exercise JSON escaping even when the parent path has no special characters.
+    sink_dir_ = tmp_dir_.path() + R"(/plugin"\backslash_sink)";
     std::error_code ec;
     std::filesystem::create_directories(sink_dir_, ec);
 
@@ -585,13 +581,19 @@ protected:
     }
     std::string cfg{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 
-    const std::string token = RJ_DAEMON_LOGGING_SINK_TOKEN;
+    std::string sink_json;
+    if (!flatbuffers::EscapeString(sink_dir_.c_str(), sink_dir_.size(), &sink_json,
+                                   /*allow_non_utf8=*/false, /*natural_utf8=*/false)) {
+      ADD_FAILURE() << "cannot encode daemon logging sink path as JSON: " << sink_dir_;
+      return {};
+    }
+    constexpr std::string_view token = "\"" RJ_DAEMON_LOGGING_SINK_TOKEN "\"";
     for (size_t pos = cfg.find(token); pos != std::string::npos; pos = cfg.find(token, pos)) {
-      cfg.replace(pos, token.size(), sink_dir_);
-      pos += sink_dir_.size();
+      cfg.replace(pos, token.size(), sink_json);
+      pos += sink_json.size();
     }
 
-    std::string out_path = tmp_dir_ + "/daemon_logging_config.json";
+    std::string out_path = tmp_dir_.path() + "/daemon_logging_config.json";
     std::ofstream out(out_path);
     out << cfg;
     if (!out.good()) {
@@ -731,19 +733,15 @@ TEST_F(DaemonTest, RemoteGemVaReplacePreservesOriginalTail) {
 class RcclDaemonTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    const char *xdg = std::getenv("XDG_RUNTIME_DIR");
-    std::string base = xdg ? xdg : "/tmp";
-    std::string tmpl = base + "/rocjitsu-rccl-XXXXXX";
-    ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
-    tmp_dir_ = tmpl;
-    runtime_dir_ = tmp_dir_ + "/rocjitsu";
+    ASSERT_TRUE(initialize_runtime_directory(tmp_dir_, "rj-r-"));
+    runtime_dir_ = tmp_dir_.path() + "/rocjitsu";
     sock_path_ = runtime_dir_ + "/daemon.sock";
 
     daemon_pid_ = fork();
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
-      setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+      setenv("XDG_RUNTIME_DIR", tmp_dir_.path().c_str(), 1);
       setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config_2gpu(), nullptr);
       _exit(127);
@@ -773,16 +771,15 @@ protected:
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
-    std::filesystem::remove_all(tmp_dir_);
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
 
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
     std::string cmd = "timeout 150 env ROCJITSU_RUNTIME_DIR=";
-    cmd += runtime_dir_;
+    cmd += shell_quote(runtime_dir_);
     cmd += " XDG_RUNTIME_DIR=";
-    cmd += tmp_dir_;
+    cmd += shell_quote(tmp_dir_.path());
     cmd += " HIP_VISIBLE_DEVICES=";
     cmd += std::to_string(rank);
     cmd += " NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 HSA_NO_SCRATCH_RECLAIM=1"
@@ -798,7 +795,7 @@ protected:
     cmd += " --world-size=";
     cmd += std::to_string(world_size);
     cmd += " --shared-dir=";
-    cmd += shared_dir;
+    cmd += shell_quote(shared_dir);
     if (gtest_filter && gtest_filter[0]) {
       cmd += " --gtest_filter=";
       cmd += gtest_filter;
@@ -820,9 +817,9 @@ protected:
   }
 
   void run_collective(const char *filter, int world_size = 2) {
-    std::string shared_tmpl = tmp_dir_ + "/coll-XXXXXX";
-    ASSERT_NE(mkdtemp(shared_tmpl.data()), nullptr) << strerror(errno);
-    std::string shared_dir = shared_tmpl;
+    ScopedTempDirectory shared;
+    ASSERT_TRUE(shared.initialize("coll-", tmp_dir_.path()));
+    const std::string &shared_dir = shared.path();
 
     std::vector<std::thread> threads(world_size);
     std::vector<ProcessResult> results(world_size);
@@ -835,12 +832,10 @@ protected:
 
     for (int r = 0; r < world_size; ++r)
       EXPECT_EQ(results[r].exit_code, 0) << "Rank " << r << " failed:\n" << results[r].output;
-
-    std::filesystem::remove_all(shared_dir);
   }
 
   pid_t daemon_pid_ = -1;
-  std::string tmp_dir_;
+  ScopedTempDirectory tmp_dir_;
   std::string runtime_dir_;
   std::string sock_path_;
 };

@@ -15,6 +15,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -110,7 +111,7 @@ struct TimingResult {
 
 /// @brief Run the benchmark for a given ISA.
 template <typename Encoding>
-void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const Encoding *encodings,
+void run_benchmark(rocjitsu::IsaFamily arch, std::string_view arch_name, const Encoding *encodings,
                    size_t num_encodings) {
   // Set up CU + wavefront.
   amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_bench_mem");
@@ -239,11 +240,13 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const Encodi
 #define RUN_BENCHMARK(ISA_NS, ARCH_ENUM, ARCH_STR)                                                 \
   run_benchmark(ARCH_ENUM, ARCH_STR, ISA_NS::test_data::ENCODINGS, ISA_NS::test_data::NUM_ENCODINGS)
 
-TEST(DecodeExecuteBenchmark, Cdna4) { RUN_BENCHMARK(cdna4, ROCJITSU_CODE_ARCH_CDNA4, "cdna4"); }
+TEST(DecodeExecuteBenchmark, Cdna4) { RUN_BENCHMARK(cdna4, rocjitsu::IsaFamily::Cdna4, "cdna4"); }
 
-TEST(DecodeExecuteBenchmark, Rdna4) { RUN_BENCHMARK(rdna4, ROCJITSU_CODE_ARCH_RDNA4, "rdna4"); }
+TEST(DecodeExecuteBenchmark, Rdna4) { RUN_BENCHMARK(rdna4, rocjitsu::IsaFamily::Rdna4, "rdna4"); }
 
-TEST(DecodeExecuteBenchmark, Gfx1250) { RUN_BENCHMARK(cdna5, ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"); }
+TEST(DecodeExecuteBenchmark, Gfx1250) {
+  RUN_BENCHMARK(cdna5, rocjitsu::IsaFamily::Cdna5, "gfx1250");
+}
 
 // Isolate dispatch overhead from decoding and wavefront setup. The rejection
 // instruction has no implementation and must fail before accessing memory.
@@ -251,7 +254,7 @@ void run_execution_dispatch_benchmark(size_t failure_period) {
   amdgpu::GpuMemory memory("dispatch_bench_mem");
   amdgpu::L2Cache l2("dispatch_bench_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.arch = rocjitsu::IsaFamily::Rdna4;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;

@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
@@ -29,7 +30,7 @@
 
 namespace rocjitsu {
 namespace {
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
 constexpr util::FailureOr<uint32_t> kNop0Encoding = build_s_nop(0, kArch);
 constexpr util::FailureOr<uint32_t> kNop1Encoding = build_s_nop(1, kArch);
 constexpr util::FailureOr<uint32_t> kEndpgmEncoding = build_s_endpgm(kArch);
@@ -138,7 +139,7 @@ void append_abs64_write(KernelElf &elf, uint64_t destination, Abs64Write &write)
 
 void patch_eligible_points(const AmdGpuCodeObject &source, InstrumentedCodeObjectDebug &result,
                            std::initializer_list<uint64_t> offsets = {0},
-                           rj_code_arch_t arch = kArch) {
+                           rocjitsu::IsaFamily arch = kArch) {
   Instrumentor instrumentor(source, arch);
   for (uint64_t offset : offsets)
     instrumentor.add_point_by_offset(offset);
@@ -156,7 +157,7 @@ void expect_rejected_without_output(const InstrumentedCodeObjectDebug &result) {
 }
 
 void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool overlaps_text) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5;
   constexpr uint64_t loaded_prefix_size = sizeof(uint64_t);
   const util::FailureOr<uint32_t> barrier =
       build_sop1_encoding(arch, cdna5::kSBarrierSignalSop1, 0, 193);
