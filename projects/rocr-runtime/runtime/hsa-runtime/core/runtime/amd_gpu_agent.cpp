@@ -74,7 +74,6 @@
 #include "inc/hsa_ven_amd_pc_sampling.h"
 
 #include "core/inc/amd_trap_handler_v1.h"
-#include "core/inc/amd_blit_shaders.h"
 #include "core/inc/hsa_api_trace_int.h"
 // Generated header
 #include "amd_trap_handler_v2.h"
@@ -363,8 +362,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   };
 
   struct CompiledShader {
-    ASICShader compute_7;
-    ASICShader compute_8;
     ASICShader compute_9;
     ASICShader compute_90a;
     ASICShader compute_942;
@@ -385,8 +382,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   std::map<std::string, CompiledShader> compiled_shaders = {
       {"TrapHandler",
        {
-           {NULL, 0, 0, 0},                                                 // gfx7
-           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
            {kCodeTrapHandler9, sizeof(kCodeTrapHandler9), 2, 4},            // gfx9
            {kCodeTrapHandler90a, sizeof(kCodeTrapHandler90a), 2, 4},        // gfx90a
            {NULL, 0, 0, 0},                                                 // gfx942
@@ -399,8 +394,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"TrapHandlerKfdExceptions",
        {
-           {NULL, 0, 0, 0},                                                 // gfx7
-           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
            {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx9
            {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx90a
            {kCodeTrapHandlerV2_942, sizeof(kCodeTrapHandlerV2_942), 2, 4},  // gfx942
@@ -413,8 +406,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"CopyAligned",
        {
-           {kCodeCopyAligned7, sizeof(kCodeCopyAligned7), 32, 12},          // gfx7
-           {kCodeCopyAligned8, sizeof(kCodeCopyAligned8), 32, 12},          // gfx8
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx9
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx90a
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx942
@@ -426,8 +417,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"CopyMisaligned",
        {
-           {kCodeCopyMisaligned7, sizeof(kCodeCopyMisaligned7), 23, 10},    // gfx7
-           {kCodeCopyMisaligned8, sizeof(kCodeCopyMisaligned8), 23, 10},    // gfx8
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx9
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx90a
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx942
@@ -439,8 +428,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"Fill",
        {
-           {kCodeFill7, sizeof(kCodeFill7), 19, 8},                         // gfx7
-           {kCodeFill8, sizeof(kCodeFill8), 19, 8},                         // gfx8
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx9
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx90a
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx942
@@ -458,12 +445,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   ASICShader* asic_shader = NULL;
 
   switch (supported_isas()[0]->GetMajorVersion()) {
-    case 7:
-      asic_shader = &compiled_shader_it->second.compute_7;
-      break;
-    case 8:
-      asic_shader = &compiled_shader_it->second.compute_8;
-      break;
     case 9:
       if((supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
         asic_shader = &compiled_shader_it->second.compute_90a;
@@ -1055,9 +1036,8 @@ void GpuAgent::InitDma() {
   auto blit_lambda = [this](bool prefer_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
     Flag::SDMA_OVERRIDE sdma_override = core::Runtime::runtime_singleton_->flag().enable_sdma();
 
-    // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
-    bool use_sdma =
-        ((supported_isas()[0]->GetMajorVersion() != 8) && (supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3)));
+    // User SDMA queues are unsupported on gfx1013.
+    bool use_sdma = supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3);
     if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
 
     if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
@@ -2487,11 +2467,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
           HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
       break;
     case HSA_AGENT_INFO_FAST_F16_OPERATION:
-      if (supported_isas()[0]->GetMajorVersion() >= 8) {
-        *((bool*)value) = true;
-      } else {
-        *((bool*)value) = false;
-      }
+      *((bool*)value) = true;
       break;
     case HSA_AGENT_INFO_PROFILE:
       *((hsa_profile_t*)value) = profile_;
@@ -3102,8 +3078,6 @@ void GpuAgent::UnregisterAqlQueue(core::Queue* queue) {
 void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   assert(scratch.main_queue_base == nullptr &&
          "AcquireQueueMainScratch called while holding scratch.");
-  bool need_queue_scratch_base = (supported_isas()[0]->GetMajorVersion() > 8);
-
   if (scratch.main_size == 0) {
     scratch.main_size = queue_scratch_len_;
     scratch.main_size_per_thread = scratch_per_thread_;
@@ -3149,8 +3123,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
             ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
              scratch.main_size) > small_limit));
 
-  if ((supported_isas()[0]->GetMajorVersion() < 8) ||
-      core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
+  if (core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
     large = false;
     use_reclaim = false;
   }
@@ -3279,9 +3252,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
     return;
   }();
 
-  scratch.main_queue_process_offset = need_queue_scratch_base
-      ? uintptr_t(scratch.main_queue_base)
-      : uintptr_t(scratch.main_queue_base) - uintptr_t(scratch_pool_.base());
+  scratch.main_queue_process_offset = uintptr_t(scratch.main_queue_base);
 }
 
 /* Should be called with scratch_lock_ */
@@ -3626,11 +3597,6 @@ void GpuAgent::WarnIfNoSecondLevelTrapHandler() {
 }
 
 void GpuAgent::BindTrapHandler() {
-  if (supported_isas()[0]->GetMajorVersion() == 7) {
-    // No trap handler support on Gfx7, soft error.
-    return;
-  }
-
   // Assemble the trap handler source code.
   void* tma_addr = nullptr;
   uint64_t tma_size = 0;
@@ -3674,19 +3640,7 @@ void GpuAgent::BindTrapHandler() {
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
-  // Check for microcode cache invalidation support.
-  // This is deprecated in later microcode builds.
-  if (supported_isas()[0]->GetMajorVersion() == 7) {
-    if (properties_.EngineId.ui32.uCode < 420) {
-      // Microcode is handling code cache invalidation.
-      return;
-    }
-  } else if (supported_isas()[0]->GetMajorVersion() == 8 && supported_isas()[0]->GetMinorVersion() == 0) {
-    if (properties_.EngineId.ui32.uCode < 685) {
-      // Microcode is handling code cache invalidation.
-      return;
-    }
-  } else if (supported_isas()[0]->GetMajorVersion() > 12) {
+  if (supported_isas()[0]->GetMajorVersion() > 12) {
     assert(false && "Code cache invalidation not implemented for this agent");
   }
 

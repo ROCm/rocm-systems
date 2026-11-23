@@ -56,14 +56,8 @@ namespace rocr {
 namespace AMD {
 
 static constexpr const char kBlitKernelSource_[] = R"(
-  // Compatibility function for GFXIP 7.
-
   function s_load_dword_offset(byte_offset)
-    if kGFXIPVersion == 7
-      return byte_offset / 4
-    else
-      return byte_offset
-    end
+    return byte_offset
   end
 
   // Memory copy for all cases except:

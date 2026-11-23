@@ -92,7 +92,6 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   agent_ = agent_handle;
 
   hsa_status_t status = GetGPUAsicID(agent_, &chip_id_);
-  uint32_t major_ver = MajorVerFromDevID(chip_id_);
   assert(status == HSA_STATUS_SUCCESS);
 
   status = HSA::hsa_agent_get_info(
@@ -120,11 +119,7 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   ADDR_CREATE_INPUT addr_create_input = {0};
   ADDR_CREATE_OUTPUT addr_create_output = {0};
 
-  if (major_ver >= 9) {
-    addr_create_input.chipEngine = CIASICIDGFXENGINE_ARCTICISLAND;
-  } else {
-    addr_create_input.chipEngine = CIASICIDGFXENGINE_SOUTHERNISLAND;
-  }
+  addr_create_input.chipEngine = CIASICIDGFXENGINE_ARCTICISLAND;
 
   addr_create_input.chipFamily = family_type_;
   addr_create_input.chipRevision = 0;  // TODO(bwicakso): find how to get this.
@@ -259,24 +254,8 @@ hsa_status_t ImageManagerKv::CalculateImageSizeAndAlignment(
   return HSA_STATUS_SUCCESS;
 }
 
-static const uint64_t kLimitSystem = 1ULL << 48;
-
-bool ImageManagerKv::IsLocalMemory(const void* address) const {
-  uintptr_t u_address = reinterpret_cast<uintptr_t>(address);
-
-  uint32_t major_ver = MajorVerFromDevID(chip_id_);
-
-  if (major_ver >= 8) {
-    return true;
-  }
-#ifdef HSA_LARGE_MODEL
-  // Fast path without querying local memory region info.
-  // User mode system memory addressable by CPU is 0 to 2^48.
-  return (u_address >= kLimitSystem);
-#else
-  // No local memory on 32 bit.
-  return false;
-#endif
+bool ImageManagerKv::IsLocalMemory(const void*) const {
+  return true;
 }
 
 hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image, const metadata_amd_t* descriptor) const {
@@ -368,9 +347,7 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image) const {
     word1.bits.swizzle_enable = false;
     word1.bits.cache_swizzle = false;
 
-    uint32_t major_ver = MajorVerFromDevID(chip_id_);
-    word2.bits.num_records = (major_ver < 8) ?
-                image.desc.width : image.desc.width * image_prop.element_size;
+    word2.bits.num_records = image.desc.width * image_prop.element_size;
 
     const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
     word3.u32_all = 0;
@@ -722,12 +699,10 @@ hsa_status_t ImageManagerKv::FillImage(const Image& image, const void* pattern,
 }
 
 hsa_status_t ImageManagerKv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
-  // Kv (GFX8) architecture does not support mipmaps
   return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 }
 
 hsa_status_t ImageManagerKv::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
-  // Kv (GFX8) architecture does not support mipmaps
   return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 }
 
@@ -873,7 +848,6 @@ hsa_status_t ImageManagerKv::PopulateMipLevelSrd(
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
 
-  // Mip level views not supported on GFX8 hardware
   return HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
 
@@ -982,6 +956,9 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
     ADDR_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
+  (void)image_data_row_pitch;
+  (void)image_data_slice_pitch;
+
   const ImageProperty image_prop =
       GetImageProperty(component, desc.format, desc.geometry);
 
@@ -993,10 +970,7 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
   const uint32_t num_slice = static_cast<uint32_t>(
       std::max(kMinNumSlice, std::max(desc.array_size, desc.depth)));
 
-  uint32_t major_ver = MajorVerFromDevID(chip_id_);
-
-  if (major_ver >= 9) {
-    ADDR2_COMPUTE_SURFACE_INFO_INPUT in = {0};
+  ADDR2_COMPUTE_SURFACE_INFO_INPUT in = {0};
     in.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_INPUT);
     in.format = addrlib_format;
     in.bpp = static_cast<unsigned int>(image_prop.element_size) * 8;
@@ -1094,37 +1068,6 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
     out.tileIndex = in.swizzleMode;
     out.sliceSize = out2.sliceSize;
     return true;
-  }
-
-  ADDR_COMPUTE_SURFACE_INFO_INPUT in = {0};
-  in.size = sizeof(ADDR_COMPUTE_SURFACE_INFO_INPUT);
-  in.tileMode = (tileMode == Image::TileMode::LINEAR)?
-    ADDR_TM_LINEAR_ALIGNED : ADDR_TM_2D_TILED_THIN1;
-  in.format = addrlib_format;
-  in.bpp = static_cast<unsigned int>(image_prop.element_size) * 8;
-  in.numSamples = 1;
-  in.width = width;
-  in.height = height;
-  in.numSlices = num_slice;
-  in.flags.texture = 1;
-  in.flags.noStencil = 1;
-  in.flags.opt4Space = 0;
-  in.tileType = ADDR_NON_DISPLAYABLE;
-  in.tileIndex = -1;
-
-  if (image_data_row_pitch != 0) {
-    in.width = image_data_row_pitch / image_prop.element_size;
-//    in.pitchAlign  = image_data_row_pitch / image_prop.element_size;
-//    in.heightAlign = image_data_slice_pitch / image_data_row_pitch;
-  }
-
-  if (ADDR_OK != AddrComputeSurfaceInfo(addr_lib_, &in, &out)) {
-    return false;
-  }
-
-  assert(out.tileIndex != -1);
-
-  return (out.tileIndex != -1) ? true : false;
 }
 
 size_t ImageManagerKv::CalWorkingSizeBytes(hsa_ext_image_geometry_t geometry,
