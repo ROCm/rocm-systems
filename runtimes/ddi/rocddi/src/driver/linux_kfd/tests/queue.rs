@@ -366,7 +366,6 @@ fn gws_aql() -> QueueParameters {
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 enum RingBacking {
     #[default]
-    Userptr,
     Gtt,
     Local,
 }
@@ -611,14 +610,6 @@ impl Fixture {
                         assert_eq!(ring.size, u64::from(args.ring_size).div_ceil(page) * page);
                         let expected_ring_flags =
                             match (args.queue_type, state.expected_ring_backing) {
-                                (2, RingBacking::Userptr) => {
-                                    uapi::USERPTR
-                                        | uapi::WRITABLE
-                                        | uapi::EXECUTABLE
-                                        | uapi::COHERENT
-                                        | uapi::UNCACHED
-                                        | uapi::NO_SUBSTITUTE
-                                }
                                 (2 | 4, RingBacking::Local) => {
                                     uapi::VRAM
                                         | uapi::PUBLIC
@@ -962,9 +953,6 @@ impl Fixture {
                 ring_memory: QueueRingMemory::HostVisibleLocal,
                 ..
             } => RingBacking::Local,
-            QueueParameters::Aql { .. } if lifetime == DriverContextLifetime::Process => {
-                RingBacking::Userptr
-            }
             _ => RingBacking::Gtt,
         };
         state.expected_aql_queue_type = match desc.parameters {

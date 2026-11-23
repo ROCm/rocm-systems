@@ -1580,7 +1580,7 @@ impl KfdQueue {
     fn create(
         vm: Shared<DeviceVm>,
         request: &Request,
-        lifetime: DriverContextLifetime,
+        _lifetime: DriverContextLifetime,
     ) -> Result<Owned<Self>, Error> {
         vm.check()?;
         if vm.version.major != 1 || vm.version.minor < 17 {
@@ -1618,13 +1618,9 @@ impl KfdQueue {
                 uncached: true,
                 contiguous: false,
             }
-        } else if request.aql.is_some() && lifetime == DriverContextLifetime::Process {
-            BufferKind::OwnedUserptr {
-                cache: crate::memory::HostMappingPolicy::Uncached,
-            }
         } else {
-            // KFD USERPTR cannot be allocated in a secondary INSTANCE VM.
-            // Coherent GTT provides a host view of the ring in that context.
+            // Coherent GTT provides host-visible system ring backing without
+            // a USERPTR mapping's MMU-notifier and deferred-restore path.
             BufferKind::Gtt
         };
         let mut ring = allocate(
