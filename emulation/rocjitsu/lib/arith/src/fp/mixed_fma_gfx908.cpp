@@ -50,7 +50,7 @@ int run(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, const
       continue;
     }
     const uint32_t *x = a[0] + offset, *y = b[0] + offset, *z = c[0] + offset;
-    uint32_t intermediate[32]{};
+    alignas(64) uint32_t intermediate[32]{};
     uint32_t *destination = half ? intermediate : d[0] + offset;
     // The established FP32 path owns guest rounding, denormals, NaNs and CLAMP.
     if (int error = rj_arith_v_fma_mix_f32_w32(arithmetic_flags, active, mode, &destination, &x, &y,
