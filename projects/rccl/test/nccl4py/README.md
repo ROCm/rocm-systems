@@ -33,6 +33,7 @@ It exercises:
 |--------|----------------|
 | (wheel artifact) | `cmake --build --target nccl4py` produced a `.whl` |
 | `test_rocm_extensions.py` | RCCL-only wrappers (`all_reduce_with_bias`, `all_to_all_v`) fail controlled |
+| `test_version_and_codegen.py` | `nccl.__version__` is the installed distribution's version (`0+unknown` without one), and `DevResourceRequirements.next` links struct objects |
 | `test_shim_surface.py` | HIP `cuda.core` shim (optional; self-skips without visible GPUs) |
 
 The harness also runs an out-of-process `import nccl.bindings` check against
