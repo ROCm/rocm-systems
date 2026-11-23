@@ -760,12 +760,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 		q->eop_buffer_size = 4096;
 
 	/* Limit the eop buffer size to half the number of entries that can fit in
-	 * QueueSizeInBytes. */
-	pkt_size = (Type >= HSA_QUEUE_COMPUTE_AQL && Type <= HSA_QUEUE_DMA_AQL_XGMI) ?
-				AQL_PKT_SIZE : PM4_PKT_SIZE;
+	 * QueueSizeInBytes, but never below the minimum KFD accepts. KFD rejects an
+	 * EOP buffer smaller than the node's eop_buffer_size, which is the per-ASIC
+	 * size set above. */
+	pkt_size = (Type == HSA_QUEUE_COMPUTE_AQL) ? AQL_PKT_SIZE : PM4_PKT_SIZE;
 
-	q->eop_buffer_size =
-			MIN(q->eop_buffer_size, (QueueSizeInBytes * EOP_PKT_SIZE) / (pkt_size * 2));
+	if (q->eop_buffer_size) {
+		uint64_t eop_min = q->eop_buffer_size;
+		uint64_t eop_limit = (QueueSizeInBytes * EOP_PKT_SIZE) / (pkt_size * 2);
+
+		q->eop_buffer_size = MAX(MIN(eop_min, eop_limit), eop_min);
+	}
 
 	/* By default, CUs are all turned on. Initialize cu_mask to '1
 	 * for all CU bits.
