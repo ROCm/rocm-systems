@@ -20981,6 +20981,33 @@ TEST_F(KfdIoctlTest, UncachedVramExportKeepsUcPolicyAcrossUnmapAndRemap) {
   }
 }
 
+TEST_F(KfdIoctlTest, GemMapReclaimsOnlyMappedBytesOfFreedKfdRange) {
+  constexpr uint64_t kVa = 0x3000000000ULL;
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_TRUE(process);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = kVa;
+  allocation.size = 3 * kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  ASSERT_FALSE(process->gpu_access_grant(kGpuId, kVa + kPage, kPage).allowed);
+
+  alignas(kPage) std::array<std::byte, kPage> backing{};
+  auto transaction = driver_->begin_gem_va_transaction();
+  ASSERT_TRUE(transaction);
+  ASSERT_EQ(transaction->map(kVa + kPage, backing.data(), kPage, allocation.flags, false, 1), 0);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, kVa + kPage, kPage).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, kVa, kPage).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, kVa + 2 * kPage, kPage).allowed);
+  EXPECT_TRUE(transaction->unmap(kVa + kPage, kPage, 1));
+}
+
 TEST_F(KfdIoctlTest, ExportedUncachedVramPolicyMapsGemPagesAfterSourceFree) {
   using rocjitsu::amdgpu::Mtype;
   constexpr uint64_t kVa = 0x3000000000ULL;
