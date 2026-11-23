@@ -55,4 +55,6 @@ class Workload:
     ml_api_call_trees: CallTreeForest = field(default_factory=dict)
     # --operator patterns keyed by the backend they match in this workload.
     operator_patterns: Dict[str, List[str]] = field(default_factory=dict)
+    # Kernel name to the id shown in the top-kernel table, for operator reports.
+    operator_kernel_ids: Dict[str, int] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None

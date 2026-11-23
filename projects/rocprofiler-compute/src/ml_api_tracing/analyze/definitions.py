@@ -23,7 +23,6 @@ class KernelStats:
     total_duration_ns: float = 0.0
     min_duration_ns: Optional[float] = None
     max_duration_ns: Optional[float] = None
-    kernel_id: Optional[int] = None
     pmc_group_keys: List[Tuple] = field(default_factory=list)
 
 
