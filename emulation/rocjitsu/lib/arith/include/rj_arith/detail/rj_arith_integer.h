@@ -14,6 +14,27 @@
 extern "C" {
 #endif
 
+// gfx1251 packed U64 arithmetic: A/B and D each hold two U64 values per lane,
+// in four VGPRs. ADD/SUB support RJ_ARITH_PK_NEG_LO_A/B, NEG_HI_A/B and CLAMP.
+// Negation precedes arithmetic; CLAMP saturates the mathematical result to U64,
+// otherwise results wrap modulo 2^64. All semantics share these integer results.
+// Inactive lanes are preserved; arbitrary operand VGPR storage may overlap.
+// Guest FP controls are rejected except the globally accepted, ignored FP16_OVFL.
+int rj_arith_v_pk_add_nc_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b);
+int rj_arith_v_pk_sub_nc_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b);
+
+// gfx1251: D = (A << B) + C, independently for two U64 elements per lane.
+// A/C/D each use four VGPRs; B uses two VGPRs holding independent U32 counts.
+// Active counts must be in [0,4], the inherited supported execution domain.
+// Instruction flags must be zero; semantics, overlap, EXEC and FP flags as above.
+int rj_arith_v_pk_lshl_add_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+
 // Select each output byte using the corresponding byte of C. Selectors 0..7
 // select bytes of the concatenation A:B (B supplies the low four bytes).
 // Selectors 8..11 replicate the sign bit of its four 16-bit halves; 12 selects
@@ -1096,6 +1117,260 @@ int rj_arith_v_bfm_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
 
 int rj_arith_v_bfrev_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a);
+
+// Shift signed A/B by C & 31, saturate to signed/unsigned bytes, and pack A below B.
+// HIGH_D selects the destination half; the other half and inactive lanes are preserved.
+// CLAMP is accepted but saturation is unconditional. Source half selectors are unsupported.
+int rj_arith_v_ashr_pk_u8_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_ashr_pk_i8_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_ashr_pk_u8_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_ashr_pk_i8_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+// Add a 32x32 product to a 64-bit accumulator, optionally saturating with CLAMP.
+// A/B use one VGPR each; C/D use low/high pairs. These forms have no scalar carry output.
+int rj_arith_v_mad_nc_u64_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mad_nc_i64_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mad_nc_u64_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mad_nc_i64_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+// Wide integer A/B/D use low/high VGPR pairs. ADD/SUB saturate under CLAMP;
+// MUL and MIN/MAX ignore CLAMP. Shift-add uses B[2:0] (encodings 5..7 mean zero),
+// a wide C addend, wrapping addition, and ignores CLAMP. Inactive lanes are preserved.
+int rj_arith_v_add_nc_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b);
+
+int rj_arith_v_add_nc_u64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b);
+
+int rj_arith_v_sub_nc_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b);
+
+int rj_arith_v_sub_nc_u64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b);
+
+int rj_arith_v_mul_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_mul_u64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_min_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_min_u64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_max_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_max_u64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_min_i64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_min_i64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_max_i64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_max_i64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_lshl_add_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_lshl_add_u64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c);
+
+// Advance the stochastic-rounding LFSR: (A << 1) XOR 0xc5 when A has its top bit set.
+// A and D each use one VGPR. Inactive lanes are preserved; whole-VGPR overlap is allowed.
+// CLAMP is ignored, DPP routes A, and other modifiers are rejected. All semantics are exact.
+int rj_arith_v_prng_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a);
+
+int rj_arith_v_prng_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a);
+
+// BITOP3 applies the low eight instruction_flags bits as a truth table to each bit.
+// Index = (A_bit << 2) | (B_bit << 1) | C_bit. These bits are not ALU NEG/ABS/OMOD.
+// Each operand occupies one VGPR. B16 selects halves with HIGH_A/B/C/D and preserves
+// the other destination half. CLAMP is ignored; DPP routes A. All semantics are exact.
+constexpr uint32_t RJ_ARITH_BITOP3_TABLE_MASK = 0xffU;
+
+int rj_arith_v_bitop3_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_bitop3_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_bitop3_b16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_bitop3_b16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c);
+
+// ADD_MIN/MAX saturates A+B to the signed/unsigned 32-bit range, then selects
+// against C. MAD_U32 multiplies and adds modulo 2^32. Each operand occupies one
+// VGPR. Signed ADD_MIN/MAX applies CLAMP to exclude negative results; the other
+// forms ignore it. DPP routes A. Inactive lanes and whole-VGPR aliases
+// follow the common ALU contract. All semantics are exact.
+int rj_arith_v_add_min_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_add_min_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_add_max_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_add_max_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_add_min_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_add_min_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_add_max_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_add_max_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mad_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c);
+
+int rj_arith_v_mad_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c);
+
+// Packed halfword selection: A, B, C and D each occupy one VGPR with two elements.
+// ADD_MIN/MAX saturates A+B to the signed/unsigned 16-bit range before selection;
+// signed CLAMP limits negative results to zero, also for MIN3/MAX3.
+// Packed half selectors are supported; NEG and DPP controls are rejected.
+// All semantics are exact, with the common EXEC and whole-VGPR aliasing contract.
+int rj_arith_v_pk_add_min_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_add_min_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_add_min_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_add_min_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_add_max_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_add_max_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_add_max_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_add_max_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_min3_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_min3_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_min3_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_min3_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_max3_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_max3_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_max3_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_pk_max3_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx942 unsigned halfword multiplication saturates to 65535 under CLAMP;
+// without CLAMP it retains the low 16 bits. Selectors and EXEC follow the unsuffixed forms.
+int rj_arith_v_mul_lo_u16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b);
+int rj_arith_v_mul_lo_u16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b);
+int rj_arith_v_pk_mul_lo_u16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_pk_mul_lo_u16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b);
 
 #ifdef __cplusplus
 } // extern "C"

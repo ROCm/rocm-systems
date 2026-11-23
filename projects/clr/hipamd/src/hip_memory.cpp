@@ -691,6 +691,8 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
           *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes,
           helper.copyMetadata());
       break;
+    case hipWriteBuffer:
+    case hipReadBuffer:
     case hipHostToHost:
       assert(false && "Unreachable case");
       break;
@@ -800,7 +802,8 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   if (!isHostAsync) {
     command->queue()->finishCommand(command);
   } else if (!isGPUAsync) {
-    assert(dstDeviceMemory != nullptr || srcDeviceMemory != nullptr && "Must have device memory to have GPU async");
+    assert((dstDeviceMemory != nullptr || srcDeviceMemory != nullptr) &&
+           "Must have device memory to have GPU async");
     amd::Memory* syncMemory = (dstDeviceMemory != nullptr) ? dstDeviceMemory : srcDeviceMemory;
     hip::Stream* pStream = hip::getNullStream(syncMemory->GetDeviceById()->context());
     amd::Command::EventWaitList waitList;
@@ -2567,7 +2570,7 @@ hipError_t hipMemcpy2DValidateArray(hipArray_const_t arr, size_t wOffset, size_t
 hipError_t hipMemcpy2D_common(void* dst, size_t dpitch, const void* src, size_t spitch,
                               size_t width, size_t height, hipMemcpyKind kind,
                               hipStream_t stream = nullptr, bool isAsync = false) {
-  hipError_t validateParams = hipSuccess, validateSrc = hipSuccess, validateDst = hipSuccess;
+  hipError_t validateParams = hipSuccess;
   if ((validateParams = hipMemcpy2DValidateParams(kind, stream)) != hipSuccess) {
     return validateParams;
   }
@@ -3217,6 +3220,15 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
+  // An asymmetric swap without SDMA support is decomposed into two ops: one extra op per such entry.
+  // sizesDst is non-zero only for swap entries (validated above).
+  size_t extraOps = 0;
+  if (sizesDst != nullptr && !stream.device().settings().sdma_asymmetric_swap_supported_) {
+    for (size_t i = 0; i < count; ++i) {
+      extraOps += (sizesDst[i] != 0 && sizesDst[i] != sizes[i]);
+    }
+  }
+
   // Classify copies by type and group them by the queue device that will execute each batch.
   std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
   std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device(g_devices.size());
@@ -3298,6 +3310,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
               (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
                   ? srcMemories[i]->getUserData().deviceId
                   : dstMemories[i]->getUserData().deviceId;
+        }
+        // Size the vector once on first use: this device receives at most the remaining entries
+        // plus the extra op of each decomposed swap.
+        if (copy_ops_by_device[device_id].capacity() == 0) {
+          copy_ops_by_device[device_id].reserve((count - i) + extraOps);
         }
         if (sizeB > 0 && sizeB != sizes[i]
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
@@ -4148,7 +4165,7 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
     HIP_RETURN(hipErrorInvalidContext);
   }
 
-  if (ihandle->owners_device_id >= g_devices.size()) {
+  if (static_cast<size_t>(ihandle->owners_device_id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -4244,8 +4261,8 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     HIP_RETURN(hipErrorInvalidValue);
   }
   size_t offset = 0;
-  amd::Memory* memObj = (ptr != nullptr) ? getMemoryObject(hip::getCurrentDevice(), ptr, offset) : nullptr;
-  int device = 0;
+  amd::Memory* memObj =
+      (ptr != nullptr) ? getMemoryObject(hip::getCurrentDevice(), ptr, offset) : nullptr;
   device::Memory* devMem = nullptr;
   memset(attributes, 0, sizeof(hipPointerAttribute_t));
 
@@ -4599,8 +4616,8 @@ hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_att
 
   // Ignore the status, hipDrvPointerGetAttributes always returns success
   // If the ptr is invalid, the queried attributes will be assigned default values
-  for (int i = 0; i < numAttributes; ++i) {
-    hipError_t status = ihipPointerGetAttributes(data[i], attributes[i], ptr);
+  for (size_t i = 0; i < numAttributes; ++i) {
+    (void)ihipPointerGetAttributes(data[i], attributes[i], ptr);
   }
   HIP_RETURN(hipSuccess);
 }
@@ -4706,6 +4723,28 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
   }
 
   HIP_RETURN(ihipArray3DGetDescriptor(pArrayDescriptor, array));
+}
+
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  HIP_INIT_API(hipArrayGetPlane, pPlaneArray, hArray, planeIdx);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (pPlaneArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(hArray) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *pPlaneArray = nullptr;
+
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+          "HIP does not implement multiplanar arrays, so no array has planes to return");
+  HIP_RETURN(hipErrorNotSupported);
 }
 
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
@@ -5167,6 +5206,28 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
   HIP_RETURN(ihipMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array) {
+  HIP_INIT_API(hipArrayGetSparseProperties, sparseProperties, array);
+
+  if (sparseProperties == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *sparseProperties = {};
+
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  LogPrintfError("Sparse arrays not supported on the device %s", device->info().name_);
+  HIP_RETURN(hipErrorNotSupported);
+}
+
 hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
                                    const hipChannelFormatDesc* desc, hipExtent extent,
                                    unsigned int numLevels, unsigned int flags) {
@@ -5211,7 +5272,7 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
   CHECK_STREAM_CAPTURE_SUPPORTED();
 
   auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
-  const device::Memory* devMem = buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+  (void)buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {mipmapDesc->extent.width,
                                           mipmapDesc->extent.height,

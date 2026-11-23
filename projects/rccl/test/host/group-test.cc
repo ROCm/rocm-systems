@@ -35,15 +35,16 @@
 #include "comm.h"
 #include "group.h"
 
-#include "fakes/comm_fakes.h"    // controllable ncclCommSetAsyncError seam
-#include "fakes/recorder_fakes.h"  // g_recorderResult, shared with the other micro binaries
-#include "fakes/nccl_fakes.h"    // g_loadParam, used by param_redirect.h
-#include "fakes/collective_stubs.h"  // g_ncclArgsGlobalCheck
-#include "fakes/ce_fakes.h"      // g_ncclCeInit, g_ncclCeEnsureAllReduceStaging
-#include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
-#include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
-#include "ScopedHook.h"          // RAII install/restore for controllable seams
-#include "WaitUntil.h"           // bounded poll for what the other thread does
+#include "fakes/comm_fakes.h"
+#include "fakes/recorder_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/collective_stubs.h"
+#include "fakes/ce_fakes.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/sym_kernels_fakes.h"
+#include "fakes/transport_stubs.h"
+#include "ScopedHook.h"
+#include "WaitUntil.h"
 
 // Route group.cc's NCCL_PARAM sites through g_loadParam instead of the real
 // ncclLoadParam (see param_redirect.h); must precede the unit under test.
@@ -77,6 +78,14 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
 #include GROUP_CC_PATH
 
 #include "fakes/alloc_seam_undef.h"
+
+#include "dev_runtime.h"
+#include "dev_runtime_internal.h"
+#include "fakes/dev_runtime_micro_fakes.h"
+
+// Compat records owned by the devcomm sources linked into this binary; the
+// devComm drain test below narrows them to make two versions distinguishable.
+extern struct ncclDevCommCompat ncclDevCommCompat_v22902, ncclDevCommCompat_v22907;
 
 namespace {
 
@@ -384,6 +393,16 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   comm->intraRanks = 2;
   comm->symmetricSupport = 1;
   comm->p2pCrossClique = 0;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
 
   ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
   ncclIntruQueueConstruct(&asyncCollJobs);
@@ -405,6 +424,212 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 
   queued->destructor(queued);
+}
+
+TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyncJob) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+  ncclTaskColl task{};
+  task.func = ncclFuncAlltoAll;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  int tuningFunc = ncclTuningFuncIndex(task.func);
+  ASSERT_GE(tuningFunc, 0);
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][tuningFunc] = 1;
+  ncclTaskColl unsupported = task;
+  unsupported.func = ncclFuncScatter;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &unsupported, unsupported.count * sizeof(float));
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  int availabilityCalls = 0;
+  ScopedHook symkAvailable(
+      g_symkAvailable,
+      [&availabilityCalls](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) {
+        availabilityCalls++;
+        return false;
+      });
+  int prepareCalls = 0;
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect,
+                      bool* needGenkDevComm, ncclSimInfo_t*) {
+        prepareCalls++;
+        memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+        *needConnect = false;
+        *needGenkDevComm = false;
+        return ncclSuccess;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  EXPECT_EQ(1, prepareCalls);
+  EXPECT_EQ(1, availabilityCalls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+}
+
+TEST_F(GroupEndInternalTest, SymmetricExtractionAndGeneralOnlyMaskPrepareInline) {
+  constexpr int kRingSimple = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE;
+  for (bool denyExtraction : {true, false}) {
+    auto comm = std::make_unique<ncclComm>();
+    comm->intraRanks = 2;
+    comm->symmetricSupport = 1;
+    ncclTaskColl task{};
+    task.func = ncclFuncAllReduce;
+    task.opHost = ncclSum;
+    task.opDev.op = ncclDevSum;
+    task.datatype = ncclFloat32;
+    task.count = 1024;
+    task.symkExtract = denyExtraction ? RCCL_SYMK_EXTRACT_DENY : RCCL_SYMK_EXTRACT_ALLOW;
+    task.algMask = denyExtraction ? rcclTuningMask() : rcclTuningMask::bit(kRingSimple);
+    comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
+    ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+
+    int availabilityCalls = 0;
+    ScopedHook symkAvailable(
+        g_symkAvailable,
+        [&availabilityCalls](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) {
+          availabilityCalls++;
+          return true;
+        });
+    int prepareCalls = 0;
+    ScopedHook prepareTasks(
+        g_ncclPrepareTasks,
+        [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect,
+                        bool* needGenkDevComm, ncclSimInfo_t*) {
+          prepareCalls++;
+          memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+          *needConnect = false;
+          *needGenkDevComm = false;
+          return ncclSuccess;
+        });
+    ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+    ncclIntruQueueConstruct(&asyncCollJobs);
+    ncclSimInfo_t simInfo{};
+
+    ASSERT_EQ(ncclSuccess, ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+    EXPECT_EQ(1, prepareCalls);
+    EXPECT_EQ(0, availabilityCalls);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+  }
+}
+
+TEST_F(GroupEndInternalTest, GlobalForcedSymmetricSelectionOverridesGeneralOnlyTaskMask) {
+  constexpr int kRingSimple = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE;
+  auto comm = std::make_unique<ncclComm>();
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  task.algMask = rcclTuningMask::bit(kRingSimple);
+  comm->tuningContext.forced[task.func] = 1;
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [](struct ncclComm*, bool*, bool*, bool*, ncclSimInfo_t*) {
+        ADD_FAILURE() << "a forced symmetric selection must prepare asynchronously";
+        return ncclInternalError;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess, ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  ncclAsyncJob* queued = ncclIntruQueueDequeue(&asyncCollJobs);
+  ASSERT_NE(nullptr, queued);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+  queued->destructor(queued);
+}
+
+TEST_F(GroupEndInternalTest, GlobalForcedGeneralSelectionWithoutSymmetricModelPreparesInline) {
+  constexpr int kRingSimple = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE;
+  auto comm = std::make_unique<ncclComm>();
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  comm->tuningContext.forced[task.func] = 1;
+  comm->tuningContext.enabled[kRingSimple][task.func] = 1;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  int availabilityCalls = 0;
+  ScopedHook symkAvailable(
+      g_symkAvailable,
+      [&availabilityCalls](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) {
+        availabilityCalls++;
+        return true;
+      });
+  int prepareCalls = 0;
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect,
+                      bool* needGenkDevComm, ncclSimInfo_t*) {
+        prepareCalls++;
+        memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+        *needConnect = false;
+        *needGenkDevComm = false;
+        return ncclSuccess;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess, ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  EXPECT_EQ(1, prepareCalls);
+  EXPECT_EQ(0, availabilityCalls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+}
+
+TEST_F(GroupEndInternalTest, InitializedSymmetricStateAvoidsRepeatedAsyncJobs) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+  comm->symkState.initialized = true;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  int prepareCalls = 0;
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect,
+                      bool* needGenkDevComm, ncclSimInfo_t*) {
+        prepareCalls++;
+        memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+        *needConnect = false;
+        *needGenkDevComm = false;
+        return ncclSuccess;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  EXPECT_EQ(1, prepareCalls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 }
 
 TEST_F(GroupEndInternalTest, DepthZero_ReturnsInvalidUsage) {
@@ -774,8 +999,8 @@ class AsyncLaunchTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Not just this class's own SetUp: other TUs sharing this binary/thread (e.g. rccl_wrap.cc's
-    // rcclDdaEnabled reading ncclGroupDepth) can run next, especially under --gtest_shuffle.
+    // Not just this class's own SetUp: any test on this thread can run next, especially under
+    // --gtest_shuffle.
     ResetGroupThreadLocals();
     s_active = nullptr;
   }
@@ -1458,8 +1683,8 @@ TEST_F(MgmtTaskJobFuncTest, FailingTaskStopsDequeuingAndStillRunsItsOwnDestructo
 }
 
 // ncclCommGroupRegisterSymmetric: only the ceInitTaskQueue branch. rmaCeInitTaskQueue is not
-// covered because this binary links the real src/rma/rma_ce.cc, whose ncclRmaCeInit needs the
-// dev_runtime fixture; the other four queues need that fixture or new seams. Deferred.
+// covered because ncclRmaCeInit is a plain ::abort() stub here (collective_stubs.cc); the other
+// four queues need the dev_runtime fixture or new seams. Deferred.
 class GroupRegisterSymmetricCeInitTest : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_;
@@ -1947,6 +2172,121 @@ TEST_F(GroupRegisterSymmetricTest, GroupCleanup_ClearsPendingStagingOfSymRegiste
 
   EXPECT_FALSE(comm_->ceColl.stagingPending);
   EXPECT_EQ(nullptr, ncclGroupCommHead[ncclGroupTaskTypeSymRegister]);
+}
+
+// ncclCommGroupRegisterSymmetric: the commCreateTaskQueue branch, run against the real
+// ncclDevrCommCreateInternal. A queued task carries the version its device code was built
+// against, which differs from task->reqs->version when the device code is JIT-compiled
+// (reqs.useRuntimeVersion); the drain must build the devComm for the task's version.
+class GroupRegisterSymmetricDevCommTest : public ::testing::Test {
+ protected:
+  static constexpr uint32_t kCompileTimeVersion = NCCL_VERSION(2, 31, 0);
+  static_assert(kCompileTimeVersion < NCCL_VERSION_CODE, "needs a compile-time version older than the runtime");
+
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclSharedResources> sharedRes_;
+  struct ncclGroupSymmetricJob job_ {};
+  ncclDevComm outDevComm_{};
+  ncclDevCommCompat saved22902_{}, saved22907_{};
+  static int newToOldCalls_;
+  int lsaRank0_ = 0;
+
+  void SetUp() override {
+    ResetCeFakes();
+    ResetGroupThreadLocals();
+    ResetDevRuntimeMicroFakes();  // working HIP VMM emulator and dev_runtime seams
+    newToOldCalls_ = 0;
+    saved22902_ = ncclDevCommCompat_v22902;
+    saved22907_ = ncclDevCommCompat_v22907;
+    // The compile-time version down-converts; the runtime version does not.
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kCompileTimeVersion;
+    ncclDevCommCompat_v22902.devCommCopyNewToOld = [](ncclComm_t, void*, ncclDevComm const*) {
+      newToOldCalls_++;
+      return ncclSuccess;
+    };
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kCompileTimeVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+
+    comm_ = std::make_unique<ncclComm>();
+    sharedRes_ = std::make_unique<ncclSharedResources>();
+    comm_->sharedRes = sharedRes_.get();
+    comm_->nRanks = 1;
+    comm_->devrState.lsaDomainSize = comm_->devrState.lsaTeamSize = 1;
+    comm_->devrState.lsaDomainRankList = comm_->devrState.lsaTeamRankList = &lsaRank0_;
+    comm_->devrState.cftSize = 1;    // ncclDevrInitOnce never ran; it would set both to >= 1
+    comm_->devrState.cftMcSize = 1;
+    comm_->devrState.granularity = 1;
+    ncclIntruQueueConstruct(&comm_->devrState.regTaskQueue);
+    ncclIntruQueueConstruct(&comm_->devrState.commCreateTaskQueue);
+    ncclIntruQueueConstruct(&comm_->ceInitTaskQueue);
+    ncclIntruQueueConstruct(&comm_->rmaCeInitTaskQueue);
+    ncclIntruQueueConstruct(&comm_->suspendTaskQueue);
+    ncclIntruQueueConstruct(&comm_->resumeTaskQueue);
+    job_.comm = comm_.get();
+  }
+
+  void TearDown() override {
+    while (!ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue)) {
+      struct ncclDevrCommCreateTask* t = ncclIntruQueueDequeue(&comm_->devrState.commCreateTaskQueue);
+      freeDevCommRequirements(t->reqs);
+      free(t);
+    }
+    while (comm_->devrState.teamHead != nullptr) {
+      struct ncclDevrTeam* next = comm_->devrState.teamHead->next;
+      free(comm_->devrState.teamHead);
+      comm_->devrState.teamHead = next;
+    }
+    // Default reqs need no resource window, so the create registers no memory and no window;
+    // the only other allocation, the window table, lives in the fake shadow pool that
+    // ResetDevRuntimeMicroFakes frees. Non-default reqs would need the memory and window freed here.
+    EXPECT_EQ(nullptr, comm_->devrState.memHead);
+    EXPECT_EQ(0, comm_->devrState.winSortedCount);
+    ncclDevCommCompat_v22902 = saved22902_;
+    ncclDevCommCompat_v22907 = saved22907_;
+    ResetDevRuntimeMicroFakes();
+    // Hand the shared fakes back fail-loud, as the suites sharing this binary expect.
+    ResetHipFakes();
+    ResetNcclFakes();
+    ResetGroupThreadLocals();
+    ResetCeFakes();
+  }
+
+  void QueueCreateTask(uint32_t reqsVersion, uint32_t deviceCodeVersion) {
+    auto* task = static_cast<struct ncclDevrCommCreateTask*>(calloc(1, sizeof(struct ncclDevrCommCreateTask)));
+    task->reqs = static_cast<struct ncclDevCommRequirements*>(calloc(1, sizeof(struct ncclDevCommRequirements)));
+    *task->reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    task->reqs->version = reqsVersion;
+    task->outDevComm = &outDevComm_;
+    task->deviceCodeVersion = deviceCodeVersion;
+    ncclIntruQueueEnqueue(&comm_->devrState.commCreateTaskQueue, task);
+  }
+};
+int GroupRegisterSymmetricDevCommTest::newToOldCalls_ = 0;
+
+// JIT case: compile-time requirements, runtime-version device code. Building for the reqs'
+// version would down-convert and stamp the old version into a devComm the kernels read in
+// the runtime layout.
+TEST_F(GroupRegisterSymmetricDevCommTest, QueuedTask_BuildsForTaskDeviceCodeVersionNotReqsVersion) {
+  QueueCreateTask(/*reqsVersion=*/kCompileTimeVersion, /*deviceCodeVersion=*/NCCL_VERSION_CODE);
+
+  EXPECT_EQ(ncclSuccess, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue));
+  EXPECT_EQ(0, newToOldCalls_);
+  EXPECT_EQ(static_cast<uint32_t>(NCCL_VERSION_CODE), outDevComm_.version);
+}
+
+// Contrast, AOT case: the task's older device-code version is down-converted through its record.
+TEST_F(GroupRegisterSymmetricDevCommTest, QueuedTask_OlderDeviceCodeVersion_DownConverts) {
+  QueueCreateTask(/*reqsVersion=*/kCompileTimeVersion, /*deviceCodeVersion=*/kCompileTimeVersion);
+
+  EXPECT_EQ(ncclSuccess, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue));
+  EXPECT_EQ(1, newToOldCalls_);
 }
 
 }  // namespace

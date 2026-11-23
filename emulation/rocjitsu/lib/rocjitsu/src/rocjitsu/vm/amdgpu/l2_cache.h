@@ -153,6 +153,9 @@ public:
   /// ordinary access result determines whether execution succeeds or faults.
   [[nodiscard]] bool can_fetch_range(uint64_t addr, uint32_t size, uint32_t vmid = 0) const;
 
+  /// Copy valid resident bytes for a speculative K$ fill without accessing backing.
+  [[nodiscard]] bool copy_resident_line(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid);
+
   /// @brief Read a cache line worth of data (or partial line).
   ///
   /// Used by L1 controllers to fetch on miss. In functional mode this refetches
@@ -221,7 +224,9 @@ public:
   /// at the line-aligned address containing addr.
   /// @param addr Any address within the desired cache line.
   /// @param[out] line_buf Buffer of at least LINE_SIZE bytes.
-  VmAccessOutcome fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid = 0);
+  VmAccessOutcome fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid = 0) {
+    return fetch_line(addr, line_buf, vmid, nullptr);
+  }
 
   /// @brief Write back a full cache line from L1 eviction.
   /// @param line_addr Line-aligned address.
@@ -479,6 +484,13 @@ public:
 
 private:
   friend class DeviceCacheCoherence;
+  friend class L1VectorCache;
+  VmAccessOutcome fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid,
+                             const VmLocalGrantView *local);
+  VmAccessOutcome write_from_l1(const GpuVmAccess &counted, uint64_t addr, const uint8_t *src,
+                                uint32_t size, Mtype mtype, uint32_t vmid);
+  VmAccessOutcome write_impl(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
+                             uint32_t vmid, const GpuVmAccess *counted);
   friend class L2CacheTestAccess;
   friend class KfdPreparedProviderTestAccess;
 

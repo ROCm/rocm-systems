@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 
@@ -260,7 +261,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
 
     case QueueIdlePublicationPhase::CaptureAccess:
       if (state.queue_desc_va == 0) {
-        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        state.phase = QueueIdlePublicationPhase::NotifyIdle;
         continue;
       }
       if (!state.address_space)
@@ -279,7 +280,7 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       if (state.signal_address == 0) {
-        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        state.phase = QueueIdlePublicationPhase::NotifyIdle;
         continue;
       }
       if ((state.signal_address & 0x3f) != 0)
@@ -323,11 +324,11 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
     case QueueIdlePublicationPhase::DeliverEventInterrupt:
       if (state.event_id != 0)
         state.interrupt_sink.deliver(state.process_id, state.event_id);
-      state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+      state.phase = QueueIdlePublicationPhase::NotifyIdle;
       continue;
 
-    case QueueIdlePublicationPhase::DeliverGenericInterrupt:
-      state.interrupt_sink.deliver(state.process_id, 0);
+    case QueueIdlePublicationPhase::NotifyIdle:
+      state.interrupt_sink.notify_idle(state.process_id);
       state.phase = QueueIdlePublicationPhase::Complete;
       return VmAccessOutcome::Complete;
     }
@@ -467,7 +468,7 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
     case CompletionPublicationPhase::CaptureAccess: {
       if (!state.signal_access)
         return VmAccessOutcome::Faulted;
-      const auto arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_.front()->arch();
+      const auto arch = cus_.empty() ? rocjitsu::IsaFamily::Invalid : cus_.front()->arch();
       state.start_timestamp = entry.profiling_start_timestamp;
       if (state.start_timestamp == 0)
         state.start_timestamp = gpu_timestamp(arch);

@@ -12,8 +12,10 @@
 /// required field names.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -22,10 +24,12 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -34,13 +38,53 @@ namespace addr_calc {
 /// RDNA buffer resources can end in VCC, as with s[104:107]. Validate the
 /// SGPR pair and VCC pair independently; neither may read another wave's storage.
 inline bool buffer_resource_range_is_backed(const Wavefront &wf, uint32_t selector) {
-  if ((wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 ||
-       wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-       wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 || wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5) &&
+  if ((wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Cdna5) &&
       selector == 104)
     return scalar_selector_range_is_backed(wf, selector, 2) &&
            scalar_selector_range_is_backed(wf, selector + 2, 2);
   return scalar_selector_range_is_backed(wf, selector, 4);
+}
+
+// Four ordinary SGPRs form one resource. Split SGPR/VCC descriptors and
+// special registers keep the selector-specific reads and observer callbacks.
+inline std::optional<std::array<uint32_t, 4>> read_buffer_resource(Wavefront &wf,
+                                                                   uint32_t selector) {
+  if (!buffer_resource_range_is_backed(wf, selector))
+    return std::nullopt;
+  if (selector + 3 < kFlatScratchSelectorFirst && !wf.cu().observes_register_access()) {
+    const auto words = RegisterAccess(wf).read_sgpr_region(wf.sgpr_alloc().base + selector, 4);
+    return std::array{words.dword(0), words.dword(1), words.dword(2), words.dword(3)};
+  }
+  return std::array{read_scalar_selector(wf, selector), read_scalar_selector(wf, selector + 1),
+                    read_scalar_selector(wf, selector + 2), read_scalar_selector(wf, selector + 3)};
+}
+
+/// @brief CDNA5 V# TYPE, SRD bits 127:126, from SRD word 3. Zero identifies a
+/// buffer.
+constexpr uint8_t cdna5_buffer_resource_type(uint32_t srd3) {
+  return static_cast<uint8_t>((srd3 >> 30) & 0x3u);
+}
+
+/// @brief Whether a gfx1250 VBUFFER instruction is ignored because its
+/// resource is not a buffer: an SRD TYPE other than 0 makes the instruction
+/// ignored (CDNA5 ISA 9.6). The SRD is read without a register-access
+/// observation. False when `modifiers` name no VBUFFER resource or its SRD is
+/// not backed by this wave.
+inline bool cdna5_ignores_buffer_resource(const RegisterModifiers &modifiers, const Wavefront &wf) {
+  if (wf.cu().arch() != rocjitsu::IsaFamily::Cdna5 || !modifiers.buffer_resource ||
+      modifiers.scalar_buffer_words)
+    return false;
+  const uint32_t selector = modifiers.buffer_resource->encoding_value();
+  if (!buffer_resource_range_is_backed(wf, selector))
+    return false;
+  const auto range = resolve_scalar_register_range(wf, selector + 3, 1);
+  const auto word3 = range ? RegisterAccess(wf).read_scalar_unobserved(*range) : std::nullopt;
+  return word3 && cdna5_buffer_resource_type(*word3) != 0;
 }
 
 /// MUBUF/MTBUF SOFFSET accepts scalar registers and inline integer/float constants.
@@ -48,7 +92,7 @@ inline bool buffer_resource_range_is_backed(const Wavefront &wf, uint32_t select
 inline std::optional<uint32_t> buffer_scalar_offset(Wavefront &wf, uint32_t selector) {
   if (auto constant = resolve_src_scalar_statically(selector))
     return static_cast<uint32_t>(*constant);
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 &&
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 &&
       ((selector >= 235 && selector <= 239) || (selector >= 251 && selector <= 253)))
     return resolve_src_scalar(wf, selector, kLegacyM0Selector);
   return try_read_scalar_selector(wf, selector);
@@ -91,15 +135,15 @@ struct Gfx9BufferResource {
   bool add_tid_enable;       ///< ADD_TID_ENABLE, word3[23].
 };
 
-constexpr Gfx9BufferResource gfx9_buffer_resource(rj_code_arch_t arch, uint32_t srd1,
+constexpr Gfx9BufferResource gfx9_buffer_resource(rocjitsu::IsaFamily arch, uint32_t srd1,
                                                   uint32_t srd3) {
   const bool add_tid = (srd3 & (1u << 23)) != 0;
   const bool swizzle = (srd1 & (1u << 31)) != 0;
   // MI100 ISA tables 36/39 specify independent swizzle and thread-ID fields.
   // Later CDNA targets retain their existing gfx950-qualified policy.
   return {.stride = (srd1 >> 16) & 0x3FFFu,
-          .swizzle_enable = swizzle && (arch == ROCJITSU_CODE_ARCH_CDNA1 || add_tid),
-          .add_tid_when_indexed = arch == ROCJITSU_CODE_ARCH_CDNA1 || swizzle,
+          .swizzle_enable = swizzle && (arch == rocjitsu::IsaFamily::Cdna1 || add_tid),
+          .add_tid_when_indexed = arch == rocjitsu::IsaFamily::Cdna1 || swizzle,
           .data_format = (srd3 >> 15) & 0xFu,
           .index_stride = 8u << ((srd3 >> 21) & 0x3u),
           .add_tid_enable = add_tid};
@@ -234,7 +278,7 @@ inline void rdna_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_t
 inline bool rdna_buffer_range_check_lane(VectorMemState &d, uint32_t lane, RdnaBufferOobSelect mode,
                                          uint32_t stride, uint32_t records, uint32_t index,
                                          uint32_t offset, uint32_t soffset, bool swizzle,
-                                         bool per_element, rj_code_arch_t arch) {
+                                         bool per_element, rocjitsu::IsaFamily arch) {
   if (mode == RdnaBufferOobSelect::Complete)
     records -= std::min(records, soffset);
   const uint32_t count = per_element ? d.num_elems : 1;
@@ -248,9 +292,9 @@ inline bool rdna_buffer_range_check_lane(VectorMemState &d, uint32_t lane, RdnaB
     case RdnaBufferOobSelect::IndexAndOffset:
       // GFX10.1 Table 35 uses "offset > stride" for rejection. GFX10.3
       // Table 35 changes the comparison to ">=". Both use the starting offset.
-      if (arch == ROCJITSU_CODE_ARCH_RDNA1)
+      if (arch == rocjitsu::IsaFamily::Rdna1)
         valid = index < records && start <= stride;
-      else if (arch == ROCJITSU_CODE_ARCH_RDNA2)
+      else if (arch == rocjitsu::IsaFamily::Rdna2)
         valid = stride == 0 ? start < records : index < records && start < stride;
       else
         valid = index < records && end <= stride;
@@ -272,16 +316,16 @@ inline bool rdna_buffer_range_check_lane(VectorMemState &d, uint32_t lane, RdnaB
   return any;
 }
 
-inline bool uses_gfx10_buffer_addressing(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+inline bool uses_gfx10_buffer_addressing(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
 }
 
-inline bool uses_rdna_buffer_range_check(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
+inline bool uses_rdna_buffer_range_check(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4;
 }
 
-inline bool uses_rdna_buffer_addressing(rj_code_arch_t arch) {
+inline bool uses_rdna_buffer_addressing(rocjitsu::IsaFamily arch) {
   return uses_gfx10_buffer_addressing(arch) || uses_rdna_buffer_range_check(arch);
 }
 
@@ -290,15 +334,16 @@ inline bool uses_rdna_buffer_addressing(rj_code_arch_t arch) {
 /// gfx1030, gfx1100 and gfx1201 return zero for loads and returning atomics
 /// and leave memory untouched for any OOB_SELECT, with or without ADD_TID.
 /// Scalar buffer loads ignore it.
-inline uint32_t rdna_buffer_resource_format(rj_code_arch_t arch, uint32_t srd3) {
-  const bool six_bits = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                        arch == ROCJITSU_CODE_ARCH_RDNA4;
+inline uint32_t rdna_buffer_resource_format(rocjitsu::IsaFamily arch, uint32_t srd3) {
+  const bool six_bits = arch == rocjitsu::IsaFamily::Rdna3 ||
+                        arch == rocjitsu::IsaFamily::Rdna3_5 || arch == rocjitsu::IsaFamily::Rdna4;
   return (srd3 >> 12) & (six_bits ? 0x3f : 0x7f);
 }
 
 /// Dword and wider GFX10.1 buffer requests ignore the low two address bits.
-inline uint64_t buffer_access_address(rj_code_arch_t arch, uint64_t address, uint32_t elem_size) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA1 && elem_size >= sizeof(uint32_t))
+inline uint64_t buffer_access_address(rocjitsu::IsaFamily arch, uint64_t address,
+                                      uint32_t elem_size) {
+  if (arch == rocjitsu::IsaFamily::Rdna1 && elem_size >= sizeof(uint32_t))
     address &= ~uint64_t{3};
   return buffer_virtual_address(address);
 }
@@ -329,6 +374,26 @@ inline void gfx10_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_
   d.scratch_addr_base_offset = (base + soffset) % 4;
 }
 
+/// Address VGPRs selected by a buffer instruction. Read each register once for
+/// the active lanes before calculating their individual addresses.
+struct BufferAddressRegisters {
+  std::span<const uint32_t> indices;
+  std::span<const uint32_t> offsets;
+};
+
+inline BufferAddressRegisters read_buffer_address_registers(RegisterAccess &regs, uint32_t base,
+                                                            bool idxen, bool offen, uint64_t exec) {
+  BufferAddressRegisters result;
+  if (idxen || offen) {
+    const auto region = regs.read_vgpr_region(base, idxen && offen ? 2 : 1, exec);
+    if (idxen)
+      result.indices = region.lanes(0).value();
+    if (offen)
+      result.offsets = region.lanes(idxen ? 1 : 0).value();
+  }
+  return result;
+}
+
 /// @brief Compute per-lane addresses for MUBUF encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, d.exec_mask and, on GFX9/CDNA,
@@ -339,7 +404,7 @@ inline void gfx10_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_
 ///           inst.offset.
 template <typename MubufInst>
 void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
-  const rj_code_arch_t arch = wf.cu().arch();
+  const rocjitsu::IsaFamily arch = wf.cu().arch();
   const bool gfx9 = arch_is_cdna_4_or_lower(arch);
   const bool gfx10 = uses_gfx10_buffer_addressing(arch);
   if (!gfx9 && !uses_rdna_buffer_addressing(arch)) {
@@ -354,15 +419,13 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   const uint32_t sb_sel = inst.srsrc * 4;
-  if (!buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = read_buffer_resource(wf, sb_sel);
+  if (!words) {
     reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+  const auto [srd0, srd1, srd2, srd3] = *words;
+  if ((arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) &&
       (srd3 >> 30) != 0) {
     // A resource type mismatch ignores the entire instruction, including load writeback.
     d.exec_mask = d.lane_mask = 0;
@@ -430,24 +493,13 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   else
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vgpr_base, reg_count, exec));
-  }
+  const auto address_regs =
+      read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
                                                         offset_part, soffset_val, lane)
@@ -460,7 +512,7 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
     bool oob;
     if (gfx9) {
       // MI100 checks the raw buffer offset before adding the scalar offset.
-      const bool cdna1_raw = arch == ROCJITSU_CODE_ARCH_CDNA1 && !inst.idxen &&
+      const bool cdna1_raw = arch == rocjitsu::IsaFamily::Cdna1 && !inst.idxen &&
                              !gfx9_srd.swizzle_enable && !gfx9_srd.add_tid_enable;
       oob = !gfx9_buffer_range_check_lane(
           d, lane,
@@ -509,7 +561,7 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
 ///           inst.offset.
 template <typename MtbufInst>
 void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
-  const rj_code_arch_t arch = wf.cu().arch();
+  const rocjitsu::IsaFamily arch = wf.cu().arch();
   const bool gfx9 = arch_is_cdna_4_or_lower(arch);
   const bool gfx10 = uses_gfx10_buffer_addressing(arch);
   if (!gfx9 && !uses_rdna_buffer_addressing(arch)) {
@@ -524,15 +576,13 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   const uint32_t sb_sel = inst.srsrc * 4;
-  if (!buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = read_buffer_resource(wf, sb_sel);
+  if (!words) {
     reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+  const auto [srd0, srd1, srd2, srd3] = *words;
+  if ((arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) &&
       (srd3 >> 30) != 0) {
     // A resource type mismatch ignores the entire instruction, including load writeback.
     d.exec_mask = d.lane_mask = 0;
@@ -556,24 +606,13 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   else
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vgpr_base, reg_count, exec));
-  }
+  const auto address_regs =
+      read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
                                                         offset_part, soffset_val, lane)
@@ -586,7 +625,7 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
     bool oob;
     if (gfx9) {
       // MI100 checks the raw buffer offset before adding the scalar offset.
-      const bool cdna1_raw = arch == ROCJITSU_CODE_ARCH_CDNA1 && !inst.idxen &&
+      const bool cdna1_raw = arch == rocjitsu::IsaFamily::Cdna1 && !inst.idxen &&
                              !gfx9_srd.swizzle_enable && !gfx9_srd.add_tid_enable;
       oob = !gfx9_buffer_range_check_lane(
           d, lane,

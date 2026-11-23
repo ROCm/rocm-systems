@@ -53,7 +53,7 @@ struct SubmitError {
 #[derive(Clone, Copy)]
 struct ImportOrigin<'a> {
     /// Native connection queried for the DMA-BUF's placement.
-    kfd: &'a super::sys::Kfd,
+    kfd: &'a super::connection::Kfd,
     /// Maps a native GPU ID to an activated endpoint identity.
     endpoint_id: &'a dyn Fn(u32) -> Option<[u8; 16]>,
 }
@@ -339,7 +339,7 @@ impl KfdVirtualAddress {
         Ok(())
     }
 
-    fn check(&self) -> Result<(), Error> {
+    pub(super) fn check(&self) -> Result<(), Error> {
         let Some(reservation) = self.reservation.as_ref() else {
             return Err(error(
                 ErrorKind::InvalidArgument,
@@ -565,7 +565,7 @@ impl KfdVirtualMemory {
 
     pub(super) fn import_with_kfd(
         descriptor: i32,
-        kfd: &super::sys::Kfd,
+        kfd: &super::connection::Kfd,
         endpoint_id: impl Fn(u32) -> Option<[u8; 16]>,
     ) -> Result<Owned<Self>, Error> {
         Self::import_impl(
@@ -922,6 +922,25 @@ pub(crate) struct KfdVirtualHostMapping {
 }
 
 impl KfdVirtualHostMapping {
+    #[allow(unsafe_code)]
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        let reservation = self
+            .reservation
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Unsupported, "virtual host map has retired"))?;
+        // SAFETY: The retained reservation owns this mapped CPU/GPU interval.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                reservation.address() as u64,
+                Some(reservation.address()),
+                reservation.usable_size() as u64,
+            )
+        }
+    }
+
     pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
         let Some(reservation) = &mut self.reservation else {
             return Err(error(

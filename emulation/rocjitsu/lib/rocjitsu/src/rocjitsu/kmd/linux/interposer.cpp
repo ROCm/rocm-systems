@@ -204,14 +204,14 @@ bool is_proc_maps_path(const char *path) {
   return name.ends_with("/maps") || name.ends_with("/smaps");
 }
 
-int open_proc_maps_snapshot(const char *path, int flags) {
+std::optional<int> open_proc_maps_snapshot(const char *path, int flags) {
   if (!is_proc_maps_path(path) || (flags & O_ACCMODE) != O_RDONLY)
-    return -1;
+    return std::nullopt;
 
   auto &libc = rocjitsu::libc_passthrough();
   int source = libc.openat(AT_FDCWD, path, flags, 0);
   if (source < 0)
-    return -1;
+    return std::nullopt;
   std::string contents;
   std::array<char, 16384> buffer{};
   while (true) {
@@ -229,7 +229,7 @@ int open_proc_maps_snapshot(const char *path, int flags) {
       contents.find(rocjitsu::kmd::kDeviceBackingNamePrefix) == std::string::npos &&
       contents.find(token_marker) == std::string::npos) {
     errno = read_errno;
-    return -1;
+    return std::nullopt;
   }
 
   constexpr std::string_view marker = "/memfd:rocjitsu_remote_kfd (deleted)";
@@ -277,10 +277,10 @@ int open_proc_maps_snapshot(const char *path, int flags) {
     }
   }
 
-  int snapshot = libc.memfd_create("rocjitsu_proc_maps", MFD_CLOEXEC);
+  int snapshot = rocjitsu::create_scratch_fd("rocjitsu_proc_maps");
   if (snapshot < 0)
     return -1;
-  if (rocjitsu::populate_backing_file(snapshot, contents.data(), contents.size()) != 0) {
+  if (rocjitsu::populate_backing_file(snapshot, contents.data(), contents.size(), true) != 0) {
     int saved_errno = errno;
     libc.close(snapshot);
     errno = saved_errno;
@@ -545,6 +545,20 @@ public:
       std::fprintf(stderr, "rocjitsu: cannot register fork child initialization: %s\n",
                    std::strerror(fork_error));
     real().resolve();
+    // A library loaded with RTLD_LOCAL can still serve the C VM API while
+    // libc owns the application's mappings. Enable the index only when our
+    // mapping entry points actually own the process's global bindings.
+    Dl_info interposer{};
+    if (dladdr(reinterpret_cast<void *>(&init), &interposer)) {
+      const bool observed =
+          std::ranges::all_of(std::array{"mmap", "mmap64", "munmap", "mremap", "shmat", "shmdt"},
+                              [&](const char *symbol) {
+                                Dl_info resolved{};
+                                return dladdr(dlsym(RTLD_DEFAULT, symbol), &resolved) &&
+                                       resolved.dli_fbase == interposer.dli_fbase;
+                              });
+      rocjitsu::host_mapping_lock().set_mapping_changes_observed(observed);
+    }
     // Keep generated topology and proc snapshots independent of limits lowered
     // by application code before its first GPU call. Inherited hard limits on
     // GPU backing are handled by the keeper's shared-RAM fallback.
@@ -2741,14 +2755,21 @@ public:
               ib.ip_instance || ib.ring >= (ib.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u) ||
               !ib.ib_bytes || (ib.ib_bytes & 3) ||
               (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
-                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC)))
+                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC |
+                            AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID)))
+            return -EINVAL;
+          if ((ib.flags & AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID) &&
+              !driver->supports_pm4_gds_wave_id_reset(file->render_minor))
             return -EINVAL;
           if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
             return -EINVAL;
           submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
           engine = ib.ip_type;
           ring = ib.ring;
-          submission.buffers.push_back({.address = ib.va_start, .dwords = ib.ib_bytes / 4});
+          submission.buffers.push_back(
+              {.address = ib.va_start,
+               .dwords = ib.ib_bytes / 4,
+               .reset_gds_wave_id = bool(ib.flags & AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID)});
           break;
         }
         case AMDGPU_CHUNK_ID_FENCE: {
@@ -3444,6 +3465,8 @@ public:
       return -EINVAL;
     }
     if (!prt && drv && !gem.cpu_ptr) {
+      // Keep the host mapping lock before the private fd lock, as in mmap_gem.
+      auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
       void *p = gem.dmabuf_fd->use([&](int fd) {
         return rocjitsu::map_memory_backing(nullptr, gem.size, PROT_READ | PROT_WRITE, MAP_SHARED,
                                             fd, 0);
@@ -4081,8 +4104,10 @@ private:
         (void)gem.remote_owner->gem_va_unmap(gem.drm_file_id, range.va_address, range.map_size);
       gem.remote_owner.reset();
     }
-    if (gem.cpu_ptr && gem.size)
+    if (gem.cpu_ptr && gem.size) {
+      auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
       InterposerContext::real().munmap(gem.cpu_ptr, gem.size);
+    }
     gem.cpu_ptr = nullptr;
     gem.installed_vas.clear();
     // Release our private dup of the backing dmabuf (taken in prime_import) now that
@@ -4495,7 +4520,7 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
 
   // Descriptor identity is tracked explicitly; moving it to a high number only
   // forces the host to grow its descriptor table after threads have started.
-  const int drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
+  const int drm_fd = rocjitsu::create_scratch_fd("rocjitsu_drm");
   if (drm_fd < 0)
     return {true, -1};
 
@@ -4821,8 +4846,8 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
   if (!p || InterposerContext::in_construction)
     return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 
-  if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
-    return snapshot;
+  if (auto snapshot = open_proc_maps_snapshot(path, flags))
+    return *snapshot;
 
   if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
     return drm_fd.fd;
@@ -4907,8 +4932,8 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     return InterposerContext::real().openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
-    if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
-      return snapshot;
+    if (auto snapshot = open_proc_maps_snapshot(path, flags))
+      return *snapshot;
 
     if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
       return drm_fd.fd;
@@ -5894,6 +5919,15 @@ FcntlArgKind fcntl_arg_kind(int cmd) {
 #if defined(F_GETLK64) && (!defined(F_GETLK) || F_GETLK64 != F_GETLK)
   case F_GETLK64:
 #endif
+#ifdef F_OFD_SETLK
+  case F_OFD_SETLK:
+#endif
+#ifdef F_OFD_SETLKW
+  case F_OFD_SETLKW:
+#endif
+#ifdef F_OFD_GETLK
+  case F_OFD_GETLK:
+#endif
 #ifdef F_GETOWNER_UIDS
   case F_GETOWNER_UIDS:
 #endif
@@ -6320,6 +6354,23 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
   });
 }
 
+RJ_INTERPOSER_EXPORT void *shmat(int shmid, const void *addr, int flags) noexcept {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().shmat)
+    return reinterpret_cast<void *>(syscall(SYS_shmat, shmid, addr, flags));
+  if (!rj_owns_interposer_state())
+    return InterposerContext::real().shmat(shmid, addr, flags);
+  return with_host_mapping_held(
+      [&] { return InterposerContext::real().shmat(shmid, addr, flags); });
+}
+
+RJ_INTERPOSER_EXPORT int shmdt(const void *addr) noexcept {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().shmdt)
+    return static_cast<int>(syscall(SYS_shmdt, addr));
+  if (!rj_owns_interposer_state())
+    return InterposerContext::real().shmdt(addr);
+  return with_host_mapping_held([&] { return InterposerContext::real().shmdt(addr); });
+}
+
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
   if (!InterposerContext::real().ready() || !InterposerContext::real().munmap)
     return raw_munmap_syscall(addr, length);
@@ -6394,8 +6445,17 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
     return nullptr;
 
   int open_flags = InterposerContext::fopen_flags_from_mode(mode);
-  if (int snapshot = open_proc_maps_snapshot(path, open_flags); snapshot >= 0)
-    return fdopen(snapshot, mode);
+  if (auto snapshot = open_proc_maps_snapshot(path, open_flags)) {
+    if (*snapshot < 0)
+      return nullptr;
+    FILE *stream = fdopen(*snapshot, mode);
+    if (!stream) {
+      const int error = errno;
+      rocjitsu::host_close_fd(*snapshot);
+      errno = error;
+    }
+    return stream;
+  }
 
   const char *actual = path;
   std::string redirected;
@@ -6852,7 +6912,7 @@ static std::string redirect_canonical_path(const char *path) {
 RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
   auto &real = InterposerContext::real();
   if (!real.ready()) {
-    auto fn = util::lookup_symbol<char *(*)(const char *, char *)>(RTLD_NEXT, "realpath");
+    auto fn = rocjitsu::resolve_host_realpath();
     return fn ? fn(path, resolved_path) : nullptr;
   }
   if (!rj_owns_interposer_state() || InterposerContext::in_construction)

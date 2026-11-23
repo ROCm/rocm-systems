@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/checked_text_edits.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/text_padding.h"
@@ -11,11 +13,16 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <span>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -40,6 +47,67 @@ bool reference_enters_edit(uint64_t offset, std::span<const CheckedTextEdit> edi
   return offset > edit.offset && offset - edit.offset < edit.expected.size();
 }
 
+Result validate_load_file_aliases(const AmdGpuCodeObject &source,
+                                  std::span<const CheckedTextEdit> edits, TextEditError &error) {
+  const std::span<const uint8_t> image = image_bytes(source);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  const std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  if (!segments)
+    return reject(error, TextEditErrorCode::InvalidImage, "invalid PT_LOAD program header table",
+                  edits.front().offset);
+  for (const Elf64_Phdr &segment : *segments) {
+    if (segment.p_type != PT_LOAD || segment.p_filesz == 0)
+      continue;
+    if (segment.p_offset > image.size() || segment.p_filesz > image.size() - segment.p_offset ||
+        segment.p_filesz > segment.p_memsz ||
+        segment.p_memsz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr)
+      return reject(error, TextEditErrorCode::InvalidImage, "invalid PT_LOAD extent",
+                    edits.front().offset);
+  }
+  const Section &text = *source.text_sections().front();
+  for (size_t left_index = 0; left_index < segments->size(); ++left_index) {
+    const Elf64_Phdr &left = (*segments)[left_index];
+    if (left.p_type != PT_LOAD || left.p_filesz == 0)
+      continue;
+    for (size_t right_index = left_index + 1; right_index < segments->size(); ++right_index) {
+      const Elf64_Phdr &right = (*segments)[right_index];
+      if (right.p_type != PT_LOAD || right.p_filesz == 0)
+        continue;
+      const uint64_t shared_begin = std::max(left.p_offset, right.p_offset);
+      const uint64_t shared_end =
+          std::min(left.p_offset + left.p_filesz, right.p_offset + right.p_filesz);
+      if (shared_begin >= shared_end)
+        continue;
+      // Both file ranges and virtual extents were checked above. Their affine
+      // mappings agree throughout the shared interval if they agree at its start.
+      const uint64_t left_address = left.p_vaddr + (shared_begin - left.p_offset);
+      const uint64_t right_address = right.p_vaddr + (shared_begin - right.p_offset);
+      if (left_address == right_address)
+        continue;
+      for (const CheckedTextEdit &edit : edits) {
+        // Source extent and per-edit bounds have already been validated, so
+        // these file coordinates stay inside the immutable source image.
+        const uint64_t edit_begin = text.sectionOffset() + edit.offset;
+        const uint64_t edit_end = edit_begin + edit.expected.size();
+        if (shared_begin < edit_end && edit_begin < shared_end)
+          return reject(
+              error, TextEditErrorCode::InvalidImage,
+              "edited source bytes have PT_LOAD file aliases at different virtual addresses",
+              edit.offset);
+      }
+    }
+  }
+  for (const CheckedTextEdit &edit : edits) {
+    if (!elf_load_file_mappings_match_range(*segments, text.sectionOffset() + edit.offset,
+                                            text.vaddr() + edit.offset, edit.expected.size()))
+      return reject(error, TextEditErrorCode::InvalidImage,
+                    "edited virtual addresses have conflicting PT_LOAD file backing", edit.offset);
+  }
+  return Result::success();
+}
+
 Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint64_t offset,
                           TextEditError &error) {
   std::vector<uint32_t> words(bytes.size() / sizeof(uint32_t));
@@ -51,7 +119,7 @@ Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint
     if (decoded.failed() || decoded.value()->size() == 0)
       return reject(error, TextEditErrorCode::InvalidInstruction,
                     "replacement contains an invalid or truncated instruction", offset);
-    if (decoded.value()->mnemonic() == "s_clause")
+    if (decoded.value()->amdgpu_operation() == amdgpu::Operation::S_CLAUSE)
       return reject(error, TextEditErrorCode::Clause, "replacement may not introduce a clause",
                     offset);
     cursor += decoded.value()->size() / sizeof(uint32_t);
@@ -61,16 +129,13 @@ Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint
 
 } // namespace
 
-CheckedTextEdits::CheckedTextEdits(const AmdGpuCodeObject &source, rj_code_arch_t architecture,
-                                   Decoder &decoder, const InstructionBoundaries &boundaries,
-                                   const CodeObjectPatcher &patcher,
-                                   std::span<const uint64_t> kernel_entries)
-    : source_(source), architecture_(architecture), decoder_(decoder), boundaries_(boundaries),
-      patcher_(patcher), kernel_entries_(kernel_entries) {}
+CheckedTextEdits::CheckedTextEdits(const AmdGpuCodeObject &source, Decoder &decoder,
+                                   const InstructionBoundaries &boundaries,
+                                   const TextEditReferences &references)
+    : source_(source), decoder_(decoder), boundaries_(boundaries), references_(references) {}
 
-Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
-                               std::span<uint8_t> destination, TextEditError &error) const {
-  const AmdGpuCodeObject &source = source_;
+Result CheckedTextEdits::validate_source_extent(const AmdGpuCodeObject &source,
+                                                TextEditError &error) {
   error = {};
   if (!source.is_valid() || source.text_sections().size() != 1)
     return reject(error, TextEditErrorCode::InvalidImage,
@@ -82,10 +147,17 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
       text.sectionOffset() > source.image_size() ||
       text.size() > source.image_size() - text.sectionOffset())
     return reject(error, TextEditErrorCode::InvalidImage, "invalid .text extent");
-  if (destination.size() != text.size())
-    return reject(error, TextEditErrorCode::InvalidRange,
-                  "edit destination must cover the complete original text");
-  const std::vector<Elf64_Shdr> sections = patcher_.section_headers();
+  return Result::success();
+}
+
+FailureOr<TextEditReferences> CheckedTextEdits::collect_references(
+    const AmdGpuCodeObject &source, rocjitsu::IsaFamily architecture,
+    const InstructionBoundaries &boundaries, const CodeObjectPatcher &patcher,
+    std::span<const uint64_t> kernel_entries, TextEditError &error) {
+  if (validate_source_extent(source, error).failed())
+    return Result::failure();
+  const Section &text = *source.text_sections().front();
+  const std::vector<Elf64_Shdr> sections = patcher.section_headers();
   const auto aliases_text = [&](uint64_t offset, uint64_t size) {
     return size != 0 && offset < text.sectionOffset() + text.size() &&
            (offset >= text.sectionOffset() || size > text.sectionOffset() - offset);
@@ -110,23 +182,37 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
       return reject(error, TextEditErrorCode::InvalidImage,
                     ".text virtual addresses alias another allocated section");
   }
-  if (patcher_.has_relocations_within_text() || patcher_.has_malformed_rocr_relocation_section() ||
-      patcher_.has_rocr_rejected_none_relocation() || patcher_.has_unsupported_relocation_to_text())
+  if (patcher.has_relocations_within_text() || patcher.has_malformed_rocr_relocation_section() ||
+      patcher.has_rocr_rejected_none_relocation() || patcher.has_unsupported_relocation_to_text())
     return reject(error, TextEditErrorCode::UnsupportedReferences,
                   "unsupported relocation place or reference to .text");
-  const std::vector<uint64_t> relative_text_references = patcher_.relative_text_addend_offsets();
+  for (const Elf64_Shdr &section : sections) {
+    if ((section.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR) &&
+        section.sh_size != 0 &&
+        elf_has_rocr_dynamic_write_in_range(image_bytes(source), header, sections, section.sh_addr,
+                                            section.sh_size))
+      return reject(error, TextEditErrorCode::UnsupportedReferences,
+                    "dynamic relocation overwrites executable source instructions");
+  }
+  TextEditReferences references;
+  references.branch_addresses.assign(boundaries.reference_addresses().begin(),
+                                     boundaries.reference_addresses().end());
+  references.relative_text_references = patcher.relative_text_addend_offsets();
+  references.kernel_entries.assign(kernel_entries.begin(), kernel_entries.end());
   const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(text.data()),
                                         text.size() / sizeof(uint32_t));
   size_t cursor = 0;
   size_t boundary_index = 0;
+  const TextAlignmentGaps alignment_gaps(source, architecture);
   while (cursor < words.size()) {
-    if (is_text_padding_word(architecture_, words[cursor])) {
+    if (is_text_padding_word(architecture, words[cursor]) ||
+        (words[cursor] == 0 && alignment_gaps.contains(cursor * sizeof(uint32_t)))) {
       ++cursor;
       continue;
     }
-    // The observation path supplies its full-section decoded index. Verify that
-    // it covers all non-padding bytes before relying on instruction extents.
-    const std::span<const InstructionBoundaries::Entry> entries = boundaries_.entries();
+    // Both callers supply a full-section index. Verify non-padding coverage
+    // before relying on the collected instruction and reference facts.
+    const std::span<const InstructionBoundaries::Entry> entries = boundaries.entries();
     const InstructionBoundaries::Entry *entry =
         boundary_index < entries.size() ? &entries[boundary_index++] : nullptr;
     if (!entry || entry->offset != cursor * 4 || entry->size == 0 || entry->size % 4 != 0 ||
@@ -135,12 +221,21 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
                     "decoded index does not cover the complete source text", cursor * 4);
     cursor += entry->size / 4;
   }
-  if (boundary_index != boundaries_.entries().size())
+  if (boundary_index != boundaries.entries().size())
     return reject(error, TextEditErrorCode::InvalidInstruction,
                   "decoded index extends outside source text");
-  if (boundaries_.reference_overflow())
+  if (boundaries.reference_overflow())
     return reject(error, TextEditErrorCode::UnsupportedReferences, "branch reference overflows");
-  std::vector<uint64_t> symbol_endpoints;
+  for (const uint64_t entry : kernel_entries) {
+    if (alignment_gaps.contains(entry))
+      return reject(error, TextEditErrorCode::UnsupportedReferences,
+                    "kernel entry points into alignment", entry);
+  }
+  for (const uint64_t address : boundaries.reference_addresses()) {
+    if (address >= text.vaddr() && alignment_gaps.contains(address - text.vaddr()))
+      return reject(error, TextEditErrorCode::UnsupportedReferences, "branch targets alignment",
+                    address - text.vaddr());
+  }
   // Fixed addresses preserve text references only at retained boundaries. A
   // symbol start/end in a replaced literal would become a new instruction entry.
   for (const Elf64_Shdr &section : sections) {
@@ -166,10 +261,17 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
       }
       if (start > text.size() || symbol.st_size > text.size() - start)
         return reject(error, TextEditErrorCode::UnsupportedReferences, "symbol leaves .text");
-      symbol_endpoints.push_back(start);
-      symbol_endpoints.push_back(start + symbol.st_size);
+      references.symbol_endpoints.push_back(start);
+      references.symbol_endpoints.push_back(start + symbol.st_size);
     }
   }
+  return references;
+}
+
+Result CheckedTextEdits::validate_source_edits(std::span<const CheckedTextEdit> edits,
+                                               TextEditError &error) const {
+  error = {};
+  const Section &text = *source_.text_sections().front();
   std::vector<CheckedTextEdit> sorted(edits.begin(), edits.end());
   std::ranges::sort(sorted, {}, &CheckedTextEdit::offset);
   edits = sorted;
@@ -181,11 +283,10 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
   uint64_t previous_end = 0;
   for (const CheckedTextEdit &edit : edits) {
     const size_t size = edit.expected.size();
-    if (edit.offset % 4 != 0 || (size != 4 && size != 8) || edit.replacement.size() != size ||
+    if (edit.offset % 4 != 0 || (size != 4 && size != 8 && size != 12) ||
         edit.offset > text.size() || size > text.size() - edit.offset)
       return reject(error, TextEditErrorCode::InvalidRange,
-                    "edit requires an in-bounds, aligned, equal-length 4/8-byte anchor extent",
-                    edit.offset);
+                    "edit requires an in-bounds, aligned 4/8/12-byte source extent", edit.offset);
     if (edit.offset < previous_end)
       return reject(error, TextEditErrorCode::Overlap, "duplicate or overlapping edits",
                     edit.offset);
@@ -194,6 +295,8 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
       return reject(error, TextEditErrorCode::StaleBytes, "expected bytes do not match source",
                     edit.offset);
   }
+  if (validate_load_file_aliases(source_, edits, error).failed())
+    return Result::failure();
 
   for (const CheckedTextEdit &edit : edits) {
     const InstructionBoundaries::Entry *instruction = boundaries_.find(edit.offset);
@@ -203,10 +306,8 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
     if (instruction->clause_member || instruction->clause)
       return reject(error, TextEditErrorCode::Clause, "cannot edit a clause or its members",
                     edit.offset);
-    if (decode_replacement(decoder_, edit.replacement, edit.offset, error).failed())
-      return Result::failure();
   }
-  for (const uint64_t address : boundaries_.reference_addresses()) {
+  for (const uint64_t address : references_.branch_addresses) {
     // A valid target before .text cannot enter an original-text anchor.
     if (address < text.vaddr())
       continue;
@@ -215,21 +316,45 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
       return reject(error, TextEditErrorCode::UnsupportedReferences,
                     "branch reference enters an edited instruction", reference);
   }
-  for (const uint64_t endpoint : symbol_endpoints) {
+  for (const uint64_t endpoint : references_.symbol_endpoints) {
     if (reference_enters_edit(endpoint, edits))
       return reject(error, TextEditErrorCode::UnsupportedReferences,
                     "symbol endpoint lies inside an edited instruction", endpoint);
   }
-  for (const uint64_t reference : relative_text_references) {
+  for (const uint64_t reference : references_.relative_text_references) {
     if (reference_enters_edit(reference, edits))
       return reject(error, TextEditErrorCode::UnsupportedReferences,
                     "relocation reference enters an edited instruction", reference);
   }
-  for (const uint64_t entry : kernel_entries_) {
+  for (const uint64_t entry : references_.kernel_entries) {
     if (reference_enters_edit(entry, edits))
       return reject(error, TextEditErrorCode::UnsupportedReferences,
                     "kernel entry lies inside an edited instruction", entry);
   }
+  return Result::success();
+}
+
+Result CheckedTextEdits::validate(std::span<const CheckedTextEdit> edits,
+                                  TextEditError &error) const {
+  if (validate_source_edits(edits, error).failed())
+    return Result::failure();
+  for (const CheckedTextEdit &edit : edits) {
+    if (edit.replacement.size() != edit.expected.size())
+      return reject(error, TextEditErrorCode::InvalidRange,
+                    "anchor edit must preserve its source extent", edit.offset);
+    if (decode_replacement(decoder_, edit.replacement, edit.offset, error).failed())
+      return Result::failure();
+  }
+  return Result::success();
+}
+
+Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
+                               std::span<uint8_t> destination, TextEditError &error) const {
+  if (destination.size() != source_.text_sections().front()->size())
+    return reject(error, TextEditErrorCode::InvalidRange,
+                  "edit destination must cover the complete original text");
+  if (validate(edits, error).failed())
+    return Result::failure();
   // No write occurs until the entire batch is valid against the immutable source.
   for (const CheckedTextEdit &edit : edits)
     std::memcpy(destination.data() + edit.offset, edit.replacement.data(), edit.replacement.size());

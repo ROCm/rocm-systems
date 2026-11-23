@@ -51,6 +51,8 @@ FCOLLECT_WAVE_DEF_GEN(unsigned short, ushort)
 FCOLLECT_WAVE_DEF_GEN(unsigned int, uint)
 FCOLLECT_WAVE_DEF_GEN(unsigned long, ulong)
 FCOLLECT_WAVE_DEF_GEN(unsigned long long, ulonglong)
+FCOLLECT_WAVE_DEF_GEN(__half, half)
+FCOLLECT_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -78,11 +80,11 @@ __global__ void FcollectWaveTest(int loop, int skip, long long int *start_time,
     __syncthreads();
   }
 
-  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0. The TDM LDS
-  // region sits right after the per-wave ctx slots in the dynamic shared
-  // buffer; memcpy_wave_tdm splits it evenly across the block's waves.
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0. The
+  // staged LDS region sits right after the per-wave ctx slots in the dynamic
+  // shared buffer; memcpy_wave_lds_stage splits it evenly across the block's waves.
   uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int n_pes = rocshmem_ctx_n_pes(ctx_array[wf_id]);
 
@@ -172,7 +174,7 @@ template <typename T1>
 void FcollectWaveTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
   size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
-                        rocshmem_query_tdm_lds_bytes();
+                        rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 
@@ -201,7 +203,10 @@ void FcollectWaveTester<T1>::resetBuffers(size_t size) {
   for (int wave_id = 0; wave_id < total_waves; wave_id++) {
     for (int i = 0; i < num_elems; i++) {
       int idx = wave_id * num_elems + i;
-      if constexpr (std::is_floating_point<T1>::value) {
+      if constexpr (std::is_same<T1, __half>::value ||
+                    std::is_same<T1, __hip_bfloat16>::value) {
+        source_buf[idx] = static_cast<T1>(3.5f + my_pe + wave_id);
+      } else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + my_pe + wave_id);
       } else {
         source_buf[idx] = static_cast<T1>('a' + my_pe + wave_id);
@@ -225,7 +230,10 @@ void FcollectWaveTester<T1>::verifyResults(size_t size) {
       for (int i = 0; i < num_elems; i++) {
         int idx = (wave_id * n_pes + pe) * num_elems + i;
         T1 expected;
-        if constexpr (std::is_floating_point<T1>::value) {
+        if constexpr (std::is_same<T1, __half>::value ||
+                      std::is_same<T1, __hip_bfloat16>::value) {
+          expected = static_cast<T1>(3.5f + pe + wave_id);
+        } else if constexpr (std::is_floating_point<T1>::value) {
           expected = static_cast<T1>(3.14 + pe + wave_id);
         } else {
           expected = static_cast<T1>('a' + pe + wave_id);
@@ -233,8 +241,14 @@ void FcollectWaveTester<T1>::verifyResults(size_t size) {
         if (dest_buf[idx] != expected) {
           std::cerr << "Data validation error at wave " << wave_id
                     << " pe " << pe << " idx " << i << std::endl;
-          std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-                    << ", Expected " << expected << std::endl;
+          if constexpr (std::is_same<T1, __half>::value ||
+                        std::is_same<T1, __hip_bfloat16>::value) {
+            std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dest_buf[idx])
+                      << ", Expected " << static_cast<float>(expected) << std::endl;
+          } else {
+            std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
+                      << ", Expected " << expected << std::endl;
+          }
           exit(-1);
         }
       }

@@ -8,6 +8,7 @@
 
 #include "common/alu.h"
 #include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "graphics/interp.h"
 #include "graphics/interp_guest.h"
 #include "rj_arith/detail/rj_arith_graphics.h"
@@ -37,13 +38,15 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   if (rocjitsu::arith::is_exact(flags) || (flags & rocjitsu::arith::interp_round_denorm_flags)) {
     return guest(exec_mask);
   }
+  [[maybe_unused]] const auto level =
+      rocjitsu::arith::wave_cpu_level(flags, !P2 || mode || rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     return guest(rocjitsu::arith::interp32_x86_64_v4<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]));
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     return guest(rocjitsu::arith::interp32_x86_64_v3<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]));
   }
 #endif
