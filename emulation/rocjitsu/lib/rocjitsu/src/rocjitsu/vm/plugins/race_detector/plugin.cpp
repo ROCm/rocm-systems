@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
@@ -122,10 +123,10 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgp
 /// On CDNA1 through CDNA4, a buffer, global or scratch instruction issued with EXEC
 /// zero counts on VMCNT, in order with the wave's other non-FLAT VMEM
 /// instructions (all four ISA manuals, sections 3.3, 4.4 and 10.4–10.5).
-bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA5;
+bool exec_zero_memory_issue_counts(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+         arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4 ||
+         arch == rocjitsu::IsaFamily::Cdna5;
 }
 
 /// Counter obligations retained when wave EXEC is zero.
@@ -178,7 +179,7 @@ amdgpu::MemoryIssueInfo exec_zero_counted_obligations(const amdgpu::MemoryIssueI
 bool ignored_memory_issue(const Instruction &inst, const amdgpu::Wavefront &wf) {
   // Every gfx1250 VBUFFER instruction has conditional memory lanes, so others
   // skip decoding their register modifiers.
-  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 || !(inst.flags() & CONDITIONAL_MEMORY_LANES))
+  if (wf.cu().arch() != rocjitsu::IsaFamily::Cdna5 || !(inst.flags() & CONDITIONAL_MEMORY_LANES))
     return false;
   amdgpu::RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
@@ -257,14 +258,14 @@ validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::W
   return registers;
 }
 
-MemoryOrderClass vgpr_writeback_order(MemoryOrderClass completion, rj_code_arch_t arch) {
+MemoryOrderClass vgpr_writeback_order(MemoryOrderClass completion, rocjitsu::IsaFamily arch) {
   if (completion == MemoryOrderClass::VMEM && !amdgpu::has_ordered_vmem_writeback(arch))
     return MemoryOrderClass::UNORDERED;
   return completion;
 }
 
 void apply_wait_fields(WaveRaceState &state, const amdgpu::WaitFields &fields,
-                       rj_code_arch_t arch) {
+                       rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch).value();
   PendingWaitCount wait;
   for (size_t i = 0; i < fields.size(); ++i) {
@@ -278,7 +279,7 @@ void apply_wait_fields(WaveRaceState &state, const amdgpu::WaitFields &fields,
     state.dispatch(wait);
 }
 
-void drain_wave_counters(WaveRaceState &state, rj_code_arch_t arch) {
+void drain_wave_counters(WaveRaceState &state, rocjitsu::IsaFamily arch) {
   amdgpu::WaitFields drained;
   drained.fill(0);
   apply_wait_fields(state, drained, arch);
@@ -308,7 +309,7 @@ void register_global_load(WaveRaceState &rs, const InstructionSnapshot &instruct
 
 std::optional<amdgpu::MemoryIssueInfo>
 routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
-                       const amdgpu::MemoryIssueInfo &decoded, rj_code_arch_t arch,
+                       const amdgpu::MemoryIssueInfo &decoded, rocjitsu::IsaFamily arch,
                        const Instruction &inst) {
   if (access.decoded_space != amdgpu::DecodedMemorySpace::FLAT ||
       (access.route != amdgpu::MemoryRoute::GLOBAL && access.route != amdgpu::MemoryRoute::LOCAL))
@@ -515,6 +516,11 @@ namespace {
 // resolve differently, and scalar and direct-to-LDS loads can read scratch.
 std::string_view event_description(const EventRegistry &events, EventId event,
                                    RaceViolation::Space space) {
+  // A barrier arrive is an atomic update that is kept as a read only.
+  if (space == RaceViolation::Space::LDS && events.barrierArrive(event))
+    return events.type(event) == MemoryEventType::LDS_TO_VGPR
+               ? "arrival at an LDS barrier cell returning the cell to VGPRs"
+               : "arrival at an LDS barrier cell";
   if (space == RaceViolation::Space::LDS && events.readsLds(event) && events.writesLds(event))
     return events.registers(event).empty() ? "atomic update of LDS"
                                            : "atomic update of LDS returning values to VGPRs";
@@ -549,7 +555,7 @@ std::string_view event_description(const EventRegistry &events, EventId event,
 } // namespace
 
 std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &events,
-                                  uint64_t access_pc, rj_code_arch_t arch) {
+                                  uint64_t access_pc, rocjitsu::IsaFamily arch) {
   if (!v.sourceInstruction && !events.contains(v.conflictingEvent))
     throw std::out_of_range("race violation references an unavailable conflicting event");
   const util::FailureOr<amdgpu::WaitcntModel> model = amdgpu::waitcnt_model(arch);
@@ -557,7 +563,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     throw std::invalid_argument("race report has an unsupported architecture");
   const EventId event = v.conflictingEvent;
   const bool conflicting_read =
-      v.sourceInstruction || v.conflictsWithSrc2Read ||
+      v.sourceInstruction || v.conflictsWithSrc2Read || v.conflictsWithBarrierArrive ||
       (v.space == RaceViolation::Space::VGPR && isFromVgpr(events.type(event))) ||
       (v.space == RaceViolation::Space::LDS && events.readsLds(event));
   const char *hazard = !v.isWrite         ? "read-after-write (RAW)"
@@ -597,8 +603,9 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   }
   const int owner = events.waveId(event).value;
   oss << "  Conflict: "
-      << (v.conflictsWithSrc2Read ? "read of LDS source operand"
-                                  : event_description(events, event, v.space));
+      << (v.conflictsWithSrc2Read        ? "read of LDS source operand"
+          : v.conflictsWithBarrierArrive ? "arrival at an LDS barrier cell"
+                                         : event_description(events, event, v.space));
   oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
       << ".\n";
   const bool flat_lds = v.space == RaceViolation::Space::LDS && events.usesFlatLds(event);
@@ -780,7 +787,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
-      static_cast<int>(wavefronts.front()->cu().arch() == ROCJITSU_CODE_ARCH_CDNA3
+      static_cast<int>(wavefronts.front()->cu().arch() == rocjitsu::IsaFamily::Cdna3
                            ? std::max<uint32_t>(physical_sgpr_count, cdna3::sgpr_alias_end(102))
                            : physical_sgpr_count),
       Dim3d(static_cast<int>(wg_id)), std::move(handler),
@@ -876,6 +883,8 @@ void RaceDetectorPlugin::onAmdgpuMixedFlatLdsAccess(const Instruction &, amdgpu:
                                access.atomic_bytes);
     }
   }
+  if (pending.acquires_barrier_cells)
+    detector.acquireBarrierCells(wave, pending.intervals);
   detector.attachLdsIntervals(pending.event, std::move(pending.intervals));
   s->mixed_lds.reset();
 }
@@ -941,7 +950,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   const auto &issue = routed ? *routed : *decoded;
   const auto obligations = issue.counter_obligations();
   const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   const bool typed_vmem = amdgpu::has_ordered_vmem_reads(arch);
   VgprWriteOrder writeOrder{vgpr_writeback_order(memoryOrder, arch),
                             gfx10 && routed && access.is_load ? amdgpu::VmemWriteback::GenericFlat
@@ -988,7 +997,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                                   {}, obligations, memoryOrder);
         return;
       }
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && wf.exec() != 0 && !routed)
+      if (arch == rocjitsu::IsaFamily::Cdna5 && wf.exec() != 0 && !routed)
         return;
       const bool local = access.route == amdgpu::MemoryRoute::LOCAL;
       if (local || access.route == amdgpu::MemoryRoute::GLOBAL) {
@@ -1000,7 +1009,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         const bool unconditional =
             gfx10 || issued.counts_with_empty_exec ||
             (routed && amdgpu::flat_issues_both_counter_domains(arch)) ||
-            (arch == ROCJITSU_CODE_ARCH_CDNA5 && !rs->getWaveMemoryEvents().empty());
+            (arch == rocjitsu::IsaFamily::Cdna5 && !rs->getWaveMemoryEvents().empty());
         for (const auto &obligation : counted.counter_obligations()) {
           if (!unconditional && !rs->hasPendingCounter(obligation.wait_counter_type()))
             continue;
@@ -1029,7 +1038,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     }
   }
 
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3 && access.scratch_lane_mask &&
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna3 && access.scratch_lane_mask &&
       (access.decoded_space == amdgpu::DecodedMemorySpace::SCRATCH ||
        access.decoded_space == amdgpu::DecodedMemorySpace::FLAT))
     rs->checkScalarRead(wf.memory_wait_shadow().canonical({RegClass::FLAT_SCRATCH, 0, 2}));
@@ -1038,7 +1047,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   // including loads and returning atomics nullified by VGPR tuple bounds.
   // Keep each routed counter obligation in order without any register or LDS bytes.
   const auto count_empty_issue = [&](MemoryEventType type) {
-    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 && !obligations.empty())
+    if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 && !obligations.empty())
       rs->registerEvent(instruction, type, {}, 0, 0xf, obligations, memoryOrder);
   };
   const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && shared_lanes != 0;
@@ -1088,7 +1097,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       const amdgpu::RegisterAccess registers(wf);
       // Indexed RDNA2 GDS faults can enter the handler after the source grant.
       const bool enters_memory_trap =
-          arch == ROCJITSU_CODE_ARCH_RDNA2 && d.gds_m0 && d.address_range_violation_lanes &&
+          arch == rocjitsu::IsaFamily::Rdna2 && d.gds_m0 && d.address_range_violation_lanes &&
           (wf.mode_raw() & amdgpu::Wavefront::kRdna2MemoryViolationEnable);
       if (protect_gds_sources && !enters_memory_trap &&
           registers.vgpr_results_fit_allocation(inst)) {
@@ -1103,8 +1112,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       return;
     }
     const uint64_t execMask = split_results ? d.exec_mask & shared_lanes : d.exec_mask;
-    const bool native_ds = (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
-                           !inst.mnemonic().starts_with("flat_") && !d.lds_stack_inputs;
+    const bool native_ds =
+        (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) &&
+        !inst.mnemonic().starts_with("flat_") && !d.lds_stack_inputs;
 
     const uint32_t granule = native_ds && d.atomic_op == amdgpu::AtomicOp::NONE
                                  ? (d.is_load ? std::min(d.elem_size, 4u) : 1u)
@@ -1112,7 +1122,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     // DDS and allocation-OOB lanes participate in the instruction's
     // dependencies, but do not access bytes in the ordinary LDS allocation.
     uint64_t activeLdsLanes =
-        (d.ds_src2 || arch == ROCJITSU_CODE_ARCH_CDNA3) ? d.lane_mask : execMask;
+        (d.ds_src2 || arch == rocjitsu::IsaFamily::Cdna3) ? d.lane_mask : execMask;
     // LDS byte checks follow requesting lanes. Register dependencies can cover more lanes.
     // A parameter load writes all four quad lanes while only three lanes read LDS.
     if (access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL && access.wavefront_size)
@@ -1129,6 +1139,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
             (routed.has_value() || access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
             d.atomic_op != amdgpu::AtomicOp::NONE};
     ldsAccess.aligned_atomic_bytes = ldsAccess.read_modify_write ? d.elem_size : 0;
+    // The DS barrier arrives update an LDS barrier cell (CDNA5 ISA 11.2.2).
+    // Each arrival is reported through onAmdgpuLdsBarrierArrived() once the
+    // instruction executes.
+    ldsAccess.barrier_arrive =
+        ldsAccess.read_modify_write && d.atomic_op == amdgpu::AtomicOp::BARRIER_ARRIVE;
     const auto ldsOrder = ldsAccess.order(memoryOrder);
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
     if (amdgpu::cdna1_ds_atomic_nullified(d, arch, wf.vgpr_alloc())) {
@@ -1207,15 +1222,22 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const bool defer_lds =
         mixedFlat && d.routed_issue_info && !intervals.empty() && !obligations.empty();
     if (defer_lds) {
-      auto &pending = s->mixed_lds.emplace();
+      auto &pending = s->mixed_lds.emplace(RaceWavefrontState::MixedLdsAccess{});
       pending.order = ldsOrder;
       pending.reads = d.is_load || ldsAccess.read_modify_write;
       pending.writes = !d.is_load || ldsAccess.read_modify_write;
     }
+    // When every lane is an aligned atomic of one width, the instruction-wide
+    // check exempts matching atomics as each lane's check does.
     const bool checkReads = !defer_lds && (d.is_load || ldsAccess.read_modify_write) &&
-                            detector->mayConflict(intervals, waveId, /*isWrite=*/false, ldsOrder);
+                            detector->mayConflict(intervals, waveId, /*isWrite=*/false, ldsOrder,
+                                                  ldsAccess.aligned_atomic_bytes);
+    // A barrier arrive updates its cell atomically, so it races with no read
+    // of the cell and is checked only as a read, against writes of it.
     const bool checkWrites = !defer_lds && (!d.is_load || ldsAccess.read_modify_write) &&
-                             detector->mayConflict(intervals, waveId, /*isWrite=*/true, ldsOrder);
+                             !ldsAccess.barrier_arrive &&
+                             detector->mayConflict(intervals, waveId, /*isWrite=*/true, ldsOrder,
+                                                   ldsAccess.aligned_atomic_bytes);
     if (defer_lds || checkReads || checkWrites) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         for (size_t set = 0; set < numAddressSets; ++set) {
@@ -1237,6 +1259,13 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         }
       }
     }
+    // A load, or an atomic that returns the old value, of an LDS barrier cell
+    // observes its phase, and acquires what its completed phases released. A
+    // mixed FLAT load does so when its LDS lanes are accessed.
+    if (defer_lds)
+      s->mixed_lds->acquires_barrier_cells = d.is_load;
+    else if (d.is_load)
+      detector->acquireBarrierCells(waveId, intervals);
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       for (uint32_t reg : registers)
@@ -1410,6 +1439,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
                                                  const amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
+  s->tensor_transfer = {};
   // The hook fires in the tensor instruction's own step, before the transfer's
   // global requests and LDS writes, as onAmdgpuMemoryAccessRouted() does for
   // other memory instructions.
@@ -1468,9 +1498,59 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // established.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-  rs->registerLdsRangeEvent(
+  s->tensor_transfer = rs->registerLdsRangeEvent(
       instruction, issue.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
       ranges, obligations, memoryOrder);
+}
+
+void RaceDetectorPlugin::onAmdgpuLdsBarrierArrived(
+    const amdgpu::LdsBarrierArrivalObservation &arrival, const amdgpu::Wavefront &wf) {
+  using Source = amdgpu::LdsBarrierArrivalObservation::Source;
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
+  auto *rs = s->race_state;
+  auto *detector = rs->getDetector();
+  const auto waveId = rs->getWaveId();
+  // The simulator reports a cell inside the wave's LDS allocation.
+  assert(detector->validLdsRange(arrival.cell_address, kBarrierCellBytes));
+  if (!detector->validLdsRange(arrival.cell_address, kBarrierCellBytes) ||
+      arrival.cell_address >
+          static_cast<uint32_t>(std::numeric_limits<int>::max()) - kBarrierCellBytes)
+    return;
+  // ds_atomic_barrier_arrive_rtn_b64 with an update of zero leaves the cell
+  // unchanged: it reads the cell without arriving, so it releases nothing. No
+  // phase waits for it, and it can execute after the phase it is reported in
+  // completes. Its read of the cell acquired when the instruction issued.
+  if (arrival.old_state == arrival.new_state)
+    return;
+  const auto kind = [&] {
+    switch (arrival.source) {
+    case Source::DsAtomic:
+      return BarrierCellArrival::Ds;
+    case Source::AsyncDsAtomic:
+      return BarrierCellArrival::Async;
+    case Source::TensorDma:
+      return BarrierCellArrival::Tensor;
+    }
+    return BarrierCellArrival::Tensor;
+  }();
+  // The DS arrives were checked as LDS atomics when they issued. A tensor
+  // transfer's arrival is checked here, against non-atomic writes of the cell:
+  // the ISA does not order it with the wave's DS instructions (CDNA5 ISA
+  // 10.11.1), so as a conservative rule that includes the wave's own pending
+  // writes. A transfer has no lanes, so a violation reports lane -1.
+  // The arrival's atomic update of the cell is then attached to the transfer's
+  // event, so a later write of the cell that the transfer is not ordered before
+  // races with it. The transfer holds the one TENSORcnt slot for both. A
+  // transfer that touches no LDS bytes still has an event, so its arrival is
+  // attached the same way.
+  if (kind == BarrierCellArrival::Tensor) {
+    detector->validateRead(static_cast<int>(arrival.cell_address), waveId, /*lane=*/-1,
+                           kBarrierCellBytes, MemoryOrderClass::UNORDERED, kBarrierCellBytes);
+    if (const EventId transfer = std::exchange(s->tensor_transfer, {}); transfer.isValid())
+      detector->attachBarrierArrive(transfer, arrival.cell_address);
+  }
+  detector->barrierCellArrived(waveId, arrival.cell_address, kind, arrival.phase_completed);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
@@ -1539,8 +1619,8 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
       operation == amdgpu::Operation::IMAGE_GET_LOD && amdgpu::has_ordered_vmem_reads(arch);
   if (inst.is_memory_wait_producer() && !inst.is_memory_op() &&
       (operation == amdgpu::Operation::IMAGE_GET_RESINFO || legacy_lod)) {
-    const auto counter = arch == ROCJITSU_CODE_ARCH_RDNA4 ? amdgpu::WaitCounterType::LOADCNT
-                                                          : amdgpu::WaitCounterType::VMCNT;
+    const auto counter = arch == rocjitsu::IsaFamily::Rdna4 ? amdgpu::WaitCounterType::LOADCNT
+                                                            : amdgpu::WaitCounterType::VMCNT;
     if (s->race_state->prepareForCounterIncrement(counter).failed()) {
       report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
       return;
@@ -1570,7 +1650,7 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   // Wait-counter producers without memory issue metadata, such as GLOBAL_INV
   // and the LDS lane permutes, apply their gfx1250 backpressure here and then
   // hold their slot (see counter_only_slot()).
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && inst.is_memory_wait_producer() &&
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna5 && inst.is_memory_wait_producer() &&
       !inst.is_memory_op()) {
     if (const auto slot = counter_only_slot(inst.amdgpu_operation())) {
       const std::span<const amdgpu::MemoryCounterObligation> obligations{&slot->obligation, 1};
@@ -1591,8 +1671,8 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   if ((operation == amdgpu::Operation::S_SENDMSG || operation == amdgpu::Operation::S_SENDMSGHALT ||
        operation == amdgpu::Operation::S_SENDMSG_RTN_B32 ||
        operation == amdgpu::Operation::S_SENDMSG_RTN_B64) &&
-      (arch == ROCJITSU_CODE_ARCH_CDNA5 || counterCapacitiesForArch(arch).lgkmcnt != 0)) {
-    const bool cdna5 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5;
+      (arch == rocjitsu::IsaFamily::Cdna5 || counterCapacitiesForArch(arch).lgkmcnt != 0)) {
+    const bool cdna5 = wf.cu().arch() == rocjitsu::IsaFamily::Cdna5;
     const auto counter = cdna5 ? amdgpu::WaitCounterType::KMCNT : amdgpu::WaitCounterType::LGKMCNT;
     const uint8_t increment = cdna5 && (operation == amdgpu::Operation::S_SENDMSG_RTN_B32 ||
                                         operation == amdgpu::Operation::S_SENDMSG_RTN_B64)
@@ -1605,7 +1685,8 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   }
   // Implicit VCC operands use wave mask operations directly. Observe only
   // the architectural mask, excluding temporary VCC saves by SDWA execution.
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3 && !s->race_state->getWaveMemoryEvents().empty()) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna3 &&
+      !s->race_state->getWaveMemoryEvents().empty()) {
     auto uses_vcc = [](const Operand *operand) {
       return operand && operand->to_special_reg_class() == RegClass::VCC;
     };
@@ -1687,7 +1768,7 @@ void RaceDetectorPlugin::onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf,
 }
 
 void RaceDetectorPlugin::onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
-  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA2)
+  if (wf.cu().arch() != rocjitsu::IsaFamily::Cdna2)
     return;
   auto *s = get_state(wf);
   if (!s || !s->race_state)

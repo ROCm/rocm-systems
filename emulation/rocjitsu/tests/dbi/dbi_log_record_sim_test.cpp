@@ -28,6 +28,7 @@
 #include "../log_buffer_test_access.h"
 #include "dbi_sim.h"
 #include "log_record_probe.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -76,18 +77,18 @@ constexpr uint32_t kNoWriterLane = 0xFFFFFFFF;
 
 struct LogRecordSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
   bool wave32;
 };
 
-constexpr LogRecordSimArch kCdna3{"cdna3", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942,
+constexpr LogRecordSimArch kCdna3{"cdna3", rocjitsu::IsaFamily::Cdna3, EF_AMDGPU_MACH_AMDGCN_GFX942,
                                   64, false};
-constexpr LogRecordSimArch kCdna4{"cdna4", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950,
+constexpr LogRecordSimArch kCdna4{"cdna4", rocjitsu::IsaFamily::Cdna4, EF_AMDGPU_MACH_AMDGCN_GFX950,
                                   64, false};
-constexpr LogRecordSimArch kRdna4{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
-                                  32, true};
+constexpr LogRecordSimArch kRdna4{"rdna4", rocjitsu::IsaFamily::Rdna4,
+                                  EF_AMDGPU_MACH_AMDGCN_GFX1200, 32, true};
 
 // The kernarg image the CP delivers, with @p buffer_addr as the DBI payload.
 // Built through the production helper, so the offset the prologue loads from is

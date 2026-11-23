@@ -48,7 +48,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op,
                                                  uint32_t round_mode = 0) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst))
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst))
     return false;
   auto canonical = [](const auto &operand) {
     if constexpr (E32)
@@ -217,8 +217,9 @@ template <typename T, typename Inst, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_div_scale_simd(Inst &inst, Wavefront &wf,
                                                      WriteResult commit) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr uint32_t W = util::native<T>::size();
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -276,7 +277,7 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopd_simd(const Slot &x, const Slot &y, Wavefront &wf,
                                                 Classify classify = nullptr) {
-  if (simd_force_scalar())
+  if (simd_force_scalar(wf))
     return false;
   auto capable = [](const Slot &slot) {
     return slot.src0->simd_capable() && (slot.op == 8 || slot.src1->simd_capable()) &&
@@ -441,8 +442,8 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
       case 11: {
         // RDNA3 names these V_DUAL_MAX_F32/V_DUAL_MIN_F32; later targets have
         // the IEEE maximumNumber/minimumNumber forms.
-        const rj_code_arch_t arch = wf.cu().arch();
-        if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) {
+        const rocjitsu::IsaFamily arch = wf.cu().arch();
+        if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5) {
           const auto policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
           result = slot.op == 10 ? minmax::evaluate<fp_format::F32, minmax::MaxNum>(policy, av, bv)
                                  : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);

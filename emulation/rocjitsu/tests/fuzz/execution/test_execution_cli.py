@@ -13,6 +13,8 @@ import unittest
 WAIT_CHECKING_BIT = 0x10
 CACHE_MEMORY_BIT = 0x20
 TARGET_COUNT = 12
+TARGET_MASK = 0x0F
+CPU_MASK = 0xC0
 
 
 class ExecutionFuzzCliTest(unittest.TestCase):
@@ -106,9 +108,14 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(
                 {path.stat().st_size for path in seeds}, {8, 32, 256, 1024}
             )
-            self.assertTrue(all(path.read_bytes()[0] == 10 for path in seeds))
-            modes = {path.read_bytes()[1] for path in seeds}
-            harness_modes = WAIT_CHECKING_BIT | CACHE_MEMORY_BIT
+            headers = [path.read_bytes()[:2] for path in seeds]
+            self.assertTrue(all(target & TARGET_MASK == 10 for target, _ in headers))
+            self.assertEqual(
+                {(target >> 4, mode >> 6) for target, mode in headers},
+                {(semantics, cpu) for semantics in range(5) for cpu in range(4)},
+            )
+            modes = {mode for _, mode in headers}
+            harness_modes = WAIT_CHECKING_BIT | CACHE_MEMORY_BIT | CPU_MASK
             self.assertEqual(
                 {mode & ~harness_modes for mode in modes}, {0, 1, 6, 7, 8, 9, 14, 15}
             )
@@ -129,6 +136,7 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             kernel_targets = set()
             for path in seeds:
                 target, modes = path.read_bytes()[:2]
+                target &= TARGET_MASK
                 if target in kernel_targets or not modes & WAIT_CHECKING_BIT:
                     continue
                 replay = self.run_execution_fuzz("--input", path, "--async", "off")
@@ -217,7 +225,7 @@ class ExecutionFuzzCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             input_path = Path(temporary) / "input.bin"
             input_path.write_bytes(b"\x00")
-            for target in ("gfx1100", "gfx1151", "gfx1251"):
+            for target in ("gfx1100", "gfx1150", "gfx1251"):
                 result = self.run_execution_fuzz(
                     "--input", input_path, "--target", target
                 )

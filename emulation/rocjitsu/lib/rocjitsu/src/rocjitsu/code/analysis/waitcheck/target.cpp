@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
@@ -14,7 +15,7 @@ using amdgpu::MemoryKind;
 using amdgpu::Operation;
 
 std::optional<RegisterRef> WaitcheckTarget::register_operand(const Operand &operand,
-                                                             rj_code_arch_t arch) {
+                                                             rocjitsu::IsaFamily arch) {
   if (const auto ref = operand.to_register_ref())
     return ref;
   // Mesh exports read M0 through a fieldless input. Scalar instructions such
@@ -97,15 +98,15 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
 }
 
 [[nodiscard]] util::FailureOr<std::optional<WaitFields>>
-WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch) {
+WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
   WaitFields fields;
   bool has_wait = false;
-  const bool has_vinterp_wait = arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                                arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                                arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool has_vinterp_wait = arch == rocjitsu::IsaFamily::Rdna3 ||
+                                arch == rocjitsu::IsaFamily::Rdna3_5 ||
+                                arch == rocjitsu::IsaFamily::Rdna4;
   if (const auto wait_exp = vinterp_wait_exp(inst);
       has_vinterp_wait && wait_exp && *wait_exp < 0x7u) {
     fields[counter_index(WaitCounterKind::Exp)] = *wait_exp;
@@ -152,8 +153,8 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 }
 
 [[nodiscard]] bool WaitcheckTarget::is_cdna_lds_dma_load(const Instruction &inst,
-                                                         rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+                                                         rocjitsu::IsaFamily arch) {
+  if (arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4)
     return false;
   const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   return inst.transfers_to_lds() && inst.amdgpu_memory_kind() == MemoryKind::Load &&
@@ -290,7 +291,7 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 }
 
 [[nodiscard]] util::FailureOr<std::vector<ClassifiedEvent>>
-WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
+WaitcheckTarget::classify_events(const Instruction &inst, rocjitsu::IsaFamily arch) {
   std::vector<ClassifiedEvent> events;
   if (classify_events_into(inst, arch, events).failed())
     return util::Result::failure();
@@ -298,7 +299,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
 }
 
 [[nodiscard]] util::Result
-WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t arch,
+WaitcheckTarget::classify_events_into(const Instruction &inst, rocjitsu::IsaFamily arch,
                                       std::vector<ClassifiedEvent> &events) {
   events.clear();
   const auto model = amdgpu::waitcnt_model(arch);
@@ -316,7 +317,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   const MemoryKind memory_kind = inst.amdgpu_memory_kind();
   auto add_xcnt_event = [&](WaitEventKind kind) {
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (arch == rocjitsu::IsaFamily::Cdna5)
       events.emplace_back(WaitCounterKind::X, kind, TrackedRegisterSource::Uses,
                           /*check_uses=*/false, /*check_defs=*/true,
                           /*check_exec_defs=*/is_xcnt_vmem_kind(kind));
@@ -356,7 +357,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
         amdgpu::uses_legacy_waitcnt(model.value()) && addressing == MemoryAddressing::Gds;
     events.push_back({WaitCounterKind::Ds, gds ? WaitEventKind::Gds : WaitEventKind::Ds});
     // CDNA4 retains the legacy wait encoding, but EXPCNT is unused (ISA 3.1/4.4).
-    if (gds && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    if (gds && arch != rocjitsu::IsaFamily::Cdna4)
       events.push_back({WaitCounterKind::Exp, WaitEventKind::Gds, TrackedRegisterSource::VectorUses,
                         false, true, true});
     if (expert)
@@ -437,7 +438,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     bool returns_value = has_register_result();
     if (inst.raw_encoding() != nullptr && inst.size() >= 8) {
       const unsigned glc_bit =
-          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 14u : 13u;
+          arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ? 14u : 13u;
       returns_value = amdgpu::uses_legacy_waitcnt(model.value())
                           ? (inst.raw_encoding()[0] & (1u << glc_bit)) != 0
                           : (inst.raw_encoding()[1] & (1u << 20u)) != 0;
@@ -542,7 +543,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
       (addressing == MemoryAddressing::Image && memory_kind == MemoryKind::Sample)) {
     events.push_back({amdgpu::image_sample_wait_counter(model.value()), WaitEventKind::Sample});
     events.back().point_sample_accel =
-        arch == ROCJITSU_CODE_ARCH_RDNA3_5 &&
+        arch == rocjitsu::IsaFamily::Rdna3_5 &&
         (operation == Operation::IMAGE_SAMPLE || operation == Operation::IMAGE_SAMPLE_L ||
          operation == Operation::IMAGE_SAMPLE_LZ);
     if (expert)
@@ -577,11 +578,11 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
         if (target <= Export::kLastMrt)
           kind = WaitEventKind::ExportMrt;
         else if (target == Export::kDualSource0 || target == Export::kDualSource1)
-          kind = arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportDualSourceBlend
-                                                  : WaitEventKind::ExportMrt;
+          kind = arch == rocjitsu::IsaFamily::Rdna4 ? WaitEventKind::ExportDualSourceBlend
+                                                    : WaitEventKind::ExportMrt;
         else if (target == Export::kDepth)
-          kind =
-              arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportMrt : WaitEventKind::ExportZ;
+          kind = arch == rocjitsu::IsaFamily::Rdna4 ? WaitEventKind::ExportMrt
+                                                    : WaitEventKind::ExportZ;
         else if (target >= Export::kFirstPosition && target <= Export::kLastPosition)
           kind = WaitEventKind::ExportPosition;
         else if (target == Export::kPrimitive)

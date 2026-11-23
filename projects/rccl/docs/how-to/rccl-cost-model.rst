@@ -94,7 +94,8 @@ cases cross family boundaries:
 *  ``ncclTuningCompute`` queries itself recursively with a general-only mask to decide whether a
    symmetric LL kernel must fall back, and again when the fallback is taken. So a symmetric
    decision can emit a second ``Input:``/``Best tuning`` pair carrying
-   ``NCCL_TUNING_MASK_GENERAL_KERNELS`` (``0x1fffff``). Those extra records come from the
+   ``NCCL_TUNING_MASK_GENERAL_KERNELS``
+   (``0x000000000000000000000000001fffff``). Those extra records come from the
    fallback check, not from a general selection the enqueue path requested.
 *  With ``NCCL_ENQUEUE_REARCH_ENABLE=1``, ``fillCollTuningInput`` builds one mask spanning
    general and symmetric candidates, and the model does compare them head to head.
@@ -128,20 +129,21 @@ partitioned into three contiguous families, defined in ``src/include/tuning.h``:
         (``TREE``, ``RING``, ``COLLNET_DIRECT``, ``COLLNET_CHAIN``, ``NVLS``, ``NVLS_TREE``, ``PAT``)
         times 3 protocols (``LL``, ``LL128``, ``SIMPLE``). Not every combination is implemented.
 
-    * - ``[21, 39)``
+    * - ``[21, NCCL_TUNING_CE_METHOD_ID_OFFSET)``
       - Symmetric device-API kernels
-      - ``21 + ncclSymkKernelId_*``, the 18 symmetric AllReduce, AllGather, and ReduceScatter kernels.
+      - ``21 + ncclSymkKernelId_*``, NCCL's symmetric kernels followed by RCCL's.
 
-    * - ``[39, 41)``
+    * - ``[NCCL_TUNING_CE_METHOD_ID_OFFSET, NCCL_TUNING_COUNT)``
       - Copy engine methods
-      - ``39 + ncclCeMethodId_*``: ``AllGather_UC`` (unicast) and ``AllGather_MC`` (multicast).
+      - ``NCCL_TUNING_CE_METHOD_ID_OFFSET + ncclCeMethodId_*``: ``AllGather_UC`` (unicast) and
+        ``AllGather_MC`` (multicast).
 
-A caller restricts the model to a subset of these families with a 64-bit candidate mask. Four
+A caller restricts the model to a subset of these families with a 128-bit candidate mask. Four
 mask constants name the useful subsets:
 
 *  ``NCCL_TUNING_MASK_GENERAL_KERNELS``: bits ``[0, 21)``
-*  ``NCCL_TUNING_MASK_SYM_KERNELS``: bits ``[21, 40)``
-*  ``NCCL_TUNING_MASK_CE``: bits ``[40, 42)``
+*  ``NCCL_TUNING_MASK_SYM_KERNELS``: bits ``[21, NCCL_TUNING_CE_METHOD_ID_OFFSET)``
+*  ``NCCL_TUNING_MASK_CE``: bits ``[NCCL_TUNING_CE_METHOD_ID_OFFSET, NCCL_TUNING_COUNT)``
 *  ``NCCL_TUNING_MASK_ALL``: all of the above
 
 The mask is the single most useful thing to read out of the logs, because it tells you which
@@ -186,11 +188,13 @@ protocol are chosen on the legacy path instead. Enabling ``NCCL_ENQUEUE_REARCH_E
 general selection through the cost model as well, and these records then appear for every
 collective. See :ref:`cost-model-what-is-active`.
 
+Both are ``TRACE`` messages, printed only by a ``-DTRACE=ON`` build run with ``NCCL_DEBUG=TRACE``.
+
 The first record states what was asked for:
 
 .. code-block:: text
 
-   Input: { .comm = %p, .tuningMask = 0x%lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, .nBytes = %lu, .numPipesOps = %d, .count = %lu, .countMax = %lu, .nWorks = %d, .winRegType = %d, .regBuff = %d }
+   Input: { .comm = %p, .tuningMask = 0x%016lx%016lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, .nBytes = %zu, .numPipeOps = %d, .count = %zu, .countMax = %zu, .nWorks = %d, .winRegType = %d, .regBuff = %d }
 
 The second record states what was chosen:
 
@@ -202,22 +206,22 @@ The fields worth reading first:
 
 *  ``.tuningMask`` is the candidate mask from :ref:`cost-model-id-space`, printed in hexadecimal.
    Compare it against all three bounded ranges, not against a single threshold: bits ``[0, 21)``
-   are general algorithm and protocol candidates (``0x1fffff``), bits ``[21, 40)`` are symmetric
-   kernels (``0xffffe00000``), and bits 40 and 41 are copy engine methods (``0x30000000000``).
-   "At or above bit 21" is not enough to call a decision symmetric, because the copy engine bits
-   are above 21 as well.
+   are general algorithm and protocol candidates, then come the symmetric kernels, then the copy
+   engine methods. "At or above bit 21" is not enough to call a decision symmetric, because the
+   copy engine bits are above 21 as well.
 
 *  Only the caller narrows ``.tuningMask``. On the symmetric path that is the per-call
    ``algSelection``, intersected with the symmetric range. The process-wide overrides work
    differently: ``NCCL_ALGO``, ``NCCL_PROTO``, and ``NCCL_SYM_KERNEL`` are parsed once at
    communicator init and clear entries in ``tuningContext.enabled[id][func]``, which the model
-   checks per candidate. Pinning one symmetric kernel with ``NCCL_SYM_KERNEL`` therefore still
-   logs the full symmetric mask ``0xffffe00000``. A full mask is not evidence that the override
-   was ignored. Read ``.forced`` on the "Best tuning" line for that.
+   checks per candidate. Pinning one symmetric kernel with ``NCCL_SYM_KERNEL`` therefore does not
+   change the logged mask. The mask is not evidence that the override was ignored. Read
+   ``.forced`` on the "Best tuning" line for that.
 
 *  ``.id`` on the "Best tuning" line is the flat candidate ID of the winner. Map it into the three
    ranges to find out which family won: below 21 it is a general ``algo``/``proto`` pair, from 21
-   to 38 a symmetric kernel, and 39 or 40 a copy engine method. The ``.algo``/``.proto``,
+   to ``NCCL_TUNING_CE_METHOD_ID_OFFSET - 1`` a symmetric kernel, and above that a copy engine
+   method. The ``.algo``/``.proto``,
    ``.symKernelId``, and ``.ceMethodId`` fields are the expanded form of the same answer; the
    fields belonging to the families that did not win are left at their "none" values.
 
@@ -360,7 +364,7 @@ Matching is a case-insensitive **name prefix**, not an exact comparison. A short
 selects a family:
 
 *  ``SYMK_LL`` selects three rows, not two: the AllGather ``SYMK_LL`` (bit 26) and ``SYMK_LLMC``
-   (bit 27), and also the ReduceScatter ``SYMK_LL`` (bit 34). A registry name is unique per
+   (bit 27), and also the ReduceScatter ``SYMK_LL`` (bit 33). A registry name is unique per
    collective but can repeat across collectives, and the prefix match does not look at the
    collective, so a name shared by two collectives selects both rows.
 *  ``SYMK_RailA2A`` selects both ``SYMK_RailA2A_LsaLD`` and ``SYMK_RailA2A_LsaLDMC``.

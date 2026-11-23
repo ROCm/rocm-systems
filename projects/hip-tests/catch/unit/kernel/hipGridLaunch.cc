@@ -119,7 +119,7 @@ HIP_TEST_CASE(Unit_hipGridLaunch) {
 
 __global__ void emptyKernel() {}
 
-TEST_CASE("Unit_hipGridLaunch_MaxGridDim_DeviceProperties") {
+HIP_TEST_CASE(Unit_hipGridLaunch_MaxGridDim_DeviceProperties) {
   hipDeviceProp_t deviceProp;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -153,7 +153,7 @@ TEST_CASE("Unit_hipGridLaunch_MaxGridDim_DeviceProperties") {
   }
 }
 
-TEST_CASE("Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute") {
+HIP_TEST_CASE(Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute) {
   const unsigned int maxGridX = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0);
   const unsigned int maxGridY = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0);
   const unsigned int maxGridZ = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0);
