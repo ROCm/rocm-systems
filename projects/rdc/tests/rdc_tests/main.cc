@@ -312,10 +312,18 @@ int main(int argc, char** argv, char* envp[]) {
           std::cout << "Failed to start rdcd. Exiting" << std::endl;
           return -1;
         }
-      } else if (!rdcdPortInUse()) {
-        std::cout << "rdcd is not running on localhost:" << kRdcdPort
-                  << ". Use -d (--start_rdcd) to have rdcd started. Exiting test." << std::endl;
-        return 1;
+      } else {
+        const int in_use = rdcdPortInUse();
+        if (in_use == 0) {
+          std::cout << "rdcd is not running on localhost:" << kRdcdPort
+                    << ". Use -d (--start_rdcd) to have rdcd started. Exiting test." << std::endl;
+          return 1;
+        }
+        if (in_use < 0) {
+          std::cout << "rdcd on localhost:" << kRdcdPort << " does not answer. Exiting test."
+                    << std::endl;
+          return 1;
+        }
       }
     }
     ret = RUN_ALL_TESTS();

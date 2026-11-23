@@ -56,8 +56,6 @@ class RdcLogger {
 
   bool should_log(uint32_t severity) { return log_level_ >= severity; }
 
-  std::ostream& get_ostream() { return os_; }
-
   std::string get_log_header(uint32_t severity, const char* file, int line);
 
   // Writes a whole line, with its newline, and flushes; safe to call from several threads.

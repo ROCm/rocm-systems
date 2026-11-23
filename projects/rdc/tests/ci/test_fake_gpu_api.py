@@ -176,9 +176,12 @@ def test_rdctst_does_not_start_rdcd_on_a_busy_port(tools):
     assert f"localhost:{RDCTST_PORT} is in use" in r.stdout, r.stdout[-3000:]
 
 
-def test_rdctst_does_not_wait_on_a_port_that_does_not_answer(tools):
+@pytest.mark.parametrize("start", [True, False], ids=["start_rdcd", "running_rdcd"])
+def test_rdctst_does_not_wait_on_a_port_that_does_not_answer(tools, start):
     # A listener that does not accept, with its accept queue full: the kernel drops further
-    # connection requests, and a blocking connect() waits for minutes.
+    # connection requests, and a blocking connect() waits for minutes. rdctst checks the port
+    # before it starts its rdcd, or, with --start_rdcd= (no path), before it tests the rdcd
+    # there.
     rdctst = _rdctst()
     rdcd, _, fake = tools
     env = dict(os.environ, LD_PRELOAD=fake, RDC_FAKE_GPUS=str(NUM_GPUS))
@@ -201,7 +204,7 @@ def test_rdctst_does_not_wait_on_a_port_that_does_not_answer(tools):
                 pytest.skip("the listener's queue did not fill")
             try:
                 r = subprocess.run(
-                    [rdctst, "-b", f"--start_rdcd={rdcd}"],
+                    [rdctst, "-b", f"--start_rdcd={rdcd if start else ''}"],
                     env=env,
                     capture_output=True,
                     text=True,
@@ -212,5 +215,11 @@ def test_rdctst_does_not_wait_on_a_port_that_does_not_answer(tools):
         finally:
             for s in queued:
                 s.close()
-    assert r.returncode != 0, "rdctst passed without an rdcd of its own"
-    assert f"localhost:{RDCTST_PORT} does not answer" in r.stdout, r.stdout[-3000:]
+    assert r.returncode != 0, "rdctst passed without an rdcd that answers"
+    # Each branch prints its own message.
+    expected = (
+        f"localhost:{RDCTST_PORT} does not answer. Free the port"
+        if start
+        else f"rdcd on localhost:{RDCTST_PORT} does not answer. Exiting test."
+    )
+    assert expected in r.stdout, r.stdout[-3000:]

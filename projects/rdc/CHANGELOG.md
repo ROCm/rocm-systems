@@ -100,6 +100,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - A path that `get_rocm_path()` returned no longer changes when the function is called again, and the function is safe to call from several threads.
 
+- `rdc_device_get_component_version()` no longer crashes `rdcd` when AMD SMI gives no build string. It then reports AMD SMI's version as major.minor.release.
+
+- RDC no longer writes past its list of supported fields when its telemetry libraries support more than 8192 fields together. The list then holds the first 8192, and a watch keeps all the fields that it asks for.
+
 - `RDC_FI_GPU_PARTITION_COUNT` now reports how many compute partitions the GPU is split into, for example 1 in SPX mode. It reported 65535 or N/A in every partition mode on most GPUs.
   - A GPU that cannot be partitioned now reports 1.
 
