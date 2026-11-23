@@ -11,7 +11,6 @@
 
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 
-#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h"
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128_peerpar.h"
 #include "checks.h"
@@ -47,7 +46,7 @@ using dda::common::kDdaLL128RsPeerMaxWarps;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
 
-// From rankScaledMinRanks ranks, batched shards LL ran start at this block size (see ddaLL128RsNarrow).
+// From rankScaledMinRanks ranks, small batched shards start at this block size (see ddaLL128RsNarrow).
 constexpr unsigned kDdaLL128RsNarrowThreads = 128;
 
 // A block size the batched kernel launches: a multiple of the warp up to kDdaLL128RsMaxThreads.
@@ -75,27 +74,13 @@ static inline bool ddaLL128RsPeerParallel(const ncclComm* comm, size_t shardByte
   return bytes <= rcclDdaFabricRsLL128PeerMaxBytes(comm);
 }
 
-// Whether LL ran the shards LL128 now takes narrow: LL on at no less than the table's cap, its bank in the scratch.
-// Otherwise those shards ran LL128 at full width before.
-static inline bool ddaLL128RsTakesLLShards(const ncclComm* comm, const rcclArchThresholds* t) {
-  const size_t llMax = t->ddaLLMax[ncclFuncReduceScatter];
-  if (llMax == 0 || rcclDdaLLThreshold(comm, ncclFuncReduceScatter) < llMax) {
-    return false;
-  }
-  const size_t bankBytes = dda::common::ddaLLRsBankBytes(comm->nRanks);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
-  return bankBytes <= bankSize && bankSize + bankBytes <= comm->ddaScratchBytes;
-}
-
-// Whether a batched shard starts narrow: up to rsDdaLL128NarrowMaxPerRank, LL ran it, and DDA_LL128_RS_THREADS is
-// unset (a valid one always wins).
-static inline bool ddaLL128RsNarrow(const ncclComm* comm, const rcclArchThresholds* t, size_t shardBytes) {
+// Whether a batched shard starts narrow: up to rsDdaLL128NarrowMaxPerRank, with DDA_LL128_RS_THREADS unset (a valid
+// one always wins).
+static inline bool ddaLL128RsNarrow(const rcclArchThresholds* t, size_t shardBytes) {
   if (t == nullptr || t->rsDdaLL128NarrowMaxPerRank == 0 || ddaLL128RsThreadsFit(rcclParamDdaLL128RSThreads())) {
     return false;
   }
-  // LL never ran shards past kDdaLLRsMaxBytes, whatever the table says.
-  return shardBytes <= std::min(t->rsDdaLL128NarrowMaxPerRank, dda::common::kDdaLLRsMaxBytes) &&
-         ddaLL128RsTakesLLShards(comm, t);
+  return shardBytes <= t->rsDdaLL128NarrowMaxPerRank;
 }
 
 // Launch shape of whichever kernel the message takes.
@@ -107,7 +92,7 @@ struct DdaLL128RsGeom {
 
 // A warp (batched) or a warp group (peer-parallel) carries one slice, so blocks = ceil(slices / slicesPerBlock),
 // capped by the grid budget. More slices than the grid holds just means more passes through the slice loop. From
-// rankScaledMinRanks ranks, batched shards LL ran start at narrow blocks and widen to the batched block size once the
+// rankScaledMinRanks ranks, small batched shards start at narrow blocks and widen to the batched block size once the
 // budget is full.
 static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
@@ -136,7 +121,7 @@ static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, siz
     const rcclArchThresholds* t = rcclDdaFabricRsLL128ShapeTable(comm);
     const unsigned batchedThreads = ddaLL128RSThreads(comm);
     threads = batchedThreads;
-    if (ddaLL128RsNarrow(comm, t, shardBytes)) {
+    if (ddaLL128RsNarrow(t, shardBytes)) {
       threads = std::min(kDdaLL128RsNarrowThreads, batchedThreads);
       while (threads < batchedThreads && slices > (size_t)nBlocksMax * (threads / (unsigned)kDdaLL128Warp)) {
         threads = std::min(threads * 2, batchedThreads);

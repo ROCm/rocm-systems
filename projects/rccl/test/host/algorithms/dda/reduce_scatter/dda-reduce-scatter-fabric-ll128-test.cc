@@ -20,6 +20,7 @@
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 
 #include "fakes/param_redirect.h"
 
@@ -82,7 +83,6 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
 
   // The launch-shape entries of the gfx1250 SPX table: 256-thread batched blocks, LL on at its 1 MiB cap.
   void UseShapeTable() {
-    table_.ddaLLMax[ncclFuncReduceScatter] = size_t{1} << 20;
     table_.rankScaledMinRanks = 8;
     table_.rsDdaLL128NarrowMaxPerRank = size_t{1} << 20;
     comm().archThresholds = &table_;
@@ -309,10 +309,10 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithin
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
 }
 
-// From the table's rankScaledMinRanks, a batched shard up to rsDdaLL128NarrowMaxPerRank that LL ran starts at
-// 128-thread blocks (4 warps) and widens only once ddaFabricMaxBlocks blocks are full, up to the batched block size.
-// Larger shards, shards LL did not run, smaller comms, the peer-parallel kernel and no table keep that block size.
-TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTableStartsLLShardsNarrow) {
+// From the table's rankScaledMinRanks, a batched shard up to rsDdaLL128NarrowMaxPerRank starts at 128-thread blocks
+// (4 warps) and widens only once ddaFabricMaxBlocks blocks are full, up to the batched block size. LL settings do not
+// change it. Larger shards, smaller comms, the peer-parallel kernel and no table keep that block size.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTableStartsSmallShardsNarrow) {
   using Shape = std::pair<unsigned, unsigned>;
   constexpr size_t kMiBFloats = (size_t{1} << 20) / sizeof(float);
   UseShapeTable();
@@ -335,14 +335,14 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTableStartsLLShardsNarr
   comm().nRanks = 64;
   EXPECT_EQ(GridBlock(kMiBFloats), Shape(137u, 128u));
   comm().nRanks = 8;
-  // Shards LL did not run: LL off, LL below the table's cap, or LL's bank past the scratch.
+  // LL does not run these shards, so its settings leave the shape alone.
   SetLLThreshold(0);
-  EXPECT_EQ(GridBlock(kMiBFloats), Shape(69u, 256u)) << "LL off";
+  EXPECT_EQ(GridBlock(kMiBFloats), Shape(137u, 128u)) << "LL off";
   SetLLThreshold(size_t{512} << 10);
-  EXPECT_EQ(GridBlock(kMiBFloats), Shape(69u, 256u)) << "LL lowered below the table's cap";
+  EXPECT_EQ(GridBlock(kMiBFloats), Shape(137u, 128u)) << "LL lowered";
   SetLLThreshold(size_t{1} << 20);
   comm().ddaScratchBytes = 2 * dda::common::ddaLLRsBankBytes(8) - 128;
-  EXPECT_EQ(GridBlock(4 * kSliceFloats), Shape(1u, 256u)) << "LL's bank does not fit";
+  EXPECT_EQ(GridBlock(4 * kSliceFloats), Shape(1u, 128u)) << "LL's bank does not fit";
   comm().ddaScratchBytes = std::numeric_limits<size_t>::max();
   table_.rsDdaLL128NarrowMaxPerRank = 0;
   EXPECT_EQ(GridBlock(kMiBFloats), Shape(69u, 256u)) << "a table without the entry";
