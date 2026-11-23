@@ -1241,6 +1241,8 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       } else {
         line.tag->dirty = false;
         line.tag->coherence = simdojo::CoherenceState::SHARED;
+        if (line.snapshot->l2 != nullptr)
+          line.snapshot->l2->may_have_shared_lines_.store(true, std::memory_order_relaxed);
       }
     }
     for (const CommitLine &line : clean_lines) {

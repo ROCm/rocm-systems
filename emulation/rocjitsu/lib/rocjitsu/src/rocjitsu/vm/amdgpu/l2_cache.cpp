@@ -1043,8 +1043,11 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
         return outcome;
       std::memcpy(dst + copied, line.data + line_offset, chunk);
     }
-    if (mtype == Mtype::CC)
+    if (mtype == Mtype::CC) {
+      // A coherent read leaves a clean coherent copy.
       line.tag->coherence = simdojo::CoherenceState::SHARED;
+      may_have_shared_lines_.store(true, std::memory_order_relaxed);
+    }
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
@@ -1097,6 +1100,8 @@ bool L2Cache::try_write_private_dwords(std::span<const VmRamDwordStore> stores,
         cache_.lookup(store.address, &tag, vmid);
         cache_.write_line(store.address, store.source, CacheStore::line_offset(store.address),
                           sizeof(uint32_t), vmid);
+        if (mtype == Mtype::CC)
+          may_have_shared_lines_.store(true, std::memory_order_relaxed);
         tag->coherence = mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
                                             : simdojo::CoherenceState::EXCLUSIVE;
       }
@@ -1205,6 +1210,8 @@ VmAccessOutcome L2Cache::write_impl(uint64_t addr, const uint8_t *src, uint32_t 
     // in L2 as dirty lines and never reach the host-visible pages, causing
     // stale reads on D2H copy.
     line.tag->dirty = clear_dirty_bytes(CacheStore::line_address(ea), line_offset, chunk, vmid);
+    if (!line.tag->dirty && mtype == Mtype::CC)
+      may_have_shared_lines_.store(true, std::memory_order_relaxed);
     line.tag->coherence = line.tag->dirty
                               ? simdojo::CoherenceState::MODIFIED
                               : (mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
@@ -1293,6 +1300,8 @@ VmAccessOutcome L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data,
       return write_outcome;
     CacheStore::write_line(line, data + dirty_offset, dirty_offset, dirty_size);
     line.tag->dirty = clear_dirty_bytes(line_addr, dirty_offset, dirty_size, vmid);
+    if (!line.tag->dirty)
+      may_have_shared_lines_.store(true, std::memory_order_relaxed);
     line.tag->coherence =
         line.tag->dirty ? simdojo::CoherenceState::MODIFIED : simdojo::CoherenceState::SHARED;
   } else {
@@ -1344,6 +1353,11 @@ VmAccessOutcome L2Cache::invalidate_buffer_scope(bool system_scope) {
   const auto outcome = flush_dirty_locked();
   if (outcome != VmAccessOutcome::Complete)
     return outcome;
+  if (!may_have_shared_lines_.load(std::memory_order_relaxed) &&
+      !has_dirty_lines_.load(std::memory_order_relaxed)) {
+    cache_.invalidate_all();
+    return VmAccessOutcome::Complete;
+  }
   cache_.invalidate_clean_if([](const simdojo::CacheTag &tag) {
     return tag.coherence != simdojo::CoherenceState::SHARED;
   });
@@ -1357,6 +1371,7 @@ VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {
   if (outcome != VmAccessOutcome::Complete)
     return outcome;
   cache_.invalidate_all();
+  may_have_shared_lines_.store(false, std::memory_order_relaxed);
   clear_all_dirty_bytes();
   return VmAccessOutcome::Complete;
 }

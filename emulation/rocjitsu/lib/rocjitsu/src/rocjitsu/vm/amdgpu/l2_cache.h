@@ -657,6 +657,9 @@ private:
   std::mutex dirty_bytes_mutex_;
   std::map<std::pair<uint32_t, uint64_t>, DirtyMask> dirty_bytes_;
   std::atomic<bool> has_dirty_lines_{false};
+  // Set when a line may be left SHARED; scoped invalidation must then keep
+  // those lines, otherwise it can discard the whole cache in constant time.
+  std::atomic<bool> may_have_shared_lines_{false};
   std::vector<simdojo::Port *> cpl_ports_;
   struct alignas(64) DiagnosticCounters {
     std::atomic<uint64_t> writes{0};
