@@ -52,8 +52,9 @@ std::optional<uint64_t> gfx11_smem_calculate_address(const Encoding &inst, Wavef
     // ISA 8.1.2 checks the immediate separately even if SOFFSET compensates for it.
     if (state)
       state->memviol = immediate < 0;
+    // Physical gfx1100 rounds NUM_RECORDS down to whole DWORDs.
     return scalar_buffer_address(wf, sbase_sel, aligned_base, offset, state,
-                                 /*align_mask=*/3, /*size_align_mask=*/0);
+                                 /*align_mask=*/3, /*size_align_mask=*/3);
   }
   if (offset < 0)
     wf.report_undefined_behavior("negative combined scalar-memory offset");

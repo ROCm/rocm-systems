@@ -82,8 +82,10 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
     wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
                                              : "negative combined scalar-memory offset");
   if (buffer_load) {
+    // Physical gfx1201 rounds NUM_RECORDS down to whole DWORDs even for sub-dword loads,
+    // while retaining byte/halfword address alignment.
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
-                                                    align_mask);
+                                                    /*size_align_mask=*/3);
   }
   return (*base + off) & ~align_mask;
 }
