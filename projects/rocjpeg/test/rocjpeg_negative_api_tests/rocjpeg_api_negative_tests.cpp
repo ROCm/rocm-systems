@@ -1998,8 +1998,15 @@ int RocJpegApiNegativeTests::CheckCrossDeviceDecode(int handle_device, int calle
             return EXIT_FAILURE;
         }
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            std::cout << "info: Skipping, rocJpegCreate on device " << handle_device << " returned " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
-            return EXIT_SUCCESS;
+            if (k == 0) {
+                std::cout << "info: Skipping, rocJpegCreate on device " << handle_device << " returned " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_SUCCESS;
+            }
+            // The reference handle was created on handle_device, so failing to create one there with caller_device
+            // current is a regression, not a device rocJPEG cannot use.
+            std::cerr << "rocJpegCreate on device " << handle_device << " with device " << caller_device
+                      << " current: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
         }
         // The output buffers are allocated on handle_device.
         if (hipSetDevice(handle_device) != hipSuccess) {
