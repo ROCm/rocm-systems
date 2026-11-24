@@ -298,7 +298,7 @@ TEST(ScalarControlTest, AbsDifferenceWrapsBeforeTakingMagnitude) {
     ASSERT_NE(wave, nullptr);
     wave->set_exec(0);
     const auto base = wave->sgpr_alloc().base;
-    for (unsigned destination : {0u, 2u})
+    for (unsigned destination : {0u, 2u}) {
       for (const auto &c : cases) {
         SCOPED_TRACE(testing::Message() << "arch=" << arch.arch << " a=" << c[0] << " b=" << c[1]);
         cu->write_sgpr(base, c[0]);
@@ -311,6 +311,7 @@ TEST(ScalarControlTest, AbsDifferenceWrapsBeforeTakingMagnitude) {
         EXPECT_EQ(cu->read_sgpr(base + destination), c[2]);
         EXPECT_EQ(wave->read_scc(), c[2] != 0);
       }
+    }
     wave->halt();
   }
 }
@@ -332,14 +333,15 @@ TEST(ScalarControlTest, MovrelUsesDwordOffsetsForBothWidthsAndDirections) {
     ASSERT_NE(wave, nullptr);
     wave->set_exec(0);
     const auto base = wave->sgpr_alloc().base;
-    for (bool wide : {false, true})
-      for (bool destination : {false, true})
+    for (bool wide : {false, true}) {
+      for (bool destination : {false, true}) {
         for (unsigned offset : {0u, 1u, 2u, 3u, 10u, 80u, 108u, 128u, 0x100u, 0x80000002u,
                                 0xfffffffeu, 0xffffffffu}) {
           SCOPED_TRACE(testing::Message() << "arch=" << arch.arch << " wide=" << wide
                                           << " dst=" << destination << " offset=" << offset);
-          for (unsigned r = 0; r < 102; ++r)
+          for (unsigned r = 0; r < 102; ++r) {
             cu->write_sgpr(base + r, 0x12340000u + r);
+          }
           wave->set_m0(offset);
           wave->write_scc(true);
           const auto opcode = destination ? (wide ? arch.movreld64 : arch.movreld32)
@@ -353,21 +355,25 @@ TEST(ScalarControlTest, MovrelUsesDwordOffsetsForBothWidthsAndDirections) {
           const uint64_t dst = 20 + (destination ? aligned : 0);
           for (unsigned reg = 0; reg < 102; ++reg) {
             uint32_t expected = 0x12340000u + reg;
-            if (dst + (wide ? 2u : 1u) <= 102 && reg >= dst && reg < dst + (wide ? 2u : 1u))
+            if (dst + (wide ? 2u : 1u) <= 102 && reg >= dst && reg < dst + (wide ? 2u : 1u)) {
               expected = 0x12340000u + (src + (wide ? 2u : 1u) <= 102 ? src : 0) + reg - dst;
+            }
             EXPECT_EQ(cu->read_sgpr(base + reg), expected) << "reg=" << reg;
           }
           EXPECT_TRUE(wave->read_scc());
         }
+      }
+    }
     wave->halt();
   }
 }
 
 TEST(ScalarControlTest, SetkillHonorsLowImmediateBitAndDrainsMemory) {
   for (const auto &arch : kScalarControlArches) {
-    if (arch.setkill == 0xffffffffu)
+    if (arch.setkill == 0xffffffffu) {
       continue;
-    for (unsigned immediate : {0u, 2u, 1u, 3u, 0xffffu})
+    }
+    for (unsigned immediate : {0u, 2u, 1u, 3u, 0xffffu}) {
       for (bool pending : {false, true}) {
         SCOPED_TRACE(testing::Message() << "arch=" << arch.arch << " immediate=" << immediate
                                         << " pending=" << pending);
@@ -385,8 +391,9 @@ TEST(ScalarControlTest, SetkillHonorsLowImmediateBitAndDrainsMemory) {
         auto *wave = cu->dispatch_wf(0, 0, 102, 16);
         ASSERT_NE(wave, nullptr);
         wave->set_exec(0);
-        if (pending)
+        if (pending) {
           wave->wait_counters().lgkmcnt = 1;
+        }
         const uint32_t words[] = {0xbf800000u | (arch.setkill << 16) | immediate};
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
         ASSERT_NE(inst, nullptr);
@@ -401,6 +408,7 @@ TEST(ScalarControlTest, SetkillHonorsLowImmediateBitAndDrainsMemory) {
           wave->halt();
         }
       }
+    }
   }
 }
 
@@ -415,8 +423,9 @@ TEST(ScalarControlTest, OnlySTrapCarriesTheSoftwareTrapFlag) {
     size_t traps = 0;
     for (const auto &encoding : encodings) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.words.data()));
-      if (!inst)
+      if (!inst) {
         continue;
+      }
       const bool trap = (inst->flags() & SOFTWARE_TRAP) != 0;
       EXPECT_EQ(trap, inst->mnemonic() == "s_trap") << inst->mnemonic();
       traps += trap;
@@ -454,9 +463,9 @@ TEST(ScreenPartitionTest, RectangleCoverageMatchesAllSelectorsAndRespectsExec) {
     const auto base = wave->vgpr_alloc().base;
     for (bool scalar : {false, true}) {
       ForceScalarGuard force(scalar);
-      for (bool vop3 : {false, true})
-        for (unsigned destination : {2u, 4u})
-          for (unsigned batch = 0; batch < 4; ++batch)
+      for (bool vop3 : {false, true}) {
+        for (unsigned destination : {2u, 4u}) {
+          for (unsigned batch = 0; batch < 4; ++batch) {
             for (uint64_t mask : {uint64_t{0}, uint64_t{0x80000000800000a5}, ~uint64_t{0}}) {
               wave->set_exec(mask);
               for (unsigned lane = 0; lane < 64; ++lane) {
@@ -476,16 +485,20 @@ TEST(ScreenPartitionTest, RectangleCoverageMatchesAllSelectorsAndRespectsExec) {
                 const unsigned dx = (((selector >> 2) & 3) - xmin) & 3;
                 const unsigned dy = ((selector & 3) - ymin) & 3;
                 uint32_t coverage = 0;
-                for (unsigned x = xmin; x <= xmin + dx; ++x)
+                for (unsigned x = xmin; x <= xmin + dx; ++x) {
                   for (unsigned y = ymin; y <= ymin + dy; ++y) {
                     const unsigned se = (((x ^ (y >> 1)) & 1) << 1) | ((y ^ (x >> 1)) & 1);
                     coverage |= 1u << se;
                   }
+                }
                 const uint32_t original = destination == 2 ? 0xabcd0000u | selector : 0x12345678;
                 EXPECT_EQ(cu->read_vgpr(base + destination, lane),
                           mask & (1ull << lane) ? coverage : original);
               }
             }
+          }
+        }
+      }
     }
     wave->halt();
   }
@@ -529,9 +542,10 @@ TEST(ScreenPartitionTest, DppAndSdwaStageSourcesAndPreserveMaskedDestinations) {
     execute(
         {prefix | amdgpu::SRC_DPP, 2u | (amdgpu::dpp::ROW_SHR1 << 8) | (15u << 24) | (1u << 28)});
     constexpr uint32_t kCoverage[] = {1, 3, 7, 15, 5, 15, 15, 15, 7, 15, 15, 15, 15, 15, 15};
-    for (unsigned lane = 0; lane < 64; ++lane)
+    for (unsigned lane = 0; lane < 64; ++lane) {
       EXPECT_EQ(cu->read_vgpr(base + 4, lane),
                 lane > 0 && lane < 16 ? kCoverage[lane - 1] : 0xdeadbeefu);
+    }
   }
   wave->halt();
 }
@@ -625,8 +639,9 @@ TEST(CdnaVop3pPackedF32Test, SgprSourcesUseArchitectureSpecificWidth) {
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
       }
 
-      if (!wf->is_halted())
+      if (!wf->is_halted()) {
         wf->halt();
+      }
     }
   }
 }
@@ -640,8 +655,9 @@ public:
   MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
                amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
       : Base(std::move(name), config, memory, l2) {
-    if (l2)
+    if (l2) {
       l2->set_backing_memory(memory);
+    }
     this->set_memory(memory);
     this->set_l2(l2);
   }
@@ -649,8 +665,9 @@ public:
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
     std::unique_ptr<Instruction> owner(inst);
     EXPECT_TRUE(this->execute_instruction(inst, wf).succeeded());
-    if (inst->is_memory_op())
+    if (inst->is_memory_op()) {
       this->route_memory_inst(owner, wf);
+    }
   }
 };
 
@@ -688,8 +705,9 @@ inline bool should_skip_inst(std::string_view mn) {
   // allocation can segfault.
   //
   // Allowlist approach: only s_* instructions that are pure ALU.
-  if (mn.empty() || mn[0] != 's' || mn[1] != '_')
+  if (mn.empty() || mn[0] != 's' || mn[1] != '_') {
     return true; // Skip all non-scalar instructions.
+  }
   static constexpr std::string_view SKIP_PREFIXES[] = {
       // Memory instructions
       "s_load_",
@@ -738,9 +756,11 @@ constexpr HarnessExpectation HARNESS_EXPECTATIONS[] = {
 };
 
 const HarnessExpectation *harness_expectation(std::string_view arch_name) {
-  for (const auto &expectation : HARNESS_EXPECTATIONS)
-    if (expectation.arch_name == arch_name)
+  for (const auto &expectation : HARNESS_EXPECTATIONS) {
+    if (expectation.arch_name == arch_name) {
       return &expectation;
+    }
+  }
   return nullptr;
 }
 
@@ -825,8 +845,9 @@ void run_execution_harness(rocjitsu::IsaFamily arch, std::string_view arch_name,
     }
 
     // Reset the wavefront for the next instruction.
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 
   size_t testable = total - skipped;
@@ -841,8 +862,9 @@ void run_execution_harness(rocjitsu::IsaFamily arch, std::string_view arch_name,
       const auto mnemonic = unimpl_list[i];
       std::printf(" %.*s", static_cast<int>(mnemonic.size()), mnemonic.data());
     }
-    if (unimpl_list.size() > 20)
+    if (unimpl_list.size() > 20) {
       std::printf(" ... +%zu more", unimpl_list.size() - 20);
+    }
     std::printf("\n");
   }
 
@@ -986,13 +1008,15 @@ template <typename Isa> void check_high_shared_flat_addresses(rocjitsu::IsaFamil
   for (uint32_t shared_lane : {0u, 1u}) {
     for (bool mixed : {false, true}) {
       for (const Case &test : kCases) {
-        if (arch == rocjitsu::IsaFamily::Cdna4 && (test.immediate != 0 || test.rdna4_only))
+        if (arch == rocjitsu::IsaFamily::Cdna4 && (test.immediate != 0 || test.rdna4_only)) {
           continue; // Keep the older target's immediate rules out of this matrix.
+        }
         for (Operation operation : {Operation::Load, Operation::Store, Operation::Atomic}) {
           const bool load = operation == Operation::Load;
           const bool atomic = operation == Operation::Atomic;
-          if (arch == rocjitsu::IsaFamily::Cdna4 && atomic)
+          if (arch == rocjitsu::IsaFamily::Cdna4 && atomic) {
             continue;
+          }
           SCOPED_TRACE(testing::Message()
                        << "shared lane=" << shared_lane << " mixed=" << mixed
                        << " offset=" << test.address_offset << " immediate=" << test.immediate
@@ -1021,10 +1045,11 @@ template <typename Isa> void check_high_shared_flat_addresses(rocjitsu::IsaFamil
           constexpr uint32_t canary = 0xdeadbeef, value = 0x12345678;
           constexpr uint32_t foreign_canary = 0x55aa33cc, inactive_value = 0xabad1dea;
           constexpr uint32_t destination = 0xbaadf00d, global_value = 0x87654321;
-          for (uint32_t address = 0; address < 4 * allocation; address += 4)
+          for (uint32_t address = 0; address < 4 * allocation; address += 4) {
             wf->lds().write32(address, address >= own_base && address < own_base + allocation
                                            ? canary
                                            : foreign_canary);
+          }
           memory.write32(0x2000, global_value);
           const uint32_t vb = wf->vgpr_alloc().base;
           for (uint32_t lane = 0; lane < 3; ++lane) {
@@ -1142,8 +1167,9 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
             wave->lds().write32(address, value);
             std::memcpy(expected_memory.data() + address, &value, 4);
           }
-          for (uint32_t word = 0; word < 5; ++word)
+          for (uint32_t word = 0; word < 5; ++word) {
             memory.write32(0x4000 + word * 4, 0x88770000u + word);
+          }
           const uint32_t vb = wave->vgpr_alloc().base;
           for (uint32_t lane = 0; lane < 3; ++lane) {
             const uint64_t address = lane == 1 ? 0x4000 : shared_base + test.address_offset;
@@ -1169,28 +1195,32 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
           ASSERT_EQ(cu.route_memory_inst(instruction, *wave), amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
           const uint32_t valid_words = std::min(width, test.valid_words);
-          if (!load)
-            for (uint32_t word = 0; word < valid_words; ++word)
+          if (!load) {
+            for (uint32_t word = 0; word < valid_words; ++word) {
               std::memcpy(expected_memory.data() + 1024 + test.logical_offset + word * 4,
                           &payload[word], 4);
+            }
+          }
           for (uint32_t address = 0; address < expected_memory.size(); address += 4) {
             uint32_t expected;
             std::memcpy(&expected, expected_memory.data() + address, 4);
             EXPECT_EQ(wave->lds().read32(address), expected) << "LDS address=" << address;
           }
-          for (uint32_t word = 0; word < 5; ++word)
+          for (uint32_t word = 0; word < 5; ++word) {
             EXPECT_EQ(memory.read32(0x4000 + word * 4),
                       !load && mixed && word < width ? payload[word] : 0x88770000u + word);
+          }
           for (uint32_t lane = 0; lane < 3; ++lane) {
             for (uint32_t word = 0; word < 4; ++word) {
               uint32_t expected = 0xa5a50000u + lane * 16 + word;
               if (load && word < width && (lane == 0 || (mixed && lane == 1))) {
                 expected = 0;
-                if (lane == 1)
+                if (lane == 1) {
                   expected = 0x88770000u + word;
-                else if (word < valid_words)
+                } else if (word < valid_words) {
                   std::memcpy(&expected,
                               expected_memory.data() + 1024 + test.logical_offset + word * 4, 4);
+                }
               }
               EXPECT_EQ(cu.read_vgpr(vb + 16 + word, lane), expected);
             }
@@ -1298,8 +1328,9 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           wf->set_lds_base(own_base);
           wf->set_lds_size(2048);
           constexpr uint32_t canary = 0xdeadbeef;
-          for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4)
+          for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4) {
             wf->lds().write32(address, canary);
+          }
           memory.write32(0x2000, canary);
           const uint32_t vb = wf->vgpr_alloc().base;
           for (uint32_t lane = 0; lane < 2; ++lane) {
@@ -1319,11 +1350,13 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           EXPECT_EQ(cu.route_memory_inst(inst, *wf), amdgpu::VmAccessOutcome::Faulted);
           EXPECT_TRUE(wf->wait_counters().empty());
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
-          for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4)
+          for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4) {
             EXPECT_EQ(wf->lds().read32(address), canary);
+          }
           EXPECT_EQ(memory.read32(0x2000), canary);
-          for (uint32_t lane = 0; lane < 2; ++lane)
+          for (uint32_t lane = 0; lane < 2; ++lane) {
             EXPECT_EQ(cu.read_vgpr(vb + 16, lane), canary);
+          }
         }
       }
     }
@@ -1425,10 +1458,11 @@ TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult
         cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
         for (uint32_t word = 0; word <= test.width; ++word) {
           const uint32_t value = word == test.width ? canary : initial(lane, word);
-          if (lane == local_lane)
+          if (lane == local_lane) {
             wf->lds().write32(wf->lds_base() + 0x40 + word * 4, value);
-          else
+          } else {
             memory.write32(address + word * 4, value);
+          }
           cu.write_vgpr(vb + 8 + word, lane, 7 + word);
           cu.write_vgpr(vb + 16 + word, lane, canary);
         }
@@ -1505,9 +1539,11 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rocjitsu::IsaFa
       };
       auto initial = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 16 + word; };
       auto source = [](uint32_t lane, uint32_t word) { return 0x12300000u + lane * 16 + word; };
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
-        for (uint32_t word = 0; word < 32; ++word)
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        for (uint32_t word = 0; word < 32; ++word) {
           memory.write32(scratch_address(lane, word), canary);
+        }
+      }
       for (uint32_t lane = 0; lane < 4; ++lane) {
         for (uint32_t word = 0; word < 32; ++word) {
           memory.write32(global_base + lane * 128 + word * 4, canary);
@@ -1525,29 +1561,32 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rocjitsu::IsaFa
         for (uint32_t word = 0; word < 5; ++word) {
           cu.write_vgpr(vb + 8 + word, lane, source(lane, word));
           cu.write_vgpr(vb + 16 + word, lane, canary);
-          if (lane >= 3 || word >= 4)
+          if (lane >= 3 || word >= 4) {
             continue;
-          if (lane == shared_lane)
+          }
+          if (lane == shared_lane) {
             wf->lds().write32(wf->lds_base() + lane * 128 + offset + word * 4, initial(lane, word));
-          else
+          } else {
             memory.write32(lane == scratch_lane ? scratch_address(lane, offset / 4 + word)
                                                 : global_base + lane * 128 + offset + word * 4,
                            initial(lane, word));
+          }
         }
       }
       std::array<uint32_t, 3> words;
-      if (is_cdna5)
+      if (is_cdna5) {
         words = cdna5::build_vflat(load ? cdna5::kFlatLoadB128Vflat : cdna5::kFlatStoreB128Vflat,
                                    {.saddr = 124,
                                     .vdst = uint8_t(load ? 16 : 0),
                                     .vsrc = uint8_t(load ? 0 : 8),
                                     .vaddr = 0});
-      else
+      } else {
         words = rdna4::build_vflat(load ? rdna4::kFlatLoadB128Vflat : rdna4::kFlatStoreB128Vflat,
                                    {.saddr = 124,
                                     .vdst = uint8_t(load ? 16 : 0),
                                     .vsrc = uint8_t(load ? 0 : 8),
                                     .vaddr = 0});
+      }
       auto decoder = Decoder::create(arch);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -1555,13 +1594,16 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rocjitsu::IsaFa
       ASSERT_EQ(cu.route_memory_inst(inst, *wf), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       auto expected = [&](uint32_t lane, uint32_t word, uint32_t selected_lane) {
-        if (lane != selected_lane || word < offset / 4 || word >= offset / 4 + 4)
+        if (lane != selected_lane || word < offset / 4 || word >= offset / 4 + 4) {
           return canary;
+        }
         return load ? initial(lane, word - offset / 4) : source(lane, word - offset / 4);
       };
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
-        for (uint32_t word = 0; word < 32; ++word)
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        for (uint32_t word = 0; word < 32; ++word) {
           EXPECT_EQ(memory.read32(scratch_address(lane, word)), expected(lane, word, scratch_lane));
+        }
+      }
       for (uint32_t lane = 0; lane < 4; ++lane) {
         for (uint32_t word = 0; word < 32; ++word) {
           EXPECT_EQ(memory.read32(global_base + lane * 128 + word * 4),
@@ -1569,9 +1611,10 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rocjitsu::IsaFa
           EXPECT_EQ(wf->lds().read32(wf->lds_base() + lane * 128 + word * 4),
                     expected(lane, word, shared_lane));
         }
-        for (uint32_t word = 0; word < 5; ++word)
+        for (uint32_t word = 0; word < 5; ++word) {
           EXPECT_EQ(cu.read_vgpr(vb + 16 + word, lane),
                     load && lane < 3 && word < 4 ? initial(lane, word) : canary);
+        }
       }
       EXPECT_TRUE(wf->wait_counters().empty());
       wf->halt();
@@ -1656,8 +1699,9 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 32), 0u);
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 48), 0x22000001u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 template <typename Isa>
@@ -1707,8 +1751,9 @@ void check_block_transfer_masks(rocjitsu::IsaFamily arch, bool general_completio
                             .vdst = uint8_t(load ? 32 : 0),
                             .vsrc = uint8_t(load ? 0 : 32),
                             .vaddr = 0};
-              if constexpr (requires { fields.sve; })
+              if constexpr (requires { fields.sve; }) {
                 fields.sve = 1; // Documented SV scratch addressing, with zero v0.
+              }
               return builder(opcode, fields);
             };
         std::array<uint32_t, 3> words;
@@ -1824,21 +1869,23 @@ template <typename Isa> void check_block_transfer_ownership(rocjitsu::IsaFamily 
                             .vdst = uint8_t(load ? 240 : 0),
                             .vsrc = uint8_t(load ? 0 : 240),
                             .vaddr = 2};
-              if constexpr (requires { fields.sve; })
+              if constexpr (requires { fields.sve; }) {
                 fields.sve = 1;
+              }
               return builder(opcode, fields);
             };
         const auto words = [&] {
-          if constexpr (std::is_same_v<Isa, cdna5::Isa>)
+          if constexpr (std::is_same_v<Isa, cdna5::Isa>) {
             return scratch ? build_words(cdna5::build_vscratch, load ? cdna5::kScratchLoadBlock
                                                                      : cdna5::kScratchStoreBlock)
                            : build_words(cdna5::build_vglobal,
                                          load ? cdna5::kGlobalLoadBlock : cdna5::kGlobalStoreBlock);
-          else
+          } else {
             return scratch ? build_words(rdna4::build_vscratch, load ? rdna4::kScratchLoadBlock
                                                                      : rdna4::kScratchStoreBlock)
                            : build_words(rdna4::build_vglobal,
                                          load ? rdna4::kGlobalLoadBlock : rdna4::kGlobalStoreBlock);
+          }
         }();
         auto decoder = Decoder::create(arch);
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -1953,8 +2000,9 @@ TEST(Gfx1250MemoryExecutionHarness, SwizzledBufferIdxenOffenUsesScaledStride) {
   EXPECT_EQ(cu.read_vgpr(vb + 1, 0), kPayload[0]);
   EXPECT_EQ(cu.read_vgpr(vb + 1, 1), kPayload[1]);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250MemoryExecutionHarness, NonBufferResourceTypeSuppressesLoadAndStore) {
@@ -2022,8 +2070,9 @@ TEST(Gfx1250MemoryExecutionHarness, NonBufferResourceTypeSuppressesLoadAndStore)
   EXPECT_EQ(cu.read_vgpr(vb + 1, 0), kLoadSentinel);
   EXPECT_TRUE(wf->wait_counters().empty());
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna2MovrelModifierTest, RelativeSourceIsSelectedBeforeDppAndSdwaStaging) {
@@ -2046,8 +2095,9 @@ TEST(Rdna2MovrelModifierTest, RelativeSourceIsSelectedBeforeDppAndSdwaStaging) {
 
   const uint32_t base = wf->vgpr_alloc().base;
   wf->set_m0(1u); // Every encoded v7 source below resolves to v8.
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(base + 8, lane, 0x100u + lane);
+  }
 
   auto execute = [&](const std::array<uint32_t, 2> &words) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -2059,8 +2109,9 @@ TEST(Rdna2MovrelModifierTest, RelativeSourceIsSelectedBeforeDppAndSdwaStaging) {
   // LLVM 23 gfx1030 encodings. DPP16 row_shr:1 reads the M0-adjusted source
   // from the preceding lane and supplies zero at the row boundary.
   wf->set_exec(~0ULL);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(base + 5, lane, 0xDEADBEEFu);
+  }
   execute({0x7E0A86FAu, 0xFF091107u});
   EXPECT_EQ(cu->read_vgpr(base + 5, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(base + 5, 1), 0x100u);
@@ -2071,14 +2122,16 @@ TEST(Rdna2MovrelModifierTest, RelativeSourceIsSelectedBeforeDppAndSdwaStaging) {
   // fetch its odd, inactive partner. Inactive destinations remain untouched.
   constexpr uint64_t kEvenLanes = 0x5555555555555555ULL;
   wf->set_exec(kEvenLanes);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(base + 5, lane, 0xDEADBEEFu);
+  }
   execute({0x7E0A86E9u, 0xDE54C107u}); // dpp8 [1,0,3,2,5,4,7,6], FI=0
   EXPECT_EQ(cu->read_vgpr(base + 5, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(base + 5, 1), 0xDEADBEEFu);
 
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(base + 5, lane, 0xDEADBEEFu);
+  }
   execute({0x7E0A86EAu, 0xDE54C107u}); // same permutation, FI=1
   EXPECT_EQ(cu->read_vgpr(base + 5, 0), 0x101u);
   EXPECT_EQ(cu->read_vgpr(base + 5, 1), 0xDEADBEEFu);
@@ -2098,9 +2151,10 @@ TEST(Cdna4GprIdxTest, SelectorMaskMapsIndependentlyToEachOperandRole) {
       amdgpu::VgprMsbRole::Dst};
 
   for (uint32_t mask = 0; mask < 16; ++mask) {
-    for (size_t role = 0; role < kRoles.size(); ++role)
+    for (size_t role = 0; role < kRoles.size(); ++role) {
       EXPECT_EQ(amdgpu::gpr_idx_role_enabled(mask, kRoles[role]), (mask & (1u << role)) != 0)
           << "mask=" << mask << " role=" << role;
+    }
     EXPECT_FALSE(amdgpu::gpr_idx_role_enabled(mask, amdgpu::VgprMsbRole::None));
   }
 }
@@ -2254,50 +2308,57 @@ TEST(Cdna4GprIdxTest, MfmaIndexesArchitecturalVgprsButNotAccvgprs) {
       cu->write_vgpr(base + kSrc0, lane, std::bit_cast<uint32_t>(src0));
       cu->write_vgpr(base + kSrc0 + kIndex, lane, std::bit_cast<uint32_t>(indexed_src0));
       cu->write_vgpr(base + kSrc1, lane, std::bit_cast<uint32_t>(3.0f));
-      for (uint32_t dword = 0; dword < kDstDwords; ++dword)
+      for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
         cu->write_vgpr(base + kSrc2 + dword, lane, std::bit_cast<uint32_t>(5.0f));
+      }
     }
   };
 
   initialize_sources(7.0f, 2.0f);
   wf->set_m0(kIndex | (0x1u << 12));
   EXPECT_TRUE(cu->execute_instruction(vgpr_instruction.get(), *wf).succeeded());
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
-    for (uint32_t dword = 0; dword < kDstDwords; ++dword)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
       EXPECT_EQ(cu->read_vgpr(base + kDst + dword, lane), std::bit_cast<uint32_t>(29.0f));
+    }
+  }
 
   initialize_sources(2.0f, 7.0f);
   wf->set_m0(kIndex | (0x8u << 12));
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
       cu->write_vgpr(base + kDst + dword, lane, 0x11111111u);
       cu->write_vgpr(base + kDst + kIndex + dword, lane, 0x22222222u);
     }
+  }
   EXPECT_TRUE(cu->execute_instruction(vgpr_instruction.get(), *wf).succeeded());
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
       EXPECT_EQ(cu->read_vgpr(base + kDst + dword, lane), 0x11111111u);
       EXPECT_EQ(cu->read_vgpr(base + kDst + kIndex + dword, lane), std::bit_cast<uint32_t>(29.0f));
     }
+  }
 
   initialize_sources(2.0f, 7.0f);
   wf->set_m0(kIndex | (0xCu << 12));
   const uint32_t acc_base = base + amdgpu::ACC_VGPR_OFFSET + kDst;
   const uint32_t acc_src2_base = base + amdgpu::ACC_VGPR_OFFSET + kSrc2;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
       cu->write_vgpr(acc_src2_base + dword, lane, std::bit_cast<uint32_t>(5.0f));
       cu->write_vgpr(acc_src2_base + kIndex + dword, lane, 0x44444444u);
       cu->write_vgpr(acc_base + dword, lane, 0x22222222u);
       cu->write_vgpr(acc_base + kIndex + dword, lane, 0x33333333u);
     }
+  }
   EXPECT_TRUE(cu->execute_instruction(acc_instruction.get(), *wf).succeeded());
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
       EXPECT_EQ(cu->read_vgpr(acc_base + dword, lane), std::bit_cast<uint32_t>(29.0f));
       EXPECT_EQ(cu->read_vgpr(acc_base + kIndex + dword, lane), 0x33333333u);
       EXPECT_EQ(cu->read_vgpr(acc_src2_base + kIndex + dword, lane), 0x44444444u);
     }
+  }
 }
 
 TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
@@ -2344,8 +2405,9 @@ TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
   run(sub, "s_sub_co_i32", 0x80000000u, 1u, 0x7FFFFFFFu, true);
   run(sub, "s_sub_co_i32", 5u, 3u, 2u, false);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 struct ScalarCvtSccCase {
@@ -2397,8 +2459,9 @@ void run_scalar_cvt_preserves_scc(rocjitsu::IsaFamily arch, std::string_view arc
     }
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 // Keep these raw opcode witnesses independent of the generated encodings used
@@ -2536,8 +2599,9 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     uint64_t expected_mask = 0;
     for (const auto &test : cases) {
       active_mask |= (1ULL << test.lane);
-      if (test.expected)
+      if (test.expected) {
         expected_mask |= (1ULL << test.lane);
+      }
       src0[test.lane] = pack16(test.value, 0xCAFEu);
       src1[test.lane] = pack16(test.mask, 0x1234u);
     }
@@ -2555,8 +2619,9 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), static_cast<uint32_t>(expected_mask));
     EXPECT_EQ(cu->read_sgpr(sb + 1), static_cast<uint32_t>(expected_mask >> 32));
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -2595,8 +2660,9 @@ TEST(Cdna4Vop3Test, BcntAddsSourceAccumulator) {
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->raw_vgpr_reg<64>(vb + 2)[0], 9u);
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -2691,8 +2757,9 @@ TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
       }
 
-      if (!wf->is_halted())
+      if (!wf->is_halted()) {
         wf->halt();
+      }
     }
   }
 }
@@ -2731,8 +2798,9 @@ TEST(Rdna3Dot2ExecutionTest, Vop2Dot2accF32F16AccumulatesDst) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), std::bit_cast<uint32_t>(16.0f));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4Dot2True16ExecutionTest, F16IgnoresOutputModifiersAndUsesSelectedHalves) {
@@ -2772,8 +2840,9 @@ TEST(Rdna4Dot2True16ExecutionTest, F16IgnoresOutputModifiersAndUsesSelectedHalve
 
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(23.5f)));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4Dot2True16ExecutionTest, Bf16UsesSelectedAccumulatorAndDestinationHalf) {
@@ -2813,8 +2882,9 @@ TEST(Rdna4Dot2True16ExecutionTest, Bf16UsesSelectedAccumulatorAndDestinationHalf
 
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(util::f32_to_bf16(16.0f), 0xCAFEu));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 // VOP3P v_dot2_f32_bf16 must widen each 16-bit half as BF16 (8-bit exponent),
@@ -2889,8 +2959,9 @@ void run_cdna4_dot2_f32_bf16(bool force_scalar) {
     EXPECT_EQ(cu->read_vgpr(vb + 3, 0), std::bit_cast<uint32_t>(expected));
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna4Dot2Vop3pExecutionTest, Bf16WidensAsBf16Simd) {
@@ -2977,8 +3048,9 @@ TEST(Cdna4BlockScaleMfmaDecodeTest, ValidCompoundConsumesPrefixAndSuffixThenAdva
     pcs.push_back(byte_pc);
     sizes.push_back(inst->size());
     mnemonics.push_back(inst->mnemonic());
-    if (inst->mnemonic() == "s_endpgm")
+    if (inst->mnemonic() == "s_endpgm") {
       break;
+    }
     byte_pc += static_cast<uint64_t>(inst->size());
   }
 
@@ -3059,10 +3131,11 @@ TEST(Cdna4BlockScaleMfmaDecodeTest, RejectsIllegalScaleSelectors) {
     for (uint32_t scale_position = 0; scale_position < 2; ++scale_position) {
       SCOPED_TRACE(testing::Message() << invalid.name << " scale_position=" << scale_position);
       auto words = make_cdna4_mfma_scale_words(45, 1, vgpr_src(96), vgpr_src(97));
-      if (scale_position == 0)
+      if (scale_position == 0) {
         words[1] = (words[1] & ~(0x1FFu)) | invalid.selector;
-      else
+      } else {
         words[1] = (words[1] & ~(0x1FFu << 9)) | (invalid.selector << 9);
+      }
       EXPECT_TRUE(decode_fails(*decoder, words.data()));
     }
   }
@@ -3123,8 +3196,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wf && !wf->is_halted())
+    if (wf && !wf->is_halted()) {
       wf->halt();
+    }
   }
 
   void seed_inputs(uint32_t packed_value) {
@@ -3137,14 +3211,17 @@ protected:
   }
 
   void seed_accumulator(uint32_t bits, uint32_t output_registers) {
-    for (uint32_t reg = 0; reg < output_registers; ++reg)
-      for (uint32_t lane = 0; lane < 64; ++lane)
+    for (uint32_t reg = 0; reg < output_registers; ++reg) {
+      for (uint32_t lane = 0; lane < 64; ++lane) {
         cu->write_vgpr(vgpr_base + kAccumulator + reg, lane, bits);
+      }
+    }
   }
 
   void seed_scale(uint32_t reg, uint32_t word) {
-    for (uint32_t lane = 0; lane < 64; ++lane)
+    for (uint32_t lane = 0; lane < 64; ++lane) {
       cu->write_vgpr(vgpr_base + reg, lane, word);
+    }
   }
 
   void seed_scale_lane(uint32_t reg, uint32_t lane, uint32_t word) {
@@ -3224,21 +3301,26 @@ protected:
     const uint32_t k_size = matrix_size == 16 ? 128u : 64u;
     const uint32_t a_bits = format_bits(a_fmt);
     const uint32_t b_bits = format_bits(b_fmt);
-    for (uint32_t row = 0; row < matrix_size; ++row)
-      for (uint32_t k = 0; k < k_size; ++k)
+    for (uint32_t row = 0; row < matrix_size; ++row) {
+      for (uint32_t k = 0; k < k_size; ++k) {
         write_input_element(kSrc0, matrix_size, k_size, row, k, a_bits,
                             format_raw(a_fmt, format_matrix_a(row, k)));
-    for (uint32_t col = 0; col < matrix_size; ++col)
-      for (uint32_t k = 0; k < k_size; ++k)
+      }
+    }
+    for (uint32_t col = 0; col < matrix_size; ++col) {
+      for (uint32_t k = 0; k < k_size; ++k) {
         write_input_element(kSrc1, matrix_size, k_size, col, k, b_bits,
                             format_raw(b_fmt, format_matrix_b(col, k)));
+      }
+    }
   }
 
   static float reference_format_pair(uint32_t matrix_size, uint32_t row, uint32_t col) {
     const uint32_t k_size = matrix_size == 16 ? 128u : 64u;
     float result = 0.0f;
-    for (uint32_t k = 0; k < k_size; ++k)
+    for (uint32_t k = 0; k < k_size; ++k) {
       result += format_matrix_a(row, k) * format_matrix_b(col, k);
+    }
     return result;
   }
 
@@ -3255,20 +3337,26 @@ protected:
     seed_scale(kScaleA, 0);
     seed_scale(kScaleB, 0);
 
-    for (uint32_t row = 0; row < 16; ++row)
-      for (uint32_t k = 0; k < 128; ++k)
+    for (uint32_t row = 0; row < 16; ++row) {
+      for (uint32_t k = 0; k < 128; ++k) {
         write_input_element(kSrc0, /*dim=*/16, /*k_size=*/128, row, k, /*bits=*/8,
                             nonuniform_a_raw(row, k));
-    for (uint32_t col = 0; col < 16; ++col)
-      for (uint32_t k = 0; k < 128; ++k)
+      }
+    }
+    for (uint32_t col = 0; col < 16; ++col) {
+      for (uint32_t k = 0; k < 128; ++k) {
         write_input_element(kSrc1, /*dim=*/16, /*k_size=*/128, col, k, /*bits=*/4,
                             nonuniform_b_raw(col, k));
+      }
+    }
 
     for (uint32_t blk = 0; blk < 4; ++blk) {
-      for (uint32_t row = 0; row < 16; ++row)
+      for (uint32_t row = 0; row < 16; ++row) {
         seed_scale_lane(kScaleA, 16 * blk + row, nonuniform_scale_a_exp(row, blk));
-      for (uint32_t col = 0; col < 16; ++col)
+      }
+      for (uint32_t col = 0; col < 16; ++col) {
         seed_scale_lane(kScaleB, 16 * blk + col, nonuniform_scale_b_exp(col, blk));
+      }
     }
   }
 
@@ -3297,9 +3385,11 @@ protected:
   std::vector<uint32_t> capture_outputs(uint32_t output_registers) const {
     std::vector<uint32_t> words;
     words.reserve(output_registers * wf->wf_size());
-    for (uint32_t reg = 0; reg < output_registers; ++reg)
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t reg = 0; reg < output_registers; ++reg) {
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         words.push_back(cu->read_vgpr(vgpr_base + kDst + reg, lane));
+      }
+    }
     return words;
   }
 
@@ -3336,8 +3426,9 @@ protected:
 
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding));
     EXPECT_NE(inst, nullptr);
-    if (!inst)
+    if (!inst) {
       return 0;
+    }
     EXPECT_EQ(inst->size(), has_prefix && abid == 1u ? 16u : 8u);
     EXPECT_TRUE(static_cast<amdgpu::ComputeUnitCore &>(*cu)
                     .execute_instruction(inst.get(), *wf)
@@ -3365,26 +3456,34 @@ TEST_F(Cdna4BlockScaleMfmaExecutionTest, Bare16x16x128Fp8Fp4AccumulatesFullK) {
   ASSERT_NE(inst, nullptr);
 
   // The 16x128 inputs occupy eight FP8 or four FP4 registers per lane.
-  for (uint32_t reg = 0; reg < 8; ++reg)
-    for (uint32_t lane = 0; lane < 64; ++lane)
+  for (uint32_t reg = 0; reg < 8; ++reg) {
+    for (uint32_t lane = 0; lane < 64; ++lane) {
       cu->write_vgpr(vgpr_base + kSrc0 + reg, lane, 0x38383838u); // FP8 1.0.
-  for (uint32_t reg = 0; reg < 4; ++reg)
-    for (uint32_t lane = 0; lane < 64; ++lane)
+    }
+  }
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    for (uint32_t lane = 0; lane < 64; ++lane) {
       cu->write_vgpr(vgpr_base + kSrc1 + reg, lane, 0x22222222u); // FP4 1.0.
+    }
+  }
   seed_accumulator(std::bit_cast<uint32_t>(0.0f), 4);
 
   for (bool force_scalar : {true, false}) {
     SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);
     ForceScalarGuard guard(force_scalar);
-    for (uint32_t reg = 0; reg < 4; ++reg)
-      for (uint32_t lane = 0; lane < 64; ++lane)
+    for (uint32_t reg = 0; reg < 4; ++reg) {
+      for (uint32_t lane = 0; lane < 64; ++lane) {
         cu->write_vgpr(vgpr_base + kDst + reg, lane, 0xccccccccu);
+      }
+    }
 
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t reg = 0; reg < 4; ++reg)
-      for (uint32_t lane = 0; lane < 64; ++lane)
+    for (uint32_t reg = 0; reg < 4; ++reg) {
+      for (uint32_t lane = 0; lane < 64; ++lane) {
         ASSERT_EQ(cu->read_vgpr(vgpr_base + kDst + reg, lane), std::bit_cast<uint32_t>(128.0f))
             << "reg=" << reg << " lane=" << lane;
+      }
+    }
   }
 }
 
@@ -3574,8 +3673,9 @@ TEST_F(Cdna4BlockScaleMfmaExecutionTest, ClampsScaleOverflowAndPreservesTrueInfi
   seed_scale(kScaleA, 0xfefefefe);
   seed_scale(kScaleB, 0x7f7f7f7f);
   for (const auto &tc : cases) {
-    for (uint32_t r = 0; r < 8; ++r)
+    for (uint32_t r = 0; r < 8; ++r) {
       seed_scale(kSrc0 + r, tc.a);
+    }
     seed_accumulator(tc.c, 16);
     for (bool force_scalar : {false, true}) {
       ForceScalarGuard guard(force_scalar);
@@ -3676,8 +3776,9 @@ TEST(Cdna4OmodExecutionTest, IeeeSuppressesTrigPreopOmod) {
   EXPECT_TRUE(cu->execute_instruction(omod.get(), *wf).succeeded());
   EXPECT_EQ(read_f64(6), 0x3FF45F306DC9C882ULL);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna4OmodExecutionTest, MulExceptionClassifierUsesEffectiveOmod) {
@@ -3715,8 +3816,9 @@ TEST(Cdna4OmodExecutionTest, MulExceptionClassifierUsesEffectiveOmod) {
   wf->set_mode_raw(0u);
   EXPECT_EQ(amdgpu::classify_mul_f32_vop3(*mul, *wf) & kOverflow, kOverflow);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(NewerOmodExecutionTest, MulReportsOnlyPermittedExceptionClasses) {
@@ -3788,8 +3890,9 @@ TEST(NewerOmodExecutionTest, MulReportsOnlyPermittedExceptionClasses) {
       EXPECT_EQ(wf->pending_alu_causes() & kOverflow, kOverflow);
       EXPECT_EQ(wf->trapsts() & kOverflow, kOverflow);
 
-      if (!wf->is_halted())
+      if (!wf->is_halted()) {
         wf->halt();
+      }
     }
   }
 }
@@ -3877,8 +3980,9 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsWithSimdEnabledAndForc
           decode_valid(*decoder, unclamped_f32_words.data()));
       ASSERT_NE(unclamped_f32, nullptr);
       EXPECT_TRUE(cu->execute_instruction(unclamped_f32.get(), *wf).succeeded());
-      for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane)
+      for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 2, lane), lane == 1 ? 0x80000000u : 0u);
+      }
 
       constexpr std::array<uint64_t, 3> kF64Inputs{
           kMinNormalF64,
@@ -3906,8 +4010,9 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsWithSimdEnabledAndForc
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), lane == 1 ? 0x80000000u : 0u);
       }
 
-      if (!wf->is_halted())
+      if (!wf->is_halted()) {
         wf->halt();
+      }
     }
   }
 }
@@ -3978,8 +4083,9 @@ TEST(Cdna4PkFmacF16Vop3ExecutionTest, PackedAccumulatorModifiersModeAndPartialEx
     }
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 // v_permlane16_swap_b32 on a wave64 swaps ALL FOUR 16-lane groups: it exchanges
@@ -4042,8 +4148,9 @@ TEST(Cdna4Permlane16SwapExecutionTest, Wave64SwapsAllFourGroups) {
     }
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 class PermlaneSwapWriteRecorder final : public ExecutionPlugin {
@@ -4147,8 +4254,9 @@ TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
             // Active destinations with inactive sources involve separate
             // FI/BOUND_CTRL semantics. This regression asserts their inactive
             // peers stay unchanged, without prescribing those source rules.
-            if (active && !peer_active)
+            if (active && !peer_active) {
               continue;
+            }
             const bool upper = (lane & stride) != 0;
             const uint32_t expected_dst =
                 active && (same_register || upper)
@@ -4165,8 +4273,9 @@ TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
         }
       }
     }
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -4296,8 +4405,9 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
     for (uint32_t row = 0; row < 16; ++row) {
       for (uint32_t col = 0; col < 16; ++col) {
         float ref = wmma_test_c(row, col);
-        for (uint32_t k = 0; k < 64; ++k)
+        for (uint32_t k = 0; k < 64; ++k) {
           ref += wmma_test_a(row, k) * wmma_test_b(k, col);
+        }
         const auto out = amdgpu::wmma_output_loc_16<16, 16>(row, col);
         const uint32_t raw = cu->read_vgpr(d_base + out.reg, out.lane);
         const auto actual = static_cast<uint16_t>((raw >> (16u * out.sub_element)) & 0xFFFFu);
@@ -4315,8 +4425,9 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   expect_reference();
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250WmmaTest, CModifierAppliesAbsBeforeNegate) {
@@ -4364,9 +4475,11 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
       cu->write_vgpr(c_base + reg, lane, 0);
     }
   }
-  for (uint32_t reg = 0; reg < 4; ++reg)
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(d_base + reg, lane, 0xDEADBEEFu);
+    }
+  }
 
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t k = 0; k < 32; ++k) {
@@ -4400,8 +4513,9 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       float ref = wmma_test_c(row, col);
-      for (uint32_t k = 0; k < 32; ++k)
+      for (uint32_t k = 0; k < 32; ++k) {
         ref += wmma_test_a(row, k) * wmma_test_b(k, col);
+      }
       const auto out = amdgpu::wmma_output_loc_16<16, 16>(row, col);
       const uint32_t raw = cu->read_vgpr(d_base + out.reg, out.lane);
       const auto actual = static_cast<uint16_t>((raw >> (16u * out.sub_element)) & 0xFFFFu);
@@ -4409,8 +4523,9 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
     }
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250WmmaTest, Bf16F32K32Bf16MatchesF32DotOverflow) {
@@ -4436,12 +4551,13 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16MatchesF32DotOverflow) {
   const uint32_t b_base = vb + 20;
   const uint32_t c_base = vb + 30;
   const uint32_t d_base = vb + 40;
-  for (uint32_t reg = 0; reg < 8; ++reg)
+  for (uint32_t reg = 0; reg < 8; ++reg) {
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(a_base + reg, lane, 0);
       cu->write_vgpr(b_base + reg, lane, 0);
       cu->write_vgpr(c_base + reg, lane, 0);
     }
+  }
 
   const auto a = amdgpu::wmma_input_loc<16, 32>(/*row=*/0, /*k=*/0, 16);
   const auto b = amdgpu::wmma_input_loc<16, 32>(/*col=*/0, /*k=*/0, 16);
@@ -4472,8 +4588,9 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16MatchesF32DotOverflow) {
     EXPECT_EQ(cu->read_vgpr(f32_d_base + f32_out.reg, f32_out.lane), 0x7F800000u);
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
@@ -4528,8 +4645,9 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
     EXPECT_EQ(raw & 0xFFFFu, util::f32_to_f16(static_cast<float>(src_lane + 1))) << "lane=" << lane;
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
@@ -4585,8 +4703,9 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   EXPECT_TRUE(cu->execute_instruction(restore_exec.get(), *wf).succeeded());
   EXPECT_EQ(wf->exec(), all_lanes);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
@@ -4614,8 +4733,9 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
 
   cu->write_sgpr(wf->sgpr_alloc().base + 3, 64);
   const uint32_t v2 = wf->vgpr_alloc().base + 2;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(v2, lane, lane);
+  }
 
   // v_cmpx_gt_i32_e64 s3, v2
   const uint32_t in_range_words[] = {0xD4C4007EU, 0x02020403U};
@@ -4625,8 +4745,9 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
   EXPECT_TRUE(cu->execute_instruction(in_range.get(), *wf).succeeded());
   EXPECT_EQ(wf->exec(), all_lanes);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
@@ -4671,8 +4792,9 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 0), 1u << 4);
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 1), saved_exec);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
@@ -4714,14 +4836,16 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   // v_mul_lo_u16 v3.h, v3.l, v2.l op_sel:[0,0,1]
   const uint32_t mul_hi_words[] = {0xD7054003U, 0x02020503U};
   execute(mul_hi_words, "v_mul_lo_u16");
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(v3, lane), 0x00230007u);
+  }
 
   // v_sub_nc_u16 v3.h, 2, v3.h op_sel:[0,1,1]
   const uint32_t sub_hi_words[] = {0xD7045003U, 0x02020682U};
   execute(sub_hi_words, "v_sub_nc_u16");
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(v3, lane), 0xFFDF0007u);
+  }
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(v2, lane, 0xCAFE0005u);
@@ -4731,8 +4855,9 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   // v_mad_u16 v3.h, v3.l, v2.l, v3.h op_sel:[0,0,1,1]
   const uint32_t mad_hi_words[] = {0xD6416003U, 0x040E0503U};
   execute(mad_hi_words, "v_mad_u16");
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(v3, lane), 0x12570007u);
+  }
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(v2, lane, 0xCAFE0005u);
@@ -4742,11 +4867,13 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   // v_mul_lo_u16 v3.l, v3.l, v2.l op_sel:[0,0,0]
   const uint32_t mul_lo_words[] = {0xD7050003U, 0x02020503U};
   execute(mul_lo_words, "v_mul_lo_u16");
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(v3, lane), 0xBEEF0023u);
+  }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestination) {
@@ -4787,8 +4914,9 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x4600CAFEu); // high=6.0h, low preserved
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
@@ -4829,8 +4957,9 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x4B003C00u); // high=14.0h, low preserved
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
@@ -4867,8 +4996,9 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xAAAA625Cu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
@@ -4909,8 +5039,9 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
   EXPECT_EQ(cu->read_sgpr(sb + 0), 0u);
   EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
@@ -4956,8 +5087,9 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x1u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5002,8 +5134,9 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(wf->exec(), 0x1u);
     EXPECT_EQ(wf->vcc(), 0xA5A5u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5085,8 +5218,9 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
             "v_div_fixup_f16");
     EXPECT_EQ(cu->read_vgpr(vb + 12, 0), pack16(0xBEEFu, util::f32_to_f16(2.0f)));
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5126,8 +5260,9 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
 
   EXPECT_EQ(wf->vcc(), 0x2u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4True16Vop3Test, CmpGeF16UsesSelectedHighSourceHalf) {
@@ -5173,8 +5308,9 @@ TEST(Rdna4True16Vop3Test, CmpGeF16UsesSelectedHighSourceHalf) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x2u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5221,8 +5357,9 @@ TEST(Rdna4True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x1u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5268,8 +5405,9 @@ TEST(Rdna4True16Vop3Test, CmpClassF16InlineConstantUsesF16Broadcast) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x3u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5314,8 +5452,9 @@ TEST(Rdna4True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     EXPECT_EQ(wf->exec(), 0x1u);
     EXPECT_EQ(wf->vcc(), 0xA5A5u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5389,8 +5528,9 @@ TEST(Rdna4True16Vop3Test, ClassF16HelperSequenceMovesMaskIntoSelectedHighHalf) {
     uint64_t expected_mask = 0;
     for (const auto &test : cases) {
       active_mask |= (1ULL << test.lane);
-      if (test.expected)
+      if (test.expected) {
         expected_mask |= (1ULL << test.lane);
+      }
       cu->write_vgpr(vb + 0, test.lane, pack16(test.value, 0xCAFEu));
       cu->write_vgpr(vb + 1, test.lane, pack16(test.mask, 0x1234u));
     }
@@ -5413,8 +5553,9 @@ TEST(Rdna4True16Vop3Test, ClassF16HelperSequenceMovesMaskIntoSelectedHighHalf) {
       EXPECT_EQ(cu->read_vgpr(vb + 0, test.lane), test.expected ? 1u : 0u) << "lane " << test.lane;
     }
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5455,8 +5596,9 @@ TEST(Rdna4True16Vop3Test, RcpF16WritesSelectedHighDestinationHalf) {
 
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xB8004000u); // high=-0.5h, low preserved
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5497,8 +5639,9 @@ TEST(Rdna4True16Vop3Test, CvtF32F16AppliesAbsToSelectedSourceHalf) {
 
     EXPECT_EQ(cu->read_vgpr(vb + 4, 0), 0x40800000u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5548,8 +5691,9 @@ TEST(Rdna4True16Vop3Test, AddF16UsesSelectedHalvesAndPreservesDestinationHalf) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0xBEEFu, util::f32_to_f16(5.0f)));
     EXPECT_EQ(cu->read_vgpr(vb + 2, 1), pack16(0x1234u, util::f32_to_f16(-0.5f)));
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5611,8 +5755,9 @@ TEST(Rdna4True16Vop3Test, AddF16DppPreservesMaskedDestinationHalf) {
   EXPECT_EQ(cu->read_vgpr(vb + kDst, 2), pack16(0x4002u, util::f32_to_f16(11.5f)));
   EXPECT_EQ(cu->read_vgpr(vb + kDst, 16), pack16(0x4010u, 0x7010u));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
@@ -5680,11 +5825,13 @@ TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
       outputs[mode][lane] = cu->read_vgpr(vb + kDst, lane);
+    }
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 
   EXPECT_EQ(outputs[0], outputs[1]);
@@ -5775,8 +5922,9 @@ TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
     outputs[mode] = static_cast<uint64_t>(cu->read_sgpr(sb)) |
                     (static_cast<uint64_t>(cu->read_sgpr(sb + 1)) << 32);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 
   EXPECT_EQ(outputs[0], outputs[1]);
@@ -5787,12 +5935,14 @@ TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
   for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     const int source_lane = plan.source_lanes[lane];
     if (!(plan.row_bank_mask & plan.source_write_mask & (uint64_t{1} << lane)) ||
-        source_lane == amdgpu::dpp::DppPlan::INVALID_LANE)
+        source_lane == amdgpu::dpp::DppPlan::INVALID_LANE) {
       continue;
+    }
     const float source = static_cast<float>(source_lane + 1);
     const float threshold = static_cast<float>(lane + ((lane & 1u) ? 2u : 0u));
-    if (source >= threshold)
+    if (source >= threshold) {
       expected_low |= uint32_t{1} << lane;
+    }
   }
   EXPECT_EQ(outputs[1], static_cast<uint64_t>(expected_low) | (uint64_t{0xDEADBEEF} << 32));
 }
@@ -5863,17 +6013,20 @@ TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
     EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2.l, v0.l dpp8:[7,0,5,2,3,6,1,4] fi:1");
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
       outputs[mode][lane] = cu->read_vgpr(vb + kDst, lane);
+    }
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 
   EXPECT_EQ(outputs[0], outputs[1]);
   uint32_t lane_select_bits = 0;
-  for (uint32_t lane = 0; lane < kLaneSelectors.size(); ++lane)
+  for (uint32_t lane = 0; lane < kLaneSelectors.size(); ++lane) {
     lane_select_bits |= kLaneSelectors[lane] << (lane * 3u);
+  }
   for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     const uint32_t source_lane = amdgpu::dpp::dpp8_src_lane(lane, lane_select_bits);
     const uint16_t expected_low =
@@ -5928,8 +6081,9 @@ TEST(Rdna4True16Vop3Test, FmacF16UsesSelectedAccumulatorHalfAndPreservesDestinat
     EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(10.0f)));
     EXPECT_EQ(cu->read_vgpr(vb + 3, 1), pack16(0x1234u, util::f32_to_f16(0.5f)));
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -5990,8 +6144,9 @@ TEST(Rdna4True16Vop3Test, TernaryI16U16UsesSelectedHalvesAndPreservesDestination
     execute(/*op=*/0x24E, /*dst=*/14, /*src0=*/260, /*src1=*/261, /*src2=*/262, "v_max3_u16", 7u);
     execute(/*op=*/0x251, /*dst=*/15, /*src0=*/260, /*src1=*/261, /*src2=*/262, "v_med3_u16", 5u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -6073,8 +6228,9 @@ TEST(Rdna4True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
             "v_div_fixup_f16");
     EXPECT_EQ(cu->read_vgpr(vb + 12, 0), pack16(0xBEEFu, util::f32_to_f16(2.0f)));
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -6124,8 +6280,9 @@ TEST(Rdna4Vop3CndmaskTest, B32AppliesNegModifierBeforeSelect) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x11223344u);
     EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0xBF000000u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -6185,8 +6342,9 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
     EXPECT_TRUE(cu->execute_instruction(f16_cmp.get(), *wf).succeeded());
     EXPECT_EQ(wf->vcc() & 0x3u, 0x1u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -6231,8 +6389,9 @@ TEST(Rdna4Atan2F16Test, DualCndmaskReadsOldPairedSlotSource) {
   EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0x4016CBE4u);
   EXPECT_EQ(cu->read_vgpr(vb + 5, 1), 0x4016CBE4u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4Atan2F16Test, TailSequenceKeepsNegativeXQuadrant) {
@@ -6291,8 +6450,9 @@ TEST(Rdna4Atan2F16Test, TailSequenceKeepsNegativeXQuadrant) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0) & 0xFFFFu, 0xC0B6u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
@@ -6403,8 +6563,9 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     EXPECT_TRUE(cu->execute_instruction(atanh_scale_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xBBC9BEEFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -6490,8 +6651,9 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     EXPECT_TRUE(cu->execute_instruction(xor_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xCAFEB4D0u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -6538,8 +6700,9 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
   EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0x1234CAFEu);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 2), 0xDEADCAFEu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinationHalf) {
@@ -6576,8 +6739,9 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
 
   EXPECT_EQ(cu->read_vgpr(vb + 16, 0), 0x00125555u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinationHalf) {
@@ -6621,8 +6785,9 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   // v_or_b16 v2.l, v8.l, 1
   const uint32_t or_words[] = {0xD7630002U, 0x02010308U};
   execute(or_words, "v_or_b16");
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(v2, lane), 0xA5A50015u);
+  }
 
   auto bitop3 = [](uint16_t a, uint16_t b, uint16_t c, uint8_t table) {
     uint16_t result = 0;
@@ -6637,11 +6802,13 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   const uint32_t bitop_words[] = {0xD6331502U, 0x9B0A0702U};
   execute(bitop_words, "v_bitop3_b16");
   uint32_t expected = bitop3(0x0015u, 0x00F0u, 0xFFFEu, 0xECu);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(v2, lane), 0xA5A50000u | expected);
+  }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
@@ -6679,8 +6846,9 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
@@ -6718,8 +6886,9 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna35True16Vop1Test, SwapHighSourcePreservesBothUnselectedHalves) {
@@ -6756,8 +6925,9 @@ TEST(Rdna35True16Vop1Test, SwapHighSourcePreservesBothUnselectedHalves) {
   EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xAAAA2222u);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x1111BBBBu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
@@ -6796,8 +6966,9 @@ TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
     wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
 
     const uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(vb + 3, lane, std::bit_cast<uint32_t>(input[lane]));
+    }
 
     for (const auto &words : dpp_adds) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
@@ -6823,8 +6994,9 @@ TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
     EXPECT_TRUE(cu->execute_instruction(final_add_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 3, 31), std::bit_cast<uint32_t>(-2.0f));
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -6855,8 +7027,9 @@ TEST(Rdna3ScalarOperandTest, NullSdstDoesNotClobberM0) {
   const uint32_t sb = wf->sgpr_alloc().base;
   cu->write_sgpr(sb + 9, 0x1u);
   cu->write_sgpr(sb + 10, 0xA5A5A5A5u);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(vb + 5, lane, 0xCAFECAFEu);
+  }
 
   // v_add_co_ci_u32_e64 v5, null, 0, 0, s9
   const uint32_t words[] = {0xD5207C05U, 0x00250080U};
@@ -6871,8 +7044,9 @@ TEST(Rdna3ScalarOperandTest, NullSdstDoesNotClobberM0) {
   EXPECT_EQ(cu->read_vgpr(vb + 5, 1), 0u);
   EXPECT_EQ(cu->read_vgpr(vb + 5, 2), 0xCAFECAFEu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
@@ -6910,8 +7084,9 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
 
   EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x3C005555u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
@@ -6958,8 +7133,9 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0xBEEF3C00u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
@@ -7012,8 +7188,9 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(fp8_high_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x7BFFBEEFu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
@@ -7058,8 +7235,9 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), std::bit_cast<uint32_t>(1.0f));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
@@ -7101,8 +7279,9 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FE7Eu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
@@ -7153,8 +7332,9 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FB7Bu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtF16Test, PackedStochasticConversionsUseSeparateSeedHalves) {
@@ -7230,8 +7410,9 @@ TEST(Gfx1250CvtF16Test, PackedStochasticConversionsUseSeparateSeedHalves) {
           pack16(format_case.infinity, format_case.infinity | 0x8000));
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
@@ -7273,8 +7454,9 @@ TEST(Rdna4CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FE7Eu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
@@ -7336,8 +7518,9 @@ TEST(Rdna4CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(sr_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE7Bu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4CvtF16Test, F32OverflowHonorsFp16OvflMode) {
@@ -7378,8 +7561,9 @@ TEST(Rdna4CvtF16Test, F32OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4CvtF16Test, U16OverflowHonorsFp16OvflModeWithSimdEnabledAndForcedScalar) {
@@ -7425,8 +7609,9 @@ TEST(Rdna4CvtF16Test, U16OverflowHonorsFp16OvflModeWithSimdEnabledAndForcedScala
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -7473,8 +7658,9 @@ TEST(Rdna4Fp16ValuTest, AddOverflowHonorsFp16OvflModeWithSimdEnabledAndForcedSca
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -7612,8 +7798,9 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0x5A5A0000u | bf16_set);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna4CvtPkTest, F16Bf16F32OverflowHonorsFp16OvflMode) {
@@ -7679,8 +7866,9 @@ TEST(Cdna4CvtPkTest, F16Bf16F32OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xFF807F80u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(CdnaLegacyCvtF16Test, SetregImm32ModeControlsOverflowingF32ToF16) {
@@ -7742,8 +7930,9 @@ TEST(CdnaLegacyCvtF16Test, SetregImm32ModeControlsOverflowingF32ToF16) {
     EXPECT_TRUE(cu->execute_instruction(cvt_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0) & 0xFFFFu, 0x7BFFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -7785,8 +7974,9 @@ TEST(Rdna4ScalarF16Test, AddAndFmacConsumeFp16OvflMode) {
     }
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Rdna4ScalarF16Test, CvtF16F32ConsumesFp16OvflMode) {
@@ -7825,8 +8015,9 @@ TEST(Rdna4ScalarF16Test, CvtF16F32ConsumesFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xFFFFu, 0x7BFFu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna3CvtFp8Test, SetregImm32ModeChangeRecomputesFp16OvflRounding) {
@@ -7881,8 +8072,9 @@ TEST(Cdna3CvtFp8Test, SetregImm32ModeChangeRecomputesFp16OvflRounding) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
@@ -7954,8 +8146,9 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
   run_sr_case(cdna5::kVCvtSrFp8F16Vop3, "v_cvt_sr_fp8_f16", f16_fp8_src, 0, 0x7Fu);
   run_sr_case(cdna5::kVCvtSrBf8F16Vop3, "v_cvt_sr_bf8_f16", f16_bf8_src, 0xFFFFFFFFu, 0x7Cu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
@@ -8040,8 +8233,9 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(sr_bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE7Fu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna4CvtScaleTest, ScaledFp8Bf8ConversionsHonorDenormAndOverflowModes) {
@@ -8192,8 +8386,9 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8ConversionsHonorDenormAndOverflowModes) {
   run_scaled_packed_case(cdna4::kVCvtScalef32PkBf8Bf16Vop3, "v_cvt_scalef32_pk_bf8_bf16",
                          bf16_bf8_src, 0xA5A5FC7Cu, 0xA5A5FB7Bu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
@@ -8219,13 +8414,15 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
 
   const uint32_t vb = wf->vgpr_alloc().base;
   uint8_t fp6_values[32]{};
-  for (uint32_t i = 0; i < 32; ++i)
+  for (uint32_t i = 0; i < 32; ++i) {
     fp6_values[i] = (i & 1u) ? 0x3Fu : 0x1Fu;
+  }
 
   uint32_t packed_fp6[6]{};
   util::pack_6bit(fp6_values, packed_fp6);
-  for (uint32_t i = 0; i < 6; ++i)
+  for (uint32_t i = 0; i < 6; ++i) {
     cu->write_vgpr(vb + 20 + i, 0, packed_fp6[i]);
+  }
   cu->write_vgpr(vb + 30, 0, std::bit_cast<uint32_t>(16384.0f));
 
   // v_cvt_scalef32_pk32_f16_fp6 v[2:17], v[20:25], v30
@@ -8237,16 +8434,19 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
 
   wf->set_mode_raw(0);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  for (uint32_t i = 0; i < 16; ++i)
+  for (uint32_t i = 0; i < 16; ++i) {
     EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFC007C00u) << "dst dword " << i;
+  }
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  for (uint32_t i = 0; i < 16; ++i)
+  for (uint32_t i = 0; i < 16; ++i) {
     EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFBFF7BFFu) << "dst dword " << i;
+  }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna4CvtScaleTest, DirectOperandRejectionsReturnBeforeDestinationWrites) {
@@ -8293,15 +8493,17 @@ TEST(Cdna4CvtScaleTest, DirectOperandRejectionsReturnBeforeDestinationWrites) {
     // guard: these operands always decode as OPR_VGPR or OPR_SRC_VGPR.
     operand->opr_type_ = cdna4::OperandType::OPR_SREG;
     operand->encoding_value_ = 0;
-    for (uint32_t offset = 0; offset < 32; ++offset)
+    for (uint32_t offset = 0; offset < 32; ++offset) {
       cu->write_vgpr(base + kDestination + offset, 0, kSentinel);
+    }
     wf->clear_instruction_execution_error();
     // Execute below the CU's legacy exception boundary.
     instruction->execute(*instruction, wf);
     EXPECT_EQ(wf->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    for (uint32_t offset = 0; offset < 32; ++offset)
+    for (uint32_t offset = 0; offset < 32; ++offset) {
       EXPECT_EQ(cu->read_vgpr_storage(base + kDestination + offset, 0), kSentinel) << offset;
+    }
   }
   wf->halt();
 }
@@ -8349,15 +8551,18 @@ TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
     cu->write_vgpr(base + kSrc + dword, 0, 0u);
     cu->write_vgpr(base + kSrc + kIndex + dword, 0, packed_fp6[dword]);
   }
-  for (uint32_t dword = 0; dword < 16; ++dword)
+  for (uint32_t dword = 0; dword < 16; ++dword) {
     cu->write_vgpr(base + kDst + dword, 0, 0xDEADBEEFu);
+  }
   EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
-  for (uint32_t dword = 0; dword < 16; ++dword)
+  for (uint32_t dword = 0; dword < 16; ++dword) {
     EXPECT_EQ(cu->read_vgpr(base + kDst + dword, 0), expected) << dword;
+  }
 
   wf->set_m0(kIndex | (0x8u << 12));
-  for (uint32_t dword = 0; dword < 6; ++dword)
+  for (uint32_t dword = 0; dword < 6; ++dword) {
     cu->write_vgpr(base + kSrc + dword, 0, packed_fp6[dword]);
+  }
   for (uint32_t dword = 0; dword < 16; ++dword) {
     cu->write_vgpr(base + kDst + dword, 0, 0x11111111u);
     cu->write_vgpr(base + kDst + kIndex + dword, 0, 0x22222222u);
@@ -8449,8 +8654,9 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   EXPECT_TRUE(cu->execute_instruction(sr_f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xDE38BEEFu);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
@@ -8475,8 +8681,9 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
   const uint32_t vb = wf->vgpr_alloc().base;
   wf->set_vgpr_msb_mode(1u << 2); // SRC1 in VGPR bank 1.
   constexpr uint32_t kSentinel = 0xdeadbeef;
-  for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t lane = 0; lane < 32; ++lane) {
     cu->write_vgpr(vb + 256 + 10, lane, 0x43424140u + 0x04040404u * lane);
+  }
 
   // CDNA5 ISA section 7.6.3, Tables 36 and 37. The two byte indices
   // correspond to data lanes 0..15 and 16..31 respectively.
@@ -8503,9 +8710,11 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
       {cdna5::kVCvtScalePk8F32Bf8Vop3, {0x3c3c3c3cu, 0x3c3c3c3cu, 0}, 8, f8},
   };
   for (const Case &test : cases) {
-    for (uint32_t lane = 0; lane < 32; ++lane)
-      for (unsigned reg = 0; reg < test.input.size(); ++reg)
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      for (unsigned reg = 0; reg < test.input.size(); ++reg) {
         cu->write_vgpr(vb + reg, lane, test.input[reg]);
+      }
+    }
     const unsigned selector_count = test.selectors.size() == 8 ? 16 : test.selectors.size();
     for (uint8_t opsel = 0; opsel < selector_count; ++opsel) {
       const auto words = cdna5::build_vop3(
@@ -8517,9 +8726,11 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
       // may come from its inactive partner in the other half-wave.
       for (uint32_t exec : {0xaaaa5555u, 0x5555aaaau}) {
         wf->set_exec(exec);
-        for (unsigned reg = 0; reg < test.elements; ++reg)
-          for (uint32_t lane = 0; lane < 32; ++lane)
+        for (unsigned reg = 0; reg < test.elements; ++reg) {
+          for (uint32_t lane = 0; lane < 32; ++lane) {
             cu->write_vgpr(vb + 16 + reg, lane, kSentinel);
+          }
+        }
         ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
         const Selection &sel = test.selectors[opsel % test.selectors.size()];
         for (uint32_t lane = 0; lane < 32; ++lane) {
@@ -8527,9 +8738,10 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
           const unsigned byte = lane < 16 ? sel.low_byte : sel.high_byte;
           const uint32_t exponent = 0x40u + 4 * source_lane + byte;
           const uint32_t expected = (exec & (1u << lane)) ? exponent << 23 : kSentinel;
-          for (unsigned reg = 0; reg < test.elements; ++reg)
+          for (unsigned reg = 0; reg < test.elements; ++reg) {
             EXPECT_EQ(cu->read_vgpr(vb + 16 + reg, lane), expected)
                 << "lane=" << lane << " element=" << reg;
+          }
         }
       }
     }
@@ -8599,19 +8811,22 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
             }
             ASSERT_TRUE(cu->execute_instruction(reg.get(), *wf).succeeded());
             ASSERT_TRUE(cu->execute_instruction(constant.get(), *wf).succeeded());
-            for (unsigned i = 0; i < 8; ++i)
-              for (unsigned lane = 0; lane < 32; ++lane)
+            for (unsigned i = 0; i < 8; ++i) {
+              for (unsigned lane = 0; lane < 32; ++lane) {
                 ASSERT_EQ(cu->read_vgpr(vb + destination + i, lane),
                           cu->read_vgpr(vb + 16 + i, lane))
                     << "output " << i << ", lane " << lane;
+              }
+            }
           }
         }
       }
     }
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtScaleTest, UnitScalePackMatchesRegisterScaleWithOverlappingTuples) {
@@ -8649,16 +8864,19 @@ TEST(Gfx1250CvtScaleTest, UnitScalePackMatchesRegisterScaleWithOverlappingTuples
         for (unsigned word = 0; word < 8; ++word) {
           const auto bits = inputs[(lane + word) % inputs.size()];
           cu->write_vgpr(base + 2 + word, lane, bits);
-          if (word == 2 || word == 3)
+          if (word == 2 || word == 3) {
             cu->write_vgpr(base + 18 + word, lane, bits);
+          }
         }
         cu->write_vgpr(base + 14, lane, 0x3f800000u);
       }
       ASSERT_TRUE(cu->execute_instruction(control.get(), *wf).succeeded());
       ASSERT_TRUE(cu->execute_instruction(fast.get(), *wf).succeeded());
-      for (unsigned lane = 0; lane < 32; ++lane)
-        for (unsigned word = 0; word < 2; ++word)
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        for (unsigned word = 0; word < 2; ++word) {
           EXPECT_EQ(cu->read_vgpr(base + 4 + word, lane), cu->read_vgpr(base + 20 + word, lane));
+        }
+      }
     }
   }
   wf->halt();
@@ -8719,18 +8937,21 @@ TEST(Gfx1250CvtScaleTest, PackUsesOnlyScaleExponent) {
     for (unsigned lane = 0; lane < std::size(scales); ++lane) {
       // Zero remains zero when scaled by 2^-127.
       const uint32_t input = lane / 2 == 2 ? 0 : test.source_word;
-      for (unsigned word = 0; word < test.source_words; ++word)
+      for (unsigned word = 0; word < test.source_words; ++word) {
         cu->write_vgpr(base + word, lane, input);
+      }
       cu->write_vgpr(base + 8, lane, scales[lane]);
     }
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     // FP4 maps NaN to zero. FP8 and BF8 write the positive NaN code.
     const uint32_t nan_result = test.destination_words == 1 ? 0 : 0x7f7f7f7fu;
     const uint32_t expected[] = {test.double_scale_result, test.unit_scale_result, 0, nan_result};
-    for (unsigned word = 0; word < test.destination_words; ++word)
-      for (unsigned lane = 0; lane < std::size(scales); ++lane)
+    for (unsigned word = 0; word < test.destination_words; ++word) {
+      for (unsigned lane = 0; lane < std::size(scales); ++lane) {
         EXPECT_EQ(cu->read_vgpr(base + 16 + word, lane), expected[lane / 2])
             << "scale=" << std::hex << scales[lane] << " word=" << word;
+      }
+    }
   }
   wf->halt();
 }
@@ -8763,8 +8984,9 @@ TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
 
   constexpr uint32_t kDestinationBase = 3 * 256 + 250;
   constexpr uint32_t kSentinel = 0xA5A5A5A5u;
-  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg)
+  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg) {
     cu->write_vgpr(vb + reg, 0, kSentinel);
+  }
 
   // v_cvt_scale_pk16_f32_fp6 v[1018:1033], v[0:2], v10 scale_sel:1.
   // The complete 16-register destination does not fit in this wave.
@@ -8776,11 +8998,13 @@ TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
-  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg)
+  for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg) {
     EXPECT_EQ(cu->read_vgpr(vb + reg, 0), kSentinel) << "vgpr=" << reg;
+  }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
@@ -8815,8 +9039,9 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   // Unpack source v[1022:1024] does not fit. The valid destination must remain
   // untouched instead of consuming zero/foreign source words.
   wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
-  for (uint32_t reg = 20; reg < 36; ++reg)
+  for (uint32_t reg = 20; reg < 36; ++reg) {
     cu->write_vgpr(vb + reg, 0, kSentinel);
+  }
   const auto unpack_words = cdna5::build_vop3(
       cdna5::kVCvtScalePk16F32Fp6Vop3, {.vdst = 20, .src0 = vgpr_src(254), .src1 = vgpr_src(10)});
   auto decoded_unpack = decoder->decode(unpack_words.data());
@@ -8827,16 +9052,18 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   recorder_ptr->read_registers.clear();
   recorder_ptr->write_registers.clear();
   EXPECT_TRUE(cu->execute_instruction(unpack.get(), *wf).succeeded());
-  for (uint32_t reg = 20; reg < 36; ++reg)
+  for (uint32_t reg = 20; reg < 36; ++reg) {
     EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "unpack dst vgpr=" << reg;
+  }
   EXPECT_TRUE(recorder_ptr->read_registers.empty());
   EXPECT_TRUE(recorder_ptr->write_registers.empty());
 
   // Pack source v[1018:1033] does not fit. Its valid three-register
   // destination must remain untouched.
   wf->set_vgpr_msb_mode(0x03u); // Source 0 bank 3.
-  for (uint32_t reg = 40; reg < 43; ++reg)
+  for (uint32_t reg = 40; reg < 43; ++reg) {
     cu->write_vgpr(vb + reg, 0, kSentinel);
+  }
   const auto pack_source_words =
       cdna5::build_vop3(cdna5::kVCvtScalef32Pk16Fp6F32Vop3,
                         {.vdst = 40, .src0 = vgpr_src(250), .src1 = vgpr_src(10)});
@@ -8848,16 +9075,18 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   recorder_ptr->read_registers.clear();
   recorder_ptr->write_registers.clear();
   EXPECT_TRUE(cu->execute_instruction(pack_source.get(), *wf).succeeded());
-  for (uint32_t reg = 40; reg < 43; ++reg)
+  for (uint32_t reg = 40; reg < 43; ++reg) {
     EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "pack source dst vgpr=" << reg;
+  }
   EXPECT_TRUE(recorder_ptr->read_registers.empty());
   EXPECT_TRUE(recorder_ptr->write_registers.empty());
 
   // Pack destination v[1022:1024] does not fit. The in-range portion must not
   // be modified.
   wf->set_vgpr_msb_mode(0xC0u); // Destination bank 3.
-  for (uint32_t reg = 0; reg < 16; ++reg)
+  for (uint32_t reg = 0; reg < 16; ++reg) {
     cu->write_vgpr(vb + reg, 0, std::bit_cast<uint32_t>(1.0f));
+  }
   cu->write_vgpr(vb + 1022, 0, kSentinel);
   cu->write_vgpr(vb + 1023, 0, kSentinel);
   const auto pack_destination_words = cdna5::build_vop3(
@@ -8875,8 +9104,9 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   EXPECT_TRUE(recorder_ptr->read_registers.empty());
   EXPECT_TRUE(recorder_ptr->write_registers.empty());
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePreserved) {
@@ -8919,30 +9149,31 @@ TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePre
       for (uint8_t destination : {0, 4}) {
         SCOPED_TRACE(::testing::Message() << "destination=" << unsigned(destination));
         std::array<uint32_t, 2> words;
-        if (arch == rocjitsu::IsaFamily::Cdna4)
+        if (arch == rocjitsu::IsaFamily::Cdna4) {
           words =
               cdna4::build_ds(cdna4::kDsSwizzleB32Ds, {.offset0 = static_cast<uint8_t>(offset),
                                                        .offset1 = static_cast<uint8_t>(offset >> 8),
                                                        .addr = 0,
                                                        .vdst = destination});
-        else if (arch == rocjitsu::IsaFamily::Rdna3)
+        } else if (arch == rocjitsu::IsaFamily::Rdna3) {
           words =
               rdna3::build_ds(rdna3::kDsSwizzleB32Ds, {.offset0 = static_cast<uint8_t>(offset),
                                                        .offset1 = static_cast<uint8_t>(offset >> 8),
                                                        .addr = 0,
                                                        .vdst = destination});
-        else if (arch == rocjitsu::IsaFamily::Rdna4)
+        } else if (arch == rocjitsu::IsaFamily::Rdna4) {
           words = rdna4::build_vds(rdna4::kDsSwizzleB32Vds,
                                    {.offset0 = static_cast<uint8_t>(offset),
                                     .offset1 = static_cast<uint8_t>(offset >> 8),
                                     .addr = 0,
                                     .vdst = destination});
-        else
+        } else {
           words = cdna5::build_vds(cdna5::kDsSwizzleB32Vds,
                                    {.offset0 = static_cast<uint8_t>(offset),
                                     .offset1 = static_cast<uint8_t>(offset >> 8),
                                     .addr = 0,
                                     .vdst = destination});
+        }
         auto decoded = decoder->decode(words.data());
         ASSERT_TRUE(decoded.succeeded());
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
@@ -8991,15 +9222,17 @@ TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePre
               break;
             }
             uint32_t expected = destination == 0 ? lane + 1 : kSentinel;
-            if (exec & (uint64_t{1} << lane))
+            if (exec & (uint64_t{1} << lane)) {
               expected = (exec & (uint64_t{1} << source)) ? source + 1 : 0;
+            }
             EXPECT_EQ(cu->read_vgpr(vb + destination, lane), expected) << "lane=" << lane;
           }
         }
       }
     }
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -9027,7 +9260,7 @@ TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitec
     wf->set_lds_size(config.lds_size_kb * 1024 - 128);
     const auto vb = wf->vgpr_alloc().base;
     const uint64_t full = ~uint64_t{0} >> (64 - wf->wf_size());
-    for (uint32_t m0 : {0u, 0x120u, 0xabc00120u, 0x10120u, 0xfff0u, 0xffffcu, 0xfe80u})
+    for (uint32_t m0 : {0u, 0x120u, 0xabc00120u, 0x10120u, 0xfff0u, 0xffffcu, 0xfe80u}) {
       for (uint64_t exec : {uint64_t{0}, uint64_t{0x8000000100000025} & full, full}) {
         SCOPED_TRACE(testing::Message() << "arch=" << arch << " m0=" << m0 << " exec=" << exec);
         // The pre-CDNA5 base plus OFFSET wraps at 16 bits; lane addition never wraps.
@@ -9043,8 +9276,9 @@ TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitec
         for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           cu->write_vgpr(vb + 2, lane, 0x12340000 + lane);
           cu->write_vgpr(vb + 4, lane, 0xcccccccc);
-          if (!address_only)
+          if (!address_only) {
             wf->lds().write32(address(lane), 0xdddddddd);
+          }
         }
         for (bool load : {false, true}) {
           std::array<uint32_t, 2> words;
@@ -9100,23 +9334,27 @@ TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitec
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           const auto *state = inst->data_as<amdgpu::VectorMemState>();
           ASSERT_NE(state, nullptr);
-          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             if (exec & (uint64_t{1} << lane)) {
               EXPECT_EQ(state->per_lane_addr[lane], address(lane));
             }
-          if (address_only)
+          }
+          if (address_only) {
             continue;
+          }
           amdgpu::LocalMemPipeline pipeline;
           ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
         }
-        if (address_only)
+        if (address_only) {
           continue;
+        }
         for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           const bool active = exec & (uint64_t{1} << lane);
           EXPECT_EQ(wf->lds().read32(address(lane)), active ? 0x12340000 + lane : 0xdddddddd);
           EXPECT_EQ(cu->read_vgpr(vb + 4, lane), active ? 0x12340000 + lane : 0xcccccccc);
         }
       }
+    }
     wf->halt();
   }
 }
@@ -9150,17 +9388,20 @@ TEST(Cdna1ValuTest, AccumulatorInputsAndVectorResults) {
     cu->write_vgpr(base + 4, lane, 0x3f800000); // v4 = 1
     cu->write_vgpr(acc, lane, 0x40000000);      // a0 = 2
     cu->write_vgpr(acc + 4, lane, 0x40400000);  // a4 = 3
-    for (unsigned r = 64; r != 68; ++r)
+    for (unsigned r = 64; r != 68; ++r) {
       cu->write_vgpr(acc + r, lane, 0x3f800000); // C tile = 1
+    }
   }
   constexpr float expected[] = {5, 9, 13, 25};
   for (unsigned banks = 0; banks < 4; ++banks) {
     SCOPED_TRACE(banks);
     // v_mfma_f32_16x16x4f32 a[32:35], [va]0, [va]4, a[64:67]
     ASSERT_NO_FATAL_FAILURE(run(0xd3c50020, 0x05020900 | (banks << 27)));
-    for (unsigned r = 32; r != 36; ++r)
-      for (unsigned lane = 0; lane != 64; ++lane)
+    for (unsigned r = 32; r != 36; ++r) {
+      for (unsigned lane = 0; lane != 64; ++lane) {
         EXPECT_EQ(cu->read_vgpr(acc + r, lane), std::bit_cast<uint32_t>(expected[banks]));
+      }
+    }
   }
 
   wf->set_exec(1);
@@ -9218,8 +9459,9 @@ TEST(Cdna1ValuTest, AccumulatorInputsAndVectorResults) {
        }) {
     SCOPED_TRACE(op.first);
     for (auto [reg, bits] : std::array<std::pair<unsigned, uint32_t>, 4>{
-             {{0, op.dst}, {1, op.a}, {2, op.b}, {3, op.c}}})
+             {{0, op.dst}, {1, op.a}, {2, op.b}, {3, op.c}}}) {
       cu->write_vgpr(base + reg, 0, bits);
+    }
     ASSERT_NO_FATAL_FAILURE(run(op.first, op.second));
     EXPECT_EQ(cu->read_vgpr(base, 0), op.result);
   }
@@ -9317,15 +9559,16 @@ TEST(MfmaExecMaskTest, DenseInstructionsIgnoreExecAndUseTheAccumulatorBank) {
     auto vb = wf->vgpr_alloc().base;
     const auto destination =
         vb + 64 + (arch == rocjitsu::IsaFamily::Cdna1 ? amdgpu::ACC_VGPR_OFFSET : 0);
-    for (const auto &test : cases)
-      for (bool scalar : {false, true})
+    for (const auto &test : cases) {
+      for (bool scalar : {false, true}) {
         for (uint64_t exec :
              {uint64_t{0}, uint64_t{1}, uint64_t{0x8000000100000025}, ~uint64_t{0}}) {
           // The full-wave EXEC rule is explicit in the CDNA3/4 control tables.
           // Older targets only qualify the accumulator bank at full EXEC.
           if (arch < rocjitsu::IsaFamily::Cdna3 &&
-              (exec != ~uint64_t{0} || test.opcode == cdna4::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma))
+              (exec != ~uint64_t{0} || test.opcode == cdna4::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma)) {
             continue;
+          }
           // CDNA3 uses the FNUZ exponent bias; CDNA4 uses IEEE E5M2.
           const auto input = arch == rocjitsu::IsaFamily::Cdna3 && test.input == 0x3c3c3c3c
                                  ? 0x40404040u
@@ -9333,12 +9576,13 @@ TEST(MfmaExecMaskTest, DenseInstructionsIgnoreExecAndUseTheAccumulatorBank) {
           ForceScalarGuard scalar_guard(scalar);
           SCOPED_TRACE(testing::Message() << "arch=" << arch << " op=" << test.opcode
                                           << " scalar=" << scalar << " exec=" << exec);
-          for (unsigned reg = 0; reg < 4; ++reg)
+          for (unsigned reg = 0; reg < 4; ++reg) {
             for (unsigned lane = 0; lane < 64; ++lane) {
               cu->write_vgpr(vb + reg, lane, input);
               cu->write_vgpr(vb + 16 + reg, lane, input);
               cu->write_vgpr(destination + reg, lane, 0xcccccccc);
             }
+          }
           wf->set_exec(exec);
           const auto words = cdna4::build_vop3p_mfma(
               test.opcode, {.vdst = 64, .acc_cd = 0, .src0 = 256, .src1 = 272, .src2 = 128});
@@ -9346,11 +9590,15 @@ TEST(MfmaExecMaskTest, DenseInstructionsIgnoreExecAndUseTheAccumulatorBank) {
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           EXPECT_EQ(wf->vgpr_write_mask(), ~uint64_t{0});
-          for (unsigned reg = 0; reg < 4; ++reg)
-            for (unsigned lane = 0; lane < 64; ++lane)
+          for (unsigned reg = 0; reg < 4; ++reg) {
+            for (unsigned lane = 0; lane < 64; ++lane) {
               EXPECT_EQ(cu->read_vgpr(destination + reg, lane),
                         std::bit_cast<uint32_t>(test.result));
+            }
+          }
         }
+      }
+    }
     wf->halt();
   }
 }
@@ -9392,11 +9640,13 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   ASSERT_EQ(std::string_view(swizzle_inst->mnemonic()), "ds_swizzle_b32");
   EXPECT_TRUE(cu->execute_instruction(swizzle_inst.get(), *wf).succeeded());
 
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0x100Fu) << "lane=" << lane;
+  }
 
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(vb + 2, lane, 0xDEADBEEFu);
+  }
 
   // ds_swizzle_b32 v2, v1 offset:0x80b1, QDMode quad permutation (1, 0, 3, 2)
   const uint32_t quad_perm_words[] = {0xD8D480B1U, 0x02000001U};
@@ -9411,8 +9661,9 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
     EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0x1000u + src_lane) << "lane=" << lane;
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms) {
@@ -9527,10 +9778,11 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
             // F16/F64 denorm fields also distinguish which field DS captures.
             wf->set_mode_raw(0xf | ((denorm ^ 3u) << 4) | (denorm << 6) |
                              amdgpu::Wavefront::FP16_OVFL_BIT);
-            if (form == Form::Ds)
+            if (form == Form::Ds) {
               cu.lds().write32(wf->lds_base() + kAddr, c.old_value);
-            else
+            } else {
               memory.write32(kAddr, c.old_value);
+            }
             cu.write_vgpr(vb, 0, 0xdeadbeef);
             cu.write_vgpr(vb + 1, 0, c.source);
             cu.write_vgpr(vb + dst, 1, 0xdeadbeef);
@@ -9539,11 +9791,13 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
             cu.execute_and_route(inst.release(), *wf);
             uint32_t expected = c.expected;
             // LDS selects the incoming NaN when both operands are NaNs.
-            if (form == Form::Ds && c.old_value == (bf16 ? 0x7fc27fc0u : 0x7e027e00u))
+            if (form == Form::Ds && c.old_value == (bf16 ? 0x7fc27fc0u : 0x7e027e00u)) {
               expected = bf16 ? 0x7fc47fc0u : 0x7e047e00u;
+            }
             if (form == Form::Ds &&
-                ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u))))
+                ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u)))) {
               expected = c.flushed_value;
+            }
             EXPECT_EQ(form == Form::Ds ? cu.lds().read32(wf->lds_base() + kAddr)
                                        : memory.read32(kAddr),
                       expected);
@@ -9691,8 +9945,9 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
   EXPECT_EQ(cu.read_vgpr(wf->vgpr_alloc().base + 0, 0), std::bit_cast<uint32_t>(kOld));
   EXPECT_EQ(gpu_mem.read32(kAddr), std::bit_cast<uint32_t>(kOld + kAdd));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
@@ -9734,8 +9989,9 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
   EXPECT_EQ(cu.read_vgpr(wf->vgpr_alloc().base + 1, 0), std::bit_cast<uint32_t>(kOld));
   EXPECT_EQ(gpu_mem.read32(kAddr), std::bit_cast<uint32_t>(kOld + kAdd));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
@@ -9777,8 +10033,9 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
 
   EXPECT_EQ(gpu_mem.read64(kAddr), kOld + kAdd);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
@@ -9821,8 +10078,9 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
   EXPECT_EQ(cu.read_vgpr(wf->vgpr_alloc().base + 0, 0), kOld);
   EXPECT_EQ(gpu_mem.read32(kAddr), kNew);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
@@ -9883,15 +10141,18 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
     // RDNA4 and CDNA5 put the separate privileged fields in STATE_PRIV.
     const auto arch = arch_case.arch;
     uint32_t expected = (kStatus & ~((1u << 6) | (1u << 11) | (1u << 12))) | (3u << 9) | (1u << 16);
-    if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
+    if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) {
       expected = (expected | (kStatus & (1u << 6))) & ~(1u << 28);
-    if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
+    }
+    if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
       expected = 0x02054600u;
+    }
     EXPECT_EQ(cu->read_sgpr(sb + 5), expected);
     EXPECT_EQ(cu->read_sgpr(sb + 6), 0u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -9935,16 +10196,18 @@ TEST(HwregTest, StatusNeverReportsTheReadingWaveIdle) {
               amdgpu::HwregAccessResult::Success);
     EXPECT_EQ(busy_wave, idle_wave);
     wf->wait_counters().vmcnt = 0;
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
 TEST(HwregTest, CdnaLocationReadsUseBackedTopologyFields) {
   for (const HwregArchCase &arch_case : kHwregArchCases) {
     if (arch_case.arch != rocjitsu::IsaFamily::Cdna3 &&
-        arch_case.arch != rocjitsu::IsaFamily::Cdna4)
+        arch_case.arch != rocjitsu::IsaFamily::Cdna4) {
       continue;
+    }
     SCOPED_TRACE(arch_case.name);
     amdgpu::GpuMemory memory("identity_mem");
     amdgpu::L2Cache l2("identity_l2");
@@ -10000,9 +10263,10 @@ TEST(HwregTest, CdnaLocationReadsUseBackedTopologyFields) {
       EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), expected);
       EXPECT_EQ(amdgpu::write_hwreg_field(*wf, field, 0), amdgpu::HwregAccessResult::ReadOnly);
     }
-    for (auto field : {encode_hwreg(4), encode_hwreg(4, 6, 1), encode_hwreg(4, 16, 4)})
+    for (auto field : {encode_hwreg(4), encode_hwreg(4, 6, 1), encode_hwreg(4, 16, 4)}) {
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
                 amdgpu::HwregAccessResult::Unsupported);
+    }
     cu->set_shader_engine_location(8, 9, 10, 10);
     EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(4, 8, 8), value),
               amdgpu::HwregAccessResult::Unsupported);
@@ -10067,10 +10331,11 @@ TEST(HwregTest, CdnaLocationFieldLimitsRejectAliasing) {
       // Construct unregistered slots to test the encoding limit beyond the
       // configured CDNA residency limit of 32 slots.
       std::unique_ptr<amdgpu::Wavefront> resident;
-      if (arch == rocjitsu::IsaFamily::Cdna3)
+      if (arch == rocjitsu::IsaFamily::Cdna3) {
         resident = std::make_unique<amdgpu::IsaWavefront<cdna3::Isa>>(*cu, slot);
-      else
+      } else {
         resident = std::make_unique<amdgpu::IsaWavefront<cdna4::Isa>>(*cu, slot);
+      }
       const bool representable = slot == 63;
       check(*resident, encode_hwreg(4, 0, 4), representable ? Result::Success : Result::Unsupported,
             representable ? 15 : 0);
@@ -10087,9 +10352,10 @@ TEST(HwregTest, CdnaLocationFieldLimitsRejectAliasing) {
       }
       peers.push_back(&cp);
       cp.set_xcd_topology(rank, peers);
-      for (auto field : {encode_hwreg(20), encode_hwreg(20, 0, 4)})
+      for (auto field : {encode_hwreg(20), encode_hwreg(20, 0, 4)}) {
         check(*wave, field, rank == 15 ? Result::Success : Result::Unsupported,
               rank == 15 ? 15 : 0);
+      }
       // Drop peer pointers before destroying their owners.
       cp.set_xcd_topology(0, {&cp});
     }
@@ -10102,8 +10368,9 @@ TEST(HwregTest, CdnaSimdIdsFollowResidentWaveSlots) {
   for (const HwregArchCase &arch_case : kHwregArchCases) {
     if (arch_case.arch != rocjitsu::IsaFamily::Cdna2 &&
         arch_case.arch != rocjitsu::IsaFamily::Cdna3 &&
-        arch_case.arch != rocjitsu::IsaFamily::Cdna4)
+        arch_case.arch != rocjitsu::IsaFamily::Cdna4) {
       continue;
+    }
     SCOPED_TRACE(arch_case.name);
     amdgpu::GpuMemory memory(std::string("simd_identity_mem_") + arch_case.name);
     amdgpu::L2Cache l2(std::string("simd_identity_l2_") + arch_case.name);
@@ -10192,8 +10459,9 @@ TEST(HwregTest, OtherArchitecturesPreserveHardwareRegisterMappings) {
   for (const HwregArchCase &arch_case : kHwregArchCases) {
     if (arch_case.arch == rocjitsu::IsaFamily::Cdna2 ||
         arch_case.arch == rocjitsu::IsaFamily::Cdna3 ||
-        arch_case.arch == rocjitsu::IsaFamily::Cdna4)
+        arch_case.arch == rocjitsu::IsaFamily::Cdna4) {
       continue;
+    }
     SCOPED_TRACE(arch_case.name);
     amdgpu::GpuMemory memory(std::string("other_hw_id_mem_") + arch_case.name);
     amdgpu::L2Cache l2(std::string("other_hw_id_l2_") + arch_case.name);
@@ -10274,8 +10542,9 @@ TEST(HwregHelperTest, ReportsReadWriteResultContracts) {
             amdgpu::HwregAccessResult::Unsupported);
   EXPECT_EQ(value, 0u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregHelperTest, Gfx1250PreservesWaveSchedModeHwreg) {
@@ -10311,8 +10580,9 @@ TEST(HwregHelperTest, Gfx1250PreservesWaveSchedModeHwreg) {
             amdgpu::HwregAccessResult::Success);
   EXPECT_EQ(wf->wave_sched_mode_raw(), 0xA5A55A3Au);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregHelperTest, Gfx1250TrapHandlerRegistersRoundTripArchitectedFields) {
@@ -10384,8 +10654,9 @@ TEST(HwregHelperTest, Gfx1250TrapHandlerRegistersRoundTripArchitectedFields) {
   EXPECT_EQ(value, 0u);
 
   wf->set_in_trap_handler(false);
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregHelperTest, Rdna4UsesTheCommonGfx12WaveStateRegisters) {
@@ -10421,8 +10692,9 @@ TEST(HwregHelperTest, Rdna4UsesTheCommonGfx12WaveStateRegisters) {
   }
 
   wf->set_in_trap_handler(false);
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
@@ -10456,8 +10728,9 @@ TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
   EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(23)), "WAVE_HW_ID1");
   EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(24)), "WAVE_HW_ID2");
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregTest, Gfx1250GetregReadsWgpId) {
@@ -10502,8 +10775,9 @@ TEST(HwregTest, Gfx1250GetregReadsWgpId) {
       EXPECT_EQ(value, 0u);
     }
   }
-  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot)
+  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot) {
     cu->wf(slot)->halt();
+  }
 }
 
 TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
@@ -10621,8 +10895,9 @@ TEST(HwregTest, RdnaHwId1ReportsTheResidentSlotAndItsWgp) {
                   amdgpu::HwregAccessResult::ReadOnly);
       }
       // An idle CU alternates SIMDs as it places consecutive waves.
-      for (uint32_t wave = 1; wave < ids.size(); ++wave)
+      for (uint32_t wave = 1; wave < ids.size(); ++wave) {
         EXPECT_NE((ids[wave] >> 9) & 1u, (ids[wave - 1] >> 9) & 1u) << wave;
+      }
 
       // A wave reusing a halted slot takes over that slot's SIMD and wave ID.
       auto *retired = cu->wf(5);
@@ -10633,8 +10908,9 @@ TEST(HwregTest, RdnaHwId1ReportsTheResidentSlotAndItsWgp) {
       EXPECT_EQ(amdgpu::read_hwreg_field(*reused, arch_case.widest_read, id),
                 amdgpu::HwregAccessResult::Success);
       EXPECT_EQ(id, ids[5]);
-      for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot)
+      for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot) {
         cu->wf(slot)->halt();
+      }
     }
   }
 }
@@ -10669,15 +10945,17 @@ TEST(HwregHelperTest, RdnaHwId1RejectsLocationsItsFieldsCannotHold) {
     cu->set_shader_engine_location(2, 5);
     check(kWaveId, Result::Success, 1);
     check(kSeId, Result::Success, 2);
-    for (uint16_t field : {kSimdId, kWgpId, kSaId, arch_case.widest_read})
+    for (uint16_t field : {kSimdId, kWgpId, kSaId, arch_case.widest_read}) {
       check(field, Result::Unsupported, 0);
+    }
 
     // An odd array width splits a WGP across arrays; WGP_ID has four bits.
     for (uint32_t width : {7u, 34u}) {
       SCOPED_TRACE(width);
       cu->set_shader_engine_location(2, 5, width, 2 * width);
-      for (uint16_t field : {kSimdId, kWgpId, kSaId})
+      for (uint16_t field : {kSimdId, kWgpId, kSaId}) {
         check(field, Result::Unsupported, 0);
+      }
     }
     cu->set_shader_engine_location(2, 31, 32, 64);
     check(kWgpId, Result::Success, 15);
@@ -10782,8 +11060,9 @@ TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {
             amdgpu::HwregAccessResult::Success);
   EXPECT_EQ(value, 7u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregHelperTest, Gfx1250ReadsModeledIbSts2Counters) {
@@ -10832,8 +11111,9 @@ TEST(HwregHelperTest, Gfx1250ReadsModeledIbSts2Counters) {
             amdgpu::HwregAccessResult::Success);
   EXPECT_EQ(value, 3u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(HwregHelperTest, ModeBit27OnlyEnablesGprIndexingWhereArchitected) {
@@ -10879,8 +11159,9 @@ TEST(HwregHelperTest, ModeBit27OnlyEnablesGprIndexingWhereArchitected) {
               amdgpu::Wavefront::GPR_IDX_EN_BIT);
     EXPECT_EQ(wf->gpr_idx_en(), arch_case.mode_has_gpr_idx_en);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -10980,10 +11261,12 @@ TEST(HwregHelperTest, ReadsGprAllocFromWaveState) {
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(5), 0),
               amdgpu::HwregAccessResult::ReadOnly);
 
-    if (!first_wf->is_halted())
+    if (!first_wf->is_halted()) {
       first_wf->halt();
-    if (!wf->is_halted())
+    }
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11105,8 +11388,9 @@ TEST(HwregHelperTest, Rdna3TablesNameXmlHwregIds) {
               amdgpu::HwregAccessResult::ReadOnly);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(63)), "unknown");
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11121,8 +11405,9 @@ TEST(HwregTest, TrapstsDpRateIsAReadOnlyRdna1And2Constant) {
                                 arch_case.arch == rocjitsu::IsaFamily::Rdna3_5 ||
                                 arch_case.arch == rocjitsu::IsaFamily::Cdna3 ||
                                 arch_case.arch == rocjitsu::IsaFamily::Cdna4;
-    if (!legacy_trapsts)
+    if (!legacy_trapsts) {
       continue;
+    }
     amdgpu::GpuMemory gpu_mem(std::string("hwreg_dp_rate_mem_") + arch_case.name);
     amdgpu::L2Cache l2(std::string("hwreg_dp_rate_l2_") + arch_case.name);
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -11155,8 +11440,9 @@ TEST(HwregTest, TrapstsDpRateIsAReadOnlyRdna1And2Constant) {
     EXPECT_EQ(value, dp_rate >> 29);
 
     if (!gfx10) {
-      if (!wf->is_halted())
+      if (!wf->is_halted()) {
         wf->halt();
+      }
       continue;
     }
     ASSERT_TRUE(cu->execute_instruction(write.get(), *wf).succeeded());
@@ -11166,8 +11452,9 @@ TEST(HwregTest, TrapstsDpRateIsAReadOnlyRdna1And2Constant) {
     EXPECT_EQ(wf->trapsts(), 0u);
     ASSERT_TRUE(cu->execute_instruction(read.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_sgpr(sb + 4), dp_rate);
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11181,8 +11468,9 @@ TEST(HwregTest, Gfx11ShMemBasesMatchesRdna1And2) {
                        arch_case.arch == rocjitsu::IsaFamily::Rdna2;
     const bool gfx11 = arch_case.arch == rocjitsu::IsaFamily::Rdna3 ||
                        arch_case.arch == rocjitsu::IsaFamily::Rdna3_5;
-    if (!gfx10 && !gfx11)
+    if (!gfx10 && !gfx11) {
       continue;
+    }
     SCOPED_TRACE(arch_case.name);
     amdgpu::GpuMemory gpu_mem(std::string("hwreg_sh_mem_bases_mem_") + arch_case.name);
     amdgpu::L2Cache l2(std::string("hwreg_sh_mem_bases_l2_") + arch_case.name);
@@ -11211,8 +11499,9 @@ TEST(HwregTest, Gfx11ShMemBasesMatchesRdna1And2) {
     // The RDNA3 manual lists SH_MEM_BASES as read-only to shaders.
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(15), 0u),
               gfx11 ? amdgpu::HwregAccessResult::ReadOnly : amdgpu::HwregAccessResult::Success);
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11265,8 +11554,9 @@ TEST(HwregTest, GetregExtractsPartialModeAndStatusFields) {
     EXPECT_EQ(cu->read_sgpr(sb + 4), 1u);
     EXPECT_EQ(cu->read_sgpr(sb + 5), 0x6u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11309,8 +11599,9 @@ TEST(HwregTest, SetregImm32StatusIsReadOnly) {
     EXPECT_EQ(wf->status_raw(), 0x12345678u);
     EXPECT_EQ(wf->mode_raw(), 0u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11351,8 +11642,9 @@ TEST(HwregTest, SetregImm32WritesModeFp16Ovfl) {
     EXPECT_TRUE(wf->fp16_ovfl());
     EXPECT_EQ(wf->status_raw(), 0x12345678u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11393,8 +11685,9 @@ TEST(HwregTest, SetregB32WritesModeFp16OvflFromSgpr) {
     EXPECT_TRUE(wf->fp16_ovfl());
     EXPECT_EQ(wf->status_raw(), 0x12345678u);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11438,8 +11731,9 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
         << "Partial MODE write or target-specific VGPR-MSB side effect incorrect";
     EXPECT_EQ(wf->status_raw(), 0x13579BDFu);
 
-    if (!wf->is_halted())
+    if (!wf->is_halted()) {
       wf->halt();
+    }
   }
 }
 
@@ -11503,17 +11797,19 @@ TEST(SparseMmaExecution, IntegerProductsUseSparseSelectorsAndWrapAccumulators) {
             nibble = word * 2 + pair;
           } else {
             q = pair + 2 * (word / 2) + 4 * (word % 2);
-            if (m == 16)
+            if (m == 16) {
               q = pair + 2 * (word / 2) + 4 * (group % 2) + 8 * (word % 2) + 16 * (group / 2);
-            else
+            } else {
               q += 8 * group;
+            }
             nibble = pair + 4 * (word / 2) + 2 * (word % 2);
           }
           const uint32_t selectors = pairs[(row + q) % pairs.size()];
           const uint32_t alternate_selectors = pairs[(row + q + 3) % pairs.size()];
           seed[index_base * 64 + lane] |= selectors << (4 * nibble);
-          if (!wide)
+          if (!wide) {
             seed[index_base * 64 + lane] |= alternate_selectors << (16 + 4 * nibble);
+          }
           for (uint32_t element = 0; element < 2; ++element) {
             const int32_t value =
                 static_cast<int32_t>((row * 29 + q * 37 + element * 83) % 256) - 128;
@@ -11547,25 +11843,32 @@ TEST(SparseMmaExecution, IntegerProductsUseSparseSelectorsAndWrapAccumulators) {
         for (bool acc_dst : {false, true}) {
           SCOPED_TRACE(acc_dst);
           const uint32_t physical_dst = dst + (acc_dst ? amdgpu::ACC_VGPR_OFFSET : 0);
-          for (uint32_t reg = 0; reg < 128; ++reg)
-            for (uint32_t lane = 0; lane < 64; ++lane)
+          for (uint32_t reg = 0; reg < 128; ++reg) {
+            for (uint32_t lane = 0; lane < 64; ++lane) {
               cu->write_vgpr(vb + reg, lane, seed[reg * 64 + lane]);
+            }
+          }
           // Non-aliased C starts near overflow; aliases retain the packed inputs as C.
-          if (dst == dst_base || acc_dst)
-            for (uint32_t reg = 0; reg < m * m / 64; ++reg)
-              for (uint32_t lane = 0; lane < 64; ++lane)
+          if (dst == dst_base || acc_dst) {
+            for (uint32_t reg = 0; reg < m * m / 64; ++reg) {
+              for (uint32_t lane = 0; lane < 64; ++lane) {
                 cu->write_vgpr(vb + physical_dst + reg, lane, 0x7FFFFF00u + reg * 64 + lane);
+              }
+            }
+          }
 
           std::vector<uint32_t> expected(m * m);
-          for (uint32_t row = 0; row < m; ++row)
+          for (uint32_t row = 0; row < m; ++row) {
             for (uint32_t col = 0; col < m; ++col) {
               const uint32_t lane = col + m * ((row / 4) % (64 / m));
               const uint32_t reg = (row / (256 / m)) * 4 + row % 4;
               uint32_t value = cu->read_vgpr(vb + physical_dst + reg, lane);
-              for (uint32_t inner = 0; inner < k; ++inner)
+              for (uint32_t inner = 0; inner < k; ++inner) {
                 value += static_cast<uint32_t>(selected_a[row * k + inner] * b[inner * m + col]);
+              }
               expected[row * m + col] = value;
             }
+          }
           const auto fields = cdna3::Vop3pMfmaBuilderFields{.vdst = static_cast<uint8_t>(dst),
                                                             .cbsz = static_cast<uint8_t>(cbsz),
                                                             .abid = static_cast<uint8_t>(abid),
@@ -11586,18 +11889,21 @@ TEST(SparseMmaExecution, IntegerProductsUseSparseSelectorsAndWrapAccumulators) {
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           for (uint32_t reg = 0; reg < 128; ++reg) {
-            if (reg >= physical_dst && reg < physical_dst + m * m / 64)
+            if (reg >= physical_dst && reg < physical_dst + m * m / 64) {
               continue;
-            for (uint32_t lane = 0; lane < 64; ++lane)
+            }
+            for (uint32_t lane = 0; lane < 64; ++lane) {
               EXPECT_EQ(cu->read_vgpr(vb + reg, lane), seed[reg * 64 + lane]);
+            }
           }
-          for (uint32_t row = 0; row < m; ++row)
+          for (uint32_t row = 0; row < m; ++row) {
             for (uint32_t col = 0; col < m; ++col) {
               const uint32_t lane = col + m * ((row / 4) % (64 / m));
               const uint32_t reg = (row / (256 / m)) * 4 + row % 4;
               EXPECT_EQ(cu->read_vgpr(vb + physical_dst + reg, lane), expected[row * m + col])
                   << "row=" << row << " col=" << col;
             }
+          }
         }
       }
     }
@@ -11652,8 +11958,9 @@ TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
 
   const uint32_t stride = wf->wf_size() * static_cast<uint32_t>(sizeof(uint32_t));
   for (uint64_t a : {kGlobalAddr, kGlobalAddr + 4, kGlobalAddr + stride, kScratchBase,
-                     kScratchBase + 4, kScratchBase + stride})
+                     kScratchBase + 4, kScratchBase + stride}) {
     gpu_mem.write32(a, 0u);
+  }
 
   // flat_store_dwordx2 v[0:1], v[2:3]
   cdna4::FlatMachineInst enc{};
@@ -11682,8 +11989,9 @@ TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
   EXPECT_EQ(gpu_mem.read32(kScratchBase + stride), kScratchWord1);
   EXPECT_EQ(gpu_mem.read32(kScratchBase + 4), 0u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIsReadAtWaveWidth) {
@@ -11747,8 +12055,9 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIsReadAtWaveWidth) {
   // The paired slot still runs.
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0xC0FFEE00u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
@@ -11799,8 +12108,9 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
   EXPECT_EQ(cu->read_vgpr(vb + 0, 2), 0x22220002u);
   EXPECT_EQ(cu->read_vgpr(vb + 0, 3), 0x11110003u);
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 namespace {
@@ -12065,8 +12375,9 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
           // Only CDNA profiles expose packed FMAC through SDWA.
           if (value.opcode == architecture.packed_fmac_f16 && !value.unary &&
               (architecture.arch == rocjitsu::IsaFamily::Rdna1 ||
-               architecture.arch == rocjitsu::IsaFamily::Rdna2))
+               architecture.arch == rocjitsu::IsaFamily::Rdna2)) {
             continue;
+          }
           SCOPED_TRACE(::testing::Message()
                        << "arch=" << architecture.arch << " opcode=" << value.opcode
                        << " omod=" << value.omod << " mode=" << value.mode
@@ -12089,10 +12400,11 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
           std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
           ASSERT_NE(instruction, nullptr);
           EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
-          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
             EXPECT_EQ(compute_unit->read_vgpr_storage(register_base + 6, lane),
                       active_mask & (uint64_t{1} << lane) ? value.expected
                                                           : value.initial_destination);
+          }
         }
       }
       wave->halt();
@@ -12341,10 +12653,12 @@ TEST(LegacyRdnaFlatTest, PrivateAndGlobalLanesKeepDistinctMultiwordLayouts) {
             cu->write_vgpr(vb + 3, lane, 0x93500000u + lane);
           }
           const uint32_t stride = wave_size * 4;
-          for (uint32_t offset = 0; offset < 4 * stride; offset += 4)
+          for (uint32_t offset = 0; offset < 4 * stride; offset += 4) {
             memory.write32(scratch_base + offset, 0xa5a5a5a5);
-          for (const auto address : {global_address, global_address + 4, global_address + stride})
+          }
+          for (const auto address : {global_address, global_address + 4, global_address + stride}) {
             memory.write32(address, 0xa5a5a5a5);
+          }
           auto decoder = Decoder::create(arch);
           const auto words =
               arch == rocjitsu::IsaFamily::Rdna1
@@ -12364,12 +12678,14 @@ TEST(LegacyRdnaFlatTest, PrivateAndGlobalLanesKeepDistinctMultiwordLayouts) {
           expected_private.fill(0xa5);
           const std::array<uint32_t, 2> payload{0x73100000u + private_lane,
                                                 0x93500000u + private_lane};
-          for (uint32_t byte = 0; byte < 8; ++byte)
+          for (uint32_t byte = 0; byte < 8; ++byte) {
             expected_private[private_offset + byte] = payload[byte / 4] >> (8 * (byte % 4));
+          }
           for (uint32_t row = 0; row < 4; ++row) {
             uint32_t expected_word = 0;
-            for (uint32_t byte = 0; byte < 4; ++byte)
+            for (uint32_t byte = 0; byte < 4; ++byte) {
               expected_word |= uint32_t{expected_private[row * 4 + byte]} << (8 * byte);
+            }
             for (uint32_t lane = 0; lane < wave_size; ++lane) {
               EXPECT_EQ(memory.read32(scratch_base + row * stride + lane * 4),
                         lane == private_lane ? expected_word : 0xa5a5a5a5u)
