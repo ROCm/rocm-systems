@@ -38,6 +38,7 @@
 #include "../config_test_util.h"
 #include "../dbi_test_util.h"
 #include "../halt_snapshot_plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
@@ -182,15 +183,17 @@ public:
         static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                        ((256 / 8) - 1));
-    if (soc_->arch() == ROCJITSU_CODE_ARCH_CDNA3 || soc_->arch() == ROCJITSU_CODE_ARCH_CDNA4)
+    if (soc_->arch() == rocjitsu::IsaFamily::Cdna3 || soc_->arch() == rocjitsu::IsaFamily::Cdna4) {
       RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 128 / 4 - 1);
+    }
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count_);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
     kd.kernel_code_properties = kernarg_properties_;
-    if (wave32_dispatch_)
+    if (wave32_dispatch_) {
       RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                          1);
+    }
     kd.kernarg_size = static_cast<uint32_t>(kernarg_bytes_.size());
     kd.private_segment_fixed_size = private_bytes;
 
@@ -214,14 +217,16 @@ public:
                                                         const std::vector<uint32_t> &regs,
                                                         uint32_t workgroup_id = 0) {
     const WavefrontSnapshot *wf = run(code, private_bytes, 0, workgroup_id);
-    if (wf == nullptr)
+    if (wf == nullptr) {
       return std::vector<std::vector<uint32_t>>(regs.size());
+    }
 
     std::vector<std::vector<uint32_t>> out(regs.size());
     for (size_t i = 0; i < regs.size(); ++i) {
       out[i].resize(wave_size_);
-      for (uint32_t lane = 0; lane < wave_size_; ++lane)
+      for (uint32_t lane = 0; lane < wave_size_; ++lane) {
         out[i][lane] = wf->vgpr(regs[i], lane);
+      }
     }
     return out;
   }
@@ -238,10 +243,13 @@ public:
     run(code, private_bytes, workgroup_size);
     const std::vector<WavefrontSnapshot> &snapshots = snapshot_plugin_->snapshots();
     std::vector<std::vector<uint32_t>> out(regs.size());
-    for (size_t wave = halts_before; wave < snapshots.size(); ++wave)
-      for (size_t i = 0; i < regs.size(); ++i)
-        for (uint32_t lane = 0; lane < wave_size_; ++lane)
+    for (size_t wave = halts_before; wave < snapshots.size(); ++wave) {
+      for (size_t i = 0; i < regs.size(); ++i) {
+        for (uint32_t lane = 0; lane < wave_size_; ++lane) {
           out[i].push_back(snapshots[wave].vgpr(regs[i], lane));
+        }
+      }
+    }
     return out;
   }
 
@@ -258,8 +266,9 @@ public:
   std::optional<uint64_t> run_and_read_sgpr64(const std::vector<uint32_t> &code,
                                               uint32_t private_bytes, uint32_t base) {
     const WavefrontSnapshot *wf = run(code, private_bytes);
-    if (wf == nullptr)
+    if (wf == nullptr) {
       return std::nullopt;
+    }
     return wf->sgpr64(base);
   }
 
@@ -277,8 +286,9 @@ public:
     // dispatch added one.
     const size_t halts_before = snapshot_plugin_->snapshots().size();
     run(code, private_bytes);
-    if (snapshot_plugin_->snapshots().size() == halts_before)
+    if (snapshot_plugin_->snapshots().size() == halts_before) {
       return std::nullopt;
+    }
     // This topology's caches already write stores through to GpuMemory, so the
     // flush changes nothing today. It is SoC's documented visibility point, and
     // keeps the read-back correct if a cache here starts holding dirty lines.
@@ -295,8 +305,9 @@ private:
   const WavefrontSnapshot *run(const std::vector<uint32_t> &code, uint32_t private_bytes,
                                uint32_t workgroup_size = 0, uint32_t workgroup_id = 0) {
     const uint64_t ko = write_kernel(KERNEL_ADDR, code, private_bytes);
-    if (!kernarg_bytes_.empty())
+    if (!kernarg_bytes_.empty()) {
       mem_->load_image(kernarg_bytes_.data(), kernarg_bytes_.size(), KERNARG_ADDR);
+    }
     // Callers reuse one DbiSim for several dispatches, and each AqlQueue leaves
     // its registration behind on the CP, so every run needs its own queue --
     // its own id, since two live queues sharing one on a CP are rejected (fan-out
@@ -312,9 +323,11 @@ private:
                    /*workgroup_size_x=*/threads, kernarg_bytes_.empty() ? 0 : KERNARG_ADDR);
     engine_->run();
 
-    for (const WavefrontSnapshot &snapshot : snapshot_plugin_->snapshots())
-      if (snapshot.wg_id == workgroup_id)
+    for (const WavefrontSnapshot &snapshot : snapshot_plugin_->snapshots()) {
+      if (snapshot.wg_id == workgroup_id) {
         return &snapshot;
+      }
+    }
     return nullptr;
   }
 

@@ -11,6 +11,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "test_paths.h"
 #include "util/diagnostic.h"
 
@@ -103,12 +104,14 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   // the rodata vaddr, and kernel_code_entry_byte_offset bridges to .text vaddr.
   uint64_t kd_offset = co->kernel_descriptor_offset("vector_add");
   ASSERT_NE(kd_offset, 0u) << "Kernel descriptor symbol not found";
-  for (const auto *sec : co->rodata_sections())
+  for (const auto *sec : co->rodata_sections()) {
     memory->load_image(reinterpret_cast<const uint8_t *>(sec->data()), sec->size(),
                        KD_ADDR + sec->vaddr());
-  for (const auto *sec : co->text_sections())
+  }
+  for (const auto *sec : co->text_sections()) {
     memory->load_image(reinterpret_cast<const uint8_t *>(sec->data()), sec->size(),
                        KD_ADDR + sec->vaddr());
+  }
   uint64_t kernel_object = KD_ADDR + kd_offset;
 
   // Generate input vectors.
@@ -147,8 +150,9 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   soc->flush_all();
 
   std::vector<uint32_t> output_words(N);
-  for (uint32_t i = 0; i < N; ++i)
+  for (uint32_t i = 0; i < N; ++i) {
     output_words[i] = memory->read32(C_ADDR + i * sizeof(float));
+  }
 
   result.output_words = std::move(output_words);
   result.expected = std::move(C_expected);
@@ -162,8 +166,9 @@ void expect_vector_add_matches_golden(const std::vector<uint32_t> &output_words,
   for (size_t i = 0; i < output_words.size(); ++i) {
     float actual = std::bit_cast<float>(output_words[i]);
     if (std::abs(actual - expected[i]) > 1e-6f) {
-      if (mismatches < 10)
+      if (mismatches < 10) {
         ADD_FAILURE() << "Mismatch at C[" << i << "]: GPU=" << actual << " CPU=" << expected[i];
+      }
       ++mismatches;
     }
   }
@@ -176,8 +181,9 @@ void expect_same_output_words(const std::vector<uint32_t> &expected_words,
 
   unsigned mismatches = 0;
   for (size_t i = 0; i < actual_words.size(); ++i) {
-    if (actual_words[i] == expected_words[i])
+    if (actual_words[i] == expected_words[i]) {
       continue;
+    }
     if (mismatches < 10) {
       ADD_FAILURE() << "Output word mismatch at C[" << i
                     << "]: dispatch_threads=1 word=" << expected_words[i]
@@ -269,8 +275,9 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   for (uint32_t i = 0; i < N; ++i) {
     float actual = std::bit_cast<float>(memory->read32(C_ADDR + i * sizeof(float)));
     if (std::abs(actual - C_expected[i]) > 1e-6f) {
-      if (mismatches < 10)
+      if (mismatches < 10) {
         ADD_FAILURE() << "Mismatch at C[" << i << "]: GPU=" << actual << " CPU=" << C_expected[i];
+      }
       ++mismatches;
     }
   }
@@ -284,7 +291,7 @@ TEST(VectorAddCodeObjectTest, LoadsAndDecodes) {
   ASSERT_NE(co, nullptr);
   ASSERT_FALSE(co->text_sections().empty());
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   const auto *text = co->text_sections()[0];
   const auto *data = reinterpret_cast<const uint32_t *>(text->data());
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, data));
@@ -352,15 +359,17 @@ void run_fanout_golden_reference(uint32_t num_threads) {
 
   auto counts = soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), TOTAL_XCDS);
-  for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi)
+  for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
     EXPECT_EQ(counts[xi], TOTAL_CUS / TOTAL_XCDS) << "xcd" << xi;
+  }
 
   unsigned mismatches = 0;
   for (uint32_t i = 0; i < N; ++i) {
     float actual = std::bit_cast<float>(memory->read32(C_ADDR + i * sizeof(float)));
     if (std::abs(actual - C_expected[i]) > 1e-6f) {
-      if (mismatches < 10)
+      if (mismatches < 10) {
         ADD_FAILURE() << "Mismatch at C[" << i << "]: GPU=" << actual << " CPU=" << C_expected[i];
+      }
       ++mismatches;
     }
   }
@@ -380,15 +389,18 @@ void run_fanout_golden_reference(uint32_t num_threads) {
 util::FailureOr<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_scope,
                                                              util::DiagnosticEmitter emit_error) {
   Executable exec(kernel_path("vector_add"));
-  if (!exec.is_valid())
+  if (!exec.is_valid()) {
     return emit_error.emit() << "Failed to load vector_add.o";
+  }
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
-  if (!co)
+  if (!co) {
     return emit_error.emit() << "vector_add.o has no gfx950 code object";
+  }
 
   auto loaded_result = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, emit_error);
-  if (loaded_result.failed())
+  if (loaded_result.failed()) {
     return util::Result::failure();
+  }
   auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
@@ -397,10 +409,12 @@ util::FailureOr<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_sc
   loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  if (loaded.wire_links(engine->topology(), emit_error).failed())
+  if (loaded.wire_links(engine->topology(), emit_error).failed()) {
     return util::Result::failure();
-  if (engine->create(emit_error).failed())
+  }
+  if (engine->create(emit_error).failed()) {
     return util::Result::failure();
+  }
 
   co->load_to_memory(memory, KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset("vector_add");
@@ -424,8 +438,9 @@ util::FailureOr<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_sc
   std::vector<uint8_t> sink(vec_bytes);
   for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
     auto *l2 = soc->xcd(xi)->l2_cache();
-    if (!l2)
+    if (!l2) {
       return emit_error.emit() << "xcd" << xi << " has no L2 to prime";
+    }
     l2->read(A_ADDR, sink.data(), static_cast<uint32_t>(vec_bytes));
     l2->read(B_ADDR, sink.data(), static_cast<uint32_t>(vec_bytes));
   }
@@ -441,8 +456,9 @@ util::FailureOr<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_sc
   memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), KERNARG_ADDR);
 
   auto *cp = soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
-  if (!cp)
+  if (!cp) {
     return emit_error.emit() << "no command processor owns the fan-out queue";
+  }
   auto queue = test::make_fanout_queue(memory, cp);
 
   // 4. One fanned-out dispatch carrying the requested acquire scope. Only the
@@ -467,8 +483,9 @@ util::FailureOr<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_sc
   unsigned mismatches = 0;
   for (uint32_t i = 0; i < N; ++i) {
     float actual = std::bit_cast<float>(memory->read32(C_ADDR + i * sizeof(float)));
-    if (std::abs(actual - C_expected[i]) > 1e-6f)
+    if (std::abs(actual - C_expected[i]) > 1e-6f) {
       ++mismatches;
+    }
   }
   return mismatches;
 }
@@ -510,18 +527,21 @@ public:
 
   void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override {
     ++wgs_completed_;
-    if (memory_->read64(SIGNAL_ADDR + SIGNAL_VALUE_OFFSET) == initial_value_)
+    if (memory_->read64(SIGNAL_ADDR + SIGNAL_VALUE_OFFSET) == initial_value_) {
       return;
+    }
     // The signal moved. Record the first time we saw that, and whether the whole
     // grid's results had reached memory by then.
-    if (signal_moved_after_wgs_ != 0)
+    if (signal_moved_after_wgs_ != 0) {
       return;
+    }
     signal_moved_after_wgs_ = wgs_completed_;
     results_visible_when_signal_moved_ = 0;
     for (uint32_t i = 0; i < expected_.size(); ++i) {
       float actual = std::bit_cast<float>(memory_->read32(C_ADDR + i * sizeof(float)));
-      if (std::abs(actual - expected_[i]) <= 1e-6f)
+      if (std::abs(actual - expected_[i]) <= 1e-6f) {
         ++results_visible_when_signal_moved_;
+      }
     }
   }
 
@@ -637,8 +657,9 @@ void run_fanout_signal_ordering(uint32_t num_threads) {
   // The grid really was spread, or none of this says anything about fan-out.
   auto counts = soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), TOTAL_XCDS);
-  for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi)
+  for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
     ASSERT_EQ(counts[xi], TOTAL_CUS / TOTAL_XCDS) << "xcd" << xi;
+  }
   // ...and every workgroup was sampled, or the watch above saw nothing.
   ASSERT_EQ(watch->wgs_completed(), kTotalWgs);
 
@@ -659,8 +680,9 @@ void run_fanout_signal_ordering(uint32_t num_threads) {
   unsigned mismatches = 0;
   for (uint32_t i = 0; i < N; ++i) {
     float actual = std::bit_cast<float>(memory->read32(C_ADDR + i * sizeof(float)));
-    if (std::abs(actual - C_expected[i]) > 1e-6f)
+    if (std::abs(actual - C_expected[i]) > 1e-6f) {
       ++mismatches;
+    }
   }
   EXPECT_EQ(mismatches, 0u) << "the shards did not write the results the signal stands for";
 }

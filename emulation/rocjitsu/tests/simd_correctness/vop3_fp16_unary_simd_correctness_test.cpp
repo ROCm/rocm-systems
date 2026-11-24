@@ -11,6 +11,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -96,15 +97,16 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop3_fp16_una_mem"), l2("vop3_fp16_una_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_fp16_una", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -122,8 +124,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -143,8 +146,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -154,12 +158,13 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     amdgpu::ScopedSimdFastPathTracker tracker;
     auto out = fx.run(inst, exec);
     // Integral rounding now uses rj-arith, outside the legacy SIMD tracker.
-    if (force_scalar || c.opcode != 382)
+    if (force_scalar || c.opcode != 382) {
       EXPECT_TRUE(tracker.no_tracked_path_executed())
           << c.name << ": forced-scalar execution used SIMD";
-    else
+    } else {
       EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP3_UNARY_FP16))
           << c.name << ": eligible execution did not use the unary F16 SIMD path";
+    }
     delete inst;
     return out;
   };
@@ -172,8 +177,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (active) {
-      if (is_f16_nan(scalar_out[lane]) || is_f16_nan(simd_out[lane]))
+      if (is_f16_nan(scalar_out[lane]) || is_f16_nan(simd_out[lane])) {
         continue;
+      }
       EXPECT_EQ(scalar_out[lane], simd_out[lane])
           << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
           << " lane " << lane << ": SIMD path diverged from scalar body";
@@ -187,11 +193,15 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
 }
 
 void check_all_mods(const Case &c, uint64_t exec) {
-  for (uint32_t abs = 0; abs < 2; ++abs)
-    for (uint32_t neg = 0; neg < 2; ++neg)
-      for (uint32_t omod = 0; omod < 4; ++omod)
-        for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (uint32_t abs = 0; abs < 2; ++abs) {
+    for (uint32_t neg = 0; neg < 2; ++neg) {
+      for (uint32_t omod = 0; omod < 4; ++omod) {
+        for (uint32_t clamp = 0; clamp < 2; ++clamp) {
           check_case(c, abs, neg, omod, clamp, exec);
+        }
+      }
+    }
+  }
 }
 
 TEST(Vop3Fp16UnarySimdCorrectness, FullExec) {
@@ -199,8 +209,9 @@ TEST(Vop3Fp16UnarySimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_all_mods(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop3Fp16UnarySimdCorrectness, PartialExec) {
@@ -208,8 +219,9 @@ TEST(Vop3Fp16UnarySimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 } // namespace

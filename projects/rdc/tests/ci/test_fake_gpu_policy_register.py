@@ -144,8 +144,8 @@ def test_callbacks_can_unregister_groups(rdcd):
 
     disconnected = None
     try:
-        # rdcd keeps a context per group once registered; make both now, so
-        # the steps below only reuse them.
+        # Each group delivers a notification and unregisters once before the
+        # callbacks below unregister groups.
         for group in (a, b):
             assert register(group, lambda: None).wait(wait), f"no callback for group {group}"
             assert lib.rdc_policy_unregister(handle, group) == 0
@@ -221,8 +221,9 @@ def test_registering_waits_for_an_unregister_to_return(rdcd):
 
 def test_unregister_frees_the_group_when_rdcd_is_gone(rdcd):
     """Through the C API: once rdcd is gone, rdc_policy_unregister() fails but
-    returns, and the group is free again: registering it returns RDC_ST_OK
-    instead of RDC_ST_CONFLICT."""
+    returns, and the group is free again: registering it no longer returns
+    RDC_ST_CONFLICT. It waits for rdcd to admit the stream, so it reports that
+    rdcd cannot be reached."""
     group = _policy_group(rdcd)
     lib, handle = _connect(rdcd)
     wait = 10 * FACTOR
@@ -242,7 +243,7 @@ def test_unregister_frees_the_group_when_rdcd_is_gone(rdcd):
         unregistering.join(wait)
         assert not unregistering.is_alive(), "rdc_policy_unregister() did not return"
         assert results == {"unregister": RDC_ST_CLIENT_ERROR}, results
-        assert lib.rdc_policy_register(handle, group, callbacks[1]) == 0
+        assert lib.rdc_policy_register(handle, group, callbacks[1]) == RDC_ST_CLIENT_ERROR
     finally:
         # Not while the unregister still runs: that would free the handle under it.
         if not unregistering.is_alive():

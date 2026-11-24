@@ -20,6 +20,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -113,7 +114,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4)
       : gpu_mem("vop3p_pk_bin_int_mem"), l2("vop3p_pk_bin_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -122,8 +123,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_pk_bin_int", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -144,8 +146,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -166,16 +169,18 @@ void check_case(const Case &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
-    if (c.ternary)
+    if (c.ternary) {
       vop3p_encode_default_ternary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/258,
                                    words);
-    else
+    } else {
       vop3p_encode_default_binary(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
+    }
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
@@ -216,8 +221,8 @@ TEST(Vop3pPkBinaryIntSimdCorrectness, AppliesSignBitsAfterSelectingSourceHalves)
       {{0xcc006006, 0x9c0a0300}, 0xfffe800d}, // MAD_I16: select high C twice and negate only low C.
   };
   ForceScalarGuard guard;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
@@ -248,8 +253,9 @@ TEST(Vop3pPkBinaryIntSimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop3pPkBinaryIntSimdCorrectness, PartialExec) {
@@ -257,8 +263,9 @@ TEST(Vop3pPkBinaryIntSimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 } // namespace

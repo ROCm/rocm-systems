@@ -36,8 +36,9 @@ DecodeResult decodeTensorLoadToLdsVimage(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "tensor_load_to_lds", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TensorLoadToLdsVimage>(opcode);
 }
 } // namespace detail
@@ -66,8 +67,9 @@ DecodeResult decodeTensorStoreFromLdsVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "tensor_store_from_lds", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TensorStoreFromLdsVimage>(opcode);
 }
 } // namespace detail

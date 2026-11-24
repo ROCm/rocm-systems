@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/lds_barrier_arrival_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "util/bit.h"
@@ -55,10 +56,12 @@ uint64_t read_bits(const std::array<uint32_t, WordCount> &words, uint32_t bit_of
   for (uint32_t bit = 0; bit < bit_count; ++bit) {
     const uint32_t absolute_bit = bit_offset + bit;
     const uint32_t word = absolute_bit / 32;
-    if (word >= WordCount)
+    if (word >= WordCount) {
       break;
-    if (words[word] & (1u << (absolute_bit % 32)))
+    }
+    if (words[word] & (1u << (absolute_bit % 32))) {
       value |= 1ull << bit;
+    }
   }
   return value;
 }
@@ -68,18 +71,22 @@ util::FailureOr<std::array<uint32_t, N>> read_sgpr_group(const Wavefront &wf, in
                                                          bool allow_null) {
   std::array<uint32_t, N> words{};
   if (reg == kSgprNull) {
-    if (allow_null)
+    if (allow_null) {
       return words;
+    }
     return util::Result::failure();
   }
-  if (reg < 0 || reg > 105 || static_cast<size_t>(reg) + N > 106) [[unlikely]]
+  if (reg < 0 || reg > 105 || static_cast<size_t>(reg) + N > 106) [[unlikely]] {
     return util::Result::failure();
+  }
   const uint32_t base = wf.sgpr_alloc().base + static_cast<uint32_t>(reg);
   auto group = amdgpu::RegisterAccess(wf).read_sgpr_region(base, static_cast<uint32_t>(N));
-  if (!group.valid()) [[unlikely]]
+  if (!group.valid()) [[unlikely]] {
     return util::Result::failure();
-  for (size_t i = 0; i < N; ++i)
+  }
+  for (size_t i = 0; i < N; ++i) {
     words[i] = group.dword(static_cast<uint32_t>(i));
+  }
   return words;
 }
 
@@ -139,8 +146,9 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
   desc.atomic_barrier = read_bits(d1, 18, 1) != 0;
   desc.iterate = !desc.gather && read_bits(d1, 19, 1) != 0;
   desc.pad = read_bits(d1, 20, 1) != 0;
-  if (desc.atomic_barrier)
+  if (desc.atomic_barrier) {
     desc.atomic_barrier_addr = static_cast<uint32_t>(read_bits(d1, 32, 16) << 3);
+  }
   if (desc.pad) {
     desc.pad_interval = 1u << (static_cast<uint32_t>(read_bits(d1, 22, 3)) + 1);
     desc.pad_amount = static_cast<uint32_t>(read_bits(d1, 25, 7)) + 1;
@@ -149,30 +157,34 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
   desc.tensor_dims[0] = static_cast<uint32_t>(read_bits(d1, 48, 32));
   desc.tensor_dims[1] = static_cast<uint32_t>(read_bits(d1, 80, 32));
   desc.tensor_dims[2] = static_cast<uint32_t>(read_bits(d2, 0, 32));
-  if (desc.iterate)
+  if (desc.iterate) {
     desc.lds_increment = static_cast<uint32_t>(read_bits(d2, 32, 32));
-  else
+  } else {
     desc.tensor_dims[3] = static_cast<uint32_t>(read_bits(d2, 32, 32));
+  }
   desc.tensor_dims[4] = static_cast<uint32_t>(read_bits(d3, 48, 32));
 
   desc.tile_dims[0] = static_cast<uint32_t>(read_bits(d1, 112, 16));
-  if (desc.gather)
+  if (desc.gather) {
     desc.valid_indices = static_cast<uint32_t>(read_bits(d1, 128, 16));
-  else
+  } else {
     desc.tile_dims[1] = static_cast<uint32_t>(read_bits(d1, 128, 16));
+  }
   desc.tile_dims[2] = static_cast<uint32_t>(read_bits(d1, 144, 16));
-  if (desc.iterate)
+  if (desc.iterate) {
     desc.iteration_count = static_cast<uint32_t>(read_bits(d2, 112, 16)) + 1;
-  else
+  } else {
     desc.tile_dims[3] = static_cast<uint32_t>(read_bits(d2, 112, 16));
+  }
   desc.tile_dims[4] = static_cast<uint32_t>(read_bits(d3, 80, 16));
 
   desc.global_strides[0] = read_bits(d1, 160, 48);
   desc.global_strides[1] = read_bits(d1, 208, 48);
-  if (desc.iterate)
+  if (desc.iterate) {
     desc.global_increment = read_bits(d2, 64, 48);
-  else
+  } else {
     desc.global_strides[2] = read_bits(d2, 64, 48);
+  }
   desc.global_strides[3] = read_bits(d3, 0, 48);
 
   if (desc.gather) {
@@ -190,10 +202,12 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
 
   if (desc.gather) {
     if (desc.gather_indices_32bit) {
-      for (uint32_t index = 0; index < 4; ++index)
+      for (uint32_t index = 0; index < 4; ++index) {
         desc.gather_indices[index] = d2[index];
-      for (uint32_t index = 0; index < 4; ++index)
+      }
+      for (uint32_t index = 0; index < 4; ++index) {
         desc.gather_indices[index + 4] = d3[index];
+      }
     } else {
       for (uint32_t index = 0; index < 4; ++index) {
         desc.gather_indices[index * 2] = d2[index] & 0xffffu;
@@ -216,8 +230,9 @@ public:
       // Cases 3/7 used {4,2,0,2}, strides {8,99,24}. With no padding or iteration,
       // both kept LDS[i] = 0x80000000 + i and global[i] = 1000 + i at the destination.
       // A positive tensor extent keeps a zero higher tile dimension unused.
-      if (dim != 0 && !desc.gather && desc.tile_dims[dim] == 0 && desc.tensor_dims[dim] != 0)
+      if (dim != 0 && !desc.gather && desc.tile_dims[dim] == 0 && desc.tensor_dims[dim] != 0) {
         continue;
+      }
       dimensions_[dimension_count_++] = dim;
       empty_ |= desc.tensor_dims[dim] == 0;
     }
@@ -248,16 +263,19 @@ private:
 /// established hardware behavior.
 inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout) {
-  if (desc.rank() == 0 || desc.tile_dims[0] == 0)
+  if (desc.rank() == 0 || desc.tile_dims[0] == 0) {
     return uint64_t{0};
-  if (desc.gather)
+  }
+  if (desc.gather) {
     return util::checked_mul(uint64_t{desc.valid_indices}, uint64_t{desc.tile_dims[0]});
+  }
 
   uint64_t elements_per_iteration = 1;
   for (uint32_t dim : layout.dimensions()) {
     const auto product = util::checked_mul(elements_per_iteration, uint64_t{desc.tile_dims[dim]});
-    if (!product) [[unlikely]]
+    if (!product) [[unlikely]] {
       return std::nullopt;
+    }
     elements_per_iteration = *product;
   }
   const uint64_t iterations = desc.iterate ? desc.iteration_count : 1;
@@ -268,28 +286,35 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
                                                   const TensorDmaLayout &layout) {
   // The in-tree HIP descriptor API and LLVM lowering only produce the boolean
   // count encodings 0 (disabled) and 1 (active).
-  if (desc.count > 1) [[unlikely]]
+  if (desc.count > 1) [[unlikely]] {
     return util::Result::failure();
+  }
   if (desc.elem_size != 1 && desc.elem_size != 2 && desc.elem_size != 4 && desc.elem_size != 8)
-      [[unlikely]]
+      [[unlikely]] {
     return util::Result::failure();
+  }
   const uint32_t rank = desc.rank();
   if (desc.gather) {
-    if (rank != 2) [[unlikely]]
+    if (rank != 2) [[unlikely]] {
       return util::Result::failure();
+    }
     // Zero valid indices or a zero tile_dims[0] is a NOP; see tensor_element_count.
     const uint32_t max_indices = desc.gather_indices_32bit ? 8 : 16;
-    if (desc.valid_indices > max_indices) [[unlikely]]
+    if (desc.valid_indices > max_indices) [[unlikely]] {
       return util::Result::failure();
+    }
     return tensor_element_count(desc, layout) ? util::Result::success() : util::Result::failure();
   }
   // A zero-width tile can drain an iterating prefetch with the other dimensions unset.
-  if (rank == 0 || desc.tile_dims[0] == 0)
+  if (rank == 0 || desc.tile_dims[0] == 0) {
     return util::Result::success();
-  if (desc.iterate && (rank < 2 || rank > 3)) [[unlikely]]
+  }
+  if (desc.iterate && (rank < 2 || rank > 3)) [[unlikely]] {
     return util::Result::failure();
-  if (!tensor_element_count(desc, layout)) [[unlikely]]
+  }
+  if (!tensor_element_count(desc, layout)) [[unlikely]] {
     return util::Result::failure();
+  }
   return util::Result::success();
 }
 
@@ -345,12 +370,14 @@ inline bool validate_global_address_range(const TensorDmaDescriptor &desc,
       const uint64_t extent0 = std::min<uint64_t>(desc.tile_dims[0], desc.tensor_dims[0]);
       for (uint32_t idx = 0; idx < desc.valid_indices; ++idx) {
         const uint32_t gather_index = desc.gather_indices[idx];
-        if (extent0 == 0 || gather_index >= desc.tensor_dims[1])
+        if (extent0 == 0 || gather_index >= desc.tensor_dims[1]) {
           continue;
+        }
         const auto row = util::checked_mul(uint64_t{gather_index}, desc.global_strides[0]);
         const auto last = row ? util::checked_add(*row, extent0 - 1) : std::nullopt;
-        if (!last) [[unlikely]]
+        if (!last) [[unlikely]] {
           return false;
+        }
         include_element(*last);
       }
     }
@@ -362,19 +389,22 @@ inline bool validate_global_address_range(const TensorDmaDescriptor &desc,
         util::checked_mul(uint64_t{last_iteration}, desc.global_increment);
     for (uint32_t dim : layout.dimensions()) {
       const uint32_t extent = std::min(desc.tile_dims[dim], desc.tensor_dims[dim]);
-      if (extent == 0)
+      if (extent == 0) {
         return true;
+      }
       const uint64_t stride = dim == 0 ? 1 : desc.global_strides[dim - 1];
       const auto delta = util::checked_mul(uint64_t{extent - 1}, stride);
       last = last && delta ? util::checked_add(*last, *delta) : std::nullopt;
     }
-    if (!last) [[unlikely]]
+    if (!last) [[unlikely]] {
       return false;
+    }
     include_element(*last);
   }
 
-  if (!max_global_element)
+  if (!max_global_element) {
     return true;
+  }
   const auto max_global_byte = util::checked_mul(*max_global_element, uint64_t{desc.elem_size});
   const auto max_global_address =
       max_global_byte ? util::checked_add(desc.global_base, *max_global_byte) : std::nullopt;
@@ -445,34 +475,41 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
         util::checked_add(uint64_t{wf.lds_base()}, uint64_t{desc.atomic_barrier_addr});
     const auto barrier_end =
         barrier_address ? util::checked_add(*barrier_address, uint64_t{8}) : std::nullopt;
-    if (!barrier_end || *barrier_end > allocation_end) [[unlikely]]
+    if (!barrier_end || *barrier_end > allocation_end) [[unlikely]] {
       return false;
+    }
   }
   const auto total_elements = tensor_element_count(desc, layout);
-  if (!total_elements)
+  if (!total_elements) {
     return false;
-  if (*total_elements == 0)
+  }
+  if (*total_elements == 0) {
     return true;
+  }
 
   const uint64_t iterations = desc.gather ? 1 : (desc.iterate ? desc.iteration_count : 1);
-  if (!validate_global_address_range(desc, layout)) [[unlikely]]
+  if (!validate_global_address_range(desc, layout)) [[unlikely]] {
     return false;
+  }
 
   // Padding restarts with each iterated tile, so pad the last element's offset
   // within a tile, then add the final iteration's start (see tensor_dma_lds_byte).
   const uint64_t elements_per_iteration = *total_elements / iterations;
   auto max_tile_byte = util::checked_mul(elements_per_iteration - 1, uint64_t{desc.elem_size});
-  if (!max_tile_byte) [[unlikely]]
+  if (!max_tile_byte) [[unlikely]] {
     return false;
+  }
   if (desc.pad && !store_from_lds) {
     const TensorDmaLdsPadding padding = tensor_dma_lds_padding(desc);
-    if (padding.interval_bytes == 0) [[unlikely]]
+    if (padding.interval_bytes == 0) [[unlikely]] {
       return false;
+    }
     const auto extra =
         util::checked_mul(*max_tile_byte / padding.interval_bytes, padding.amount_bytes);
     max_tile_byte = extra ? util::checked_add(*max_tile_byte, *extra) : std::nullopt;
-    if (!max_tile_byte) [[unlikely]]
+    if (!max_tile_byte) [[unlikely]] {
       return false;
+    }
   }
   const auto final_iteration_lds = util::checked_mul(iterations - 1, uint64_t{desc.lds_increment});
   const auto final_iteration_byte =
@@ -481,8 +518,9 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
   const auto max_lds_byte = final_iteration_byte
                                 ? util::checked_add(*final_iteration_byte, *max_tile_byte)
                                 : std::nullopt;
-  if (!max_lds_byte) [[unlikely]]
+  if (!max_lds_byte) [[unlikely]] {
     return false;
+  }
 
   const auto descriptor_base = util::checked_add(uint64_t{wf.lds_base()}, uint64_t{desc.lds_base});
   const auto last_address =
@@ -546,16 +584,18 @@ inline void copy_tensor_lds(TensorDmaState &state, Wavefront &wf) {
     while (!state.elements[i - 1].lds_dropped_bytes && i < state.elements.size()) {
       const auto &next = state.elements[i];
       if (next.lds_dropped_bytes == size || (state.store_from_lds && !next.in_bounds) ||
-          next.lds_address != uint64_t{first.lds_address} + bytes)
+          next.lds_address != uint64_t{first.lds_address} + bytes) {
         break;
+      }
       bytes += size - next.lds_dropped_bytes;
       ++i;
     }
     auto *payload = state.payload.data() + start * size;
-    if (state.store_from_lds)
+    if (state.store_from_lds) {
       std::as_const(wf.lds()).read(first.lds_address, payload, bytes);
-    else
+    } else {
       wf.lds().write(first.lds_address, payload, bytes);
+    }
   }
 }
 
@@ -568,8 +608,9 @@ inline void for_each_gather_tensor_element(const TensorDmaDescriptor &desc,
       const bool in_bounds =
           !layout.empty() && coord0 < desc.tensor_dims[0] && gather_index < desc.tensor_dims[1];
       uint64_t global_element = 0;
-      if (in_bounds)
+      if (in_bounds) {
         global_element = coord0 + uint64_t{gather_index} * desc.global_strides[0];
+      }
 
       const uint64_t tile_element = uint64_t{idx} * desc.tile_dims[0] + coord0;
       visit(global_element, /*iteration_lds_element=*/0, tile_element, in_bounds);
@@ -581,14 +622,17 @@ template <typename Visitor>
 inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
                                           const TensorDmaLayout &layout, Visitor &visit) {
   const std::span<const uint32_t> dimensions = layout.dimensions();
-  if (dimensions.empty())
+  if (dimensions.empty()) {
     return;
+  }
 
   uint64_t element_count = 1;
-  for (uint32_t dim : dimensions)
+  for (uint32_t dim : dimensions) {
     element_count *= desc.tile_dims[dim];
-  if (element_count == 0)
+  }
+  if (element_count == 0) {
     return;
+  }
 
   const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
   for (uint32_t iter = 0; iter < iteration_count; ++iter) {
@@ -616,10 +660,12 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
       }
       const uint64_t tile_base = row * width;
       const uint32_t valid_width = row_in_bounds ? std::min(width, desc.tensor_dims[0]) : 0;
-      for (uint32_t x = 0; x < valid_width; ++x)
+      for (uint32_t x = 0; x < valid_width; ++x) {
         visit(row_base + x, iteration_lds, tile_base + x, true);
-      for (uint32_t x = valid_width; x < width; ++x)
+      }
+      for (uint32_t x = valid_width; x < width; ++x) {
         visit(0, iteration_lds, tile_base + x, false);
+      }
     }
   }
 }
@@ -630,23 +676,27 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
 template <typename Visitor>
 inline void for_each_tensor_element(const TensorDmaDescriptor &desc, const TensorDmaLayout &layout,
                                     Visitor &&visit) {
-  if (desc.gather)
+  if (desc.gather) {
     for_each_gather_tensor_element(desc, layout, visit);
-  else
+  } else {
     for_each_dense_tensor_element(desc, layout, visit);
+  }
 }
 
 inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   const TensorDmaDescriptor &desc = state.desc;
   const TensorDmaLayout layout(desc);
-  if (validate_supported_descriptor(desc, layout).failed()) [[unlikely]]
+  if (validate_supported_descriptor(desc, layout).failed()) [[unlikely]] {
     return util::Result::failure();
+  }
   const auto element_count = tensor_element_count(desc, layout);
-  if (!element_count) [[unlikely]]
+  if (!element_count) [[unlikely]] {
     return util::Result::failure();
+  }
   // A transfer with zero elements needs no GPU memory.
-  if (*element_count != 0 && !wf.has_gpu_memory()) [[unlikely]]
+  if (*element_count != 0 && !wf.has_gpu_memory()) [[unlikely]] {
     return util::Result::failure();
+  }
   // Iterations may legally reuse LDS through a zero or overlapping increment.
   // This separate simulator limit bounds the eager host representation.
   if (*element_count > kMaxMaterializedElements) [[unlikely]] {
@@ -659,8 +709,9 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   // completion and observation work from the elements it produced.
   const uint64_t lds_allocation_end = tensor_dma_lds_allocation_end(wf);
   if (!validate_materialization_address_ranges(desc, layout, wf, state.store_from_lds,
-                                               lds_allocation_end)) [[unlikely]]
+                                               lds_allocation_end)) [[unlikely]] {
     return util::Result::failure();
+  }
   state.elements.reserve(static_cast<size_t>(*element_count));
   auto append_element = [&](uint64_t global_element, uint64_t iteration_lds_element,
                             uint64_t tile_element, bool in_bounds) {
@@ -669,15 +720,17 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   };
   for_each_tensor_element(desc, layout, append_element);
   state.payload.resize(state.elements.size() * desc.elem_size);
-  if (state.store_from_lds)
+  if (state.store_from_lds) {
     copy_tensor_lds(state, wf);
+  }
 
   // A transfer with zero elements makes no global request, so it needs no VM
   // binding either.
   if (*element_count != 0 && wf.address_space()) {
     state.access = wf.snapshot_vm_access();
-    if (!state.access)
+    if (!state.access) {
       state.outcome = VmAccessOutcome::Faulted;
+    }
   }
   return util::Result::success();
 }
@@ -687,15 +740,17 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
 /// @pre context points to a descriptor that passed validate_supported_descriptor and
 /// validate_materialization_address_ranges during prepare_tensor.
 inline bool materialize_observed_addresses(const void *context, std::span<uint64_t> addresses) {
-  if (!context)
+  if (!context) {
     return false;
+  }
   const auto &desc = *static_cast<const TensorDmaDescriptor *>(context);
   const TensorDmaLayout layout(desc);
   size_t next_address = 0;
   bool fits = true;
   auto collect_address = [&](uint64_t global_element, uint64_t, uint64_t, bool in_bounds) {
-    if (!in_bounds)
+    if (!in_bounds) {
       return;
+    }
     if (next_address == addresses.size()) {
       fits = false;
       return;
@@ -715,12 +770,14 @@ inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState
   ranges.reserve(state.elements.size());
   for (const TensorDmaTransferElement &element : state.elements) {
     const uint32_t lds_bytes = state.desc.elem_size - element.lds_dropped_bytes;
-    if (lds_bytes == 0 || (state.store_from_lds && !element.in_bounds))
+    if (lds_bytes == 0 || (state.store_from_lds && !element.in_bounds)) {
       continue;
-    if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address)
+    }
+    if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address) {
       ranges.back().bytes += lds_bytes;
-    else
+    } else {
       ranges.push_back({.address = element.lds_address, .bytes = lds_bytes});
+    }
   }
   return ranges;
 }
@@ -732,8 +789,9 @@ inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState
 /// reports no LDS ranges; the emulator still counts it on TENSORcnt, which is an
 /// assumption rather than established hardware behavior.
 inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state) {
-  if (!wf.cu().observes_tensor_dma_issue())
+  if (!wf.cu().observes_tensor_dma_issue()) {
     return;
+  }
   const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
   wf.cu().report_tensor_dma_issue({
       .is_load = !state.store_from_lds,
@@ -743,17 +801,20 @@ inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state)
 
 inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
                                         TensorDmaState &state) {
-  if (state.outcome != VmAccessOutcome::Complete || state.observation_reported)
+  if (state.outcome != VmAccessOutcome::Complete || state.observation_reported) {
     return;
+  }
 
   state.observation_reported = true;
-  if (!wf.cu().observes_tensor_dma_memory_access())
+  if (!wf.cu().observes_tensor_dma_memory_access()) {
     return;
+  }
 
   const size_t observed_address_count = static_cast<size_t>(
       std::ranges::count_if(state.elements, &TensorDmaTransferElement::in_bounds));
-  if (observed_address_count == 0)
+  if (observed_address_count == 0) {
     return;
+  }
 
   const TensorDmaMemoryAccessObservation access{
       .mnemonic = inst.mnemonic(),
@@ -780,10 +841,21 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
   wf.cu().report_tensor_dma_memory_access(access);
 }
 
+/// Send the arrival a descriptor requests, and report it with the cell already
+/// updated.
 inline void arrive_atomic_barrier(const TensorDmaDescriptor &desc, Wavefront &wf) {
   const uint32_t addr = wf.lds_base() + desc.atomic_barrier_addr;
   const uint64_t state = wf.lds().read64(addr);
-  wf.lds().write64(addr, lds_barrier_cell_update_arrive(state));
+  const uint64_t arrived = lds_barrier_cell_update_arrive(state);
+  wf.lds().write64(addr, arrived);
+  if (wf.cu().observes_lds_barrier_arrival()) {
+    wf.cu().report_lds_barrier_arrival(
+        {.source = LdsBarrierArrivalObservation::Source::TensorDma,
+         .cell_address = addr,
+         .old_state = state,
+         .new_state = arrived,
+         .phase_completed = lds_barrier_cell_arrive_completes_phase(state)});
+  }
 }
 
 // A declined batch has no observable effect. Only the element access below
@@ -793,8 +865,9 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
   constexpr uint64_t kPageBytes = IdentityAddressSpaceTranslator::kPageSize;
   const auto &first = state.elements[state.next_element];
   if (state.transfer_token.pending() || (!state.access && wf.process_id() != 0) ||
-      !first.in_bounds || state.completed_bytes != 0)
+      !first.in_bounds || state.completed_bytes != 0) {
     return 0;
+  }
   const size_t size = state.desc.elem_size;
   size_t count = 1;
   while (state.next_element + count < state.elements.size() &&
@@ -802,12 +875,14 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
          (count + 1) * size <= kPageBytes - (first.global_address & (kPageBytes - 1))) {
     const auto &next = state.elements[state.next_element + count];
     if (!next.in_bounds || next.global_address != first.global_address + count * size ||
-        next.lds_address != first.lds_address + count * size)
+        next.lds_address != first.lds_address + count * size) {
       break;
+    }
     ++count;
   }
-  if (count == 1)
+  if (count == 1) {
     return 0;
+  }
   auto bytes = std::span(state.payload).subspan(state.next_element * size, count * size);
   bool copied;
   if (state.access) {
@@ -825,14 +900,16 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
 
 template <bool Coalesce = true>
 inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront &wf) {
-  if (state.outcome != VmAccessOutcome::Complete && state.outcome != VmAccessOutcome::Unavailable)
+  if (state.outcome != VmAccessOutcome::Complete && state.outcome != VmAccessOutcome::Unavailable) {
     return state.outcome;
+  }
 
   if (state.access && !state.transfer_token.pending() && !state.access->info().ready &&
       state.next_element == 0 && state.completed_bytes == 0) {
     state.access = wf.snapshot_vm_access();
-    if (!state.access)
+    if (!state.access) {
       return state.outcome = VmAccessOutcome::Faulted;
+    }
   }
 
   while (state.next_element < state.elements.size()) {
@@ -870,10 +947,12 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
   }
 
   if (!state.completion_committed) {
-    if (!state.store_from_lds)
+    if (!state.store_from_lds) {
       copy_tensor_lds(state, wf);
-    if (state.desc.atomic_barrier)
+    }
+    if (state.desc.atomic_barrier) {
       arrive_atomic_barrier(state.desc, wf);
+    }
     state.completion_committed = true;
   }
   state.outcome = VmAccessOutcome::Complete;
@@ -901,14 +980,17 @@ private:
 template <typename Inst>
 util::FailureOr<TensorDmaDescriptor> read_descriptor(const Inst &inst, const Wavefront &wf) {
   auto d0 = read_sgpr_group<4>(wf, inst.vaddr0.encoding_value(), false);
-  if (d0.failed()) [[unlikely]]
+  if (d0.failed()) [[unlikely]] {
     return util::Result::failure();
+  }
   auto d1 = read_sgpr_group<8>(wf, inst.vaddr1.encoding_value(), false);
-  if (d1.failed()) [[unlikely]]
+  if (d1.failed()) [[unlikely]] {
     return util::Result::failure();
+  }
   auto d2 = read_sgpr_group<4>(wf, inst.vaddr2.encoding_value(), true);
-  if (d2.failed()) [[unlikely]]
+  if (d2.failed()) [[unlikely]] {
     return util::Result::failure();
+  }
   // CDNA5 10.11.1 permits VADDR3 == VADDR2 when D3 is unused. Interpret
   // that encoding before its aliased stride bits can become a fifth dimension.
   // Gather groups hold row indices; preserve their existing literal decoding.
@@ -917,8 +999,9 @@ util::FailureOr<TensorDmaDescriptor> read_descriptor(const Inst &inst, const Wav
                               ? kSgprNull
                               : inst.vaddr3.encoding_value();
   auto d3 = read_sgpr_group<4>(wf, d3_encoding, true);
-  if (d3.failed()) [[unlikely]]
+  if (d3.failed()) [[unlikely]] {
     return util::Result::failure();
+  }
   return parse_descriptor(d0.value(), d1.value(), d2.value(), d3.value());
 }
 
@@ -926,27 +1009,32 @@ template <typename Inst>
 util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) {
   ScopedWaitCounter counter(wf, WaitCounterType::TENSORCNT);
   if (inst.data() != nullptr && inst.data()->tag() == TENSOR_DMA &&
-      inst.template data_as<TensorDmaState>()->outcome != VmAccessOutcome::Unavailable)
+      inst.template data_as<TensorDmaState>()->outcome != VmAccessOutcome::Unavailable) {
     inst.set_data(nullptr);
+  }
   if (inst.data() == nullptr) {
     const auto desc = read_descriptor(inst, wf);
-    if (desc.failed()) [[unlikely]]
+    if (desc.failed()) [[unlikely]] {
       return util::Result::failure();
+    }
     std::unique_ptr<TensorDmaState> state =
         std::make_unique<TensorDmaState>(desc.value(), store_from_lds);
     state->pc = wf.pc;
-    if (desc.value().active() && prepare_tensor(*state, wf).failed()) [[unlikely]]
+    if (desc.value().active() && prepare_tensor(*state, wf).failed()) [[unlikely]] {
       return util::Result::failure();
+    }
     // Only a fresh instruction reaches this block: a deferred transfer resumes
     // from its retained state, so each instruction is reported once.
     report_issued_tensor_dma(wf, *state);
-    if (wf.instruction_execution_failed()) [[unlikely]]
+    if (wf.instruction_execution_failed()) [[unlikely]] {
       return util::Result::failure();
+    }
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();
-  if (!state.desc.active())
+  if (!state.desc.active()) {
     return util::Result::success();
+  }
   state.outcome = resume_tensor_dma_state(state, wf);
   report_completed_tensor_dma(inst, wf, state);
   return util::Result::success();
@@ -966,8 +1054,9 @@ inline VmAccessOutcome resume_tensor_dma(Instruction &inst, Wavefront &wf) {
   tensor_dma_detail::TensorDmaState &state = *inst.data_as<tensor_dma_detail::TensorDmaState>();
   state.outcome = tensor_dma_detail::resume_tensor_dma_state(state, wf);
   tensor_dma_detail::report_completed_tensor_dma(inst, wf, state);
-  if (wf.instruction_execution_failed()) [[unlikely]]
+  if (wf.instruction_execution_failed()) [[unlikely]] {
     return VmAccessOutcome::Malformed;
+  }
   return state.outcome;
 }
 

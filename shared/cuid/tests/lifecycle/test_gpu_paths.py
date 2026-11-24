@@ -7,6 +7,7 @@ The only character devices are private instances of /dev/null. The executable
 shim supplies DRM device numbers and rejects execution against the host /sys.
 """
 
+import contextlib
 import ctypes
 import importlib.util
 import json
@@ -132,6 +133,7 @@ class GpuPaths(unittest.TestCase):
             "/sys/" + str(device.relative_to(self.sys)),
         )
         self.link(device / "subsystem", "/sys/bus/pci")
+        self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
         self.drm(device, card, render)
         self.devices[bdf] = device
 
@@ -149,16 +151,14 @@ class GpuPaths(unittest.TestCase):
             self.publish(self.devices[bdf], serial)
 
     def components(self):
-        """SMBIOS and a two-port NIC whose functions share one PCIe Device
-        Serial Number, so CPU, NIC and Platform are discovered and have a
-        serial."""
+        """Opt in to CPU, NIC and Platform discovery, with a two-port NIC
+        whose functions share one PCIe Device Serial Number. No DMI: the
+        Platform needs only the machine-id. One CPU package, 0, which the
+        host's /proc/cpuinfo describes."""
         self.write(self.sys / ".cuid-path-components", "\n")
-        dmi = self.sys / "devices/virtual/dmi/id"
         self.write(
-            dmi / "product_uuid", "12345678-9abc-4def-8123-456789abcdef\n", 0o400
+            self.sys / "devices/system/cpu/cpu0/topology/physical_package_id", "0\n"
         )
-        self.write(dmi / "board_vendor", "0x1022\n")
-        self.link(self.sys / "class/dmi/id", "/sys/devices/virtual/dmi/id")
         config = bytearray(4096)
         config[0:4] = bytes([0xE4, 0x14, 0x50, 0x17])
         config[0x100:0x104] = bytes([0x03, 0x00, 0x01, 0x00])
@@ -422,6 +422,56 @@ class GpuPaths(unittest.TestCase):
             finally:
                 self.write(path, original)
 
+    def test_unreadable_input_leaves_out_only_its_component(self):
+        """A GPU whose vendor file cannot be read is identified from the
+        configuration header, which the kernel shows every caller, so root and
+        other callers agree. Without that either, only that GPU is left out."""
+        device = self.devices["0000:03:00.0"]
+        before = {role: self.listing(nonroot=role)[0] for role in (False, True)}
+        self.assertTrue(any("renderD128" in path for path in before[False]), before)
+        header = bytearray(256)
+        header[0:2] = (0x1002).to_bytes(2, "little")
+        header[2:4] = (0x73A3).to_bytes(2, "little")
+        header[8] = 0x01
+        header[10:12] = (0x0300).to_bytes(2, "little")
+        (device / "config").write_bytes(bytes(header))
+        (device / "config").chmod(0o644)
+        (device / "vendor").unlink()
+        (device / "vendor").mkdir(mode=0o755)
+        for role in (False, True):
+            with self.subTest(nonroot=role, header=True):
+                self.assertEqual(self.listing(nonroot=role)[0], before[role])
+        (device / "config").unlink()
+        for role in (False, True):
+            with self.subTest(nonroot=role, header=False):
+                rows = self.listing(nonroot=role)[0]
+                self.assertEqual(
+                    rows, {p: r for p, r in before[role].items() if "renderD128" not in p}
+                )
+
+    def test_partition_pci_error_during_reindex_is_local(self):
+        self.stock("dpx")
+        before, _ = self.listing()
+        self.assertEqual(sum(path.endswith("/xcp") for path in before), 2)
+        children = [self.start("reindex", nonroot=role) for role in (False, True)]
+        try:
+            for child in children:
+                self.assertEqual(child.stdout.readline().strip(), "ready")
+            parent = self.devices["0000:03:00.0"]
+            (parent / "device").unlink()
+            (parent / "config").unlink()
+            for child in children:
+                rows, _ = child.communicate("continue\n", timeout=30)
+                self.assertEqual(child.returncode, 0)
+                paths = {row.split("\t")[0] for row in rows.splitlines()}
+                self.assertIn("/sys/class/drm/renderD129", paths)
+                self.assertFalse(any(path.endswith("/xcp") for path in paths))
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+
     def test_whole_gpu_requires_readable_pci_identity(self):
         device = self.devices["0000:03:00.0"]
         (device / "config").unlink()
@@ -437,6 +487,85 @@ class GpuPaths(unittest.TestCase):
                                        nonroot=nonroot)
             finally:
                 self.write(path, original)
+
+    def test_whole_device_unit_id_must_be_zero(self):
+        """A whole device's own cuid_unit_id, where published, must read 0;
+        any other value names no component, never the whole GPU."""
+        self.driver()
+        path = self.devices["0000:03:00.0"] / "cuid_unit_id"
+        for value in ("2", "1", "garbage", ""):
+            self.write(path, value + "\n", 0o444)
+            for nonroot in (False, True):
+                with self.subTest(value=value, nonroot=nonroot):
+                    self.run_probe("reject", "bdf=0000:03:00.0", "/dev/dri/renderD128",
+                                   nonroot=nonroot)
+        self.write(path, "0\n", 0o444)
+        self.run_probe("temporary-gpu", "bdf=0000:03:00.0")
+
+    def test_amdgpu_function_without_drm_is_listed_and_found(self):
+        """An amdgpu-bound GPU function with no DRM node is in the inventory and
+        found by its address, with the same CUID either way."""
+        bdf = "0000:a1:00.0"
+        device = self.sys / "devices/pci0000:a0" / bdf
+        self.write(device / "vendor", "0x1002\n")
+        self.write(device / "device", "0x73a3\n")
+        self.write(device / "revision", "0x01\n")
+        self.write(device / "class", "0x030000\n")
+        self.link(self.sys / "bus/pci/devices" / bdf, "/sys/" + str(device.relative_to(self.sys)))
+        self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
+        for nonroot in (False, True):
+            with self.subTest(nonroot=nonroot):
+                rows, found = self.listing(f"bdf={bdf}", nonroot=nonroot)
+                path = f"/sys/bus/pci/devices/{bdf}"
+                self.assertIn(path, rows)
+                whole = self.temporary(bdf, 0, 0x01, 0x73A3)
+                self.assertEqual(rows[path][3], whole)
+                self.assertEqual(found[f"bdf={bdf}"], whole)
+
+    def test_amdgpu_function_without_drm_lists_partition_zero(self):
+        """In a split mode, partition 0 of an amdgpu GPU with no DRM node is
+        listed beside the GPU when the driver publishes its UnitID."""
+        bdf = "0000:a1:00.0"
+        device = self.sys / "devices/pci0000:a0" / bdf
+        self.write(device / "vendor", "0x1002\n")
+        self.write(device / "device", "0x73a3\n")
+        self.write(device / "revision", "0x01\n")
+        self.write(device / "class", "0x038000\n")
+        self.write(device / "current_compute_partition", "DPX\n")
+        self.write(device / "xcp/cuid_unit_id", "2\n", 0o444)
+        self.link(self.sys / "bus/pci/devices" / bdf, "/sys/" + str(device.relative_to(self.sys)))
+        self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
+        for nonroot in (False, True):
+            with self.subTest(nonroot=nonroot):
+                rows, _ = self.listing(nonroot=nonroot)
+                units = {row[3]: row[0] for row in rows.values()}
+                self.assertEqual(units.get(self.temporary(bdf, 0, 0x01, 0x73A3)), "0x000", rows)
+                self.assertEqual(units.get(self.temporary(bdf, 2, 0x01, 0x73A3)), "0x002", rows)
+
+    def test_malformed_class_is_reported_by_every_lookup(self):
+        """A GPU or NIC function whose PCI class is malformed is refused with
+        INVALID_FORMAT by path and by BDF, not as unsupported or absent. A NIC
+        with no interface is found by its BDF."""
+        self.components()
+        functions = (("0000:a2:00.0", "0x1002", "0x030000junk", "amdgpu"),
+                     ("0000:a3:00.0", "0x14e4", "0x020000junk", None),
+                     ("0000:a3:00.1", "0x14e4", "0x020000", None))
+        for bdf, vendor, pci_class, driver in functions:
+            device = self.sys / "devices/pci0000:a0" / bdf
+            self.write(device / "vendor", vendor + "\n")
+            self.write(device / "device", "0x1750\n")
+            self.write(device / "revision", "0x01\n")
+            self.write(device / "class", pci_class + "\n")
+            self.link(self.sys / "bus/pci/devices" / bdf, "/sys/" + str(device.relative_to(self.sys)))
+            if driver:
+                self.link(device / "driver", f"/sys/bus/pci/drivers/{driver}")
+        names = ["bdf=0000:a2:00.0", "/sys/bus/pci/devices/0000:a2:00.0", "nic=0000:a3:00.0",
+                 "nic=0000:a3:00.1"]
+        want = ["INVALID_FORMAT", "INVALID_FORMAT", "INVALID_FORMAT", "SUCCESS"]
+        for nonroot in (False, True):
+            with self.subTest(nonroot=nonroot):
+                statuses = self.repeated(names, nonroot)
+                self.assertEqual([statuses[n][0] for n in names], want, statuses)
 
     def test_whole_gpu_spelling_matrix(self):
         physical = "/sys/" + str(self.devices["0000:03:00.0"].relative_to(self.sys))
@@ -542,7 +671,13 @@ class GpuPaths(unittest.TestCase):
                     child.kill()
                     child.wait()
 
-    def test_unnamed_vf_cannot_adopt_attributes(self):
+    def test_host_vf_discovery_uses_unit_zero(self):
+        vf = self.devices["0000:63:00.0"]
+        self.link(vf / "physfn", "/sys/bus/pci/devices/0000:03:00.0")
+        for role in (False, True):
+            self.run_probe("discover-host-vf", "/sys/class/drm/renderD129", nonroot=role)
+
+    def test_host_vf_cannot_adopt_attributes(self):
         self.driver()
         self.partitions(count=2, published=2)
         forms = [
@@ -558,7 +693,44 @@ class GpuPaths(unittest.TestCase):
                         (device / name).unlink(missing_ok=True)
             for role in (False, True):
                 with self.subTest(state=state, nonroot=role):
-                    self.run_probe("unnamed-vf", *forms, nonroot=role)
+                    self.run_probe("host-vf", *forms, nonroot=role)
+
+    def repeated(self, names, nonroot):
+        statuses = {}
+        for line in self.run_probe("repeat", *names, nonroot=nonroot).splitlines():
+            name, status = line.split("\t")
+            statuses.setdefault(name, []).append(status)
+        return statuses
+
+    def hide_machine_id(self):
+        empty = ROOT / "empty-machine-id"
+        self.write(empty, "")
+        for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            if os.path.exists(path):
+                mount(str(empty), path, flags=4096)
+                self.addCleanup(self.unmount, path)
+
+    def test_lookups_answer_the_same_every_time(self):
+        """A lookup's answer does not depend on what was asked before it: a
+        failed enumeration is not cached as an empty one (ROCM-33270, where a
+        GPU without sysfs answered HARDWARE_FINGERPRINT_NOT_FOUND once and
+        DEVICE_NOT_FOUND after)."""
+        absent = "bdf=0000:77:00.0"
+        names = [absent, "/sys/class/drm/renderD128", "bdf=0000:63:00.0"]
+        for role in (False, True):
+            with self.subTest(nonroot=role):
+                statuses = self.repeated(names, role)
+                for name in names:
+                    self.assertEqual(len(set(statuses[name])), 1, f"{name}: {statuses[name]}")
+                self.assertEqual(statuses[absent][0], "DEVICE_NOT_FOUND")
+                self.assertEqual(statuses[names[1]][0], "SUCCESS")
+        self.hide_machine_id()
+        for role in (False, True):
+            with self.subTest(nonroot=role, machine_id=False):
+                statuses = self.repeated(names, role)
+                for name in names:
+                    self.assertEqual(len(set(statuses[name])), 1, f"{name}: {statuses[name]}")
+                    self.assertNotEqual(statuses[name][0], "SUCCESS")
 
     def test_components_are_temporary(self):
         self.components()
@@ -593,15 +765,28 @@ class GpuPaths(unittest.TestCase):
                     self.run_probe("temporary-gpu", *forms, nonroot=role)
 
     def test_gim_device_without_pci_sysfs_node(self):
-        """GIM names two functions sysfs does not show. One is identified from
-        GIM's ASIC information; the other, which GIM cannot describe, is not a
-        GPU."""
+        """A function bound to gim is a GPU, named from PCI sysfs alone. A
+        function only GIM's ioctl names, which sysfs does not show, is not:
+        every caller sees the same components. An unbound display function
+        is not a GPU either."""
         self.write(
             self.sys / ".cuid-path-gim",
             "0000:03:00.0 -\n"
             "0000:a1:00.0 0x1002 0x74a1 0x05 0x1234abcd\n"
-            "0000:b1:00.0 -\n",
+            "0000:b1:00.0 0x1002 0x74a1 0x05 0x5678abcd\n",
         )
+        for bdf, driver in (("0000:a1:00.0", "gim"), ("0000:c1:00.0", None)):
+            device = self.sys / "devices/pci0000:a0" / bdf
+            self.write(device / "vendor", "0x1002\n")
+            self.write(device / "device", "0x74a1\n")
+            self.write(device / "revision", "0x05\n")
+            self.write(device / "class", "0x120000\n")
+            self.link(
+                self.sys / "bus/pci/devices" / bdf,
+                "/sys/" + str(device.relative_to(self.sys)),
+            )
+            if driver:
+                self.link(device / "driver", f"/sys/bus/pci/drivers/{driver}")
         for role in (False, True):
             with self.subTest(nonroot=role):
                 self.run_probe("gim", nonroot=role)
@@ -630,6 +815,51 @@ class GpuPaths(unittest.TestCase):
     def test_stock_qpx_partitions_are_temporary_components(self):
         self.assertEqual(len(self.stock_scenario("qpx")), 6)
 
+    @contextlib.contextmanager
+    def hidden_kfd_node(self):
+        """A node outside the caller's device cgroup: KFD refuses its
+        properties, so they read back nothing."""
+        node = self.sys / "class/kfd/kfd/topology/nodes/99"
+        self.write(node / "properties", "")
+        try:
+            yield
+        finally:
+            shutil.rmtree(node)
+
+    def test_stock_partitions_survive_a_hidden_kfd_node_and_a_reset(self):
+        """DPX fixes n = 2, so a node hidden elsewhere does not matter, and
+        while amdgpu cannot report the mode (a reset) KFD alone still names
+        the partitions."""
+        self.stock("dpx")
+        mode = self.devices["0000:03:00.0"] / "current_compute_partition"
+        base = {role: self.listing(nonroot=role)[0] for role in (False, True)}
+        self.assertEqual(len(base[False]), 4)
+        with self.hidden_kfd_node():
+            for role in (False, True):
+                with self.subTest(nonroot=role, hidden=True):
+                    self.assertEqual(self.listing(nonroot=role)[0], base[role])
+        self.write(mode, "")
+        for role in (False, True):
+            with self.subTest(nonroot=role, reset=True):
+                self.assertEqual(self.listing(nonroot=role)[0], base[role])
+
+    def test_stock_cpx_with_a_hidden_kfd_node_keeps_the_whole_gpu(self):
+        """In CPX the count needs every node. With one hidden, the partitions
+        have no CUID, but the GPU as a whole is still listed and partition 0's
+        render node never names it."""
+        self.stock("cpx")
+        pci = "/sys/bus/pci/devices/0000:03:00.0"
+        for role in (False, True):
+            with self.subTest(nonroot=role):
+                base, _ = self.listing(nonroot=role)
+                with self.hidden_kfd_node():
+                    rows, found = self.listing(
+                        "bdf=0000:03:00.0", "/dev/dri/renderD128", nonroot=role
+                    )
+                self.assertEqual(rows, {path: base[path] for path in (pci, "/sys/class/drm/renderD129")})
+                self.assertEqual(found["bdf=0000:03:00.0"], base[pci][3])
+                self.assertNotEqual(found["/dev/dri/renderD128"], base[pci][3])
+
     def test_stock_spx_gpu_is_one_component(self):
         self.assertEqual(len(self.stock_scenario("spx")), 2)
 
@@ -649,6 +879,7 @@ class GpuPaths(unittest.TestCase):
             self.write(device / "xcp/xcp_metrics", "", 0o444)
             self.link(self.sys / "bus/pci/devices" / bdf, pci["path"])
             self.link(device / "subsystem", "/sys/bus/pci")
+            self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
             self.drm(device, *self.drm_numbers(pci["drm"]))
             self.devices[bdf] = device
         for name, drm in data["platform"].items():
@@ -744,8 +975,21 @@ class GpuPaths(unittest.TestCase):
                         child.wait()
 
 
-if __name__ == "__main__":
+def skip_reason():
     if os.geteuid() != 0:
+        return "needs root for a private mount namespace"
+    for hidden in ("/tmp", "/dev", "/run"):
+        if BUILD == Path(hidden) or Path(hidden) in BUILD.parents:
+            return f"build directory {BUILD} is under {hidden}, which the namespace replaces"
+    if os.statvfs(BUILD).f_flag & os.ST_NODEV:
+        return f"build directory {BUILD} is on a nodev filesystem; the fixture needs device nodes"
+    return None
+
+
+if __name__ == "__main__":
+    reason = skip_reason()
+    if reason:
+        print(f"SKIP: {reason}", file=sys.stderr)
         sys.exit(77)
     namespace()
     unittest.main()

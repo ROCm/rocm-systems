@@ -6,6 +6,12 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
+- **`rdc_policy_register()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**, and through `rdcd` it returns `RDC_ST_MAX_LIMIT` when `rdcd` already serves 64 policy registrations from all of its clients. Through `rdcd`, it also waits up to 5 seconds for `rdcd` to admit the registration; with an `rdcd` older than this release, the first registration of a connection takes up to 5 seconds.
+
+- `rdcd` pings the connection of each client every 60 seconds and closes a connection whose client does not answer within 20 seconds.
+
+- `rdcd` runs at most two diagnostics at a time, `rdc_diagnostic_run()` and `rdc_test_case_run()` together for all of its clients, and returns `RDC_ST_MAX_LIMIT` for another, so that clients cannot keep the GPUs busy with diagnostics without limit. A run keeps its place until it ends, also after its client has gone away.
+
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
@@ -18,7 +24,22 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci stats -j` labels each GPU by its ID, such as `GPU 3`, or `GPU g0.1` for partition 1 of GPU 0, instead of by its position in the job. The JSON keys follow, such as `gpu_3` and `gpu_g0.1`. A statistic without samples prints as `N/A` in the text output and as `null` in JSON, instead of zeros and a minimum of 18446744073709551615. PCIe standard deviations print with two decimals, like the other statistics.
 
+- `rdcd` exits with status 1 for an unknown option or a missing option argument, instead of ignoring it and starting, and whenever it finds another `rdcd` running; it exited with status 0 when two started at the same time.
+
+- A non-root `rdcd` no longer refuses to start when it cannot read the lock file of the root `rdcd`, `/var/run/rdcd.lock`. It still stops when it can read that file and the root `rdcd` holds it.
+
 ### Resolved Issues
+
+- `rdcd` no longer keeps a thread and memory for each policy registration whose client went away, and no longer hangs at shutdown while policy registrations arrive. Unregistering the policies of a group also ends a registration whose client stays connected but stopped reading notifications.
+
+- All clients registered for the policies of one GPU group receive every notification. Each notification went to only one of them, and a client could miss some when several GPUs met a condition at once.
+  - `rdcd` holds up to 1,024 notifications for a client that is slow to read them, and drops the oldest beyond that.
+
+- `rdc_policy_register()` through `rdcd` works again for a group whose registration ended by itself, for example because `rdcd` restarted. It returned `RDC_ST_CONFLICT` for that group until the connection was closed.
+
+- `rdci diag`, and `rdc_diagnostic_run()` and `rdc_test_case_run()` with `rdcd`, report the error of a diagnostic that `rdcd` cannot run, for example for a GPU group that does not exist, and return `RDC_ST_CLIENT_ERROR` when `rdcd` cannot be reached. They reported success with an empty or stale result.
+
+- `rdc_diagnostic_run()` and `rdc_test_case_run()` with `rdcd` no longer crash when `config` is NULL.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
@@ -55,10 +76,21 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_policy_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist, instead of accepting the policy, and `rdci policy` exits with the status of a failed set.
 
+- A process that uses AMD SMI itself keeps working AMD SMI handles after it starts RDC in embedded mode. Loading RDC shut AMD SMI down and initialized it again, which invalidated the handles of the host process. Such a process must pass `AMDSMI_INIT_AMD_CPUS` in its first `amdsmi_init()` call for RDC to read CPU fields.
+
+- `rdc_start_embedded()` returns `RDC_ST_FAIL_LOAD_MODULE`, and `rdcd` exits with an error, when AMD SMI fails to initialize. Both aborted the process.
+
+- GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values. `rdci config` sets and clears the settings of a group that holds such a GPU on the other GPUs, instead of stopping at it; after a set, that GPU gets the settings once AMD SMI identifies it.
+
+- The node topology check of `rdci diag` reports the link weight between each pair of GPUs in the group. It reported each GPU's weight to itself.
+
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
 - Certificates signed with the RDC certificate authority setup in `authentication/openssl.cnf` can no longer sign other certificates. A certificate request could ask to become a signing certificate, and its holder could then create client and server certificates that `rdcd` and `rdci` trust.
   - If you signed requests that other people created, check the certificates in the `newcerts` directory of your CA for `CA:TRUE`. If you find one, create a new root certificate and reissue all certificates.
+
+- A compute partition's `RDC_FI_GPU_CLOCK` no longer reports 65535 MHz or another partition's clock when the GPU lists unavailable clock readings before the available ones. It stops updating, instead of reporting a wrong clock, when the GPU's partition count drops to the partition's index or below while the partition is watched (for example, when AMD SMI reports the partition profile as not supported).
+  - A reading of 0 MHz now counts like any other. RDC skipped it, so partitions could report another partition's clock, or no clock.
 
 - `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. Failed `rdc_device_get_attributes()` calls now return zeroed attributes, and `rdcd` replies to failed requests no longer contain garbage values.
 
@@ -69,6 +101,18 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci diag` now runs the Compute Queue and System memory checks on AMD Instinct MI455X GPUs instead of skipping them.
 
+- `field_id_string()` returns `INVALID` for a field ID that RDC does not know, for example one that a newer `rdcd` reports. It read past the end of RDC's field table, which could crash the program.
+
+- Log lines that several threads write at the same time no longer run into each other.
+
+- `rdc_group_gpu_create()` with `RDC_GROUP_DEFAULT` fails, and creates no group, when it cannot add one of the GPUs. It returned success with that GPU missing, or failed and left the group behind.
+
+- A path that `get_rocm_path()` returned no longer changes when the function is called again, and the function is safe to call from several threads.
+
+- `rdc_device_get_component_version()` no longer crashes `rdcd` when AMD SMI gives no build string. It then reports AMD SMI's version as major.minor.release.
+
+- RDC no longer writes past its list of supported fields when its telemetry libraries support more than 8192 fields together. The list then holds the first 8192, and a watch keeps all the fields that it asks for.
+
 - `RDC_FI_GPU_PARTITION_COUNT` now reports how many compute partitions the GPU is split into, for example 1 in SPX mode. It reported 65535 or N/A in every partition mode on most GPUs.
   - A GPU that cannot be partitioned now reports 1.
 
@@ -76,11 +120,13 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Field watches with a `max_keep_samples` above 2147483647, such as `UINT32_MAX`, no longer crash `rdcd` or the process that embeds RDC.
 
-- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port. It printed "Server listening" and then crashed.
+- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port, and the message asks whether `rdcd` is already running. It printed "Server listening" and then crashed.
 
 - `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
 
 - `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
+
+- `rdcd` no longer follows a symbolic link at its lock file path or writes into a file that belongs to another user or has another name, and a root `rdcd` no longer refuses to start because of a `/tmp/rdcd.lock` that another user created and locked. For a lock file it refuses to use, `rdcd` exits with an error that names it.
 
 - When `rdcd` takes more than 5 seconds to stop, another SIGTERM or SIGINT ends it at once, with status 1.
 

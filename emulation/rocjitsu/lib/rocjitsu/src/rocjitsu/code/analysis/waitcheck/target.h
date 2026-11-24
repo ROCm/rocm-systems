@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "util/result.h"
 
@@ -25,10 +26,11 @@ using amdgpu::WaitCounterPolicy;
 using amdgpu::WaitFields;
 
 [[nodiscard]] inline util::FailureOr<std::string>
-wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t arch) {
+wait_expression(WaitCounterKind counter, uint32_t required_count, rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   std::ostringstream os;
   if (amdgpu::uses_legacy_waitcnt(model.value())) {
     switch (counter) {
@@ -140,10 +142,10 @@ struct ClassifiedEvent {
 // Successful empty optionals/vectors represent absent counters, waits, or events.
 struct WaitcheckTarget : WaitCounterPolicy {
   [[nodiscard]] static std::optional<RegisterRef> register_operand(const Operand &operand,
-                                                                   rj_code_arch_t arch);
+                                                                   rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
-  embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch);
+  embedded_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static bool vm_vsrc_event_implied_by_wait(WaitEventKind kind,
                                                           WaitCounterKind counter);
@@ -157,7 +159,7 @@ struct WaitcheckTarget : WaitCounterPolicy {
 
   [[nodiscard]] static std::optional<int64_t> first_barrier_id(const Instruction &inst);
 
-  [[nodiscard]] static bool is_cdna_lds_dma_load(const Instruction &inst, rj_code_arch_t arch);
+  [[nodiscard]] static bool is_cdna_lds_dma_load(const Instruction &inst, rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static std::optional<uint32_t> vinterp_wait_exp(const Instruction &inst);
 
@@ -188,11 +190,11 @@ struct WaitcheckTarget : WaitCounterPolicy {
   [[nodiscard]] static bool is_tensor_lds_store(const Instruction &inst);
 
   [[nodiscard]] static util::FailureOr<std::vector<ClassifiedEvent>>
-  classify_events(const Instruction &inst, rj_code_arch_t arch);
+  classify_events(const Instruction &inst, rocjitsu::IsaFamily arch);
 
   // Runtime issuers retain the output storage between instructions.
   [[nodiscard]] static util::Result classify_events_into(const Instruction &inst,
-                                                         rj_code_arch_t arch,
+                                                         rocjitsu::IsaFamily arch,
                                                          std::vector<ClassifiedEvent> &events);
 };
 

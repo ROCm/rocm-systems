@@ -12,6 +12,7 @@
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/helpers.h"
+#include <algorithm>
 #include <limits>
 
 #include <gtest/gtest.h>
@@ -148,4 +149,30 @@ TEST(SwmmacF32FP8FP8K32W64, Arithmetic) {
   rocjitsu::arith::test::expect_sparse_aliasing(rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w64, input,
                                                 /*outputs=*/4, /*b=*/1, /*index=*/7, {0, 1, 1, 7},
                                                 cpu_levels);
+}
+
+// The earliest product must round before the next product, including in the last
+// lane of the last output VGPR. A subnormal tied accumulator must survive zero factors.
+TEST(SwmmacF32FP8FP8K32W64, LoosePairOrderAndSubnormalAccumulator) {
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (bool subnormal : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << cpu << '/' << subnormal);
+      Registers regs;
+      for (int reg = 0; reg < 7; ++reg) {
+        std::fill_n(regs.v[reg], 64, 0u);
+      }
+      std::fill_n(regs.v[7], 64, 0x44444444u);
+      regs.v[6][63] = subnormal ? 1u : 0x4b800000u;
+      if (!subnormal) {
+        // Starting at 2^24, +1 rounds away, then -1 is exactly representable.
+        // Reversing the pair gives 2^24.
+        regs.v[0][15] = 0x0000b838u;
+        regs.v[1][15] = 0x00003838u;
+      }
+      ASSERT_EQ(rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w64(
+                    cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, regs.v + 3, regs.v, regs.v + 1, regs.v + 7),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(regs.v[6][63], subnormal ? 1u : 0x4b7fffffu);
+    }
+  }
 }

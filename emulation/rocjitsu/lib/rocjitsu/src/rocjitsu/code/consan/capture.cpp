@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/capture.h"
+#include "rocjitsu/code/consan/contract_internal.h"
 #include "rocjitsu/code/consan/encoding.h"
 
 #include <algorithm>
@@ -20,12 +21,6 @@ constexpr uint32_t kFrameBytes = 48;
 constexpr uint32_t kExecutionBytes = 144;
 constexpr uint32_t kEndBytes = 64;
 
-Result reject(ContractError *error, ContractErrorCode code, const char *message) {
-  if (error != nullptr)
-    *error = {code, message};
-  return Result::failure();
-}
-
 template <size_t Count>
 bool matches(std::span<const uint8_t> bytes, const std::array<uint8_t, Count> &expected) {
   return bytes.size() >= Count && std::equal(expected.begin(), expected.end(), bytes.begin());
@@ -41,22 +36,25 @@ bool valid_header(const CaptureHeader &header) {
 }
 
 Result validate_execution(const Manifest &manifest, const CapturedExecution &execution,
-                          ContractError *error, const CaptureLimits &limits) {
+                          util::DiagnosticEmitter diagnostic, const CaptureLimits &limits) {
   const FailureOr<LaunchLayout> layout =
       plan_launch(manifest, execution.dimensions, execution.group_bytes, execution.private_bytes,
-                  error, limits.contract);
-  if (layout.failed())
+                  diagnostic, limits.contract);
+  if (layout.failed()) {
     return Result::failure();
-  if (execution.arguments.size() > limits.argument_bytes)
-    return reject(error, ContractErrorCode::ResourceLimit, "capture argument budget exceeded");
-  if (execution.serial == 0 || execution.storage_slot == 0 || execution.storage_generation == 0 ||
+  }
+  if (execution.arguments.size() > limits.argument_bytes) {
+    return diagnostic.emit() << "capture argument budget exceeded";
+  }
+  if (execution.entry_key != manifest.entry.original_descriptor_offset || execution.serial == 0 ||
+      execution.storage_slot == 0 || execution.storage_generation == 0 ||
       execution.completion != kCompletionVisibleForwarded ||
       execution.arguments.size() != manifest.entry.original_kernarg_bytes ||
       execution.report.size() != layout.value().report_bytes ||
       execution.group_bytes != layout.value().group_bytes ||
-      execution.private_bytes != layout.value().private_bytes)
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "invalid execution ownership, extent or completion");
+      execution.private_bytes != layout.value().private_bytes) {
+    return diagnostic.emit() << "invalid execution ownership, extent or completion";
+  }
   const std::array<uint8_t, kContextBytes> &context = execution.context;
   const std::optional<uint64_t> address = wire::read_u64(context, wire::kContextReportPointer);
   if (wire::read_u64(context, wire::kContextSerial) != execution.serial ||
@@ -65,16 +63,16 @@ Result validate_execution(const Manifest &manifest, const CapturedExecution &exe
       (*address % 64) != 0 || execution.report.size() > UINT64_MAX - *address ||
       wire::read_u64(context, wire::kContextReportBytes) != execution.report.size() ||
       wire::read_u32(context, wire::kContextGroupBytes) != execution.group_bytes ||
-      wire::read_u32(context, wire::kContextPrivateBytes) != execution.private_bytes)
-    return reject(error, ContractErrorCode::IdentityMismatch,
-                  "context does not match its owning execution");
+      wire::read_u32(context, wire::kContextPrivateBytes) != execution.private_bytes) {
+    return diagnostic.emit() << "context does not match its owning execution";
+  }
   for (size_t index = 0; index < 3; ++index) {
     if (wire::read_u32(context, wire::kContextGrid + index * 4) !=
             execution.dimensions.grid[index] ||
         wire::read_u32(context, wire::kContextWorkgroup + index * 4) !=
-            execution.dimensions.workgroup[index])
-      return reject(error, ContractErrorCode::IdentityMismatch,
-                    "context geometry differs from envelope");
+            execution.dimensions.workgroup[index]) {
+      return diagnostic.emit() << "context geometry differs from envelope";
+    }
   }
   return Result::success();
 }
@@ -95,6 +93,7 @@ std::vector<uint8_t> encode_execution(const CapturedExecution &execution) {
   wire::write_u32(payload, 56, static_cast<uint32_t>(execution.arguments.size()));
   wire::write_u64(payload, 64, execution.report.size());
   std::copy(execution.context.begin(), execution.context.end(), payload.begin() + 72);
+  wire::write_u64(payload, 136, execution.entry_key);
   std::copy(execution.arguments.begin(), execution.arguments.end(),
             payload.begin() + kExecutionBytes);
   std::copy(execution.report.begin(), execution.report.end(),
@@ -109,21 +108,29 @@ std::vector<uint8_t> encode_execution(const CapturedExecution &execution) {
 }
 
 FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
-                                              const Manifest &manifest, ContractError *error,
+                                              const ImageFacts &image,
+                                              util::DiagnosticEmitter diagnostic,
                                               const CaptureLimits &limits) {
   if (payload.size() < kExecutionBytes || !all_zero(payload.subspan(52, 4)) ||
-      !all_zero(payload.subspan(60, 4)) || !all_zero(payload.subspan(136, 8)))
-    return reject(error, ContractErrorCode::InvalidEncoding,
-                  "missing execution fields or reserved bytes");
+      !all_zero(payload.subspan(60, 4))) {
+    return diagnostic.emit() << "missing execution fields or reserved bytes";
+  }
   const uint32_t argument_bytes = *wire::read_u32(payload, 56);
   const uint64_t report_bytes = *wire::read_u64(payload, 64);
-  if (argument_bytes > limits.argument_bytes || report_bytes > limits.contract.report_bytes)
-    return reject(error, ContractErrorCode::ResourceLimit, "execution payload exceeds budget");
+  if (argument_bytes > limits.argument_bytes || report_bytes > limits.contract.report_bytes) {
+    return diagnostic.emit() << "execution payload exceeds budget";
+  }
   if (argument_bytes > payload.size() - kExecutionBytes ||
-      report_bytes != payload.size() - kExecutionBytes - argument_bytes)
-    return reject(error, ContractErrorCode::InvalidEncoding, "execution payload extent mismatch");
+      report_bytes != payload.size() - kExecutionBytes - argument_bytes) {
+    return diagnostic.emit() << "execution payload extent mismatch";
+  }
   CapturedExecution execution;
   execution.serial = *wire::read_u64(payload, 0);
+  execution.entry_key = *wire::read_u64(payload, 136);
+  const Manifest *manifest = selected_manifest(image, execution.entry_key);
+  if (manifest == nullptr) {
+    return diagnostic.emit() << "unknown or native capture entry key";
+  }
   for (size_t index = 0; index < 3; ++index) {
     execution.dimensions.grid[index] = *wire::read_u32(payload, 8 + index * 4);
     execution.dimensions.workgroup[index] = *wire::read_u32(payload, 20 + index * 4);
@@ -137,23 +144,24 @@ FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
   execution.arguments.assign(payload.begin() + kExecutionBytes,
                              payload.begin() + kExecutionBytes + argument_bytes);
   execution.report.assign(payload.begin() + kExecutionBytes + argument_bytes, payload.end());
-  if (validate_execution(manifest, execution, error, limits).failed())
+  if (validate_execution(*manifest, execution, diagnostic, limits).failed()) {
     return Result::failure();
+  }
   return execution;
 }
 
 } // namespace
 
 FailureOr<std::vector<uint8_t>> CaptureEncoder::start(const CaptureHeader &header,
-                                                      ContractError *error) {
-  if (error != nullptr)
-    *error = {};
-  if (started_ || !valid_header(header))
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "capture already started or invalid run execution conditions/identity");
-  const FailureOr<std::vector<uint8_t>> facts = encode_manifest(header.manifest, error);
-  if (facts.failed())
+                                                      util::DiagnosticEmitter diagnostic) {
+  if (started_ || !valid_header(header)) {
+    return diagnostic.emit()
+           << "capture already started or invalid run execution conditions/identity";
+  }
+  const FailureOr<std::vector<uint8_t>> facts = encode_image_facts(header.image, diagnostic);
+  if (facts.failed()) {
     return Result::failure();
+  }
   std::vector<uint8_t> prefix(kHeaderBytes + facts.value().size());
   std::copy(kMagic.begin(), kMagic.end(), prefix.begin());
   std::copy(kProducerContract.begin(), kProducerContract.end(), prefix.begin() + 8);
@@ -169,24 +177,31 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::start(const CaptureHeader &heade
 }
 
 FailureOr<std::vector<uint8_t>> CaptureEncoder::append(const CapturedExecution &execution,
-                                                       ContractError *error) {
+                                                       util::DiagnosticEmitter diagnostic) {
   const CaptureLimits limits;
-  if (!started_ || finished_ || execution.serial != count_ + 1)
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "capture not open or serial is not its next execution");
-  if (count_ >= limits.executions)
-    return reject(error, ContractErrorCode::ResourceLimit, "capture execution budget exceeded");
-  if (validate_execution(header_.manifest, execution, error, limits).failed())
+  if (!started_ || finished_ || execution.serial != count_ + 1) {
+    return diagnostic.emit() << "capture not open or serial is not its next execution";
+  }
+  if (count_ >= limits.executions) {
+    return diagnostic.emit() << "capture execution budget exceeded";
+  }
+  const Manifest *manifest = selected_manifest(header_.image, execution.entry_key);
+  if (manifest == nullptr) {
+    return diagnostic.emit() << "unknown or native capture entry key";
+  }
+  if (validate_execution(*manifest, execution, diagnostic, limits).failed()) {
     return Result::failure();
+  }
   const std::map<uint32_t, uint32_t>::iterator generation =
       generations_.find(execution.storage_slot);
-  if (generation != generations_.end() && execution.storage_generation <= generation->second)
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "storage generation was already captured");
+  if (generation != generations_.end() && execution.storage_generation <= generation->second) {
+    return diagnostic.emit() << "storage generation was already captured";
+  }
   const uint64_t frame_bytes =
       kFrameBytes + kExecutionBytes + execution.arguments.size() + execution.report.size();
-  if (frame_bytes + kEndBytes > limits.file_bytes - bytes_)
-    return reject(error, ContractErrorCode::ResourceLimit, "capture file budget exceeded");
+  if (frame_bytes + kEndBytes > limits.file_bytes - bytes_) {
+    return diagnostic.emit() << "capture file budget exceeded";
+  }
   std::vector<uint8_t> frame = encode_execution(execution);
   hash_.update(frame.data(), frame.size());
   generations_[execution.storage_slot] = execution.storage_generation;
@@ -195,9 +210,10 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::append(const CapturedExecution &
   return frame;
 }
 
-FailureOr<std::vector<uint8_t>> CaptureEncoder::finish(ContractError *error) {
-  if (!started_ || finished_)
-    return reject(error, ContractErrorCode::InvalidFacts, "capture is not open for End");
+FailureOr<std::vector<uint8_t>> CaptureEncoder::finish(util::DiagnosticEmitter diagnostic) {
+  if (!started_ || finished_) {
+    return diagnostic.emit() << "capture is not open for End";
+  }
   std::vector<uint8_t> end(kEndBytes);
   std::copy(kEndMagic.begin(), kEndMagic.end(), end.begin());
   wire::write_u64(end, 8, count_);
@@ -209,78 +225,86 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::finish(ContractError *error) {
   return end;
 }
 
-FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes, ContractError *error,
-                                  const CaptureLimits &limits) {
-  if (error != nullptr)
-    *error = {};
-  if (bytes.size() > limits.file_bytes)
-    return reject(error, ContractErrorCode::ResourceLimit, "capture file budget exceeded");
+FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes,
+                                  util::DiagnosticEmitter diagnostic, const CaptureLimits &limits) {
+  if (bytes.size() > limits.file_bytes) {
+    return diagnostic.emit() << "capture file budget exceeded";
+  }
   if (bytes.size() < kHeaderBytes + kEndBytes || !matches(bytes, kMagic) ||
-      !matches(bytes.subspan(bytes.size() - kEndBytes), kEndMagic))
-    return reject(error, ContractErrorCode::InvalidEncoding,
-                  "capture header or complete End is missing");
-  if (!matches(bytes.subspan(8), kProducerContract))
-    return reject(error, ContractErrorCode::IncompatibleContract,
-                  "capture producer contract mismatch");
+      !matches(bytes.subspan(bytes.size() - kEndBytes), kEndMagic)) {
+    return diagnostic.emit() << "capture header or complete End is missing";
+  }
+  if (!matches(bytes.subspan(8), kProducerContract)) {
+    return diagnostic.emit() << "capture producer contract mismatch";
+  }
   const Digest checksum = digest(bytes.first(bytes.size() - 32));
-  if (!std::equal(checksum.begin(), checksum.end(), bytes.end() - 32))
-    return reject(error, ContractErrorCode::InvalidEncoding,
-                  "capture complete-file checksum mismatch");
-  if (!all_zero(bytes.subspan(52, 12)))
-    return reject(error, ContractErrorCode::InvalidEncoding, "unknown capture header fields");
+  if (!std::equal(checksum.begin(), checksum.end(), bytes.end() - 32)) {
+    return diagnostic.emit() << "capture complete-file checksum mismatch";
+  }
+  if (!all_zero(bytes.subspan(52, 12))) {
+    return diagnostic.emit() << "unknown capture header fields";
+  }
   const uint64_t facts_bytes = *wire::read_u64(bytes, 40);
-  if (facts_bytes > limits.contract.metadata_bytes)
-    return reject(error, ContractErrorCode::ResourceLimit, "capture facts budget exceeded");
-  if (facts_bytes > bytes.size() - kHeaderBytes - kEndBytes)
-    return reject(error, ContractErrorCode::InvalidEncoding, "capture facts extent is truncated");
-  const FailureOr<Manifest> manifest =
-      decode_manifest(bytes.subspan(kHeaderBytes, facts_bytes), error, limits.contract);
-  if (manifest.failed())
+  if (facts_bytes > limits.contract.metadata_bytes) {
+    return diagnostic.emit() << "capture facts budget exceeded";
+  }
+  if (facts_bytes > bytes.size() - kHeaderBytes - kEndBytes) {
+    return diagnostic.emit() << "capture facts extent is truncated";
+  }
+  const FailureOr<ImageFacts> image =
+      decode_image_facts(bytes.subspan(kHeaderBytes, facts_bytes), diagnostic, limits.contract);
+  if (image.failed()) {
     return Result::failure();
+  }
   Capture capture;
-  capture.header.manifest = manifest.value();
+  capture.header.image = image.value();
   std::copy_n(bytes.begin() + 24, capture.header.run_identity.size(),
               capture.header.run_identity.begin());
   capture.header.execution_conditions = *wire::read_u32(bytes, 48);
-  if (!valid_header(capture.header))
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "unsupported run execution conditions or missing identity");
+  if (!valid_header(capture.header)) {
+    return diagnostic.emit() << "unsupported run execution conditions or missing identity";
+  }
   const std::span<const uint8_t> end = bytes.last(kEndBytes);
   const uint64_t count = *wire::read_u64(end, 8);
-  if (count > limits.executions)
-    return reject(error, ContractErrorCode::ResourceLimit,
-                  "capture execution count exceeds budget");
+  if (count > limits.executions) {
+    return diagnostic.emit() << "capture execution count exceeds budget";
+  }
   if (*wire::read_u32(end, 16) != capture.header.execution_conditions ||
-      !all_zero(end.subspan(20, 12)))
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "End does not close these execution conditions/scope");
+      !all_zero(end.subspan(20, 12))) {
+    return diagnostic.emit() << "End does not close these execution conditions/scope";
+  }
   size_t offset = kHeaderBytes + facts_bytes;
   std::map<uint32_t, uint32_t> generations;
   while (offset < bytes.size() - kEndBytes) {
     if (capture.executions.size() >= count || bytes.size() - kEndBytes - offset < kFrameBytes ||
-        !matches(bytes.subspan(offset), kExecutionMagic))
-      return reject(error, ContractErrorCode::InvalidEncoding, "missing or excess execution frame");
+        !matches(bytes.subspan(offset), kExecutionMagic)) {
+      return diagnostic.emit() << "missing or excess execution frame";
+    }
     const uint64_t payload_bytes = *wire::read_u64(bytes, offset + 8);
-    if (payload_bytes > bytes.size() - kEndBytes - offset - kFrameBytes)
-      return reject(error, ContractErrorCode::InvalidEncoding, "truncated execution frame");
+    if (payload_bytes > bytes.size() - kEndBytes - offset - kFrameBytes) {
+      return diagnostic.emit() << "truncated execution frame";
+    }
     const std::span<const uint8_t> payload = bytes.subspan(offset + kFrameBytes, payload_bytes);
     const Digest frame_hash = digest(payload);
-    if (!std::equal(frame_hash.begin(), frame_hash.end(), bytes.begin() + offset + 16))
-      return reject(error, ContractErrorCode::InvalidEncoding, "execution frame checksum mismatch");
+    if (!std::equal(frame_hash.begin(), frame_hash.end(), bytes.begin() + offset + 16)) {
+      return diagnostic.emit() << "execution frame checksum mismatch";
+    }
     FailureOr<CapturedExecution> execution =
-        decode_execution(payload, capture.header.manifest, error, limits);
-    if (execution.failed())
+        decode_execution(payload, capture.header.image, diagnostic, limits);
+    if (execution.failed()) {
       return Result::failure();
+    }
     if (execution.value().serial != capture.executions.size() + 1 ||
-        execution.value().storage_generation <= generations[execution.value().storage_slot])
-      return reject(error, ContractErrorCode::InvalidFacts,
-                    "duplicate execution or storage generation");
+        execution.value().storage_generation <= generations[execution.value().storage_slot]) {
+      return diagnostic.emit() << "duplicate execution or storage generation";
+    }
     generations[execution.value().storage_slot] = execution.value().storage_generation;
     capture.executions.push_back(std::move(execution.value()));
     offset += kFrameBytes + payload_bytes;
   }
-  if (capture.executions.size() != count || offset != bytes.size() - kEndBytes)
-    return reject(error, ContractErrorCode::InvalidEncoding, "End membership count is incomplete");
+  if (capture.executions.size() != count || offset != bytes.size() - kEndBytes) {
+    return diagnostic.emit() << "End membership count is incomplete";
+  }
   return capture;
 }
 

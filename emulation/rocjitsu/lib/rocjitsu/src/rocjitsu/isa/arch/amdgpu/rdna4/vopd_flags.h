@@ -17,8 +17,9 @@ inline uint32_t vopd_flags(unsigned op, uint32_t a, uint32_t b, uint32_t c, uint
   namespace status = amdgpu::fp_status;
   const auto semantics = wave.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;
   if (semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY &&
-      semantics != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)
+      semantics != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
     return 0;
+  }
   auto denorm = wave.fp_denorm_mode_f32();
   constexpr uint32_t one = 0x3f800000u;
   switch (op) {
@@ -40,8 +41,9 @@ inline uint32_t vopd_flags(unsigned op, uint32_t a, uint32_t b, uint32_t c, uint
     break;
   case 7: // MUL_DX9_ZERO computes zero if either operand is zero.
     denorm = 0;
-    if ((a & F32::kMagnitude) < F32::kMinNormal || (b & F32::kMagnitude) < F32::kMinNormal)
+    if ((a & F32::kMagnitude) < F32::kMinNormal || (b & F32::kMagnitude) < F32::kMinNormal) {
       return 0;
+    }
     c = (a ^ b) & F32::kSign;
     break;
   case 10: // MAX_NUM
@@ -55,9 +57,10 @@ inline uint32_t vopd_flags(unsigned op, uint32_t a, uint32_t b, uint32_t c, uint
   const uint32_t magnitude = result & F32::kMagnitude;
   if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY && magnitude < 0x7f7fffffu &&
       (a & F32::kMagnitude) < F32::kInfinity && (b & F32::kMagnitude) < F32::kInfinity &&
-      (c & F32::kMagnitude) < F32::kInfinity)
+      (c & F32::kMagnitude) < F32::kInfinity) {
     return status::input_causes<F32>(a, denorm) | status::input_causes<F32>(b, denorm) |
            status::input_causes<F32>(c, denorm);
+  }
   return status::fma<F32>(a, b, c, result, wave.fp_round_mode_f32(), denorm);
 }
 

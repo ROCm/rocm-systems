@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -30,7 +31,7 @@ using namespace rocjitsu;
 
 class ScalarCachePolicyTest : public ::testing::Test {
 protected:
-  virtual rj_code_arch_t arch() const { return ROCJITSU_CODE_ARCH_CDNA4; }
+  virtual rocjitsu::IsaFamily arch() const { return rocjitsu::IsaFamily::Cdna4; }
   void SetUp() override { initialize(1); }
 
   void initialize(uint32_t num_wf_slots) {
@@ -49,8 +50,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
 
   void issue(uint32_t op, bool glc, uint64_t address, uint32_t records = 0xffffffffu) {
@@ -84,13 +86,13 @@ protected:
 };
 
 class Gfx11ScalarCachePolicyTest : public ScalarCachePolicyTest,
-                                   public testing::WithParamInterface<rj_code_arch_t> {
+                                   public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11ScalarCachePolicyTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11ScalarCachePolicyTest, GlcBypassesAWarmScalarCacheLine) {
   constexpr uint32_t address = 0x4000;
@@ -153,42 +155,51 @@ TEST_F(ScalarCachePolicyTest, GlcLoadsRefetchWarmScalarAndL2Lines) {
     SCOPED_TRACE(op);
     const uint32_t words = 1u << op;
     const uint64_t address = 0x103c + op * 0x100;
-    for (uint32_t i = 0; i < words; ++i)
+    for (uint32_t i = 0; i < words; ++i) {
       memory.write32(address + 4 * i, 100 + i);
+    }
     ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-    for (uint32_t i = 0; i < words; ++i)
+    for (uint32_t i = 0; i < words; ++i) {
       EXPECT_EQ(result(i), 100 + i);
+    }
 
     for (uint32_t version : {200u, 300u}) {
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         memory.write32(address + 4 * i, version + i);
+      }
       if (version == 200) {
         ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-        for (uint32_t i = 0; i < words; ++i)
+        for (uint32_t i = 0; i < words; ++i) {
           EXPECT_EQ(result(i), 100 + i);
+        }
       }
       ASSERT_NO_FATAL_FAILURE(issue(op, true, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(result(i), version + i);
+      }
     }
   }
 }
 
 TEST_F(ScalarCachePolicyTest, GlcBufferLoadsRefreshOnlyInBoundsWords) {
   constexpr uint64_t address = 0x203c;
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     memory.write32(address + 4 * i, 100 + i);
+  }
   ASSERT_NO_FATAL_FAILURE(issue(/*s_buffer_load_dwordx4=*/10, false, address, /*records=*/12));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     memory.write32(address + 4 * i, 200 + i);
+  }
   ASSERT_NO_FATAL_FAILURE(issue(10, true, address, 12));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(result(i), i < 3 ? 200 + i : 0);
+  }
 
   const auto transactions = l2.backing_read_transactions();
   ASSERT_NO_FATAL_FAILURE(issue(10, true, /*unmapped base=*/0, /*records=*/0));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(result(i), 0u);
+  }
   EXPECT_EQ(l2.backing_read_transactions(), transactions);
 }
 
@@ -200,11 +211,13 @@ TEST_F(ScalarCachePolicyTest, GlcStoresDoNotLeavePersistentScalarCopies) {
       SCOPED_TRACE(testing::Message() << "op=" << op << " glc=" << glc);
       const uint32_t words = 1u << op;
       const uint64_t address = 0x303c + op * 0x200 + uint32_t{glc} * 0x100;
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         memory.write32(address + 4 * i, 100 + i);
+      }
       ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         cu->write_sgpr(wave->sgpr_alloc().base + 32 + i, 200 + i);
+      }
       ASSERT_NO_FATAL_FAILURE(issue(/*s_store_dword[xN]=*/16 + op, glc, address));
       for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(memory.read32(address + 4 * i), 200 + i);
@@ -214,8 +227,9 @@ TEST_F(ScalarCachePolicyTest, GlcStoresDoNotLeavePersistentScalarCopies) {
                   amdgpu::VmAccessOutcome::Complete);
       }
       ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(result(i), (glc ? 300 : 200) + i);
+      }
     }
   }
 }
@@ -286,7 +300,7 @@ TEST(ScalarCacheMtypeTest, NarrowPipelineLoadsForwardDecodedPolicy) {
     amdgpu::L1ScalarCache l1(&l2);
     amdgpu::ScalarMemPipeline pipeline(&l1);
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Rdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;

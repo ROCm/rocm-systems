@@ -41,17 +41,19 @@ struct PlatformApi {
 namespace util::detail {
 
 template <typename Name> LibraryHandle open_library(Name name) {
-  if constexpr (is_windows)
+  if constexpr (is_windows) {
     return LoadLibraryA(name);
-  else if constexpr (is_linux)
+  } else if constexpr (is_linux) {
     return dlopen(name, library_flags);
+  }
 }
 
 template <typename Handle> void close_library(Handle handle) {
-  if constexpr (is_windows)
+  if constexpr (is_windows) {
     FreeLibrary(handle);
-  else if constexpr (is_linux)
+  } else if constexpr (is_linux) {
     dlclose(handle);
+  }
 }
 
 template <typename Api> std::string last_library_error() {
@@ -79,8 +81,9 @@ inline LibraryHandle open_library(const char *name) { return detail::open_librar
 
 /// @brief Close a library handle previously returned by open_library().
 inline void close_library(LibraryHandle handle) {
-  if (!handle)
+  if (!handle) {
     return;
+  }
   detail::close_library(handle);
 }
 
@@ -95,10 +98,11 @@ inline auto last_library_error() { return detail::last_library_error<detail::Pla
 template <typename T, typename Handle>
 T lookup_symbol([[maybe_unused]] Handle handle, const char *name) {
   static_assert(std::is_pointer_v<T>, "symbol type must be a pointer");
-  if constexpr (detail::is_windows)
+  if constexpr (detail::is_windows) {
     return reinterpret_cast<T>(GetProcAddress(handle, name));
-  else if constexpr (detail::is_linux)
+  } else if constexpr (detail::is_linux) {
     return reinterpret_cast<T>(dlsym(handle, name));
+  }
 }
 
 } // namespace util

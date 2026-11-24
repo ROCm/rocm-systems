@@ -11,6 +11,7 @@
 #include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decode_result.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/intrusive_list.h"
 
 #include <cstdint>
@@ -239,7 +240,7 @@ public:
   /// @param[in] emit_error Destination for validation and offset-bearing decode diagnostics.
   /// @returns Ordered blocks, or failure on invalid inputs or exhausted discovery budgets.
   static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-  build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+  build_cfg(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
             const BuildOptions &options, DecodeErrorEmitter emit_error = {});
 
   /// @brief Build basic blocks from a code object's .text sections.
@@ -267,7 +268,7 @@ public:
   /// target.
   /// @returns Ordered basic blocks with their decoded instructions, or failure.
   static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-  build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+  build(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
         DecodeErrorEmitter emit_error = {}, std::span<const uint64_t> extra_leaders = {},
         ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
         std::span<const uint64_t> extra_split_points = {},
@@ -303,7 +304,7 @@ public:
   /// target.
   /// @returns Blocks ordered by text offset, or failure with a diagnostic.
   static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-  build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+  build_reachable(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                   std::span<const uint64_t> entry_offsets, DecodeErrorEmitter emit_error = {},
                   std::span<const CodeRange> permitted_ranges = {},
                   std::span<const uint64_t> decode_seeds = {},
@@ -315,15 +316,16 @@ private:
   /// Consume prepared instructions and discovery facts while retaining permitted_ranges
   /// for padding and missing-edge decisions.
   static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-  build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+  build_impl(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
              DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
              ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
              DecodedSection *prepared, std::span<const CodeRange> permitted_ranges,
              rj_code_target_id_t target);
 
   void note_successor_issue(SuccessorIssue issue) {
-    if (successor_issue_ == SuccessorIssue::None)
+    if (successor_issue_ == SuccessorIssue::None) {
       successor_issue_ = issue;
+    }
   }
 
   void add_instruction(std::unique_ptr<Instruction> inst);

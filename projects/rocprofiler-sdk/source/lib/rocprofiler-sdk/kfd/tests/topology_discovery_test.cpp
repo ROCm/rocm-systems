@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 namespace
 {
+using rocprofiler::kfd::discover_dispatch_log_gpus;
 using rocprofiler::kfd::discover_stream_dispatch_log_gpus;
 struct fake_topology  // owns a throwaway "<root>/nodes" tree; rm -rf on destruction
 {
@@ -98,4 +99,29 @@ TEST(TopologyDiscovery, missing_topology_root_yields_empty)
 {
     auto ids = discover_stream_dispatch_log_gpus("/nonexistent/kfd/topology/nodes");
     EXPECT_TRUE(ids.empty());
+}
+// Backward-compatible profiler ABI >= 6 permits discovery; stream advertisement still required.
+TEST(TopologyDiscovery, profiler_abi_gate)
+{
+    fake_topology topo;
+    topo.add_node("1", 0x1234, false, true);
+    for(uint32_t abi : {6u, 7u, 8u, 0xffffffffu})
+    {
+        auto ids = discover_dispatch_log_gpus(abi, topo.nodes.c_str());
+        EXPECT_EQ(ids.size(), 1u) << "abi " << abi;
+        EXPECT_EQ(ids.count(0x1234), 1u) << "abi " << abi;
+    }
+    for(uint32_t abi : {0u, 1u, 5u})
+        EXPECT_TRUE(discover_dispatch_log_gpus(abi, topo.nodes.c_str()).empty()) << "abi " << abi;
+}
+// ABI >= 7 without dlog (no dispatch_log_stream_format) must not claim dispatch-log.
+TEST(TopologyDiscovery, profiler_abi7_without_stream_format_yields_empty)
+{
+    fake_topology topo;
+    topo.add_node("0", 0, false, false);
+    topo.add_node("1", 0x1234, true, false);
+    topo.add_node("2", 0x5678, false, false);
+    EXPECT_TRUE(discover_dispatch_log_gpus(7, topo.nodes.c_str()).empty());
+    EXPECT_TRUE(discover_dispatch_log_gpus(8, topo.nodes.c_str()).empty());
+    EXPECT_TRUE(discover_dispatch_log_gpus(7, "/nonexistent/kfd/topology/nodes").empty());
 }
