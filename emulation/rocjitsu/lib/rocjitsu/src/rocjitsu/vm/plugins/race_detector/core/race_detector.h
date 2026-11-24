@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
+#include "util/diagnostic.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -85,6 +86,10 @@ namespace rocjitsu::plugins::race_detector {
 ///     barrier or an LDS barrier cell.
 class RaceDetector {
 public:
+  /// @brief Reject wave counts that exceed the barrier-round bit capacity.
+  static util::Result validate_wave_count(size_t waves, util::DiagnosticEmitter diagnostic = {});
+
+  /// @pre nWaves is nonnegative and passes validate_wave_count().
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,

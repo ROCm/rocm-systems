@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 #include "util/result.h"
@@ -20,7 +21,6 @@
 #include <regex>
 #include <span>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -222,19 +222,31 @@ TEST(RaceReportTraceTest, ContextCountsExecutionsBeforeCompactionAndKeepsGapsSep
   EXPECT_NE(odd_report.find("2 executions, through PC 0x118\n"), std::string::npos);
 }
 
-TEST(RaceReportConfigTest, ValidatesTraceContextAtConstruction) {
+TEST(RaceReportConfigTest, ValidatesTraceContextAtInitialization) {
   for (const char *config : {static_cast<const char *>(nullptr), "", "{}", R"({"trace_context":2})",
                              R"({"trace_context":3})", R"({"trace_context":256})"}) {
     SCOPED_TRACE(config ? config : "null");
-    EXPECT_NO_THROW({ RaceDetectorPlugin plugin(config); });
+    RaceDetectorPlugin plugin;
+    EXPECT_TRUE(plugin.initialize(config).succeeded());
   }
   for (const char *config :
        {"{", "[]", "null", R"({"trace_context":-1})", R"({"trace_context":0})",
         R"({"trace_context":1})", R"({"trace_context":257})", R"({"trace_context":1e30})",
         R"({"trace_context":2.5})", R"({"trace_context":true})", R"({"trace_context":"128"})"}) {
     SCOPED_TRACE(config);
-    EXPECT_THROW({ RaceDetectorPlugin plugin(config); }, std::invalid_argument);
+    RaceDetectorPlugin plugin;
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(plugin.initialize(config, diagnostic.emitter()).failed());
+    EXPECT_FALSE(diagnostic.message().empty());
   }
+}
+
+TEST(RaceReportConfigTest, FactoryRejectsInvalidConfiguration) {
+  std::unique_ptr<rocjitsu::ExecutionPlugin> plugin(
+      rocjitsu::create_plugin_instance<RaceDetectorPlugin>(R"({"trace_context":1})"));
+  EXPECT_EQ(plugin, nullptr);
+  plugin.reset(rocjitsu::create_plugin_instance<RaceDetectorPlugin>(R"({"trace_context":2})"));
+  EXPECT_NE(plugin, nullptr);
 }
 
 TEST(RaceReportTraceTest, RepeatedPcWithDifferentBytesSelectsTheMatchingEncoding) {
@@ -389,7 +401,8 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
         test.write, Dim3d(1, 2, 3),
         event};
     const std::string report =
-        formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4);
+        formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4)
+            .value();
     EXPECT_NE(report.find(test.resource), std::string::npos);
     EXPECT_NE(report.find(std::string("(") + test.hazard + ")"), std::string::npos);
     EXPECT_NE(report.find(std::string("Conflict: ") + test.operation + " at PC 0x100"),
@@ -426,11 +439,13 @@ TEST(RaceReportDescriptionTest, ReportsOnlyRemainingCounterObligationsAfterAPart
       MemoryOrderClass::UNORDERED);
   const RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), event};
   EXPECT_NE(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4)
+                .value()
                 .find("pending counters: loadcnt, dscnt."),
             std::string::npos);
   EXPECT_FALSE(detector.satisfyEventWaitCounter(event, WaitCounterType::DSCNT));
   const std::string report =
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4);
+      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4)
+          .value();
   EXPECT_NE(report.find("pending counters: loadcnt."), std::string::npos);
   EXPECT_EQ(report.find("dscnt"), std::string::npos);
 }
@@ -470,10 +485,10 @@ TEST(RaceReportDescriptionTest, ArchitecturalCounterNamesPreservePendingSubsetCh
         "  Current access: read at PC 0x200.\n"
         "  Conflict: load into VGPRs at PC 0x100, wave 0.\n"
         "  Completion for wave 0 is not guaranteed; pending counters: ";
-    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch),
+    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch).value(),
               prefix + test.both + ".\n");
     EXPECT_FALSE(detector.satisfyEventWaitCounter(event, test.first));
-    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch),
+    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch).value(),
               prefix + test.remaining + ".\n");
   }
 }
@@ -487,7 +502,8 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
     detector.satisfyEventWaitCounter(event, obligation.wait_counter_type());
   detector.markEventWaveComplete(event);
   const RaceViolation violation{RaceViolation::Space::LDS, 16, 0, 3, true, Dim3d(1, 2, 3), event};
-  EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna3),
+  EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna3)
+                .value(),
             "Race on LDS byte 16 [workgroup (1, 2, 3), wave 0, lane 3]: write-after-read (WAR).\n"
             "  Current access: write at PC 0x200.\n"
             "  Conflict: transfer from LDS into VGPRs at PC 0x100, wave 1.\n"
@@ -498,19 +514,23 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
 TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {
   RaceDetector detector(1, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), {}};
-  EXPECT_THROW(
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4),
-      std::out_of_range);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4,
+                                    diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "race violation references an unavailable conflicting event");
   violation.conflictingEvent = detector.allocateEventId(
       WaveId{0}, testInstruction(0x100), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
       CounterObligations(WaitCounterType::VMCNT, MemoryOrderClass::VMEM), MemoryOrderClass::VMEM);
-  EXPECT_THROW(
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Invalid),
-      std::invalid_argument);
+  EXPECT_TRUE(formatRaceDescription(violation, detector.events(), 0x200,
+                                    rocjitsu::IsaFamily::Invalid, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "race report has an unsupported architecture");
   detector.retireEvent(violation.conflictingEvent);
-  EXPECT_THROW(
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4),
-      std::logic_error);
+  EXPECT_TRUE(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4,
+                                    diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "race violation references a retired memory event");
 }
 
 static_assert(sizeof(InstructionSnapshot) == 32);
