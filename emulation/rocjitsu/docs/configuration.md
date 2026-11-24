@@ -160,6 +160,17 @@ positive `cpu_thread_budget` overrides the budget. A config without a table
 uses serial defaults for unspecified knobs. Clocked mode uses only engines,
 capped automatically at 32, by affinity/budget and by XCD count.
 
+The VFIO-user server (`--vfio-socket`) keeps every local GPU in one engine
+partition, so it runs one engine thread whatever `num_threads` resolves to. A
+server presenting one function applies the resolved `cpu_dispatch_threads` to
+its GPU, as launch mode does. A server presenting several functions leaves
+every GPU at serial dispatch whatever the config resolves to, and logs a
+warning when the config sets a width above one. Functions served as a group
+copy guest memory through the serialized transport rather than through mapped
+windows. Dispatch workers have been measured only behind a single function,
+where they made memory-bound kernels several times slower for as long as memory
+access was serialized.
+
 Explicit engine, dispatch and helper values take precedence and may exceed the
 automatic ceiling. Engines are clamped to aggregate XCD count. Each SoC's pool
 width is bounded by one plus the sum of CUs-1 across nonempty XCDs; individual
@@ -279,6 +290,8 @@ Increasing the budget alone retains these serial defaults.
 
 Set `cpu_dispatch_threads: 0` to opt into the parallel granules below, or set a
 positive dispatch width explicitly. The engine stays at one unless overridden.
+A VFIO-user server presenting these GPUs as several functions does not apply
+either choice and dispatches serially.
 
 | Budget | MI355X, 2 GPUs E/D | Retained threads | MI455X, 4 GPUs E/D | Retained threads |
 |---:|---:|---:|---:|---:|

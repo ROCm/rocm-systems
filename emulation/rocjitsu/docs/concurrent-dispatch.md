@@ -42,6 +42,11 @@ unused budget between entries. The default budget is CPU affinity and the
 target table sets the allocation ceiling. `cpu_thread_budget` overrides the
 budget; explicit knob settings take priority.
 
+A VFIO-user server always runs one engine thread. It applies the resolved
+dispatch width only when it presents a single function; presenting several, it
+keeps every GPU at D=1 whatever the table or an explicit `cpu_dispatch_threads`
+selects. See [Simulation threading](configuration.md#simulation-threading).
+
 The single-GPU gfx942 and gfx950 presets use up to 48 execution threads.
 gfx1250 uses up to 64. Each uses eight engines at its highest granule. See
 [the allocation table](configuration.md#thread-accounting-and-preferred-allocations)

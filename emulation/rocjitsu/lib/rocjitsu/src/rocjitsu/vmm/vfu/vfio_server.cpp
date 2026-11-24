@@ -248,10 +248,37 @@ private:
   bool started_ = false;
 };
 
+/// @brief Write the dispatch width of each served GPU to @p fd, in ordinal order.
+/// @details One native-endian uint32_t per GPU. The widths are read back from
+/// the assembled machine rather than taken from the config, so what is reported
+/// is what the serving SoCs hold and not what they were meant to be given.
+/// @param[in] fd Descriptor to write to; it stays the caller's to close.
+/// @param[in] machine The assembled local node.
+/// @param[in] gpu_count How many local GPUs the node serves.
+/// @returns Whether every width was written whole.
+bool report_dispatch_widths(int fd, const VirtualMachine &machine, std::size_t gpu_count) {
+  for (std::size_t gpu_index = 0; gpu_index < gpu_count; ++gpu_index) {
+    const SoC *served_soc = machine.soc(static_cast<uint32_t>(gpu_index));
+    if (served_soc == nullptr) {
+      return false;
+    }
+    const uint32_t width = served_soc->dispatch_threads();
+    ssize_t written = 0;
+    do {
+      written = write(fd, &width, sizeof(width));
+    } while (written < 0 && errno == EINTR);
+    if (written != static_cast<ssize_t>(sizeof(width))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 int run_vfio_server_impl(const std::string &config_path,
                          const std::vector<std::string> &socket_paths, int ready_fd,
                          bool trace_effects, std::optional<int> engine_exit_code_for_test,
-                         std::optional<std::size_t> serving_thread_failure_after = std::nullopt) {
+                         std::optional<std::size_t> serving_thread_failure_after = std::nullopt,
+                         int dispatch_report_fd_for_test = -1) {
   ReadinessPipe readiness(ready_fd);
   if (trace_effects && socket_paths.size() < 2) {
     util::Logger::warn("vfu: the fabric effect trace requires multiple VFIO functions");
@@ -293,6 +320,22 @@ int run_vfio_server_impl(const std::string &config_path,
   // A PCI function retains its trace until the engine-owned topology destroys
   // it, so traces must be declared before the engine.
   std::vector<std::unique_ptr<BarAccessTrace>> traces;
+
+  // The dispatch width the loader resolved reaches a SoC only through
+  // apply_cpu_dispatch_threads(), which launch mode also calls; a SoC it never
+  // reaches dispatches serially. It has to precede topology assembly, which
+  // takes the SoCs out of the loaded config.
+  //
+  // Only a lone function is given it: a group copies guest memory through the
+  // serialized transport, and dispatch workers queueing for memory access
+  // measured several times slower than serial dispatch.
+  if (socket_paths.size() == 1) {
+    loaded.apply_cpu_dispatch_threads();
+  } else if (loaded.cpu_dispatch_threads > 1) {
+    util::Logger::warn(std::format(
+        "vfu: serving {} functions with serial dispatch; {} asked for {} dispatch threads",
+        socket_paths.size(), config_path, loaded.cpu_dispatch_threads));
+  }
 
   // The whole local node is built before create(): the engine sizes its one
   // partition and gives every function an engine pointer during creation. The
@@ -506,6 +549,11 @@ int run_vfio_server_impl(const std::string &config_path,
         break;
       }
     }
+  }
+  if (status == 0 && dispatch_report_fd_for_test >= 0 &&
+      !report_dispatch_widths(dispatch_report_fd_for_test, *machine_ptr, socket_paths.size())) {
+    util::Logger::warn("vfu: cannot report the dispatch widths");
+    status = 1;
   }
   if (status == 0 && !readiness.signal()) {
     util::Logger::warn("vfu: cannot report server readiness to the launcher");
@@ -753,6 +801,13 @@ int run_vfio_server_with_serving_thread_failure_for_test(
     std::size_t successful_threads) {
   return run_vfio_server_impl(config_path, socket_paths, ready_fd, false, std::nullopt,
                               successful_threads);
+}
+
+int run_vfio_server_reporting_dispatch_for_test(const std::string &config_path,
+                                                const std::vector<std::string> &socket_paths,
+                                                int ready_fd, int dispatch_fd) {
+  return run_vfio_server_impl(config_path, socket_paths, ready_fd, false, std::nullopt,
+                              std::nullopt, dispatch_fd);
 }
 
 } // namespace rocjitsu

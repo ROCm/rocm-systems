@@ -863,6 +863,7 @@ if(ROCJITSU_ENABLE_VFIO)
             vmm/guest_region_map_test.cpp
             vmm/vfio_user_client.cpp
             vmm/vfio_device_host_test.cpp
+            vmm/vfio_server_dispatch_test.cpp
     )
     target_link_libraries(
         rocjitsu_tests
