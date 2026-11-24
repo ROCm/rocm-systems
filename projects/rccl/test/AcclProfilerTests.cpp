@@ -224,6 +224,11 @@ static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
     d->coll.count = count;
     d->coll.seqNumber = seqNumber;
     d->coll.nChannels = nChannels;
+    // FIXME: Remove when Addon collectives gain KernelCh event support.
+    // RCCL Addon collectives (DDA, GIN-SDMA) do not support KernelCh events
+    // and report nChannels=0, nWarps=0. Set nWarps=1 so that the Coll event
+    // descriptor is not misinterpreted as an Addon collective.
+    d->coll.nWarps = 1;
 }
 
 // Fills a KernelCh event descriptor parented to `collHandle`.
