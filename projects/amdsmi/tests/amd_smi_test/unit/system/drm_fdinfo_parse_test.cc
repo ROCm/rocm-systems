@@ -101,6 +101,19 @@ TEST(SystemUnit, ParseDrmFdinfoFlagsInvalidCounters) {
       "drm-engine-gfx:\t12 parsecs\n");
   EXPECT_FALSE(bad_engine.valid);
 
+  for (const char* vram :
+       {"-5 KiB", "+5 KiB", "18446744073709551616", "17592186044416 MiB", "5 GiB", "5 KiB extra"}) {
+    const auto usage = amd::smi::ParseDrmFdinfo(std::string("drm-driver:\tamdgpu\n") +
+                                                "drm-total-vram:\t" + vram + "\n");
+    EXPECT_FALSE(usage.valid) << vram;
+    EXPECT_EQ(usage.vram, 0ULL) << vram;
+  }
+  const auto largest = amd::smi::ParseDrmFdinfo(
+      "drm-driver:\tamdgpu\n"
+      "drm-total-vram:\t17592186044415 MiB\n");
+  EXPECT_TRUE(largest.valid);
+  EXPECT_EQ(largest.vram, 17592186044415ULL << 20);
+
   EXPECT_TRUE(amd::smi::ParseDrmFdinfo(kAmdgpuFdinfo).valid);
 }
 

@@ -22,8 +22,8 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_self_fdinfo.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
-#include "amd_smi/impl/fdinfo.h"
 #include "test_fixture_utils.h"
 
 namespace {
@@ -271,6 +271,24 @@ TEST(SystemUnit, GetSelfInfoPropagatesReadFailure) {
   EXPECT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_FILE_ERROR);
 }
 
+TEST(SystemUnit, ReadFdinfoFileReportsDescriptorClosedAfterOpen) {
+  const int target = open(kRenderNode, O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(target, 0);
+  const std::string path = "/proc/self/fdinfo/" + std::to_string(target);
+  const int open_fdinfo = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(open_fdinfo, 0);
+  std::string text;
+  EXPECT_EQ(amd::smi::ReadFdinfoFile(open_fdinfo, &text), AMDSMI_STATUS_SUCCESS);
+  EXPECT_NE(text.find("flags:"), std::string::npos);
+  close(open_fdinfo);
+
+  const int closing_fdinfo = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(closing_fdinfo, 0);
+  ASSERT_EQ(close(target), 0);
+  EXPECT_EQ(amd::smi::ReadFdinfoFile(closing_fdinfo, &text), AMDSMI_STATUS_NOT_FOUND);
+  close(closing_fdinfo);
+}
+
 TEST(SystemUnit, GetSelfInfoRejectsInvalidCounters) {
   ScopedFakeFdinfo fake;
   ScopedFd mine(kRenderNode), sibling(kSiblingNode);
@@ -314,6 +332,10 @@ TEST(SystemUnit, GetGpuProcessInfoSelfPublicApi) {
   EXPECT_EQ(info.memory_usage.vram_mem, 12ULL << 20);
   EXPECT_EQ(info.pid, static_cast<uint32_t>(getpid()));
   EXPECT_EQ(info.cu_occupancy, std::numeric_limits<uint32_t>::max());
+
+  fake->text[mine.get()] = AmdgpuClient("1", "garbage", /*use_client_id=*/true);
+  EXPECT_EQ(amdsmi_get_gpu_process_info_self(topology.handle(kNode), &info),
+            AMDSMI_STATUS_UNEXPECTED_DATA);
 }
 
 TEST(SystemUnit, GetGpuProcessInfoSelfNeedsRenderNodeDevNumber) {

@@ -17,7 +17,7 @@
 #include <utility>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/fdinfo.h"
+#include "amd_smi/impl/amd_smi_self_fdinfo.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
 namespace amd::smi {

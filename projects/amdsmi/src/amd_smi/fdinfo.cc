@@ -5,6 +5,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -21,6 +22,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "amd_smi/impl/amd_smi_drm_fdinfo_parser.h"
+#include "amd_smi/impl/amd_smi_self_fdinfo.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
@@ -224,21 +226,15 @@ bool IsNumericFdName(const char* name) {
 
 SelfFdinfoReader g_self_fdinfo_reader = nullptr;
 
+// procfs fails both the open and later reads with ENOENT once the descriptor
+// is closed.
 amdsmi_status_t ReadProcSelfFdinfo(int fd, std::string* text) {
-  errno = 0;
-  std::ifstream fdinfo("/proc/self/fdinfo/" + std::to_string(fd));
-  if (!fdinfo) {
-    if (errno == ENOENT) return AMDSMI_STATUS_NOT_FOUND;
-    return AMDSMI_STATUS_FILE_ERROR;
-  }
-  text->clear();
-  for (std::string line; std::getline(fdinfo, line);) {
-    text->append(line);
-    text->push_back('\n');
-  }
-  // getline sets failbit on EOF after a successful read; badbit is a hard error.
-  if (fdinfo.bad()) return AMDSMI_STATUS_FILE_ERROR;
-  return AMDSMI_STATUS_SUCCESS;
+  const std::string path = "/proc/self/fdinfo/" + std::to_string(fd);
+  const int fdinfo_fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fdinfo_fd < 0) return errno == ENOENT ? AMDSMI_STATUS_NOT_FOUND : AMDSMI_STATUS_FILE_ERROR;
+  const amdsmi_status_t status = amd::smi::ReadFdinfoFile(fdinfo_fd, text);
+  close(fdinfo_fd);
+  return status;
 }
 
 // Adds descriptor `fd` to `clients` if it is an amdgpu client of `render_dev`.
@@ -278,6 +274,25 @@ amdsmi_status_t CollectSelfFd(int fd, dev_t render_dev, SelfFdinfoReader read_fd
 }
 
 }  // namespace
+
+namespace amd::smi {
+
+amdsmi_status_t ReadFdinfoFile(int fdinfo_fd, std::string* text) {
+  text->clear();
+  char buf[4096];
+  for (;;) {
+    const ssize_t n = read(fdinfo_fd, buf, sizeof(buf));
+    if (n > 0) {
+      text->append(buf, static_cast<size_t>(n));
+    } else if (n == 0) {
+      return AMDSMI_STATUS_SUCCESS;
+    } else if (errno != EINTR) {
+      return errno == ENOENT ? AMDSMI_STATUS_NOT_FOUND : AMDSMI_STATUS_FILE_ERROR;
+    }
+  }
+}
+
+}  // namespace amd::smi
 
 namespace amd::smi::test_hooks {
 
