@@ -13,6 +13,10 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand_types.h"
@@ -20,6 +24,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
@@ -983,19 +988,188 @@ TEST(KernelOwnershipTest, Gfx950VccAliasesUseEachDescriptorAllocation) {
   }
 }
 
+struct LegacyCdnaTarget {
+  IsaFamily arch;
+  rj_code_target_id_t target;
+  uint32_t flags;
+};
+
+constexpr std::array<LegacyCdnaTarget, 2> kLegacyCdnaTargets = {{
+    {.arch = IsaFamily::Cdna1,
+     .target = ROCJITSU_CODE_TARGET_GFX908,
+     .flags = EF_AMDGPU_MACH_AMDGCN_GFX908},
+    {.arch = IsaFamily::Cdna2,
+     .target = ROCJITSU_CODE_TARGET_GFX90A,
+     .flags = EF_AMDGPU_MACH_AMDGCN_GFX90A},
+}};
+
+TEST(KernelOwnershipTest, LegacyVccAliasesUseEachDescriptorAllocation) {
+  for (const LegacyCdnaTarget &target : kLegacyCdnaTargets) {
+    for (bool return_link : {false, true}) {
+      for (uint32_t sgpr_count : {48, 64}) {
+        for (bool canonical_field : {false, true}) {
+          SCOPED_TRACE(static_cast<int>(target.arch));
+          SCOPED_TRACE(return_link);
+          SCOPED_TRACE(sgpr_count);
+          SCOPED_TRACE(canonical_field);
+          const uint32_t store_offset = return_link ? 8 : 516;
+          std::vector<uint32_t> words(132, build_s_nop(0, target.arch).value());
+          if (return_link) {
+            words[0] = build_s_call_b64(46, 127, target.arch).value();
+            words[1] = build_s_endpgm(target.arch).value();
+          } else {
+            words[0] = build_s_getpc_b64(46, target.arch).value();
+            words[1] = build_s_add_u32(46, 46, 255, target.arch).value();
+            words[2] = 508;
+            words[3] = build_s_addc_u32(47, 47, 128, target.arch).value();
+            words[128] = build_s_endpgm(target.arch).value();
+          }
+          const size_t clobber = return_link ? 128 : 4;
+          words[clobber] =
+              build_s_add_u32(scalar_operand_vcc_lo(target.arch).value(), 46, 132, target.arch)
+                  .value();
+          words[clobber + 1] = build_s_setpc_b64(46, target.arch).value();
+          words[64] =
+              build_s_branch(static_cast<int16_t>((static_cast<int32_t>(store_offset) - 260) / 4),
+                             target.arch)
+                  .value();
+          const std::array<uint32_t, 2> store =
+              target.arch == IsaFamily::Cdna1
+                  ? cdna1::build_ds(cdna1::kDsWriteB32Ds, {.addr = 2, .data0 = 3})
+                  : cdna2::build_ds(cdna2::kDsWriteB32Ds, {.addr = 2, .data0 = 3});
+          words[store_offset / 4] = store[0];
+          words[store_offset / 4 + 1] = store[1];
+          words[store_offset / 4 + 2] = build_s_endpgm(target.arch).value();
+          std::vector<uint8_t> image = two_owner_image(words, 256, target.flags);
+          for (size_t kernel = 0; kernel < 2; ++kernel) {
+            const size_t offset = 0x100 + words.size() * sizeof(uint32_t) +
+                                  kernel * sizeof(amdhsa::kernel_descriptor_t);
+            amdhsa::kernel_descriptor_t descriptor = {};
+            std::memcpy(&descriptor, image.data() + offset, sizeof(descriptor));
+            const uint32_t allocation = kernel == 0 ? sgpr_count : 48;
+            // Both fields round to the same physical 16-SGPR block. The even
+            // field is the canonical GFX9 encoding; retain the original fixture too.
+            RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                               amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                               allocation / 8 - (canonical_field ? 2 : 1));
+            std::memcpy(image.data() + offset, &descriptor, sizeof(descriptor));
+          }
+          const std::shared_ptr<const AmdGpuCodeObject> source =
+              std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+          std::string error;
+          const FailureOr<KernelOwnership> ownership =
+              KernelOwnership::build(source, target.target, error);
+          if (sgpr_count == 48) {
+            EXPECT_TRUE(ownership.failed());
+          } else {
+            ASSERT_TRUE(ownership.succeeded()) << error;
+            const std::optional<std::span<const KernelExecutionOwner>> owners =
+                ownership.value().owners_at(store_offset);
+            ASSERT_TRUE(owners);
+            ASSERT_EQ(owners->size(), 1u);
+            EXPECT_EQ(owners->front().kernel_index, 1u);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(KernelOwnershipTest, LegacyFlatScratchWritesInvalidateSavedLinks) {
+  for (const LegacyCdnaTarget &target : kLegacyCdnaTargets) {
+    for (bool before_call : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(target.arch));
+      SCOPED_TRACE(before_call);
+      std::vector<uint32_t> words = shared_helper_words(false, false, target.arch);
+      const uint32_t flat_write =
+          build_s_mov_b32(amdgpu::kFlatScratchSelectorFirst, 128, target.arch).value();
+      if (before_call) {
+        words[0] = flat_write;
+        words[1] = build_s_call_b64(30, 126, target.arch).value();
+        words[2] = build_s_endpgm(target.arch).value();
+      } else {
+        words[128] = flat_write;
+      }
+      const std::vector<uint8_t> image = two_owner_image(words, 256, target.flags);
+      const std::shared_ptr<const AmdGpuCodeObject> source =
+          std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+      std::string error;
+      const FailureOr<KernelOwnership> ownership =
+          KernelOwnership::build(source, target.target, error);
+      if (before_call) {
+        ASSERT_TRUE(ownership.succeeded()) << error;
+        ASSERT_TRUE(ownership.value().owners_at(512));
+        EXPECT_EQ(ownership.value().owners_at(512)->size(), 2u);
+      } else {
+        EXPECT_TRUE(ownership.failed());
+      }
+    }
+  }
+}
+
+TEST(KernelOwnershipTest, LegacyFlatScratchWritesRequireRecoveredPcBackingProof) {
+  for (const LegacyCdnaTarget &target : kLegacyCdnaTargets) {
+    SCOPED_TRACE(static_cast<int>(target.arch));
+    std::vector<uint32_t> words(129, build_s_nop(0, target.arch).value());
+    words[0] = build_s_mov_b32(amdgpu::kFlatScratchSelectorFirst, 128, target.arch).value();
+    words[1] = build_s_getpc_b64(8, target.arch).value();
+    words[2] = build_s_add_u32(8, 8, 255, target.arch).value();
+    words[3] = 504;
+    words[4] = build_s_addc_u32(9, 9, 128, target.arch).value();
+    words[5] = build_s_setpc_b64(8, target.arch).value();
+    words[64] = build_s_branch(63, target.arch).value();
+    words[128] = build_s_endpgm(target.arch).value();
+    const std::vector<uint8_t> image = two_owner_image(words, 256, target.flags);
+    const std::shared_ptr<const AmdGpuCodeObject> source =
+        std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+    std::string error;
+    EXPECT_TRUE(KernelOwnership::build(source, target.target, error).failed());
+  }
+}
+
+TEST(KernelOwnershipTest, LegacyVccDefinitionsInvalidateSavedLinks) {
+  for (const LegacyCdnaTarget &target : kLegacyCdnaTargets) {
+    for (bool vector_compare : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(target.arch));
+      SCOPED_TRACE(vector_compare);
+      std::vector<uint32_t> words = shared_helper_words(false, false, target.arch);
+      if (vector_compare) {
+        words[128] = target.arch == IsaFamily::Cdna1
+                         ? cdna1::build_vopc(cdna1::kVCmpEqU32Vopc, {.src0 = 128, .vsrc1 = 0})[0]
+                         : cdna2::build_vopc(cdna2::kVCmpEqU32Vopc, {.src0 = 128, .vsrc1 = 0})[0];
+      } else {
+        words[128] =
+            build_s_mov_b32(scalar_operand_vcc_lo(target.arch).value() + 1, 129, target.arch)
+                .value();
+      }
+      const std::vector<uint8_t> image = two_owner_image(words, 256, target.flags);
+      const std::shared_ptr<const AmdGpuCodeObject> source =
+          std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+      std::string error;
+      EXPECT_TRUE(KernelOwnership::build(source, target.target, error).failed());
+    }
+  }
+}
+
 TEST(KernelOwnershipTest, AliasedReturnLinksRemainProvedWithoutSpecialWrites) {
   struct Target {
     IsaFamily arch;
     rj_code_target_id_t target;
     uint32_t flags;
   };
-  const std::array<Target, 2> targets = {{
+  const std::array<Target, 4> targets = {{
       {.arch = IsaFamily::Cdna3,
        .target = ROCJITSU_CODE_TARGET_GFX942,
        .flags = EF_AMDGPU_MACH_AMDGCN_GFX942},
       {.arch = IsaFamily::Cdna4,
        .target = ROCJITSU_CODE_TARGET_GFX950,
        .flags = EF_AMDGPU_MACH_AMDGCN_GFX950},
+      {.arch = IsaFamily::Cdna1,
+       .target = ROCJITSU_CODE_TARGET_GFX908,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX908},
+      {.arch = IsaFamily::Cdna2,
+       .target = ROCJITSU_CODE_TARGET_GFX90A,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX90A},
   }};
   for (const Target &target : targets) {
     SCOPED_TRACE(static_cast<int>(target.arch));

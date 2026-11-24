@@ -211,7 +211,68 @@ const Instruction *KernelOwnership::instruction_at(size_t kernel_index, uint64_t
 }
 
 static bool has_descriptor_sgpr_aliases(IsaFamily arch) {
-  return arch == IsaFamily::Cdna3 || arch == IsaFamily::Cdna4;
+  return arch == IsaFamily::Cdna1 || arch == IsaFamily::Cdna2 || arch == IsaFamily::Cdna3 ||
+         arch == IsaFamily::Cdna4;
+}
+
+static std::optional<uint16_t> descriptor_sgpr_alias_base(IsaFamily arch, uint32_t alias_end,
+                                                          RegClass cls) {
+  if (cls == RegClass::VCC)
+    return cdna3::vcc_base(alias_end);
+  // The VCC allocation rule is shared by CDNA1-4. Only the CDNA3/4
+  // FLAT_SCRATCH backing has been qualified for this ownership proof.
+  if (cls == RegClass::FLAT_SCRATCH && (arch == IsaFamily::Cdna3 || arch == IsaFamily::Cdna4))
+    return cdna3::flat_scratch_base(alias_end);
+  return std::nullopt;
+}
+
+static bool overlaps_descriptor_sgpr_alias(IsaFamily arch, uint32_t sgpr_count, uint16_t pair) {
+  const uint32_t alias_end = cdna3::sgpr_alias_end(sgpr_count);
+  for (RegClass cls : {RegClass::VCC, RegClass::FLAT_SCRATCH}) {
+    const std::optional<uint16_t> base = descriptor_sgpr_alias_base(arch, alias_end, cls);
+    if (base && pair < *base + 2u && pair + 2u > *base)
+      return true;
+  }
+  return false;
+}
+
+struct DescriptorAliasWrites {
+  bool vcc = false;
+  bool flat_scratch = false;
+};
+
+static DescriptorAliasWrites descriptor_alias_writes(const Instruction &instruction) {
+  DescriptorAliasWrites writes = {};
+  const auto record = [&](RegClass cls) {
+    writes.vcc = writes.vcc || cls == RegClass::VCC;
+    writes.flat_scratch = writes.flat_scratch || cls == RegClass::FLAT_SCRATCH;
+  };
+  // Ordinary def/use projects selector-encoded specials out. Ownership also
+  // needs named, fieldless and implicit writes to their physical SGPR backing.
+  for (int destination = 0; destination < instruction.num_dst_operands(); ++destination) {
+    const Operand *operand = instruction.dst_operand(destination);
+    if (!operand)
+      continue;
+    const std::optional<RegisterRef> ref = operand->to_register_ref();
+    if (ref)
+      record(ref->cls);
+    const std::optional<RegClass> special = operand->to_special_reg_class();
+    if (special)
+      record(*special);
+    if (operand->has_register_selector()) {
+      const int selector = operand->encoding_value();
+      if (selector >= static_cast<int>(amdgpu::kVccSelectorFirst) &&
+          selector <= static_cast<int>(amdgpu::kVccSelectorLast))
+        record(RegClass::VCC);
+      else if (selector >= static_cast<int>(amdgpu::kFlatScratchSelectorFirst) &&
+               selector <= static_cast<int>(amdgpu::kFlatScratchSelectorLast))
+        record(RegClass::FLAT_SCRATCH);
+    }
+  }
+  RegisterSet implicit_defs;
+  instruction.implicit_defs(implicit_defs);
+  implicit_defs.for_each([&](RegisterRef ref) { record(ref.cls); });
+  return writes;
 }
 
 /// Prove that a setpc pair contains a scoped call continuation on every incoming
@@ -267,16 +328,15 @@ proved_call_return_offsets(std::span<BasicBlock *const> scope, std::span<const u
     const auto invalidate_special_alias = [&](RegClass cls) {
       if (!descriptor_aliases)
         return;
-      uint16_t base = 0;
-      if (cls == RegClass::VCC)
-        base = cdna3::vcc_base(alias_end);
-      else if (cls == RegClass::FLAT_SCRATCH)
-        base = cdna3::flat_scratch_base(alias_end);
-      else
+      const std::optional<uint16_t> base = descriptor_sgpr_alias_base(arch, alias_end, cls);
+      if (!base) {
+        // An unqualified backing cannot establish preservation of any link.
+        state.killed.set();
         return;
+      }
       // A selector may name only one half. Killing the whole alias is safe for
       // this proof, including conditional writes and implicit definitions.
-      for (size_t sgpr = base; sgpr < static_cast<size_t>(base) + 2; ++sgpr) {
+      for (size_t sgpr = *base; sgpr < static_cast<size_t>(*base) + 2; ++sgpr) {
         if (sgpr < state.killed.size())
           state.killed.set(sgpr);
         if (sgpr != 0 && sgpr - 1 < state.killed.size())
@@ -302,31 +362,11 @@ proved_call_return_offsets(std::span<BasicBlock *const> scope, std::span<const u
           state.killed.set(ref.index - 1);
       });
       if (descriptor_aliases) {
-        // Ordinary def/use intentionally projects selector-encoded specials
-        // out. Return ownership instead needs their physical SGPR aliases.
-        for (int destination = 0; destination < instruction.num_dst_operands(); ++destination) {
-          const Operand *operand = instruction.dst_operand(destination);
-          if (!operand)
-            continue;
-          const std::optional<RegisterRef> ref = operand->to_register_ref();
-          if (ref)
-            invalidate_special_alias(ref->cls);
-          const std::optional<RegClass> special = operand->to_special_reg_class();
-          if (special)
-            invalidate_special_alias(*special);
-          if (operand->has_register_selector()) {
-            const int selector = operand->encoding_value();
-            if (selector >= static_cast<int>(amdgpu::kVccSelectorFirst) &&
-                selector <= static_cast<int>(amdgpu::kVccSelectorLast))
-              invalidate_special_alias(RegClass::VCC);
-            else if (selector >= static_cast<int>(amdgpu::kFlatScratchSelectorFirst) &&
-                     selector <= static_cast<int>(amdgpu::kFlatScratchSelectorLast))
-              invalidate_special_alias(RegClass::FLAT_SCRATCH);
-          }
-        }
-        RegisterSet implicit_defs;
-        instruction.implicit_defs(implicit_defs);
-        implicit_defs.for_each([&](RegisterRef ref) { invalidate_special_alias(ref.cls); });
+        const DescriptorAliasWrites writes = descriptor_alias_writes(instruction);
+        if (writes.vcc)
+          invalidate_special_alias(RegClass::VCC);
+        if (writes.flat_scratch)
+          invalidate_special_alias(RegClass::FLAT_SCRATCH);
       }
     }
     const Instruction *term = block.terminator();
@@ -723,6 +763,13 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
                                    kernel_wave_sizes[kernel_index]);
     if (returns.failed())
       return reject("return ownership exceeds context budget");
+    const bool unproved_flat_scratch =
+        (architecture->family == IsaFamily::Cdna1 || architecture->family == IsaFamily::Cdna2) &&
+        std::ranges::any_of(scope, [](const BasicBlock *block) {
+          return std::ranges::any_of(block->instructions(), [](const Instruction &instruction) {
+            return descriptor_alias_writes(instruction).flat_scratch;
+          });
+        });
     for (BasicBlock *block : scope) {
       if (block->has_implicit_terminator() ||
           (block->successor_issue() != BasicBlock::SuccessorIssue::None &&
@@ -755,16 +802,18 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
           if (fixup.source_incomplete || !target ||
               target->start_offset() != fixup.source_target_offset)
             return reject("incomplete indirect ownership");
+          if (unproved_flat_scratch)
+            return reject("recovered PC ownership requires proved FLAT_SCRATCH backing");
           // Recovery has no descriptor allocation with which to model the
           // special registers' physical backing. Its producer and consumer
           // must both name ordinary, unaliased pairs in this owner's layout.
           if (has_descriptor_sgpr_aliases(architecture->family) &&
               (fixup.source_builder_sreg + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS ||
                fixup.source_call_sreg + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS ||
-               cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(*kernel_sgpr_count,
-                                                             fixup.source_builder_sreg) ||
-               cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(*kernel_sgpr_count,
-                                                             fixup.source_call_sreg)))
+               overlaps_descriptor_sgpr_alias(architecture->family, *kernel_sgpr_count,
+                                              fixup.source_builder_sreg) ||
+               overlaps_descriptor_sgpr_alias(architecture->family, *kernel_sgpr_count,
+                                              fixup.source_call_sreg)))
             return reject("recovered PC ownership requires unaliased ordinary SGPR pairs");
           const BasicBlock *producer = block_for_offset(index, fixup.source_getpc_offset);
           if (!producer)

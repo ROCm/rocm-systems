@@ -116,9 +116,11 @@ struct KernelOwnerFlow {
 /// target-bound CFG itself. Unknown flow or unproved returns fail without facts.
 /// Shared multi-target transfers require kernel-specific provenance; PC builders
 /// carried across calls require callee-preservation proof. Both fail in this profile.
-/// For gfx942/gfx950, named VCC/FLAT_SCRATCH writes invalidate return links
-/// through their descriptor-dependent backing SGPRs. Recovered PC pairs must
-/// name ordinary SGPRs that do not overlap those aliases.
+/// For CDNA1-4, VCC writes invalidate return links through their descriptor-dependent
+/// backing SGPRs. FLAT_SCRATCH backing is qualified only on CDNA3/4; writes on
+/// CDNA1/2 invalidate all saved links and exclude recovered-PC proofs in that scope,
+/// even if they precede a builder. Recovered pairs must name ordinary SGPRs that
+/// do not overlap the qualified aliases.
 /// Query spans are valid only while both this result and the source remain alive;
 /// callers must retain the source when consuming a returned span.
 class KernelOwnership {
