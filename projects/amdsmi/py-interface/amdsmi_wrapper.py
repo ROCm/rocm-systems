@@ -1682,6 +1682,35 @@ struct_amdsmi_driver_info_t._fields_ = [
 ]
 
 amdsmi_driver_info_t = struct_amdsmi_driver_info_t
+
+# values for enumeration 'amdsmi_driver_package_t'
+amdsmi_driver_package_t__enumvalues = {
+    0: 'AMDSMI_DRIVER_PACKAGE_NONE',
+    1: 'AMDSMI_DRIVER_PACKAGE_DKMS',
+    2: 'AMDSMI_DRIVER_PACKAGE_KMOD',
+}
+AMDSMI_DRIVER_PACKAGE_NONE = 0
+AMDSMI_DRIVER_PACKAGE_DKMS = 1
+AMDSMI_DRIVER_PACKAGE_KMOD = 2
+amdsmi_driver_package_t = ctypes.c_uint32 # enum
+class struct_amdsmi_driver_info_v2_t(Structure):
+    pass
+
+struct_amdsmi_driver_info_v2_t._pack_ = 1 # source:False
+struct_amdsmi_driver_info_v2_t._layout_ = 'ms'
+struct_amdsmi_driver_info_v2_t._fields_ = [
+    ('driver_version', ctypes.c_char * 256),
+    ('driver_date', ctypes.c_char * 256),
+    ('driver_name', ctypes.c_char * 256),
+    ('driver_kernel_version', ctypes.c_char * 256),
+    ('amdgpu_driver_version', ctypes.c_char * 256),
+    ('driver_build_version', ctypes.c_char * 256),
+    ('driver_full_version', ctypes.c_char * 256),
+    ('driver_package', amdsmi_driver_package_t),
+    ('reserved', ctypes.c_uint32 * 575),
+]
+
+amdsmi_driver_info_v2_t = struct_amdsmi_driver_info_v2_t
 class struct_amdsmi_board_info_t(Structure):
     pass
 
@@ -4742,6 +4771,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_driver_info_v2 = _libraries['libamd_smi.so'].amdsmi_get_gpu_driver_info_v2
+    amdsmi_get_gpu_driver_info_v2.restype = amdsmi_status_t
+    amdsmi_get_gpu_driver_info_v2.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_driver_info_v2_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_asic_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_asic_info
     amdsmi_get_gpu_asic_info.restype = amdsmi_status_t
     amdsmi_get_gpu_asic_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_asic_info_t)]
@@ -5687,17 +5722,18 @@ __all__ = \
     'AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK',
     'AMDSMI_DEV_PERF_LEVEL_STABLE_PEAK',
     'AMDSMI_DEV_PERF_LEVEL_STABLE_STD',
-    'AMDSMI_DEV_PERF_LEVEL_UNKNOWN', 'AMDSMI_EVNT_FIRST',
-    'AMDSMI_EVNT_GRP_INVALID', 'AMDSMI_EVNT_GRP_XGMI',
-    'AMDSMI_EVNT_GRP_XGMI_DATA_OUT', 'AMDSMI_EVNT_LAST',
-    'AMDSMI_EVNT_XGMI_0_BEATS_TX', 'AMDSMI_EVNT_XGMI_0_NOP_TX',
-    'AMDSMI_EVNT_XGMI_0_REQUEST_TX', 'AMDSMI_EVNT_XGMI_0_RESPONSE_TX',
-    'AMDSMI_EVNT_XGMI_1_BEATS_TX', 'AMDSMI_EVNT_XGMI_1_NOP_TX',
-    'AMDSMI_EVNT_XGMI_1_REQUEST_TX', 'AMDSMI_EVNT_XGMI_1_RESPONSE_TX',
-    'AMDSMI_EVNT_XGMI_DATA_OUT_0', 'AMDSMI_EVNT_XGMI_DATA_OUT_1',
-    'AMDSMI_EVNT_XGMI_DATA_OUT_2', 'AMDSMI_EVNT_XGMI_DATA_OUT_3',
-    'AMDSMI_EVNT_XGMI_DATA_OUT_4', 'AMDSMI_EVNT_XGMI_DATA_OUT_5',
-    'AMDSMI_EVNT_XGMI_DATA_OUT_FIRST',
+    'AMDSMI_DEV_PERF_LEVEL_UNKNOWN', 'AMDSMI_DRIVER_PACKAGE_DKMS',
+    'AMDSMI_DRIVER_PACKAGE_KMOD', 'AMDSMI_DRIVER_PACKAGE_NONE',
+    'AMDSMI_EVNT_FIRST', 'AMDSMI_EVNT_GRP_INVALID',
+    'AMDSMI_EVNT_GRP_XGMI', 'AMDSMI_EVNT_GRP_XGMI_DATA_OUT',
+    'AMDSMI_EVNT_LAST', 'AMDSMI_EVNT_XGMI_0_BEATS_TX',
+    'AMDSMI_EVNT_XGMI_0_NOP_TX', 'AMDSMI_EVNT_XGMI_0_REQUEST_TX',
+    'AMDSMI_EVNT_XGMI_0_RESPONSE_TX', 'AMDSMI_EVNT_XGMI_1_BEATS_TX',
+    'AMDSMI_EVNT_XGMI_1_NOP_TX', 'AMDSMI_EVNT_XGMI_1_REQUEST_TX',
+    'AMDSMI_EVNT_XGMI_1_RESPONSE_TX', 'AMDSMI_EVNT_XGMI_DATA_OUT_0',
+    'AMDSMI_EVNT_XGMI_DATA_OUT_1', 'AMDSMI_EVNT_XGMI_DATA_OUT_2',
+    'AMDSMI_EVNT_XGMI_DATA_OUT_3', 'AMDSMI_EVNT_XGMI_DATA_OUT_4',
+    'AMDSMI_EVNT_XGMI_DATA_OUT_5', 'AMDSMI_EVNT_XGMI_DATA_OUT_FIRST',
     'AMDSMI_EVNT_XGMI_DATA_OUT_LAST', 'AMDSMI_EVNT_XGMI_FIRST',
     'AMDSMI_EVNT_XGMI_LAST', 'AMDSMI_EVT_NOTIF_FIRST',
     'AMDSMI_EVT_NOTIF_GPU_POST_RESET',
@@ -6051,7 +6087,8 @@ __all__ = \
     'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
     'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
     'amdsmi_dpm_policy_entry_t', 'amdsmi_dpm_policy_t',
-    'amdsmi_driver_info_t', 'amdsmi_engine_usage_t',
+    'amdsmi_driver_info_t', 'amdsmi_driver_info_v2_t',
+    'amdsmi_driver_package_t', 'amdsmi_engine_usage_t',
     'amdsmi_enumeration_info_t', 'amdsmi_error_count_t',
     'amdsmi_event_group_t', 'amdsmi_event_handle_t',
     'amdsmi_event_type_t', 'amdsmi_evt_notification_data_t',
@@ -6130,9 +6167,9 @@ __all__ = \
     'amdsmi_get_gpu_cper_entries', 'amdsmi_get_gpu_cpu_links',
     'amdsmi_get_gpu_cuid_info', 'amdsmi_get_gpu_device_bdf',
     'amdsmi_get_gpu_device_cuid', 'amdsmi_get_gpu_device_uuid',
-    'amdsmi_get_gpu_driver_info', 'amdsmi_get_gpu_ecc_count',
-    'amdsmi_get_gpu_ecc_enabled', 'amdsmi_get_gpu_ecc_status',
-    'amdsmi_get_gpu_enumeration_info',
+    'amdsmi_get_gpu_driver_info', 'amdsmi_get_gpu_driver_info_v2',
+    'amdsmi_get_gpu_ecc_count', 'amdsmi_get_gpu_ecc_enabled',
+    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
     'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_id',
@@ -6310,7 +6347,8 @@ __all__ = \
     'struct_amdsmi_ddr_bw_metrics_t', 'struct_amdsmi_dimm_power_t',
     'struct_amdsmi_dimm_thermal_t', 'struct_amdsmi_dpm_level_t',
     'struct_amdsmi_dpm_policy_entry_t', 'struct_amdsmi_dpm_policy_t',
-    'struct_amdsmi_driver_info_t', 'struct_amdsmi_engine_usage_t',
+    'struct_amdsmi_driver_info_t', 'struct_amdsmi_driver_info_v2_t',
+    'struct_amdsmi_engine_usage_t',
     'struct_amdsmi_enumeration_info_t', 'struct_amdsmi_error_count_t',
     'struct_amdsmi_evt_notification_data_t',
     'struct_amdsmi_fabric_info_t', 'struct_amdsmi_fabric_info_v1_t',

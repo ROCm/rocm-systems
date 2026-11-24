@@ -366,8 +366,12 @@ constexpr uint8_t kScopeWaveSize = 64;
 LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
   const ExecMaskAnalysis exec(KernelBlockScope(scope), kScopeWaveSize);
+  // These fixtures model one kernel entered at the first decoded block.
+  const std::array<const BasicBlock *, 1> entries = {scope.empty() ? nullptr : scope.front()};
+  LivenessAnalysisOptions options = {.additional_entry_blocks = {},
+                                     .vskip_clear_entry_blocks = entries};
   return LivenessAnalysis(KernelBlockScope(scope), kScopeWaveSize,
-                          std::make_unique<ExecMaskAnalysis>(exec));
+                          std::make_unique<ExecMaskAnalysis>(exec), options);
 }
 
 // Wire the same scoped call/return edges into BOTH analyses, as BinaryTranslator
@@ -5762,6 +5766,7 @@ TEST(LivenessAnalysis, UnavailableQueriesFailClosed) {
   EXPECT_TRUE(liveness.live_before(instruction).failed());
   EXPECT_TRUE(liveness.is_live_before(instruction, {RegClass::SGPR, 0, 1}).failed());
   EXPECT_TRUE(liveness.vgpr_msb_bank_before(instruction, amdgpu::VgprMsbRole::Src0).failed());
+  EXPECT_TRUE(liveness.vskip_clear_before(instruction).failed());
   EXPECT_TRUE(liveness.global_vgpr_usage_is_complete().failed());
   EXPECT_TRUE(liveness.find_globally_unused_vgpr_run(&instruction, 1).failed());
   EXPECT_TRUE(liveness.find_free_run(&instruction, 1).failed());
@@ -5811,7 +5816,7 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
 
 TEST(VgprMsbHwregSlice, MatchesTheBankFieldBitsForEveryEncoding) {
   for (uint32_t encoding = 0; encoding <= 0xffffu; ++encoding) {
-    const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(encoding);
+    const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(encoding);
     bool overlaps = false;
     for (uint32_t bit = 12; bit <= 19; ++bit)
       overlaps |= slice.id == amdgpu::MODE_HWREG && bit >= slice.begin &&
@@ -7297,6 +7302,253 @@ TEST(ExecFlagsRealDecode, Cdna4WritelaneDestStaysLiveUnderFullExec) {
   EXPECT_TRUE(maybe_is_live_writelane.value());
 }
 
+TEST(LivenessAnalysis, VskipSuppressedDefinitionsKeepAllOrdinaryResultsLive) {
+  const std::array<uint32_t, 2> acc =
+      cdna4::build_vop3p(cdna4::kVAccvgprWriteVop3p, {.vdst = 4, .src0 = 128});
+  const std::array<uint32_t, 2> mixed =
+      cdna4::build_vop3_sdst_enc(cdna4::kVDivScaleF32Vop3SdstEnc,
+                                 {.vdst = 6, .sdst = 8, .src0 = 256, .src1 = 257, .src2 = 258});
+  const std::array<uint32_t, 2> wide =
+      cdna4::build_flat(cdna4::kFlatLoadDwordx2Flat, {.seg = 2, .addr = 2, .saddr = 10, .vdst = 4});
+  struct Case {
+    std::string_view name;
+    std::vector<uint32_t> words;
+    std::vector<RegisterRef> results;
+    bool affected;
+  };
+  const std::array<Case, 6> cases = {{
+      {.name = "VGPR",
+       .words = {0x7e080281u},
+       .results = {{RegClass::VGPR, 4, 1}},
+       .affected = true},
+      {.name = "SGPR",
+       .words = {0x7e080500u},
+       .results = {{RegClass::SGPR, 4, 1}},
+       .affected = true},
+      {.name = "wide load",
+       .words = {wide[0], wide[1]},
+       .results = {{RegClass::VGPR, 4, 2}},
+       .affected = true},
+      {.name = "ACC",
+       .words = {acc[0], acc[1]},
+       .results = {{RegClass::ACC_VGPR, 4, 1}},
+       .affected = true},
+      {.name = "mixed",
+       .words = {mixed[0], mixed[1]},
+       .results = {{RegClass::VGPR, 6, 1}, {RegClass::SGPR, 8, 2}},
+       .affected = true},
+      {.name = "scalar control",
+       .words = {0xbe840087u},
+       .results = {{RegClass::SGPR, 4, 1}},
+       .affected = false},
+  }};
+  for (const Case &test_case : cases) {
+    for (const bool skip : {false, true}) {
+      SCOPED_TRACE(test_case.name);
+      SCOPED_TRACE(skip);
+      // Full EXEC is independent of whether the definition issues at all.
+      std::vector<uint32_t> words = {0xbefe01c1u, skip ? 0xbf108081u : 0xbf108080u};
+      words.insert(words.end(), test_case.words.begin(), test_case.words.end());
+      words.insert(words.end(), {0xbf108080u, 0xbf800000u, 0xbf810000u});
+      TestCodeObject co(std::move(words));
+      std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
+      ASSERT_NE(decoder, nullptr);
+      const std::vector<std::unique_ptr<BasicBlock>> blocks =
+          build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna4);
+      ASSERT_EQ(blocks.size(), 1u);
+      const std::vector<const Instruction *> instructions = insts_of(*blocks.front());
+      ASSERT_EQ(instructions.size(), 6u);
+      const Instruction &definition = *instructions[2];
+      ASSERT_EQ(definition.is_vskip_affected(), test_case.affected);
+      const InstDefUse accesses(definition, kScopeWaveSize);
+      RegisterSet observed;
+      for (const RegisterRef result : test_case.results) {
+        ASSERT_TRUE(accesses.defs.contains(result));
+        ASSERT_FALSE(accesses.uses.intersects(result));
+        observed.expand(result);
+      }
+      const std::array<AdditionalRegisterUse, 1> uses = {
+          AdditionalRegisterUse{.instruction = instructions[4], .registers = observed}};
+      const std::vector<BasicBlock *> scope = block_scope(blocks);
+      const ExecMaskAnalysis exec(KernelBlockScope(scope), kScopeWaveSize);
+      LivenessAnalysisOptions options = {.arch = rocjitsu::IsaFamily::Cdna4,
+                                         .additional_entry_blocks = {},
+                                         .text = text_span(co),
+                                         .additional_uses = uses};
+      const LivenessAnalysis liveness(KernelBlockScope(scope), kScopeWaveSize,
+                                      std::make_unique<ExecMaskAnalysis>(exec), options);
+      const FailureOr<const RegisterSet *> before = liveness.live_before(definition);
+      const FailureOr<const BlockLiveness *> block = liveness.block_liveness(*blocks.front());
+      ASSERT_TRUE(before.succeeded());
+      ASSERT_TRUE(block.succeeded());
+      for (const RegisterRef result : test_case.results) {
+        if (skip && test_case.affected) {
+          EXPECT_TRUE(before.value()->contains(result));
+          EXPECT_TRUE(block.value()->live_in.contains(result));
+        } else {
+          EXPECT_FALSE(before.value()->intersects(result));
+          EXPECT_FALSE(block.value()->live_in.intersects(result));
+        }
+      }
+    }
+  }
+}
+
+TEST(LivenessAnalysis, VskipStateWritesControlWhetherDefinitionsKill) {
+  struct Case {
+    std::string_view name;
+    std::vector<uint32_t> prefix;
+    bool provide_text;
+    bool live;
+  };
+  const std::array<Case, 8> cases = {{
+      {.name = "unknown entry", .prefix = {}, .provide_text = true, .live = true},
+      {.name = "clear", .prefix = {0xbf108080u}, .provide_text = true, .live = false},
+      {.name = "dynamic source", .prefix = {0xbf108000u}, .provide_text = true, .live = true},
+      {.name = "zero source dynamic selector",
+       .prefix = {0xbf100180u},
+       .provide_text = true,
+       .live = false},
+      {.name = "immediate clear", .prefix = {0xba000701u, 0u}, .provide_text = true, .live = false},
+      {.name = "missing literal bytes",
+       .prefix = {0xba000701u, 0u},
+       .provide_text = false,
+       .live = true},
+      {.name = "dynamic MODE",
+       .prefix = {0xbf108080u, 0xb9070701u},
+       .provide_text = true,
+       .live = true},
+      {.name = "unrelated MODE slice",
+       .prefix = {0xbf108080u, 0xb90706c1u},
+       .provide_text = true,
+       .live = false},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    std::vector<uint32_t> words = test_case.prefix;
+    const uint64_t definition_offset = words.size() * sizeof(uint32_t);
+    // A vector encoding's SGPR result does not depend on proving EXEC full.
+    words.insert(words.end(), {0x7e080500u, 0xbe850004u, 0xbf810000u});
+    TestCodeObject co(std::move(words));
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
+    ASSERT_NE(decoder, nullptr);
+    const std::vector<std::unique_ptr<BasicBlock>> blocks =
+        build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna4);
+    ASSERT_EQ(blocks.size(), 1u);
+    const std::vector<const Instruction *> instructions = insts_of(*blocks.front());
+    const std::vector<const Instruction *>::const_iterator definition =
+        std::ranges::find(instructions, definition_offset, &Instruction::src_loc);
+    ASSERT_NE(definition, instructions.end());
+    const std::vector<BasicBlock *> scope = block_scope(blocks);
+    LivenessAnalysisOptions options = {.arch = rocjitsu::IsaFamily::Cdna4,
+                                       .entry_block = blocks.front().get(),
+                                       .additional_entry_blocks = {}};
+    if (test_case.provide_text)
+      options.text = text_span(co);
+    const LivenessAnalysis liveness(KernelBlockScope(scope), kScopeWaveSize, nullptr, options);
+    const FailureOr<bool> before = liveness.is_live_before(**definition, {RegClass::SGPR, 4, 1});
+    ASSERT_TRUE(before.succeeded());
+    EXPECT_EQ(before.value(), test_case.live);
+  }
+}
+
+TEST(LivenessAnalysis, VskipJoinsAndEntryBackedgesMeetAllIncomingPaths) {
+  for (const bool loop : {false, true}) {
+    for (const bool skip : {false, true}) {
+      SCOPED_TRACE(loop);
+      SCOPED_TRACE(skip);
+      const uint32_t state_write = skip ? 0xbf108081u : 0xbf108080u;
+      // The loop enters with VSKIP clear, then may return with it set. An entry
+      // seed is another incoming state, not a reason to discard the backedge.
+      const std::vector<uint32_t> words =
+          loop ? std::vector<uint32_t>{0x7e080500u, 0xbe850004u, state_write, 0xbf85fffcu,
+                                       0xbf810000u}
+               : std::vector<uint32_t>{0xbf108080u, 0xbf850001u, state_write,
+                                       0x7e080500u, 0xbe850004u, 0xbf810000u};
+      const std::vector<std::unique_ptr<BasicBlock>> blocks = build_cdna4_blocks(words);
+      BasicBlock *definition_block = block_starting_at(blocks, loop ? 0 : 12);
+      ASSERT_NE(definition_block, nullptr);
+      const Instruction &definition = *definition_block->instructions().begin();
+      ASSERT_EQ(definition.mnemonic(), "v_readfirstlane_b32_e32");
+      const std::vector<BasicBlock *> scope = block_scope(blocks);
+      const std::array<const BasicBlock *, 1> entries = {scope.front()};
+      const LivenessAnalysisOptions options = {.arch = rocjitsu::IsaFamily::Cdna4,
+                                               .additional_entry_blocks = {},
+                                               .vskip_clear_entry_blocks = entries};
+      const LivenessAnalysis liveness(KernelBlockScope(scope), kScopeWaveSize, nullptr, options);
+      const FailureOr<bool> before = liveness.is_live_before(definition, {RegClass::SGPR, 4, 1});
+      const FailureOr<const BlockLiveness *> block = liveness.block_liveness(*definition_block);
+      ASSERT_TRUE(before.succeeded());
+      ASSERT_TRUE(block.succeeded());
+      EXPECT_EQ(before.value(), skip);
+      EXPECT_EQ(block.value()->live_in.contains({RegClass::SGPR, 4, 1}), skip);
+    }
+  }
+}
+
+TEST(LivenessAnalysis, VskipProofUsesScopedEdgesAndUnknownCallEffects) {
+  for (const bool call : {false, true}) {
+    // The callee block is connected only through a supplied scoped edge. A
+    // generic call does not promise to preserve VSKIP, even after an explicit
+    // clear; an ordinary end marker leaves that proven state unchanged.
+    const uint32_t terminator =
+        call ? cdna4::build_sop1(cdna4::kSSwapPcB64Sop1, {.ssrc0 = 10, .sdst = 30})[0]
+             : 0xbf810000u;
+    const std::vector<std::unique_ptr<BasicBlock>> blocks =
+        build_cdna4_blocks({0xbf108080u, terminator, 0x7e080500u, 0xbe850004u, 0xbf810000u});
+    BasicBlock *caller = block_starting_at(blocks, 0);
+    BasicBlock *callee = block_starting_at(blocks, 8);
+    ASSERT_NE(caller, nullptr);
+    ASSERT_NE(callee, nullptr);
+    const Instruction &definition = *callee->instructions().begin();
+    const std::vector<BasicBlock *> scope = block_scope(blocks);
+    const std::array<ScopedCfgEdge, 1> edges = {ScopedCfgEdge{.from = caller, .to = callee}};
+    for (const bool connect : {false, true}) {
+      SCOPED_TRACE(call);
+      SCOPED_TRACE(connect);
+      const std::span<const ScopedCfgEdge> scoped_edges =
+          connect ? std::span<const ScopedCfgEdge>(edges) : std::span<const ScopedCfgEdge>{};
+      const LivenessAnalysis liveness(KernelBlockScope(scope), kScopeWaveSize, nullptr, {},
+                                      scoped_edges);
+      const FailureOr<bool> before = liveness.is_live_before(definition, {RegClass::SGPR, 4, 1});
+      ASSERT_TRUE(before.succeeded());
+      EXPECT_EQ(before.value(), call || !connect);
+    }
+  }
+}
+
+TEST(LivenessAnalysis, VskipEntryProofDoesNotHideUnmodeledIncomingPaths) {
+  for (const bool disconnected_cycle : {false, true}) {
+    SCOPED_TRACE(disconnected_cycle);
+    const std::vector<std::unique_ptr<BasicBlock>> blocks = build_cdna4_blocks(
+        disconnected_cycle
+            ? std::vector<uint32_t>{0xbf810000u, 0x7e080500u, 0xbe850004u, 0xbf82fffdu}
+            : std::vector<uint32_t>{0x7e080500u, 0xbe850004u, 0xbf810000u});
+    BasicBlock *definition_block = block_starting_at(blocks, disconnected_cycle ? 4 : 0);
+    ASSERT_NE(definition_block, nullptr);
+    const Instruction &definition = *definition_block->instructions().begin();
+    const std::vector<BasicBlock *> scope = block_scope(blocks);
+    const std::array<const BasicBlock *, 1> entries = {scope.front()};
+    const LivenessAnalysisOptions options = {.arch = rocjitsu::IsaFamily::Cdna4,
+                                             .additional_entry_blocks = {},
+                                             .vskip_clear_entry_blocks = entries};
+    // Neither an unmodeled incoming edge nor a disconnected cycle inherits the
+    // dispatch root's clear state. The external edge also reaches the root
+    // itself, so its clear-entry seed must be met with that unknown input.
+    BasicBlock outside_scope(0x1000);
+    const std::array<ScopedCfgEdge, 1> edges = {
+        ScopedCfgEdge{.from = &outside_scope, .to = definition_block}};
+    const std::span<const ScopedCfgEdge> scoped_edges = disconnected_cycle
+                                                            ? std::span<const ScopedCfgEdge>{}
+                                                            : std::span<const ScopedCfgEdge>(edges);
+    const LivenessAnalysis liveness(KernelBlockScope(scope), kScopeWaveSize, nullptr, options,
+                                    scoped_edges);
+    const FailureOr<bool> before = liveness.is_live_before(definition, {RegClass::SGPR, 4, 1});
+    ASSERT_TRUE(before.succeeded());
+    EXPECT_TRUE(before.value());
+  }
+}
+
 TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
   // exec=all-ones; v0=...; exec=narrow; v0=...; end
   auto blocks =
@@ -7926,6 +8178,111 @@ TEST(LivenessAnalysis, PartialDefRegisterStaysLiveOutWhenUsedBySuccessor) {
   auto maybe_block = liveness.block_liveness(*blocks[0]);
   ASSERT_TRUE(maybe_block.succeeded());
   EXPECT_TRUE((*maybe_block.value()).live_out.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(LivenessAnalysis, AdditionalUsesReadBeforeDefinitionsAndRespectKills) {
+  const std::vector<std::unique_ptr<BasicBlock>> blocks =
+      build_test_blocks({TestOpcode::Nop, TestOpcode::DefSgpr4, TestOpcode::WriteExecFull,
+                         TestOpcode::DefVgpr0, TestOpcode::Nop, TestOpcode::End});
+  ASSERT_EQ(blocks.size(), 1u);
+  const std::vector<BasicBlock *> scope = block_scope(blocks);
+  const std::vector<const Instruction *> instructions = insts_of(*blocks.front());
+  ASSERT_EQ(instructions.size(), 6u);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), kScopeWaveSize);
+  ASSERT_EQ(exec.before(*instructions[3]), ExecState::Full);
+  RegisterSet scalar_use;
+  scalar_use.expand({RegClass::SGPR, 4, 1});
+  RegisterSet vector_use;
+  vector_use.expand({RegClass::VGPR, 0, 1});
+  for (const bool use_at_definition : {false, true}) {
+    SCOPED_TRACE(use_at_definition);
+    const std::array<AdditionalRegisterUse, 2> additional_uses = {{
+        {.instruction = instructions[use_at_definition ? 1 : 4], .registers = scalar_use},
+        {.instruction = instructions[use_at_definition ? 3 : 4], .registers = vector_use},
+    }};
+    const LivenessAnalysis liveness(
+        KernelBlockScope(scope), kScopeWaveSize, std::make_unique<ExecMaskAnalysis>(exec),
+        LivenessAnalysisOptions{.additional_entry_blocks = {}, .additional_uses = additional_uses});
+    const FailureOr<const RegisterSet *> before = liveness.live_before(*instructions.front());
+    ASSERT_TRUE(before.succeeded());
+    // A later use is bounded by the intervening full definition. A use at that
+    // definition observes its input and therefore also reaches the earlier NOP.
+    EXPECT_EQ(before.value()->contains({RegClass::SGPR, 4, 1}), use_at_definition);
+    EXPECT_EQ(before.value()->contains({RegClass::VGPR, 0, 1}), use_at_definition);
+    const FailureOr<bool> scalar_at_definition =
+        liveness.is_live_before(*instructions[1], {RegClass::SGPR, 4, 1});
+    const FailureOr<bool> vector_at_definition =
+        liveness.is_live_before(*instructions[3], {RegClass::VGPR, 0, 1});
+    ASSERT_TRUE(scalar_at_definition.succeeded());
+    ASSERT_TRUE(vector_at_definition.succeeded());
+    EXPECT_EQ(scalar_at_definition.value(), use_at_definition);
+    EXPECT_EQ(vector_at_definition.value(), use_at_definition);
+    const FailureOr<const RegisterSet *> after = liveness.live_before(*instructions[4]);
+    ASSERT_TRUE(after.succeeded());
+    EXPECT_EQ(after.value()->contains({RegClass::SGPR, 4, 1}), !use_at_definition);
+    EXPECT_EQ(after.value()->contains({RegClass::VGPR, 0, 1}), !use_at_definition);
+  }
+}
+
+TEST(LivenessAnalysis, AdditionalUsesAreOwnedScopedAndIndependentOfSnapshotFilter) {
+  const std::array<uint64_t, 1> leaders = {4};
+  const std::vector<std::unique_ptr<BasicBlock>> blocks =
+      build_test_blocks({TestOpcode::Nop, TestOpcode::Nop, TestOpcode::End}, leaders);
+  ASSERT_EQ(blocks.size(), 2u);
+  const std::vector<BasicBlock *> scope = block_scope(blocks);
+  const Instruction &first = *blocks.front()->instructions().begin();
+  const Instruction &second = *blocks.back()->instructions().begin();
+  ASSERT_TRUE(has_predecessor(*blocks.back(), blocks.front().get()));
+  const TestInstruction outside_scope("outside_scope");
+  const LivenessAnalysis liveness = [&] {
+    RegisterSet scalar_use;
+    scalar_use.expand({RegClass::SGPR, 0, 2});
+    scalar_use.expand({RegClass::EXEC, 0, 2});
+    RegisterSet vector_use;
+    vector_use.expand({RegClass::VGPR, 0, 1});
+    RegisterSet outside_use;
+    outside_use.expand({RegClass::SGPR, 2, 2});
+    outside_use.expand({RegClass::VGPR, 1, 1});
+    std::vector<AdditionalRegisterUse> uses = {
+        {.instruction = &second, .registers = scalar_use},
+        {.instruction = &second, .registers = vector_use},
+        {.instruction = &outside_scope, .registers = outside_use},
+    };
+    const std::array<const Instruction *, 1> snapshots = {&first};
+    LivenessAnalysis analysis(KernelBlockScope(scope), kScopeWaveSize, nullptr,
+                              LivenessAnalysisOptions{.additional_entry_blocks = {},
+                                                      .restrict_live_before_to_instructions = true,
+                                                      .live_before_instructions = snapshots,
+                                                      .additional_uses = uses});
+    // Caller buffers can be reused and then destroyed before deferred dataflow.
+    for (AdditionalRegisterUse &use : uses)
+      use.registers = {};
+    return analysis;
+  }();
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  const FailureOr<std::optional<uint16_t>> scalar_scratch =
+      liveness.find_globally_unused_sgpr_pair(&first);
+  const FailureOr<std::optional<uint16_t>> vector_scratch =
+      liveness.find_globally_unused_vgpr_run(&first, 1, 0, 1, 2);
+  ASSERT_TRUE(scalar_scratch.succeeded());
+  ASSERT_TRUE(vector_scratch.succeeded());
+  EXPECT_EQ(scalar_scratch.value(), 2);
+  EXPECT_EQ(vector_scratch.value(), 1);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  const FailureOr<const RegisterSet *> before = liveness.live_before(first);
+  ASSERT_TRUE(before.succeeded());
+  EXPECT_TRUE(before.value()->contains({RegClass::SGPR, 0, 2}));
+  EXPECT_TRUE(before.value()->contains({RegClass::VGPR, 0, 1}));
+  EXPECT_FALSE(before.value()->contains({RegClass::SGPR, 2, 2}));
+  EXPECT_FALSE(before.value()->contains({RegClass::VGPR, 1, 1}));
+  EXPECT_FALSE(before.value()->has_specials());
+  const FailureOr<bool> second_snapshot = liveness.has_live_before(second);
+  ASSERT_TRUE(second_snapshot.succeeded());
+  EXPECT_FALSE(second_snapshot.value());
+  const FailureOr<const BlockLiveness *> predecessor = liveness.block_liveness(*blocks.front());
+  ASSERT_TRUE(predecessor.succeeded());
+  EXPECT_TRUE(predecessor.value()->live_out.contains({RegClass::SGPR, 0, 2}));
+  EXPECT_TRUE(predecessor.value()->live_out.contains({RegClass::VGPR, 0, 1}));
 }
 
 TEST(LivenessAnalysis, FullWidthDefKillsRegisterBeforeInstruction) {

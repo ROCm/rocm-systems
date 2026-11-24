@@ -44,7 +44,12 @@ constexpr size_t kHalfGranule = 64;
 
 template <typename T, int P, int N>
 const void* Hier() {
-  return KernelPtr(&dda::common::ddaAllReduceHierFabric<T, P, N>);
+  return KernelPtr(&dda::common::ddaAllReduceHierFabric<T, P, N, true>);
+}
+
+template <typename T, int P, int N>
+const void* HierUnaligned() {
+  return KernelPtr(&dda::common::ddaAllReduceHierFabric<T, P, N, false>);
 }
 
 class DdaAllReduceFabricHierMicrotest : public ::testing::Test {
@@ -70,14 +75,15 @@ class DdaAllReduceFabricHierMicrotest : public ::testing::Test {
   }
 
   // Launches as the last local rank of the last host, with hosts of consecutive ranks.
-  const DdaLaunch& RunOne(size_t count, ncclDataType_t datatype, int nHosts, int ranksPerHost) {
+  const DdaLaunch& RunOne(size_t count, ncclDataType_t datatype, int nHosts, int ranksPerHost,
+                          const void* sendbuff = kSendbuff, void* recvbuff = kRecvbuff) {
     const int hostIndex = nHosts - 1;
     const int localRank = ranksPerHost - 1;
     std::vector<int> intra(ranksPerHost), inter(nHosts);
     for (int l = 0; l < ranksPerHost; l++) intra[l] = hostIndex * ranksPerHost + l;
     for (int h = 0; h < nHosts; h++) inter[h] = h * ranksPerHost + localRank;
     g_ddaLaunches.clear();
-    EXPECT_EQ(ncclAllReduceDdaFabricHier(kSendbuff, kRecvbuff, count, datatype, mock_.get(), kStream, nHosts,
+    EXPECT_EQ(ncclAllReduceDdaFabricHier(sendbuff, recvbuff, count, datatype, mock_.get(), kStream, nHosts,
                                          ranksPerHost, hostIndex, localRank, intra.data(), inter.data()),
               ncclSuccess);
     EXPECT_EQ(g_ddaLaunches.size(), 1u);
@@ -207,6 +213,21 @@ TEST_F(DdaAllReduceFabricHierMicrotest, Launch_RoundCappedAt64MiBAndByScratch) {
   // 36864 fp32 elements of scratch: 18432 per bank, 8 / 18 of it per round.
   comm().ddaScratchBytes = 36864 * sizeof(float);
   EXPECT_EQ(RunOne(size_t{1} << 20, ncclFloat32, 2, 8).Arg<size_t>(4), 8192u);
+}
+
+// Each rank picks its user-buffer access from its own pointers; the scratch layout is the same either way.
+TEST_F(DdaAllReduceFabricHierMicrotest, Launch_UnalignedInstanceWhenEitherBufferIsOffSixteenBytes) {
+  void* const offSend = reinterpret_cast<void*>(0x1004);
+  void* const offRecv = reinterpret_cast<void*>(0x2008);
+  EXPECT_EQ(RunOne(size_t{1} << 20, ncclFloat32, 2, 8).kernel, (Hier<float, 8, 2>()));
+  EXPECT_EQ(RunOne(size_t{1} << 20, ncclFloat32, 2, 8, offSend, kRecvbuff).kernel, (HierUnaligned<float, 8, 2>()));
+  EXPECT_EQ(RunOne(size_t{1} << 20, ncclFloat32, 2, 8, kSendbuff, offRecv).kernel, (HierUnaligned<float, 8, 2>()));
+  EXPECT_EQ(RunOne(size_t{1} << 20, ncclFloat32, 2, 8, offSend, offRecv).kernel, (HierUnaligned<float, 8, 2>()));
+  EXPECT_EQ(RunOne(size_t{1} << 20, ncclFloat16, 4, 8, offSend, offSend).kernel, (HierUnaligned<half, 8, 4>()));
+  EXPECT_EQ(RunOne(size_t{1} << 20, ncclBfloat16, 2, 4, offSend, offRecv).kernel, (HierUnaligned<bf16, 0, 0>()));
+  const DdaLaunch& launch = RunOne(size_t{1} << 20, ncclFloat32, 2, 8, offSend, offRecv);
+  EXPECT_EQ(launch.Arg<float*>(1), offRecv);
+  EXPECT_EQ(launch.Arg<const float*>(2), offSend);
 }
 
 }  // namespace

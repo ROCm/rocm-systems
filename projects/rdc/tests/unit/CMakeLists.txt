@@ -47,15 +47,17 @@ endif()
 include(GoogleTest)
 
 # rdc_codec_tests: pure-logic tests (entity codec, AFID field registration,
-# library loader; the loader tests dlopen only libm and libc). Links only
-# librdc_bootstrap (which holds the codec, the field descriptor table and the
-# loader) and NOT librdc, so it pulls in no amdsmi and runs on GPU-less CI.
-# Uses gtest_main since it needs no custom setup.
+# library loader, field names, the ROCm path and the logger; the loader tests
+# dlopen only libm and libc). Links only librdc_bootstrap (which holds the codec,
+# the field descriptor table, the loader and the logger) and NOT librdc, so it
+# pulls in no amdsmi and runs on GPU-less CI. Uses gtest_main since it needs no
+# custom setup.
 add_executable(
     ${RDC_CODEC_TESTS}
     ${SRC_DIR}/test_entity_codec.cc
     ${SRC_DIR}/test_afid_field.cc
     ${SRC_DIR}/test_library_loader.cc
+    ${SRC_DIR}/test_bootstrap_checks.cc
 )
 target_include_directories(
     ${RDC_CODEC_TESTS}
@@ -468,3 +470,37 @@ if(BUILD_RUNTIME)
         COMPONENT ${TESTS_COMPONENT}
     )
 endif()
+
+# rdc_field_values_tests: the field values RdcMetricFetcherImpl reads from the fake
+# AMD SMI (tests/fake_amdsmi). Compiles RdcMetricFetcherImpl.cc and the files it
+# needs from librdc, and links the fake, which provides every amdsmi call, instead
+# of amd_smi, so it needs neither librdc nor a GPU.
+add_executable(
+    rdc_field_values_tests
+    ${SRC_DIR}/test_field_values.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcMetricFetcherImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+    ${PROJECT_SOURCE_DIR}/common/rdc_capabilities.cc
+)
+target_include_directories(
+    rdc_field_values_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests/fake_amdsmi
+        ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(
+    rdc_field_values_tests
+    PRIVATE rdc_bootstrap rdc_fake_amdsmi GTest::gtest_main pthread cap
+)
+set_target_properties(
+    rdc_field_values_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/fake_gpu:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_field_values_tests COMMAND rdc_field_values_tests)
+install(
+    TARGETS rdc_field_values_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)

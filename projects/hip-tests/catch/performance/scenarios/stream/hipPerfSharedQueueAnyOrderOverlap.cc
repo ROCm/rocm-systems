@@ -144,7 +144,7 @@ double TimeStreamSweep(int num_streams, int busy_iters, int iters) {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Performance_hipPerfSharedQueueAnyOrderOverlap") {
+HIP_TEST_CASE(Performance_hipPerfSharedQueueAnyOrderOverlap) {
   constexpr int kBusyIters = 20000;
   constexpr int kIters = 50;
   const int stream_counts[] = {2, 4, 8, 16, 32};
@@ -176,7 +176,7 @@ TEST_CASE("Performance_hipPerfSharedQueueAnyOrderOverlap") {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Performance_hipPerfSharedQueueAnyOrderOverlap_EventDependency") {
+HIP_TEST_CASE(Performance_hipPerfSharedQueueAnyOrderOverlap_EventDependency) {
   constexpr int kBusyIters = 20000;
   constexpr int kIters = 50;
   const int pair_counts[] = {2, 4, 8};

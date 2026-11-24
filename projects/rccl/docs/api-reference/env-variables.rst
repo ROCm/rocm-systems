@@ -529,8 +529,7 @@ collected in the following table.
           operation (``ncclAvg`` only on floating-point types). It is not used
           inside a group or a graph capture, while ``NCCL_ALGO`` is set, or
           while a backend is forced. The first eligible call splits the
-          communicator, so all ranks must use the same value. A rank whose
-          buffers are not 16-byte aligned copies them through scratch.
+          communicator, so all ranks must use the same value.
       - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
           clique, used on buffers outside registered windows with these
           layouts, message sizes and operations. With eight ranks per host: 2
@@ -830,6 +829,8 @@ in the following table.
         | Minimum message size (in bytes) before the payload is split across
         | multiple NICs/QPs.
         | Smaller messages use one QP for data to reduce latency.
+        | The threshold now also applies when the CAST QP scheduler is disabled;
+        | previously it was honoured only while the scheduler was active.
         | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes

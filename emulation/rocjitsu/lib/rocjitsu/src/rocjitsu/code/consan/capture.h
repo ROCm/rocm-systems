@@ -75,10 +75,10 @@ struct Capture {
 class CaptureEncoder {
 public:
   [[nodiscard]] FailureOr<std::vector<uint8_t>> start(const CaptureHeader &header,
-                                                      ContractError *error = nullptr);
+                                                      util::DiagnosticEmitter diagnostic = {});
   [[nodiscard]] FailureOr<std::vector<uint8_t>> append(const CapturedExecution &execution,
-                                                       ContractError *error = nullptr);
-  [[nodiscard]] FailureOr<std::vector<uint8_t>> finish(ContractError *error = nullptr);
+                                                       util::DiagnosticEmitter diagnostic = {});
+  [[nodiscard]] FailureOr<std::vector<uint8_t>> finish(util::DiagnosticEmitter diagnostic = {});
 
 private:
   CaptureHeader header_;
@@ -94,7 +94,7 @@ private:
 /// @details A malformed local GPU row remains raw evidence for the analyzer;
 /// framing, missing End/facts, execution identity and bounds reject the file.
 [[nodiscard]] FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes,
-                                                ContractError *error = nullptr,
+                                                util::DiagnosticEmitter diagnostic = {},
                                                 const CaptureLimits &limits = {});
 
 } // namespace rocjitsu::consan

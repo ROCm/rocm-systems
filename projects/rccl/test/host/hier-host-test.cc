@@ -339,6 +339,13 @@ TEST_F(HostHierEnsureTest, ScratchGrowthVotesBeforeTheStages) {
   rcclHostHierTeardown(hc.get());
 }
 
+// After a failed grow vote the ranks may hold scratch of different sizes, so the comm stops using the path for good;
+// the scratch is kept until teardown like any other.
+void ExpectPathOffAfterFailedGrow(HierComm* hc) {
+  EXPECT_EQ(rcclHostHierFailed, hc->comm.hostHierState);
+  EXPECT_EQ(nullptr, rcclHostHierGetLayout(hc->get())) << "later calls take the default path";
+}
+
 TEST_F(HostHierEnsureTest, PeerFailingScratchGrowthLaunchesNothing) {
   HierComm hc;
   Children children;
@@ -347,6 +354,7 @@ TEST_F(HostHierEnsureTest, PeerFailingScratchGrowthLaunchesNothing) {
   EXPECT_EQ(ncclRemoteError, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(),
                                                    nullptr));
   EXPECT_EQ(std::vector<std::string>{"vote"}, g_log);
+  ExpectPathOffAfterFailedGrow(&hc);
   rcclHostHierTeardown(hc.get());
 }
 
@@ -359,7 +367,34 @@ TEST_F(HostHierEnsureTest, ScratchAllocationFailingHereLaunchesNothing) {
   EXPECT_NE(ncclSuccess, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(),
                                                nullptr));
   EXPECT_EQ(std::vector<std::string>{"vote"}, g_log) << "this rank still votes, then launches nothing";
+  ExpectPathOffAfterFailedGrow(&hc);
   rcclHostHierTeardown(hc.get());
+}
+
+// A peer fails the vote after this rank grew: both buffers stay until teardown.
+TEST_F(HostHierEnsureTest, PeerFailingRegrowKeepsTheBuffersUntilTeardown) {
+  HierComm hc;
+  Children children;
+  EnsureReady(&hc, &children);
+  {
+    ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/-1));
+    ASSERT_EQ(ncclSuccess,
+              rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(), nullptr));
+  }
+  ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/3));
+  ScopedHook release(g_hipFree, [](void* ptr) {
+    g_log.push_back("free");
+    std::free(ptr);  // DefaultHipExtMallocWithFlags allocates with std::malloc
+    return hipSuccess;
+  });
+  g_log.clear();
+  EXPECT_EQ(ncclRemoteError, rcclHostHierAllReduce(nullptr, nullptr, kLargeCount, ncclFloat32, ncclSum, hc.get(),
+                                                   nullptr));
+  EXPECT_EQ(std::vector<std::string>{"vote"}, g_log) << "no free while the comm lives";
+  ExpectPathOffAfterFailedGrow(&hc);
+  g_log.clear();
+  rcclHostHierTeardown(hc.get());
+  EXPECT_EQ((std::vector<std::string>{"free", "free"}), g_log) << "the outgrown and the new scratch";
 }
 
 // An outgrown stage buffer is kept until teardown rather than freed while the comm lives.
@@ -387,9 +422,8 @@ TEST_F(HostHierEnsureTest, RegrowKeepsTheOldBufferUntilTeardown) {
   EXPECT_EQ((std::vector<std::string>{"free", "free"}), g_log) << "the kept and the current buffer";
 }
 
-// Only a rank whose buffers are not 16-byte aligned copies them, so its copy buffer grows without a vote and leaves the
-// stage buffer, which every rank grows together, untouched.
-TEST_F(HostHierEnsureTest, MisalignedRankGrowsItsCopyBufferWithoutAVote) {
+// Buffers that are not 16-byte aligned go to the stages as they are, with no copy and no extra scratch.
+TEST_F(HostHierEnsureTest, MisalignedBuffersGoStraightToTheStages) {
   HierComm hc;
   Children children;
   EnsureReady(&hc, &children);
@@ -404,9 +438,8 @@ TEST_F(HostHierEnsureTest, MisalignedRankGrowsItsCopyBufferWithoutAVote) {
   void* const misaligned = reinterpret_cast<void*>(0x1004);
   ASSERT_EQ(ncclSuccess,
             rcclHostHierAllReduce(misaligned, misaligned, kSmallCount, ncclFloat32, ncclSum, hc.get(), nullptr));
-  const std::vector<std::string> expected = {"copy", "ReduceScatter", "AllReduce", "AllGather", "copy"};
+  const std::vector<std::string> expected = {"ReduceScatter", "AllReduce", "AllGather"};
   EXPECT_EQ(expected, g_log);
-  EXPECT_GE(hc.comm.hostHier->copyBytes, kSmallCount * sizeof(float));
   EXPECT_EQ(stageBytes, hc.comm.hostHier->scratchBytes);
   rcclHostHierTeardown(hc.get());
 }

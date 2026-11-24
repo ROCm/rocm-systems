@@ -54,24 +54,35 @@ ncclResult_t launchHier(const void* sendbuff, void* recvbuff, size_t count, nccl
   const size_t slice = roundCount / lay.ranksPerHost;
   const auto geom = dda::common::getGridAndBlockDims(slice, sizeof(T), (size_t)rcclDdaFabricVmmBlocks(comm));
   auto* barrierState = static_cast<DdaFabricBarrierState*>(comm->ddaFabricBarrierState);
-  INFO(NCCL_COLL, "DDA fabric hierarchical AllReduce: count %zu round %zu hosts %d ranksPerHost %d grid %u block %u",
-       count, roundCount, lay.nHosts, lay.ranksPerHost, geom.first.x, geom.second.x);
+  // Each rank picks the instance for its own buffers; both use the same scratch layout, so the ranks need not agree.
+  const bool aligned = dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff);
+  INFO(NCCL_COLL,
+       "DDA fabric hierarchical AllReduce: count %zu round %zu hosts %d ranksPerHost %d grid %u block %u aligned=%d",
+       count, roundCount, lay.nHosts, lay.ranksPerHost, geom.first.x, geom.second.x, (int)aligned);
   auto launch = [&](auto kernel) {
     hipExtLaunchKernelGGL(kernel, geom.first, geom.second, 0, stream, /*startEvent=*/nullptr,
                           rcclTakeAddonStopEvent(comm), /*flags=*/0, reinterpret_cast<T* const*>(comm->ddaPeerPtrsDev),
                           static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, roundCount, lay,
                           barrierState->barrierHost);
   };
+  auto dispatch = [&](auto alignedKernel, auto unalignedKernel) {
+    if (aligned) {
+      launch(alignedKernel);
+    } else {
+      launch(unalignedKernel);
+    }
+  };
+  using dda::common::ddaAllReduceHierFabric;
   if (lay.ranksPerHost == 8 && lay.nHosts == 1) {
-    launch(dda::common::ddaAllReduceHierFabric<T, 8, 1>);
+    dispatch(ddaAllReduceHierFabric<T, 8, 1, true>, ddaAllReduceHierFabric<T, 8, 1, false>);
   } else if (lay.ranksPerHost == 8 && lay.nHosts == 2) {
-    launch(dda::common::ddaAllReduceHierFabric<T, 8, 2>);
+    dispatch(ddaAllReduceHierFabric<T, 8, 2, true>, ddaAllReduceHierFabric<T, 8, 2, false>);
   } else if (lay.ranksPerHost == 8 && lay.nHosts == 4) {
-    launch(dda::common::ddaAllReduceHierFabric<T, 8, 4>);
+    dispatch(ddaAllReduceHierFabric<T, 8, 4, true>, ddaAllReduceHierFabric<T, 8, 4, false>);
   } else if (lay.ranksPerHost == 8 && lay.nHosts == 8) {
-    launch(dda::common::ddaAllReduceHierFabric<T, 8, 8>);
+    dispatch(ddaAllReduceHierFabric<T, 8, 8, true>, ddaAllReduceHierFabric<T, 8, 8, false>);
   } else {
-    launch(dda::common::ddaAllReduceHierFabric<T, 0, 0>);
+    dispatch(ddaAllReduceHierFabric<T, 0, 0, true>, ddaAllReduceHierFabric<T, 0, 0, false>);
   }
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;

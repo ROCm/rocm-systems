@@ -573,7 +573,7 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
     return true;
 
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_vgpr_msb_hwreg(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
     return false;
 
   return count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,
@@ -598,7 +598,7 @@ ExpandResult expand_gfx1250_setreg_mode_ordering(const Instruction &inst, uint32
   // SOPK carries the hardware-register selector in SIMM16. Only MODE requires
   // the separation, so the mnemonic alone cannot decide this.
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_vgpr_msb_hwreg(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
     return ExpandResult::not_handled();
 
   const int existing_slots = count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,

@@ -17,6 +17,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Works with every ROCm installation layout, not only `/opt/rocm`: legacy system packages, TheRock system packages (`/opt/rocm/core-X.Y`), TheRock Python packages, tarballs, and custom prefixes. The inspected root, how it was found, and the installation type are reported, and remediation commands match the installation type.
 - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
   - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
+- `rocpd` summary `--summary-by-rank` includes a Rank column when an MPI rank can be detected from the recorded process environment.
+- `rocpd` summary writes a files table that maps each profiled process (Process_Id, Hostname, and Rank with `--summary-by-rank`) to the database output it was recorded in.
+
 
 **API:**
 
@@ -35,6 +38,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - `rocprof-attach -t/--attach-tool-library` is now optional. A tool library given with `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` is used exactly as given and is interpreted in the target's filesystem. `rocprofv3 --attach` now honors a user-set `ROCPROF_ATTACH_TOOL_LIBRARY`.
 - A user-set `ROCP_TOOL_LIBRARIES` is ignored in attach mode, with a warning. Use `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` to attach a custom tool library.
 - `rocprof-attach` reports a clear error before touching the target when the target's rocprofiler-sdk attach library predates attachment through the `rocp-bg-attach` thread.
+- The `rocpd` output directory option is now `-d/--output-directory`, matching rocprofv3. `--output-path` is deprecated.
+- `rocpd summary --summary-by-rank` writes only the per-rank summaries. Run without `--summary-by-rank` to get the aggregate summaries.
+- Per-rank summaries name the process ID column Process_Id instead of ProcessID.
+- `rocpd summary --domain-summary` includes a MARKER row when the database contains marker data.
+
 
 ### Resolved issues
 
@@ -51,6 +59,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed `rocattach` not unmapping the environment and tool-path buffers in the target when the attach call in the target reported failure.
 - Fixed the rocprofv3 tool library aborting on reattach after it disabled thread trace or kernel replay because the running rocprofiler-sdk does not support them, and fixed counter collection using kernel replay passes when kernel replay is unsupported.
 - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
+- Fixed `rocpd` summary never producing the marker summary (marker_summary), including with --region-categories MARKER.
 
 ### Known issues
 

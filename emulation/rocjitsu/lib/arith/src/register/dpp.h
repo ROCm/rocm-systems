@@ -76,6 +76,10 @@ int execute_dpp(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
   if (error || !exec_mask) {
     return error;
   }
+  if ((instruction_flags & RJ_ARITH_DPP16) && (!(instruction_flags & RJ_ARITH_DPP_ROW_MASK) ||
+                                               !(instruction_flags & RJ_ARITH_DPP_BANK_MASK))) {
+    return RJ_ARITH_SUCCESS;
+  }
   uint32_t permuted[32];
   const uint32_t *source = permuted;
   if (instruction_flags & RJ_ARITH_DPP8) {

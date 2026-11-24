@@ -55,7 +55,7 @@ public:
   uint16_t bits;
 
   // Return whether the encoded value is a NaN.
-  bool nan() const {
+  constexpr bool nan() const {
     if constexpr (is_f8 && !is_bfloat) {
       return (bits & magnitude_mask) == 0x7f;
     }
@@ -63,7 +63,7 @@ public:
   }
 
   // Return whether the encoded value is an infinity.
-  bool inf() const {
+  constexpr bool inf() const {
     if constexpr (is_f8 && !is_bfloat) {
       return false;
     }
@@ -71,13 +71,13 @@ public:
   }
 
   // Return whether the encoded value has its sign bit set.
-  bool negative() const { return bits >> (is_f8 ? 7 : 15); }
+  constexpr bool negative() const { return bits >> (is_f8 ? 7 : 15); }
 
   // Extract the encoded exponent field.
-  unsigned exponent_field() const { return (bits & magnitude_mask) >> fraction_bits; }
+  constexpr unsigned exponent_field() const { return (bits & magnitude_mask) >> fraction_bits; }
 
   // Return the integer significand, including the implicit leading bit for normal values.
-  uint64_t significand() const {
+  constexpr uint64_t significand() const {
     if (exponent_field()) {
       return (1u << fraction_bits) | (bits & fraction_mask);
     }
@@ -85,7 +85,7 @@ public:
   }
 
   // Return the binary exponent used to align this factor on the accumulation grid.
-  int alignment_exponent() const {
+  constexpr int alignment_exponent() const {
     return int(rocjitsu::arith::maximum(exponent_field(), 1u)) - bias;
   }
 

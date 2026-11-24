@@ -42,15 +42,10 @@ struct rcclHostHier {
   ncclComm_t inter; // The same local rank on every host, ordered by host. Null with one host
   int* hostRanks; // Comm rank of local rank l on host h at h * ranksPerHost + l
   // Shared by every host-hierarchical collective on the comm, so running them
-  // concurrently on two streams is unsafe. The stage buffer holds the
-  // three-collective path's intermediate shard and grows on the same call on
-  // every rank; the copy buffer holds the data of a rank whose buffers are not
-  // 16-byte aligned, so it grows on that rank only.
+  // concurrently on two streams is unsafe.
   void* scratch;
   size_t scratchBytes;
-  void* copy;
-  size_t copyBytes;
-  void* retired[kHostHierMaxRetired]; // Outgrown scratch and copy buffers, freed at teardown
+  void* retired[kHostHierMaxRetired]; // Outgrown scratch buffers, freed at teardown
   int nRetired;
 };
 

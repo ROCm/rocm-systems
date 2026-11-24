@@ -615,12 +615,12 @@ def test_unregistering_ends_the_stream_of_a_client_that_stopped_reading(tools, t
         assert _wait_until(lambda: conn.state(stopped, "ended"), 10), (
             "the stream of the client that stopped reading did not end"
         )
-        # Both handlers return and log "Policy stream for group N ended". RDC_LOG writes a line in
-        # pieces, so the two lines can mix: count the last piece, " ended", not the whole line.
-        # Read the whole log, not output(), which keeps only its end.
-        assert _wait_until(
-            lambda: d.out_log.read_text(errors="replace").count(" ended") == 2, 10
-        ), d.output()
+        # Both handlers return and log it, each in a line of its own. Read the whole log, not
+        # output(), which keeps only its end.
+        ended = f"Policy stream for group {gid} ended"
+        assert _wait_until(lambda: d.out_log.read_text(errors="replace").count(ended) == 2, 10), (
+            d.output()
+        )
     finally:
         if conn is not None:
             conn.close()

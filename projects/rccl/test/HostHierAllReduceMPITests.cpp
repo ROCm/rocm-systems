@@ -240,21 +240,38 @@ TEST_F(HostHierAllReduceMPITest, Fp32SumInPlace)
     ASSERT_MPI_FALSE(skippedFusedKernel(countFor(128 * 1024), ncclFloat32));
 }
 
-// Rank 0's buffers are 4 bytes off 16-byte alignment while its peers' are aligned: every rank still takes the same
-// path.
-TEST_F(HostHierAllReduceMPITest, UnalignedBuffersOnOneRank)
+// Every rank's buffers are 4 bytes off 16-byte alignment, on the fused kernel and the three collectives alike.
+TEST_F(HostHierAllReduceMPITest, UnalignedBuffersOnEveryRank)
 {
     for(bool inPlace : {false, true})
     {
         RunResult run = runAllReduce<float>(
             comm(), getActiveStream(), countFor(128 * 1024), ncclFloat32, ncclSum, inPlace, false,
             [this](size_t i) { return static_cast<float>((rank_ + i) % 16); },
+            [this](size_t i, float v) { return v == rankSumMod(i, 16); }, sizeof(float));
+        ASSERT_RUN_OK(run);
+        ASSERT_MPI_TRUE(builtChildComms());
+    }
+}
+
+// Rank 0's buffers are 4 bytes off 16-byte alignment while its peers' are aligned, in the fused kernel, which picks its
+// user-buffer access per rank. The child collectives of the three-collective path need the rank-uniform DDA LL128
+// choice of AICOMRCCL-3999 for this, so the test runs only where the fused kernel does.
+TEST_F(HostHierAllReduceMPITest, UnalignedBuffersOnOneRankInTheFusedKernel)
+{
+    const size_t count = countFor(128 * 1024);
+    if(rcclParamHostHierAllReduceFused() != 1 ||
+       !ncclAllReduceDdaFabricHierEligible(comm(), count, ncclFloat32, ncclSum, layout_.nHosts, layout_.ranksPerHost))
+        GTEST_SKIP() << "launch with RCCL_HOST_HIER_ALLREDUCE_FUSED=1 on a DDA fabric comm";
+    for(bool inPlace : {false, true})
+    {
+        RunResult run = runAllReduce<float>(
+            comm(), getActiveStream(), count, ncclFloat32, ncclSum, inPlace, false,
+            [this](size_t i) { return static_cast<float>((rank_ + i) % 16); },
             [this](size_t i, float v) { return v == rankSumMod(i, 16); }, rank_ == 0 ? sizeof(float) : 0);
         ASSERT_RUN_OK(run);
         ASSERT_MPI_TRUE(builtChildComms());
-        // Rank 0's copy buffer holds the whole message; the aligned ranks never allocate one.
-        ASSERT_MPI_TRUE(rank_ == 0 ? comm()->hostHier->copyBytes >= countFor(128 * 1024) * sizeof(float)
-                                   : comm()->hostHier->copy == nullptr);
+        ASSERT_MPI_FALSE(skippedFusedKernel(count, ncclFloat32));
     }
 }
 

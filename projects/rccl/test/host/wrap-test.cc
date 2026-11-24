@@ -6268,10 +6268,11 @@ class RegisteredAr {
     comm_->rankToNode = rankToNode_.data();
   }
 
-  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum) {
+  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum,
+                          ncclDataType_t dtype = ncclFloat32) {
     capturing_ = capturing;
     rcclCollDecision decision{};
-    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, op,
+    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / ncclTypeSize(dtype), dtype, op,
                                                 /*stream=*/nullptr, query, /*graphCapturingHint=*/capturing,
                                                 &decision));
     return decision;
@@ -6352,8 +6353,11 @@ class RegisteredAr {
   HookFor<decltype(g_allReduceDdaFabricLLBlocks)> llBlocks_{g_allReduceDdaFabricLLBlocks, CappedReport(113u)};
   HookFor<decltype(g_allReduceDdaFabricBlocks)> vmmBlocks_{g_allReduceDdaFabricBlocks, CappedReport(112u)};
   HookFor<decltype(g_getAlgoInfo)> ringInfo_{
-      g_getAlgoInfo, [this](struct ncclComm*, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
-        task->algorithm = ringAlgo_;
+      g_getAlgoInfo, [this](struct ncclComm* comm, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
+        // A penalized FP8 ring (factor > 1) loses to Tree, as in the real planner.
+        const float fp8Factor = rcclFp8RingCostFactor(task->datatype, task->func, comm->nRanks, comm->nNodes,
+                                                      rcclDdaLL128Threshold(comm, ncclFuncAllReduce), comm->archName);
+        task->algorithm = fp8Factor > 1.0f ? NCCL_ALGO_TREE : ringAlgo_;
         task->protocol = NCCL_PROTO_LL128;
         task->nMaxChannels = ringChannels_;
         task->nWarps = ringWarps_;
@@ -6586,7 +6590,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk) 
       });
 }
 
-// Capture re-routes only where the planner runs Ring (fp8 plans Tree); the cap is Ring's packed channels and
+// Capture re-routes only where the planner runs Ring (fp8 too); the cap is Ring's packed channels and
 // max(nWarps, 3) warps.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel) {
   RUN_ISOLATED_TEST(
@@ -6607,6 +6611,10 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlanne
         d = ar.Select(16 * kMiB, true);
         EXPECT_EQ(24u, d.ddaCap.blocks) << "the channels the packed plan launches";
         EXPECT_EQ(24u, d.nMaxChannels);
+        ar.SetRanks(16);
+        d = ar.Select(16 * kMiB, true, true, ncclSum, ncclFloat8e4m3);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo) << "fp8 re-routes like float32";
+        EXPECT_EQ(24u, d.ddaCap.blocks);
       });
 }
 

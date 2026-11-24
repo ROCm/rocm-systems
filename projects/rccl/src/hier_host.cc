@@ -60,15 +60,15 @@ bool allRanksReady(struct ncclComm* comm, ncclResult_t* res) {
 // Never frees a buffer while the comm lives: freeing one that peer GPUs of the same process have just accessed
 // through the child comms intermittently fails in HIP, so a buffer that is outgrown is kept until teardown. Growing
 // at least twofold keeps the kept buffers under the size of the current one.
-ncclResult_t reserveBuffer(struct ncclComm* comm, struct rcclHostHier* h, void** buf, size_t* bufBytes, size_t bytes) {
-  if (*bufBytes >= bytes) return ncclSuccess;
+ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes) {
+  if (h->scratchBytes >= bytes) return ncclSuccess;
   if (h->nRetired == kHostHierMaxRetired) return ncclInternalError;
-  const size_t grown = std::max(bytes, 2 * *bufBytes);
-  char* next = nullptr;
-  NCCLCHECK(ncclCudaMalloc(&next, grown, comm->memManager));
-  if (*buf != nullptr) h->retired[h->nRetired++] = *buf;
-  *buf = next;
-  *bufBytes = grown;
+  const size_t grown = std::max(bytes, 2 * h->scratchBytes);
+  char* buf = nullptr;
+  NCCLCHECK(ncclCudaMalloc(&buf, grown, comm->memManager));
+  if (h->scratch != nullptr) h->retired[h->nRetired++] = h->scratch;
+  h->scratch = buf;
+  h->scratchBytes = grown;
   return ncclSuccess;
 }
 
@@ -267,7 +267,6 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   // The children's collectives read the scratch buffers.
   for (int i = 0; i < h->nRetired; i++) NCCLCHECKGOTO(ncclCudaFree(h->retired[i], comm->memManager), res, exit);
   if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
-  if (h->copy != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->copy, comm->memManager), res, exit);
 exit:
   free(h->hostRanks);
   free(h);
@@ -349,7 +348,6 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   struct rcclHostHier* h = comm->hostHier;
   const struct rcclHostLayout& layout = h->layout;
   const bool fused = fusedKernelRuns(comm, layout, count, datatype, op);
-  const size_t bytes = count * ncclTypeSize(datatype);
   const size_t chunk = count / layout.ranksPerHost;
   const size_t chunkBytes = chunk * ncclTypeSize(datatype);
   const bool doInter = h->inter != nullptr;
@@ -358,48 +356,34 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   const size_t stageBytes = fused ? 0 : doInter ? stride + chunkBytes : chunkBytes;
   if (h->scratchBytes < stageBytes) {
     // Every rank grows on the same call, and one that cannot allocate would skip the ReduceScatter its peers wait in.
-    ncclResult_t res = reserveBuffer(comm, h, &h->scratch, &h->scratchBytes, stageBytes);
-    if (!allRanksReady(comm, &res)) return res;
+    ncclResult_t res = reserveScratch(comm, h, stageBytes);
+    if (!allRanksReady(comm, &res)) {
+      // The ranks may now hold scratch of different sizes and would disagree on the next grow, so every rank stops
+      // using host-hierarchical AllReduce, as after a failed setup. Its scratch is freed at teardown like any other.
+      comm->hostHierState = rcclHostHierFailed;
+      ATTN("Host-hierarchical AllReduce: scratch allocation failed on rank %d (%s), using the default path", comm->rank,
+           ncclGetErrorString(res));
+      return res;
+    }
   }
-  // The fused kernel and some algorithms of the child collectives are chosen from each rank's own buffer alignment, so
-  // a rank whose buffers are not 16-byte aligned copies them through its copy buffer instead of taking a path its peers
-  // do not take. Only that rank grows the buffer, so it cannot vote: if the allocation fails, its peers wait in the
-  // collective it skips.
-  const bool aligned = ((reinterpret_cast<uintptr_t>(sendbuff) | reinterpret_cast<uintptr_t>(recvbuff)) & 15) == 0;
-  if (!aligned) NCCLCHECK(reserveBuffer(comm, h, &h->copy, &h->copyBytes, bytes));
-  char* const copy = static_cast<char*>(h->copy);
-  const void* in = aligned ? sendbuff : copy;
-  void* out = aligned ? recvbuff : copy;
-  if (!aligned) CUDACHECK(cudaMemcpyAsync(copy, sendbuff, bytes, cudaMemcpyDeviceToDevice, stream));
-
   if (fused) {
     std::vector<int> inter(layout.nHosts);
     for (int host = 0; host < layout.nHosts; host++) {
       inter[host] = h->hostRanks[host * layout.ranksPerHost + layout.localRank];
     }
-    // With a copy-out after the kernel, the kernel must not record the stop event that orders the next call, which
-    // writes the same scratch: hand it back so rcclAddonLaunchEnd records it after the copy.
-    hipEvent_t stopEvent = aligned ? nullptr : rcclTakeAddonStopEvent(comm);
-    const ncclResult_t res =
-      ncclAllReduceDdaFabricHier(in, out, count, datatype, comm, stream, layout.nHosts, layout.ranksPerHost,
-                                 layout.hostIndex, layout.localRank,
-                                 h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data());
-    if (!aligned) comm->addonStopEvent = stopEvent;
-    NCCLCHECK(res);
-  } else {
-    // The child comms keep their own stop events, so this comm's is recorded after the copy-out below.
-    char* rsOut = static_cast<char*>(h->scratch);
-    char* agIn = doInter ? rsOut + stride : rsOut;
-    // The parent AllReduce is already recorded.
-    rccl::Recorder::instance().skip(true);
-    ncclResult_t res = ncclSuccess;
-    NCCLCHECKGOTO(ncclReduceScatter(in, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
-    if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
-    NCCLCHECKGOTO(ncclAllGather(agIn, out, chunk, datatype, h->intra, stream), res, exit);
-  exit:
-    rccl::Recorder::instance().skip(false);
-    if (res != ncclSuccess) return res;
+    return ncclAllReduceDdaFabricHier(sendbuff, recvbuff, count, datatype, comm, stream, layout.nHosts,
+                                      layout.ranksPerHost, layout.hostIndex, layout.localRank,
+                                      h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data());
   }
-  if (!aligned) CUDACHECK(cudaMemcpyAsync(recvbuff, copy, bytes, cudaMemcpyDeviceToDevice, stream));
-  return ncclSuccess;
+  char* rsOut = static_cast<char*>(h->scratch);
+  char* agIn = doInter ? rsOut + stride : rsOut;
+  // The parent AllReduce is already recorded.
+  rccl::Recorder::instance().skip(true);
+  ncclResult_t res = ncclSuccess;
+  NCCLCHECKGOTO(ncclReduceScatter(sendbuff, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
+  if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
+  NCCLCHECKGOTO(ncclAllGather(agIn, recvbuff, chunk, datatype, h->intra, stream), res, exit);
+exit:
+  rccl::Recorder::instance().skip(false);
+  return res;
 }

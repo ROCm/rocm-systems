@@ -47,6 +47,25 @@ __device__ __forceinline__ void hierStore(T* p, const uint4& v) {
   *reinterpret_cast<uint4*>(p) = v;
 }
 
+// User buffers follow the caller's alignment; scratch is always 16-byte aligned. A 16-byte memcpy compiles to the same
+// 128-bit access on gfx1250 at any alignment.
+template <bool kAligned, typename T>
+__device__ __forceinline__ uint4 hierUserLoad(const T* p) {
+  if constexpr (kAligned) return hierLoad(p);
+  uint4 v;
+  __builtin_memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+template <bool kAligned, typename T>
+__device__ __forceinline__ void hierUserStore(T* p, const uint4& v) {
+  if constexpr (kAligned) {
+    hierStore(p, v);
+  } else {
+    __builtin_memcpy(p, &v, sizeof(v));
+  }
+}
+
 // Sums n slots `slotStride` apart, always in slot order, so every rank that sums the same slots gets the same bits.
 template <typename T, int kMax>
 __device__ __forceinline__ uint4 hierSumSlots(const T* first, size_t slotStride, int n) {
@@ -66,7 +85,7 @@ __device__ __forceinline__ uint4 hierSumSlots(const T* first, size_t slotStride,
 // A bank holds [P host slots | N inter-host slots | P gathered slots]. Slots are `roundCount / P` wide even in a short
 // last round, so each block uses the same scratch every round: barriers only order blocks with the same index. A
 // round's bank is reused two rounds later, after the barriers of the round in between have ordered every reader.
-template <typename T, int P_CT, int N_CT>
+template <typename T, int P_CT, int N_CT, bool kAligned = true>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -107,7 +126,7 @@ __launch_bounds__(512)
       uint4 vals[kMaxP];
 #pragma unroll
       for (int s = 0; s < kMaxP; s++) {
-        if (s < P) vals[s] = hierLoad(sendbuff + base + s * slice + j);
+        if (s < P) vals[s] = hierUserLoad<kAligned>(sendbuff + base + s * slice + j);
       }
 #pragma unroll
       for (int s = 0; s < kMaxP; s++) {
@@ -148,7 +167,7 @@ __launch_bounds__(512)
       }
 #pragma unroll
       for (int s = 0; s < kMaxP; s++) {
-        if (s < P) hierStore(recvbuff + base + s * slice + j, vals[s]);
+        if (s < P) hierUserStore<kAligned>(recvbuff + base + s * slice + j, vals[s]);
       }
     }
   }

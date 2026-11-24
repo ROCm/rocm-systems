@@ -10,6 +10,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "scoped_temp.h"
+#include "shell_quote.h"
 
 #include <gtest/gtest.h>
 
@@ -35,6 +36,8 @@
 #include <unistd.h>
 
 namespace {
+
+using rocjitsu::test::shell_quote;
 
 std::filesystem::path g_translate_tool;
 std::filesystem::path g_decode_benchmark;
@@ -292,18 +295,6 @@ std::vector<uint8_t> make_empty_text_code_object() {
   std::memcpy(image.data() + text_section, &text, sizeof(text));
 
   return image;
-}
-
-std::string shell_quote(std::string_view text) {
-  std::string quoted = "'";
-  for (const char ch : text) {
-    if (ch == '\'')
-      quoted += "'\\''";
-    else
-      quoted += ch;
-  }
-  quoted += "'";
-  return quoted;
 }
 
 std::string read_text_file(const std::filesystem::path &path) {
