@@ -2203,7 +2203,10 @@ impl KfdQueue {
                 percentage: 0,
                 priority: self.priority,
             })
-            .map_err(|source| native_error("AMDKFD_IOC_UPDATE_QUEUE", source))?;
+            .map_err(|source| {
+                self.vm.diagnose_queue_update_failure(id, &source);
+                native_error("AMDKFD_IOC_UPDATE_QUEUE", source)
+            })?;
         self.active = false;
         Ok(())
     }
