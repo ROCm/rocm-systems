@@ -200,10 +200,10 @@ struct CacheDomains {
     return result;
   }
 };
-/// RJ_MMA_REMOTE=1 lets an issuer fall back to helpers of another cache domain.
-inline bool remote_helpers() {
+/// RJ_MMA_LOCAL_ONLY=1 never lets an issuer use another cache domain's helpers.
+inline bool local_helpers_only() {
   static const bool enabled = [] {
-    const char *value = std::getenv("RJ_MMA_REMOTE");
+    const char *value = std::getenv("RJ_MMA_LOCAL_ONLY");
     return value && *value && *value != '0';
   }();
   return enabled;
@@ -454,32 +454,20 @@ private:
     return occupied_threads() + claimed < budget;
   }
 
-  /// Helpers of the issuer's cache domain; every helper with one domain.
+  /// Helpers of the issuer's cache domain, or none with a single domain.
   std::array<uint64_t, 2> local_mask() const {
-    if (domain_masks_.empty())
-      return {~uint64_t{0}, ~uint64_t{0}};
 #if defined(__linux__)
-    const int cpu = sched_getcpu();
-    if (cpu >= 0 && size_t(cpu) < domains_.domain_of_cpu.size() &&
-        domains_.domain_of_cpu[cpu] >= 0) {
-      if (!remote_helpers())
+    if (!domain_masks_.empty()) {
+      const int cpu = sched_getcpu();
+      if (cpu >= 0 && size_t(cpu) < domains_.domain_of_cpu.size() &&
+          domains_.domain_of_cpu[cpu] >= 0)
         return domain_masks_[domains_.domain_of_cpu[cpu]];
-      return {~uint64_t{0}, ~uint64_t{0}};
     }
 #endif
-    return {~uint64_t{0}, ~uint64_t{0}};
+    return {0, 0};
   }
 
-  Slot *try_claim() {
-    if (!helpers_enabled() || !within_budget())
-      return nullptr;
-    // Bound claims and fall back inline on a miss: one or two loads detect an
-    // exhausted pool, and after two failed CAS attempts per word the chain
-    // runs on the issuer. A stable per-issuer start keeps reusing an awake helper.
-    static thread_local const uint32_t issuer_hash =
-        static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
-    const auto mask = local_mask();
-    const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
+  Slot *claim_from(const std::array<uint64_t, 2> &mask, unsigned start) {
     for (unsigned word = 0; word != (slots_.size() > 64 ? 2u : 1u); ++word) {
       auto free = free_[word].load(std::memory_order_relaxed);
       for (unsigned attempt = 0; (free & mask[word]) && attempt != 2; ++attempt) {
@@ -493,6 +481,25 @@ private:
       }
     }
     return nullptr;
+  }
+
+  Slot *try_claim() {
+    if (!helpers_enabled() || !within_budget())
+      return nullptr;
+    // Bound claims and fall back inline on a miss: one or two loads detect an
+    // exhausted pool, and after two failed CAS attempts per word the chain
+    // runs on the issuer. A stable per-issuer start keeps reusing an awake
+    // helper. Helpers sharing the issuer's last-level cache come first.
+    static thread_local const uint32_t issuer_hash =
+        static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
+    const auto local = local_mask();
+    if (local[0] | local[1])
+      if (Slot *slot = claim_from(local, start))
+        return slot;
+    if ((local[0] | local[1]) && local_helpers_only())
+      return nullptr;
+    return claim_from({~uint64_t{0}, ~uint64_t{0}}, start);
   }
   void release(Slot *slot) {
     free_[slot->index / 64].fetch_or(uint64_t{1} << (slot->index % 64), std::memory_order_release);

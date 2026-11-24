@@ -234,15 +234,20 @@ struct Plan {
 /// @details safe_inline() rejects every branch, barrier, terminator, trap and
 /// EXEC write, so the recorded order is the only order the block can execute.
 /// Footprints are computed once here; replay needs no register bitsets.
+///
+/// Scheduling first forms logical chains with no slot limit, so a block never
+/// joins a running chain early just to free a slot. A post-pass then places
+/// them on physical helpers and the issuer.
 template <typename Fetch>
 void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uint32_t num_vgprs,
              bool has_accvgprs, uint64_t &decodes) {
   Instruction::ScopedHeapAllocation heap;
+  // A logical chain: one helper job if offloaded. `joined` is the first step
+  // that must wait for it; the block end if none does.
   struct Chain {
-    bool active = false, open = false;
-    unsigned head = 0, id = 0;
+    unsigned head = 0, joined = ~0u, count = 0;
+    bool open = true;
     Access access;
-    unsigned count = 0;
     std::array<MemberOperands, kMaxChain> members{};
     void refresh() {
       access = {};
@@ -253,33 +258,25 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
       }
     }
   };
-  std::array<Chain, kSlots> slots{};
-  // Every helper chain ever started, with the step that joined it. A bundled
-  // member runs early, concurrently with any chain alive at or after its head.
-  struct History {
-    Access access;
-    unsigned head = 0, joined = ~0u;
-  };
-  std::vector<History> history;
+  std::vector<Chain> chains;
+  std::vector<unsigned> live;             // logical chains not yet joined
   std::vector<Access> accesses;
-  std::vector<int8_t> step_slot; // helper slot executing each step, -1 on the issuer
+  std::vector<int> step_chain;            // logical chain executing each MMA step, -1 otherwise
+  std::vector<std::vector<unsigned>> joins; // logical chains each step waits for
   uint64_t offset = 0;
-  unsigned age = 0;
-  std::array<unsigned, kSlots> started{};
   unsigned current = 0;
-  const auto join = [&](uint8_t mask) {
-    for (unsigned s = 0; s != kSlots; ++s)
-      if ((mask & (1u << s)) && slots[s].active) {
-        history[slots[s].id].joined = current;
-        slots[s] = {};
-      }
+  const auto join = [&](const std::vector<unsigned> &which) {
+    for (unsigned c : which) {
+      chains[c].joined = current;
+      std::erase(live, c);
+    }
   };
   // A later step that only overwrites factor registers of a running chain need
   // not wait: those factors are copied when the chain is submitted. Any read
   // of its results, write of its results, or overwrite of an accumulator or
   // scale register still joins it.
-  const auto break_war = [&](unsigned s, const Access &next) {
-    auto &chain = slots[s];
+  const auto break_war = [&](unsigned c, const Access &next) {
+    auto &chain = chains[c];
     if ((chain.access.writes & (next.reads | next.writes)).any())
       return false;
     const auto war = chain.access.reads & next.writes;
@@ -296,24 +293,39 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         member.a_snap |= war.test(member.a_base + r);
       for (unsigned r = 0; r != member.b_regs; ++r)
         member.b_snap |= war.test(member.b_base + r);
-      auto &spec = plan.steps[chain.head].snapshot[i];
-      if (member.a_snap)
-        spec.a_base = member.a_base, spec.a_regs = member.a_regs;
-      if (member.b_snap)
-        spec.b_base = member.b_base, spec.b_regs = member.b_regs;
     }
-    plan.steps[chain.head].snapshots = true;
     chain.refresh();
-    history[chain.id].access = chain.access;
     return true;
   };
-  const auto break_wars = [&](uint8_t &conflicts, const Access &next) {
-    if (!snapshot_enabled())
-      return;
-    for (unsigned s = 0; s != kSlots; ++s)
-      if ((conflicts & (1u << s)) && break_war(s, next))
-        conflicts &= uint8_t(~(1u << s));
+  const auto conflicts_of = [&](const Access &next) {
+    std::vector<unsigned> result;
+    for (unsigned c : live)
+      if (overlaps(chains[c].access, next) && !(snapshot_enabled() && break_war(c, next)))
+        result.push_back(c);
+    return result;
   };
+  // Can `access` (an MMA at step `at`) run early, at step `from` on the helper
+  // of `chains`? Its inputs must already exist there: no step in between may
+  // touch its registers or be able to stall or fault (an early exit would
+  // re-execute an accumulate the helper already ran). It must also not race a
+  // chain that runs concurrently with that helper job.
+  const auto hoistable = [&](const Access &access, unsigned from, unsigned at,
+                             std::initializer_list<int> own) {
+    for (unsigned j = from + 1; j < at; ++j) {
+      if (std::find(own.begin(), own.end(), step_chain[j]) != own.end())
+        continue;
+      if (plan.steps[j].kind == StepKind::Ordinary || overlaps(accesses[j], access))
+        return false;
+    }
+    for (unsigned c = 0; c != chains.size(); ++c) {
+      if (std::find(own.begin(), own.end(), int(c)) != own.end())
+        continue;
+      if (chains[c].head < at && chains[c].joined > from && overlaps(chains[c].access, access))
+        return false;
+    }
+    return true;
+  };
+
   for (unsigned k = 0; k != kMaxSteps; ++k) {
     current = k;
     // Stay in the fetchable code page of the block entry.
@@ -338,82 +350,45 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     Step step;
     step.size = static_cast<uint8_t>(inst->size());
     step.offset = static_cast<uint16_t>(offset);
-    uint8_t conflicts = 0;
-    for (unsigned s = 0; s != kSlots; ++s)
-      if (slots[s].active && overlaps(slots[s].access, *access))
-        conflicts |= uint8_t(1u << s);
     std::optional<MemberOperands> operands;
     if (offloadable(*inst, has_accvgprs))
       operands = member_operands(*inst, k, num_vgprs, has_accvgprs);
+    // Placeholders keep step-indexed tables aligned while this step is decided.
+    accesses.push_back(*access);
+    step_chain.push_back(-1);
+    joins.emplace_back();
+    const auto conflicts = conflicts_of(*access);
     if (operands) {
-      // A same-accumulator successor joins a running chain only when its other
-      // inputs already exist at the chain's head: no step in between may touch
-      // its registers, and none may be able to stall or fault, since an early
-      // exit would otherwise re-execute an accumulate the helper already ran.
+      // A same-accumulator successor joins its producer's chain: one handoff.
       int bundle = -1;
-      if (chaining_enabled() && std::has_single_bit(conflicts)) {
-        const unsigned h = std::countr_zero(conflicts);
-        bool ok = slots[h].open;
-        for (unsigned j = slots[h].head + 1; ok && j != k; ++j) {
-          if (step_slot[j] == int8_t(h))
-            continue;
-          ok = plan.steps[j].kind != StepKind::Ordinary && !overlaps(accesses[j], *access);
-        }
-        for (unsigned c = 0; ok && c != history.size(); ++c)
-          ok = c == slots[h].id || history[c].joined <= slots[h].head ||
-               !overlaps(history[c].access, *access);
-        auto &head = plan.steps[slots[h].head];
-        if (ok && head.members < kMaxChain)
-          bundle = int(h);
+      if (chaining_enabled() && conflicts.size() == 1) {
+        const unsigned c = conflicts.front();
+        if (chains[c].open && chains[c].count < kMaxChain &&
+            hoistable(*access, chains[c].head, k, {int(c)}))
+          bundle = int(c);
       }
       if (bundle >= 0) {
-        auto &chain = slots[bundle];
-        auto &head = plan.steps[chain.head];
-        head.member_step[head.members] = uint8_t(k);
-        head.chain[head.members++] = inst.get();
+        auto &chain = chains[bundle];
         chain.members[chain.count++] = *operands;
         chain.refresh();
-        history[chain.id].access = chain.access;
         step.kind = StepKind::Chained;
-        step.slot = uint8_t(bundle);
-        step_slot.push_back(int8_t(bundle));
       } else {
-        break_wars(conflicts, *access);
-        step.wait = conflicts;
         join(conflicts);
-        unsigned slot = kSlots;
-        for (unsigned s = 0; s != kSlots && slot == kSlots; ++s)
-          if (!slots[s].active)
-            slot = s;
-        if (slot == kSlots) {
-          // Reuse the oldest chain's slot after joining it.
-          slot = 0;
-          for (unsigned s = 1; s != kSlots; ++s)
-            if (started[s] < started[slot])
-              slot = s;
-          step.wait |= uint8_t(1u << slot);
-          join(uint8_t(1u << slot));
-        }
-        slots[slot] = {};
-        slots[slot].active = slots[slot].open = true;
-        slots[slot].head = k;
-        slots[slot].id = unsigned(history.size());
-        slots[slot].members[slots[slot].count++] = *operands;
-        slots[slot].refresh();
-        history.push_back({slots[slot].access, k});
-        started[slot] = ++age;
+        joins.back() = conflicts;
+        Chain chain;
+        chain.head = k;
+        chain.members[chain.count++] = *operands;
+        chain.refresh();
+        bundle = int(chains.size());
+        chains.push_back(chain);
+        live.push_back(unsigned(bundle));
         step.kind = StepKind::Offload;
-        step.slot = uint8_t(slot);
-        step.chain[0] = inst.get();
-        step.member_step[0] = uint8_t(k);
-        step.members = 1;
-        step_slot.push_back(int8_t(slot));
       }
+      step_chain.back() = bundle;
       step.inst = inst.get();
     } else {
-      break_wars(conflicts, *access);
-      step.wait = conflicts;
       join(conflicts);
+      joins.back() = conflicts;
       // Retain only stateless arithmetic. Memory instructions keep per-issue
       // state and go through ordinary issue and its decoded-instruction cache.
       if (alu_enabled() && pure_alu(*inst)) {
@@ -421,39 +396,137 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         step.inst = inst.get();
       }
       // An issuer step that could stall or fault closes every running chain
-      // to later members (see above).
+      // to later members (see hoistable()).
       if (step.kind == StepKind::Ordinary)
-        for (auto &slot : slots)
-          slot.open = false;
-      step_slot.push_back(-1);
+        for (unsigned c : live)
+          chains[c].open = false;
     }
     if (step.inst)
       plan.owned.push_back(std::move(inst));
-    accesses.push_back(*access);
     plan.steps.push_back(step);
     offset += step.size;
   }
   plan.length = offset;
-  // Keep the last independent chain on the issuer so it does useful matrix
-  // work instead of only waiting. A block with fewer than two chains offloads nothing.
-  unsigned chains = 0, last = 0;
-  for (unsigned k = 0; k != plan.steps.size(); ++k)
-    if (plan.steps[k].kind == StepKind::Offload) {
-      ++chains;
-      last = k;
+  const unsigned steps = unsigned(plan.steps.size());
+  for (auto &chain : chains)
+    chain.joined = std::min(chain.joined, steps);
+
+  // Profitability: offloading pays only while another chain runs at the same
+  // time. A serial chain (even one split at kMaxChain) never qualifies.
+  unsigned max_concurrent = 0;
+  for (unsigned t = 0; t != steps; ++t) {
+    unsigned alive = 0;
+    for (const auto &chain : chains)
+      alive += chain.head <= t && t < chain.joined;
+    max_concurrent = std::max(max_concurrent, alive);
+  }
+  // Placement. Within each group of chains with overlapping lifetimes, the
+  // last-started chain stays on the issuer so it does useful matrix work, as
+  // does any chain that overlaps no other. The rest take free helpers in head
+  // order; a chain finding none is appended to a running helper job when it
+  // can run that early, and otherwise also stays on the issuer.
+  constexpr int kIssuer = -1;
+  std::vector<int> placed(chains.size(), kIssuer); // helper slot, or kIssuer
+  std::vector<int> packed_into(chains.size(), -1);  // host chain when appended
+  std::vector<unsigned> job_size(chains.size(), 0); // members of each host's helper job
+  if (max_concurrent >= 2) {
+    std::vector<bool> issuer(chains.size(), false);
+    for (unsigned c = 0; c != chains.size();) {
+      unsigned end = chains[c].joined, last = c, size = 0;
+      unsigned g = c;
+      for (; g != chains.size() && chains[g].head < end; ++g) {
+        end = std::max(end, chains[g].joined);
+        last = g;
+        ++size;
+      }
+      issuer[last] = true;
+      (void)size;
+      c = g;
     }
-  plan.accept = chains >= 2;
+    std::array<int, kSlots> occupant;
+    occupant.fill(-1);
+    for (unsigned c = 0; c != chains.size(); ++c) {
+      if (issuer[c])
+        continue;
+      int slot = -1;
+      for (unsigned s = 0; s != kSlots && slot < 0; ++s)
+        if (occupant[s] < 0 || chains[occupant[s]].joined <= chains[c].head)
+          slot = int(s);
+      if (slot >= 0) {
+        occupant[slot] = int(c);
+        placed[c] = slot;
+        job_size[c] = chains[c].count;
+        continue;
+      }
+      // Pack onto a running helper job: its members must all be able to run at
+      // that job's submission.
+      for (unsigned s = 0; s != kSlots; ++s) {
+        const int h = occupant[s];
+        const unsigned host = packed_into[h] >= 0 ? unsigned(packed_into[h]) : unsigned(h);
+        if (job_size[host] + chains[c].count > kMaxChain || chains[h].joined <= chains[c].head)
+          continue;
+        bool ok = true;
+        for (unsigned i = 0; ok && i != chains[c].count; ++i) {
+          const unsigned at = chains[c].members[i].step;
+          ok = hoistable(accesses[at], chains[host].head, at, {int(host), int(c)});
+        }
+        if (!ok)
+          continue;
+        packed_into[c] = int(host);
+        placed[c] = int(s);
+        job_size[host] += chains[c].count;
+        break;
+      }
+    }
+  }
+
+  // Materialize steps: helper jobs, issuer MMAs and physical join masks.
+  unsigned helper_chains = 0;
+  for (unsigned c = 0; c != chains.size(); ++c)
+    helper_chains += placed[c] != kIssuer && packed_into[c] < 0;
+  plan.accept = helper_chains >= 1;
   if (!plan.accept)
     return;
-  const uint8_t issuer_slot = plan.steps[last].slot;
-  for (unsigned k = last; k != plan.steps.size(); ++k) {
+  for (unsigned k = 0; k != steps; ++k) {
     auto &step = plan.steps[k];
-    if ((step.kind == StepKind::Offload && k == last) ||
-        (step.kind == StepKind::Chained && step.slot == issuer_slot && k > last))
-      step.kind = StepKind::IssuerMma;
-    // Later waits on the issuer's chain are already satisfied in program order.
-    if (k > last && step.kind != StepKind::Offload)
-      step.wait &= uint8_t(~(1u << issuer_slot));
+    const int c = step_chain[k];
+    if (c >= 0) {
+      if (placed[c] == kIssuer) {
+        step.kind = StepKind::IssuerMma;
+      } else {
+        const unsigned host = packed_into[c] >= 0 ? unsigned(packed_into[c]) : unsigned(c);
+        step.slot = uint8_t(placed[c]);
+        if (unsigned(c) == host && k == chains[c].head) {
+          step.kind = StepKind::Offload;
+          step.members = 0;
+        } else {
+          step.kind = StepKind::Chained;
+        }
+      }
+    }
+    for (unsigned j : joins[k])
+      if (placed[j] != kIssuer)
+        step.wait |= uint8_t(1u << placed[j]);
+  }
+  // Fill each helper job's member list in program order of its host chain,
+  // then of the chains packed onto it.
+  for (unsigned c = 0; c != chains.size(); ++c) {
+    if (placed[c] == kIssuer)
+      continue;
+    const unsigned host = packed_into[c] >= 0 ? unsigned(packed_into[c]) : c;
+    auto &head = plan.steps[chains[host].head];
+    for (unsigned i = 0; i != chains[c].count; ++i) {
+      const auto &member = chains[c].members[i];
+      const unsigned at = member.step;
+      auto &spec = head.snapshot[head.members];
+      if (member.a_snap)
+        spec.a_base = member.a_base, spec.a_regs = member.a_regs;
+      if (member.b_snap)
+        spec.b_base = member.b_base, spec.b_regs = member.b_regs;
+      head.snapshots |= member.a_snap || member.b_snap;
+      head.member_step[head.members] = uint8_t(at);
+      head.chain[head.members++] = plan.steps[at].inst;
+    }
   }
   for (const auto &step : plan.steps) {
     plan.chains += step.kind == StepKind::Offload;
