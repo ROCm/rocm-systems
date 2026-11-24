@@ -487,9 +487,9 @@ TEST(kernel_replay_snapshot, kept_arenas_belong_to_one_agent)
     ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 
-// The SDK's own limits apply only when it chooses where the snapshot goes. A forced mode may use
-// all of its memory, apart from the 5% of free device memory left for the replayed kernel.
-TEST(kernel_replay_snapshot, forced_modes_drop_the_sdk_size_limits)
+// The SDK's own limits apply only when it chooses where the snapshot goes. A mode the tool chose
+// may use all of its memory, apart from the 5% of free device memory left for the replayed kernel.
+TEST(kernel_replay_snapshot, tool_chosen_modes_drop_the_sdk_size_limits)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
@@ -502,9 +502,11 @@ TEST(kernel_replay_snapshot, forced_modes_drop_the_sdk_size_limits)
     const auto automatic   = capture_context(agent, msnp::capture_mode::automatic);
     const auto device_only = capture_context(agent, msnp::capture_mode::force_gpu);
     const auto host_only   = capture_context(agent, msnp::capture_mode::force_pinned);
+    const auto both        = capture_context(agent, msnp::capture_mode::gpu_then_pinned);
     ASSERT_TRUE(automatic.has_value());
     ASSERT_TRUE(device_only.has_value());
     ASSERT_TRUE(host_only.has_value());
+    ASSERT_TRUE(both.has_value());
 
     size_t gpu_pool_size = 0;
     size_t pinned_max    = 0;
@@ -524,11 +526,12 @@ TEST(kernel_replay_snapshot, forced_modes_drop_the_sdk_size_limits)
     EXPECT_EQ(host_budgets.host_bytes, pinned_max);
 
     EXPECT_EQ(msnp::plan_budgets(*device_only).host_bytes, 0U);
+    EXPECT_EQ(msnp::plan_budgets(*both).host_bytes, pinned_max);
 
     ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 
-TEST(kernel_replay_snapshot, device_only_budget_is_not_capped_at_half_the_device)
+TEST(kernel_replay_snapshot, tool_chosen_device_budget_is_not_capped_at_half_the_device)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
@@ -539,7 +542,9 @@ TEST(kernel_replay_snapshot, device_only_budget_is_not_capped_at_half_the_device
     const auto agent = allocation.agent;
     ASSERT_NE(agent.handle, 0U);
     const auto device_only = capture_context(agent, msnp::capture_mode::force_gpu);
+    const auto both        = capture_context(agent, msnp::capture_mode::gpu_then_pinned);
     ASSERT_TRUE(device_only.has_value());
+    ASSERT_TRUE(both.has_value());
 
     size_t   pool_size = 0;
     size_t   alloc_max = 0;
@@ -563,6 +568,7 @@ TEST(kernel_replay_snapshot, device_only_budget_is_not_capped_at_half_the_device
                         "of its memory";
 
     EXPECT_GT(msnp::plan_budgets(*device_only).gpu_bytes, half_device);
+    EXPECT_GT(msnp::plan_budgets(*both).gpu_bytes, half_device);
 }
 
 TEST(kernel_replay_snapshot, host_only_snapshot_stays_out_of_device_memory)

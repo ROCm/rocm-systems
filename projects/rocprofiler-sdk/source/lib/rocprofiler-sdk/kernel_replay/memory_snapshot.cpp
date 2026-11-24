@@ -406,7 +406,7 @@ gpu_plan_budget(const capture_context_t& ctx)
         budget = std::min(
             budget,
             planning::tier_budget(retained_capacity(ctx.gpu_pool, ctx.agent), *available, 20));
-    else if(ctx.mode == capture_mode::force_gpu)
+    else if(ctx.mode != capture_mode::automatic)
     {
         // Without the free memory, keep the reserve against the device's size.
         const auto total = pool_size(ctx.gpu_pool);
@@ -422,8 +422,8 @@ host_plan_budget(const capture_context_t& ctx)
     if(ctx.mode == capture_mode::force_gpu) return 0;
     auto maximum = pool_allocation_max(ctx.pinned_pool);
     if(!maximum) return 0;
-    // A tool that asks for host memory only gets whatever the pool can allocate.
-    if(ctx.mode == capture_mode::force_pinned) return *maximum;
+    // A tool that chose the memory gets whatever the pool can allocate.
+    if(ctx.mode != capture_mode::automatic) return *maximum;
     // Pinned memory cannot be swapped out, so use at most half of what the host has available.
     if(auto available = host_available_bytes())
         return std::min(*maximum,
@@ -492,8 +492,8 @@ using snapshot_storage = storage::fallback<hsa_tier, hsa_tier, storage::null_tie
 snapshot_storage
 make_snapshot_storage(const capture_context_t& ctx, storage_budgets_t budgets)
 {
-    // A snapshot the tool limited to one memory keeps nothing once it ends, not even an arena it
-    // took over from an earlier replay.
+    // A snapshot whose memory the tool chose keeps nothing once it ends, not even an arena it took
+    // over from an earlier replay.
     const auto retain =
         ctx.mode == capture_mode::automatic ? retain_mode::across_replays : retain_mode::per_replay;
     const auto gpu    = hsa_pool_allocator{.kind      = storage_kind::gpu_local,

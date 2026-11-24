@@ -64,10 +64,10 @@ TEST(kernel_replay_options, one_snapshot_flag_forces_that_memory)
     EXPECT_EQ(kr::capture_mode_for(&pinned), msnp::capture_mode::force_pinned);
 }
 
-TEST(kernel_replay_options, both_snapshot_flags_leave_the_choice_to_the_sdk)
+TEST(kernel_replay_options, both_snapshot_flags_fill_device_then_pinned_host)
 {
     const auto both = options(device_flag | pinned_flag);
-    EXPECT_EQ(kr::capture_mode_for(&both), msnp::capture_mode::automatic);
+    EXPECT_EQ(kr::capture_mode_for(&both), msnp::capture_mode::gpu_then_pinned);
 }
 
 TEST(kernel_replay_options, honored_options_have_no_rejection)

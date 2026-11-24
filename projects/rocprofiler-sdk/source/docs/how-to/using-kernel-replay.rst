@@ -248,8 +248,7 @@ the SDK owns, holding its defaults, and the tool changes the flags through it:
 
    * - ``flags``
      - Snapshot
-   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_NONE``, or both ``SNAPSHOT_DEVICE`` and
-       ``SNAPSHOT_HOST_PINNED``
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_NONE``
      - The SDK chooses: device memory first, pinned host memory for what does not fit, using at
        most half of the device's memory and half of the host's available memory. It keeps that
        memory for later replays.
@@ -264,17 +263,20 @@ the SDK owns, holding its defaults, and the tool changes the flags through it:
        This needs the SDK's copy kernels for the GPU. They are built for the GPUs in
        ``GPU_TARGETS`` that the SDK's compiler supports, or for every GPU it supports from gfx8
        on when ``GPU_TARGETS`` is empty, and installed in ``share/rocprofiler-sdk/kernel-replay``.
+   * - ``SNAPSHOT_DEVICE | SNAPSHOT_HOST_PINNED``
+     - Device memory first, as above, and pinned host memory for what does not fit, as much as
+       the snapshot needs.
    * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE`` or
        ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK``
      - Not supported yet. Options that set either one are not honored.
 
-With one flag, the SDK applies no limit of its own beyond that reserve, so the tool decides whether
-the application can spare the memory. The SDK frees that memory when the replay ends, including
-memory it kept there from earlier replays, so a tool that switches flags between dispatches makes
-it allocate again. A replay limited to pinned host memory also frees device memory kept by earlier
-replays. If the snapshot does not fit in the memory allowed, or the SDK cannot honor the options
-(an unknown flag, a flag for memory it cannot use yet, or a ``size`` that does not cover
-``flags``), it warns and the dispatch runs once without replay.
+With flags set, the SDK applies no limit of its own beyond that reserve, so the tool decides
+whether the application can spare the memory. The SDK frees that memory when the replay ends,
+including memory it kept there from earlier replays, so a tool that switches flags between
+dispatches makes it allocate again. A replay limited to pinned host memory also frees device memory
+kept by earlier replays. If the snapshot does not fit in the memory allowed, or the SDK cannot honor
+the options (an unknown flag, or a flag for memory it cannot use yet), it warns and the dispatch
+runs once without replay.
 ``samples/kernel_replay/basic_client.cpp`` sets the options from ``KR_SNAPSHOT``.
 
 .. _kernel-replay-limitations:

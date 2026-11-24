@@ -84,15 +84,15 @@ typedef enum rocprofiler_kernel_replay_option_flag_t
  *    memory. The SDK leaves the application 5% of the free device memory, counting memory it kept
  *    from earlier replays as free, because the replayed kernel may need scratch. This needs the
  *    SDK's copy kernels for the GPU.
- *  - neither, or both of those: the SDK chooses, which today means device memory first and pinned
- *    host memory for what does not fit, within limits it sets for each, and keeps that memory for
- *    later replays.
+ *  - both of those: device memory first, as above, and pinned host memory for what does not fit.
+ *  - neither: the SDK chooses, which today means the same order within limits it sets for each,
+ *    and it keeps that memory for later replays.
  *
  * @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE and
  * @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK name pageable host memory and a file on disk.
  * This SDK cannot keep a snapshot in either yet, so options that set one of them are not honored.
  *
- * With one flag, the SDK sets no limit of its own on how much of that memory the snapshot uses,
+ * With flags set, the SDK sets no limit of its own on how much of that memory the snapshot uses,
  * beyond the device reserve above. It frees that memory when the replay ends, including memory it
  * kept there from earlier replays, so a tool that switches flags between dispatches makes it
  * allocate again. A replay limited to pinned host memory also frees device memory kept by earlier

@@ -145,6 +145,9 @@ add_kernel_replay_sample(kernel-replay-basic-host-pinned-snapshot basic_client.c
                          ENVIRONMENT "KR_SNAPSHOT=host-pinned")
 add_kernel_replay_sample(kernel-replay-basic-device-snapshot basic_client.cpp ENVIRONMENT
                          "KR_SNAPSHOT=device")
+add_kernel_replay_sample(
+    kernel-replay-basic-device-and-host-pinned-snapshot basic_client.cpp ENVIRONMENT
+    "KR_SNAPSHOT=device-and-host-pinned")
 add_kernel_replay_sample(kernel-replay-basic-unknown-option basic_client.cpp ENVIRONMENT
                          "KR_SNAPSHOT=unknown-flag")
 add_kernel_replay_sample(kernel-replay-counters-hash-once counters_client.cpp ENVIRONMENT

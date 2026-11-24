@@ -37,13 +37,17 @@ placement_is(const char* name)
     return placement != nullptr && std::strcmp(placement, name) == 0;
 }
 
-// KR_SNAPSHOT=host-pinned or KR_SNAPSHOT=device limits where the SDK keeps the snapshot, and
-// KR_SNAPSHOT=unknown-flag sets a flag the SDK does not know, so the dispatch runs once.
+// KR_SNAPSHOT=host-pinned, device or device-and-host-pinned limits where the SDK keeps the
+// snapshot, and KR_SNAPSHOT=unknown-flag sets a flag the SDK does not know, so the dispatch runs
+// once.
 uint64_t
 snapshot_flags()
 {
     if(placement_is("host-pinned")) return ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
     if(placement_is("device")) return ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE;
+    if(placement_is("device-and-host-pinned"))
+        return ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE |
+               ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
     if(placement_is("unknown-flag")) return uint64_t{1} << 63;
     return ROCPROFILER_KERNEL_REPLAY_OPTION_NONE;
 }

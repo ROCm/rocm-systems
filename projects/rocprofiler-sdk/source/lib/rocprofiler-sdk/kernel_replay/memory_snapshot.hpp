@@ -68,9 +68,10 @@ enum class capture_status : uint8_t
 
 enum class capture_mode : uint8_t
 {
-    automatic,
+    automatic,  // the SDK chooses: GPU first, then pinned host, within limits of its own
     force_gpu,
     force_pinned,
+    gpu_then_pinned,  // the tool allowed both: GPU first, then pinned host, without those limits
 };
 
 struct block_t
@@ -177,8 +178,8 @@ using batch_copy_fn_t = std::function<hsa_status_t(const std::vector<blit::copy_
 
 // The budgets snap(const capture_context_t&) places against. When the SDK chooses, the GPU budget
 // is at most half of the device's memory and the host budget at most half of what the host has
-// available. A forced mode drops those limits for its memory, but still leaves the application 5%
-// of the free device memory.
+// available. A mode the tool chose drops those limits, but still leaves the application 5% of the
+// free device memory.
 storage_budgets_t
 plan_budgets(const capture_context_t&);
 

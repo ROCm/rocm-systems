@@ -216,6 +216,7 @@ capture_mode_for(const rocprofiler_kernel_replay_options_t* options)
     if(options == nullptr) return capture_mode::automatic;
     if(options->flags == device_flag) return capture_mode::force_gpu;
     if(options->flags == pinned_flag) return capture_mode::force_pinned;
+    if(options->flags == (device_flag | pinned_flag)) return capture_mode::gpu_then_pinned;
     return capture_mode::automatic;
 }
 
