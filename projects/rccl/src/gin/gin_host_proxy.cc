@@ -385,6 +385,8 @@ static ncclResult_t proxyGinProcessGfd(struct ginProxyCtx* ctx, struct ginProxyH
   case ncclGinProxyOpPut:
     signalOp = mapGfdOpToSignalOp(gfd);
     if (signalOp == -1) {
+      INFO(NCCL_NET, "GIN Proxy ProcessGfd: calling iput contextId=%d targetRank=%d size=%zu srcOff=%lu dstOff=%lu",
+           hostGpuCtx->contextId, targetRank, size, srcOff, dstOff);
       // First cast from 63 bits to 64 bits and then to void * to avoid warnings
       NCCLCHECK(rmaBackend->iput(ctx->rmaCtx, hostGpuCtx->contextId, srcOff, srcHandle, size, dstOff, dstHandle,
                                  targetRank, optFlags, &outstandingOp->request));
@@ -394,6 +396,8 @@ static ncclResult_t proxyGinProcessGfd(struct ginProxyCtx* ctx, struct ginProxyH
       uint64_t signalOff =
         (gfd->qword[ncclGinProxyGfdCompletion].completion.signalId + hostGpuCtx->contextId * ctx->nSignalsPerContext) *
         sizeof(uint64_t);
+      INFO(NCCL_NET, "GIN Proxy ProcessGfd: calling iputSignal contextId=%d targetRank=%d size=%zu signalOp=%d signalVal=%lu signalOff=%lu",
+           hostGpuCtx->contextId, targetRank, size, signalOp, signalVal, signalOff);
       NCCLCHECK(rmaBackend->iputSignal(ctx->rmaCtx, hostGpuCtx->contextId, srcOff, srcHandle, size, dstOff, dstHandle,
                                        targetRank, signalOff, ctx->signalsGinHandle, signalVal, signalOp,
                                        extractIsStrongSignal(gfd), optFlags, &outstandingOp->request));
@@ -747,8 +751,18 @@ static ncclResult_t ncclGinProxyDestroyContext(void* ginCtx) {
   return ncclSuccess;
 }
 
+static uint64_t ginProxyProgressCalls = 0;
+static uint64_t ginProxyGfdsPolled = 0;
+
 static ncclResult_t ncclGinProxyProgress(void* ginCtx) {
   struct ginProxyCtx* ctx = (struct ginProxyCtx*)ginCtx;
+
+  ginProxyProgressCalls++;
+  // Log every 10000 calls to avoid spam
+  if (ginProxyProgressCalls % 10000 == 1) {
+    INFO(NCCL_NET, "GIN Proxy Progress: call #%lu, GFDs polled so far: %lu, nContexts=%d, nRanks=%d",
+         ginProxyProgressCalls, ginProxyGfdsPolled, ctx->nContexts, ctx->nRanks);
+  }
 
   for (int contextId = 0; contextId < ctx->nContexts; contextId++) {
     struct ginProxyHostGpuCtx* hostGpuCtx = ctx->hostGpuCtx + contextId;
@@ -758,6 +772,9 @@ static ncclResult_t ncclGinProxyProgress(void* ginCtx) {
         ncclGinProxyGfd_t gfd;
         struct ginProxyOutstandingOp* outstandingOp = NULL;
         if (!proxyGinPollGfd(hostGpuCtx, targetRank, &gfd, &outstandingOp)) break;
+        ginProxyGfdsPolled++;
+        INFO(NCCL_NET, "GIN Proxy: polled GFD #%lu contextId=%d targetRank=%d op=%#x",
+             ginProxyGfdsPolled, contextId, targetRank, extractOp(&gfd));
         bool isLastInBatch = (p == ctx->pollBatch - 1);
         ncclResult_t ret = proxyGinProcessGfd(ctx, hostGpuCtx, targetRank, &gfd, outstandingOp, isLastInBatch);
         if (ret) {
