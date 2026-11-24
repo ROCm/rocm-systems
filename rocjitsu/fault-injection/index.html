@@ -1773,16 +1773,17 @@
 
 <h1 id="fault-injection">Fault injection<a class="headerlink" href="#fault-injection" title="Permanent link">&para;</a></h1>
 <p>The fault-injection library creates deliberately modified AMDGPU code objects
-for experiments with synchronization failures. It runs offline on the host:
-callers supply an image, select a qualified operation, and receive a mutant
+for experiments with synchronization and LDS address failures. It runs offline
+on the host: callers supply an image, select a qualified operation, and receive a mutant
 image or a typed error. It neither initializes HSA nor dispatches GPU work.</p>
 <p>The internal C++ library and <code>rj_code_mutate</code> CLI perform the same mutation.
 ConSan is an optional consumer of the output; both the library and CLI build
 and run host tests with the ConSan compiler, runtime, and analyzer disabled.
 There is no persistent selection, manifest, or replay-bundle format.</p>
 <h2 id="architecture-and-lifetime">Architecture and lifetime<a class="headerlink" href="#architecture-and-lifetime" title="Permanent link">&para;</a></h2>
-<p>This flow shows the current complete-barrier Drop path and its shared DBI
-transaction boundary:</p>
+<p>This flow shows the complete-barrier Drop path and its shared DBI transaction
+boundary. The LDS recipe uses the same source facts and a fresh Instrumentor
+fork, with its own instruction qualification and address replacement:</p>
 <pre class="mermaid"><code>flowchart TD
     Source[Immutable source context] --&gt; Facts[Concrete decode and all-entry direct CFG ownership]
     Source --&gt; Seed[Instrumentor seed: cached full-text facts]
@@ -1794,14 +1795,15 @@ transaction boundary:</p>
     Recipe --&gt; Batch
     Batch --&gt; Transaction[Shared validation, trampoline layout and CodeObjectPatcher]
     Transaction --&gt; Mutant[Owned mutant ELF in result.image]</code></pre>
-<p><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h"><code>FaultMutationContext</code></a>
+<p><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h"><code>FaultMutationContext</code></a>
 owns one immutable copy of the input. Retain it in the input/session owner until
 all discovery, selection, and apply operations finish. One context can serve
 many requests for that original image; each apply produces an independent
 mutant. A session handling several inputs keeps a separate context for each.
 To analyze or mutate an emitted image, create a new context from its bytes.</p>
-<p>The context supplies target, section, and owner facts. It caches the fixed
-all-entry ownership analysis and per-kernel qualification once. Full-text
+<p>The context supplies target, section, and owner facts independently of any
+barrier. It caches the fixed all-entry ownership analysis; Drop separately
+caches per-kernel barrier qualification. Full-text
 structural facts belong to a retained <code>Instrumentor</code> seed: references in
 unreachable code still matter to byte editing. Each apply forks a fresh request
 batch that shares those immutable facts and repeats request-specific validation.
@@ -1809,10 +1811,14 @@ The batches have independent queues and patch attempts; they do not inherit
 previous mutations. Facts are reusable for the same immutable source and analysis
 profile, not arbitrary new roots or broader helper ownership.
 Selections expire with their source context and cannot be replayed in another
-context, even if its input bytes are identical. Their kind, owner, and barrier
-facts are value snapshots exposed through const accessors; they remain readable
-after expiry but cannot authorize another mutation. The in-process API does not
-require callers to supply a target or content digest.</p>
+context, even if its input bytes are identical. Drop selections expose kind,
+owner, and barrier snapshots; LDS selections expose kind and site snapshots.
+Those snapshots remain readable after expiry but cannot authorize a mutation.
+The in-process API does not require callers to supply a target or content digest.</p>
+<p>The common source context and admission live in <code>fault_mutation_context.{h,cpp}</code>.
+The Drop and LDS recipes live in <code>drop_barrier.{h,cpp}</code> and
+<code>lds_wrong_address.{h,cpp}</code>, respectively. Each recipe includes the common
+context header; LDS callers include <code>lds_wrong_address.h</code>.</p>
 <p>The library reuses the ISA registry and concrete decoder, <code>BasicBlock</code> and
 <code>KernelScopeSpec</code>, descriptor scanning, instruction builders, and
 <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/code_object_patcher.h"><code>CodeObjectPatcher</code></a>.
@@ -1837,6 +1843,11 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
   as the checked-edit transaction, including facts from unreachable text.
   Recipe tests verify output semantics; emission does not run a second
   FI domain validator.</li>
+<li>The LDS frontend checks a supported instruction and register allocation,
+  then uses a target-specific ISA helper, such as the
+  <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/rdna4/encoded_fields.h">RDNA4 source-preserving helper</a>
+  to change only its encoded address field. It sends the complete replacement
+  through the same transaction; the helper does not choose a fault or a register.</li>
 <li><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.cpp"><code>Instrumentor</code></a>
   owns both replacement transactions and observational instrumentation. Each
   selected barrier member becomes a branch to an appended cave containing
@@ -1866,14 +1877,19 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 <td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h"><code>StaticBarrier</code> / family policy</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp">qualification</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/analysis/static_barriers_test.cpp">analysis regressions</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/drop_barrier_test.cpp">Drop regressions</a></td>
 </tr>
 <tr>
+<td>LDS wrong address</td>
+<td>Implemented for gfx1200/gfx1201 wave32/wave64 <code>ds_store_b32</code>/<code>ds_load_b32</code>, gfx942/gfx950 wave64 <code>ds_write_b32</code>/<code>ds_write_b128</code>, and gfx1250 wave32 <code>ds_store_b32</code>/<code>ds_load_b32</code> in the direct, independently owned CFG profile. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR. Other LDS forms and targets remain follow-up work.</td>
+<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h">LDS API</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_wrong_address_test.cpp">library tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_cli_test.cpp">CLI tests</a></td>
+</tr>
+<tr>
 <td>Exact and logical-ordinal selection</td>
-<td>Implemented. Exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Default ordinal zero deterministically chooses the first barrier in first-member source order; there is no race ranking or legacy physical-index adapter.</td>
-<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h"><code>DropBarrierSelector</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp"><code>select_drop_barrier</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/drop_barrier_test.cpp">selection regressions</a></td>
+<td>An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction by source offset. There is no race ranking or legacy physical-index adapter.</td>
+<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h"><code>DropBarrierSelector</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp"><code>select_drop_barrier</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h"><code>LdsSelector</code></a> and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp"><code>select_lds_wrong_address</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/drop_barrier_test.cpp">selection regressions</a></td>
 </tr>
 <tr>
 <td>Multiple kernels in one text section</td>
 <td>Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected.</td>
-<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h"><code>FaultMutationContext</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp">ownership analysis</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/drop_barrier_test.cpp">sibling preservation tests</a></td>
+<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h"><code>FaultMutationContext</code></a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp">ownership analysis</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/drop_barrier_test.cpp">sibling preservation tests</a></td>
 </tr>
 <tr>
 <td>Shared DBI instruction replacement</td>
@@ -1882,7 +1898,7 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 </tr>
 <tr>
 <td>Offline CLI</td>
-<td>Implemented: list current-input sites and emit one complete Drop using the same selector and library.</td>
+<td>Lists current-input sites and emits one complete Drop or one supported LDS address mutation using the same library.</td>
 <td><a href="#command-line-usage">usage</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tools/rj_code_mutate.cpp">frontend</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">integration tests</a></td>
 </tr>
 <tr>
@@ -1897,7 +1913,7 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 </tr>
 <tr>
 <td>Other mutation recipes and composition</td>
-<td>Planned. Barrier movement, address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here.</td>
+<td>Planned. Barrier movement, other address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here.</td>
 <td>—</td>
 </tr>
 <tr>
@@ -1994,6 +2010,14 @@ targets and ten target/wave combinations:</p>
 </tr>
 </tbody>
 </table>
+<p>The table above describes Drop only. <code>lds_wrong_address_capabilities()</code> separately
+reports linked LDS profiles: gfx1200/gfx1201 wave32/wave64 <code>ds_store_b32</code>/<code>ds_load_b32</code>,
+gfx942/gfx950 wave64 <code>ds_write_b32</code>/<code>ds_write_b128</code>, and gfx1250 wave32
+<code>ds_store_b32</code>/<code>ds_load_b32</code>, restricted to independently owned direct CFGs.
+CDNA GDS encodings are excluded; the ACC data selector is preserved.
+A target is omitted if its decoder or binding is not linked. Other targets,
+waves, and DS forms are not advertised by this recipe; the Drop table does not
+imply LDS support.</p>
 <p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/drop_barrier_test.cpp">host regression matrix</a> covers
 discovery, exact/ordinal selection, emission, concrete decoding, and preservation
 for these rows. RDNA3 has its own instruction encodings and descriptor-selected
@@ -2023,7 +2047,8 @@ and cross-block pairs are outside this profile. This compiler-shape limitation
 comes from source inspection; it does not qualify physical GPU execution.</p>
 <p>These are host transformation capabilities. Neither the listing nor a successful
 mutation establishes GPU execution or detector qualification.
-<code>DropBarrierResult</code> leaves those evidence states <code>Unverified</code>. A removed barrier
+<code>DropBarrierResult</code> leaves those evidence states <code>Unverified</code>; <code>LdsResult</code> does
+not itself contain execution or detector evidence fields. A removed barrier
 may be redundant, unreachable in a particular run, or insufficient to cause a
 race; successful execution alone also does not establish a detector finding.</p>
 <h2 id="current-limits">Current limits<a class="headerlink" href="#current-limits" title="Permanent link">&para;</a></h2>
@@ -2052,8 +2077,19 @@ text. Non-aliasing unselected sections are preserved; their executable flag alon
 does not imply another text section. Additional allocated executable sections
 must decode completely and satisfy the shared source checks before discovery
 can return an inventory. Detailed admission and diagnostics are in
-the <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp">frontend</a>
+the <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp">source context</a>
 and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h">shared Instrumentor contract</a>.</p>
+<p>The LDS inventory contains complete, reachable instructions of the admitted forms in
+the kernel; clause members are not advertised. It does not require a
+barrier or successful Drop qualification. The replacement register must be
+explicit, representable in the eight-bit encoded address field, different from
+the original, and inside the entry descriptor's allocated ordinary VGPR window.
+For CDNA3/4 this window ends at the accumulator allocation base when that base
+is below the total allocation. These checks do not prove that the register has
+been initialized or holds a valid LDS address at runtime: the caller must arrange
+both. Static mutation affects every
+execution of the selected instruction. Other target/wave/form and shared-owner
+profiles remain follow-up work.</p>
 <p>Barrier qualification is all-or-nothing for a kernel's analyzed reachable
 scope: an unsupported form or incomplete barrier rejects that kernel's entire
 inventory, even when other complete barriers are present. This is the current
@@ -2157,14 +2193,62 @@ emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span>--help
 emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span>--capabilities
 </code></pre></div>
 <p>List complete logical barriers for one exact kernel entry, then create a new
-mutant file:</p>
+mutant file. <code>DropBarrier</code> is the default kind:</p>
 <div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--list
 emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>DropBarrier<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--ordinal<span class="w"> </span><span class="m">0</span><span class="w"> </span>--output<span class="w"> </span>mutant.hsaco
 </code></pre></div>
-<p>For a <code>gfx1250</code> mutant that meets ConSan's native LDS admission, fresh
+<p>The <code>--address-vgpr</code> argument is the encoded 8-bit selector, not a physical VGPR
+number. Listing reports <code>address_bank</code>; for gfx1250, allocation is checked for
+<code>256 * address_bank + address-vgpr</code>. The caller must initialize that full VGPR
+with the intended runtime address: bank 1 with selector 6 reads v262, so initialize
+v262. The mutation preserves the bank and does not initialize register values.</p>
+<p>To list the supported LDS instructions in a gfx1200 or gfx1201 wave32 or wave64 kernel and mutate one,
+choose an address register whose runtime value the caller has initialized. Here
+<code>v6</code> is an example only: it must differ from the selected instruction's address
+register and fall within the kernel descriptor's allocated VGPR window.</p>
+<div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>LdsWrongAddress<span class="w"> </span>--list
+emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>LdsWrongAddress<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ordinal<span class="w"> </span><span class="m">0</span><span class="w"> </span>--address-vgpr<span class="w"> </span><span class="m">6</span><span class="w"> </span>--output<span class="w"> </span>lds-mutant.hsaco
+</code></pre></div>
+<p>Alternatively, copy an <code>exact</code> offset from that listing into <code>lds_exact</code> and
+use it in place of the ordinal. An invalid exact offset never falls back:</p>
+<div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>LdsWrongAddress<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--exact<span class="w"> </span><span class="s2">"</span><span class="nv">$lds_exact</span><span class="s2">"</span><span class="w"> </span>--address-vgpr<span class="w"> </span><span class="m">6</span><span class="w"> </span>--output<span class="w"> </span>lds-exact-mutant.hsaco
+</code></pre></div>
+<p>The equivalent library flow retains the context for discovery, selection, and
+application. Handle the returned typed error at each failure; on success,
+<code>result.value().image</code> owns the mutant ELF:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"rocjitsu/code/patch/fault_injection/lds_wrong_address.h"</span>
+
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">rocjitsu</span><span class="p">;</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">mutate_lds</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="o">&lt;</span><span class="k">const</span><span class="w"> </span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">image</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">FaultMutationContext</span><span class="w"> </span><span class="n">context</span><span class="p">(</span><span class="n">image</span><span class="p">);</span>
+<span class="w">  </span><span class="n">FaultMutationError</span><span class="w"> </span><span class="n">error</span><span class="p">;</span>
+<span class="w">  </span><span class="n">FailureOr</span><span class="o">&lt;</span><span class="n">LdsInventory</span><span class="o">&gt;</span><span class="w"> </span><span class="n">inventory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">discover_lds_wrong_address</span><span class="p">(</span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="s">"my_kernel"</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">);</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">inventory</span><span class="p">.</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// Handle error.</span>
+<span class="w">  </span><span class="n">LdsSelector</span><span class="w"> </span><span class="n">selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{.</span><span class="n">exact</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">nullopt</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">ordinal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">};</span>
+<span class="w">  </span><span class="n">FailureOr</span><span class="o">&lt;</span><span class="n">LdsSelection</span><span class="o">&gt;</span><span class="w"> </span><span class="n">selection</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">select_lds_wrong_address</span><span class="p">(</span><span class="n">inventory</span><span class="p">.</span><span class="n">value</span><span class="p">(),</span><span class="w"> </span><span class="n">selector</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">);</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">selection</span><span class="p">.</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// Handle error.</span>
+<span class="w">  </span><span class="n">FailureOr</span><span class="o">&lt;</span><span class="n">LdsResult</span><span class="o">&gt;</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">apply_lds_wrong_address</span><span class="p">(</span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">selection</span><span class="p">.</span><span class="n">value</span><span class="p">(),</span><span class="w"> </span><span class="mi">6u</span><span class="p">,</span><span class="w"> </span><span class="n">error</span><span class="p">);</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">result</span><span class="p">.</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// Handle error, including an unallocated or unchanged v6.</span>
+<span class="w">  </span><span class="c1">// Consume result.value().image before leaving this example.</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>To select an exact library handle instead, put a previously obtained
+<code>LdsSelection</code> in <code>LdsSelector::exact</code> and call <code>select_lds_wrong_address</code> on
+an inventory from the same context and entry. Exact takes precedence over the
+ordinal; a foreign or expired handle fails without fallback.</p>
+<p>For a <code>gfx1250</code> Drop mutant that meets ConSan's native LDS admission, fresh
 preparation consumes <code>mutant.hsaco</code> as its new original image:</p>
 <div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_consan_prepare<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>mutant.hsaco<span class="w"> </span>gfx1250<span class="w"> </span>my_kernel<span class="w"> </span>mutant-artifact
@@ -2175,18 +2259,21 @@ See the <a href="../consan/#fault-injection">ConSan mutation workflow</a> for fr
 and capture bindings and links to the existing execution/analysis steps.</p>
 <p><code>--kernel</code> requires the exact descriptor-derived spelling. After shared image
 analysis succeeds, an unknown name reports the descriptor entries in its
-diagnostic. Those names do not promise that each entry passes barrier
-qualification.</p>
-<p><code>DropBarrier</code> is currently the only kind and is also the default. Each listing
-line includes the zero-based logical <code>ordinal</code>, <code>exact</code> first-member byte offset
-relative to <code>.text</code>, concrete target, section index, form, ID, scope, and ordered
-<code>members=offset:size,...</code>. A singleton has one member; a split pair has two.
-Coordinates describe only this input and exact entry. They are not reusable
-handles for another image or legacy physical instruction indices.</p>
-<p>Emission redirects each selected member through a NOP trampoline. The mutant's
-text and ELF layout can grow, and descriptor-relative entry fields can change.
-Reparse the output and list its sites again before selecting another mutation.</p>
-<p>Discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
+diagnostic. Those names do not promise that each entry passes the selected
+recipe's qualification.</p>
+<p>For <code>DropBarrier</code>, each listing line includes the zero-based logical <code>ordinal</code>,
+<code>exact</code> first-member byte offset relative to <code>.text</code>, concrete target, section
+index, form, ID, scope, and ordered <code>members=offset:size,...</code>. A singleton has
+one member; a split pair has two. <code>LdsWrongAddress</code> listing lines contain
+<code>ordinal</code>, the instruction's <code>.text</code>-relative <code>exact</code> byte offset, its original
+<code>address_vgpr</code>, <code>address_bank</code>, target, and form. Coordinates describe only this input and exact entry;
+they are not reusable handles for another image or legacy physical indices.</p>
+<p>Drop emission redirects each selected member through a NOP trampoline. LDS
+emission redirects the selected instruction through a trampoline containing the
+replacement instruction. The mutant's text and ELF layout can grow, and
+descriptor-relative entry fields can change. Reparse the output and list its
+sites again before selecting another mutation.</p>
+<p>Drop discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
 instead of assigning them a logical ordinal, including when an admitted user
 barrier follows them. CDNA5 cluster ID -3 remains admitted subject to the
 dispatch assumptions described above; listing or mutation does not establish
@@ -2194,10 +2281,11 @@ that cluster semantics are active.</p>
 <p>Use <code>--exact TEXT-OFFSET</code> to resolve that coordinate into a context-bound library
 selection. Exact takes precedence over <code>--ordinal</code>, including an out-of-range
 ordinal; invalid exact requests fail without fallback. Without either selector,
-ordinal zero selects the first complete barrier. Numbers accept unsigned decimal
-or <code>0x</code> hexadecimal. <code>--target gfx1250</code>, if supplied, asserts the parsed identity
-and never selects a different decoder. Input ABI and wave admission are the
-library's shared DBI checks, without another CLI version gate.</p>
+ordinal zero selects the first complete barrier or supported LDS instruction in
+source order. Numbers accept unsigned decimal or <code>0x</code> hexadecimal.
+<code>--target gfx1250</code>, if supplied, asserts the parsed identity and never selects a
+different decoder. Input ABI and wave admission are the library's shared DBI
+checks, without another CLI version gate.</p>
 <p>The input must be a regular extracted code-object file of 1 through 256 MiB.
 The CLI refuses host executables, bundles, archives, relocatable objects, and
 other inputs rejected by the library. Output creation is exclusive: existing
@@ -2224,24 +2312,27 @@ location is present, so those diagnostic prefixes omit the numeric field.
 An invalid <code>--exact</code> request has an explicitly known coordinate and reports
 <code>code=InvalidParameters offset=N</code>, including when the requested <code>.text</code> byte
 coordinate is zero. Such requests never fall back to an ordinal.</p>
-<p>Successful mutation prints the kind, concrete target, exact coordinate,
-logical/member counts and output byte count to stdout. It also prints each
-returned library assumption to stderr, prefixed by <code>rj_code_mutate: assumption:</code>,
-including convergence and execution-qualification limits and the clustered
-dispatch requirement when applicable. Failure to write these assumptions
-returns status 3 before printing a success summary. The CLI emits only the
-mutant file and does not load HSA or a capture plugin. Mutation success and the
-capability listing make no execution or detector qualification claim.</p>
-<p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">CLI tests</a> exercise all ten
-rows above using the built executable, compare library and CLI bytes, decode
-selected members independently, reparse the mutant and check unchanged bytes,
-sibling kernels, deterministic repeat output and rejection/I/O paths. The
+<p>Successful mutation prints the kind, concrete target, exact coordinate, logical
+count and output byte count to stdout. Drop also reports the member count and
+prints returned library assumptions to stderr, prefixed by
+<code>rj_code_mutate: assumption:</code>. These include convergence and execution limits
+and the clustered dispatch requirement when applicable. Failure to write Drop
+assumptions returns status 3 before printing a success summary. LDS reports its
+replacement <code>address_vgpr</code>; its runtime preconditions are described above. The
+CLI emits only the mutant file and does not load HSA or a capture plugin.
+Mutation success and the capability listing make no execution or detector
+qualification claim.</p>
+<p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">Drop CLI tests</a> exercise
+all ten Drop rows above using the built executable. The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_cli_test.cpp">LDS CLI tests</a>
+cover the bounded LDS profile. These tests compare library and CLI bytes, decode
+selected instructions, reparse mutants and check preservation and rejection
+paths; the Drop tests also cover sibling kernels and I/O paths. The
 symbol-boundary test checks the actual executable for runtime and execution
 provider dependencies. To run the focused suites:</p>
 <div class="highlight"><pre><span></span><code>ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--show-only<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'</span>
 ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--output-on-failure<span class="w"> </span>--no-tests<span class="o">=</span>error<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'</span>
 </code></pre></div>
 
 
