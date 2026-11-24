@@ -1281,6 +1281,11 @@ TEST_P(ConSanTargetSim, AtomicU64PropagatesCarryAndConflictsWithTheUpperDword) {
   ASSERT_NO_FATAL_FAILURE(check_atomic_peers("u64", 8));
 }
 
+TEST_P(ConSanTargetSim, AtomicF32PerformsFloatingPointAddition) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("f32", 4, {0x40200000u, 0x40200000u}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f32", 4));
+}
+
 class NativeWidthIssueCounter final : public ExecutionPlugin {
 public:
   explicit NativeWidthIssueCounter(std::vector<std::array<unsigned, 2>> &counts)

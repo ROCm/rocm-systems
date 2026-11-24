@@ -59,7 +59,7 @@ CASES = (
     ),
     *(
         f'atomic_{form}_{peer}'
-        for form in ('u32', 'u64')
+        for form in ('u32', 'u64', 'f32')
         for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
     ),
     'wide_u8',

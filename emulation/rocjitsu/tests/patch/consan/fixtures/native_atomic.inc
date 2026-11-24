@@ -6,6 +6,11 @@
 #define SIZE 8
 #define SEED DS_STORE_B64 v3, v[4:5] offset:8
 #define READ_RESULT DS_LOAD_B64 v[8:9], v3 offset:8
+#elif defined(ATOMIC_F32)
+#define ADD ds_add_f32 v3, v7 offset:4
+#define SIZE 4
+#define SEED DS_STORE_B32 v3, v4 offset:4
+#define READ_RESULT DS_LOAD_B32 v8, v3 offset:4
 #else
 #define ADD ds_add_u32 v3, v7 offset:4
 #define SIZE 4
@@ -24,11 +29,14 @@
   v_mov_b32 v5, 3
   v_mov_b32 v8, 1
   v_mov_b32 v9, 0
+#elif defined(ATOMIC_F32)
+  v_mov_b32 v4, 0x3fc00000  // 1.5f
+  v_mov_b32 v7, 0x3f000000  // 0.5f
 #else
   v_mov_b32 v7, 1
 #endif
 #ifdef ATOMIC_COUNT
-  // Seed and read one value per wave. Two high lanes each add one to it.
+  // Seed and read one value per wave. Two high lanes each apply one update.
 #if SIZE == 8
   v_lshlrev_b32 v3, 4, v6
 #else

@@ -177,7 +177,7 @@ foreach(
             list(APPEND _target_fixtures ${_image})
         endforeach()
         set(_atomic_specs)
-        foreach(_form IN ITEMS u32 u64)
+        foreach(_form IN ITEMS u32 u64 f32)
             string(TOUPPER "${_form}" _form_define)
             foreach(
                 _scenario
