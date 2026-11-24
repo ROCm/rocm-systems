@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/consan/analysis/lds_race.h"
+#include "util/diagnostic.h"
 
 namespace rocjitsu::consan {
 
@@ -29,7 +30,7 @@ struct AnalysisOptions {
 /// are reported separately. Zero findings is never a race-free verdict.
 [[nodiscard]] FailureOr<LdsRaceResult> analyze_capture(const Capture &capture,
                                                        const AnalysisOptions &options = {},
-                                                       ContractError *error = nullptr);
+                                                       util::DiagnosticEmitter diagnostic = {});
 
 /// @brief Query observed findings without exposing check-specific counters to callers.
 [[nodiscard]] bool has_findings(const LdsRaceResult &result);

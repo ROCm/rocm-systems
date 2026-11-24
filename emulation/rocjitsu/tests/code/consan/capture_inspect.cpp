@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/consan/capture.h"
 #include "rocjitsu/code/consan/encoding.h"
+#include "util/diagnostic.h"
 
 #include <fstream>
 #include <iostream>
@@ -20,10 +21,10 @@ int main(int argc, char **argv) {
   file.read(reinterpret_cast<char *>(bytes.data()), bytes.size());
   if (!file)
     return 2;
-  ContractError error;
-  const FailureOr<Capture> captured = decode_capture(bytes, &error);
+  util::StringDiagnostic error;
+  const FailureOr<Capture> captured = decode_capture(bytes, error.emitter());
   if (captured.failed()) {
-    std::cerr << "capture input error: " << error.message << '\n';
+    std::cerr << "capture input error: " << error.message() << '\n';
     return 2;
   }
   const Capture &capture = captured.value();

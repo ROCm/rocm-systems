@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/diagnostic.h"
 #include "util/utf8.h"
 
 #include <algorithm>
@@ -75,9 +76,9 @@ Result finish_manifest(const InputProgram &program, PreparedArtifact &artifact, 
                     .prepared_vgprs = vgprs,
                     .maximum_workgroup_size = program.maximum_workgroup_size,
                     .workgroup_id_scalar = workgroup_id_scalar(program)};
-  ContractError contract_error;
-  if (validate_manifest(manifest, &contract_error).failed())
-    return reject(error, "invalid lowered facts: " + contract_error.message);
+  util::StringDiagnostic diagnostic;
+  if (validate_manifest(manifest, diagnostic.emitter()).failed())
+    return reject(error, "invalid lowered facts: " + diagnostic.message());
   return Result::success();
 }
 
@@ -209,9 +210,10 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
 Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifact &artifact,
                          InputError &error) {
   // Shared framing, executable mapping and resource checks precede decoding.
-  ContractError contract_error;
-  if (verify_artifact_images(artifact.manifest, original, artifact.image, &contract_error).failed())
-    return reject(error, contract_error.message);
+  util::StringDiagnostic diagnostic;
+  if (verify_artifact_images(artifact.manifest, original, artifact.image, diagnostic.emitter())
+          .failed())
+    return reject(error, diagnostic.message());
   const TargetProfile *target = target_profile(artifact.manifest.target);
   const rocjitsu::IsaFamily arch = target->arch;
   const FailureOr<InputProgram> program =

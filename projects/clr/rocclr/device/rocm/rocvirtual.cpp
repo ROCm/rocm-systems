@@ -900,7 +900,11 @@ void VirtualGPU::RetiringSignalTracker::PreparePooledSignals(
 
 // ================================================================================================
 bool VirtualGPU::RetiringSignalTracker::IsRetired(const ProfilingSignal* signal) const {
+  // A stream synchronize waits on the command's signal outside the tracker and only records the
+  // completion in use_completion_
   return signal->use_retired_ ||
+         (signal->use_completion_.load(std::memory_order_acquire) &
+          ProfilingSignal::kUseCompleteBit) != 0 ||
          (signal->use_aql_slot_ != kInvalidAqlSlot && signal->use_queue_gen_ == queue_gen_ &&
           signal->use_aql_slot_ < retired_below_);
 }
@@ -1016,12 +1020,12 @@ ProfilingSignal* VirtualGPU::RetiringSignalTracker::TakeHostSignal() {
 }
 
 // ================================================================================================
-void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool timing_only) {
+void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool host_memory) {
   ProfilingSignal* current = signal_list_[current_id_];
-  if (current->in_device_memory_ != timing_only) {
+  if (current->in_device_memory_ != host_memory) {
     return;
   }
-  ProfilingSignal* replacement = timing_only ? TakeHostSignal() : TakeSpare();
+  ProfilingSignal* replacement = host_memory ? TakeHostSignal() : TakeSpare();
   if (replacement == nullptr) {
     return;
   }
@@ -1030,7 +1034,7 @@ void VirtualGPU::RetiringSignalTracker::PlaceForUse(bool timing_only) {
     spare_signals_.push_back(replacement);
     return;
   }
-  (timing_only ? spare_signals_ : host_signals_).push_back(current);
+  (host_memory ? spare_signals_ : host_signals_).push_back(current);
   signal_list_[current_id_] = replacement;
 }
 
@@ -1336,7 +1340,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     }
   }
   if (!use_irq) {
-    PlaceForUse(timing_only);
+    // An SDMA submission reads and flushes a device-memory signal across the bus
+    PlaceForUse(timing_only || IsSdmaEngine(engine_));
   }
   ProfilingSignal* prof_signal = signal_list_[current_id_];
   const bool blocking_callback = enqueHandler && ts->command().Callback() != nullptr &&
@@ -6625,6 +6630,7 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
 
   // Wait without the execution() lock. The marker holds a reference to the signal,
   // so the tracker can't reuse it in the meantime
+  const uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
   WaitForSignal(signal->signal_, ActiveWait(), /*yield=*/false, signal->in_device_memory_);
 
   // The wait returns early, with the signal not completed normally, if the device is in an error
@@ -6633,6 +6639,8 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
   // threads waiting for its commands would hang. The state is checked directly: a signal in device
   // memory costs a PCIe read.
   if (!(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
+    // Lets the tracker leave this use out of later waits without reading the signal
+    signal->MarkUseComplete(completion);
     std::scoped_lock lock(execution());
     Barriers().ProcessSignalTiming(signal);
     // Kernel arguments and memory dependencies can be released only if the wait covered all
