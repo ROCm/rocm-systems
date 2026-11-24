@@ -539,7 +539,8 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     // multiple of 32B ncclIbSendFifoCtsInline elements and hence
     // effectively inline handling will be disabled. So limit the
     // max_inline_data to single request size.
-    qpInitAttr.cap.max_inline_data = IbCastAinicCtsInlineData ? sizeof(struct ncclIbSendFifoCtsInline) : 0;
+    // Always enable at least 8 bytes of inline for GIN signal WRITEs on AINIC.
+    qpInitAttr.cap.max_inline_data = IbCastAinicCtsInlineData ? sizeof(struct ncclIbSendFifoCtsInline) : sizeof(uint64_t);
   }
   qpInitAttr.sq_sig_all |= (1 << 16);
   if (createQpAttrs->isDataQp) {

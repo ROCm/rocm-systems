@@ -853,15 +853,20 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
       cumulativeValue = signalMap[signalAddr];
     }
 
-    // Use ring buffer slot to avoid overwriting values before NIC reads them
+    // Use a scratchpad slot for the signal value. With IBV_SEND_INLINE, the data is
+    // copied into the WQE at post time, so slot reuse is safe even before NIC reads it.
     int scratchpadIdx = comm->putSignalScratchpadIdx;
     comm->putSignalScratchpadIdx = (scratchpadIdx + 1) % ncclIbSendComm::kPutSignalScratchpadSlots;
     comm->putSignalScratchpads[scratchpadIdx] = cumulativeValue;
 
     wr[1].opcode = IBV_WR_RDMA_WRITE;
-    wr[1].send_flags = IBV_SEND_SIGNALED;
-    // For strong signals with data, use fence to ensure data lands before signal
-    if (isStrongSignal && postData) {
+    // Use inline data: the 8-byte signal value is copied into the WQE at post time,
+    // eliminating the race between posting and NIC reading from the scratchpad.
+    wr[1].send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+    // On AINIC, always fence data+signal to ensure data lands before signal.
+    // Without fence, the signal WRITE can complete before data WRITEs land,
+    // causing the receiver to see "data ready" before data is actually there.
+    if (postData) {
       wr[1].send_flags |= IBV_SEND_FENCE;
     }
     wr[1].wr_id = req - comm->base.reqs;
@@ -871,9 +876,10 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
     wr[1].sg_list = &signalSge;
     wr[1].num_sge = 1;
 
+    // For inline data, the lkey is ignored but addr/length must point to valid data
     signalSge.addr = (uintptr_t)&comm->putSignalScratchpads[scratchpadIdx];
     signalSge.length = sizeof(comm->putSignalScratchpads[0]);
-    signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
+    signalSge.lkey = 0;  // Not used for inline
   } else {
     // Standard RDMA atomic-based signaling
     // Use ring buffer slot for the atomic result (even though result is typically ignored)
