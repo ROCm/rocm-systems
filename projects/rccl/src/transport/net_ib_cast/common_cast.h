@@ -753,7 +753,11 @@ struct ncclIbSendComm {
   int sendReqsCnt[NET_IB_MAX_REQUESTS];
   struct ncclIbRemCompletionsRecords remCmplsRecords;
   int ar; // Use adaptive routing when all merged devices have it enabled
-  uint64_t putSignalScratchpad;
+  // Ring buffer of scratchpads for AINIC WRITE-based signaling.
+  // Each in-flight RDMA WRITE needs its own slot to avoid overwriting values before NIC reads them.
+  static constexpr int kPutSignalScratchpadSlots = 64;
+  uint64_t putSignalScratchpads[kPutSignalScratchpadSlots];
+  int putSignalScratchpadIdx;
   bool useCtsOffload;
   int telChId; // Telemetry: NCCL channel ID for this communicator
   // Resolved slot for telChId on this comm's first device (NULL if untracked).

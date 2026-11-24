@@ -1603,9 +1603,9 @@ ib_recv_dev_list:
     devInfo->lid = ibDev->portAttr.lid;
     devInfo->ibv_dev_index = commDev->base.ibDevN;
 
-    // Prepare GIN Put Signal scratchpad (for RDMA Atomic result)
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->putSignalScratchpadMr, commDev->base.pd, &comm->putSignalScratchpad,
-                                  sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE),
+    // Prepare GIN Put Signal scratchpad ring buffer (for RDMA WRITE-based signaling on AINIC)
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->putSignalScratchpadMr, commDev->base.pd, comm->putSignalScratchpads,
+                                  sizeof(comm->putSignalScratchpads), IBV_ACCESS_LOCAL_WRITE),
                   ret, fail);
 
     // Prepare my CTS FIFO

@@ -853,7 +853,10 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
       cumulativeValue = signalMap[signalAddr];
     }
 
-    comm->putSignalScratchpad = cumulativeValue;
+    // Use ring buffer slot to avoid overwriting values before NIC reads them
+    int scratchpadIdx = comm->putSignalScratchpadIdx;
+    comm->putSignalScratchpadIdx = (scratchpadIdx + 1) % ncclIbSendComm::kPutSignalScratchpadSlots;
+    comm->putSignalScratchpads[scratchpadIdx] = cumulativeValue;
 
     wr[1].opcode = IBV_WR_RDMA_WRITE;
     wr[1].send_flags = IBV_SEND_SIGNALED;
@@ -868,11 +871,15 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
     wr[1].sg_list = &signalSge;
     wr[1].num_sge = 1;
 
-    signalSge.addr = (uintptr_t)&comm->putSignalScratchpad;
-    signalSge.length = sizeof(comm->putSignalScratchpad);
+    signalSge.addr = (uintptr_t)&comm->putSignalScratchpads[scratchpadIdx];
+    signalSge.length = sizeof(comm->putSignalScratchpads[0]);
     signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
   } else {
     // Standard RDMA atomic-based signaling
+    // Use ring buffer slot for the atomic result (even though result is typically ignored)
+    int scratchpadIdx = comm->putSignalScratchpadIdx;
+    comm->putSignalScratchpadIdx = (scratchpadIdx + 1) % ncclIbSendComm::kPutSignalScratchpadSlots;
+
     wr[1].opcode = IBV_WR_ATOMIC_FETCH_AND_ADD;
     wr[1].send_flags = IBV_SEND_SIGNALED;
     wr[1].wr_id = req - comm->base.reqs;  // used for matching completions with request
@@ -883,8 +890,8 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
     wr[1].sg_list = &signalSge;
     wr[1].num_sge = 1;
 
-    signalSge.addr = (uintptr_t)&comm->putSignalScratchpad;
-    signalSge.length = sizeof(comm->putSignalScratchpad);
+    signalSge.addr = (uintptr_t)&comm->putSignalScratchpads[scratchpadIdx];
+    signalSge.length = sizeof(comm->putSignalScratchpads[0]);
     signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
   }
 

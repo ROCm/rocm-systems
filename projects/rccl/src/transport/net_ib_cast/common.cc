@@ -118,6 +118,7 @@ ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm) {
   sendComm->ainicSignalCounters = nullptr;
   sendComm->ainicSignalCountersSize = 0;
   sendComm->ainicSignalMap = nullptr;
+  sendComm->putSignalScratchpadIdx = 0;
   return ncclSuccess;
 }
 
