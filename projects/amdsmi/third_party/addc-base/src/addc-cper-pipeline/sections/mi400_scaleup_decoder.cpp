@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "addc/pipeline/mi450_scaleup_decoder.hpp"
+#include "addc/pipeline/mi400_scaleup_decoder.hpp"
 
 #include "addc-common/base64.hpp"
 #include "addc/common.hpp"
@@ -12,37 +12,14 @@ namespace addc::pipeline
 namespace
 {
 
-[[nodiscard]] std::string_view contextTypeName(uint16_t context_type)
-{
-    switch (context_type)
-    {
-        case 1U:
-            return "UALoE Event";
-        case 2U:
-            return "UALoE Telemetry";
-        default:
-            return "Unknown";
-    }
-}
-
-[[nodiscard]] std::string_view eventClass(uint16_t context_type)
-{
-    switch (context_type)
-    {
-        case 1U:
-            return "scaleup_event";
-        case 2U:
-            return "scaleup_telemetry";
-        default:
-            return "scaleup_context";
-    }
-}
+constexpr uint16_t kUaloeEvent = 1U;
+constexpr uint16_t kUaloeTelemetry = 2U;
 
 } // namespace
 
-std::vector<PipelineEvent> decode_mi450_scaleup(
+std::vector<PipelineEvent> decode_mi400_scaleup(
     [[maybe_unused]] const SectionDescriptor& descriptor,
-    const AmdMi450ScaleUpSection& s, const DecodeContext& context,
+    const AmdMi400ScaleUpSection& s, const DecodeContext& context,
     [[maybe_unused]] std::string* error_out)
 {
     const bool has_ei = !s.error_info_structures.empty();
@@ -52,12 +29,22 @@ std::vector<PipelineEvent> decode_mi450_scaleup(
     for (std::size_t ci = 0U; ci < s.contexts.size(); ++ci)
     {
         const ScaleUpContext& sc = s.contexts[ci];
+        if (sc.context_type != kUaloeEvent &&
+            sc.context_type != kUaloeTelemetry)
+        {
+            continue;
+        }
+        const bool is_event = sc.context_type == kUaloeEvent;
 
         PipelineEvent ev;
         ev.metadata = gpu::make_gpu_metadata(
-            s, context, ci, contextTypeName(sc.context_type),
-            eventClass(sc.context_type), events.size());
+            s, context, ci, is_event ? "UALoE Event" : "UALoE Telemetry",
+            is_event ? "scaleup_event" : "scaleup_telemetry", events.size());
         ev.platform = gpu::make_gpu_platform(s, has_ei, ei);
+        if (auto& gpu = ev.platform["gpu"]; gpu.is_object())
+        {
+            gpu.erase("redfish_event_log_timestamp");
+        }
         // Base reports the structure only; the buffer is not interpreted.
         ev.event_report = {
             {"relative_to_err", nullptr},
@@ -65,7 +52,14 @@ std::vector<PipelineEvent> decode_mi450_scaleup(
             {"details", nullptr},
         };
         ev.data_array["raw_data"] = addc::detail::base64_encode(sc.raw_data);
-        ev.firmware = gpu::make_mi450_firmware_json(s);
+        ev.firmware = gpu::make_mi400_firmware_json(s);
+        if (ev.firmware.is_object() || !s.event_data_format_version.empty())
+        {
+            ev.firmware["event_data_format_version"] =
+                s.event_data_format_version.empty()
+                    ? nlohmann::ordered_json(nullptr)
+                    : nlohmann::ordered_json(s.event_data_format_version);
+        }
         ev.validation["struct"] = true;
         ev.validation["bank"] = false;
         ev.validation["corrupted"] = nullptr;

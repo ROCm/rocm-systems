@@ -12,7 +12,7 @@
 namespace addc::mca::detail
 {
 
-inline std::optional<uint32_t> mi450_bank_base_afid(uint16_t hw_id,
+inline std::optional<uint32_t> mi400_bank_base_afid(uint16_t hw_id,
                                                     uint16_t mca_type) noexcept
 {
     switch (hw_id)
@@ -82,7 +82,7 @@ inline std::optional<uint32_t> mi450_bank_base_afid(uint16_t hw_id,
             return mca_type == 0x0 ? std::optional<uint32_t>{43585u}
                                    : std::nullopt;
         case 0x80:
-            return mca_type == 0x0 ? std::optional<uint32_t>{43842u}
+            return mca_type == 0x0 ? std::optional<uint32_t>{43841u}
                                    : std::nullopt;
         case 0xdd:
             return mca_type == 0x0 ? std::optional<uint32_t>{46465u}
@@ -94,7 +94,7 @@ inline std::optional<uint32_t> mi450_bank_base_afid(uint16_t hw_id,
             return mca_type == 0x0 ? std::optional<uint32_t>{44353u}
                                    : std::nullopt;
         case 0x27:
-            return mca_type == 0x0 ? std::optional<uint32_t>{44613u}
+            return mca_type == 0x0 ? std::optional<uint32_t>{44609u}
                                    : std::nullopt;
         case 0x1e1:
             return mca_type == 0x0 ? std::optional<uint32_t>{44865u}
@@ -119,10 +119,10 @@ inline std::optional<uint32_t> mi450_bank_base_afid(uint16_t hw_id,
     }
 }
 
-inline uint32_t mi450_gpu_decode_afid(McaRegisters regs) noexcept
+inline uint32_t mi400_gpu_decode_afid(McaRegisters regs) noexcept
 {
     const auto base =
-        mi450_bank_base_afid(regs.ipid.hardware_id, regs.ipid.mca_type);
+        mi400_bank_base_afid(regs.ipid.hardware_id, regs.ipid.mca_type);
     if (!base)
         return kAfidSentinel;
 

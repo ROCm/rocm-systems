@@ -6,6 +6,7 @@
 #include "addc/decoder/pcie/decoder.hpp"
 #include "addc/detail/format.hpp"
 #include "addc/pipeline/section_data.hpp"
+#include "fru_identity.hpp"
 
 namespace addc::pipeline
 {
@@ -31,7 +32,7 @@ namespace
 {
     nlohmann::ordered_json p;
     p["fru"] = s.fru;
-    p["fru_id"] = s.fru_id;
+    detail::set_fru_id_and_cuid(p, s.fru_id);
     p["cpu"] = nullptr;
     p["gpu"] = nullptr;
     return p;

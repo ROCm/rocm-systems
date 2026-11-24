@@ -13,7 +13,8 @@ bool is_bad_page_retirement(std::string_view project,
     {
         return false;
     }
-    if (!project.starts_with("mi300") && !project.starts_with("mi350"))
+    if (!project.starts_with("mi300") && !project.starts_with("mi350") &&
+        !project.starts_with("mi400"))
     {
         return false;
     }

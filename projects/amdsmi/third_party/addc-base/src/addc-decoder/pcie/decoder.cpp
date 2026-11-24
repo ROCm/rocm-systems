@@ -160,11 +160,11 @@ struct ValidBitsResult
     }
     if (is_supported(10))
     {
-        r.flit_logging_info_valid = (((r.raw >> 10U) & 1U) != 0U);
+        r.flit_logging_info_valid = (((r.raw >> 11U) & 1U) != 0U);
     }
     if (is_supported(11))
     {
-        r.dpc_info_valid = (((r.raw >> 11U) & 1U) != 0U);
+        r.dpc_info_valid = (((r.raw >> 10U) & 1U) != 0U);
     }
     return r;
 }
@@ -228,6 +228,8 @@ inline constexpr RootErrBit kRootBits[] = {
     {4, "First Uncorrectable Fatal"},
     {5, "Non-Fatal Error Messages Received"},
     {6, "Fatal Error Messages Received"},
+    {9, "SFW Handling ERR_COR Received"},
+    {10, "Multiple SFW Handling ERR_COR Received"},
 };
 
 [[nodiscard]] std::vector<std::string> decodeSetBits(
@@ -323,6 +325,8 @@ DecodedPcie decode_pcie(const nlohmann::json& pcie_body, uint8_t revision_major)
     result.validation["aer_info_valid"] = vb.aer_info_valid;
     result.validation["device_id_rcrb_valid"] = vb.device_id_rcrb_valid;
     result.validation["rcrb_high_address_valid"] = vb.rcrb_high_address_valid;
+    result.validation["dpc_info_valid"] = vb.dpc_info_valid;
+    result.validation["flit_logging_info_valid"] = vb.flit_logging_info_valid;
 
     // -- Read AER values from IR -------------------------------------------
     const auto& aerInfo =
@@ -380,12 +384,23 @@ DecodedPcie decode_pcie(const nlohmann::json& pcie_body, uint8_t revision_major)
         device_id_report["device_id"] = jsonStr(did, "deviceID_Hex");
         device_id_report["class_code"] = jsonStr(did, "classCode_Hex");
 
-        const auto seg = jsonU64(did, "segmentNumber");
-        const auto bus = jsonU64(did, "primaryOrDeviceBusNumber");
-        const auto dev = jsonU64(did, "deviceNumber");
-        const auto func = jsonU64(did, "functionNumber");
-        device_id_report["seg_bus_device_function"] =
-            addc::format("{:04x}:{:02x}:{:02x}.{:x}", seg, bus, dev, func);
+        // RCRB layout (valid bit 8): bytes 7-10 are an address, not a BDF.
+        if (did.contains("rcrbLowAddress"))
+        {
+            device_id_report["rcrb_low_address"] =
+                jsonStr(did, "rcrbLowAddress_Hex");
+            device_id_report["bus_number"] =
+                jsonStr(did, "primaryOrDeviceBusNumber_Hex");
+        }
+        else
+        {
+            const auto seg = jsonU64(did, "segmentNumber");
+            const auto bus = jsonU64(did, "primaryOrDeviceBusNumber");
+            const auto dev = jsonU64(did, "deviceNumber");
+            const auto func = jsonU64(did, "functionNumber");
+            device_id_report["seg_bus_device_function"] = addc::format(
+                "{:04x}:{:02x}:{:02x}.{:x}", seg, bus, dev, func);
+        }
         device_id_report["secondary_bus_number"] =
             jsonStr(did, "secondaryBusNumber_Hex");
     }
@@ -428,28 +443,53 @@ DecodedPcie decode_pcie(const nlohmann::json& pcie_body, uint8_t revision_major)
     }
     aer_report["error_severity"] = sev;
 
-    // error_source
-    int custom_error_source_id = -1;
-    if (active_unc != 0U)
+    // Root Error Status bits[8:7] and [31:27] are not single-bit flags.
+    if (const uint32_t subclass = (root_sts >> 7U) & 0x3U; subclass != 0U)
     {
-        custom_error_source_id = static_cast<int>(fatal_nonfatal_src_id);
+        aer_report["err_cor_subclass"] = addc::format("0x{:x}", subclass);
     }
-    else if (active_cor != 0U)
+    if (const uint32_t vector = (root_sts >> 27U) & 0x1FU; vector != 0U)
     {
-        custom_error_source_id = static_cast<int>(cor_src_id);
+        aer_report["msi_msix_vector"] = addc::format("0x{:x}", vector);
     }
 
-    if (custom_error_source_id >= 0)
+    // error_source: Root Error Status bits[1:0] say whether the ERR_COR half
+    // of the Error Source ID is valid, bits[3:2] the ERR_FATAL/NONFATAL half.
+    // When neither is set, fall back to unmasked uncorrectable/correctable.
+    bool fatal_src_valid = (root_sts & 0xCU) != 0U;
+    bool cor_src_valid = (root_sts & 0x3U) != 0U;
+    if (!fatal_src_valid && !cor_src_valid)
     {
-        const auto src = static_cast<uint32_t>(custom_error_source_id);
-        aer_report["error_source"] = nlohmann::ordered_json{
+        fatal_src_valid = active_unc != 0U;
+        cor_src_valid = active_cor != 0U;
+    }
+
+    const auto source_json = [](uint32_t src) {
+        return nlohmann::ordered_json{
             {"bus", addc::format("0x{:02x}", (src >> 8U) & 0xFFU)},
             {"device", addc::format("0x{:02x}", (src >> 3U) & 0x1FU)},
             {"function", addc::format("0x{:x}", src & 0x7U)},
         };
+    };
+    if (fatal_src_valid)
+    {
+        aer_report["error_source"] = source_json(fatal_nonfatal_src_id);
+        if (cor_src_valid)
+        {
+            aer_report["correctable_error_source"] = source_json(cor_src_id);
+        }
+    }
+    else if (cor_src_valid)
+    {
+        aer_report["error_source"] = source_json(cor_src_id);
     }
 
-    er["aer_info"] = aer_report;
+    // The parser omits AER Info when its validation bit (7) is clear.
+    const bool has_aer = aerInfo.is_object() && !aerInfo.empty();
+    if (has_aer)
+    {
+        er["aer_info"] = aer_report;
+    }
 
     // -- data_array ---------------------------------------------------------
     auto& da = result.data_array;
@@ -478,9 +518,12 @@ DecodedPcie decode_pcie(const nlohmann::json& pcie_body, uint8_t revision_major)
             addc::format("0x{:08x}", static_cast<uint32_t>(cmd | (sts << 16U)));
     }
 
-    da["rcrb_high_address"] = addc::format(
-        "0x{:08x}",
-        static_cast<uint32_t>(jsonU64(pcie_body, "rcrbHighAddress")));
+    if (pcie_body.contains("rcrbHighAddress"))
+    {
+        da["rcrb_high_address"] = addc::format(
+            "0x{:08x}",
+            static_cast<uint32_t>(jsonU64(pcie_body, "rcrbHighAddress")));
+    }
 
     if (pcie_body.contains("deviceID") && pcie_body["deviceID"].is_object())
     {
@@ -488,20 +531,34 @@ DecodedPcie decode_pcie(const nlohmann::json& pcie_body, uint8_t revision_major)
         const auto vid = jsonU64(did, "vendorID");
         const auto devid = jsonU64(did, "deviceID");
         const auto cls = jsonU64(did, "classCode");
-        const auto func = jsonU64(did, "functionNumber");
-        const auto devn = jsonU64(did, "deviceNumber");
-        const auto seg = jsonU64(did, "segmentNumber");
         const auto pbus = jsonU64(did, "primaryOrDeviceBusNumber");
         const auto sbus = jsonU64(did, "secondaryBusNumber");
-        const auto slot = jsonU64(did, "slotNumber");
-        da["device_id"] = addc::format(
-            "0x{:04x}{:04x}{:06x}{:02x}{:02x}{:04x}{:02x}{:02x}{:04x}", vid,
-            devid, cls, func, devn, seg, pbus, sbus, slot);
+        // Slot number sits in bits[15:3] of bytes 13-14.
+        const auto slot = jsonU64(did, "slotNumber") << 3U;
+        // Bytes 7-10: Function/Device/Segment, or the RCRB low DWord.
+        std::string bytes_7_10;
+        if (did.contains("rcrbLowAddress"))
+        {
+            bytes_7_10 = addc::format("{:08x}", jsonU64(did, "rcrbLowAddress"));
+        }
+        else
+        {
+            bytes_7_10 = addc::format("{:02x}{:02x}{:04x}",
+                                      jsonU64(did, "functionNumber"),
+                                      jsonU64(did, "deviceNumber"),
+                                      jsonU64(did, "segmentNumber"));
+        }
+        da["device_id"] = addc::format("0x{:04x}{:04x}{:06x}{}{:02x}{:02x}{:04x}",
+                                       vid, devid, cls, bytes_7_10, pbus, sbus,
+                                       slot);
     }
 
-    da["device_serial"] = addc::format(
-        "0x{:08x}",
-        static_cast<uint32_t>(jsonU64(pcie_body, "deviceSerialNumber")));
+    if (pcie_body.contains("deviceSerialNumber"))
+    {
+        da["device_serial"] = addc::format(
+            "0x{:08x}",
+            static_cast<uint32_t>(jsonU64(pcie_body, "deviceSerialNumber")));
+    }
 
     if (pcie_body.contains("bridgeControlStatus") &&
         pcie_body["bridgeControlStatus"].is_object())
@@ -595,7 +652,10 @@ DecodedPcie decode_pcie(const nlohmann::json& pcie_body, uint8_t revision_major)
         }
     }
 
-    da["aer_info"] = aer_da;
+    if (has_aer)
+    {
+        da["aer_info"] = aer_da;
+    }
 
     if (pcie_body.contains("dpcInfo") && pcie_body["dpcInfo"].contains("data"))
     {

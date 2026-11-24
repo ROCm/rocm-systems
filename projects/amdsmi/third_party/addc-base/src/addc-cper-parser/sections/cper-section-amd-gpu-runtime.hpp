@@ -10,8 +10,8 @@
 namespace addc::cper::sections
 {
 
-/// Parses AMD GPU Non-Standard (runtime) error sections. MI300 and MI450 use
-/// this section type; `layout` selects the generation-specific fields.
+/// Parses AMD GPU Non-Standard (runtime) error sections. MI300 and MI400 Series
+/// use this section type; `layout` selects the generation-specific fields.
 /// GUID: 32ac0c78-2623-48f6-81a2-ac691780551d
 /// Match: GUID only. This GUID is unique to GPU non-standard runtime sections.
 /// Note: revision check is omitted because some CPER generators populate

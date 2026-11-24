@@ -13,13 +13,13 @@
 namespace addc::cper::sections
 {
 
-/// Field layout of the AMD GPU section bodies. MI300 and MI450 use the same
-/// outer format; PLDM_BNDL and the GPU Error Info structure differ. The
+/// Field layout of the AMD GPU section bodies. MI300 and MI400 Series use the
+/// same outer format; PLDM_BNDL and the GPU Error Info structure differ. The
 /// section dispatcher selects the layout from the section kind.
 enum class AmdGpuLayout
 {
     Mi300,
-    Mi450,
+    Mi400,
 };
 
 /// PLDM_BNDL (body offset 12).

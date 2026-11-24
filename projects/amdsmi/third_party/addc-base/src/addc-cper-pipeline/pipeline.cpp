@@ -8,6 +8,7 @@
 #include "addc/pipeline/section_data.hpp"
 #include "addc/pipeline/section_dispatch.hpp"
 #include "addc/pipeline/structural_pipeline.hpp"
+#include "sections/fru_identity.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -133,14 +134,23 @@ PipelineOutput make_pipeline_output(const nlohmann::json& header,
         record_id = value->get<uint64_t>();
     }
 
+    // In-band records write ASCII text into the Platform ID, Creator ID and
+    // Record ID fields.
+    const auto platform_id = jsonString(header, "platformID");
+    std::string creator_id = detail::guid_or_ascii(
+        jsonString(header, "creatorID").value_or(std::string{}));
+    std::string origin = creator_id == "amdgpu" ? "in_band" : "out_of_band";
+
     return PipelineOutput{
         .tool_version = std::string{tool_version},
         .timestamp = jsonString(header, "timestamp").value_or(std::string{}),
         .filename = std::string{filename},
-        .platform_id = jsonString(header, "platformID").value_or(std::string{}),
+        .platform_id =
+            platform_id ? detail::guid_or_ascii(*platform_id) : std::string{},
         .partition_id = std::move(partition_id),
-        .record_id = record_id,
-        .creator_id = jsonString(header, "creatorID").value_or(std::string{}),
+        .record_id = detail::record_id_text(record_id),
+        .creator_id = std::move(creator_id),
+        .origin = std::move(origin),
         .events = {},
     };
 }

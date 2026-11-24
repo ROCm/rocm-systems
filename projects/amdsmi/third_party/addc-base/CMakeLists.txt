@@ -79,8 +79,13 @@ endif()
 # ── Product selection ──────────────────────────────────────────────────────────
 
 set(_addc_all_projects
-    embedded_2005 genoa mi300a mi300c mi300x mi325x mi350 mi450 turin venice)
+    embedded_2005 genoa mi300a mi300c mi300x mi325x mi350 mi400 turin venice)
 string(REPLACE "," ";" _addc_requested "${ADDC_PROJECTS}")
+# mi450 was the canonical name before the MI400 Series rename.
+if("mi450" IN_LIST _addc_requested)
+    message(WARNING "ADDC_PROJECTS: mi450 is deprecated, use mi400")
+    list(TRANSFORM _addc_requested REPLACE "^mi450$" "mi400")
+endif()
 list(LENGTH _addc_requested _addc_requested_count)
 if(_addc_requested_count EQUAL 0)
     message(FATAL_ERROR "ADDC_PROJECTS must contain at least one project or all")
@@ -183,20 +188,20 @@ if(_addc_cpu_project)
         src/addc-cper-parser/sections/cper-section-amd-epyc-pmic.cpp
     )
 endif()
-if(_addc_cpu_project OR ADDC_ENABLE_MI450)
+if(_addc_cpu_project OR ADDC_ENABLE_MI400)
     list(APPEND _srcs src/addc-cper-parser/sections/cper-section-amd-epyc-mtl.cpp)
 endif()
-if(_addc_mi300_gpu_project OR ADDC_ENABLE_MI450)
+if(_addc_mi300_gpu_project OR ADDC_ENABLE_MI400)
     list(APPEND _srcs
         src/addc-cper-parser/sections/cper-section-amd-gpu-common.cpp
         src/addc-cper-parser/sections/cper-section-amd-gpu-crashdump.cpp
         src/addc-cper-parser/sections/cper-section-amd-gpu-runtime.cpp
     )
 endif()
-if(ADDC_ENABLE_MI450)
+if(ADDC_ENABLE_MI400)
     list(APPEND _srcs
-        src/addc-cper-parser/sections/cper-section-amd-mi450-mtl.cpp
-        src/addc-cper-parser/sections/cper-section-amd-mi450-scaleup.cpp
+        src/addc-cper-parser/sections/cper-section-amd-mi400-mtl.cpp
+        src/addc-cper-parser/sections/cper-section-amd-mi400-scaleup.cpp
     )
 endif()
 add_library(addc_cper_parser STATIC ${_srcs})
@@ -216,10 +221,10 @@ set(_srcs
 if(ADDC_ENABLE_VENICE)
     list(APPEND _srcs src/addc-decoder/wdt/venice.cpp)
 endif()
-if(ADDC_ENABLE_MI450)
+if(ADDC_ENABLE_MI400)
     list(APPEND _srcs
-        src/addc-decoder/boot_mi450/decoder.cpp
-        src/addc-decoder/dbglog/mi450.cpp
+        src/addc-decoder/boot_mi400/decoder.cpp
+        src/addc-decoder/dbglog/mi400.cpp
     )
 endif()
 add_library(addc_decoder_base STATIC ${_srcs})
@@ -239,8 +244,8 @@ endif()
 if(ADDC_ENABLE_MI300X OR ADDC_ENABLE_MI325X OR ADDC_ENABLE_MI350)
     list(APPEND _srcs src/addc-mca/mi300x.cpp)
 endif()
-if(ADDC_ENABLE_MI450)
-    list(APPEND _srcs src/addc-mca/mi450.cpp)
+if(ADDC_ENABLE_MI400)
+    list(APPEND _srcs src/addc-mca/mi400.cpp)
 endif()
 if(ADDC_ENABLE_MI300A)
     list(APPEND _srcs src/addc-mca/mi300a.cpp)
@@ -259,13 +264,13 @@ set(_srcs
     src/addc-cper-parser/structural.cpp
     src/addc-cper-pipeline/sections/epyc_crashdump_section.cpp
     src/addc-cper-pipeline/sections/mtl_section.cpp
-    src/addc-cper-pipeline/sections/mi450_mtl_section.cpp
-    src/addc-cper-pipeline/sections/mi450_scaleup_section.cpp
+    src/addc-cper-pipeline/sections/mi400_mtl_section.cpp
+    src/addc-cper-pipeline/sections/mi400_scaleup_section.cpp
     src/addc-cper-pipeline/sections/cdd_section.cpp
     src/addc-cper-pipeline/sections/pmic_section.cpp
     src/addc-cper-pipeline/sections/gpu_crashdump_section.cpp
-    src/addc-cper-pipeline/sections/gpu_mi450_crashdump_section.cpp
-    src/addc-cper-pipeline/sections/gpu_mi450_runtime_section.cpp
+    src/addc-cper-pipeline/sections/gpu_mi400_crashdump_section.cpp
+    src/addc-cper-pipeline/sections/gpu_mi400_runtime_section.cpp
     src/addc-cper-pipeline/sections/gpu_runtime_section.cpp
     src/addc-cper-pipeline/sections/ia32x64_section.cpp
     src/addc-cper-pipeline/sections/pcie_section.cpp
@@ -283,7 +288,7 @@ if(_addc_cpu_project)
         src/addc-cper-pipeline/sections/pcie_decoder.cpp
     )
 endif()
-if(_addc_cpu_project OR ADDC_ENABLE_MI450)
+if(_addc_cpu_project OR ADDC_ENABLE_MI400)
     list(APPEND _srcs src/addc-cper-pipeline/sections/mtl_decoder.cpp)
 endif()
 if(_addc_mi300_gpu_project)
@@ -292,11 +297,11 @@ if(_addc_mi300_gpu_project)
         src/addc-cper-pipeline/sections/gpu_runtime_decoder.cpp
     )
 endif()
-if(ADDC_ENABLE_MI450)
+if(ADDC_ENABLE_MI400)
     list(APPEND _srcs
-        src/addc-cper-pipeline/sections/gpu_mi450_crashdump_decoder.cpp
-        src/addc-cper-pipeline/sections/gpu_mi450_runtime_decoder.cpp
-        src/addc-cper-pipeline/sections/mi450_scaleup_decoder.cpp
+        src/addc-cper-pipeline/sections/gpu_mi400_crashdump_decoder.cpp
+        src/addc-cper-pipeline/sections/gpu_mi400_runtime_decoder.cpp
+        src/addc-cper-pipeline/sections/mi400_scaleup_decoder.cpp
     )
 endif()
 add_library(addc_cper_pipeline STATIC ${_srcs})
@@ -333,17 +338,23 @@ if(ADDC_ENABLE_TESTS)
         SOURCES fuzz/cper_parser_fuzz.cpp LIBS addc_cper_parser DEFS ADDC_FUZZ_SMOKE)
     addc_add_test(parser-modes-test parser-modes
         SOURCES tests/parser_modes.cpp LIBS addc_cper_parser DEFS ${_addc_product_defs})
+    addc_add_test(pcie-aer-layout-test pcie-aer-layout
+        SOURCES tests/pcie_aer_layout.cpp LIBS addc_cper_parser addc_decoder_base
+        DEFS ${_addc_product_defs})
+    addc_add_test(pcie-section-fields-test pcie-section-fields
+        SOURCES tests/pcie_section_fields.cpp
+        LIBS addc_cper_parser addc_decoder_base DEFS ${_addc_product_defs})
     addc_add_test(parser-boundary-test parser-boundary
         SOURCES tests/parser_boundary.cpp LIBS addc_cper_pipeline)
     addc_add_test(allocation-contract-test allocation-contract
         SOURCES tests/allocation_contract.cpp
         LIBS addc_common addc_cper_parser addc_cper_pipeline)
-    if(ADDC_ENABLE_MI450)
-        addc_add_test(mi450-cper-layout-test mi450-cper-layout
-            SOURCES tests/mi450_cper_layout.cpp LIBS addc_cper_pipeline
+    if(ADDC_ENABLE_MI400)
+        addc_add_test(mi400-cper-layout-test mi400-cper-layout
+            SOURCES tests/mi400_cper_layout.cpp LIBS addc_cper_pipeline
             DEFS ${_addc_product_defs})
     endif()
-    if(ADDC_ENABLE_MI300X AND ADDC_ENABLE_MI450)
+    if(ADDC_ENABLE_MI300X AND ADDC_ENABLE_MI400)
         addc_add_test(descriptor-platform-smoke descriptor-platform-smoke
             SOURCES tests/descriptor_platform_smoke.cpp LIBS addc_cper_pipeline)
     endif()
@@ -359,16 +370,17 @@ if(ADDC_ENABLE_TESTS)
     addc_add_test(parser-classification-test parser-classification
         SOURCES tests/parser_classification.cpp LIBS addc_cper_parser DEFS ${_addc_product_defs})
     addc_add_test(pipeline-output-contract-test pipeline-output-contract
-        SOURCES tests/pipeline_output_contract.cpp LIBS addc_cper_pipeline)
+        SOURCES tests/pipeline_output_contract.cpp LIBS addc_cper_pipeline
+        DEFS ${_addc_product_defs})
     addc_add_test(bad-page-policy-test bad-page-policy
         SOURCES tests/bad_page_policy.cpp LIBS addc_mca_base)
     addc_add_test(outbound-base-contract-test outbound-base-contract
         SOURCES tests/outbound_base_contract.cpp LIBS addc_decoder_base)
-    if(ADDC_ENABLE_VENICE AND ADDC_ENABLE_MI450 AND ADDC_ENABLE_TURIN)
+    if(ADDC_ENABLE_VENICE AND ADDC_ENABLE_MI400 AND ADDC_ENABLE_TURIN)
         addc_add_test(decoder-contract-test decoder-contract
             SOURCES tests/decoder_contract.cpp LIBS addc_decoder_base)
     endif()
-    if(ADDC_ENABLE_MI450)
+    if(ADDC_ENABLE_MI400)
         addc_add_test(mca-contract-test mca-contract
             SOURCES tests/mca_contract.cpp LIBS addc_mca_base)
     endif()

@@ -7,6 +7,7 @@
 #include "addc-common/base64.hpp"
 #include "addc/pipeline/detect.hpp"
 #include "addc/pipeline/section_data.hpp"
+#include "fru_identity.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -200,8 +201,10 @@ void fill_common_metadata(Section& sec, const nlohmann::json& descriptor,
     sec.platform =
         detect_platform_from_descriptor(descriptor, platform_fallback);
     sec.platform_name = std::string{platform_display_name(sec.platform)};
-    sec.fru = json_str(descriptor, "fruText").value_or(std::string{});
-    sec.fru_id = json_str(descriptor, "fruID").value_or(std::string{kZeroGuid});
+    sec.fru =
+        trim_fru_text(json_str(descriptor, "fruText").value_or(std::string{}));
+    // The parser omits fruID when the FRU ID valid bit is 0.
+    sec.fru_id = json_str(descriptor, "fruID").value_or(std::string{});
     sec.addc_version = addc_version_string(descriptor);
 }
 
@@ -231,11 +234,11 @@ void fill_common_metadata(Section& sec, const nlohmann::json& descriptor,
     return b;
 }
 
-/// Parse an MI450 PLDM bundle from a pldmBundle object.
-[[nodiscard]] inline GpuMi450PldmBundle parse_mi450_pldm_bundle(
+/// Parse an MI400 Series PLDM bundle from a pldmBundle object.
+[[nodiscard]] inline GpuMi400PldmBundle parse_mi400_pldm_bundle(
     const nlohmann::json& pb)
 {
-    GpuMi450PldmBundle b;
+    GpuMi400PldmBundle b;
     if (const auto v = json_u32(pb, "patch"))
         b.patch = static_cast<uint8_t>(*v);
     if (const auto v = json_u32(pb, "minor"))
@@ -254,10 +257,10 @@ inline void parse_pldm_into(GpuPldmBundle& bundle, const nlohmann::json& pb)
     bundle = parse_pldm_bundle(pb);
 }
 
-inline void parse_pldm_into(GpuMi450PldmBundle& bundle,
+inline void parse_pldm_into(GpuMi400PldmBundle& bundle,
                             const nlohmann::json& pb)
 {
-    bundle = parse_mi450_pldm_bundle(pb);
+    bundle = parse_mi400_pldm_bundle(pb);
 }
 
 /// Read the header shared by the AMD GPU crashdump, runtime and Scale Up

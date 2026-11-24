@@ -258,9 +258,12 @@ void to_json(nlohmann::json& j, const Guid& g)
 std::string Timestamp::decode_timestamp() const
 {
     // A zero century means no date was recorded; do not produce year -100.
+    // Out-of-band records write the ordinal century (21 for 20xx). In-band
+    // amdgpu records write the first two digits of the year (20 for 20xx).
     const int year_full =
-        century == 0U
-            ? static_cast<int>(year)
+        century == 0U ? static_cast<int>(year)
+        : century == 20U
+            ? 2000 + static_cast<int>(year)
             : (static_cast<int>(century) - 1) * 100 + static_cast<int>(year);
     return addc::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00", year_full,
                         static_cast<int>(month), static_cast<int>(day),

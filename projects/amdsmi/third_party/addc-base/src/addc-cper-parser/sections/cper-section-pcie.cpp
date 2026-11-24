@@ -25,6 +25,21 @@ inline constexpr Guid kPcieGuid{
     0x430fU,
     {0xadU, 0x91U, 0xb4U, 0x4dU, 0xcbU, 0x3cU, 0x6fU, 0x35U}};
 
+// --- Section validation bits -------------------------------------------------
+// A field is decoded only when its validation bit is set.
+inline constexpr unsigned kPortTypeValid = 0U;
+inline constexpr unsigned kVersionValid = 1U;
+inline constexpr unsigned kCommandStatusValid = 2U;
+inline constexpr unsigned kDeviceIdValid = 3U;
+inline constexpr unsigned kDeviceSerialValid = 4U;
+inline constexpr unsigned kBridgeControlStatusValid = 5U;
+inline constexpr unsigned kCapabilityStructValid = 6U;
+inline constexpr unsigned kAerInfoValid = 7U;
+inline constexpr unsigned kDeviceIdRcrbValid = 8U;
+inline constexpr unsigned kRcrbHighAddressValid = 9U;
+inline constexpr unsigned kDpcInfoValid = 10U;
+inline constexpr unsigned kFlitLoggingValid = 11U;
+
 // --- Lookup tables -----------------------------------------------------------
 
 constexpr std::string_view pciePortTypeName(uint32_t v) noexcept
@@ -44,7 +59,7 @@ constexpr std::string_view pciePortTypeName(uint32_t v) noexcept
         case 7:
             return "PCI Express to PCI/PCI-X Bridge";
         case 8:
-            return "PCI/PCI-X Bridge to PCI Express Bridge";
+            return "PCI/PCI-X to PCI Express Bridge";
         case 9:
             return "Root Complex Integrated Endpoint Device";
         case 10:
@@ -96,19 +111,83 @@ constexpr std::string_view enabledName(uint32_t v) noexcept
     return ((v & 0x1U) != 0U) ? "Enabled" : "Disabled";
 }
 
-constexpr std::string_view passingName(uint32_t v) noexcept
+// Device Capabilities bits[4:3].
+constexpr std::string_view phantomFunctionsName(uint32_t v) noexcept
 {
-    return ((v & 0x1U) != 0U) ? "Passing" : "Failed";
+    switch (v)
+    {
+        case 0:
+            return "NotSupported";
+        case 1:
+            return "MostSignificantBit";
+        case 2:
+            return "TwoMostSignificantBits";
+        default:
+            return "AllThreeBits";
+    }
+}
+
+// Device Capabilities 2 bits[13:12].
+constexpr std::string_view tphCompleterName(uint32_t v) noexcept
+{
+    switch (v)
+    {
+        case 0:
+            return "NotSupported";
+        case 1:
+            return "TphOnly";
+        case 3:
+            return "TphAndExtendedTph";
+        default:
+            return "Reserved";
+    }
+}
+
+// Device Capabilities 2 bits[19:18].
+constexpr std::string_view obffName(uint32_t v) noexcept
+{
+    switch (v)
+    {
+        case 0:
+            return "NotSupported";
+        case 1:
+            return "MessageSignalingOnly";
+        case 2:
+            return "WakeSignalingOnly";
+        default:
+            return "WakeAndMessageSignaling";
+    }
+}
+
+// Device Capabilities 2 bits[25:24].
+constexpr std::string_view emergencyPowerReductionName(uint32_t v) noexcept
+{
+    switch (v)
+    {
+        case 0:
+            return "NotSupported";
+        case 1:
+            return "DeviceSpecificMechanism";
+        case 2:
+            return "FormFactorOrDeviceSpecificMechanism";
+        default:
+            return "Reserved";
+    }
+}
+
+nlohmann::json namedField(uint32_t raw, std::string_view name)
+{
+    return {{"raw", raw}, {"value", std::string{name}}};
 }
 
 // ------------------------------------------------------------------------------
-// LE readers
-// ------------------------------------------------------------------------------
-
-// ------------------------------------------------------------------------------
 // DeviceID (16 bytes at offset 24)
+// Bytes 7-10 hold Function/Device/Segment when validation bit 3 is set, or
+// the lower DWord of the RCRB MMIO base address when only bit 8 is set.
 // ------------------------------------------------------------------------------
-nlohmann::json buildDeviceId(std::span<const uint8_t> body, std::size_t off)
+nlohmann::json buildDeviceId(std::span<const uint8_t> body,
+                             std::size_t off,
+                             bool rcrb_layout)
 {
     const uint16_t vendor_id = read_u16_le(body, off + 0U);
     const uint16_t device_id = read_u16_le(body, off + 2U);
@@ -118,34 +197,46 @@ nlohmann::json buildDeviceId(std::span<const uint8_t> body, std::size_t off)
                (static_cast<uint32_t>(body[off + 5U]) << 8U) |
                (static_cast<uint32_t>(body[off + 6U]) << 16U))
             : 0U;
-    const uint8_t func_num = (off + 7U < body.size()) ? body[off + 7U] : 0U;
-    const uint8_t dev_num = (off + 8U < body.size()) ? body[off + 8U] : 0U;
-    const uint16_t seg_num = read_u16_le(body, off + 9U);
     const uint8_t primary_bus =
         (off + 11U < body.size()) ? body[off + 11U] : 0U;
     const uint8_t second_bus = (off + 12U < body.size()) ? body[off + 12U] : 0U;
-    const uint16_t slot_num = read_u16_le(body, off + 13U);
+    // Bytes 13-14: bits[2:0] reserved, bits[15:3] slot number.
+    const uint16_t slot_num =
+        static_cast<uint16_t>((read_u16_le(body, off + 13U) >> 3U) & 0x1FFFU);
 
-    return nlohmann::json{
+    nlohmann::json j{
         {"deviceID_Hex", addc::format("0x{:04x}", device_id)},
         {"vendorID_Hex", addc::format("0x{:04x}", vendor_id)},
         {"classCode_Hex", addc::format("0x{:06x}", class_code)},
-        {"functionNumber_Hex", addc::format("0x{:02x}", func_num)},
-        {"deviceNumber_Hex", addc::format("0x{:02x}", dev_num)},
-        {"segmentNumber_Hex", addc::format("0x{:02x}", seg_num)},
         {"primaryOrDeviceBusNumber_Hex", addc::format("0x{:02x}", primary_bus)},
         {"secondaryBusNumber_Hex", addc::format("0x{:02x}", second_bus)},
-        {"slotNumber_Hex", addc::format("0x{:02x}", slot_num)},
+        {"slotNumber_Hex", addc::format("0x{:04x}", slot_num)},
         {"deviceID", static_cast<uint64_t>(device_id)},
         {"vendorID", static_cast<uint64_t>(vendor_id)},
         {"classCode", static_cast<uint64_t>(class_code)},
-        {"functionNumber", static_cast<uint64_t>(func_num)},
-        {"deviceNumber", static_cast<uint64_t>(dev_num)},
-        {"segmentNumber", static_cast<uint64_t>(seg_num)},
         {"primaryOrDeviceBusNumber", static_cast<uint64_t>(primary_bus)},
         {"secondaryBusNumber", static_cast<uint64_t>(second_bus)},
         {"slotNumber", static_cast<uint64_t>(slot_num)},
     };
+
+    if (rcrb_layout)
+    {
+        const uint32_t rcrb_low = read_u32_le(body, off + 7U);
+        j["rcrbLowAddress_Hex"] = addc::format("0x{:08x}", rcrb_low);
+        j["rcrbLowAddress"] = static_cast<uint64_t>(rcrb_low);
+        return j;
+    }
+
+    const uint8_t func_num = (off + 7U < body.size()) ? body[off + 7U] : 0U;
+    const uint8_t dev_num = (off + 8U < body.size()) ? body[off + 8U] : 0U;
+    const uint16_t seg_num = read_u16_le(body, off + 9U);
+    j["functionNumber_Hex"] = addc::format("0x{:02x}", func_num);
+    j["deviceNumber_Hex"] = addc::format("0x{:02x}", dev_num);
+    j["segmentNumber_Hex"] = addc::format("0x{:04x}", seg_num);
+    j["functionNumber"] = static_cast<uint64_t>(func_num);
+    j["deviceNumber"] = static_cast<uint64_t>(dev_num);
+    j["segmentNumber"] = static_cast<uint64_t>(seg_num);
+    return j;
 }
 
 // ------------------------------------------------------------------------------
@@ -172,12 +263,15 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
     const uint32_t slt_cap = read_u32_le(d, 20U);
     const uint16_t slt_ctrl = read_u16_le(d, 24U);
     const uint16_t slt_sts = read_u16_le(d, 26U);
+    const uint16_t root_ctrl = read_u16_le(d, 28U);
+    const uint16_t root_cap = read_u16_le(d, 30U);
     const uint32_t root_sts = read_u32_le(d, 32U);
     const uint32_t dev_cap2 = read_u32_le(d, 36U);
     const uint16_t dev_ctrl2 = read_u16_le(d, 40U);
     const uint32_t lnk_cap2 = read_u32_le(d, 44U);
     const uint16_t lnk_ctrl2 = read_u16_le(d, 48U);
     const uint16_t lnk_sts2 = read_u16_le(d, 50U);
+    const uint32_t slt_cap2 = read_u32_le(d, 52U);
 
     return nlohmann::json{
         {"data", encoded},
@@ -204,7 +298,8 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
          {
              {"max_payload_size_supported", dev_cap & 0x7U},
              {"phantom_functions_supported",
-              std::string{supportedName((dev_cap >> 3U) & 0x3U)}},
+              namedField((dev_cap >> 3U) & 0x3U,
+                         phantomFunctionsName((dev_cap >> 3U) & 0x3U))},
              {"extended_tag_field_supported",
               std::string{supportedName((dev_cap >> 5U) & 0x1U)}},
              {"endpoint_l0s_acceptable_latency",
@@ -254,7 +349,8 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
              {"unsupported_request_detected", bool((dev_sts >> 3U) & 0x1U)},
              {"aux_power_detected", bool((dev_sts >> 4U) & 0x1U)},
              {"transactions_pending", bool((dev_sts >> 5U) & 0x1U)},
-             {"emergency_power_reduction", (dev_sts >> 6U) & 0x3U},
+             {"emergency_power_reduction_detected",
+              bool((dev_sts >> 6U) & 0x1U)},
          }},
         {"link_capabilities",
          {
@@ -278,34 +374,99 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
              {"aspm_control", lnk_ctrl & 0x3U},
              {"ptm_prop_delay_adaptation_interpretation",
               bool((lnk_ctrl >> 2U) & 0x1U)},
+             {"read_completion_boundary", bool((lnk_ctrl >> 3U) & 0x1U)},
              {"link_disable", (lnk_ctrl >> 4U) & 0x1U},
              {"retrain_link", (lnk_ctrl >> 5U) & 0x1U},
+             {"common_clock_configuration", bool((lnk_ctrl >> 6U) & 0x1U)},
              {"extended_synch", (lnk_ctrl >> 7U) & 0x1U},
+             {"enable_clock_power_management", bool((lnk_ctrl >> 8U) & 0x1U)},
+             {"hardware_autonomous_width_disable",
+              bool((lnk_ctrl >> 9U) & 0x1U)},
+             {"link_bandwidth_management_interrupt_enable",
+              bool((lnk_ctrl >> 10U) & 0x1U)},
+             {"link_autonomous_bandwidth_interrupt_enable",
+              bool((lnk_ctrl >> 11U) & 0x1U)},
              {"sris_clocking", (lnk_ctrl >> 12U) & 0x1U},
              {"flit_mode_disable", (lnk_ctrl >> 13U) & 0x1U},
+             {"drs_signaling_control", (lnk_ctrl >> 14U) & 0x3U},
          }},
         {"link_status",
          {
              {"current_link_speed", lnk_sts & 0xFU},
              {"negotiated_link_width", (lnk_sts >> 4U) & 0x3FU},
              {"link_training", (lnk_sts >> 11U) & 0x1U},
+             {"slot_clock_configuration", bool((lnk_sts >> 12U) & 0x1U)},
+             {"data_link_layer_link_active", bool((lnk_sts >> 13U) & 0x1U)},
+             {"link_bandwidth_management_status",
+              bool((lnk_sts >> 14U) & 0x1U)},
+             {"link_autonomous_bandwidth_status",
+              bool((lnk_sts >> 15U) & 0x1U)},
          }},
         {"slot_capabilities",
          {
+             {"attention_button_present", bool(slt_cap & 0x1U)},
+             {"power_controller_present", bool((slt_cap >> 1U) & 0x1U)},
+             {"mrl_sensor_present", bool((slt_cap >> 2U) & 0x1U)},
+             {"attention_indicator_present", bool((slt_cap >> 3U) & 0x1U)},
+             {"power_indicator_present", bool((slt_cap >> 4U) & 0x1U)},
+             {"hot_plug_surprise", bool((slt_cap >> 5U) & 0x1U)},
+             {"hot_plug_capable", bool((slt_cap >> 6U) & 0x1U)},
              {"slot_power_limit_value", {{"raw", (slt_cap >> 7U) & 0xFFU}}},
              {"slot_power_limit_scale", (slt_cap >> 15U) & 0x3U},
+             {"electromechanical_interlock_present",
+              bool((slt_cap >> 17U) & 0x1U)},
+             {"no_command_completed_support", bool((slt_cap >> 18U) & 0x1U)},
              {"physical_slot_number", (slt_cap >> 19U) & 0x1FFFU},
          }},
         {"slot_control",
          {
+             {"attention_button_pressed_enable", bool(slt_ctrl & 0x1U)},
+             {"power_fault_detected_enable", bool((slt_ctrl >> 1U) & 0x1U)},
+             {"mrl_sensor_changed_enable", bool((slt_ctrl >> 2U) & 0x1U)},
+             {"presence_detect_changed_enable", bool((slt_ctrl >> 3U) & 0x1U)},
+             {"command_completed_interrupt_enable",
+              bool((slt_ctrl >> 4U) & 0x1U)},
+             {"hot_plug_interrupt_enable", bool((slt_ctrl >> 5U) & 0x1U)},
              {"attention_indicator_control", (slt_ctrl >> 6U) & 0x3U},
              {"power_indicator_control", (slt_ctrl >> 8U) & 0x3U},
+             {"power_controller_control", bool((slt_ctrl >> 10U) & 0x1U)},
+             {"electromechanical_interlock_control",
+              bool((slt_ctrl >> 11U) & 0x1U)},
+             {"data_link_layer_state_changed_enable",
+              bool((slt_ctrl >> 12U) & 0x1U)},
+             {"auto_slot_power_limit_disable", bool((slt_ctrl >> 13U) & 0x1U)},
+             {"in_band_pd_disable", bool((slt_ctrl >> 14U) & 0x1U)},
          }},
         {"slot_status",
          {
+             {"attention_button_pressed", bool(slt_sts & 0x1U)},
+             {"power_fault_detected", bool((slt_sts >> 1U) & 0x1U)},
              {"mrl_sensor_changed", (slt_sts >> 2U) & 0x1U},
+             {"presence_detect_changed", bool((slt_sts >> 3U) & 0x1U)},
              {"command_completed", (slt_sts >> 4U) & 0x1U},
              {"mrl_sensor_state", (slt_sts >> 5U) & 0x1U},
+             {"presence_detect_state", bool((slt_sts >> 6U) & 0x1U)},
+             {"electromechanical_interlock_status",
+              bool((slt_sts >> 7U) & 0x1U)},
+             {"data_link_layer_state_changed", bool((slt_sts >> 8U) & 0x1U)},
+         }},
+        {"root_control",
+         {
+             {"system_error_on_correctable_error_enable",
+              bool(root_ctrl & 0x1U)},
+             {"system_error_on_non_fatal_error_enable",
+              bool((root_ctrl >> 1U) & 0x1U)},
+             {"system_error_on_fatal_error_enable",
+              bool((root_ctrl >> 2U) & 0x1U)},
+             {"pme_interrupt_enable", bool((root_ctrl >> 3U) & 0x1U)},
+             {"configuration_rrs_software_visibility_enable",
+              bool((root_ctrl >> 4U) & 0x1U)},
+             {"no_nfm_subtree_below_this_root_port",
+              bool((root_ctrl >> 5U) & 0x1U)},
+         }},
+        {"root_capabilities",
+         {
+             {"configuration_rrs_software_visibility", bool(root_cap & 0x1U)},
          }},
         {"root_status",
          {
@@ -328,22 +489,39 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
               std::string{supportedName((dev_cap2 >> 8U) & 0x1U)}},
              {"_128_bit_cas_completer_supported",
               std::string{supportedName((dev_cap2 >> 9U) & 0x1U)}},
-             {"no_ro_enabled_pr_pr_passing",
-              std::string{passingName((dev_cap2 >> 10U) & 0x1U)}},
+             {"no_ro_enabled_pr_pr_passing", bool((dev_cap2 >> 10U) & 0x1U)},
              {"ltr_mechanism_supported",
               std::string{supportedName((dev_cap2 >> 11U) & 0x1U)}},
              {"tph_completer_supported",
-              std::string{supportedName((dev_cap2 >> 12U) & 0x3U)}},
+              namedField((dev_cap2 >> 12U) & 0x3U,
+                         tphCompleterName((dev_cap2 >> 12U) & 0x3U))},
+             {"bit_tag_completer_10_supported",
+              std::string{supportedName((dev_cap2 >> 16U) & 0x1U)}},
+             {"bit_tag_requester_10_supported",
+              std::string{supportedName((dev_cap2 >> 17U) & 0x1U)}},
              {"obff_supported",
-              std::string{supportedName((dev_cap2 >> 18U) & 0x3U)}},
+              namedField((dev_cap2 >> 18U) & 0x3U,
+                         obffName((dev_cap2 >> 18U) & 0x3U))},
+             {"extended_fmt_field_supported",
+              std::string{supportedName((dev_cap2 >> 20U) & 0x1U)}},
+             {"end_end_tlp_prefix_supported",
+              std::string{supportedName((dev_cap2 >> 21U) & 0x1U)}},
              {"max_end_end_tlp_prefixes", {{"raw", (dev_cap2 >> 22U) & 0x3U}}},
              {"emergency_power_reduction_supported",
-              std::string{supportedName((dev_cap2 >> 24U) & 0x3U)}},
+              namedField((dev_cap2 >> 24U) & 0x3U,
+                         emergencyPowerReductionName((dev_cap2 >> 24U) & 0x3U))},
+             {"emergency_power_reduction_initialization_required",
+              bool((dev_cap2 >> 26U) & 0x1U)},
+             {"dmwr_completer_supported",
+              std::string{supportedName((dev_cap2 >> 28U) & 0x1U)}},
              {"dmwr_lengths_supported", (dev_cap2 >> 29U) & 0x3U},
+             {"frs_supported",
+              std::string{supportedName((dev_cap2 >> 31U) & 0x1U)}},
          }},
         {"device_control2",
          {
              {"completion_timeout_value", dev_ctrl2 & 0xFU},
+             {"completion_timeout_disable", bool((dev_ctrl2 >> 4U) & 0x1U)},
              {"ari_forwarding_enable", bool((dev_ctrl2 >> 5U) & 0x1U)},
              {"atomicop_requester_enable", bool((dev_ctrl2 >> 6U) & 0x1U)},
              {"atomicop_egress_blocking", bool((dev_ctrl2 >> 7U) & 0x1U)},
@@ -354,6 +532,7 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
               bool((dev_ctrl2 >> 11U) & 0x1U)},
              {"bit_tag_requester_10_enable", bool((dev_ctrl2 >> 12U) & 0x1U)},
              {"obff_enable", (dev_ctrl2 >> 13U) & 0x3U},
+             {"end_end_tlp_prefix_blocking", bool((dev_ctrl2 >> 15U) & 0x1U)},
          }},
         {"link_capabilities2",
          {
@@ -366,14 +545,17 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
               std::string{supportedName((lnk_cap2 >> 23U) & 0x1U)}},
              {"two_retimers_presence_detect_supported",
               std::string{supportedName((lnk_cap2 >> 24U) & 0x1U)}},
+             {"optical_retimer_presence_detect_supported",
+              std::string{supportedName((lnk_cap2 >> 25U) & 0x1U)}},
+             {"fra_retimers_detect_supported",
+              std::string{supportedName((lnk_cap2 >> 26U) & 0x1U)}},
              {"drs_supported",
               std::string{supportedName((lnk_cap2 >> 31U) & 0x1U)}},
          }},
         {"link_control2",
          {
              {"target_link_speed", {{"raw", lnk_ctrl2 & 0xFU}}},
-             {"enter_compliance",
-              std::string{supportedName((lnk_ctrl2 >> 4U) & 0x1U)}},
+             {"enter_compliance", bool((lnk_ctrl2 >> 4U) & 0x1U)},
              {"hardware_autonomous_speed_disable",
               {{"raw", (lnk_ctrl2 >> 5U) & 0x1U}}},
              {"selectable_de_emphasis", bool((lnk_ctrl2 >> 6U) & 0x1U)},
@@ -397,8 +579,16 @@ nlohmann::json buildCapabilityStruct(std::span<const uint8_t> d,
              {"two_retimers_presence_detected", bool((lnk_sts2 >> 7U) & 0x1U)},
              {"crosslink_resolution", (lnk_sts2 >> 8U) & 0x3U},
              {"flit_mode_status", (lnk_sts2 >> 10U) & 0x1U},
+             {"optical_retimer_presence_detected",
+              bool((lnk_sts2 >> 11U) & 0x1U)},
              {"downstream_component_presence", (lnk_sts2 >> 12U) & 0x7U},
              {"drs_message_received", bool((lnk_sts2 >> 15U) & 0x1U)},
+         }},
+        {"slot_capabilities2",
+         {
+             {"in_band_pd_disable_supported",
+              std::string{supportedName(slt_cap2 & 0x1U)}},
+             {"oob_pd_supported", (slt_cap2 >> 1U) & 0x3U},
          }},
     };
 }
@@ -525,6 +715,24 @@ nlohmann::json buildAerInfo(std::span<const uint8_t> d,
          std::string{severityName((unc_sev >> 21U) & 0x1U)}},
         {"uncorrectable_internal_error_severity",
          std::string{severityName((unc_sev >> 22U) & 0x1U)}},
+        {"mc_blocked_tlp_severity",
+         std::string{severityName((unc_sev >> 23U) & 0x1U)}},
+        {"atomicop_egress_blocked_severity",
+         std::string{severityName((unc_sev >> 24U) & 0x1U)}},
+        {"tlp_prefix_blocked_error_severity",
+         std::string{severityName((unc_sev >> 25U) & 0x1U)}},
+        {"poisoned_tlp_egress_blocked_severity",
+         std::string{severityName((unc_sev >> 26U) & 0x1U)}},
+        {"dmwr_request_egress_blocked_severity",
+         std::string{severityName((unc_sev >> 27U) & 0x1U)}},
+        {"ide_check_failed_severity",
+         std::string{severityName((unc_sev >> 28U) & 0x1U)}},
+        {"misrouted_ide_tlp_severity",
+         std::string{severityName((unc_sev >> 29U) & 0x1U)}},
+        {"pcrc_check_failed_severity",
+         std::string{severityName((unc_sev >> 30U) & 0x1U)}},
+        {"tlp_translation_egress_blocked_severity",
+         std::string{severityName((unc_sev >> 31U) & 0x1U)}},
     };
     result["correctable_error_status"] = nlohmann::json{
         {"value", cor_sts},
@@ -558,6 +766,12 @@ nlohmann::json buildAerInfo(std::span<const uint8_t> d,
         {"multiple_header_recording_capable", bool((adv_ctrl >> 9U) & 0x1U)},
         {"multiple_header_recording_enable", bool((adv_ctrl >> 10U) & 0x1U)},
         {"tlp_prefix_log_present", bool((adv_ctrl >> 11U) & 0x1U)},
+        {"completion_timeout_prefix_header_log_capable",
+         bool((adv_ctrl >> 12U) & 0x1U)},
+        {"header_log_size", (adv_ctrl >> 13U) & 0x1FU},
+        {"logged_tlp_was_flit_mode", bool((adv_ctrl >> 18U) & 0x1U)},
+        {"logged_tlp_size", (adv_ctrl >> 19U) & 0x1FU},
+        {"rc_ecs_handling_capable", bool((adv_ctrl >> 24U) & 0x1U)},
     };
     result["header_log_register"] = nlohmann::json{
         {"dw1", hdr_dw1},
@@ -570,7 +784,13 @@ nlohmann::json buildAerInfo(std::span<const uint8_t> d,
         {"correctable_error_reporting_enable", bool(root_cmd & 0x1U)},
         {"non_fatal_error_reporting_enable", bool((root_cmd >> 1U) & 0x1U)},
         {"fatal_error_reporting_enable", bool((root_cmd >> 2U) & 0x1U)},
+        {"ecs_legacy_handling_by_sfw_enable", bool((root_cmd >> 3U) & 0x1U)},
+        {"ecs_sig_sfw_handling_by_sfw_enable", bool((root_cmd >> 4U) & 0x1U)},
+        {"ecs_sig_os_handling_by_sfw_enable", bool((root_cmd >> 5U) & 0x1U)},
+        {"sfw_handling_source_id", (root_cmd >> 16U) & 0xFFFFU},
     };
+    // PME Requester ID/Status/Pending live in the Capability Structure's Root
+    // Status register, not here.
     result["root_error_status"] = nlohmann::json{
         {"value", root_sts},
         {"error_correctable", bool(root_sts & 0x1U)},
@@ -580,9 +800,12 @@ nlohmann::json buildAerInfo(std::span<const uint8_t> d,
         {"first_uncorrectable_fatal", bool((root_sts >> 4U) & 0x1U)},
         {"non_fatal_error_messages_received", bool((root_sts >> 5U) & 0x1U)},
         {"fatal_error_messages_received", bool((root_sts >> 6U) & 0x1U)},
-        {"pme_requester_id", root_sts & 0xFFFFU},
-        {"pme_status", (root_sts >> 16U) & 0x1U},
-        {"pme_pending", (root_sts >> 17U) & 0x1U},
+        {"err_cor_subclass", (root_sts >> 7U) & 0x3U},
+        {"sfw_handling_err_cor_received", bool((root_sts >> 9U) & 0x1U)},
+        {"multiple_sfw_handling_err_cor_received",
+         bool((root_sts >> 10U) & 0x1U)},
+        {"advanced_error_interrupt_message_number",
+         (root_sts >> 27U) & 0x1FU},
     };
     result["error_source_id"] = nlohmann::json{
         {"correctable_source_id", err_src & 0xFFFFU},
@@ -652,35 +875,68 @@ nlohmann::json parse_pcie(std::span<const uint8_t> body,
         return body.subspan(off, std::min(len, avail));
     };
 
+    const auto valid = [valid_bits](unsigned bit) {
+        return ((valid_bits >> bit) & 1U) != 0U;
+    };
+
+    // Fields whose validation bit is clear are omitted.
     nlohmann::json j;
     j["sectionValidBits"] = addc::format("0x{:x}", valid_bits);
 
-    j["portType"] = {
-        {"value", port_type_raw},
-        {"name", std::string{pciePortTypeName(port_type_raw)}},
-    };
-    j["version"] = {
-        {"minor", version_raw & 0xFFU},
-        {"major", (version_raw >> 8U) & 0xFFU},
-    };
-    j["commandStatus"] = {
-        {"commandRegister", cmd_sts_raw & 0xFFFFU},
-        {"statusRegister", (cmd_sts_raw >> 16U) & 0xFFFFU},
-    };
-    j["rcrbHighAddress"] = rcrb_hi;
-    j["deviceID"] =
-        (body.size() >= 40U) ? buildDeviceId(body, 24U) : nlohmann::json{};
-    j["deviceSerialNumber"] = device_serial;
-    j["bridgeControlStatus"] = {
-        {"secondaryStatusRegister", bridge_sts & 0xFFFFU},
-        {"controlRegister", (bridge_sts >> 16U) & 0xFFFFU},
-    };
-    j["capabilityStructure"] =
-        buildCapabilityStruct(safe_span(52U, 60U), context);
+    if (valid(kPortTypeValid))
+    {
+        j["portType"] = {
+            {"value", port_type_raw},
+            {"name", std::string{pciePortTypeName(port_type_raw)}},
+        };
+    }
+    if (valid(kVersionValid))
+    {
+        j["version"] = {
+            {"minor", version_raw & 0xFFU},
+            {"major", (version_raw >> 8U) & 0xFFU},
+        };
+    }
+    if (valid(kCommandStatusValid))
+    {
+        j["commandStatus"] = {
+            {"commandRegister", cmd_sts_raw & 0xFFFFU},
+            {"statusRegister", (cmd_sts_raw >> 16U) & 0xFFFFU},
+        };
+    }
+    if (valid(kRcrbHighAddressValid))
+    {
+        j["rcrbHighAddress"] = rcrb_hi;
+    }
+    // Bit 3 selects the PCI config-space layout; otherwise bit 8 selects the
+    // RCRB layout. The spec requires bit 3 clear when bit 8 is set.
+    if ((valid(kDeviceIdValid) || valid(kDeviceIdRcrbValid)) &&
+        body.size() >= 40U)
+    {
+        j["deviceID"] = buildDeviceId(body, 24U, !valid(kDeviceIdValid));
+    }
+    if (valid(kDeviceSerialValid))
+    {
+        j["deviceSerialNumber"] = device_serial;
+    }
+    if (valid(kBridgeControlStatusValid))
+    {
+        j["bridgeControlStatus"] = {
+            {"secondaryStatusRegister", bridge_sts & 0xFFFFU},
+            {"controlRegister", (bridge_sts >> 16U) & 0xFFFFU},
+        };
+    }
+    if (valid(kCapabilityStructValid))
+    {
+        j["capabilityStructure"] =
+            buildCapabilityStruct(safe_span(52U, 60U), context);
+    }
 
     auto program_rev = program_gen(desc.revision_major);
     const auto gen_rev = ras_gen(desc.revision_major);
-    const uint8_t minor_version = static_cast<uint8_t>(version_raw & 0xFFU);
+    // BMC layout version from the CPER section descriptor revision (minor
+    // byte), not the PCIe spec minor in the section body.
+    const uint8_t minor_version = desc.revision_minor;
     if (program_rev == 0U && gen_rev != 0U)
     {
         program_rev = 1U;
@@ -693,11 +949,17 @@ nlohmann::json parse_pcie(std::span<const uint8_t> body,
     const bool is_turin = (program_rev == 1U && gen_rev == 2U);
     const std::size_t aer_offset = (is_venice_deviated || is_turin) ? 4U : 0U;
 
-    j["aerInfo"] = buildAerInfo(safe_span(112U, 96U), aer_offset, context);
+    if (valid(kAerInfoValid))
+    {
+        j["aerInfo"] = buildAerInfo(safe_span(112U, 96U), aer_offset, context);
+    }
 
     // DPC info (92 bytes at 208) - stored as raw base64
-    j["dpcInfo"] = nlohmann::json{
-        {"data", detail::encode_binary(safe_span(208U, 92U), context)}};
+    if (valid(kDpcInfoValid))
+    {
+        j["dpcInfo"] = nlohmann::json{
+            {"data", detail::encode_binary(safe_span(208U, 92U), context)}};
+    }
 
     // Flit logging
     // TODO: Decode flit logging info into structured fields (flit mode, flit
@@ -705,11 +967,17 @@ nlohmann::json parse_pcie(std::span<const uint8_t> body,
     //       etc.) per PCIe 6.0+ spec. Currently raw base64 only - no decoding
     //       in either software decoder. See PCIe Gen 6 spec section on Flit
     //       Mode Logging.
-    const uint16_t flit_depth = (body.size() > 300U) ? read_u16_le(body, 300U) : 0U;
-    j["flitLoggingDepth"] = static_cast<uint64_t>(flit_depth);
-    const std::size_t flit_size = static_cast<std::size_t>(flit_depth) * 60U;
-    j["flitLoggingInfo"] = nlohmann::json{
-        {"data", detail::encode_binary(safe_span(302U, flit_size), context)}};
+    if (valid(kFlitLoggingValid))
+    {
+        const uint16_t flit_depth =
+            (body.size() > 300U) ? read_u16_le(body, 300U) : 0U;
+        j["flitLoggingDepth"] = static_cast<uint64_t>(flit_depth);
+        const std::size_t flit_size =
+            static_cast<std::size_t>(flit_depth) * 60U;
+        j["flitLoggingInfo"] = nlohmann::json{
+            {"data",
+             detail::encode_binary(safe_span(302U, flit_size), context)}};
+    }
 
     return j;
 }

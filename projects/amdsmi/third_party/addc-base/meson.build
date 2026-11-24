@@ -2,7 +2,7 @@ project(
     'addc-base',
     'c',
     'cpp',
-    version: '3.4.0',
+    version: '3.5.0',
     default_options: [
         'cpp_std=c++20',
         'c_std=c11',
@@ -25,9 +25,17 @@ addc_version_str = meson.project_version()
 # routes are limited to this exact set.
 base_all_projects = [
     'embedded_2005', 'genoa', 'mi300a', 'mi300c', 'mi300x',
-    'mi325x', 'mi350', 'mi450', 'turin', 'venice',
+    'mi325x', 'mi350', 'mi400', 'turin', 'venice',
 ]
-requested_projects = get_option('projects')
+# 'mi450' was the canonical name before the MI400 Series rename.
+requested_projects = []
+foreach project_name : get_option('projects')
+    if project_name == 'mi450'
+        warning('projects: mi450 is deprecated, use mi400')
+        project_name = 'mi400'
+    endif
+    requested_projects += [project_name]
+endforeach
 if requested_projects.length() == 0
     error('projects must contain at least one project or all')
 endif
@@ -57,7 +65,7 @@ enable_mi300c = 'mi300c' in selected_projects
 enable_mi300x = 'mi300x' in selected_projects
 enable_mi325x = 'mi325x' in selected_projects
 enable_mi350 = 'mi350' in selected_projects
-enable_mi450 = 'mi450' in selected_projects
+enable_mi400 = 'mi400' in selected_projects
 enable_turin = 'turin' in selected_projects
 enable_venice = 'venice' in selected_projects
 enable_cpu_project = enable_embedded_2005 or enable_genoa or enable_turin or enable_venice
@@ -128,22 +136,22 @@ if enable_cpu_project
         'src/addc-cper-parser/sections/cper-section-amd-epyc-pmic.cpp',
     )
 endif
-if enable_cpu_project or enable_mi450
+if enable_cpu_project or enable_mi400
     addc_cper_parser_src += files(
         'src/addc-cper-parser/sections/cper-section-amd-epyc-mtl.cpp',
     )
 endif
-if enable_mi300_gpu_project or enable_mi450
+if enable_mi300_gpu_project or enable_mi400
     addc_cper_parser_src += files(
         'src/addc-cper-parser/sections/cper-section-amd-gpu-common.cpp',
         'src/addc-cper-parser/sections/cper-section-amd-gpu-crashdump.cpp',
         'src/addc-cper-parser/sections/cper-section-amd-gpu-runtime.cpp',
     )
 endif
-if enable_mi450
+if enable_mi400
     addc_cper_parser_src += files(
-        'src/addc-cper-parser/sections/cper-section-amd-mi450-mtl.cpp',
-        'src/addc-cper-parser/sections/cper-section-amd-mi450-scaleup.cpp',
+        'src/addc-cper-parser/sections/cper-section-amd-mi400-mtl.cpp',
+        'src/addc-cper-parser/sections/cper-section-amd-mi400-scaleup.cpp',
     )
 endif
 
@@ -174,10 +182,10 @@ addc_decoder_base_src = files(
 if enable_venice
     addc_decoder_base_src += files('src/addc-decoder/wdt/venice.cpp')
 endif
-if enable_mi450
+if enable_mi400
     addc_decoder_base_src += files(
-        'src/addc-decoder/boot_mi450/decoder.cpp',
-        'src/addc-decoder/dbglog/mi450.cpp',
+        'src/addc-decoder/boot_mi400/decoder.cpp',
+        'src/addc-decoder/dbglog/mi400.cpp',
     )
 endif
 
@@ -211,8 +219,8 @@ endif
 if enable_mi300x or enable_mi325x or enable_mi350
     addc_mca_base_src += files('src/addc-mca/mi300x.cpp')
 endif
-if enable_mi450
-    addc_mca_base_src += files('src/addc-mca/mi450.cpp')
+if enable_mi400
+    addc_mca_base_src += files('src/addc-mca/mi400.cpp')
 endif
 if enable_mi300a
     addc_mca_base_src += files('src/addc-mca/mi300a.cpp')
@@ -241,13 +249,13 @@ addc_cper_pipeline_src = files(
     'src/addc-cper-parser/structural.cpp',
     'src/addc-cper-pipeline/sections/epyc_crashdump_section.cpp',
     'src/addc-cper-pipeline/sections/mtl_section.cpp',
-    'src/addc-cper-pipeline/sections/mi450_mtl_section.cpp',
-    'src/addc-cper-pipeline/sections/mi450_scaleup_section.cpp',
+    'src/addc-cper-pipeline/sections/mi400_mtl_section.cpp',
+    'src/addc-cper-pipeline/sections/mi400_scaleup_section.cpp',
     'src/addc-cper-pipeline/sections/cdd_section.cpp',
     'src/addc-cper-pipeline/sections/pmic_section.cpp',
     'src/addc-cper-pipeline/sections/gpu_crashdump_section.cpp',
-    'src/addc-cper-pipeline/sections/gpu_mi450_crashdump_section.cpp',
-    'src/addc-cper-pipeline/sections/gpu_mi450_runtime_section.cpp',
+    'src/addc-cper-pipeline/sections/gpu_mi400_crashdump_section.cpp',
+    'src/addc-cper-pipeline/sections/gpu_mi400_runtime_section.cpp',
     'src/addc-cper-pipeline/sections/gpu_runtime_section.cpp',
     'src/addc-cper-pipeline/sections/ia32x64_section.cpp',
     'src/addc-cper-pipeline/sections/pcie_section.cpp',
@@ -267,7 +275,7 @@ if enable_cpu_project
         'src/addc-cper-pipeline/sections/pcie_decoder.cpp',
     )
 endif
-if enable_cpu_project or enable_mi450
+if enable_cpu_project or enable_mi400
     addc_cper_pipeline_src += files(
         'src/addc-cper-pipeline/sections/mtl_decoder.cpp',
     )
@@ -278,11 +286,11 @@ if enable_mi300_gpu_project
         'src/addc-cper-pipeline/sections/gpu_runtime_decoder.cpp',
     )
 endif
-if enable_mi450
+if enable_mi400
     addc_cper_pipeline_src += files(
-        'src/addc-cper-pipeline/sections/gpu_mi450_crashdump_decoder.cpp',
-        'src/addc-cper-pipeline/sections/gpu_mi450_runtime_decoder.cpp',
-        'src/addc-cper-pipeline/sections/mi450_scaleup_decoder.cpp',
+        'src/addc-cper-pipeline/sections/gpu_mi400_crashdump_decoder.cpp',
+        'src/addc-cper-pipeline/sections/gpu_mi400_runtime_decoder.cpp',
+        'src/addc-cper-pipeline/sections/mi400_scaleup_decoder.cpp',
     )
 endif
 
@@ -340,6 +348,22 @@ parser_modes_test = executable(
 )
 test('parser-modes', parser_modes_test)
 
+pcie_aer_layout_test = executable(
+    'pcie-aer-layout-test',
+    'tests/pcie_aer_layout.cpp',
+    dependencies: [addc_cper_parser_dep, addc_decoder_base_dep],
+    cpp_args: base_product_cpp_args,
+)
+test('pcie-aer-layout', pcie_aer_layout_test)
+
+pcie_section_fields_test = executable(
+    'pcie-section-fields-test',
+    'tests/pcie_section_fields.cpp',
+    dependencies: [addc_cper_parser_dep, addc_decoder_base_dep],
+    cpp_args: base_product_cpp_args,
+)
+test('pcie-section-fields', pcie_section_fields_test)
+
 parser_boundary_test = executable(
     'parser-boundary-test',
     'tests/parser_boundary.cpp',
@@ -355,7 +379,7 @@ allocation_contract_test = executable(
 )
 test('allocation-contract', allocation_contract_test)
 
-if enable_mi300x and enable_mi450
+if enable_mi300x and enable_mi400
     descriptor_platform_smoke = executable(
         'descriptor-platform-smoke',
         'tests/descriptor_platform_smoke.cpp',
@@ -364,14 +388,14 @@ if enable_mi300x and enable_mi450
     test('descriptor-platform-smoke', descriptor_platform_smoke)
 endif
 
-if enable_mi450
-    mi450_cper_layout_test = executable(
-        'mi450-cper-layout-test',
-        'tests/mi450_cper_layout.cpp',
+if enable_mi400
+    mi400_cper_layout_test = executable(
+        'mi400-cper-layout-test',
+        'tests/mi400_cper_layout.cpp',
         dependencies: addc_cper_pipeline_dep,
         cpp_args: base_product_cpp_args,
     )
-    test('mi450-cper-layout', mi450_cper_layout_test)
+    test('mi400-cper-layout', mi400_cper_layout_test)
 endif
 
 if enable_cpu_project
@@ -405,6 +429,7 @@ pipeline_output_contract_test = executable(
     'pipeline-output-contract-test',
     'tests/pipeline_output_contract.cpp',
     dependencies: addc_cper_pipeline_dep,
+    cpp_args: base_product_cpp_args,
 )
 test('pipeline-output-contract', pipeline_output_contract_test)
 
@@ -422,7 +447,7 @@ outbound_base_contract_test = executable(
 )
 test('outbound-base-contract', outbound_base_contract_test)
 
-if enable_venice and enable_mi450 and enable_turin
+if enable_venice and enable_mi400 and enable_turin
     decoder_contract_test = executable(
         'decoder-contract-test',
         'tests/decoder_contract.cpp',
@@ -431,7 +456,7 @@ if enable_venice and enable_mi450 and enable_turin
     test('decoder-contract', decoder_contract_test)
 endif
 
-if enable_mi450
+if enable_mi400
     mca_contract_test = executable(
         'mca-contract-test',
         'tests/mca_contract.cpp',

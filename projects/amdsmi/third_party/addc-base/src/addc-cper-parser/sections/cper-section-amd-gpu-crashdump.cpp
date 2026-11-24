@@ -59,8 +59,8 @@ nlohmann::json parseMi300ErrorInfo(std::span<const uint8_t> body,
 }
 
 // Context structure: 16-byte header (type, array size, reserved) and the
-// register array. MI300 reports the array alone; MI450 keeps the header in
-// `data` and wraps the type.
+// register array. MI300 reports the array alone; MI400 Series keeps the header
+// in `data` and wraps the type.
 nlohmann::json parseContext(std::span<const uint8_t> body, std::size_t base,
                             AmdGpuLayout layout, ParseContext& context)
 {
@@ -83,7 +83,7 @@ nlohmann::json parseContext(std::span<const uint8_t> body, std::size_t base,
     }
 
     nlohmann::json j = nlohmann::json::object();
-    if (layout == AmdGpuLayout::Mi450)
+    if (layout == AmdGpuLayout::Mi400)
     {
         j["registerContextType"] = {
             {"value", static_cast<uint64_t>(ctx_type)},
@@ -112,7 +112,7 @@ bool matches_amd_mi300_crashdump(const RecordHeader& /*header*/,
            ras_gen(desc.revision_major) == 0x2U;
 }
 
-bool matches_amd_mi450_crashdump(const RecordHeader& /*header*/,
+bool matches_amd_mi400_crashdump(const RecordHeader& /*header*/,
                                  const SectionDescriptor& desc) noexcept
 {
     return desc.section_type == kAmdCrashdumpGuid &&
@@ -169,7 +169,7 @@ nlohmann::json parse_amd_gpu_crashdump(std::span<const uint8_t> body,
         {
             break;
         }
-        auto entry = layout == AmdGpuLayout::Mi450
+        auto entry = layout == AmdGpuLayout::Mi400
                          ? parse_amd_gpu_error_info(body, cur, layout)
                          : parseMi300ErrorInfo(body, cur);
         if (!entry.is_null())

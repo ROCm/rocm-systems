@@ -21,7 +21,7 @@
 #endif
 #if defined(ADDC_HAS_VENICE) || defined(ADDC_HAS_TURIN) || \
     defined(ADDC_HAS_GENOA) || defined(ADDC_HAS_EMBEDDED_2005) || \
-    defined(ADDC_HAS_MI450)
+    defined(ADDC_HAS_MI400)
 #include "addc/pipeline/mtl_decoder.hpp"
 #endif
 #if defined(ADDC_HAS_MI300A) || defined(ADDC_HAS_MI300C) || \
@@ -30,10 +30,10 @@
 #include "addc/pipeline/gpu_crashdump_decoder.hpp"
 #include "addc/pipeline/gpu_runtime_decoder.hpp"
 #endif
-#ifdef ADDC_HAS_MI450
-#include "addc/pipeline/gpu_mi450_crashdump_decoder.hpp"
-#include "addc/pipeline/gpu_mi450_runtime_decoder.hpp"
-#include "addc/pipeline/mi450_scaleup_decoder.hpp"
+#ifdef ADDC_HAS_MI400
+#include "addc/pipeline/gpu_mi400_crashdump_decoder.hpp"
+#include "addc/pipeline/gpu_mi400_runtime_decoder.hpp"
+#include "addc/pipeline/mi400_scaleup_decoder.hpp"
 #endif
 
 #include <type_traits>
@@ -104,7 +104,7 @@ SectionDecodeResult decode_base_section(const SectionDescriptor& descriptor,
 #endif
 #if defined(ADDC_HAS_VENICE) || defined(ADDC_HAS_TURIN) || \
     defined(ADDC_HAS_GENOA) || defined(ADDC_HAS_EMBEDDED_2005) || \
-    defined(ADDC_HAS_MI450)
+    defined(ADDC_HAS_MI400)
             else if constexpr (std::is_same_v<T, AmdEpycMtlSection>)
             {
                 return {true,
@@ -125,22 +125,22 @@ SectionDecodeResult decode_base_section(const SectionDescriptor& descriptor,
                                                  error_out)};
             }
 #endif
-#ifdef ADDC_HAS_MI450
+#ifdef ADDC_HAS_MI400
             else if constexpr (
-                std::is_same_v<T, AmdGpuMi450CrashdumpSection>)
+                std::is_same_v<T, AmdGpuMi400CrashdumpSection>)
             {
-                return {true, decode_gpu_mi450_crashdump(
+                return {true, decode_gpu_mi400_crashdump(
                                   descriptor, section, context, error_out)};
             }
             else if constexpr (
-                std::is_same_v<T, AmdGpuMi450RuntimeSection>)
+                std::is_same_v<T, AmdGpuMi400RuntimeSection>)
             {
-                return {true, decode_gpu_mi450_runtime(
+                return {true, decode_gpu_mi400_runtime(
                                   descriptor, section, context, error_out)};
             }
-            else if constexpr (std::is_same_v<T, AmdMi450ScaleUpSection>)
+            else if constexpr (std::is_same_v<T, AmdMi400ScaleUpSection>)
             {
-                return {true, decode_mi450_scaleup(descriptor, section,
+                return {true, decode_mi400_scaleup(descriptor, section,
                                                    context, error_out)};
             }
 #endif

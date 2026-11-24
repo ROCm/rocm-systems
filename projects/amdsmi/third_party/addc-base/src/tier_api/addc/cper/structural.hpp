@@ -24,14 +24,14 @@ enum class SectionKind
     Opaque,
     AmdEpycCrashdump,
     AmdEpycMtl,
-    AmdMi450Mtl,
+    AmdMi400Mtl,
     AmdEpycCdd,
     AmdEpycPmic,
     AmdMi300Crashdump,
-    AmdMi450Crashdump,
+    AmdMi400Crashdump,
     AmdMi300Runtime,
-    AmdMi450Runtime,
-    AmdMi450ScaleUp,
+    AmdMi400Runtime,
+    AmdMi400ScaleUp,
     Ia32X64,
     Pcie,
 };
@@ -60,10 +60,10 @@ using SectionPayload = std::variant<
     OpaqueSection,
     pipeline::AmdEpycCrashdumpSection, pipeline::Ia32x64Section,
     pipeline::PcieSection, pipeline::AmdGpuCrashdumpSection,
-    pipeline::AmdGpuMi450CrashdumpSection,
-    pipeline::AmdGpuMi450RuntimeSection, pipeline::AmdGpuRuntimeSection,
+    pipeline::AmdGpuMi400CrashdumpSection,
+    pipeline::AmdGpuMi400RuntimeSection, pipeline::AmdGpuRuntimeSection,
     pipeline::AmdEpycMtlSection, pipeline::AmdEpycCddSection,
-    pipeline::AmdEpycPmicSection, pipeline::AmdMi450ScaleUpSection>;
+    pipeline::AmdEpycPmicSection, pipeline::AmdMi400ScaleUpSection>;
 
 struct StructuralSection
 {

@@ -10,8 +10,8 @@
     defined(ADDC_HAS_MI350)
 #include "addc/mca/mi300x.hpp"
 #endif
-#ifdef ADDC_HAS_MI450
-#include "addc/mca/mi450.hpp"
+#ifdef ADDC_HAS_MI400
+#include "addc/mca/mi400.hpp"
 #endif
 #include "addc/product.hpp"
 #include "addc/schema_version.hpp"
@@ -159,9 +159,9 @@ std::optional<McaResult> try_decode_project_event(
         case product::ProductId::mi350:
             return base::mi300x::decode(bank);
 #endif
-#ifdef ADDC_HAS_MI450
-        case product::ProductId::mi450:
-            return base::mi450::decode(bank);
+#ifdef ADDC_HAS_MI400
+        case product::ProductId::mi400:
+            return base::mi400::decode(bank);
 #endif
         default:
             return decode_common(bank, kAfidSentinel, definition->identity.id);

@@ -7,6 +7,6 @@
 namespace addc
 {
 
-inline constexpr std::string_view kSchemaVersion = "3.4.0";
+inline constexpr std::string_view kSchemaVersion = "3.5.0";
 
 } // namespace addc

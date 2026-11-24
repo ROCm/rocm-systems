@@ -10,7 +10,7 @@ namespace addc::pipeline
 
 using namespace detail;
 
-std::optional<AmdGpuMi450RuntimeSection> parseGpuMi450RuntimeSection(
+std::optional<AmdGpuMi400RuntimeSection> parseGpuMi400RuntimeSection(
     const nlohmann::json& descriptor, const nlohmann::json& section)
 {
     const nlohmann::json* body = json_obj(section, "AmdMi300Runtime");
@@ -19,8 +19,8 @@ std::optional<AmdGpuMi450RuntimeSection> parseGpuMi450RuntimeSection(
         return std::nullopt;
     }
 
-    AmdGpuMi450RuntimeSection sec;
-    fill_common_metadata(sec, descriptor, "mi450");
+    AmdGpuMi400RuntimeSection sec;
+    fill_common_metadata(sec, descriptor, "mi400");
     sec.descriptor_flags = parse_descriptor_flags(descriptor);
 
     fill_gpu_header(sec, *body);
@@ -43,7 +43,7 @@ std::optional<AmdGpuMi450RuntimeSection> parseGpuMi450RuntimeSection(
     sec.contexts.reserve(ctxs->size());
     for (const auto& ctx : *ctxs)
     {
-        GpuMi450RuntimeContext mc;
+        GpuMi400RuntimeContext mc;
 
         if (ctx.contains("registerContextType"))
         {

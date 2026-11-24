@@ -76,7 +76,7 @@ DecodedWdt decode_base_wdt(std::string_view project,
         case addc::product::ProductId::embedded_2005:
         case addc::product::ProductId::genoa:
         case addc::product::ProductId::turin:
-        case addc::product::ProductId::mi450:
+        case addc::product::ProductId::mi400:
             return decode_generic_wdt(wdt_data, cpuid_eax);
         default:
             // Preserve the former explicit "epyc" fallback without retaining

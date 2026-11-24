@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "addc/pipeline/gpu_mi450_runtime_decoder.hpp"
+#include "addc/pipeline/gpu_mi400_runtime_decoder.hpp"
 
 #include "addc/mca/decoder.hpp"
+#include "addc/mca/policy.hpp"
 #include "addc/mca/registers.hpp"
 #include "addc/pipeline/section_data.hpp"
 #include "gpu_decode_helpers.hpp"
@@ -10,9 +11,9 @@
 namespace addc::pipeline
 {
 
-std::vector<PipelineEvent> decode_gpu_mi450_runtime(
+std::vector<PipelineEvent> decode_gpu_mi400_runtime(
     [[maybe_unused]] const SectionDescriptor& descriptor,
-    const AmdGpuMi450RuntimeSection& s, const DecodeContext& context,
+    const AmdGpuMi400RuntimeSection& s, const DecodeContext& context,
     std::string* error_out)
 {
 
@@ -21,7 +22,7 @@ std::vector<PipelineEvent> decode_gpu_mi450_runtime(
         if (error_out != nullptr)
         {
             *error_out =
-                "GpuMi450RuntimeDecoder: no MCA operation in DecodeContext";
+                "GpuMi400RuntimeDecoder: no MCA operation in DecodeContext";
         }
         return {};
     }
@@ -31,7 +32,7 @@ std::vector<PipelineEvent> decode_gpu_mi450_runtime(
     const auto* ei = has_ei ? s.error_info_structures.data() : nullptr;
     for (std::size_t ci = 0U; ci < s.contexts.size(); ++ci)
     {
-        const GpuMi450RuntimeContext& mc = s.contexts[ci];
+        const GpuMi400RuntimeContext& mc = s.contexts[ci];
         if (!mc.bank)
         {
             continue;
@@ -45,11 +46,23 @@ std::vector<PipelineEvent> decode_gpu_mi450_runtime(
             continue;
         }
 
-        const auto decoded = context.decode_mca(
+        auto decoded = context.decode_mca(
             s.platform, addc::mca::BankCapture{regs, bank.transaddr});
         if (!decoded)
         {
             continue;
+        }
+
+        if (addc::mca::is_bad_page_retirement(
+                s.platform, s.descriptor_flags.error_threshold_exceeded, regs))
+        {
+            decoded->decoded.error_type = "BadPageRetirement";
+            decoded->decoded.description =
+                "Bad page retirement threshold exceeded";
+            decoded->decoded.severity = "Fatal";
+            decoded->decoded.instance = std::nullopt;
+            decoded->decoded.afid = {47873};
+            decoded->event_report = addc::mca::to_json(decoded->decoded);
         }
 
         PipelineEvent ev;
@@ -57,13 +70,13 @@ std::vector<PipelineEvent> decode_gpu_mi450_runtime(
                                              "mca", events.size());
         ev.platform = gpu::make_gpu_platform(s, has_ei, ei);
         ev.platform["gpu"]["check_info"] =
-            has_ei ? gpu::make_mi450_check_info(*ei)
+            has_ei ? gpu::make_mi400_check_info(*ei)
                    : nlohmann::ordered_json(nullptr);
         ev.event_report = decoded->event_report;
         ev.data_array = to_data_array(bank);
         ev.validation = decoded->validation;
         ev.analysis["afid"] = decoded->decoded.afid;
-        ev.firmware = gpu::make_mi450_firmware_json(s);
+        ev.firmware = gpu::make_mi400_firmware_json(s);
         ev.ppr = decoded->ppr;
 
         events.push_back(std::move(ev));

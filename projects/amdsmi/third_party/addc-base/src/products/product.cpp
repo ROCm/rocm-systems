@@ -14,7 +14,9 @@ constexpr std::array<DescriptorRoute, 2> genoa_descriptor_routes{{{1, 0},
                                                                   {1, 1}}};
 constexpr std::array<DescriptorRoute, 1> mi300a_descriptor_routes{{{2, 1}}};
 constexpr std::array<DescriptorRoute, 1> mi300x_descriptor_routes{{{2, 2}}};
-constexpr std::array<DescriptorRoute, 1> mi450_descriptor_routes{{{2, 3}}};
+constexpr std::array<DescriptorRoute, 1> mi400_descriptor_routes{{{2, 3}}};
+// "mi450" was the canonical name before the MI400 Series rename.
+constexpr std::array<std::string_view, 1> mi400_aliases{"mi450"};
 constexpr std::array<DescriptorRoute, 1> turin_descriptor_routes{{{1, 2}}};
 constexpr std::array<DescriptorRoute, 1> venice_descriptor_routes{{{1, 3}}};
 
@@ -40,7 +42,7 @@ constexpr std::size_t product_count =
 #ifdef ADDC_HAS_MI350
     1 +
 #endif
-#ifdef ADDC_HAS_MI450
+#ifdef ADDC_HAS_MI400
     1 +
 #endif
 #ifdef ADDC_HAS_TURIN
@@ -87,9 +89,9 @@ constexpr std::array<ProductDefinition, product_count> products{{
       ProductFamily::instinct, {}, {}},
      {true, false, false}},
 #endif
-#ifdef ADDC_HAS_MI450
-    {{ProductId::mi450, "mi450", "AMD Instinct MI450X",
-      ProductFamily::instinct, {}, mi450_descriptor_routes},
+#ifdef ADDC_HAS_MI400
+    {{ProductId::mi400, "mi400", "AMD Instinct MI400 Series",
+      ProductFamily::instinct, mi400_aliases, mi400_descriptor_routes},
      {true, true, false}},
 #endif
 #ifdef ADDC_HAS_TURIN

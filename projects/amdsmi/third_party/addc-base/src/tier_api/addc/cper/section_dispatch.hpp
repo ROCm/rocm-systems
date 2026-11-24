@@ -28,9 +28,9 @@ struct SectionClassification
 
 [[nodiscard]] SectionClassification describe_section(SectionKind kind) noexcept;
 
-/// True when an AMD GPU runtime section descriptor revision selects the MI450
-/// layout (RAS generation 3, Instinct program).
-[[nodiscard]] bool is_mi450_gpu_runtime_revision(
+/// True when an AMD GPU runtime section descriptor revision selects the MI400
+/// Series layout (RAS generation 3, Instinct program).
+[[nodiscard]] bool is_mi400_gpu_runtime_revision(
     uint8_t revision_major) noexcept;
 [[nodiscard]] SectionKind section_kind_from_type_name(
     std::string_view type_name) noexcept;

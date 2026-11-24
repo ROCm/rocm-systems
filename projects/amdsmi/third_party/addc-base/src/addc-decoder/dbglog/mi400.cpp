@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "addc/decoder/dbglog/mi450.hpp"
+#include "addc/decoder/dbglog/mi400.hpp"
 
 #include <array>
 #include <cstddef>
@@ -49,7 +49,7 @@ namespace
 
 } // namespace
 
-std::optional<addc::pipeline::McaBankDump> parse_mi450_register_array(
+std::optional<addc::pipeline::McaBankDump> parse_mi400_register_array(
     std::span<const uint8_t> bytes)
 {
     if (bytes.size() < 128U)
@@ -59,7 +59,7 @@ std::optional<addc::pipeline::McaBankDump> parse_mi450_register_array(
     return parseMca(bytes.data());
 }
 
-std::vector<DecodedDbgLog> decode_mi450_dbglog(
+std::vector<DecodedDbgLog> decode_mi400_dbglog(
     const std::vector<addc::pipeline::DbgLogGroup>& groups)
 {
     auto decoded = decode_epyc_dbglog(groups);
@@ -76,7 +76,7 @@ std::vector<DecodedDbgLog> decode_mi450_dbglog(
         {
             continue;
         }
-        decoded[index].mca_bank = parse_mi450_register_array(bytes);
+        decoded[index].mca_bank = parse_mi400_register_array(bytes);
     }
     return decoded;
 }

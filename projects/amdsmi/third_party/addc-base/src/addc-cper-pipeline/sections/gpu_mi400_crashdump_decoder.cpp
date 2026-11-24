@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "addc/pipeline/gpu_mi450_crashdump_decoder.hpp"
+#include "addc/pipeline/gpu_mi400_crashdump_decoder.hpp"
 
 #include "addc/boot/decoder.hpp"
-#include "addc/boot_mi450/decoder.hpp"
+#include "addc/boot_mi400/decoder.hpp"
 #include "addc/common.hpp"
 #include "addc/decoder/dbglog/decoder.hpp"
 #include "addc/decoder/wdt/decoder.hpp"
@@ -21,32 +21,32 @@ namespace addc::pipeline
 namespace
 {
 
-[[nodiscard]] std::string mi450ContextTypeName(uint16_t context_type)
+[[nodiscard]] std::string mi400ContextTypeName(uint16_t context_type)
 {
     switch (context_type)
     {
         case 1U:
-            return "MI450 Crashdump";
+            return "MI400 Series Crashdump";
         case 3U:
-            return "MI450 Break Event";
+            return "MI400 Series Break Event";
         case 5U:
-            return "MI450 DBG Log";
+            return "MI400 Series DBG Log";
         case 9U:
-            return "MI450 Boot Status";
+            return "MI400 Series Boot Status";
         default:
-            return addc::format("MI450 Context Type {}", context_type);
+            return addc::format("MI400 Series Context Type {}", context_type);
     }
 }
 
 [[nodiscard]] nlohmann::ordered_json makeMetadata(
-    const AmdGpuMi450CrashdumpSection& s, const DecodeContext& context,
+    const AmdGpuMi400CrashdumpSection& s, const DecodeContext& context,
     std::size_t ci, uint16_t context_type, std::string_view event_class,
     std::size_t event_index)
 {
     nlohmann::ordered_json m;
     m["section_index"] = context.section_index;
     m["context_structure_index"] = ci;
-    m["context_type"] = mi450ContextTypeName(context_type);
+    m["context_type"] = mi400ContextTypeName(context_type);
     m["event_class"] = event_class;
     m["event_index"] = event_index;
     m["timestamp"] = context.timestamp;
@@ -55,11 +55,11 @@ namespace
 }
 
 [[nodiscard]] nlohmann::ordered_json makePlatform(
-    const AmdGpuMi450CrashdumpSection& s)
+    const AmdGpuMi400CrashdumpSection& s)
 {
     nlohmann::ordered_json p;
     p["fru"] = s.fru;
-    p["fru_id"] = s.fru_id;
+    detail::set_fru_id_and_cuid(p, s.fru_id);
     p["cpu"] = nullptr;
 
     nlohmann::ordered_json gpu_obj = nlohmann::ordered_json::object();
@@ -77,7 +77,7 @@ namespace
             ei.redfish_event_log_id_valid, ei.redfish_event_log_id);
         gpu_obj["redfish_event_log_id"] = redfish["id"];
         gpu_obj["redfish_event_log_timestamp"] = redfish["timestamp"];
-        gpu_obj["check_info"] = gpu::make_mi450_check_info(ei);
+        gpu_obj["check_info"] = gpu::make_mi400_check_info(ei);
     }
     else
     {
@@ -92,15 +92,15 @@ namespace
 }
 
 [[nodiscard]] nlohmann::ordered_json makeFirmware(
-    const AmdGpuMi450CrashdumpSection& s)
+    const AmdGpuMi400CrashdumpSection& s)
 {
-    return gpu::make_mi450_firmware_json(s);
+    return gpu::make_mi400_firmware_json(s);
 }
 
 // Boot Status (type 9) and Break Event (type 3) contexts both carry one
 // 8-byte MP0_OutBndMsg value. Base keeps the raw value; Extended decodes the
 // message fields. Only Boot Status has a Base AFID.
-void emitMi450OutBndMsgEvent(const AmdGpuMi450CrashdumpSection& s,
+void emitMi400OutBndMsgEvent(const AmdGpuMi400CrashdumpSection& s,
                              const DecodeContext& context,
                              std::size_t context_index, uint16_t context_type,
                              std::string_view event_class,
@@ -128,15 +128,15 @@ void emitMi450OutBndMsgEvent(const AmdGpuMi450CrashdumpSection& s,
 
     ev.analysis["afid"] = base_afid
                               ? nlohmann::ordered_json::array(
-                                    {addc::boot_mi450::decode_afid(msg)})
+                                    {addc::boot_mi400::decode_afid(msg)})
                               : nlohmann::ordered_json(
                                     addc::afid_list(addc::kAfidSentinel));
 
     events.push_back(std::move(ev));
 }
 
-void emitMi450McaEvent(
-    const AmdGpuMi450CrashdumpSection& s, const DecodeContext& context,
+void emitMi400McaEvent(
+    const AmdGpuMi400CrashdumpSection& s, const DecodeContext& context,
     std::size_t context_index, uint16_t context_type, const McaBankDump& bank,
     std::vector<PipelineEvent>& events)
 {
@@ -169,9 +169,9 @@ void emitMi450McaEvent(
 
 } // namespace
 
-std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
+std::vector<PipelineEvent> decode_gpu_mi400_crashdump(
     [[maybe_unused]] const SectionDescriptor& descriptor,
-    const AmdGpuMi450CrashdumpSection& s, const DecodeContext& context,
+    const AmdGpuMi400CrashdumpSection& s, const DecodeContext& context,
     std::string* error_out)
 {
 
@@ -180,7 +180,7 @@ std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
         if (error_out != nullptr)
         {
             *error_out =
-                "GpuMi450CrashdumpDecoder: no MCA operation in DecodeContext";
+                "GpuMi400CrashdumpDecoder: no MCA operation in DecodeContext";
         }
         return {};
     }
@@ -189,13 +189,13 @@ std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
 
     for (std::size_t ci = 0U; ci < s.contexts.size(); ++ci)
     {
-        const GpuMi450Context& mc = s.contexts[ci];
+        const GpuMi400Context& mc = s.contexts[ci];
 
         if (mc.crashdump.has_value())
         {
             for (const McaBankDump& bank : mc.crashdump->banks)
             {
-                emitMi450McaEvent(s, context, ci, mc.context_type, bank,
+                emitMi400McaEvent(s, context, ci, mc.context_type, bank,
                                   events);
             }
         }
@@ -252,7 +252,7 @@ std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
                 {
                     if (blk.mca_bank.has_value())
                     {
-                        emitMi450McaEvent(s, context, ci, mc.context_type,
+                        emitMi400McaEvent(s, context, ci, mc.context_type,
                                           *blk.mca_bank, events);
                         continue;
                     }
@@ -299,7 +299,7 @@ std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
 
         if (mc.boot_status.has_value())
         {
-            emitMi450OutBndMsgEvent(s, context, ci, mc.context_type,
+            emitMi400OutBndMsgEvent(s, context, ci, mc.context_type,
                                     "boot_status_eam", "boot_msg",
                                     mc.boot_status->boot_msg_lo,
                                     mc.boot_status->boot_msg_hi,
@@ -308,7 +308,7 @@ std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
 
         if (mc.break_event.has_value())
         {
-            emitMi450OutBndMsgEvent(s, context, ci, mc.context_type,
+            emitMi400OutBndMsgEvent(s, context, ci, mc.context_type,
                                     "break_event_eam", "break_event_msg",
                                     mc.break_event->msg_lo,
                                     mc.break_event->msg_hi,

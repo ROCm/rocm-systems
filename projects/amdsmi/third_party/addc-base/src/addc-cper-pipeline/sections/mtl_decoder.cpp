@@ -5,6 +5,7 @@
 #include "addc/common.hpp"
 #include "addc/detail/format.hpp"
 #include "addc/pipeline/section_data.hpp"
+#include "fru_identity.hpp"
 
 namespace addc::pipeline
 {
@@ -26,7 +27,7 @@ std::vector<PipelineEvent> decode_mtl(
                                    {"value", s.addc_version}};
 
     ev.platform["fru"] = s.fru;
-    ev.platform["fru_id"] = s.fru_id;
+    detail::set_fru_id_and_cuid(ev.platform, s.fru_id);
     ev.platform["cpu"] = nullptr;
     ev.platform["gpu"] = nullptr;
 
@@ -41,7 +42,8 @@ std::vector<PipelineEvent> decode_mtl(
     ev.event_report["log_header"] = std::move(log_header_j);
 
     ev.data_array = nullptr;
-    ev.analysis["afid"] = addc::afid_list(addc::kAfidSentinel);
+    ev.analysis["afid"] =
+        addc::afid_list(s.platform == "venice" ? 25764 : addc::kAfidSentinel);
 
     return {std::move(ev)};
 }

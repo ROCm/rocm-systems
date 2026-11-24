@@ -80,10 +80,10 @@ nlohmann::json parseMi300ErrorInfo(std::span<const uint8_t> d)
     return j;
 }
 
-// MI450: bit 0 Check Info valid, bit 5 FRU MPN valid, bit 7 Redfish ID valid.
-// Bits 1-4 are reserved for EPYC; bit 6 and bits 8-63 are reserved. Bytes
-// 32-47 are the MPN and bytes 48-63 are the Redfish ID.
-nlohmann::json parseMi450ErrorInfo(std::span<const uint8_t> d)
+// MI400 Series: bit 0 Check Info valid, bit 5 FRU MPN valid, bit 7 Redfish ID
+// valid. Bits 1-4 are reserved for EPYC; bit 6 and bits 8-63 are reserved.
+// Bytes 32-47 are the MPN and bytes 48-63 are the Redfish ID.
+nlohmann::json parseMi400ErrorInfo(std::span<const uint8_t> d)
 {
     const uint64_t vb = read_u64_le(d, 16U);
     nlohmann::json j = nlohmann::json::object();
@@ -105,7 +105,7 @@ nlohmann::json parseMi450ErrorInfo(std::span<const uint8_t> d)
 
 nlohmann::json parse_amd_gpu_pldm_bundle(uint32_t raw, AmdGpuLayout layout)
 {
-    if (layout == AmdGpuLayout::Mi450)
+    if (layout == AmdGpuLayout::Mi400)
     {
         // Byte 0 Patch, byte 1 Minor, byte 2 Major/Year, byte 3 bits 0-2
         // buildType and bits 3-7 productId.
@@ -134,7 +134,7 @@ nlohmann::json parse_amd_gpu_error_info(std::span<const uint8_t> body,
         return nullptr;
     }
     const auto d = body.subspan(base, kSize);
-    return layout == AmdGpuLayout::Mi450 ? parseMi450ErrorInfo(d)
+    return layout == AmdGpuLayout::Mi400 ? parseMi400ErrorInfo(d)
                                          : parseMi300ErrorInfo(d);
 }
 

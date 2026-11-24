@@ -8,8 +8,8 @@
 namespace addc::pipeline
 {
 
-[[nodiscard]] std::vector<PipelineEvent> decode_gpu_mi450_crashdump(
-    const SectionDescriptor& descriptor, const AmdGpuMi450CrashdumpSection& section,
+[[nodiscard]] std::vector<PipelineEvent> decode_gpu_mi400_crashdump(
+    const SectionDescriptor& descriptor, const AmdGpuMi400CrashdumpSection& section,
     const DecodeContext& context, std::string* error_out = nullptr);
 
 } // namespace addc::pipeline

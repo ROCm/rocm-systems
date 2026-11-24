@@ -9,6 +9,7 @@
 #include "addc/pipeline/section_data.hpp"
 #include "addc/pipeline/decode_context.hpp"
 #include "addc/pipeline/section_data.hpp"
+#include "fru_identity.hpp"
 #include "section_helpers.hpp"
 
 #include <nlohmann/json.hpp>
@@ -27,40 +28,6 @@ namespace addc::pipeline::gpu
 [[nodiscard]] inline std::string format_hex64(uint64_t v)
 {
     return addc::format("0x{:016x}", v);
-}
-
-[[nodiscard]] inline std::string decode_fru_id_ascii(std::string_view guid_str)
-{
-    std::string result;
-    for (std::size_t i = 0u; i < guid_str.size(); i += 2u)
-    {
-        if (guid_str[i] == '-')
-        {
-            ++i;
-            if (i + 1u >= guid_str.size())
-                break;
-        }
-        if (i + 1u >= guid_str.size())
-            break;
-        auto hex_val = [](char c) -> int {
-            if (c >= '0' && c <= '9')
-                return c - '0';
-            if (c >= 'a' && c <= 'f')
-                return c - 'a' + 10;
-            if (c >= 'A' && c <= 'F')
-                return c - 'A' + 10;
-            return -1;
-        };
-        const int hi = hex_val(guid_str[i]);
-        const int lo = hex_val(guid_str[i + 1u]);
-        if (hi < 0 || lo < 0)
-            break;
-        const char ch = static_cast<char>((hi << 4) | lo);
-        if (ch == '\0')
-            break;
-        result += ch;
-    }
-    return result;
 }
 
 [[nodiscard]] inline nlohmann::ordered_json crashdump_registers_to_json(
@@ -116,9 +83,9 @@ template <typename GpuSection>
     return fw;
 }
 
-/// Firmware block for MI450 sections.
+/// Firmware block for MI400 Series sections.
 template <typename GpuSection>
-[[nodiscard]] nlohmann::ordered_json make_mi450_firmware_json(
+[[nodiscard]] nlohmann::ordered_json make_mi400_firmware_json(
     const GpuSection& s)
 {
     if (!s.fw_id_valid && !s.pldm_bundle_valid)
@@ -144,9 +111,10 @@ template <typename GpuSection>
     return fw;
 }
 
-/// MS Check structure of an MI450 GPU Error Info structure. Null when Check
-/// Info Valid is clear. A field is null when its MS Check valid bit is clear.
-[[nodiscard]] inline nlohmann::ordered_json make_mi450_check_info(
+/// MS Check structure of an MI400 Series GPU Error Info structure. Null when
+/// Check Info Valid is clear. A field is null when its MS Check valid bit is
+/// clear.
+[[nodiscard]] inline nlohmann::ordered_json make_mi400_check_info(
     const GpuErrorInfoStructure& ei)
 {
     if (!ei.check_info_valid)
@@ -243,14 +211,16 @@ template <typename GpuSection>
 {
     nlohmann::ordered_json p;
     p["fru"] = s.fru;
-    p["fru_id"] = s.fru_id;
+    detail::set_fru_id_and_cuid(p, s.fru_id);
     p["cpu"] = nullptr;
 
     nlohmann::ordered_json gpu_obj = nlohmann::ordered_json::object();
 
-    auto serial = decode_fru_id_ascii(s.fru_id);
-    gpu_obj["serial_number"] = serial.empty() ? nlohmann::ordered_json(nullptr)
-                                              : nlohmann::ordered_json(serial);
+    // Out-of-band records can write the serial number as ASCII text.
+    const auto bytes = detail::guid_text_bytes(s.fru_id);
+    const auto serial = bytes ? detail::ascii_text(*bytes) : std::nullopt;
+    gpu_obj["serial_number"] = serial ? nlohmann::ordered_json(*serial)
+                                      : nlohmann::ordered_json(nullptr);
 
     gpu_obj["pcie_device"] = make_gpu_pcie_device(s);
 

@@ -4,10 +4,10 @@
 
 #include "addc/mca/decoder.hpp"
 
-namespace addc::mca::base::mi450
+namespace addc::mca::base::mi400
 {
 
 [[nodiscard]] uint32_t decode_afid(McaRegisters regs);
 [[nodiscard]] McaResult decode(const BankCapture& bank);
 
-} // namespace addc::mca::base::mi450
+} // namespace addc::mca::base::mi400

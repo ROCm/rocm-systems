@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "addc/boot_mi450/decoder.hpp"
+#include "addc/boot_mi400/decoder.hpp"
 
 #include "addc/common.hpp"
 
-namespace addc::boot_mi450
+namespace addc::boot_mi400
 {
 
 int decode_afid(uint64_t value) noexcept
@@ -27,4 +27,4 @@ int decode_afid(uint64_t value) noexcept
     }
 }
 
-} // namespace addc::boot_mi450
+} // namespace addc::boot_mi400

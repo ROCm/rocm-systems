@@ -4,11 +4,11 @@
 
 #include <cstdint>
 
-namespace addc::boot_mi450
+namespace addc::boot_mi400
 {
 
-/// Map a raw MI450 EAM boot/runtime message to the AFID knowledge available
-/// from the public register definition.
+/// Map a raw MI400 Series EAM boot/runtime message to the AFID knowledge
+/// available from the public register definition.
 [[nodiscard]] int decode_afid(uint64_t value) noexcept;
 
-} // namespace addc::boot_mi450
+} // namespace addc::boot_mi400

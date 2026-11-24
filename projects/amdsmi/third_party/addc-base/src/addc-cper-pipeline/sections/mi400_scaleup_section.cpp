@@ -7,7 +7,7 @@ namespace addc::pipeline
 
 using namespace detail;
 
-std::optional<AmdMi450ScaleUpSection> parseMi450ScaleUpSection(
+std::optional<AmdMi400ScaleUpSection> parseMi400ScaleUpSection(
     const nlohmann::json& descriptor, const nlohmann::json& section)
 {
     const nlohmann::json* body = json_obj(section, "AmdMi450ScaleUp");
@@ -16,10 +16,11 @@ std::optional<AmdMi450ScaleUpSection> parseMi450ScaleUpSection(
         return std::nullopt;
     }
 
-    AmdMi450ScaleUpSection sec;
-    fill_common_metadata(sec, descriptor, "mi450");
-    // The Scale Up GUID is MI450-only, so the section type owns the platform.
-    sec.platform = "mi450";
+    AmdMi400ScaleUpSection sec;
+    fill_common_metadata(sec, descriptor, "mi400");
+    // The Scale Up GUID is MI400 Series-only, so the section type owns the
+    // platform.
+    sec.platform = "mi400";
     sec.platform_name = std::string{platform_display_name(sec.platform)};
     sec.descriptor_flags = parse_descriptor_flags(descriptor);
 
@@ -30,6 +31,15 @@ std::optional<AmdMi450ScaleUpSection> parseMi450ScaleUpSection(
         for (const auto& eis : *infos)
         {
             sec.error_info_structures.push_back(parse_gpu_error_info(eis));
+        }
+        const nlohmann::json* vb =
+            infos->empty() ? nullptr : json_obj(infos->front(), "validBits");
+        if (vb != nullptr &&
+            json_bool(*vb, "eventDataFormatVersionValid").value_or(false))
+        {
+            sec.event_data_format_version =
+                json_str(infos->front(), "eventDataFormatVersion")
+                    .value_or(std::string{});
         }
     }
 

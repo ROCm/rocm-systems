@@ -71,10 +71,11 @@ auto make_record_without_events() -> std::vector<uint8_t> {
   return bytes;
 }
 
-// One AMD section whose event addc cannot classify further: it yields
-// ADDC_UNCLASSIFIED_AFID with the FRU text below.
-constexpr char kUnclassifiedFru[] = "TEST_FRU";
-auto make_record_with_unclassified_event() -> std::vector<uint8_t> {
+// One AMD section that addc decodes as a Venice MPx trace log: it yields
+// kTraceLogAfid with the FRU text below.
+constexpr int kTraceLogAfid = 25764;
+constexpr char kTraceLogFru[] = "TEST_FRU";
+auto make_record_with_trace_log_event() -> std::vector<uint8_t> {
   constexpr size_t kBodySize = 16;
   const auto size = (kBodyOffset + kBodySize);
   auto bytes = std::vector<uint8_t>(size, 0);
@@ -88,8 +89,8 @@ auto make_record_with_unclassified_event() -> std::vector<uint8_t> {
   put_u16(&bytes, (kCperHeaderSize + kDescriptorRevisionOffset), 0x3100);
   bytes[kCperHeaderSize + kDescriptorFlagsOffset] = 0x2;
   put_u16(&bytes, (kCperHeaderSize + kDescriptorPlatformOffset), kAmdVendorId);
-  std::memcpy(&bytes[kCperHeaderSize + kDescriptorFruOffset], kUnclassifiedFru,
-              (sizeof(kUnclassifiedFru) - 1));
+  std::memcpy(&bytes[kCperHeaderSize + kDescriptorFruOffset], kTraceLogFru,
+              (sizeof(kTraceLogFru) - 1));
   return bytes;
 }
 
@@ -322,7 +323,7 @@ TEST(GpuUnit, AddcAfidsRejectsMissingSignature) {
 // The record is parsed by its own record_length, so bytes the caller left after it
 // (a ring read hands over more than one record) cannot turn a valid record into an error.
 TEST(GpuUnit, AddcAfidsIgnoresBytesBeyondTheRecord) {
-  auto record = make_record_with_unclassified_event();
+  auto record = make_record_with_trace_log_event();
   const auto record_size = record.size();
   record.resize((record_size + kCperHeaderSize), 0xAB);
   auto afids = std::vector<int>{};
@@ -345,12 +346,11 @@ TEST(GpuUnit, AddcAfidsAcceptsRecordWithoutEvents) {
 }
 
 TEST(GpuUnit, AddcAfidsReturnsLibraryAfidUnchanged) {
-  const auto record = make_record_with_unclassified_event();
+  const auto record = make_record_with_trace_log_event();
   auto afids = std::vector<int>{};
   EXPECT_EQ(cper_get_afids(record.data(), record.size(), &afids), AMDSMI_STATUS_SUCCESS);
   ASSERT_EQ(afids.size(), 1u);
-  EXPECT_EQ(afids[0], ADDC_UNCLASSIFIED_AFID);
-  EXPECT_EQ(afids[0], 16999);
+  EXPECT_EQ(afids[0], kTraceLogAfid);
 }
 
 TEST(GpuUnit, AddcReportSizeQueryReturnsRequiredBytes) {
@@ -422,7 +422,7 @@ TEST(GpuUnit, AddcAfidsDoesNotReadPastAShortBuffer) {
 // A section descriptor whose FRU text has no terminator, in a record that ends
 // against the guard page: an unbounded string read runs off the descriptor and the buffer.
 TEST(GpuUnit, AddcAfidsDoesNotReadPastUnterminatedFruText) {
-  auto record = make_record_with_unclassified_event();
+  auto record = make_record_with_trace_log_event();
   record.resize(kBodyOffset);
   put_u32(&record, kHeaderRecordLengthOffset, static_cast<uint32_t>(record.size()));
   std::memset(&record[kCperHeaderSize + kDescriptorFruOffset], 'A',
@@ -640,19 +640,19 @@ TEST(GpuUnit, AddcReportSizeIsTheTextSizeForALargerBuffer) {
 
 // The report carries the events themselves, not just a schema header.
 TEST(GpuUnit, AddcReportContainsTheDecodedEvent) {
-  const auto record = make_record_with_unclassified_event();
+  const auto record = make_record_with_trace_log_event();
   auto size = uint32_t{0};
   ASSERT_EQ(cper_get_report_json(record.data(), record.size(), nullptr, &size),
             AMDSMI_STATUS_SUCCESS);
   auto buffer = std::string(size, '\0');
   ASSERT_EQ(cper_get_report_json(record.data(), record.size(), buffer.data(), &size),
             AMDSMI_STATUS_SUCCESS);
-  EXPECT_NE(buffer.find(std::to_string(ADDC_UNCLASSIFIED_AFID)), std::string::npos);
-  EXPECT_NE(buffer.find(kUnclassifiedFru), std::string::npos);
+  EXPECT_NE(buffer.find(std::to_string(kTraceLogAfid)), std::string::npos);
+  EXPECT_NE(buffer.find(kTraceLogFru), std::string::npos);
 }
 
 TEST(GpuUnit, AddcReportIgnoresBytesBeyondTheRecord) {
-  auto record = make_record_with_unclassified_event();
+  auto record = make_record_with_trace_log_event();
   record.resize((record.size() + kCperHeaderSize), 0xAB);
   auto size = uint32_t{0};
   ASSERT_EQ(cper_get_report_json(record.data(), record.size(), nullptr, &size),
@@ -660,7 +660,7 @@ TEST(GpuUnit, AddcReportIgnoresBytesBeyondTheRecord) {
   auto buffer = std::string(size, '\0');
   ASSERT_EQ(cper_get_report_json(record.data(), record.size(), buffer.data(), &size),
             AMDSMI_STATUS_SUCCESS);
-  EXPECT_NE(buffer.find(std::to_string(ADDC_UNCLASSIFIED_AFID)), std::string::npos);
+  EXPECT_NE(buffer.find(std::to_string(kTraceLogAfid)), std::string::npos);
 }
 
 // amdgpu writes the crashdump section of a runtime fatal record 32 bytes shorter than

@@ -6,6 +6,7 @@
 #include "addc/mca/decoder.hpp"
 #include "addc/mca/registers.hpp"
 #include "addc/pipeline/section_data.hpp"
+#include "fru_identity.hpp"
 
 namespace addc::pipeline
 {
@@ -70,7 +71,7 @@ namespace
     cpu["ppin"] = nullptr;
 
     p["fru"] = s.fru;
-    p["fru_id"] = s.fru_id;
+    detail::set_fru_id_and_cuid(p, s.fru_id);
     p["cpu"] = std::move(cpu);
     p["gpu"] = nullptr;
 

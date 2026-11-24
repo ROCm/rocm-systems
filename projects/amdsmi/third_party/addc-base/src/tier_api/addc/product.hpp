@@ -18,7 +18,7 @@ enum class ProductId : uint8_t
     mi300x,
     mi325x,
     mi350,
-    mi450,
+    mi400,
     turin,
     venice,
 };

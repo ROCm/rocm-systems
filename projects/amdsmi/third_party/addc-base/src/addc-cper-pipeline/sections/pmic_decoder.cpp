@@ -5,6 +5,7 @@
 #include "addc/common.hpp"
 #include "addc/detail/format.hpp"
 #include "addc/pipeline/section_data.hpp"
+#include "fru_identity.hpp"
 
 namespace addc::pipeline
 {
@@ -30,7 +31,7 @@ std::vector<PipelineEvent> decode_pmic(
                                    {"value", s.addc_version}};
 
     ev.platform["fru"] = s.fru;
-    ev.platform["fru_id"] = s.fru_id;
+    detail::set_fru_id_and_cuid(ev.platform, s.fru_id);
     ev.platform["cpu"] = nullptr;
     ev.platform["gpu"] = nullptr;
 

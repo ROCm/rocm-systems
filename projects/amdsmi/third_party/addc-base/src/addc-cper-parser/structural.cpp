@@ -159,10 +159,10 @@ std::optional<StructuralRecord> to_typed_record(
         if (kind == SectionKind::AmdMi300Runtime)
         {
             const auto major = unsignedField(*revision, "major");
-            if (major && is_mi450_gpu_runtime_revision(
+            if (major && is_mi400_gpu_runtime_revision(
                              static_cast<uint8_t>(*major & 0xFFU)))
             {
-                kind = SectionKind::AmdMi450Runtime;
+                kind = SectionKind::AmdMi400Runtime;
             }
         }
         const std::span<const uint8_t> raw{

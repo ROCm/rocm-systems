@@ -11,9 +11,9 @@ namespace addc::decoder
 {
 
 [[nodiscard]] std::optional<addc::pipeline::McaBankDump>
-    parse_mi450_register_array(std::span<const uint8_t> bytes);
+    parse_mi400_register_array(std::span<const uint8_t> bytes);
 
-[[nodiscard]] std::vector<DecodedDbgLog> decode_mi450_dbglog(
+[[nodiscard]] std::vector<DecodedDbgLog> decode_mi400_dbglog(
     const std::vector<addc::pipeline::DbgLogGroup>& groups);
 
 } // namespace addc::decoder

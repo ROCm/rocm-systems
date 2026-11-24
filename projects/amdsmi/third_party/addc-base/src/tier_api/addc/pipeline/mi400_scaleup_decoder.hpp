@@ -8,8 +8,8 @@
 namespace addc::pipeline
 {
 
-[[nodiscard]] std::vector<PipelineEvent> decode_gpu_mi450_runtime(
-    const SectionDescriptor& descriptor, const AmdGpuMi450RuntimeSection& section,
+[[nodiscard]] std::vector<PipelineEvent> decode_mi400_scaleup(
+    const SectionDescriptor& descriptor, const AmdMi400ScaleUpSection& section,
     const DecodeContext& context, std::string* error_out = nullptr);
 
 } // namespace addc::pipeline

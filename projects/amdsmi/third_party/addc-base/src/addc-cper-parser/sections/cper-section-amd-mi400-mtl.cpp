@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "cper-section-amd-mi450-mtl.hpp"
+#include "cper-section-amd-mi400-mtl.hpp"
 
 #include "../base64.hpp"
 #include "../endian.hpp"
@@ -37,7 +37,7 @@ constexpr uint64_t guidDieOrMpId(const Guid& guid) noexcept
     return value;
 }
 
-[[nodiscard]] bool hasMi450TopologyName(std::string_view fru) noexcept
+[[nodiscard]] bool hasMi400TopologyName(std::string_view fru) noexcept
 {
     return fru.find("_MID") != std::string_view::npos ||
            fru.find("_AID") != std::string_view::npos;
@@ -45,7 +45,7 @@ constexpr uint64_t guidDieOrMpId(const Guid& guid) noexcept
 
 } // namespace
 
-bool matches_amd_mi450_mtl(
+bool matches_amd_mi400_mtl(
     const RecordHeader& /*header*/,
     const SectionDescriptor& desc) noexcept
 {
@@ -62,21 +62,21 @@ bool matches_amd_mi450_mtl(
         return false;
     }
 
-    // MI450 normally uses program generation 2. Early firmware used the
+    // MI400 Series normally uses program generation 2. Early firmware used the
     // Venice-compatible 0x31 revision and zero GPU DID; its MID/AID topology
     // FRU is the only product discriminator carried by those descriptors.
     return program == 0x2U ||
-           (program == 0x1U && hasMi450TopologyName(desc.fru_text));
+           (program == 0x1U && hasMi400TopologyName(desc.fru_text));
 }
 
-nlohmann::json parse_amd_mi450_mtl(
+nlohmann::json parse_amd_mi400_mtl(
     std::span<const uint8_t> body, const SectionDescriptor& desc)
 {
     ParseContext context;
-    return parse_amd_mi450_mtl(body, desc, context);
+    return parse_amd_mi400_mtl(body, desc, context);
 }
 
-nlohmann::json parse_amd_mi450_mtl(
+nlohmann::json parse_amd_mi400_mtl(
     std::span<const uint8_t> body, const SectionDescriptor& desc,
     ParseContext& context)
 {

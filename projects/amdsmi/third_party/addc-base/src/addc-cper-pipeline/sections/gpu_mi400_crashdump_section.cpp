@@ -9,7 +9,7 @@ namespace addc::pipeline
 
 using namespace detail;
 
-std::optional<AmdGpuMi450CrashdumpSection> parseGpuMi450CrashdumpSection(
+std::optional<AmdGpuMi400CrashdumpSection> parseGpuMi400CrashdumpSection(
     const nlohmann::json& descriptor, const nlohmann::json& section)
 {
     const nlohmann::json* body = json_obj(section, "AmdMi450Crashdump");
@@ -18,8 +18,8 @@ std::optional<AmdGpuMi450CrashdumpSection> parseGpuMi450CrashdumpSection(
         return std::nullopt;
     }
 
-    AmdGpuMi450CrashdumpSection sec;
-    fill_common_metadata(sec, descriptor, "mi450");
+    AmdGpuMi400CrashdumpSection sec;
+    fill_common_metadata(sec, descriptor, "mi400");
     sec.descriptor_flags = parse_descriptor_flags(descriptor);
 
     fill_gpu_header(sec, *body);
@@ -43,7 +43,7 @@ std::optional<AmdGpuMi450CrashdumpSection> parseGpuMi450CrashdumpSection(
 
     for (const auto& ctx : *ctxs)
     {
-        GpuMi450Context mc;
+        GpuMi400Context mc;
 
         const auto blob_opt = json_bytes(ctx, "data");
 
@@ -153,7 +153,7 @@ std::optional<AmdGpuMi450CrashdumpSection> parseGpuMi450CrashdumpSection(
                 constexpr std::size_t kBreakEventSize = 8U;
                 if (blob.size() >= kBreakEventOffset + kBreakEventSize)
                 {
-                    mc.break_event = GpuMi450BreakEvent{
+                    mc.break_event = GpuMi400BreakEvent{
                         .msg_lo = read_u32_le(sp, kBreakEventOffset),
                         .msg_hi = read_u32_le(sp, kBreakEventOffset + 4U),
                     };
@@ -168,7 +168,7 @@ std::optional<AmdGpuMi450CrashdumpSection> parseGpuMi450CrashdumpSection(
                 constexpr std::size_t kBootStatusSize = 8U;
                 if (blob.size() >= kBootStatusOffset + kBootStatusSize)
                 {
-                    mc.boot_status = GpuMi450BootStatus{
+                    mc.boot_status = GpuMi400BootStatus{
                         .boot_msg_lo = read_u32_le(sp, kBootStatusOffset),
                         .boot_msg_hi = read_u32_le(sp, kBootStatusOffset + 4U),
                     };

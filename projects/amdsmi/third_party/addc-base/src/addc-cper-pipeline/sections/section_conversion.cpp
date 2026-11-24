@@ -13,11 +13,11 @@ std::optional<AmdEpycCrashdumpSection> parseEpycCrashdumpSection(
     const nlohmann::json&, const nlohmann::json&, std::string*);
 std::optional<AmdGpuCrashdumpSection> parseGpuCrashdumpSection(
     const nlohmann::json&, const nlohmann::json&);
-std::optional<AmdGpuMi450CrashdumpSection> parseGpuMi450CrashdumpSection(
+std::optional<AmdGpuMi400CrashdumpSection> parseGpuMi400CrashdumpSection(
     const nlohmann::json&, const nlohmann::json&);
-std::optional<AmdGpuMi450RuntimeSection> parseGpuMi450RuntimeSection(
+std::optional<AmdGpuMi400RuntimeSection> parseGpuMi400RuntimeSection(
     const nlohmann::json&, const nlohmann::json&);
-std::optional<AmdMi450ScaleUpSection> parseMi450ScaleUpSection(
+std::optional<AmdMi400ScaleUpSection> parseMi400ScaleUpSection(
     const nlohmann::json&, const nlohmann::json&);
 std::optional<AmdGpuRuntimeSection> parseGpuRuntimeSection(
     const nlohmann::json&, const nlohmann::json&);
@@ -27,7 +27,7 @@ std::optional<PcieSection> parsePcieSection(const nlohmann::json&,
                                               const nlohmann::json&);
 std::optional<AmdEpycMtlSection> parseMtlSection(const nlohmann::json&,
                                                    const nlohmann::json&);
-std::optional<AmdEpycMtlSection> parseMi450MtlSection(
+std::optional<AmdEpycMtlSection> parseMi400MtlSection(
     const nlohmann::json&, const nlohmann::json&);
 std::optional<AmdEpycCddSection> parseCddSection(const nlohmann::json&,
                                                    const nlohmann::json&);
@@ -40,9 +40,10 @@ SectionDescriptor parse_descriptor(const nlohmann::json& descriptor)
     SectionDescriptor value;
     value.guid = extract_guid(descriptor);
     value.flags = parse_descriptor_flags(descriptor);
-    value.fru = json_str(descriptor, "fruText").value_or(std::string{});
-    value.fru_id =
-        json_str(descriptor, "fruID").value_or(std::string{kZeroGuid});
+    value.fru =
+        trim_fru_text(json_str(descriptor, "fruText").value_or(std::string{}));
+    // The parser omits fruID when the FRU ID valid bit is 0.
+    value.fru_id = json_str(descriptor, "fruID").value_or(std::string{});
     value.platform = detect_platform_from_descriptor(descriptor, "");
     value.platform_name = std::string{platform_display_name(value.platform)};
     value.addc_version = addc_version_string(descriptor);
@@ -124,22 +125,22 @@ SectionPayload convert_section(SectionKind kind,
     case SectionKind::AmdMi300Crashdump:
         return typedOrOpaque(parseGpuCrashdumpSection(descriptor, section),
                              descriptor, section, source, original_bytes);
-    case SectionKind::AmdMi450Crashdump:
+    case SectionKind::AmdMi400Crashdump:
         return typedOrOpaque(
-            parseGpuMi450CrashdumpSection(descriptor, section), descriptor,
+            parseGpuMi400CrashdumpSection(descriptor, section), descriptor,
             section, source, original_bytes);
     case SectionKind::AmdMi300Runtime:
         return typedOrOpaque(parseGpuRuntimeSection(descriptor, section),
                              descriptor, section, source, original_bytes);
-    case SectionKind::AmdMi450Runtime:
+    case SectionKind::AmdMi400Runtime:
         return typedOrOpaque(
-            parseGpuMi450RuntimeSection(descriptor, section), descriptor,
+            parseGpuMi400RuntimeSection(descriptor, section), descriptor,
             section, source, original_bytes);
-    case SectionKind::AmdMi450ScaleUp:
-        return typedOrOpaque(parseMi450ScaleUpSection(descriptor, section),
+    case SectionKind::AmdMi400ScaleUp:
+        return typedOrOpaque(parseMi400ScaleUpSection(descriptor, section),
                              descriptor, section, source, original_bytes);
-    case SectionKind::AmdMi450Mtl:
-        return typedOrOpaque(parseMi450MtlSection(descriptor, section),
+    case SectionKind::AmdMi400Mtl:
+        return typedOrOpaque(parseMi400MtlSection(descriptor, section),
                              descriptor, section, source, original_bytes);
     case SectionKind::AmdEpycMtl:
         return typedOrOpaque(parseMtlSection(descriptor, section), descriptor,

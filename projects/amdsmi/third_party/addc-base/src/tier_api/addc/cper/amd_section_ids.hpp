@@ -21,8 +21,8 @@ namespace addc::cper
     return (revision_major >> 4U) & 0xFU;
 }
 
-/// AMD Crashdump section. EPYC, MI300 and MI450 use this GUID; the descriptor
-/// revision selects the format.
+/// AMD Crashdump section. EPYC, MI300 and MI400 Series use this GUID; the
+/// descriptor revision selects the format.
 inline constexpr Guid kAmdCrashdumpGuid{
     0x32ac0c78U,
     0x2623U,

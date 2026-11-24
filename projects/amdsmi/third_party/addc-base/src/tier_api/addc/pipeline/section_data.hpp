@@ -291,8 +291,8 @@ struct GpuPldmBundle
     uint8_t production_debug = 0u;
 };
 
-/// MI450 PLDM bundle version.
-struct GpuMi450PldmBundle
+/// MI400 Series PLDM bundle version.
+struct GpuMi400PldmBundle
 {
     uint8_t patch = 0u;
     uint8_t minor = 0u;
@@ -363,14 +363,14 @@ struct AmdGpuCrashdumpSection
 };
 
 /// Boot status buffer from a type-9 context (8 bytes at blob offset 16).
-struct GpuMi450BootStatus
+struct GpuMi400BootStatus
 {
     uint32_t boot_msg_lo{}; ///< EAM0_BootMsg[3:0]
     uint32_t boot_msg_hi{}; ///< EAM0_BootMsg[7:4]
 };
 
 /// MP0_OutBndMsg-formatted BREAKEVENT.
-struct GpuMi450BreakEvent
+struct GpuMi400BreakEvent
 {
     uint32_t msg_lo{}; ///< BREAKEVENT[3:0]
     uint32_t msg_hi{}; ///< BREAKEVENT[7:4]
@@ -382,7 +382,7 @@ struct GpuMi450BreakEvent
 /// DBG_LOG at blob offset 16. context_type == 9 (Boot Status): 8-byte boot
 /// status buffer only — no WDT or DBG_LOG. context_type == 3 (Break Event):
 /// 8-byte MP0_OutBndMsg-formatted BREAKEVENT buffer.
-struct GpuMi450Context
+struct GpuMi400Context
 {
     uint16_t context_type{};
     uint16_t array_size{};
@@ -390,14 +390,14 @@ struct GpuMi450Context
     std::optional<CrashdumpData> crashdump;              ///< type 1 only
     std::optional<std::array<uint8_t, 128>> df_wdt_addr; ///< type 1 only
     std::vector<DbgLogGroup> dbg_logs;                   ///< type 1 or type 5
-    std::optional<GpuMi450BootStatus> boot_status;       ///< type 9 only
-    std::optional<GpuMi450BreakEvent> break_event;       ///< type 3 only
+    std::optional<GpuMi400BootStatus> boot_status;       ///< type 9 only
+    std::optional<GpuMi400BreakEvent> break_event;       ///< type 3 only
 };
 
-/// AMD GPU MI450 Crashdump section.
+/// AMD GPU MI400 Series Crashdump section.
 /// Same GUID as EPYC/MI300; differentiated by program_gen==2 AND ras_gen==3.
 /// GPU-style outer header with EPYC-style register array layout.
-struct AmdGpuMi450CrashdumpSection
+struct AmdGpuMi400CrashdumpSection
 {
     SectionDescriptorFlags descriptor_flags;
     static constexpr std::string_view kGuid =
@@ -414,26 +414,26 @@ struct AmdGpuMi450CrashdumpSection
     bool pldm_bundle_valid = false;
     uint8_t gpu_context_info_count = 0u;
     std::string pcie_dev_id;
-    GpuMi450PldmBundle pldm_bundle;
+    GpuMi400PldmBundle pldm_bundle;
     std::string fw_id;
 
     std::vector<GpuErrorInfoStructure> error_info_structures;
-    std::vector<GpuMi450Context> contexts;
+    std::vector<GpuMi400Context> contexts;
 };
 
-/// One GPU context structure for MI450 runtime (context_type==1, 128-byte
-/// register array).
-struct GpuMi450RuntimeContext
+/// One GPU context structure for MI400 Series runtime (context_type==1,
+/// 128-byte register array).
+struct GpuMi400RuntimeContext
 {
     uint16_t context_type{};
     uint16_t array_size{};
     std::optional<McaBankDump> bank; ///< Decoded if array_size >= 128
 };
 
-/// AMD GPU MI450 Non-Standard Runtime section.
+/// AMD GPU MI400 Series Non-Standard Runtime section.
 /// Same GUID as MI300 runtime; differentiated by program_gen==2 AND ras_gen==3.
 /// GUID: 32ac0c78-2623-48f6-81a2-ac691780551d
-struct AmdGpuMi450RuntimeSection
+struct AmdGpuMi400RuntimeSection
 {
     SectionDescriptorFlags descriptor_flags;
     static constexpr std::string_view kGuid =
@@ -451,11 +451,11 @@ struct AmdGpuMi450RuntimeSection
     uint8_t gpu_error_info_count = 0u;
     uint8_t gpu_context_info_count = 0u;
     std::string pcie_dev_id;
-    GpuMi450PldmBundle pldm_bundle;
+    GpuMi400PldmBundle pldm_bundle;
     std::string fw_id;
 
     std::vector<GpuErrorInfoStructure> error_info_structures;
-    std::vector<GpuMi450RuntimeContext> contexts;
+    std::vector<GpuMi400RuntimeContext> contexts;
 };
 
 /// AMD GPU Non-Standard Runtime section.
@@ -565,8 +565,9 @@ struct AmdEpycPmicSection
     std::vector<std::pair<std::string, std::string>> persistent_logs;
 };
 
-// --- AMD MI450 Scale Up section ----------------------------------------------
-// GUID: 5eee25c9-83a0-234d-82bb-7b7fc140f21f
+// --- AMD MI400 Series Scale Up section
+// ---------------------------------------------- GUID:
+// 5eee25c9-83a0-234d-82bb-7b7fc140f21f
 
 /// One Scale Up context structure. The buffer is kept raw; Base does not
 /// interpret it.
@@ -579,7 +580,7 @@ struct ScaleUpContext
     std::vector<uint8_t> raw_data; ///< context buffer
 };
 
-struct AmdMi450ScaleUpSection
+struct AmdMi400ScaleUpSection
 {
     SectionDescriptorFlags descriptor_flags;
     static constexpr std::string_view kGuid =
@@ -595,8 +596,11 @@ struct AmdMi450ScaleUpSection
     bool pcie_devid_valid = false;
     bool pldm_bundle_valid = false;
     std::string pcie_dev_id;
-    GpuMi450PldmBundle pldm_bundle;
+    GpuMi400PldmBundle pldm_bundle;
     std::string fw_id;
+
+    /// Empty when not valid.
+    std::string event_data_format_version;
 
     std::vector<GpuErrorInfoStructure> error_info_structures;
     std::vector<ScaleUpContext> contexts;

@@ -34,8 +34,11 @@ struct PipelineOutput
     std::string filename;
     std::string platform_id;
     std::optional<std::string> partition_id;
-    uint64_t record_id = 0;
+    std::string record_id;
     std::string creator_id;
+    /// "in_band" for records that the amdgpu driver writes, otherwise
+    /// "out_of_band". Empty (JSON null) when the source is not a CPER header.
+    std::string origin;
     std::vector<PipelineEvent> events;
     nlohmann::ordered_json recovery = nullptr;
     addc::Diagnostics diagnostics = {};
@@ -48,6 +51,8 @@ struct PipelineOutput
     j["tool_version"] = out.tool_version;
     j["source"] = nlohmann::ordered_json{
         {"type", "cper"},
+        {"origin", out.origin.empty() ? nlohmann::ordered_json(nullptr)
+                                      : nlohmann::ordered_json(out.origin)},
         {"filename", out.filename},
         {"timestamp", out.timestamp},
         {"platform_id", out.platform_id},

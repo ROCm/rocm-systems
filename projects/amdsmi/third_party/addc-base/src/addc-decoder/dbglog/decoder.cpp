@@ -4,8 +4,8 @@
 
 #include "addc/common.hpp"
 #include "addc/decoder/dbglog/epyc.hpp"
-#ifdef ADDC_HAS_MI450
-#include "addc/decoder/dbglog/mi450.hpp"
+#ifdef ADDC_HAS_MI400
+#include "addc/decoder/dbglog/mi400.hpp"
 #endif
 #include "addc/detail/format.hpp"
 #include "addc/product.hpp"
@@ -47,9 +47,9 @@ std::vector<DecodedDbgLog> decode_base_dbglog(
     }
     switch (definition->identity.id)
     {
-#ifdef ADDC_HAS_MI450
-        case addc::product::ProductId::mi450:
-            return decode_mi450_dbglog(groups);
+#ifdef ADDC_HAS_MI400
+        case addc::product::ProductId::mi400:
+            return decode_mi400_dbglog(groups);
 #endif
 #if defined(ADDC_HAS_VENICE) || defined(ADDC_HAS_TURIN) || \
     defined(ADDC_HAS_GENOA) || defined(ADDC_HAS_EMBEDDED_2005)
