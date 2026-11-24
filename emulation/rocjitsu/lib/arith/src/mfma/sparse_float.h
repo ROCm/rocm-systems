@@ -50,16 +50,46 @@ void smfmac_decode(const uint32_t *const *input, float *values) {
 template <int Columns, int Terms>
 void sparse_float_row(const float *values, const float (*right)[Columns], const int *selected,
                       float *result) {
+#if !defined(__AVX512F__)
   float initial[Columns];
   for (int col = 0; col < Columns; ++col) {
     initial[col] = result[col];
   }
+#endif
 #if defined(__AVX512F__)
   for (int col = 0; col < Columns; col += 16) {
-    auto acc = _mm512_load_ps(result + col);
+    auto start = _mm512_load_ps(result + col);
+    auto acc = start;
     for (int t = 0; t < Terms; ++t) {
       acc =
           _mm512_fmadd_ps(_mm512_set1_ps(values[t]), _mm512_load_ps(right[selected[t]] + col), acc);
+    }
+    // Once a dot yields NaN, the last term with a NaN factor determines
+    // the payload. Within that term A has priority over B. Without a NaN
+    // factor the initial accumulator wins, followed by the invalid-operation NaN.
+    auto pending = _mm512_fpclass_ps_mask(acc, 0x81);
+    if (pending) {
+      auto quiet = _mm512_set1_epi32(0x00400000);
+      for (int t = Terms - 1; t >= 0 && pending; --t) {
+        auto x = as_bits(values[t]);
+        if ((x & 0x7fffffffU) > 0x7f800000U) {
+          acc = _mm512_mask_mov_ps(acc, pending,
+                                   _mm512_castsi512_ps(_mm512_set1_epi32(int(x | 0x00400000U))));
+          pending = 0;
+        } else {
+          auto y = _mm512_load_ps(right[selected[t]] + col);
+          auto take = _mm512_fpclass_ps_mask(y, 0x81) & pending;
+          acc = _mm512_mask_mov_ps(
+              acc, take, _mm512_castsi512_ps(_mm512_or_si512(_mm512_castps_si512(y), quiet)));
+          pending &= ~take;
+        }
+      }
+      if (pending) {
+        auto payload = _mm512_mask_mov_epi32(_mm512_set1_epi32(int(0xffc00000u)),
+                                             _mm512_fpclass_ps_mask(start, 0x81),
+                                             _mm512_or_si512(_mm512_castps_si512(start), quiet));
+        acc = _mm512_mask_mov_ps(acc, pending, _mm512_castsi512_ps(payload));
+      }
     }
     _mm512_store_ps(result + col, acc);
   }
@@ -73,6 +103,7 @@ void sparse_float_row(const float *values, const float (*right)[Columns], const 
     _mm256_store_ps(result + col, acc);
   }
 #endif
+#if !defined(__AVX512F__)
   for (int col = 0; col < Columns; ++col) {
 #if defined(__AVX2__)
     // Replay only NaN outputs to preserve A/B/C payload priority across host FMAs.
@@ -86,6 +117,7 @@ void sparse_float_row(const float *values, const float (*right)[Columns], const 
     }
     result[col] = acc;
   }
+#endif
 }
 
 // Preserve the inherited q/slot reduction order and stage all results before stores.

@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -29,18 +30,18 @@ namespace rocjitsu {
 /// @returns Failure for an unsupported architecture.
 /// @param error Optional caller-owned emitter for the failure reason.
 inline util::FailureOr<std::array<uint32_t, 2>>
-build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rj_code_arch_t arch,
+build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rocjitsu::IsaFamily arch,
                       const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop3(
         cdna3::kVWritelaneB32Vop3,
         {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop3(
         cdna4::kVWritelaneB32Vop3,
         {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop3(
         rdna4::kVWritelaneB32Vop3,
         {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
@@ -56,26 +57,26 @@ build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rj_co
 /// @returns Failure for an unsupported architecture.
 /// @param error Optional caller-owned emitter for the failure reason.
 inline util::FailureOr<std::array<uint32_t, 2>>
-build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_code_arch_t arch,
+build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rocjitsu::IsaFamily arch,
                      const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop3(cdna3::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
                                                         .src0 = vop3_vgpr_src(vgpr_src),
                                                         .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop3(cdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
                                                         .src0 = vop3_vgpr_src(vgpr_src),
                                                         .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop3(rdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
                                                         .src0 = vop3_vgpr_src(vgpr_src),
                                                         .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_vop3(rdna3::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
                                                         .src0 = vop3_vgpr_src(vgpr_src),
                                                         .src1 = vop3_inline_uint(lane)});
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_vop3(cdna5::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
                                                         .src0 = vop3_vgpr_src(vgpr_src),
                                                         .src1 = vop3_inline_uint(lane)});
@@ -95,10 +96,10 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 /// @note CDNA offset is 12-bit (0..4095); RDNA is 24-bit. 2 words on CDNA, 3 on RDNA.
 /// @returns Failure for an unsupported architecture or unsupported AccVGPR access.
 inline util::FailureOr<std::vector<uint32_t>>
-build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t arch,
+build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rocjitsu::IsaFamily arch,
                           const util::DiagnosticEmitter *error = nullptr, bool acc = false) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3: {
+  case rocjitsu::IsaFamily::Cdna3: {
     const auto w = cdna3::build_flat(cdna3::kFlatStoreDwordFlat,
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
@@ -107,7 +108,7 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
                                       .acc = static_cast<uint8_t>(acc ? 1 : 0)});
     return std::vector<uint32_t>{w.begin(), w.end()};
   }
-  case ROCJITSU_CODE_ARCH_CDNA4: {
+  case rocjitsu::IsaFamily::Cdna4: {
     const auto w = cdna4::build_flat(cdna4::kFlatStoreDwordFlat,
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
@@ -116,7 +117,7 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
                                       .acc = static_cast<uint8_t>(acc ? 1 : 0)});
     return std::vector<uint32_t>{w.begin(), w.end()};
   }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
+  case rocjitsu::IsaFamily::Rdna4: {
     if (acc) {
       return error != nullptr ? error->emit() << "Unimplemented instruction: scratch_store of an "
                                                  "AccVGPR on an arch without them"
@@ -142,10 +143,10 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
 /// @note A build_wait_loads_complete() must precede any use of @p vdst.
 /// @returns Failure for an unsupported architecture or unsupported AccVGPR access.
 inline util::FailureOr<std::vector<uint32_t>>
-build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch,
+build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rocjitsu::IsaFamily arch,
                          const util::DiagnosticEmitter *error = nullptr, bool acc = false) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3: {
+  case rocjitsu::IsaFamily::Cdna3: {
     const auto w = cdna3::build_flat(cdna3::kFlatLoadDwordFlat,
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
@@ -154,7 +155,7 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
                                       .vdst = static_cast<uint8_t>(vdst)});
     return std::vector<uint32_t>{w.begin(), w.end()};
   }
-  case ROCJITSU_CODE_ARCH_CDNA4: {
+  case rocjitsu::IsaFamily::Cdna4: {
     const auto w = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
@@ -163,7 +164,7 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
                                       .vdst = static_cast<uint8_t>(vdst)});
     return std::vector<uint32_t>{w.begin(), w.end()};
   }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
+  case rocjitsu::IsaFamily::Rdna4: {
     if (acc) {
       return error != nullptr ? error->emit() << "Unimplemented instruction: scratch_load of an "
                                                  "AccVGPR on an arch without them"
@@ -189,13 +190,14 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
 /// @returns Failure for an unsupported architecture.
 /// @param error Optional caller-owned emitter for the failure reason.
 inline util::FailureOr<uint32_t>
-build_wait_stores_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+build_wait_stores_complete(rocjitsu::IsaFamily arch,
+                           const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return build_sopp_encoding(arch, rdna4::kSWaitStorecntSopp, 0);
   default:
     return error != nullptr
@@ -209,13 +211,14 @@ build_wait_stores_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *e
 /// @returns Failure for an unsupported architecture.
 /// @param error Optional caller-owned emitter for the failure reason.
 inline util::FailureOr<uint32_t>
-build_wait_loads_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+build_wait_loads_complete(rocjitsu::IsaFamily arch,
+                          const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return build_sopp_encoding(arch, rdna4::kSWaitLoadcntSopp, 0);
   default:
     return error != nullptr
@@ -244,25 +247,26 @@ build_wait_loads_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *er
 /// @returns Failure for an unsupported architecture.
 /// @param error Optional caller-owned emitter for the failure reason.
 inline util::FailureOr<std::vector<uint32_t>>
-build_wait_all_loads_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+build_wait_all_loads_complete(rocjitsu::IsaFamily arch,
+                              const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   // CDNA2 has no scratch spill emitter (spilling is deferred), but a no-spill
   // probe call still reaches emit_probe_call and needs the unconditional boundary
   // drain. Its monolithic s_waitcnt 0 drains vmcnt+lgkmcnt, same as CDNA3/4.
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return std::vector<uint32_t>{build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0).value()};
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return std::vector<uint32_t>{build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0).value()};
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return std::vector<uint32_t>{build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0).value()};
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return std::vector<uint32_t>{build_sopp_encoding(arch, rdna3::kSWaitcntSopp, 0).value()};
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return std::vector<uint32_t>{
         build_sopp_encoding(arch, cdna5::kSWaitLoadcntDscntSopp, 0).value(),
         build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0).value(),
         build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0).value()};
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return std::vector<uint32_t>{
         build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0).value(),
         build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0).value(),

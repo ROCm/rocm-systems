@@ -48,7 +48,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op,
                                                  uint32_t round_mode = 0) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst))
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst))
     return false;
   auto canonical = [](const auto &operand) {
     if constexpr (E32)
@@ -217,8 +217,9 @@ template <typename T, typename Inst, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_div_scale_simd(Inst &inst, Wavefront &wf,
                                                      WriteResult commit) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr uint32_t W = util::native<T>::size();
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -276,7 +277,7 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopd_simd(const Slot &x, const Slot &y, Wavefront &wf,
                                                 Classify classify = nullptr) {
-  if (simd_force_scalar())
+  if (simd_force_scalar(wf))
     return false;
   auto capable = [](const Slot &slot) {
     return slot.src0->simd_capable() && (slot.op == 8 || slot.src1->simd_capable()) &&
@@ -299,12 +300,8 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
   };
   if (!matches_mode(x) || !matches_mode(y))
     return false;
-  // Matching controls still permit host computation to raise exception flags, so
-  // each slot that computes on host floats takes one environment for the whole
-  // wavefront, after its own operand reads and around its chunk loop, and uses
-  // the unscoped arithmetic cores inside it. Raw-bit routes, including the F32
-  // MIN/MAX selections, need none, and register access, which can run callbacks,
-  // stays outside every scope.
+  // With matching controls the host's default FP environment computes each slot,
+  // through the unscoped arithmetic cores.
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
@@ -323,9 +320,6 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
         std::optional<RegisterAccess::OperandRead64View> c;
         if (slot.op == 32)
           c.emplace(regs.read_operand64(*slot.src2, exec));
-        // Every F64 slot computes on the host: 32-34 arithmetically, and MIN/MAX
-        // through fmax/fmin, which signal on a NaN input under no MODE gate.
-        fp_mode::ScopedEnvironment environment(0);
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           if (!((exec >> base) & util::mask<uint64_t>(W)))
             continue;
@@ -376,11 +370,6 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
         slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
-    // One environment per arithmetic slot, after that slot's reads. The gate
-    // above leaves MODE.FP_ROUND nearest-even, the rounding the cores below expect.
-    std::optional<fp_mode::ScopedEnvironment> environment;
-    if (is_arithmetic(slot))
-      environment.emplace(wf.fp_round_mode_f32());
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;
@@ -441,8 +430,8 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
       case 11: {
         // RDNA3 names these V_DUAL_MAX_F32/V_DUAL_MIN_F32; later targets have
         // the IEEE maximumNumber/minimumNumber forms.
-        const rj_code_arch_t arch = wf.cu().arch();
-        if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) {
+        const rocjitsu::IsaFamily arch = wf.cu().arch();
+        if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5) {
           const auto policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
           result = slot.op == 10 ? minmax::evaluate<fp_format::F32, minmax::MaxNum>(policy, av, bv)
                                  : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);

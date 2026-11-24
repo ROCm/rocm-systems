@@ -224,8 +224,30 @@ SCALAR_NAMES = (
 
 
 # Integer and FP families are enabled independently by architecture.
-CDNA_INTEGER_NAMES = (
-    SCALAR.keys() | COMPARISONS.keys() | IMMEDIATE.keys() | BITSET.keys()
+INTEGER_NAMES = SCALAR.keys() | COMPARISONS.keys() | IMMEDIATE.keys() | BITSET.keys()
+
+
+# Operations confined to one 32-bit SGPR per operand and result.
+WORD_INTEGER_NAMES = (
+    {
+        name
+        for name, shape in SCALAR.items()
+        if shape.result_bits == 32 and max(shape.input_bits) <= 32
+    }
+    | {name for name, bits in COMPARISONS.items() if max(bits) <= 32}
+    | IMMEDIATE.keys()
+    | {name for name, bits in BITSET.items() if bits == 32}
+)
+
+# Paired SGPR inputs/results, including 32-bit counts of 64-bit operands.
+WIDE_INTEGER_NAMES = (
+    {
+        name
+        for name, shape in SCALAR.items()
+        if shape.result_bits == 64 or max(shape.input_bits) == 64
+    }
+    | {name for name, bits in COMPARISONS.items() if max(bits) == 64}
+    | {name for name, bits in BITSET.items() if bits == 64}
 )
 
 
@@ -244,12 +266,37 @@ GFX1250_CONVERSION_NAMES = {
 }
 
 
+# gfx1150's MIN/MAX spellings predate gfx12's MIN_NUM/MAX_NUM names.
+GFX1150_SELECTION = {
+    f'S_{op}_F{bits}': f'S_{op}_NUM_F{bits}'
+    for bits in (16, 32)
+    for op in ('MIN', 'MAX')
+}
+GFX1150_FLOAT_NAMES = (
+    FLOAT_COMPARISONS.keys()
+    | FLOAT_ROUNDING.keys()
+    | (
+        FLOAT_ARITHMETIC.keys()
+        - {
+            f'S_{op}_F{bits}'
+            for bits in (16, 32)
+            for op in ('MIN_NUM', 'MAX_NUM', 'MINIMUM', 'MAXIMUM')
+        }
+    )
+    | GFX1150_SELECTION.keys()
+)
+
+
 def supports_scalar(arch: str, mnemonic: str) -> bool:
+    if arch == 'rdna3_5' and mnemonic in GFX1150_FLOAT_NAMES:
+        return True
     if arch in ('rdna3', 'rdna4'):
         return mnemonic in SCALAR_NAMES
+    if arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'):
+        return mnemonic in WORD_INTEGER_NAMES or mnemonic in WIDE_INTEGER_NAMES
     if arch not in ('cdna3', 'cdna4', 'cdna5'):
         return False
-    if mnemonic in CDNA_INTEGER_NAMES | MOVES | RELATIVE_MOVES | EXEC_UPDATES:
+    if mnemonic in INTEGER_NAMES | MOVES | RELATIVE_MOVES | EXEC_UPDATES:
         return True
     if arch == 'cdna5':
         return (
@@ -329,7 +376,10 @@ def _gen_bitset(mnemonic, dst, src):
     return '\n'.join(lines)
 
 
-def _gen_float(mnemonic, dst, src, *, gfx1250=False):
+def _gen_float(mnemonic, dst, src, *, gfx1250=False, gfx1150=False):
+    api_name = mnemonic
+    if gfx1150:
+        mnemonic = GFX1150_SELECTION.get(mnemonic, mnemonic)
     comparison = mnemonic in FLOAT_COMPARISONS
     if mnemonic in FLOAT_ARITHMETIC:
         operation = FLOAT_ARITHMETIC[mnemonic]
@@ -342,6 +392,8 @@ def _gen_float(mnemonic, dst, src, *, gfx1250=False):
         '  amdgpu::RegisterAccess registers(wf);',
         f'  uint64_t flags = wf.cu().arithmetic_flags();',
     ]
+    if gfx1150 and not comparison:
+        lines.append('  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;')
     if mnemonic in (
         'S_ADD_F16',
         'S_SUB_F16',
@@ -381,14 +433,24 @@ def _gen_float(mnemonic, dst, src, *, gfx1250=False):
     lines += [f'  uint32_t result = {initial};', '  uint32_t causes = 0;']
     arguments = '&result, ' + ', '.join(f'input{i}' for i in range(len(src)))
     lines += _call(
-        mnemonic + ('_GFX1250' if gfx1250 else ''), arguments + ', &causes', 'flags'
+        api_name
+        + ('_GFX1250' if gfx1250 else '_GFX1150' if gfx1150 and not comparison else ''),
+        arguments + ', &causes',
+        'flags',
     )
     lines.append(
         '  wf.write_scc(result);'
         if comparison
         else f'  registers.write_scalar({dst[0]}, result);'
     )
-    if not gfx1250:
+    if gfx1150:
+        lines += [
+            '  if (!wf.instruction_execution_failed() && !wf.dx10_clamp()) {',
+            '    wf.set_trapsts(wf.trapsts() | causes);',
+            '    wf.raise_alu_causes(causes);',
+            '  }',
+        ]
+    elif not gfx1250:
         lines += [
             '  wf.set_trapsts(wf.trapsts() | causes);',
             '  wf.raise_alu_causes(causes);',
@@ -498,10 +560,13 @@ def gen_scalar(ctx: ExecuteContext) -> str | None:
         mnemonic in FLOAT_COMPARISONS
         or mnemonic in FLOAT_ROUNDING
         or mnemonic in FLOAT_ARITHMETIC
+        or (arch == 'rdna3_5' and mnemonic in GFX1150_SELECTION)
     ):
         return (
-            _gen_float(mnemonic, dst, src, gfx1250=arch == 'cdna5')
-            if arch in ('rdna4', 'cdna5')
+            _gen_float(
+                mnemonic, dst, src, gfx1250=arch == 'cdna5', gfx1150=arch == 'rdna3_5'
+            )
+            if arch in ('rdna4', 'cdna5', 'rdna3_5')
             else None
         )
     if mnemonic in EXEC_UPDATES:

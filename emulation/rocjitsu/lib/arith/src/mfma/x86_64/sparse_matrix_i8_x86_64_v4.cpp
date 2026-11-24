@@ -22,17 +22,7 @@ template void sparse_matrix_i8_x86_64_v4<32, 32, false>(uint64_t controls, bool 
                                                         const uint32_t *const *a,
                                                         const uint32_t *const *b,
                                                         const uint32_t *const *index);
-template void sparse_matrix_i8_x86_64_v4<16, 128, false>(uint64_t controls, bool clamp,
-                                                         uint32_t *const *d,
-                                                         const uint32_t *const *a,
-                                                         const uint32_t *const *b,
-                                                         const uint32_t *const *index);
 template void sparse_matrix_i8_x86_64_v4<32, 64, false>(uint64_t controls, bool clamp,
-                                                        uint32_t *const *d,
-                                                        const uint32_t *const *a,
-                                                        const uint32_t *const *b,
-                                                        const uint32_t *const *index);
-template void sparse_matrix_i8_x86_64_v4<16, 128, true>(uint64_t controls, bool clamp,
                                                         uint32_t *const *d,
                                                         const uint32_t *const *a,
                                                         const uint32_t *const *b,

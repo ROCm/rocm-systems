@@ -45,7 +45,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 27.2.0 | ROCm version: 10.2.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 27.3.0 | ROCm version: 10.3.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -124,28 +124,25 @@ details for usage.
 (cmd-list)=
 ### amd-smi list
 
-Lists GPU information, including identifier kind and CUID provenance.
+Lists GPU information, including the CUID and its provenance.
 
 `--gpu 2 --gpu all` keeps GPU 2 first; `--gpu 2 all` uses device enumeration order.
 
 #### CUID identity and compatibility
 
-The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) are
-**CUID-first compatibility aliases**: the derived CUID when available,
-otherwise the legacy GPU UUID, otherwise `N/A`. The fields below follow all
-existing list fields, including those selected by `--enumeration`; new
-consumers should use `identifier_kind` and `cuid`.
+The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) report the
+legacy GPU UUID, or `N/A`; they never contain a CUID. The CUID fields below
+follow all existing list fields, including those selected by `--enumeration`.
 
 Field | Meaning
 ---|---
-`identifier_kind` | `cuid`, `legacy_uuid`, or `unknown`; identifies the value in the compatibility alias
 `cuid` | Derived CUID, or `N/A`; never contains a legacy UUID
 `source` | `DRIVER`, `LIBRARY`, or `UNKNOWN`, from the CUID API
 `auxiliary` | Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false
 `cuid_metadata_status` | `available`, `partial`, `unsupported` (the library predates the call), `not_supported` (no CUID for this handle; the other CUID fields read `N/A`), `invalid_value`, or `amdsmi_error_<numeric status>`; preserves metadata failures even when an identifier remains available
 
-If the CUID info API fails, the CUID-only API is tried before the legacy UUID
-API, so a metadata failure alone does not turn a readable CUID into a legacy UUID.
+If the CUID info API fails, the CUID-only API is tried, so a metadata failure
+alone does not hide a readable CUID.
 
 `list` never reports the primary CUID.
 
@@ -205,7 +202,8 @@ output](#cli-ex-static) for `amd-smi static`.
 
 `amd-smi static --cuid` adds a per-GPU `cuid` block with `derived_cuid`,
 `primary_cuid`, `component_type`, `auxiliary`, `source`, `identifier_kind`
-and `cuid_metadata_status`, with the semantics
+and `cuid_metadata_status`. `identifier_kind` is `cuid` when `derived_cuid`
+holds a CUID and `unknown` otherwise; the other fields have the semantics
 described under [`amd-smi list`](#cmd-list). It does not fall back to a legacy
 UUID. `primary_cuid` is `N/A (not requested)` unless `--cuid-primary` is given.
 
@@ -234,7 +232,7 @@ Static Arguments:
   -a, --asic               All asic information
   -b, --bus                All bus information
   -I, --ifwi               All video bios/IFWI information (if available)
-  -d, --driver             Displays driver version
+  -d, --driver             Displays driver version and package
   -v, --vram               All vram information
   -c, --cache              All cache information
   -B, --board              All board information
@@ -1323,9 +1321,10 @@ information, GPU status, and running processes.
 ```bash
 ~$ amd-smi
 +------------------------------------------------------------------------------+
-| AMD-SMI            27.2.0                                                    |
-| amdgpu Version:    6.19.4                                                    |
-| ROCm Version:      10.2.0                                                    |
+| AMD-SMI            27.3.0                                                    |
+| amdgpu Version:    6.19.14.31400000-2370381                                  |
+| amdgpu Package:    amdgpu-dkms                                               |
+| ROCm Version:      10.3.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
@@ -1353,8 +1352,9 @@ information, GPU status, and running processes.
 
 The default output includes the following sections:
 
-- **Version header**: AMD-SMI version, amdgpu driver version, ROCm version,
-  and platform information.
+- **Version header**: AMD-SMI version, amdgpu driver version with its package
+  build, the installed driver package that matches the driver, ROCm version, and
+  platform information. See [About the amdgpu version](#cli-amdgpu-version).
 - **GPU table** (first row per GPU): BDF address, GPU market name, OAM ID,
   memory utilization, hotspot temperature, uncorrectable ECC error count, and
   current/maximum power usage.
@@ -1437,6 +1437,46 @@ do. JSON output represents an empty section as an empty object. CSV drops the se
 columns when no device in the run reports it, and fills them with `N/A` when only some
 do.
 
+(cli-amdgpu-version)=
+### About the amdgpu version
+
+`amd-smi`, `amd-smi version`, and `amd-smi static --driver` report the amdgpu
+driver version as `<module version>-<build>`, for example
+`6.19.14.31400000-2370381`.
+
+| Part | Example | Source |
+|---|---|---|
+| Module version | `6.19.14.31400000` | `/sys/module/amdgpu/version`: the base kernel version of the amdgpu source (`6.19.14`), then the amdgpu release |
+| Build | `2370381` | The `amdgpu-dkms` package installed for the running kernel, or else its `amdgpu-kmod` RPM |
+
+The build is added only when the package has the same base kernel version as
+the loaded driver. The match is by version: amd-smi does not check that the
+driver was installed from that package. A driver with a module version and no
+such package shows its module version alone. A driver without a module version,
+such as the amdgpu driver included in the kernel, shows `N/A` in
+`amd-smi version` and `amd-smi static --driver`, and the `amd-smi` header shows
+the OS kernel version in its place. An `amdgpu-kmod` driver has a three-part
+module version, so its version reads like `6.16.13-2412345`.
+
+The build is read from the installed package. After a package upgrade it is the
+build of the loaded driver only once the driver has been reloaded, for example
+by a restart.
+
+The package the build was read from is reported next to the version:
+
+| Command | Human-readable | JSON keys |
+|---|---|---|
+| `amd-smi` | `amdgpu Package: amdgpu-dkms` | With `amd-smi default --json`: `driver_full_version`, `driver_package` in `version_info`, `amdgpu version` |
+| `amd-smi version` | `amdgpu package: amdgpu-dkms` | `amdgpu_version`, `amdgpu_package` |
+| `amd-smi static --driver` | `PACKAGE: amdgpu-dkms` | `version`, `package` in `driver` |
+
+Human-readable output leaves the package out when there is none. The JSON and
+CSV output of `amd-smi version` and `amd-smi static --driver` always carry the
+key and report `N/A`. A container usually cannot see the host's DKMS tree or
+RPM database, so there the version has no build and the package is `N/A`. The
+same is shown with a `libamd_smi.so` that predates
+`amdsmi_get_gpu_driver_info_v2()`, also when a matching package is installed.
+
 (cli-ex-static)=
 ### Example output from amd-smi static
 
@@ -1499,8 +1539,9 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.4
+        VERSION: 6.19.14.31400000-2370381
         OS_KERNEL_VERSION: 5.15.0-generic
+        PACKAGE: amdgpu-dkms
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A

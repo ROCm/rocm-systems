@@ -14,6 +14,7 @@
 #include "device.h"
 #include "alloc.h"
 #include <cfloat>
+#include <cinttypes>
 
 NCCL_PARAM(SymNoWinEnable, "SYM_NOWIN_ENABLE", 0);
 
@@ -132,7 +133,7 @@ ncclResult_t ncclTuningComputeAllTunings(struct ncclTuningInput_t* const input,
     tuning.id = i;
     tuning.valid = 1;
 
-    if (!(input->tuningMask & (1ULL << i))) {
+    if (!input->tuningMask.test(i)) {
       tuning.valid = 0;
       continue;
     }
@@ -167,7 +168,7 @@ static ncclResult_t ncclTuningSelectBestTuning(
   struct ncclTuningResultListNode* node = tunings->head;
   while (node != nullptr) {
     const struct ncclTuningResult_t& tuning = node->result;
-    if (((1ull << tuning.symKernelId) & kernelExcludeMask) == 0) {
+    if (tuning.symKernelId == ncclSymkKernelId_Count || ((1ull << tuning.symKernelId) & kernelExcludeMask) == 0) {
       float selectionTimeUs = tuning.selectionTimeUs > 0.0f ? tuning.selectionTimeUs : tuning.timeUs;
       TRACE(NCCL_TUNING, "A/P/S %s/%s/%s, time: %f, selection time: %f", ncclAlgoToString(tuning.algo),
             ncclProtoToString(tuning.proto), ncclSymkKernelIdToString(tuning.symKernelId), tuning.timeUs,
@@ -190,11 +191,12 @@ static ncclResult_t ncclTuningSelectBestTuning(
 ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncclTuningResult_t* const result) {
   ncclResult_t ret = ncclSuccess;
   TRACE(NCCL_TUNING,
-        "Input: { .comm = %p, .tuningMask = 0x%lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, .nBytes = "
-        "%lu, .numPipeOps = %d, .count = %lu, .countMax = %lu, .nWorks = %d, .winRegType = %d, .regBuff = %d }",
-        input->comm, input->tuningMask, ncclFuncToString(input->func), input->redOp, input->devRedOp, input->datatype,
-        input->nBytes, input->numPipeOps, input->count, input->countMax, input->nWorks, input->winRegType,
-        input->regBuff);
+        "Input: { .comm = %p, .tuningMask = 0x%016" PRIx64 "%016" PRIx64 ", .func = %s, .redOp = %d, .devRedop = %d, "
+        ".dataType = %d, .nBytes = %zu, .numPipeOps = %d, .count = %zu, .countMax = %zu, .nWorks = %d, "
+        ".winRegType = %d, .regBuff = %d }",
+        input->comm, input->tuningMask.word(64), input->tuningMask.word(0), ncclFuncToString(input->func), input->redOp,
+        input->devRedOp, input->datatype, input->nBytes, input->numPipeOps, input->count, input->countMax,
+        input->nWorks, input->winRegType, input->regBuff);
   struct ncclTuningResultList_t tunings;
   tunings.head = nullptr;
   struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
@@ -202,7 +204,7 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
   // [RCCL] Pre-compute ncclSymkMask() once per pass; ncclTuningComputeAllTunings uses
   // the cached result to skip sym kernel entries not applicable for this collective.
   input->symkMaskCache = ncclSymkMask(input->comm, input->func, input->devRedOp, input->datatype,
-                                      input->countMax, input->symAligned16B);
+                                      input->countMax, input->symAligned16B, input->ginWindowsUnregistered);
   // Set tuning to Ring/Simple for single rank case
   if (input->comm->nRanks <= 1) {
     bestTuning.algo = NCCL_ALGO_RING;
@@ -259,7 +261,7 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
   // algSelection may have narrowed tuningMask, so EFFICIENCY must not resurrect NVLS when excluded.
   if (input->comm->tuner == NULL && (input->CTAPolicy & NCCL_CTA_POLICY_EFFICIENCY) &&
       ncclGetEnv("NCCL_ALGO") == NULL && ncclGetEnv("NCCL_PROTO") == NULL && !input->comm->MNNVL &&
-      (input->tuningMask & (1ull << (NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)))) {
+      input->tuningMask.test(NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)) {
     if (input->regBuff && (input->func == ncclFuncAllGather || input->func == ncclFuncReduceScatter)) {
       if ((input->comm->nNodes > 1 && input->collNetSupport && input->nvlsSupport) ||
           (input->comm->nNodes == 1 && input->nvlsSupport)) {
@@ -302,7 +304,7 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
           bestNonSymkTuning.ceMethodId != ncclCeMethodId_Count) {
         // The best result excluding symk kernels is not LL.  Use it instead of the symk LL result.
         bestTuning = bestNonSymkTuning;
-      } else if (ncclParamSymGenkEnable() == 0 && (input->tuningMask & NCCL_TUNING_MASK_GENERAL_KERNELS) == 0) {
+      } else if (ncclParamSymGenkEnable() == 0 && (input->tuningMask & NCCL_TUNING_MASK_GENERAL_KERNELS).none()) {
         // The search results we have don't include either genk kernels (because they are disabled) or legacy kernels
         // (because they were not requested).  We need to check the legacy ones.
         struct ncclTuningInput_t bestNonSymkInput = *input;
@@ -344,9 +346,10 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
     if (protoEnv) {
       snprintf(ncclProtoEnvStr, 1023, " NCCL_PROTO was set to %s.", protoEnv);
     }
-    WARN("No algorithm/protocol nor symKernelId available for function %s with datatype %s tuning mask 0x%lx.%s%s%s",
-         ncclFuncToString(input->func), ncclDatatypeToString(input->datatype), input->tuningMask, ncclAlgoEnvStr,
-         ncclProtoEnvStr, ncclSymKernelIdEnvStr);
+    WARN("No algorithm/protocol nor symKernelId available for function %s with datatype %s tuning mask "
+         "0x%016" PRIx64 "%016" PRIx64 ".%s%s%s",
+         ncclFuncToString(input->func), ncclDatatypeToString(input->datatype), input->tuningMask.word(64),
+         input->tuningMask.word(0), ncclAlgoEnvStr, ncclProtoEnvStr, ncclSymKernelIdEnvStr);
     ret = (algoEnv || protoEnv || symKernelIdEnv) ? ncclInvalidUsage : ncclInternalError;
   }
   *result = bestTuning;

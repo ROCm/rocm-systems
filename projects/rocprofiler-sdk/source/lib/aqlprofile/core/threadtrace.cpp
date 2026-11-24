@@ -506,20 +506,20 @@ _internal_aqlprofile_att_codeobj_marker(hsa_ext_amd_aql_pm4_packet_t*        pac
     return HSA_STATUS_SUCCESS;
 }
 
-}  // namespace aql_profile_v2
-
-extern "C" {
-
-PUBLIC_API hsa_status_t
-aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
-                                    aqlprofile_handle_t             handle,
-                                    int                             shader_engine_id,
-                                    int                             flags)
+hsa_status_t
+_internal_aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
+                                              aqlprofile_handle_t             handle,
+                                              int                             shader_engine_id)
 {
+    if(out == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
     auto generic_manager = MemoryManager::GetManager(handle.handle);
 
     auto* manager = dynamic_cast<TraceMemoryManager*>(generic_manager.get());
     if(manager == nullptr) return HSA_STATUS_ERROR;
+
+    auto it = manager->config.buffer_data.find(shader_engine_id);
+    if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     volatile auto& control =
         manager->GetTraceControlBuf<pm4_builder::TraceControl>()[shader_engine_id];
@@ -530,9 +530,6 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
     out->needs_swap  = (status & aql_profile::Pm4Factory::Create(manager->AgentHandle())
                                     ->GetSqttBuilder()
                                     ->GetBufferFullMask()) != 0;
-
-    auto it = manager->config.buffer_data.find(shader_engine_id);
-    if(it == manager->config.buffer_data.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     if(out->needs_swap)
     {
@@ -561,10 +558,10 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
     return HSA_STATUS_SUCCESS;
 }
 
-PUBLIC_API hsa_status_t
-aqlprofile_att_get_gpu_clock(aqlprofile_att_gpu_clock_t* out,
-                             aqlprofile_handle_t         handle,
-                             int                         shader_engine_id)
+hsa_status_t
+_internal_aqlprofile_att_get_gpu_clock(aqlprofile_att_gpu_clock_t* out,
+                                       aqlprofile_handle_t         handle,
+                                       int                         shader_engine_id)
 {
     if(out == nullptr || shader_engine_id < 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -586,14 +583,13 @@ aqlprofile_att_get_gpu_clock(aqlprofile_att_gpu_clock_t* out,
     return HSA_STATUS_SUCCESS;
 }
 
-PUBLIC_API hsa_status_t
-aqlprofile_att_get_buffer_packets(uint64_t*                      header,
-                                  hsa_ext_amd_aql_pm4_packet_t*  query_status,
-                                  hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
-                                  uint64_t*                      num_buffer_packets,
-                                  aqlprofile_handle_t            handle,
-                                  int                            shader_engine_id,
-                                  int                            flags)
+hsa_status_t
+_internal_aqlprofile_att_get_buffer_packets(uint64_t*                      header,
+                                            hsa_ext_amd_aql_pm4_packet_t*  query_status,
+                                            hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
+                                            uint64_t*                      num_buffer_packets,
+                                            aqlprofile_handle_t            handle,
+                                            int                            shader_engine_id)
 {
     auto generic_manager = MemoryManager::GetManager(handle.handle);
 
@@ -662,6 +658,84 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
     aql_profile::PopulateAql(cmdbuffer, commands.Size(), cmd_writer, query_status);
 
     return HSA_STATUS_SUCCESS;
+}
+
+}  // namespace aql_profile_v2
+
+extern "C" {
+
+PUBLIC_API hsa_status_t
+aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
+                                    aqlprofile_handle_t             handle,
+                                    int                             shader_engine_id,
+                                    int                             flags)
+{
+    try
+    {
+        return aql_profile_v2::_internal_aqlprofile_att_update_buffer_status(
+            out, handle, shader_engine_id);
+    } catch(hsa_status_t err)
+    {
+        ERR_LOGGING("{}", static_cast<int>(err));
+        return err;
+    } catch(std::exception& e)
+    {
+        ERR_LOGGING("{}", e.what());
+        return HSA_STATUS_ERROR;
+    } catch(...)
+    {
+        return HSA_STATUS_ERROR;
+    }
+}
+
+PUBLIC_API hsa_status_t
+aqlprofile_att_get_gpu_clock(aqlprofile_att_gpu_clock_t* out,
+                             aqlprofile_handle_t         handle,
+                             int                         shader_engine_id)
+{
+    try
+    {
+        return aql_profile_v2::_internal_aqlprofile_att_get_gpu_clock(
+            out, handle, shader_engine_id);
+    } catch(hsa_status_t err)
+    {
+        ERR_LOGGING("{}", static_cast<int>(err));
+        return err;
+    } catch(std::exception& e)
+    {
+        ERR_LOGGING("{}", e.what());
+        return HSA_STATUS_ERROR;
+    } catch(...)
+    {
+        return HSA_STATUS_ERROR;
+    }
+}
+
+PUBLIC_API hsa_status_t
+aqlprofile_att_get_buffer_packets(uint64_t*                      header,
+                                  hsa_ext_amd_aql_pm4_packet_t*  query_status,
+                                  hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
+                                  uint64_t*                      num_buffer_packets,
+                                  aqlprofile_handle_t            handle,
+                                  int                            shader_engine_id,
+                                  int                            flags)
+{
+    try
+    {
+        return aql_profile_v2::_internal_aqlprofile_att_get_buffer_packets(
+            header, query_status, buffer_swap, num_buffer_packets, handle, shader_engine_id);
+    } catch(hsa_status_t err)
+    {
+        ERR_LOGGING("{}", static_cast<int>(err));
+        return err;
+    } catch(std::exception& e)
+    {
+        ERR_LOGGING("{}", e.what());
+        return HSA_STATUS_ERROR;
+    } catch(...)
+    {
+        return HSA_STATUS_ERROR;
+    }
 }
 
 // Method to populate the provided AQL packet with ATT Markers

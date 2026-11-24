@@ -3250,12 +3250,12 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
   // (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
   // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL set forced[] and win here, as in ncclMakeSymmetricTaskList.
   // RCCL_OVERRIDE_* do not, and getAlgoInfo drops their error, so a blanked cell loses the override.
-  uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
-  uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
+  rcclTuningMask effAlgMask = comm->tuningContext.forced[info->func] ? rcclTuningMask() : info->algMask;
+  rcclTuningMask generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
   // Naming a row per call is as explicit as naming it in NCCL_ALGO or NCCL_PROTO, so it lifts the
   // same heuristic gates those env vars lift. Otherwise one selection string succeeds at 1 MiB and
   // fails at 4 MiB, or works only on an all-XGMI node.
-  auto algNamed = [&](int a, int p) { return ((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) != 0; };
+  auto algNamed = [&](int a, int p) { return generalMask.test(a * NCCL_NUM_PROTOCOLS + p); };
 
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetSupport != 1) continue;
@@ -3305,7 +3305,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
       // to be least preferred.
       if (a == NCCL_ALGO_RING) {
         // Any factor large enough to act as a partition between lossy and non-lossy algos.
-        table[a][p] *= rcclFp8RingCostFactor(info->datatype, info->func, comm->nRanks, comm->nNodes, nBytes,
+        table[a][p] *= rcclFp8RingCostFactor(info->datatype, info->func, comm->nRanks, comm->nNodes,
                                              rcclDdaLL128Threshold(comm, ncclFuncAllReduce), comm->archName);
       }
     }
@@ -3313,7 +3313,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
 
   // Apply the filter. A symmetric-only selection ("SYMK_LL") names no general row; leave the table
   // as the fallback the symmetric scheduler declines to.
-  if (generalMask != 0) {
+  if (generalMask.any()) {
     // Decide before blanking. `>= 0.0`, not `!= IGNORE`: the fp8 relegation above scales a -1.0
     // sentinel cell to -1024.0, and topoGetAlgoInfo's argmin accepts only a non-negative time.
     bool anyLeft = false;
@@ -4898,7 +4898,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     if (info->count == 0) return ncclSuccess;
 
     // Validate any per-call algorithm selection up front.
-    uint64_t algMask;
+    rcclTuningMask algMask{};
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
 
     // Reductions in FP8 require sm90+.
@@ -4982,7 +4982,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     // kernel selector, so without this an unsatisfiable selection (bad syntax, or a function with
     // no selectable algorithm) would be silently accepted despite forceAlgSelection. getAlgMask
     // rejects it when forceAlgSelection is set, else logs and falls back to automatic.
-    uint64_t algMask;
+    rcclTuningMask algMask{};
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
 
     if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {
@@ -5314,13 +5314,32 @@ void rcclLogCollInfo(const struct ncclInfo& info) {
        info.comm->localRankToRank[info.comm->localRank]);
 }
 
-ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
-  // Early-out on invalid or revoked communicator
-  ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
-  if (ret != ncclSuccess) return ncclGroupErrCheck(ret);
-  if (info->comm->revokedFlag) {
-    WARN("%s: communicator was revoked", info->opName);
+// Early-out on an invalid, revoked or not-yet-ready comm. Call it before any comm read that precedes ncclEnqueueCheck.
+ncclResult_t ncclEnqueueCommCheck(struct ncclComm* comm, const char* opName) {
+  ncclResult_t ret = CommCheck(comm, opName, "comm");
+  if (ret != ncclSuccess) {
+    return ncclGroupErrCheck(ret);
+  }
+  if (COMPILER_ATOMIC_LOAD(&comm->revokedFlag, std::memory_order_acquire) != 0) {
+    WARN("%s: communicator was revoked", opName);
     return ncclGroupErrCheck(ncclInvalidUsage);
+  }
+  // A comm whose init or grow job has not finished passes CommCheck while the job still writes the fields callers
+  // read next. initState also covers a comm used in the same group as its own init, where asyncResult is still zero.
+  // Read the atomics directly: ncclCommGetAsyncError also reads proxyState and ginState and records to the Recorder.
+  if (COMPILER_ATOMIC_LOAD(&comm->initState, std::memory_order_acquire) == ncclInProgress ||
+      COMPILER_ATOMIC_LOAD(&comm->asyncResult, std::memory_order_acquire) == ncclInProgress) {
+    WARN("%s: communicator %p is not ready; wait until ncclCommGetAsyncError no longer returns ncclInProgress",
+         opName, comm);
+    return ncclGroupErrCheck(ncclInvalidArgument);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
+  ncclResult_t ret = ncclEnqueueCommCheck(info->comm, info->opName);
+  if (ret != ncclSuccess) {
+    return ret;
   }
   // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
   // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls

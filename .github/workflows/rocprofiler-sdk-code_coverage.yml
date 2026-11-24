@@ -133,22 +133,9 @@ jobs:
       GCC_COMPILER_VERSION: 11
 
     steps:
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & ROCDecode & ROCJPEG
+    - name: Clone rocm-systems
       uses: actions/checkout@v6
       with:
-        sparse-checkout: |
-          .github/actions/rocprofiler-sdk-util
-          projects/rocprofiler-sdk
-          shared/sha256
-          projects/aqlprofile
-          projects/rocprofiler-register
-          projects/rocr-runtime
-          projects/clr
-          projects/hip
-          projects/hrr
-          projects/hipfile
-          projects/rocdecode
-          projects/rocjpeg
         submodules: false
         set-safe-directory: true
 

@@ -171,6 +171,56 @@ HIP_TEST_CASE(Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess) {
   RunBenchmark(width, 32, hipMemcpyDeviceToDevice, true);
 }
 
+// Copies rows padded to pitches 64 and 128 bytes wider than the row, starting src_offset and
+// dst_offset bytes into their allocations
+static void RunPaddedBenchmark(size_t width, size_t height, size_t src_offset, size_t dst_offset) {
+  const size_t src_pitch = width + 64;
+  const size_t dst_pitch = width + 128;
+  const size_t src_size = src_offset + src_pitch * height;
+  const size_t dst_size = dst_offset + dst_pitch * height;
+  size_t free_memory = 0, total_memory = 0;
+  HIP_CHECK(hipMemGetInfo(&free_memory, &total_memory));
+  if (free_memory < src_size + dst_size + 1_MB) {
+    HIP_SKIP_TEST("Not enough free device memory");
+  }
+
+  Memcpy2DAsyncBenchmark benchmark;
+  benchmark.AddSectionName("(" + std::to_string(width) + ", " + std::to_string(height) + ")");
+  benchmark.AddSectionName("offsets (" + std::to_string(src_offset) + ", " +
+                           std::to_string(dst_offset) + ")");
+  benchmark.RegisterBandwidth(width * height);
+
+  const StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<uint8_t> src_allocation(LinearAllocs::hipMalloc, src_size);
+  LinearAllocGuard<uint8_t> dst_allocation(LinearAllocs::hipMalloc, dst_size);
+  benchmark.Run(dst_allocation.ptr() + dst_offset, dst_pitch, src_allocation.ptr() + src_offset,
+                src_pitch, width, height, hipMemcpyDeviceToDevice, stream_guard.stream());
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpy2DAsync` from Device to Device between rows padded to a pitch wider than
+ *    the row, with source and destination rows that start 16-byte aligned, and 7 and 11 bytes past
+ *    a 16-byte boundary:
+ *    -# Copy size
+ *      - Small: 64 B x 32
+ *      - Medium: 4 KB x 128, 4 KB x 1024
+ *      - Large, the size of the last-level cache of some devices: 16 KB x 16384
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpy2DAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Performance_hipMemcpy2DAsync_DeviceToDevice_Padded) {
+  const auto [width, height] =
+      GENERATE(table<size_t, size_t>({{64, 32}, {4_KB, 128}, {4_KB, 1024}, {16_KB, 16384}}));
+  const auto [src_offset, dst_offset] = GENERATE(table<size_t, size_t>({{0, 0}, {7, 11}}));
+  RunPaddedBenchmark(width, height, src_offset, dst_offset);
+}
+
 /**
  * End doxygen group memcpy.
  * @}

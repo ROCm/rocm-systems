@@ -8,6 +8,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -142,8 +143,8 @@ struct ProbeArgValue {
 /// @details RDNA4 and CDNA5 permit user reads of TTMP0-15. Keep the supported
 /// set explicit: CDNA4 reads return zero, and an unclassified target must not
 /// silently expose unavailable entry inputs.
-[[nodiscard]] inline constexpr bool supports_entry_ttmp_capture(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+[[nodiscard]] inline constexpr bool supports_entry_ttmp_capture(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
 /// @brief Does @p source read the framework's persistent entry-storage pair?
@@ -259,7 +260,7 @@ derive_probe_abi(ProbeCallingConvention cc, uint8_t num_arg_dwords = 0) {
 ///        relocate verbatim into the instrumented code object.
 struct ProbeCallable {
   std::string symbol;                                        ///< Resolved symbol name.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;          ///< ISA the body decodes as.
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;   ///< ISA the body decodes as.
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete ISA target, if known.
   std::vector<uint32_t> body_words; ///< The body's instruction words, in order.
   ProbeAbi abi;                     ///< Verified convention and the registers it implies.
@@ -300,12 +301,16 @@ struct ProbeCallable {
 ///     access (FLAT scratch_* / SMEM s_scratch_*); note private access via FLAT
 ///     addressing, or via a buffer instruction given a scratch resource
 ///     descriptor, is not statically detectable here and is not rejected,
-///   - contain no CDNA1-4 instruction that may enable VSKIP, which suppresses
-///     the vector instructions used to restore VGPRs and SGPRs after the call,
 ///   - contain no MFMA/SMFMAC, or CDNA5 matrix/transcendental instruction:
 ///     completion before state restoration is not yet proven, even with padding,
 ///   - contain no RDNA4 image instruction (VIMAGE / VSAMPLE), whose decoded
-///     operands do not name every register it reads and writes, and
+///     operands do not name every register it reads and writes,
+///   - on CDNA1-4, contain no instruction that may enable MODE.VSKIP
+///     (s_setvskip or an overlapping s_setreg* write), because the call
+///     envelope's vector restores require VSKIP clear; provably clearing
+///     writes are permitted,
+///   - on CDNA5, contain no s_setreg* or s_set_vgpr_msb* instruction, to
+///     conservatively preserve the VGPR-bank state required by the call ABI, and
 ///   - end in `s_setpc_b64 s[30:31]`.
 ///
 /// On success the returned ProbeCallable carries the ABI derived from
@@ -320,7 +325,7 @@ struct ProbeCallable {
 ///   this ABI supplies.
 [[nodiscard]] std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                                 const ResolvedProbeSymbol &sym,
-                                                                rj_code_arch_t arch,
+                                                                rocjitsu::IsaFamily arch,
                                                                 uint8_t num_arg_dwords = 0,
                                                                 std::string *error_out = nullptr);
 

@@ -18,15 +18,16 @@ extern "C" {
 // fma(A[Q+1],B[L],C[Q]); P2 computes fma(A[Q+2],B[L],C[L]). Source lanes are
 // read even if inactive in EXEC. Each operand uses one VGPR; whole VGPRs may
 // alias. Supports NEG_A/B/C, CLAMP, with no ABS or OMOD.
-// Compatibility resolves to Loose. Bit-exact semantics evaluate every lane on
-// the guest path and report no FP status. All semantics require the default
-// host FP environment (nearest-even rounding, denormals enabled); host
-// exception flags may change. A selected NaN keeps its sign and payload.
-// IEEE_MODE quiets FP32 results; DX10_CLAMP_OFF preserves NaNs under CLAMP.
-// For RDNA4, set IEEE_MODE and leave DX10_CLAMP_OFF clear.
-// Guest rounding and precision-specific input/output denormal controls are honored.
-// WAIT_EXP belongs to the scheduler and is not an arithmetic modifier.
-// Both architectures specify that interpolation reports no GPU exceptions.
+// Compatibility resolves to bit-exact semantics and reports no FP status. Every
+// semantics shares one dispatch: without a guest rounding or denormal control the specialized
+// kernels run and hand back only the lanes the guest model must produce, so Loose, Compatibility
+// and bit-exact return the same bits at the same cost. All semantics require the
+// default host FP environment (nearest-even rounding, denormals enabled); host exception flags may
+// change. A selected NaN keeps its sign and payload. IEEE_MODE quiets FP32 results; DX10_CLAMP_OFF
+// preserves NaNs under CLAMP. For RDNA4, set IEEE_MODE and leave DX10_CLAMP_OFF clear. Guest
+// rounding and precision-specific input/output denormal controls are honored. WAIT_EXP belongs to
+// the scheduler and is not an arithmetic modifier. Both architectures specify that interpolation
+// reports no GPU exceptions.
 int rj_arith_v_interp_p10_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c);
@@ -101,15 +102,16 @@ int rj_arith_v_interp_p2_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask,
 // Each operand uses one VGPR. Guest input/output flushing applies to all
 // inputs/final results. IEEE mode and guest rounding flags are accepted; loose
 // arithmetic uses host rounding rather than implementing guest-directed rounding.
-// Compatibility uses the existing exact MUL backend for guest rounding, tininess,
-// and OMOD after applying MULLIT source predicates; it still omits FP status. APIs without
+// Exact modes and Compatibility use the exact MUL backend for guest rounding, tininess,
+// and OMOD after applying MULLIT source predicates; the gfx1100 and gfx1201 captures match
+// this model, so Compatibility resolves to mode 2. FP status is still omitted. APIs without
 // _gfx12 use RDNA3 TRAPSTS, _gfx12 uses EXCP_FLAG_USER; loose calls skip FP-status output,
 // exact FP status reporting in mode 3 is unsupported. Supports all A/B/C ABS/NEG, OMOD and CLAMP
 // modifiers. DPP8/DPP16 permute A before source modifiers. B and C retain
 // their lanes; inactive or DPP-filtered destinations remain unchanged. Host nearest-even rounding
 // with denormals enabled is required; exception flags may change. NaN payloads are unspecified.
 // Loose may differ in intermediate flushing and signed zero under OMOD;
-// Compatibility retains the hardware-matching intermediate flush ordering.
+// exact modes retain the hardware-matching intermediate flush ordering.
 int rj_arith_v_mullit_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                               uint32_t *const *d, const uint32_t *const *a,
                               const uint32_t *const *b, const uint32_t *const *c,
@@ -130,6 +132,17 @@ int rj_arith_v_mullit_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
                                     uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, const uint32_t *const *c,
                                     uint32_t *excp_flag_user);
+
+// gfx1250 shares the gfx12 MULLIT model; strict exact is unsupported pending gfx1250
+// captures. Compatibility keeps the inherited model.
+int rj_arith_v_mullit_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+int rj_arith_v_mullit_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
 
 // Cube-map face ID, S/T coordinates and signed doubled major axis, respectively.
 // A/B/C contain X/Y/Z in one VGPR each; D holds one VGPR. Z wins magnitude ties,

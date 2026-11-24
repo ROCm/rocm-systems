@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "compute_unit_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/perfsim/plugin.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -195,7 +196,7 @@ struct WaveFixture {
 
   explicit WaveFixture(uint32_t slots = 2) {
     ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.arch = rocjitsu::IsaFamily::Cdna5;
     config.target = ROCJITSU_CODE_TARGET_GFX1250;
     config.num_wf_slots = slots;
     config.sgprs_per_wf = 128;
@@ -2869,7 +2870,7 @@ TEST_F(PerfsimPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
                               Operation::Unknown, MemoryAddressing::None, MemoryKind::None);
   plugin.onAmdgpuBeforeExecuteInstruction(0x7000, swmmac, wave);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const auto smem_words = cdna5::build_smem(cdna5::kSDcacheInvSmem);
   DecodeResult smem_result = decoder->decode(smem_words.data());

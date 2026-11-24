@@ -25,6 +25,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -953,10 +954,8 @@ public:
     /// @brief Store one wave-width snapshot using the acquired lane and byte masks.
     /// @details Source and destination may overlap. Each call addresses one VGPR;
     /// adjacent registers need not have contiguous backing storage.
-    /// @throws std::invalid_argument if @p values does not hold one word per wave lane.
     void set_lanes(uint32_t relative_reg, std::span<const uint32_t> values) const {
-      if (values.size() != wf_size_)
-        throw std::invalid_argument("VGPR lane write needs one value per wave lane");
+      assert(values.size() == wf_size_ && "VGPR lane write needs one value per wave lane");
       if (!cu_)
         return;
       if (lane_mask_ == util::mask<uint64_t>(static_cast<int>(wf_size_)) &&
@@ -1111,7 +1110,7 @@ public:
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
       const auto &operand = *inst.dst_operand(i);
       const auto reg =
-          cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && (inst.flags() & MATRIX_REGISTER_ACCESSES)
+          cu_->arch() == rocjitsu::IsaFamily::Rdna3_5 && (inst.flags() & MATRIX_REGISTER_ACCESSES)
               ? gfx115_wmma_register(operand, true)
               : operand.decoded_vgpr();
       if (reg && operand.size_bits() &&
@@ -1680,7 +1679,7 @@ public:
   /// Report the architectural spelling of a gfx942 scalar alias. The race
   /// detector converts it to physical storage; other observers see the name.
   void observe_scalar_alias(RegisterRef reg, bool write) const {
-    if (!cu_->observes_register_access() || cu_->arch() != ROCJITSU_CODE_ARCH_CDNA3)
+    if (!cu_->observes_register_access() || cu_->arch() != rocjitsu::IsaFamily::Cdna3)
       return;
     if (write)
       cu_->notify_scalar_register_write(wavefront(), reg);
@@ -1907,7 +1906,7 @@ public:
     if (!cu_->valid_operand_vgpr_range(wavefront(), *base, reg_count) && uses_vgpr0_fallback())
       return std::nullopt; // A partial tuple can require noncontiguous source registers.
     if (auto mapped = remapped_valu_source(op, *base, reg_count)) {
-      if (reg_count != 1 && cu_->arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+      if (reg_count != 1 && cu_->arch() != rocjitsu::IsaFamily::Rdna3_5)
         return std::nullopt; // CDNA1 can substitute nonconsecutive source words.
       return read_vgpr_region(mapped->lo, reg_count, lane_mask);
     }
@@ -2012,7 +2011,8 @@ public:
 
 private:
   bool uses_vgpr0_fallback() const {
-    return (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_->arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+    return (cu_->arch() == rocjitsu::IsaFamily::Rdna1 ||
+            cu_->arch() == rocjitsu::IsaFamily::Rdna2) &&
            wavefront().num_vgprs() != 0;
   }
 
@@ -2041,7 +2041,7 @@ private:
 
   uint32_t read_remapped_valu_word(const Operand &op, uint32_t reg, uint32_t lane) const {
     // Compact true16 VGPRs return their selected half normalized to bits 15:0.
-    if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && op.size_bits() == 16 && !op.simd_capable()) {
+    if (cu_->arch() == rocjitsu::IsaFamily::Rdna3_5 && op.size_bits() == 16 && !op.simd_capable()) {
       const uint8_t bytes = op.register_byte_mask();
       const uint32_t value = read_vgpr(reg, lane, bytes);
       return (value >> (bytes == ExecutionPlugin::kHighHalfByteMask ? 16 : 0)) & 0xffffu;
@@ -2058,8 +2058,8 @@ private:
     const auto &wf = wavefront();
     const auto arch = cu_->arch();
     // CDNA2 resolves its unified VGPR/AccVGPR allocation in its operand backend.
-    if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-         arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+    if ((arch != rocjitsu::IsaFamily::Cdna1 && arch != rocjitsu::IsaFamily::Cdna3 &&
+         arch != rocjitsu::IsaFamily::Cdna4 && arch != rocjitsu::IsaFamily::Rdna3_5) ||
         op.vgpr_msb_role() == VgprMsbRole::None || !wf.num_vgprs())
       return std::nullopt;
     const auto base = wf.vgpr_alloc().base;
@@ -2073,7 +2073,7 @@ private:
     if (bank.contains(reg, words))
       return std::nullopt;
     // A GFX11.5 VALU operand outside the allocation selects VGPR0 as its tuple base.
-    if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    if (cu_->arch() == rocjitsu::IsaFamily::Rdna3_5) {
       // VOPD preserves the low two register-index bits.
       const auto first = bank.base + (op.is_vopd_source() ? (reg - bank.base) % 4 : 0);
       return SourceWords{first, first + 1};

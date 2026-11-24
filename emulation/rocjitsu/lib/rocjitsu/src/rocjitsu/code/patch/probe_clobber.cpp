@@ -124,7 +124,7 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
   const auto &registry = default_isa_target_registry();
   if (callable.target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetDescriptor *descriptor = registry.find(callable.target);
-    if (descriptor == nullptr || descriptor->architecture_id != callable.arch) {
+    if (descriptor == nullptr || descriptor->family != callable.arch) {
       report(error_out, "probe target does not match the probe architecture");
       return std::nullopt;
     }
