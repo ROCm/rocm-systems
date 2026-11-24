@@ -200,7 +200,6 @@ foreach(
                 string(TOUPPER "${_scenario}" _scenario_define)
                 list(APPEND _flat_specs "${_name}:32:0:0:0:0")
                 set(_flat_options_${_name}
-                    -DCONSAN_GROUP_FLAT=1
                     -DFLAT_${_direction_define}=1
                     -DFLAT_${_scenario_define}=1
                 )
@@ -385,6 +384,18 @@ foreach(
                 string(TOUPPER "${_scenario}" _scenario_define)
                 list(APPEND _peer_option -DTR_${_scenario_define}=1)
             endif()
+            if(_name MATCHES "^flat-")
+                set(_fixture_source fixtures/group_flat.s)
+                set(_fixture_deps)
+            else()
+                set(_fixture_source fixtures/native_widths.s)
+                set(_fixture_deps
+                    fixtures/native_atomic.inc
+                    fixtures/native_d16.inc
+                    fixtures/native_dual.inc
+                    fixtures/native_transpose.inc
+                )
+            endif()
             set(_object ${_directory}/width-${_name}.o)
             set(_image ${_directory}/width-${_name}.hsaco)
             add_custom_command(
@@ -400,15 +411,11 @@ foreach(
                     -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision}
                     ${_peer_option} ${_dual_options_${_name}}
                     ${_atomic_options_${_name}} ${_flat_options_${_name}} -c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
-                    ${_object}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/${_fixture_source} -o ${_object}
                 DEPENDS
-                    fixtures/native_widths.s
-                    fixtures/native_atomic.inc
-                    fixtures/group_flat.inc
-                    fixtures/native_d16.inc
-                    fixtures/native_dual.inc
-                    fixtures/native_transpose.inc
+                    ${_fixture_source}
+                    fixtures/lds_fixture_macros.s
+                    ${_fixture_deps}
                     ${AMDCXX}
                 VERBATIM
             )

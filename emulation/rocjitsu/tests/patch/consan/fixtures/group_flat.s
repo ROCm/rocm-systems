@@ -1,6 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "lds_fixture_macros.s"
+
+.amdgcn_target CONSAN_TARGET
+.text
+.globl CONSAN_KERNEL
+.type CONSAN_KERNEL,@function
+.p2align 8
+CONSAN_KERNEL:
 #if CONSAN_LEGACY
 #define FLAT_READ flat_load_dword
 #define FLAT_WRITE flat_store_dword
@@ -119,3 +127,7 @@
   MASK_MOVE MASK_EXEC, MASK_SAVE
   consan_wait_stores
   s_endpgm
+.Lkernel_end:
+.size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL
+
+consan_kernel_descriptor
