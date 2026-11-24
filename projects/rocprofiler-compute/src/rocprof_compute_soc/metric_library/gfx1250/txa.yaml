@@ -228,7 +228,7 @@ txa.tdm_store_bw:
   description: Total TDM store bandwidth.
 txa.util:
   name: TXA Utilization
-  formula: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd)
+  formula: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: Percentage of cycles the TXA is processing memory requests.
 txa.vmw_req_bus_util:
