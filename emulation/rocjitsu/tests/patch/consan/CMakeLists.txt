@@ -81,13 +81,25 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
     )
     list(APPEND _fixtures ${_fixture_dir}/renamed.hsaco)
     include(target_fixtures.cmake)
+    include(multi_entry.cmake)
     target_sources(consan_input_test PRIVATE target_test.cpp)
     add_custom_target(consan_original_fixtures DEPENDS ${_fixtures})
     add_dependencies(consan_input_test consan_original_fixtures)
-    add_dependencies(consan_input_test consan_target_fixtures)
+    add_dependencies(
+        consan_input_test
+        consan_target_fixtures
+        consan_multi_entry_fixture
+    )
     target_compile_definitions(
         consan_input_test
-        PRIVATE CONSAN_FIXTURE_DIR="${_fixture_dir}"
+        PRIVATE
+            CONSAN_FIXTURE_DIR="${_fixture_dir}"
+            CONSAN_MULTI_ENTRY_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
+            CONSAN_MULTI_ENTRY_BARRIER_FIXTURE="${_fixture_dir}/multi-entry-barrier.hsaco"
+            CONSAN_MULTI_ENTRY_LOOP_FIXTURE="${_fixture_dir}/multi-entry-loop.hsaco"
+            CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
+            CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE="${_fixture_dir}/multi-entry-native-global.hsaco"
+            CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE="${_fixture_dir}/multi-entry-unreachable-pc.hsaco"
     )
 else()
     message(
@@ -190,12 +202,20 @@ if(TARGET consan_original_fixtures)
         PRIVATE rocjitsu_consan_image GTest::gtest_main
     )
     rj_configure_target(consan_image_test PRIVATE_INCLUDES WARNINGS)
-    add_dependencies(consan_image_test consan_artifact_fixture)
+    add_dependencies(
+        consan_image_test
+        consan_artifact_fixture
+        consan_multi_entry_fixture
+    )
     target_compile_definitions(
         consan_image_test
         PRIVATE
             CONSAN_ORIGINAL_FIXTURE="${_fixture_dir}/race.hsaco"
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
+            CONSAN_MULTI_ENTRY_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
+            CONSAN_MULTI_ENTRY_BARRIER_FIXTURE="${_fixture_dir}/multi-entry-barrier.hsaco"
+            CONSAN_MULTI_ENTRY_LOOP_FIXTURE="${_fixture_dir}/multi-entry-loop.hsaco"
+            CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
     )
     rj_add_gtest_tests(consan_image_test)
 endif()
