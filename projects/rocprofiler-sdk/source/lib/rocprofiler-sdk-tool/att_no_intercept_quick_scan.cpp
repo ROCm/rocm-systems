@@ -51,12 +51,9 @@ namespace att_no_intercept
 {
 namespace
 {
-// TODO: chunk ordering and cross-chunk stitching (chunk_completed, chunk_requested, chunk_data)
-// assume a single shader engine per agent. Multi-SE triple buffering
-// (users/gbaraldi/multiplese) numbers chunks per SE and drops the SDK's single-SE check, so
-// chunks from different SEs would be counted as one sequence and stitched together. Reject
-// multi-bit --att-shader-engine-mask for --att-no-intercept, or key this state by SE, before
-// that lands.
+// Chunk ordering and cross-chunk stitching (chunk_completed, chunk_requested, chunk_data) assume a
+// single shader engine per agent, since chunks are numbered per SE. tool_init rejects multi-SE
+// masks for --att-no-intercept.
 void
 wait_for_prior_chunks(agent_state_t& state, uint64_t chunk_index)
 {

@@ -3623,6 +3623,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                             "the first code-object upload for each selected GPU agent";
         }
 
+        // Quick-scan orders and stitches chunks as one sequence per agent, but chunk indices are
+        // numbered per shader engine.
+        ROCP_FATAL_IF(att_no_intercept && __builtin_popcountll(shader_mask) > 1)
+            << "--att-no-intercept supports a single shader engine; got --att-shader-engine-mask 0x"
+            << std::hex << shader_mask;
+
         if(!att_no_intercept)
         {
             ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
