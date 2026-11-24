@@ -357,11 +357,13 @@ std::optional<FuzzTarget> indexed_target(uint8_t index) {
   return static_cast<FuzzTarget>(index);
 }
 
-std::vector<uint8_t> terminated_program(std::span<const uint8_t> instructions, FuzzTarget target) {
+util::FailureOr<std::vector<uint8_t>> terminated_program(std::span<const uint8_t> instructions,
+                                                         FuzzTarget target,
+                                                         util::DiagnosticEmitter diagnostic) {
   const std::unique_ptr<Decoder> decoder =
       Decoder::create(default_isa_target_registry(), target_id(target));
   if (!decoder) {
-    throw std::logic_error("execution fuzz target has no decoder");
+    return diagnostic.emit() << target_name(target) << " decoder is unavailable";
   }
   const std::size_t max_words = decoder->max_instruction_words();
   std::vector<uint8_t> code(instructions.begin(), instructions.end());
@@ -389,7 +391,10 @@ util::FailureOr<RunStats> run_input_once(
     FuzzTarget resolved_target, ArithmeticSemantics semantics,
     const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources,
     util::DiagnosticEmitter diagnostic) {
-  const std::vector<uint8_t> code = terminated_program(instructions, resolved_target);
+  const auto terminated = terminated_program(instructions, resolved_target, diagnostic);
+  if (terminated.failed())
+    return util::Result::failure();
+  const std::vector<uint8_t> &code = terminated.value();
 
   // Keep a mapped data island near the program. Address-bearing initial state
   // points into this region while other registers retain high-entropy values.

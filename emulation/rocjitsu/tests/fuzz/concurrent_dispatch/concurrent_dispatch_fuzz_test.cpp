@@ -23,7 +23,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 namespace rocjitsu::concurrent_dispatch_fuzz {
@@ -35,11 +34,9 @@ constexpr uint16_t kHwIdSimdId = 0x0904; // hwreg(HW_REG_HW_ID, 4, 2)
 constexpr std::array<uint32_t, 2> kInvalidCdna3Instruction{0xe0ffebf5, 0x00020000};
 
 template <typename Words> void append_words(std::vector<uint8_t> &input, const Words &words) {
-  for (uint32_t word : words) {
-    for (unsigned byte = 0; byte < sizeof(word); ++byte) {
+  for (uint32_t word : words)
+    for (unsigned byte = 0; byte < sizeof(word); ++byte)
       input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
-    }
-  }
 }
 
 void append_xcc_zero_test(std::vector<uint8_t> &input) {
@@ -122,7 +119,7 @@ std::vector<uint8_t> racy_stall_input() {
 }
 
 TEST(ConcurrentDispatchFuzzTest, CanonicalProgramsUseTargetSpecificFlatBaseAndWaits) {
-  const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
+  const std::vector<std::vector<uint8_t>> seeds = seed_corpus().value();
   ASSERT_EQ(seeds.size(), static_cast<std::size_t>(execution_fuzz::FuzzTarget::Count));
   for (std::size_t index = 0; index < seeds.size(); ++index) {
     SCOPED_TRACE(index);
@@ -170,7 +167,7 @@ TEST(ConcurrentDispatchFuzzTest, CanonicalProgramsUseTargetSpecificFlatBaseAndWa
 }
 
 TEST(ConcurrentDispatchFuzzTest, SeedCorpusCoversEveryExecutionTarget) {
-  const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
+  const std::vector<std::vector<uint8_t>> seeds = seed_corpus().value();
   ASSERT_EQ(seeds.size(), static_cast<std::size_t>(execution_fuzz::FuzzTarget::Count));
   uint64_t primed = 0;
   uint64_t multi_xcd = 0;
@@ -178,7 +175,7 @@ TEST(ConcurrentDispatchFuzzTest, SeedCorpusCoversEveryExecutionTarget) {
   uint64_t barriered = 0;
   bool uses_second_owner_without_fanout = false;
   for (const std::vector<uint8_t> &seed : seeds) {
-    const RunStats stats = run_input(seed);
+    const RunStats stats = run_input(seed).value();
     EXPECT_EQ(stats.inputs, 1u);
     EXPECT_EQ(stats.targets, 1u);
     EXPECT_EQ(stats.modes, stats.multi_xcd_inputs ? 4u : 2u);
@@ -207,13 +204,13 @@ TEST(ConcurrentDispatchFuzzTest, SeedCorpusCoversEveryExecutionTarget) {
 }
 
 TEST(ConcurrentDispatchFuzzTest, RandomInputIsStableAndIncludesBothKernelClasses) {
-  EXPECT_EQ(random_input(17), random_input(17));
-  EXPECT_NE(random_input(17), random_input(18));
+  EXPECT_EQ(random_input(17).value(), random_input(17).value());
+  EXPECT_NE(random_input(17).value(), random_input(18).value());
   uint64_t differential = 0;
   uint64_t raw = 0;
   std::vector<uint8_t> differential_input;
   for (uint64_t seed = 0; seed < 64; ++seed) {
-    const std::vector<uint8_t> input = random_input(seed);
+    const std::vector<uint8_t> input = random_input(seed).value();
     EXPECT_LE(input.size(), kGeneratedInputSize);
     if (input.size() == kGeneratedInputSize) {
       ++raw;
@@ -225,16 +222,16 @@ TEST(ConcurrentDispatchFuzzTest, RandomInputIsStableAndIncludesBothKernelClasses
   EXPECT_GT(differential, 0u);
   EXPECT_GT(raw, 0u);
   ASSERT_FALSE(differential_input.empty());
-  EXPECT_EQ(run_input(differential_input).differential_inputs, 1u);
+  EXPECT_EQ(run_input(differential_input).value().differential_inputs, 1u);
 }
 
 TEST(ConcurrentDispatchFuzzTest, BarrieredFanoutCompletesFromEitherQueueOwner) {
-  const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
+  const std::vector<std::vector<uint8_t>> seeds = seed_corpus().value();
   std::vector<uint8_t> input = seeds[static_cast<std::size_t>(execution_fuzz::FuzzTarget::Gfx950)];
   for (uint8_t owner : {uint8_t{0}, uint8_t{1}}) {
     SCOPED_TRACE(owner);
     input[5] = owner;
-    const RunStats stats = run_input(input);
+    const RunStats stats = run_input(input).value();
     EXPECT_EQ(stats.fanout_inputs, 1u);
     EXPECT_EQ(stats.packets, 2u);
     EXPECT_EQ(stats.differential_inputs, 1u);
@@ -244,30 +241,30 @@ TEST(ConcurrentDispatchFuzzTest, BarrieredFanoutCompletesFromEitherQueueOwner) {
 }
 
 TEST(ConcurrentDispatchFuzzTest, RawKernelMutationUsesSchedulingOutcomeOracle) {
-  std::vector<uint8_t> input = seed_corpus().front();
+  std::vector<uint8_t> input = seed_corpus().value().front();
   const uint32_t end = execution_fuzz::terminating_instruction(execution_fuzz::FuzzTarget::Gfx908);
   append_words(input, std::array{end});
-  EXPECT_EQ(run_input(input).differential_inputs, 0u);
+  EXPECT_EQ(run_input(input).value().differential_inputs, 0u);
 }
 
 TEST(ConcurrentDispatchFuzzTest, RawKernelCannotOverwriteHarnessState) {
   // The completion-signal value is deliberately outside the wave's bounded
   // address space even though the command processor can access it.
   constexpr uint32_t kCompletionSignalValueAddress = 0x300008;
-  const RunStats stats = run_input(flat_store_input(kCompletionSignalValueAddress));
+  const RunStats stats = run_input(flat_store_input(kCompletionSignalValueAddress)).value();
   EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
 }
 
 TEST(ConcurrentDispatchFuzzTest, KernelRangeIsNotWritable) {
   constexpr uint32_t kKernelAddress = 0x10000;
-  const RunStats stats = run_input(flat_store_input(kKernelAddress));
+  const RunStats stats = run_input(flat_store_input(kKernelAddress)).value();
   EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
   EXPECT_EQ(stats.completed_modes, 0u);
 }
 
 TEST(ConcurrentDispatchFuzzTest, DataIslandCannotBecomeInstructionStream) {
   constexpr auto kTarget = execution_fuzz::FuzzTarget::Gfx1010;
-  std::vector<uint8_t> input = seed_corpus()[static_cast<std::size_t>(kTarget)];
+  std::vector<uint8_t> input = seed_corpus().value()[static_cast<std::size_t>(kTarget)];
   input[1] = kPrimeCachesBit | kBarrierBit | kAgentAcquireBit | kAgentReleaseBit;
   input[2] = 1;  // Four workgroups.
   input[3] = 30; // 31 work-items per workgroup.
@@ -278,7 +275,7 @@ TEST(ConcurrentDispatchFuzzTest, DataIslandCannotBecomeInstructionStream) {
   // The canonical seed writes the data island. Jump to its kernarg address in s[0:1].
   append_words(input, rdna1::build_sop1(rdna1::kSSwapPcB64Sop1, {.ssrc0 = 0, .sdst = 0}));
   for (unsigned repetition = 0; repetition < 20; ++repetition) {
-    const RunStats stats = run_input(input);
+    const RunStats stats = run_input(input).value();
     ASSERT_EQ(stats.modes, 2u);
     EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
     // VMID 0 has no VM fault reporter and this queue has no exception status
@@ -294,7 +291,7 @@ TEST(ConcurrentDispatchFuzzTest, StoppedRawKernelIsOrdinaryAcrossWorkerModes) {
   input[0] = static_cast<uint8_t>(execution_fuzz::FuzzTarget::Gfx942);
   append_words(input, cdna3::build_sopp(cdna3::kSSendmsghaltSopp));
 
-  const RunStats stats = run_input(input);
+  const RunStats stats = run_input(input).value();
   EXPECT_EQ(stats.differential_inputs, 0u);
   EXPECT_EQ(stats.completed_modes, 0u);
   EXPECT_EQ(stats.terminal_faulted_modes, 0u);
@@ -310,7 +307,7 @@ TEST(ConcurrentDispatchFuzzTest, TrailingLiteralCannotConsumeTheTerminatingSuffi
     input[0] = static_cast<uint8_t>(target);
     // s_mov_b32 s0, literal. The raw body contains only the opcode word.
     append_words(input, std::array<uint32_t, 1>{0xbe8000ff});
-    const RunStats stats = run_input(input);
+    const RunStats stats = run_input(input).value();
     EXPECT_EQ(stats.completed_modes, stats.modes);
     EXPECT_EQ(stats.fatal_exit_modes, 0u);
   }
@@ -322,7 +319,7 @@ TEST(ConcurrentDispatchFuzzTest, FatalRawKernelIgnoresPostExitProgress) {
   constexpr uint16_t kReservedSoppOpcode = 0x7f;
   append_words(input, cdna1::build_sopp(kReservedSoppOpcode));
 
-  const RunStats stats = run_input(input);
+  const RunStats stats = run_input(input).value();
   EXPECT_EQ(stats.differential_inputs, 0u);
   EXPECT_EQ(stats.completed_modes, 0u);
   EXPECT_EQ(stats.fatal_exit_modes, stats.modes);
@@ -338,7 +335,7 @@ TEST(ConcurrentDispatchFuzzTest, FatalPeerFaultReachesQueueOwner) {
                                         {.simm16 = kInvalidCdna3Instruction.size()}));
   append_words(input, kInvalidCdna3Instruction);
 
-  const RunStats stats = run_input(input);
+  const RunStats stats = run_input(input).value();
   ASSERT_EQ(stats.modes, 4u);
   EXPECT_EQ(stats.fatal_exit_modes, stats.modes);
   EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
@@ -356,20 +353,18 @@ TEST(ConcurrentDispatchFuzzTest, MatchingQueueFaultsAllowFatalInFlightInstructio
   append_xcc_zero_test(input);
   constexpr uint16_t kOwnerPathWords = 7; // Three moves, two store words, wait, end.
   append_words(input, cdna3::build_sopp(cdna3::kSCbranchScc0Sopp, {.simm16 = kOwnerPathWords}));
-  for (uint8_t reg : {uint8_t{0}, uint8_t{1}, uint8_t{2}}) {
+  for (uint8_t reg : {uint8_t{0}, uint8_t{1}, uint8_t{2}})
     append_words(input, cdna3::build_vop1(cdna3::kVMovB32Vop1, {.src0 = kInlineZero, .vdst = reg}));
-  }
   append_words(input, cdna3::build_flat(cdna3::kFlatStoreDwordFlat,
                                         {.addr = 0, .data = 2, .saddr = kCdnaFlatSaddrOff}));
   append_words(input, cdna3::build_sopp(cdna3::kSWaitcntSopp));
   append_words(input, cdna3::build_sopp(cdna3::kSEndpgmSopp));
-  for (unsigned delay = 0; delay < 8; ++delay) {
+  for (unsigned delay = 0; delay < 8; ++delay)
     append_words(input, cdna3::build_sopp(cdna3::kSNopSopp));
-  }
   append_words(input, kInvalidCdna3Instruction);
 
   for (unsigned repetition = 0; repetition < 20; ++repetition) {
-    const RunStats stats = run_input(input);
+    const RunStats stats = run_input(input).value();
     ASSERT_EQ(stats.modes, 4u);
     EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
     EXPECT_EQ(stats.primary_stalled_modes, 0u);
@@ -380,14 +375,14 @@ TEST(ConcurrentDispatchFuzzTest, MatchingQueueFaultsAllowFatalInFlightInstructio
 TEST(ConcurrentDispatchFuzzTest, InitialRandomRangeRemainsCampaignViable) {
   for (uint64_t seed = 0; seed < 64; ++seed) {
     SCOPED_TRACE(seed);
-    EXPECT_NO_THROW((void)run_input(random_input(seed)));
+    EXPECT_TRUE(run_input(random_input(seed).value()).succeeded());
   }
 }
 
 TEST(ConcurrentDispatchFuzzTest, IncompleteRawKernelsIgnoreHostSchedulingProgress) {
   const std::vector<uint8_t> input = racy_stall_input();
   for (unsigned repetition = 0; repetition < 20; ++repetition) {
-    const RunStats stats = run_input(input);
+    const RunStats stats = run_input(input).value();
     EXPECT_EQ(stats.completed_modes, 0u);
     EXPECT_EQ(stats.terminal_faulted_modes, 0u);
     EXPECT_EQ(stats.primary_stalled_modes, stats.modes);
@@ -397,7 +392,7 @@ TEST(ConcurrentDispatchFuzzTest, IncompleteRawKernelsIgnoreHostSchedulingProgres
 TEST(ConcurrentDispatchFuzzTest, TerminallyFaultedRawKernelIgnoresRetirementProgress) {
   const std::vector<uint8_t> input = simd_id_fault_input(/*halt_on_simd_zero=*/false);
   for (unsigned repetition = 0; repetition < 20; ++repetition) {
-    const RunStats stats = run_input(input);
+    const RunStats stats = run_input(input).value();
     EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
     EXPECT_EQ(stats.incomplete_inputs, 1u);
   }
@@ -407,16 +402,15 @@ TEST(ConcurrentDispatchFuzzTest, TerminalFaultCancelsOlderUnbarrieredPacket) {
   for (uint8_t control : {uint8_t{0}, kXcdFanoutBit}) {
     SCOPED_TRACE(control);
     std::vector<uint8_t> input = simd_id_fault_input(/*halt_on_simd_zero=*/true, control);
-    if (control == 0) {
+    if (control == 0)
       input[2] = 0; // Three workgroups, one first-wave slot per CU.
-    }
-    const RunStats one_packet = run_input(input);
+    const RunStats one_packet = run_input(input).value();
     ASSERT_EQ(one_packet.packets, 1u);
     ASSERT_EQ(one_packet.terminal_faulted_modes, 0u);
     ASSERT_EQ(one_packet.primary_stalled_modes, one_packet.modes);
 
     input[4] = 1; // A newer packet uses SIMD 1 and faults while the older one is halted.
-    const RunStats stats = run_input(input);
+    const RunStats stats = run_input(input).value();
     ASSERT_EQ(stats.modes, 4u);
     EXPECT_EQ(stats.packets, 2u);
     EXPECT_EQ(stats.fanout_inputs, control == kXcdFanoutBit ? 1u : 0u);
@@ -426,7 +420,7 @@ TEST(ConcurrentDispatchFuzzTest, TerminalFaultCancelsOlderUnbarrieredPacket) {
 }
 
 TEST(ConcurrentDispatchFuzzTest, TerminalFaultReleasesPrimaryWithoutPublishingCompletion) {
-  const RunStats stats = run_input(flat_store_input(/*address=*/0));
+  const RunStats stats = run_input(flat_store_input(/*address=*/0)).value();
   EXPECT_EQ(stats.differential_inputs, 0u);
   EXPECT_EQ(stats.completed_modes, 0u);
   EXPECT_EQ(stats.budget_limited_modes, 0u);
@@ -467,7 +461,7 @@ TEST(ConcurrentDispatchFuzzTest, BudgetCountersRequireNonFaultTickExhaustion) {
   constexpr auto kInfiniteLoop = cdna1::build_sopp(cdna1::kSBranchSopp, {.simm16 = 0xffff});
   append_words(input, kInfiniteLoop);
 
-  const RunStats stats = run_input(input);
+  const RunStats stats = run_input(input).value();
   EXPECT_EQ(stats.differential_inputs, 0u);
   EXPECT_EQ(stats.completed_modes, 0u);
   EXPECT_EQ(stats.budget_limited_modes, stats.modes);
@@ -476,7 +470,7 @@ TEST(ConcurrentDispatchFuzzTest, BudgetCountersRequireNonFaultTickExhaustion) {
 
 TEST(ConcurrentDispatchFuzzTest, TerminalFaultDropsBlockedSuccessorAndReleasesPrimary) {
   const RunStats stats =
-      run_input(flat_store_input(/*address=*/0, kBarrierBit, /*packet_count_selector=*/1));
+      run_input(flat_store_input(/*address=*/0, kBarrierBit, /*packet_count_selector=*/1)).value();
   EXPECT_EQ(stats.packets, 2u);
   EXPECT_EQ(stats.differential_inputs, 0u);
   EXPECT_EQ(stats.completed_modes, 0u);
@@ -488,13 +482,16 @@ TEST(ConcurrentDispatchFuzzTest, TerminalFaultDropsBlockedSuccessorAndReleasesPr
 }
 
 TEST(ConcurrentDispatchFuzzTest, RejectsInputsOutsideTheSizeContract) {
-  EXPECT_THROW((void)run_input({}), std::invalid_argument);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(run_input({}, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "concurrent dispatch fuzz input must contain 1..1024 bytes");
   const std::vector<uint8_t> oversized(kMaxInputSize + 1);
-  EXPECT_THROW((void)run_input(oversized), std::invalid_argument);
+  EXPECT_TRUE(run_input(oversized, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "concurrent dispatch fuzz input must contain 1..1024 bytes");
 }
 
 TEST(ConcurrentDispatchFuzzTest, UnassignedTargetIsAnOrdinaryNoOp) {
-  const RunStats stats = run_input(std::array<uint8_t, 1>{0xff});
+  const RunStats stats = run_input(std::array<uint8_t, 1>{0xff}).value();
   EXPECT_EQ(stats.inputs, 1u);
   EXPECT_EQ(stats.targets, 0u);
   EXPECT_EQ(stats.modes, 0u);
