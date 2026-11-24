@@ -61,7 +61,7 @@ public:
   std::vector<std::byte> payload;
   std::vector<std::byte> response;
   std::vector<std::byte> effect_response;
-  std::optional<CanonicalLineFreshness::ReadStamp> read_stamp;
+  std::optional<simdojo::BackingLineVersions::ReadStamp> read_stamp;
   std::mutex mutex;
   VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
   VmAccessOutcome effect_outcome = VmAccessOutcome::Unavailable;
@@ -266,7 +266,7 @@ public:
     return request_->effect_outcome;
   }
 
-  std::optional<CanonicalLineFreshness::ReadStamp> completed_read_stamp() const override {
+  std::optional<simdojo::BackingLineVersions::ReadStamp> completed_read_stamp() const override {
     if (request_->phase.load(std::memory_order_acquire) != Request::EffectPhase::Done ||
         request_->write || request_->effect_outcome != VmAccessOutcome::Complete) {
       return std::nullopt;
@@ -949,7 +949,7 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
     request->phase.compare_exchange_strong(expected, Request::EffectPhase::Done,
                                            std::memory_order_acq_rel);
   } else {
-    CanonicalLineFreshness::WriterAuthority writer = line_freshness_.try_acquire_writer();
+    simdojo::BackingLineVersions::WriterAuthority writer = line_freshness_.try_acquire_writer();
     if (!writer) {
       release_maintenance();
       effect_authority.permit.reset();

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vmm/vfu/vfio_target_grants.h"
+#include "rocjitsu/vm/amdgpu/device_cache_line.h"
 
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 
@@ -590,7 +591,7 @@ amdgpu::MemoryIngressAdmission VfioTargetGrants::admit_peer(const PeerSnapshot &
       // grant as before rather than treating unrelated zero IDs as aliases.
       selected.push_back({snapshot.requester_ordinal, &grant});
     } else {
-      constexpr uint64_t kLineSize = CanonicalLineFreshness::kLineSize;
+      constexpr uint64_t kLineSize = amdgpu::kDeviceCacheLineBytes;
       const uint64_t first_line = snapshot.backing_offset & ~(kLineSize - 1);
       const uint64_t last_line_byte =
           (snapshot.backing_offset + snapshot.length - 1) | (kLineSize - 1);

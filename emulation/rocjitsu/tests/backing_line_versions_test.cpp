@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/vm/canonical_line_freshness.h"
+#include "simdojo/components/backing_line_versions.h"
 
 #include <gtest/gtest.h>
 
@@ -9,11 +9,11 @@
 #include <optional>
 #include <thread>
 
-namespace rocjitsu {
+namespace simdojo {
 namespace {
 
-TEST(CanonicalLineFreshnessTest, CrossLineStampAuthorizesOnlyCapturedBytes) {
-  CanonicalLineFreshness lines;
+TEST(BackingLineVersionsTest, CrossLineStampAuthorizesOnlyCapturedBytes) {
+  BackingLineVersions lines(128, 4);
   const auto read = lines.try_capture_read(7, 120, 20);
   ASSERT_TRUE(read);
 
@@ -26,8 +26,8 @@ TEST(CanonicalLineFreshnessTest, CrossLineStampAuthorizesOnlyCapturedBytes) {
   EXPECT_FALSE(read->try_acquire_fill(7, 128, 13));
 }
 
-TEST(CanonicalLineFreshnessTest, WriterWaitsForFillAndChangesOnlyTouchedLine) {
-  CanonicalLineFreshness lines;
+TEST(BackingLineVersionsTest, WriterWaitsForFillAndChangesOnlyTouchedLine) {
+  BackingLineVersions lines(128, 4);
   const auto read = lines.try_capture_read(7, 120, 20);
   ASSERT_TRUE(read);
 
@@ -54,10 +54,10 @@ TEST(CanonicalLineFreshnessTest, WriterWaitsForFillAndChangesOnlyTouchedLine) {
   EXPECT_FALSE(read->try_acquire_fill(7, 128, 12));
 }
 
-TEST(CanonicalLineFreshnessTest, AuthorityMoveAssignmentUnlocksBeforeDroppingLastState) {
-  CanonicalLineFreshness::FillAuthority fill;
+TEST(BackingLineVersionsTest, AuthorityMoveAssignmentUnlocksBeforeDroppingLastState) {
+  BackingLineVersions::FillAuthority fill;
   {
-    auto lines = std::make_unique<CanonicalLineFreshness>();
+    auto lines = std::make_unique<BackingLineVersions>(128, 4);
     auto read = lines->try_capture_read(7, 128, 1);
     ASSERT_TRUE(read);
     fill = read->try_acquire_fill(7, 128, 1);
@@ -66,9 +66,9 @@ TEST(CanonicalLineFreshnessTest, AuthorityMoveAssignmentUnlocksBeforeDroppingLas
   fill = {};
   EXPECT_FALSE(fill);
 
-  CanonicalLineFreshness::WriterAuthority writer;
+  BackingLineVersions::WriterAuthority writer;
   {
-    auto lines = std::make_unique<CanonicalLineFreshness>();
+    auto lines = std::make_unique<BackingLineVersions>(128, 4);
     writer = lines->try_acquire_writer();
     ASSERT_TRUE(writer);
   }
@@ -76,13 +76,30 @@ TEST(CanonicalLineFreshnessTest, AuthorityMoveAssignmentUnlocksBeforeDroppingLas
   EXPECT_FALSE(writer);
 }
 
-TEST(CanonicalLineFreshnessTest, MaintenanceClearCannotReviveOlderReadStamp) {
-  CanonicalLineFreshness lines(1);
+TEST(BackingLineVersionsTest, UsesTheSelectedLineSizeAndCapacity) {
+  BackingLineVersions lines(64, 2);
+  const auto stamp = lines.try_capture_read(3, 63, 2);
+  ASSERT_TRUE(stamp);
+  {
+    auto writer = lines.try_acquire_writer();
+    ASSERT_TRUE(writer);
+    writer.advance(3, 64, 1);
+  }
+  EXPECT_TRUE(stamp->try_acquire_fill(3, 63, 1));
+  EXPECT_FALSE(stamp->try_acquire_fill(3, 64, 1));
+  EXPECT_FALSE(lines.try_capture_read(3, 0, 129));
+  EXPECT_FALSE(BackingLineVersions(0, 1).try_capture_read(3, 0, 1));
+  EXPECT_FALSE(BackingLineVersions(96, 1).try_capture_read(3, 0, 1));
+  EXPECT_FALSE(BackingLineVersions(64, 0).try_capture_read(3, 0, 1));
+}
+
+TEST(BackingLineVersionsTest, MaintenanceClearCannotReviveOlderReadStamp) {
+  BackingLineVersions lines(128, 1);
   const auto old_read = lines.try_capture_read(7, 128, 1);
   ASSERT_TRUE(old_read);
 
   lines.invalidate_all();
-  std::optional<CanonicalLineFreshness::ReadStamp> new_read;
+  std::optional<BackingLineVersions::ReadStamp> new_read;
   {
     auto effect = lines.try_acquire_writer();
     ASSERT_TRUE(effect);
@@ -94,8 +111,8 @@ TEST(CanonicalLineFreshnessTest, MaintenanceClearCannotReviveOlderReadStamp) {
   EXPECT_TRUE(new_read->try_acquire_fill(7, 128, 1));
 }
 
-TEST(CanonicalLineFreshnessTest, EvictionCannotReviveOlderReadStamp) {
-  CanonicalLineFreshness lines(1);
+TEST(BackingLineVersionsTest, EvictionCannotReviveOlderReadStamp) {
+  BackingLineVersions lines(128, 1);
   const auto old_read = lines.try_capture_read(7, 0, 1);
   ASSERT_TRUE(old_read);
   ASSERT_TRUE(lines.try_capture_read(8, 0, 1));
@@ -108,4 +125,4 @@ TEST(CanonicalLineFreshnessTest, EvictionCannotReviveOlderReadStamp) {
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace simdojo

@@ -5,7 +5,6 @@ rj_add_object_library(rocjitsu_vm
     soc.cpp
     virtual_machine.cpp
     topology_assembly.cpp
-    canonical_line_freshness.cpp
     fabric_endpoint.cpp
     rj_vm.cpp
     rj_vm_config.cpp

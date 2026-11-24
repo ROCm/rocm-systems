@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
-#include "rocjitsu/vm/canonical_line_freshness.h"
+#include "simdojo/components/backing_line_versions.h"
 #include "util/distributed_shared_mutex.h"
 
 #include <cstdint>

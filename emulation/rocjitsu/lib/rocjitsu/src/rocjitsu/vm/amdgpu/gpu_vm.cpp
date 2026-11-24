@@ -1260,7 +1260,7 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
         std::ranges::copy(operation.read_result_, bytes.begin() + completed_bytes);
       }
       if constexpr (!std::is_const_v<typename Span::element_type>) {
-        if (std::optional<CanonicalLineFreshness::ReadStamp> stamp =
+        if (std::optional<simdojo::BackingLineVersions::ReadStamp> stamp =
                 operation.completed_read_stamp()) {
           token.completed_read_ =
               VmCompletedRead{.stamp = std::move(*stamp), .peer_origin = operation.peer_origin_};

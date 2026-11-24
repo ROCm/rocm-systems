@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/device_cache_line.h"
+
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "simdojo/components/cache.h"
@@ -75,8 +77,8 @@ private:
 /// may acquire them in the opposite order.
 class MemorySideCache : public simdojo::Component {
 public:
-  static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
-  static constexpr uint32_t NUM_SETS = 65536;   // 65536 sets x 16-way x 128B = 128MB
+  static constexpr uint32_t LINE_SIZE_BITS = kDeviceCacheLineBits; // 128 bytes
+  static constexpr uint32_t NUM_SETS = 65536; // 65536 sets x 16-way x 128B = 128MB
   static constexpr uint32_t ASSOCIATIVITY = 16;
 
   using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
