@@ -202,8 +202,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
       </ul>
     </div>
   </a>
@@ -255,8 +255,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
       </ul>
     </div>
   </a>
@@ -795,6 +795,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multiple-disjoint-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiple disjoint entries
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1964,6 +1975,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#multiple-disjoint-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multiple disjoint entries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#extending-consan" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2039,7 +2061,7 @@ instrumented kernel runs through the simulator.</p>
   Diagnosis can evolve separately from application execution, within the saved
   evidence's contract.</li>
 </ul>
-<div class="highlight"><pre><span></span><code>             Original code object + target/entry
+<div class="highlight"><pre><span></span><code>             Original code object + target/selected entries
                               |
                               v
 +------------------------------------------------------------+
@@ -2074,13 +2096,17 @@ instrumented kernel runs through the simulator.</p>
                      Findings + coverage
 </code></pre></div>
 <h3 id="offline-preparation">Offline preparation<a class="headerlink" href="#offline-preparation" title="Permanent link">&para;</a></h3>
-<p>The compiler qualifies the exact original image and entry, plans probes and
-resources, and rewrites code while preserving the original operations. Its
+<p>The compiler inventories the exact original image, qualifies each selected entry,
+and plans its probes, bootstrap and resources. One transactional rewrite produces
+a coherent replacement that preserves unselected native entries. Its
 artifact directory contains:</p>
 <ul>
 <li><code>prepared.hsaco</code>: the instrumented code object.</li>
-<li><code>facts.bin</code>: image identities and static instruction facts, including each
-  observation site's read/write kind and width.</li>
+<li><code>facts.bin</code>: exact image and selection identities, an owning entry table with
+  selected/native dispositions and ABI/resources, and each selected entry's
+  instruction facts including observation read/write kind and width. Native rows
+  retain their reachable code ranges for byte preservation checks; entry-address
+  order does not determine ownership of intervening instructions.</li>
 <li><code>ready</code>: a marker published after the artifact files close successfully.</li>
 </ul>
 <p>The preparation tool embeds probe bodies compiled at build time for each
@@ -2100,6 +2126,21 @@ report storage; GPU probes publish site identities, effective LDS addresses,
 widths, and lane masks. An independent host snapshot lets GPU report storage be
 reused while capture writing continues. Explicit finish drains these handoffs
 and closes the capture.</p>
+<p>A module binds every image entry after successful freeze. The actual kernel object
+selects an entry binding; selected dispatches use that entry's original argument
+ABI and prepared resource plan. Known unselected entries retain their original
+packet, resources and completion signal and are native/uncovered. Unknown kernel
+objects are rejected. One module, a controlled queue, nonoverlap and dedicated
+completion signals remain required, including for native siblings.
+Admission recognizes a native completion already visible to the application even
+if the observer has not yet processed it. The observer retains its signal lease
+until its wait returns, so callers still drain before releasing that signal.</p>
+<p>The capture header owns the immutable image/entry facts. Each selected execution
+references its original descriptor offset within that exact image. Guest probe
+entry IDs remain local zero; host EntryKeys distinguish entries. Report generation
+increases across all uses of a slot, including a change of entry. Native dispatches
+are omitted from the selected-execution capture and require separate application
+accounting. No cross-dispatch LDS candidate is formed.</p>
 <p>The runtime neither compiles nor diagnoses races. Its transport completion does
 not synchronize guest LDS accesses.</p>
 <p>Applications integrating the plugin must check completion values and finish
@@ -2170,9 +2211,13 @@ or qualified full-workgroup barriers on the supported target/wave profiles.
 Other barrier forms and atomics are rejected. Exact
 conditions are defined by <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp">compiler qualification</a>
 and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp">runtime admission</a>.</p>
-<p>The input code object must contain exactly one kernel, matching the requested
-entry. Selecting an entry does not exclude sibling kernels from this requirement;
-provide a code object containing only the selected kernel.</p>
+<p>Entries in one image must have disjoint, closed scopes and the same target/wave
+mode. Shared code, cross-entry control flow, calls and unknown ownership reject
+preparation. Each selected entry has its own original ABI, bootstrap, resources
+and static site mapping. Unselected native siblings remain in the whole image;
+this does not provide arbitrary native queue or HIP application integration.
+The multi-entry simulator fixture qualifies gfx1250 wave32; single-entry coverage
+on other modes does not establish their multi-entry execution qualification.</p>
 <p>The forms are <code>ds_store_b16</code>, <code>ds_load_u16</code>, <code>ds_load_i16</code>, and
 <code>ds_store_b32/b64/b128</code> or <code>ds_load_b32/b64/b128</code> on gfx1100/gfx1201/gfx1250.
 gfx942/gfx950 use the corresponding <code>ds_write_*</code> and <code>ds_read_*</code> names.
@@ -2334,11 +2379,22 @@ the launcher passes the plugin settings to the runner.</p>
 <span class="nb">export</span><span class="w"> </span><span class="nv">RJ_CONSAN_CAPTURE_PATH</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_example</span><span class="s2">/capture.bin"</span>
 </code></pre></div>
 <h3 id="1-offline-preparation">1. Offline preparation<a class="headerlink" href="#1-offline-preparation" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="s2">"</span><span class="nv">$consan_prepare</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="s2">"</span><span class="nv">$consan_original</span><span class="s2">"</span><span class="w"> </span>gfx1250<span class="w"> </span>lds_producer_consumer<span class="w"> </span><span class="s2">"</span><span class="nv">$RJ_CONSAN_ARTIFACT_DIR</span><span class="s2">"</span>
+<div class="highlight"><pre><span></span><code><span class="nv">consan_preparation</span><span class="o">=</span><span class="k">$(</span><span class="s2">"</span><span class="nv">$consan_prepare</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$consan_original</span><span class="s2">"</span><span class="w"> </span>gfx1250<span class="w"> </span><span class="s2">"</span><span class="nv">$RJ_CONSAN_ARTIFACT_DIR</span><span class="s2">"</span><span class="w"> </span>--entry<span class="w"> </span>lds_producer_consumer<span class="k">)</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RJ_CONSAN_SELECTION_PROFILE</span><span class="o">=</span><span class="k">$(</span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$consan_preparation</span><span class="s2">"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>sed<span class="w"> </span>-n<span class="w"> </span><span class="s1">'s/^selection_profile=//p'</span><span class="k">)</span>
 </code></pre></div>
 <p>The artifact destination must be new. The runtime verifies that this artifact
-matches the exact original image and qualified entry.</p>
+matches the exact original image and the independently configured selection
+profile. <code>RJ_CONSAN_SELECTION_PROFILE</code> must be the 64 hexadecimal digits printed
+by the intended preparation command. Missing/malformed or different profile
+configuration rejects loading; the runtime does not infer a variant by symbol
+name or copy its expected profile from the artifact it is checking. The old
+single-entry positional CLI remains an explicit convenience that emits the same
+new image-facts format.</p>
+<p>The saved producer contract changed with image entry routing. Regenerate prepared
+artifacts and captures together; historical facts/captures are not accepted as
+compatible merely because guest records still use local entry ID zero.</p>
 <h3 id="2-execution-and-capture">2. Execution and capture<a class="headerlink" href="#2-execution-and-capture" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="s2">"</span><span class="nv">$consan_launcher</span><span class="s2">"</span><span class="w"> </span>--config<span class="w"> </span><span class="s2">"</span><span class="nv">$consan_config</span><span class="s2">"</span><span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="s2">"</span><span class="nv">$consan_runner</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
@@ -2387,6 +2443,31 @@ names before publishing an artifact. The analyzer checks saved captures and
 rejects malformed names with input-error exit 2 before writing JSON. Binary
 capture retains the original name bytes. ASCII and valid UTF-8 names keep their
 original spelling.</p>
+<h2 id="multiple-disjoint-entries">Multiple disjoint entries<a class="headerlink" href="#multiple-disjoint-entries" title="Permanent link">&para;</a></h2>
+<p>Use repeated <code>--entry</code> options to select entries in one whole image:</p>
+<div class="highlight"><pre><span></span><code><span class="s2">"</span><span class="nv">$consan_prepare</span><span class="s2">"</span><span class="w"> </span>original.hsaco<span class="w"> </span>gfx1250<span class="w"> </span>new-artifact-directory<span class="w"> </span>--entry<span class="w"> </span>mk_a<span class="w"> </span>--entry<span class="w"> </span>mk_b
+</code></pre></div>
+<p>A/B share one prepared ELF and one image table; an unselected C retains its native
+ABI/resources. Keep the printed selection profile with the exact original and
+prepared identities in the launch configuration. The HSA runtime's argument
+alignment query is distinct from the AMDHSA metadata requirement: the pinned
+ROCR code-object-v5 loader reports 16-byte alignment even for metadata alignment
+8. Replacement preserves the HSA query rather than projecting the metadata value.</p>
+<p>The registered <code>ConSanMultiEntrySim.SelectedAB</code> integration control runs the
+<a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/consan/fixtures/multi_entry.s">whole A/B/C assembly fixture</a> with
+one real load, A→B→C→A dispatches, different A/B argument/resource demands,
+independent guarded CPU output oracles, selected facts/observation attribution,
+and native accounting. It removes original/prepared artifacts before fresh-process
+analysis. <code>ConSanMultiEntrySim.WrongProfile</code> checks that a different configured
+profile cannot publish a successful capture. Run these with the required test
+dependencies built; they do not establish toy Llama or physical-GPU support.</p>
+<p>The analyzer reports an image entry/disposition table and each selected
+execution's EntryKey/name. Decoder checks reject unknown/native keys and
+inconsistent facts/extents. Local guest ID zero does not independently prove
+entry provenance if a fabricated key selects another entry with an identical
+layout; correct attribution depends on the runtime's validated kernel-object
+binding. Checksums preserve recorded bytes, without providing a security
+attestation of guest identity.</p>
 <h2 id="extending-consan">Extending ConSan<a class="headerlink" href="#extending-consan" title="Permanent link">&para;</a></h2>
 <p>Preparation uses the shared <code>Instrumentor</code> and <code>TrampolineBuilder</code> with
 separately compiled, reusable HIP probe functions.</p>
@@ -2411,7 +2492,7 @@ instructions, and larger trampolines can exhaust branch reach sooner. ConSan
 currently accepts those costs rather than selecting a different policy when
 an input exceeds the resource or branch-distance limits.</p>
 <p>The callable path uses register backups instead of introducing a private frame.
-It requires one kernel with enumerable register uses, zero VGPR banks at gfx1250
+It requires each selected kernel to have enumerable register uses, zero VGPR banks at gfx1250
 call sites, a bank-preserving probe body, and enough registers for the combined
 probe and preservation plan. An input exceeding that plan is rejected during
 preparation. Entry stubs and per-site trampolines use SOPP branches, whose
