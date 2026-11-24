@@ -1355,7 +1355,12 @@ int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
 
-static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize_t recvBytes) {
+static bool rcclP2pBatchEligible(struct ncclComm* comm, struct ncclTaskP2p* const* p2pTasks, ssize_t sendBytes,
+                                 ssize_t recvBytes) {
+  if (p2pTasks[0] == nullptr && p2pTasks[1] == nullptr) return false;
+  for (int dir = 0; dir < 2; dir++) {
+    if (p2pTasks[dir] != nullptr && !rcclP2pBatchApiUniform(p2pTasks[dir]->collAPI)) return false;
+  }
   const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
   ssize_t cutoff = rcclP2pBatchCutoff(gcn, comm->nNodes, sendBytes, recvBytes, (ssize_t)rcclParamP2pBatchThreshold());
   return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes, cutoff);
@@ -1496,7 +1501,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       p2pTasks[dir] ?
         std::min(nChannelsMax, rcclP2pTaskParts(comm, p2pTasks[dir]->collAPI, dir ? sendRank : recvRank)) :
         nChannelsMax;
-  bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
+  bool batchP2P = rcclP2pBatchEligible(comm, p2pTasks, sendBytes, recvBytes);
   // Keep work-fusion size-gated (batchP2P) but select the channel map from the
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
   // onto the flags-off layout and forced a dual pre-connect. Channel base must

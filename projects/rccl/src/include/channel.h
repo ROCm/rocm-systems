@@ -67,6 +67,15 @@ inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvByt
   return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
 }
 
+// Fuse P2P rounds only for collectives whose per-peer sizes are the same on every rank. Each rank decides
+// with its own sendBytes == recvBytes, so for send/recv-based alltoallv (uneven splits, and
+// ncclAllToAllv's send/recv fallback) ranks fuse different rounds and derive different proxy opCounts.
+// Under PXN, the receiver groups receives with the same opCount on a shared recvComm into one network
+// receive, and mismatched batches deadlock it once a transfer outgrows the send window.
+inline bool rcclP2pBatchApiUniform(ncclFunc_t collAPI) {
+  return collAPI == ncclFuncAlltoAll || collAPI == ncclFuncAllGather || collAPI == ncclFuncReduceScatter;
+}
+
 // Fusion size cutoff. A negative threshold, including an explicit
 // RCCL_P2P_BATCH_THRESHOLD=-1, means "arch default": the parameter default is
 // -1, and the wrapper passes that value through with no separate "was set" bit.
