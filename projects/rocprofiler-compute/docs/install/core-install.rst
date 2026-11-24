@@ -114,11 +114,13 @@ Install the analyze mode dependencies
 =====================================
 
 Profile mode uses only the standard library. Analyze mode needs packages such as
-``numpy``, ``pandas``, ``plotly``, and ``rich``, at the versions it pins.
+``numpy``, ``pandas``, ``plotly``, and ``rich``. ``numpy`` is a minimum version;
+the other packages are pinned.
 
 Install them into a virtual environment of their own, separate from the one your
-profiled application uses. Those pins can conflict with a workload that brings
-its own ``torch`` or ``numpy``, and a shared environment breaks either side.
+profiled application uses. Those versions can conflict with a workload that
+brings its own ``torch`` or ``numpy``, and a shared environment breaks either
+side.
 
 .. code-block:: bash
 

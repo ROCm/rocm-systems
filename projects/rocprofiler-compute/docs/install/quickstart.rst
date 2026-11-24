@@ -86,10 +86,10 @@ Ensure ROCm is installed and follow the steps:
    library and needs no extra packages, so this step is only for analyze mode.
 
    Install them into a virtual environment that is separate from the one your
-   profiled application uses. Analyze mode pins versions of packages such as
-   ``numpy`` and ``pandas``, and installing them alongside a workload that has
-   its own versions of ``torch``, ``numpy``, or similar packages can break
-   either side.
+   profiled application uses. Analyze mode requires a minimum ``numpy`` version
+   and pins the other packages such as ``pandas``. Installing them alongside a
+   workload that has its own versions of ``torch``, ``numpy``, or similar
+   packages can break either side.
 
    .. code-block:: shell-session
 
