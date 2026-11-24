@@ -1319,6 +1319,214 @@
           "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
         }
       ]
+    },
+    "net_ib_multisegment": {
+      "extends": "mseg_base",
+      "description": "IB-MSEG multi-segment DMA-BUF path: per-segment registration, asymmetric offsets, boundary splitting and the segment cap. One rank per node so the DeepEP multi-node stress test is not skipped; the fixture needs DMA-BUF export (NCCL_DMABUF_ENABLE from gtest_base) and GDR. UT_NET_IB_MSEG_REQUIRE_DMABUF=1 turns a missing DMA-BUF, VMM or dma-buf export API into a failure instead of a skip; every net_ib_multisegment job sets it. The flush tests are in net_ib_multisegment_flush because they need a non-default RCCL_PARAM.",
+      "env_variables": {
+        "UT_NET_IB_MSEG_REQUIRE_DMABUF": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_PerSegmentRegistrationAndTransfer",
+          "description": "Register a 4-segment VMM window through regMrDmaBuf with fd -1 (the plugin's segment walk) and move every segment end to end",
+          "test_filter": "NetIbMultiSegmentMPITest.PerSegmentRegistrationAndTransfer"
+        },
+        {
+          "name": "NetIB_MultiSeg_IntraSegmentOffsetSelection",
+          "description": "Transfers anchored at three offsets inside each segment: per-segment lkey/rkey selection must follow the address, not segment 0",
+          "test_filter": "NetIbMultiSegmentMPITest.IntraSegmentOffsetSelection"
+        },
+        {
+          "name": "NetIB_MultiSeg_DeepEP_AsymmetricOffsetTransfer",
+          "description": "DeepEP-style per-peer window: sender starts in segment 1 while the receiver starts in segment 0, so a shared cursor would pick the wrong key",
+          "test_filter": "NetIbMultiSegmentMPITest.DeepEP_AsymmetricOffsetTransfer"
+        },
+        {
+          "name": "NetIB_MultiSeg_CrossBoundaryTransferSucceeds",
+          "description": "One transfer straddling the seg0/seg1 boundary is split at the receiver's boundary using the per-segment rkeys from the CTS layout",
+          "test_filter": "NetIbMultiSegmentMPITest.CrossBoundaryTransferSucceeds"
+        },
+        {
+          "name": "NetIB_MultiSeg_DeepEP_MultiNodeAsymmetricCrossBoundaryStress",
+          "description": "32 iterations crossing independently selected source and destination boundaries in an 8-segment window, with a sentinel-checked destination; requires ranks on two nodes",
+          "test_filter": "NetIbMultiSegmentMPITest.DeepEP_MultiNodeAsymmetricCrossBoundaryStress"
+        },
+        {
+          "name": "NetIB_MultiSeg_WholeBufferSingleTransfer",
+          "description": "A single transfer spanning the whole window crosses every boundary and exercises the full splitting builder",
+          "test_filter": "NetIbMultiSegmentMPITest.WholeBufferSingleTransfer"
+        },
+        {
+          "name": "NetIB_MultiSeg_ExceedsMaxSegmentsRejected",
+          "description": "A buffer with more than RCCL_IB_REG_SEG_DEFAULT segments is rejected with ncclInvalidUsage and produces no handle",
+          "test_filter": "NetIbMultiSegmentMPITest.ExceedsMaxSegmentsRejected"
+        },
+        {
+          "name": "NetIB_MultiSeg_NonUniformLayoutRegisters",
+          "description": "A 2S, S, 2S window has no uniform segment stride and still registers, because the splitter accepts any layout",
+          "test_filter": "NetIbMultiSegmentMPITest.NonUniformLayoutRegisters"
+        },
+        {
+          "name": "NetIB_MultiSeg_SingleSegmentThroughMultiSegPath",
+          "description": "Regression: a 1-segment window through the multi-segment entry point still takes the nSegments==1 fast path",
+          "test_filter": "NetIbMultiSegmentMPITest.SingleSegmentThroughMultiSegPath"
+        },
+        {
+          "name": "NetIB_MultiSeg_HostAndDeviceSingleSegmentRegression",
+          "description": "Regression: plain host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) registrations still transfer through the single-region path",
+          "test_filter": "NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression"
+        },
+        {
+          "name": "NetIB_MultiSeg_MultiRecvMixesSingleAndMultiSegmentHandles",
+          "description": "One multi-recv mixing a single-segment handle with a boundary-crossing multi-segment one, in both orders, so per-entry layout selection diverges within one WR chain",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiRecvMixesSingleAndMultiSegmentHandles"
+        },
+        {
+          "name": "NetIB_MultiSeg_ConcurrentPairs",
+          "description": "Rank r receives from r + N/2 while every other pair transfers too: chunks straddle each interior boundary of a 4-segment window, and the bytes before each chunk stay untouched",
+          "test_filter": "NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary"
+        },
+        {
+          "name": "NetIB_MultiSeg_SendQueueFatChainOversubscribe",
+          "description": "Three 8-recv groups over 17-segment buffers queued on one send QP before any test(): every group must complete",
+          "test_filter": "NetIbMultiSegmentMPITest.SendQueueFatChainOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1",
+            "NCCL_IB_QPS_PER_CONNECTION": "1"
+          }
+        },
+        {
+          "name": "NetIB_MultiSeg_ReceiverSideMatchingById",
+          "description": "Boundary-crossing transfers with ID-based receiver matching: a single receive whose chunk straddles a boundary must report the full size, not only the last slice carrying the imm",
+          "test_filter": "NetIbMultiSegmentMPITest.CrossBoundaryTransferSucceeds:NetIbMultiSegmentMPITest.WholeBufferSingleTransfer:NetIbMultiSegmentMPITest.DeepEP_AsymmetricOffsetTransfer:NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary",
+          "env_variables": {
+            "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "1"
+          }
+        }
+      ]
+    },
+    "net_ib_multisegment_register_off": {
+      "extends": "mseg_base",
+      "description": "IB-MSEG (NCCL_NET=IB-MSEG) with NCCL_MULTI_SEGMENT_REGISTER=0: both ends keep the legacy CTS, a multi-segment receive registration is declined, and single-segment registrations still transfer.",
+      "env_variables": {
+        "UT_NET_IB_MSEG_REQUIRE_DMABUF": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG",
+        "NCCL_NET": "IB-MSEG",
+        "NCCL_MULTI_SEGMENT_REGISTER": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_RegisterOff_DeclinesRegistration",
+          "description": "A 4-segment receive window is declined with ncclInvalidUsage because the comm has no CTS layout; the sender still registers",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentRegisterOff_DeclinesRegistration"
+        },
+        {
+          "name": "NetIB_MultiSeg_RegisterOff_SingleSegmentRegression",
+          "description": "Host, device and 1-segment VMM registrations still transfer with the switch off",
+          "test_filter": "NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression"
+        }
+      ]
+    },
+    "net_ib_multisegment_scale_2x4": {
+      "extends": "mseg_base",
+      "num_ranks": 8,
+      "num_gpus": 4,
+      "description": "IB-MSEG multi-segment transfers with 4 ranks on each of 2 nodes: 4 cross-node pairs, each on its own NIC, register and move multi-segment windows at once.",
+      "env_variables": {
+        "UT_NET_IB_MSEG_REQUIRE_DMABUF": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_ConcurrentPairs_2x4",
+          "description": "4 concurrent cross-node pairs move chunks across every segment boundary",
+          "test_filter": "NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary"
+        }
+      ]
+    },
+    "net_ib_multisegment_gdr_flush_flag": {
+      "extends": [
+        "net_ib_gdr_flush_flag_base",
+        "mseg_base"
+      ],
+      "description": "IB-MSEG segmented sends with the remote GDR flush flag on: every boundary-crossing receive must leave id + 1 in its QPs' flags.",
+      "env_variables": {
+        "UT_NET_IB_MSEG_REQUIRE_DMABUF": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_GdrFlushFlag_DefaultQps",
+          "description": "Segmented send writes the flag on the default QP",
+          "test_filter": "NetIbMultiSegmentMPITest.GdrFlushFlag_SegmentedSendWritesFlag"
+        },
+        {
+          "name": "NetIB_MultiSeg_GdrFlushFlag_4QpsSplit",
+          "description": "Segmented send split over 4 QPs writes every QP's flag",
+          "test_filter": "NetIbMultiSegmentMPITest.GdrFlushFlag_SegmentedSendWritesFlag",
+          "env_variables": {
+            "NCCL_IB_QPS_PER_CONNECTION": "4",
+            "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+          }
+        }
+      ]
+    },
+    "multisegment_netproxy_multinode": {
+      "extends": "mseg_base",
+      "timeout": 300,
+      "description": "User buffer registration of multi-segment VMM buffers through the NET proxy onto IB-MSEG.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts the NET segment cache",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_NET_Proxy_Partial_Final_Segment",
+          "description": "NET proxy registration clips the final physical segment",
+          "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment"
+        }
+      ]
+    },
+    "multisegment_netproxy_intranode_multinode": {
+      "extends": "mseg_base",
+      "num_ranks": 4,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_NET_Proxy_Partial_Final_Segment_IntraNodePeer",
+          "description": "NET proxy registration clips the final physical segment with an intra-node peer (2 ranks per node) on the non-blocking test stream",
+          "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment"
+        }
+      ]
     }
   },
 
@@ -1405,6 +1613,30 @@
     },
     {
       "config": "net_ib_transfer_mseg",
+      "enabled": true
+    },
+    {
+      "config": "net_ib_multisegment",
+      "enabled": true
+    },
+    {
+      "config": "net_ib_multisegment_register_off",
+      "enabled": true
+    },
+    {
+      "config": "net_ib_multisegment_scale_2x4",
+      "enabled": true
+    },
+    {
+      "config": "net_ib_multisegment_gdr_flush_flag",
+      "enabled": true
+    },
+    {
+      "config": "multisegment_netproxy_multinode",
+      "enabled": true
+    },
+    {
+      "config": "multisegment_netproxy_intranode_multinode",
       "enabled": true
     }
   ]
