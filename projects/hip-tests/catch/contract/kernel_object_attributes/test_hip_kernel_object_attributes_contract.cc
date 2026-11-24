@@ -31,7 +31,7 @@ constexpr char const kWriteValueKernelSource[] =
 constexpr char const kUseMaxSharedMemoryKernelName[] = "use_max_shared_memory";
 constexpr char const kUseMaxSharedMemoryKernelSource[] =
 R"%(
-extern "C" __global__ void use_max_shared_memory(unsigned long long* result, int n)
+extern "C" __global__ void use_max_shared_memory(unsigned long long* result, unsigned long long n)
 {
   extern __shared__ int myArray[];
 
