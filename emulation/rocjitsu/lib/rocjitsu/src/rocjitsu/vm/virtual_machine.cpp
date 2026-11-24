@@ -7,7 +7,6 @@
 #include "rocjitsu/vm/fabric_endpoint.h"
 
 #include "simdojo/sim/topology.h"
-#include "util/except.h"
 
 #include <cassert>
 #include <memory>
@@ -73,38 +72,45 @@ VirtualMachine::~VirtualMachine() {
     soc->release_vm_resources();
 }
 
-void VirtualMachine::install_peer_routes(config::SystemPeerRouteProjection routes,
-                                         simdojo::Topology &topology, simdojo::ExecMode mode) {
+util::Result VirtualMachine::install_peer_routes(config::SystemPeerRouteProjection routes,
+                                                 simdojo::Topology &topology,
+                                                 simdojo::ExecMode mode,
+                                                 util::DiagnosticEmitter emit_error) {
   peer_routes_ = std::move(routes);
   if (peer_routes_.routes().empty() && !driver_)
-    return;
+    return util::Result::success();
   std::vector<config::SystemPeerRoute> route_copy(peer_routes_.routes().begin(),
                                                   peer_routes_.routes().end());
   std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains;
   std::vector<amdgpu::DeviceCacheDomain> prepared_domains;
   coherence_domains.reserve(socs_.size());
   if (driver_ && driver_->gpus_.size() != socs_.size())
-    throw util::ConfigError("fabric GPU and coherence domain counts differ");
+    return emit_error.emit() << "fabric GPU and coherence domain counts differ";
   prepared_domains.reserve(socs_.size());
   for (size_t i = 0; i < socs_.size(); ++i) {
     auto domain = socs_[i]->cache_coherence();
     coherence_domains.push_back(domain);
     if (driver_) {
       if (driver_->gpus_[i].soc != socs_[i])
-        throw util::ConfigError("fabric GPU and coherence domain order differs");
+        return emit_error.emit() << "fabric GPU and coherence domain order differs";
       prepared_domains.push_back({std::move(domain), driver_->gpus_[i].gpu_id});
     }
   }
   auto fabric =
-      std::make_unique<FabricEndpoint>(std::move(route_copy), std::move(coherence_domains));
-  if (driver_)
-    fabric->configure_cache_writeback(std::move(prepared_domains),
-                                      driver_->cache_writeback_resolver());
+      FabricEndpoint::create(std::move(route_copy), std::move(coherence_domains), emit_error);
+  if (!fabric)
+    return util::Result::failure();
+  if (driver_ && fabric
+                     ->configure_cache_writeback(std::move(prepared_domains),
+                                                 driver_->cache_writeback_resolver(), emit_error)
+                     .failed())
+    return util::Result::failure();
   fabric_endpoint_ = fabric.get();
   add_child(std::move(fabric));
   fabric_endpoint_->wire(topology, mode);
   if (driver_)
     driver_->attach_fabric_endpoint(fabric_endpoint_);
+  return util::Result::success();
 }
 
 } // namespace rocjitsu

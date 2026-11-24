@@ -76,8 +76,11 @@ public:
 
   /// Copy the selected node's executable route projection before LoadedConfig
   /// and its global SystemGraph are released. This does not enable peer access.
-  void install_peer_routes(config::SystemPeerRouteProjection routes, simdojo::Topology &topology,
-                           simdojo::ExecMode mode);
+  /// Invalid cache domains emit a diagnostic and return failure.
+  [[nodiscard]] util::Result install_peer_routes(config::SystemPeerRouteProjection routes,
+                                                 simdojo::Topology &topology,
+                                                 simdojo::ExecMode mode,
+                                                 util::DiagnosticEmitter emit_error = {});
 
 private:
   VirtualMachine();
