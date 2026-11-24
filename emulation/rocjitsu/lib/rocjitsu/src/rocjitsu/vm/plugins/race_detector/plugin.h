@@ -40,10 +40,11 @@ struct MarkedInstruction {
 template <typename T, size_t N> class RingBuffer {
 public:
   void push(const T &val) {
-    if (data_.size() < N)
+    if (data_.size() < N) {
       data_.push_back(val);
-    else
+    } else {
       data_[head_] = val;
+    }
     head_ = (head_ + 1) % N;
   }
 

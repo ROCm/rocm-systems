@@ -571,7 +571,7 @@ int main(int argc, char *argv[]) {
                                launch_config_diagnostic.message());
       return 1;
     }
-    for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
+    for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 56u, 64u}) {
       settings.request.budget = budget;
       if (print(std::to_string(budget)).failed()) {
         std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
