@@ -1122,6 +1122,13 @@ in the following table.
       - | ``0``: Flush enabled (default).
         | ``1``: Flush disabled. Boolean values as for ``NCCL_IB_USE_INLINE``.
 
+    * - | ``RCCL_FORCE_ENABLE_DMABUF``
+        | Registers GPU memory through DMA-BUF instead of peermem, skipping the
+          kernel configuration check. Applies to the network transport and the
+          RMA and GIN proxies. Replaces the removed ``RCCL_RMA_USE_DMABUF``.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_IB_ROUTABLE_FLID_GID_INDEX``
         | GID index used for routable FLID.
       - | Integer.

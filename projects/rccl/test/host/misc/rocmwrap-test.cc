@@ -910,7 +910,7 @@ TEST_P(RcclGdrUseDmaBufTest, MatchesExpectedDecision) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-  RocmWrap, RcclGdrUseDmaBufTest,
+  Rocmwrap, RcclGdrUseDmaBufTest,
   ::testing::Values(GdrUseDmaBufCase{"PeermemAndDmaBuf_PrefersPeermem", true, true, false, false, false},
                     GdrUseDmaBufCase{"DmaBufOnly_UsesDmaBuf", false, true, false, false, true},
                     GdrUseDmaBufCase{"PeermemOnly_UsesPeermem", true, false, false, false, false},

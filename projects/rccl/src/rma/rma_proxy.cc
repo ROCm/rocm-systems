@@ -105,7 +105,6 @@ static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool forceNo
 // (cuMem) export when the cumem gate is enabled; otherwise fall back to the
 // ROCr portable dmabuf export.
 static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool sym_buffer = false) {
-  if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
 #if HIP_VERSION >= 70000000
   static size_t hostPageSize = ncclOsGetPageSize();
   size_t alignedSize = length;
@@ -132,13 +131,14 @@ fail:
 // Check if the RMA plugin supports DMA-BUF, if so we can try to get the DMA-BUF handle from CUDA,
 // if that fails we fallback to non-DMA-BUF
 static ncclResult_t ncclRmaProxyRegMrSym(ncclRma_t* rmaComm, void* rmaCollComm, ncclNetProperties_t props, void* addr,
-                                         size_t size, int type, int mr_flags, void** mhandle, bool sym_buffer = false) {
+                                         size_t size, int type, int mr_flags, void** mhandle, bool dmaBufSupport,
+                                         bool sym_buffer = false) {
   if (type == NCCL_PTR_HOST) {
     NCCLCHECK(rmaComm->regMrSym(rmaCollComm, addr, size, type, mr_flags, mhandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
     bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA) != 0;
-    bool dmabufAvailable = ncclParamDmaBufEnable() != 0 && (props.ptrSupport & NCCL_PTR_DMABUF) != 0;
+    bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) != 0 && dmaBufSupport;
     if (rcclGdrUseDmaBuf(peermemAvailable, dmabufAvailable, rcclParamForceEnableDMABUF() != 0,
                         ncclCuMemEnable() != 0)) {
       int dmabufFd = -1;
@@ -183,7 +183,7 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclRma_t* rmaCo
   NCCLCHECK(ncclRmaProxyRegMrSym(rmaComm, rmaProxyCtx->rmaCollComm, rmaProxyCtx->props, rmaProxyCtx->signalsDev,
                                  signalsBufSize, NCCL_PTR_CUDA,
                                  NCCL_NET_MR_FLAG_FORCE_SO | NCCL_NET_MR_FLAG_SIGNAL_NEVER_RESET,
-                                 &rmaProxyCtx->signalsMhandle));
+                                 &rmaProxyCtx->signalsMhandle, comm->dmaBufSupport));
   // Allocate the host buffer to track the expected values of the signals
   NCCLCHECK(ncclCalloc(&rmaProxyCtx->signalsHost, signalsBufSize));
   // Allocate the sequence numbers for the per-rank network function descriptors
@@ -244,9 +244,12 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclRma_t* 
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->cpuAccessSignals, &rmaProxyCtx->cpuAccessSignalsDev, signalSlots, 0,
                                   &rmaProxyCtx->cpuAccessSignalsGdrHandle, comm->memManager));
   int cpuAccessSignalsType = (rmaProxyCtx->cpuAccessSignalsGdrHandle != NULL) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+  // [RCCL] GDRCopy-backed signals are VMM under cuMem, which the ROCr dmabuf export rejects.
+  bool cpuAccessSignalsIsVmm = rmaProxyCtx->cpuAccessSignalsGdrHandle != NULL && ncclCuMemEnable();
   NCCLCHECK(ncclRmaProxyRegMrSym(rmaComm, rmaProxyCtx->rmaCollComm, rmaProxyCtx->props,
                                  rmaProxyCtx->cpuAccessSignalsDev, signalsBufSize, cpuAccessSignalsType,
-                                 NCCL_NET_MR_FLAG_FORCE_SO, &rmaProxyCtx->cpuAccessSignalsMhandle));
+                                 NCCL_NET_MR_FLAG_FORCE_SO, &rmaProxyCtx->cpuAccessSignalsMhandle,
+                                 comm->dmaBufSupport, cpuAccessSignalsIsVmm));
   // Allocate the host buffer to track the expected values of the signals
   NCCLCHECK(ncclCalloc(&rmaProxyCtx->cpuAccessSignalsHost, signalsBufSize));
 
@@ -261,7 +264,7 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclRma_t* 
   CUDACHECK(cudaMemset(rmaProxyCtx->flushBufDev, 0, flushBufSize));
   NCCLCHECK(ncclRmaProxyRegMrSym(rmaComm, rmaProxyCtx->rmaCollComm, rmaProxyCtx->props, rmaProxyCtx->flushBufDev,
                                  flushBufSize, NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
-                                 &rmaProxyCtx->flushBufMhandle));
+                                 &rmaProxyCtx->flushBufMhandle, comm->dmaBufSupport));
   // Allocate and initialize persistent descriptor queue
   rmaProxyCtx->persistentQueues =
     ncclMemoryStackAlloc<struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>>(&comm->memPermanent,
@@ -418,7 +421,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
     // cuMemGetHandleForAddressRange (sym_buffer=true) instead of the ROCr export,
     // which fails with INVALID_ALLOCATION on VMM memory.
     NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], rmaProxyState->props[n],
-                                   address, size, NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
+                                   address, size, NCCL_PTR_CUDA, 0, &rmaHostWins[n], comm->dmaBufSupport, true));
     if (rmaHostWins[n] == NULL) {
       WARN("rank %d - RMA Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
       return ncclSystemError;

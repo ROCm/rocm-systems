@@ -91,6 +91,8 @@ struct ginProxyCtx {
 };
 
 static ncclRma_t* rmaBackend;
+// comm->dmaBufSupport, the DMA-BUF availability net.cc uses.
+static bool rmaDmaBufSupport;
 
 static struct ginProxyOutstandingOp* proxyGinAllocOutstandingOp(struct ginProxyHostGpuCtx* hostGpuCtx) {
   struct ginProxyOutstandingOp* op = hostGpuCtx->freeOps;
@@ -111,7 +113,9 @@ static void proxyGinFreeOutstandingOp(struct ginProxyHostGpuCtx* hostGpuCtx, str
 }
 
 static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool forceNonDataDirect = false) {
+#if !defined(__HIP_PLATFORM_AMD__)
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+#endif
 
   // GIN's symmetric windows are cuMem/VMM allocations registered with the NIC via ibv_reg_dmabuf_mr.
   // the cuMem/hipMemGetHandleForAddressRange that exports the DMA-BUF FD requires this HIP version.
@@ -489,7 +493,7 @@ static ncclResult_t ncclGinProxyRegMrSym(void* ginCtx, void* addr, size_t size, 
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
     bool peermemAvailable = (cComm->props.ptrSupport & NCCL_PTR_CUDA) != 0;
-    bool dmabufAvailable = ncclParamDmaBufEnable() != 0 && (cComm->props.ptrSupport & NCCL_PTR_DMABUF) != 0;
+    bool dmabufAvailable = (cComm->props.ptrSupport & NCCL_PTR_DMABUF) != 0 && rmaDmaBufSupport;
     if (rcclGdrUseDmaBuf(peermemAvailable, dmabufAvailable, rcclParamForceEnableDMABUF() != 0,
                         ncclCuMemEnable() != 0)) {
       ncclResult_t registrationResult = ncclSuccess;
@@ -817,6 +821,7 @@ ncclResult_t ncclGinProxyInit(struct ncclComm* comm) {
     WARN("GIN Proxy: RMA backend not found");
     return ncclInvalidArgument;
   }
+  rmaDmaBufSupport = comm->dmaBufSupport;
   ncclGinProxy.name = rmaBackend->name;
   ncclGinProxy.init = rmaBackend->init;
   ncclGinProxy.devices = rmaBackend->devices;

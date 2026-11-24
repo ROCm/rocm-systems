@@ -139,7 +139,7 @@ gdr_t ncclGdrCopy = nullptr;
 // src/misc/rocmwrap.cc's param, which fakes/rocmwrap_fakes.cc does not define yet.
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 // src/misc/rocmwrap.cc's param, read by ncclGinProxyRegMrSym.
-int64_t rcclParamForceEnableDMABUF() { return 0; }
+RCCL_PARAM(ForceEnableDMABUF, "FORCE_ENABLE_DMABUF", 0);
 
 // CreateContext's error paths destroy the partial context; Create() records its host allocations to check that
 // none survives a failure (and to release any that would, so one leak cannot cascade into later tests).
@@ -368,8 +368,8 @@ class GinHostProxyRegMrMicrotest : public GinHostProxyMicrotest {
   void SetUp() override {
     GinHostProxyMicrotest::SetUp();
     rma_.ptrSupport |= NCCL_PTR_DMABUF;
+    SetDmaBufSupport(true);
     ASSERT_EQ(ncclSuccess, ListenAndConnect(2));
-    dmaBufEnable_ = 1;
   }
   void TearDown() override {
     CloseAll();
@@ -377,6 +377,11 @@ class GinHostProxyRegMrMicrotest : public GinHostProxyMicrotest {
   }
   ncclResult_t Reg(int type) {
     return ncclGinProxy.regMrSym(collComm_, buf_, sizeof(buf_), type, /*mrFlags=*/7, &mhandle_, &ginHandle_);
+  }
+  // ncclGinProxyInit snapshots comm->dmaBufSupport, so re-run it after changing the flag.
+  void SetDmaBufSupport(bool v) {
+    comm_->dmaBufSupport = v;
+    ASSERT_EQ(ncclSuccess, ncclGinProxyInit(comm_.get()));
   }
 };
 
@@ -426,7 +431,7 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_WithoutTheExportArmRegistersPlain) {
 #endif
 
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledRegistersPlain) {
-  dmaBufEnable_ = 0;
+  SetDmaBufSupport(false);
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
   EXPECT_TRUE(exportSizes_.empty());
   ASSERT_EQ(1u, rma_.regs.size());
@@ -496,7 +501,7 @@ TEST_F(GinHostProxyRegMrMicrotest, PlainRegistrationFailurePropagates) {
   rma_.regMrSymResult = ncclSystemError;
   ginHandle_ = kPluginCtx;
   EXPECT_EQ(ncclSystemError, Reg(NCCL_PTR_HOST));
-  dmaBufEnable_ = 0;
+  SetDmaBufSupport(false);
   EXPECT_EQ(ncclSystemError, Reg(NCCL_PTR_CUDA));
   EXPECT_EQ(kPluginCtx, ginHandle_);
 }
