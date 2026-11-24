@@ -19605,14 +19605,17 @@ void KfdIoctlTest::check_software_queue_exception_event(uint32_t gpu_id, bool fo
   runtime_wait.events_ptr = reinterpret_cast<uint64_t>(&runtime_event);
   runtime_wait.num_events = 1;
   runtime_wait.timeout = UINT32_MAX;
-  int runtime_result = -1;
-  uint64_t observed_status = 0;
-  std::thread runtime_handler([&] {
-    runtime_result = driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &runtime_wait);
-    observed_status = vm_read64(kExceptionStatusAddress, process->process_id());
+  auto runtime_handler = std::async(std::launch::async, [&] {
+    const int result = driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &runtime_wait);
+    return std::pair(result, vm_read64(kExceptionStatusAddress, process->process_id()));
   });
-  while (process->event_state_.waiter_count(events[0].event_id) != 1)
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (process->event_state_.waiter_count(events[0].event_id) != 1 &&
+         runtime_handler.wait_for(std::chrono::seconds(0)) != std::future_status::ready &&
+         std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();
+  EXPECT_EQ(process->event_state_.waiter_count(events[0].event_id), 1u)
+      << "Runtime event waiter did not register";
 
   if (forwarded) {
     kfd_ioctl_dbg_trap_args forward{};
@@ -19639,17 +19642,18 @@ void KfdIoctlTest::check_software_queue_exception_event(uint32_t gpu_id, bool fo
     EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
     EXPECT_EQ(wait.wait_result,
               index == 0 ? KFD_IOC_WAIT_RESULT_COMPLETE : KFD_IOC_WAIT_RESULT_TIMEOUT);
-    if (index == 0 && wait.wait_result != KFD_IOC_WAIT_RESULT_COMPLETE) {
-      // A failing publication must still release the parked test thread.
-      kfd_ioctl_destroy_event_args destroy_event{};
-      destroy_event.event_id = events[0].event_id;
-      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_event), 0);
-      continue;
-    }
     EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
     EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
   }
-  runtime_handler.join();
+  // Event age can advance without waking the parked thread. Observe its
+  // return directly; a WAIT_EVENTS timeout could conceal a missed notification.
+  if (runtime_handler.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    ADD_FAILURE() << "Runtime event waiter did not return after publication";
+    kfd_ioctl_destroy_event_args destroy_event{};
+    destroy_event.event_id = events[0].event_id;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_event), 0);
+  }
+  const auto [runtime_result, observed_status] = runtime_handler.get();
   EXPECT_EQ(runtime_result, 0);
   EXPECT_EQ(runtime_wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
   EXPECT_EQ(observed_status, kWaveAbort);

@@ -8564,11 +8564,16 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
     EXPECT_EQ(cu->read_vgpr(vb + 16, 16), std::bit_cast<uint32_t>(test.high_result));
   }
 
-  // Compare literal and register scales with overlapping and disjoint output
-  // tuples, preserving inactive lanes in both layouts.
+  // Destination 32 covers the hardware-defined layout. Destination 0 covers
+  // the simulator's alias-safe staging; CDNA5 forbids that source/destination
+  // overlap. Both layouts preserve inactive lanes independently of scale form.
   wf->set_vgpr_msb_mode(0);
   const uint64_t mask = 0x55555555u;
   wf->set_exec(mask);
+  const auto initial_value = [](unsigned block, unsigned lane, unsigned output) {
+    const uint32_t word = (block * 16 + lane / 2) * 0x01010101u;
+    return output == 0 ? word ^ 0x00ff55aau : output == 1 ? ~word : 0xcafef00du;
+  };
   for (unsigned destination : {0u, 32u}) {
     SCOPED_TRACE(destination);
     for (const auto opcode : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3}) {
@@ -8588,9 +8593,8 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
           for (unsigned block = 0; block < 16; ++block) {
             SCOPED_TRACE(block);
             for (unsigned lane = 0; lane < 32; ++lane) {
-              const uint32_t word = (block * 16 + lane / 2) * 0x01010101u;
               for (unsigned i = 0; i < 8; ++i) {
-                const uint32_t initial = i == 0 ? word ^ 0x00ff55aau : i == 1 ? ~word : 0xcafef00du;
+                const uint32_t initial = initial_value(block, lane, i);
                 cu->write_vgpr(vb + i, lane, initial);
                 cu->write_vgpr(vb + 16 + i, lane, initial);
                 cu->write_vgpr(vb + destination + i, lane, initial);
@@ -8600,10 +8604,17 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
             ASSERT_TRUE(cu->execute_instruction(reg.get(), *wf).succeeded());
             ASSERT_TRUE(cu->execute_instruction(constant.get(), *wf).succeeded());
             for (unsigned i = 0; i < 8; ++i)
-              for (unsigned lane = 0; lane < 32; ++lane)
-                ASSERT_EQ(cu->read_vgpr(vb + destination + i, lane),
-                          cu->read_vgpr(vb + 16 + i, lane))
-                    << "output " << i << ", lane " << lane;
+              for (unsigned lane = 0; lane < 32; ++lane) {
+                const uint32_t literal_result = cu->read_vgpr(vb + destination + i, lane);
+                const uint32_t register_result = cu->read_vgpr(vb + 16 + i, lane);
+                ASSERT_EQ(literal_result, register_result) << "output " << i << ", lane " << lane;
+                if (!(mask & (uint64_t{1} << lane))) {
+                  ASSERT_EQ(literal_result, initial_value(block, lane, i))
+                      << "output " << i << ", lane " << lane;
+                  ASSERT_EQ(register_result, initial_value(block, lane, i))
+                      << "output " << i << ", lane " << lane;
+                }
+              }
           }
         }
       }
@@ -8630,20 +8641,24 @@ TEST(Gfx1250CvtScaleTest, UnitScalePackMatchesRegisterScaleWithOverlappingTuples
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
   const auto base = wf->vgpr_alloc().base;
-  wf->set_exec(0x55555555);
+  constexpr uint64_t mask = 0x55555555;
+  wf->set_exec(mask);
   constexpr std::array<uint32_t, 16> inputs{0u,          0x80000000u, 1u,          0x80000001u,
                                             0x39800000u, 0x3b000000u, 0x3f880000u, 0x3f980000u,
                                             0x3f800000u, 0xc0000000u, 0x43f00000u, 0x47700000u,
                                             0x7f800000u, 0xff800000u, 0x7fc00001u, 0xff800001u};
   for (auto opcode : {cdna5::kVCvtScalef32Pk8Fp8F32Vop3, cdna5::kVCvtScalef32Pk8Bf8F32Vop3}) {
+    SCOPED_TRACE(opcode);
     const uint32_t first = (0x35u << 26) | (uint32_t{opcode} << 16);
     // Inline 1.0 packs v[2:9] into v[4:5]. The control reads 1.0 from v14.
+    // This overlap exercises simulator staging; CDNA5 forbids it in hardware.
     const uint32_t fast_words[] = {first | 4u, 0x0201e502u};
     const uint32_t control_words[] = {first | 20u, 0x02021d02u};
     std::unique_ptr<Instruction> fast(decode_valid(*decoder, fast_words));
     std::unique_ptr<Instruction> control(decode_valid(*decoder, control_words));
     ASSERT_TRUE(fast && control);
     for (bool clamp : {false, true}) {
+      SCOPED_TRACE(clamp);
       wf->set_mode_raw(clamp ? amdgpu::Wavefront::FP16_OVFL_BIT : 0u);
       for (unsigned lane = 0; lane < 32; ++lane) {
         for (unsigned word = 0; word < 8; ++word) {
@@ -8657,8 +8672,16 @@ TEST(Gfx1250CvtScaleTest, UnitScalePackMatchesRegisterScaleWithOverlappingTuples
       ASSERT_TRUE(cu->execute_instruction(control.get(), *wf).succeeded());
       ASSERT_TRUE(cu->execute_instruction(fast.get(), *wf).succeeded());
       for (unsigned lane = 0; lane < 32; ++lane)
-        for (unsigned word = 0; word < 2; ++word)
-          EXPECT_EQ(cu->read_vgpr(base + 4 + word, lane), cu->read_vgpr(base + 20 + word, lane));
+        for (unsigned word = 0; word < 2; ++word) {
+          const uint32_t fast_result = cu->read_vgpr(base + 4 + word, lane);
+          const uint32_t control_result = cu->read_vgpr(base + 20 + word, lane);
+          EXPECT_EQ(fast_result, control_result) << "lane " << lane << ", word " << word;
+          if (!(mask & (uint64_t{1} << lane))) {
+            const uint32_t initial = inputs[(lane + word + 2) % inputs.size()];
+            EXPECT_EQ(fast_result, initial) << "lane " << lane << ", word " << word;
+            EXPECT_EQ(control_result, initial) << "lane " << lane << ", word " << word;
+          }
+        }
     }
   }
   wf->halt();
