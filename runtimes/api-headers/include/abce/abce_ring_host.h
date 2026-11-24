@@ -99,6 +99,15 @@ typedef struct abce_ring_config_t {
   // (required by some virtualized/DXG paths).
   bool align64;
 
+  // Zeroed bytes reserved at the end of every published span, after the padded
+  // payload, for the queue backend to write into before it submits (0 = none).
+  // A Windows native SDMA user queue writes its progress-fence packet into the
+  // last 32 bytes of each span it submits; a producer that does not leave them
+  // free has its own last packet overwritten. Must be 0 or a power of two: every
+  // reservation is rounded to a multiple of it (and of 64 with align64), so wrap
+  // padding is never shorter.
+  uint32_t submission_tail_bytes;
+
   // Optional efficient wait used while an out-of-order producer waits for the
   // commit cursor. ROCr integrations can use this hook for mwaitx. The default
   // uses abce_ring_pause() (a thread yield on the host).
@@ -106,7 +115,9 @@ typedef struct abce_ring_config_t {
   void* commit_wait_user_data;
 
   // Optional platform-specific write-pointer/doorbell publication routine. When
-  // null, the ring uses volatile writes with a release fence.
+  // null, the ring uses volatile writes with a release fence. With a publish
+  // routine, doorbell may be null: a queue whose doorbell is a runtime call (a
+  // Windows SDMA queue, which submits through the driver) rings it there.
   abce_queue_publish_fn_t publish;
   void* publish_user_data;
 
@@ -224,8 +235,9 @@ static inline void abce_ring_initialize(const abce_ring_config_t* config,
   assert(config->base != NULL);
   const bool has_raw_backend =
       config->write_ptr != NULL || config->read_ptr != NULL || config->doorbell != NULL;
-  const bool raw_backend_complete =
-      config->write_ptr != NULL && config->read_ptr != NULL && config->doorbell != NULL;
+  // A publish routine may ring the doorbell another way, so it needs no doorbell word
+  const bool raw_backend_complete = config->write_ptr != NULL && config->read_ptr != NULL &&
+                                    (config->doorbell != NULL || config->publish != NULL);
   const bool has_ops_backend = !abce_ring_queue_ops_empty(&config->queue_ops);
   (void)has_raw_backend;
   (void)raw_backend_complete;
@@ -235,6 +247,10 @@ static inline void abce_ring_initialize(const abce_ring_config_t* config,
          "configure exactly one complete queue-control backend");
   assert(!has_ops_backend || config->publish == NULL);
   assert(abce_is_power_of_two(config->size) && "ring size must be a power of two");
+  assert((config->submission_tail_bytes == 0 ||
+          (abce_is_power_of_two(config->submission_tail_bytes) &&
+           config->submission_tail_bytes < config->size)) &&
+         "submission tail must be 0 or a power of two below the ring size");
 
   memset(out_ring, 0, sizeof(*out_ring));
   out_ring->config = *config;
@@ -245,20 +261,33 @@ static inline void abce_ring_initialize(const abce_ring_config_t* config,
   // the first acquire hand out bytes the engine still owns, corrupting the ring,
   // so start the cursors at the queue's write pointer.
   const uint64_t initial_write_index = abce_ring_load_write_index(out_ring);
+  assert((config->submission_tail_bytes == 0 ||
+          initial_write_index % config->submission_tail_bytes == 0) &&
+         "queue write pointer must be aligned to the submission tail");
   abce_ring_cursor_store(&out_ring->control.reserve_cursor, initial_write_index);
   abce_ring_cursor_store(&out_ring->control.commit_cursor, initial_write_index);
   abce_ring_cursor_store(&out_ring->control.max_write_index, initial_write_index);
 }
 
-// Total reservation size for a payload of |payload_bytes|, after applying the
-// configured minimum submission size and optional 64B rounding. Pass the result
-// to both acquire and release.
+// Total reservation size for a payload of |payload_bytes|: the configured minimum
+// submission size, the optional 64B rounding, then submission_tail_bytes after the
+// payload with the total rounded to a multiple of the tail (and of 64 with
+// align64). Every reservation on a ring with a tail must be sized here, so the
+// reserve cursor stays on the tail's alignment. Pass the result to both acquire
+// and release.
 static inline abce_status_t abce_ring_padded_size(const abce_ring_t* ring, uint32_t payload_bytes,
                                                   uint32_t* out_reserve_bytes) {
   if (payload_bytes == 0) return ABCE_STATUS_INVALID_ARGUMENT;
   uint64_t padded = payload_bytes;
   if (padded < ring->config.min_submission_size) padded = ring->config.min_submission_size;
-  if (ring->config.align64) padded = abce_align_up(padded, 64);
+  const uint32_t tail = ring->config.submission_tail_bytes;
+  if (tail != 0) {
+    // Both granules are powers of two, so the larger one keeps 64-byte lines whole
+    const uint64_t granule = (ring->config.align64 && tail < 64) ? 64 : tail;
+    padded = abce_align_up(padded + tail, granule);
+  } else if (ring->config.align64) {
+    padded = abce_align_up(padded, 64);
+  }
   if (padded > UINT32_MAX || padded >= ring->config.size) return ABCE_STATUS_OUT_OF_RANGE;
   *out_reserve_bytes = (uint32_t)padded;
   return ABCE_STATUS_OK;
@@ -374,6 +403,11 @@ static inline abce_status_t abce_ring_acquire(abce_ring_t* ring, uint32_t reserv
   producer.publish_padding = abce_ring_publish_padding_callback;
   producer.user_data = ring;
 
+  // A size not from abce_ring_padded_size moves the reserve cursor off the tail's
+  // alignment, and every later wrap pad on the ring can then be shorter than the tail.
+  assert((ring->config.submission_tail_bytes == 0 ||
+          reserve_bytes % ring->config.submission_tail_bytes == 0) &&
+         "size reservations with abce_ring_padded_size on a ring with a submission tail");
   const abce_status_t status = abce_ring_reserve(&producer, reserve_bytes, out_reservation);
   if (!abce_status_is_ok(status)) return status;
 
