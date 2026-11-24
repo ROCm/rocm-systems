@@ -3059,7 +3059,8 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
   uint32_t effective_threads =
       std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
   FunctionalQuantumResult result;
-  // The engine thread itself is already reserved; publish the workers it adds.
+  // Publish the dispatch workers this quantum adds, and the engine thread itself
+  // unless engines are reserved statically.
   occupancy_.occupy(int(effective_threads) - 1);
   if (shared_dispatch_pool_)
     result =

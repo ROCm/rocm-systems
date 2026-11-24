@@ -86,19 +86,19 @@ inline void register_helper_fork_guard() {
 
 // Borrowed helper capacity. With a budget (RJ_MMA_BORROW=1: the process's
 // allowed CPUs; RJ_MMA_BORROW=<n>: n), helpers only use host threads that
-// engines and CU dispatch leave idle. Engine threads count as always busy:
-// they meet at a barrier every epoch and must get a core the moment it
-// completes. One more core stays with the host process (the application
-// waits for the dispatch by spinning). Each command processor publishes the
-// dispatch workers its current quantum adds to its engine thread in its own
-// cache line; a helper claim sums those shards and the claimed helpers.
-// Dispatch is never gated. Without a budget, helpers are a separate reservation.
+// engines and CU dispatch leave idle. Engine threads count as always busy
+// even while they sleep at the epoch barrier: every epoch they wake and must
+// get a core at once, or the barrier, and with it every engine, waits for the
+// scheduler to displace a helper (measured as a 2-3x slowdown when helpers
+// borrowed the cores of sleeping engines). One more core stays with the host
+// process (the application waits for the dispatch by spinning). Each command
+// processor publishes the dispatch workers its current quantum adds to its
+// engine thread in its own cache line; a helper claim sums those shards and
+// the claimed helpers. Dispatch is never gated. Without a budget, helpers are
+// a separate reservation.
 struct alignas(64) OccupancyShard {
   std::atomic<int> threads{0};
 };
-/// True when engines and the host core already fill the borrowing budget, so
-/// no helper can ever be claimed; async issue then adds only overhead.
-inline bool borrow_budget_exhausted();
 inline constexpr unsigned kMaxOccupancyShards = 256;
 inline constinit std::array<std::atomic<OccupancyShard *>, kMaxOccupancyShards> occupancy_shards{};
 inline constinit std::atomic<unsigned> occupancy_shard_end{0};
@@ -119,10 +119,6 @@ inline int borrow_budget() {
     return int(std::thread::hardware_concurrency());
   }();
   return budget;
-}
-inline bool borrow_budget_exhausted() {
-  const int budget = borrow_budget();
-  return budget && reserved_threads.load(std::memory_order_relaxed) >= budget;
 }
 /// @brief Registers one command processor's occupancy for its lifetime.
 class ScopedOccupancyShard {
@@ -385,7 +381,29 @@ public:
     return ticket;
   }
   /// Reserve a helper without publishing; start() must follow on success.
-  Ticket claim() { return {try_claim()}; }
+  Ticket claim() { return {try_claim(within_budget() ? kUnlimited : 0)}; }
+  /// Reserve a helper while fewer than `cap` are claimed pool-wide. The cap is
+  /// the caller's share of the borrowing budget, computed once per quantum by
+  /// borrow_cap(): summing every occupancy shard on each claim bounced those
+  /// lines between cores on every block.
+  Ticket claim(unsigned cap) { return {try_claim(cap)}; }
+  static constexpr unsigned kUnlimited = ~0u;
+  /// Helpers this issuer may hold right now: unlimited without a budget,
+  /// otherwise the budget minus reserved and occupied threads (zero when the
+  /// host is saturated, so the caller issues synchronously).
+  unsigned borrow_cap() const {
+    const int budget = borrow_budget();
+    if (!budget)
+      return kUnlimited;
+    const int room = budget - reserved_threads.load(std::memory_order_relaxed) - occupied_threads();
+    return room > 0 ? unsigned(room) : 0u;
+  }
+  unsigned claimed() const {
+    unsigned claimed = unsigned(slots_.size());
+    for (const auto &word : free_)
+      claimed -= unsigned(std::popcount(word.load(std::memory_order_relaxed)));
+    return claimed;
+  }
   static SnapshotBuffer &snapshot_buffer(Ticket ticket) { return ticket.slot->snapshot; }
   static void start(Ticket ticket, Instruction *const *chain, unsigned count, void *context,
                     const MatrixInputSnapshot *const *snapshots = nullptr) {
@@ -454,16 +472,7 @@ public:
   }
 
 private:
-  bool within_budget() const {
-    const int budget = borrow_budget();
-    if (!budget)
-      return true;
-    int claimed = int(slots_.size());
-    for (const auto &word : free_)
-      claimed -= std::popcount(word.load(std::memory_order_relaxed));
-    return reserved_threads.load(std::memory_order_relaxed) + occupied_threads() + claimed <
-           budget;
-  }
+  bool within_budget() const { return claimed() < borrow_cap(); }
 
   /// Helpers of the issuer's cache domain, or none with a single domain.
   std::array<uint64_t, 2> local_mask() const {
@@ -494,8 +503,8 @@ private:
     return nullptr;
   }
 
-  Slot *try_claim() {
-    if (!helpers_enabled() || !within_budget())
+  Slot *try_claim(unsigned cap) {
+    if (!helpers_enabled() || claimed() >= cap)
       return nullptr;
     // Bound claims and fall back inline on a miss: one or two loads detect an
     // exhausted pool, and after two failed CAS attempts per word the chain

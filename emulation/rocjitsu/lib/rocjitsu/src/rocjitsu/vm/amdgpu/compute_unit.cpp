@@ -2910,7 +2910,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     }
   }
 
-  mma_plan::Replay replay(pool);
+  mma_plan::Replay replay(pool, helper_cap_);
   struct ActiveScope {
     mma_plan::Replay *&slot;
     ~ActiveScope() { slot = nullptr; }
@@ -2958,10 +2958,9 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
     }
   };
   // Executes on the issuer exactly as execute_instruction() would during ordinary issue.
-  const auto run_inline = [&](Instruction &inst) {
+  const auto run_inline = [&](Instruction &inst, uint64_t pc) {
     active->note_potential_execution_effect();
     active->clear_pending_alu_causes();
-    const uint64_t pc = active->pc;
     const util::Result result = execute_instruction(&inst, *active, &execution_failure_detail_);
     if (result.succeeded() && !active->is_halted()) {
       if (wait_checks && checks_gds_source_lifetime(config_.arch))
@@ -3026,7 +3025,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         cache.stats.snapshot_bytes += words * sizeof(uint32_t);
         return static_cast<const MatrixInputSnapshot *const *>(buffer.pointers.data());
       };
-      if (!inline_only && replay.submit(step.slot, step, active, fill)) {
+      if (!inline_only && replay.submit(step.job, step, active, fill)) {
         ++cache.stats.offloads;
         cache.stats.chained += step.members - 1u;
         // A replay is one asynchronous window; every accepted job is joined.
@@ -3036,10 +3035,10 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         async_execution::stats.retired_mma += step.members;
       } else {
         // Members precede every step that could observe them, so running the
-        // whole chain now is equivalent to its helper.
+        // whole job now is equivalent to its helper. Each reports its own PC.
         ++cache.stats.pool_full;
         for (unsigned i = 0; i != step.members; ++i)
-          if (!run_inline(*step.chain[i]))
+          if (!run_inline(*step.chain[i], entry_pc + plan->steps[step.member_step[i]].offset))
             return true;
       }
       advance(step);
@@ -3050,7 +3049,7 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       ++(step.kind == mma_plan::StepKind::Alu ? cache.stats.alu : cache.stats.issuer_mma);
       ++active->trace_inst_count_;
       check_waits(*step.inst);
-      if (!run_inline(*step.inst))
+      if (!run_inline(*step.inst, active->pc))
         return true;
       active->pc += step.size;
       record_gws_instruction_progress(process);
@@ -3106,8 +3105,14 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     }
   }
   const uint64_t full_exec = wave_size == 64 ? ~uint64_t{0} : uint64_t{0xFFFFFFFF};
-  if (matrix_coexecution::borrow_budget_exhausted()) {
-    // Engines already use every borrowable core: behave like a synchronous CU.
+  if (helper_budget_serial_ != quantum_serial_) {
+    // Borrowed helpers exist only while engines and dispatch leave cores idle.
+    // Summing the occupancy once per quantum keeps the hot path free of it.
+    helper_budget_serial_ = quantum_serial_;
+    helper_cap_ = async_pool().borrow_cap();
+  }
+  if (helper_cap_ == 0) {
+    // Every borrowable core is busy: behave like a synchronous CU.
     issue_instruction(active);
     return;
   }

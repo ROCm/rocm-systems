@@ -392,6 +392,7 @@ public:
       bool nested_;
     } progress_batch{*this};
     // A request left by direct step() execution must not shorten this quantum.
+    ++quantum_serial_;
     functional_yield_requested_ = false;
     gws_wait_yield_requested_ = false;
     FunctionalQuantumResult result;
@@ -1794,6 +1795,10 @@ protected:
   std::unique_ptr<mma_plan::PlanCache> mma_plans_;
   /// Helpers of the plan being replayed; joined before any fault or failure path.
   mma_plan::Replay *active_replay_ = nullptr;
+  /// Helpers this CU may claim, refreshed once per quantum by the async issue path.
+  uint64_t quantum_serial_ = 0;
+  uint64_t helper_budget_serial_ = ~uint64_t{0};
+  unsigned helper_cap_ = ~0u;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
   uint32_t vgpr_storage_lane_count_ = 0;
