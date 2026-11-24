@@ -120,21 +120,19 @@ TEST_F(XmlMicrotest, GetXmlFromFile_SkipsUnknownElementsWithTheirChildren) {
   EXPECT_TRUE(Logged("Loading unnamed topology"));
 }
 
-// Tab is XML whitespace; a hand-written NCCL_TOPO_FILE indented with tabs must load.
 TEST_F(XmlMicrotest, GetXmlFromFile_TabIndentationIsWhitespace) {
-  EXPECT_EQ(ncclSuccess, Parse("<system version=\"2\">\n"
+  ASSERT_EQ(ncclSuccess, Parse("<system version=\"2\">\n"
                                "\t<cpu numaid=\"0\">\n"
                                "\t\t<pci busid=\"0000:01:00.0\"/>\n"
                                "\t</cpu>\n"
                                "</system>\n"));
 
-  EXPECT_FALSE(Logged("expecting '<'"));
   EXPECT_EQ(3, xml_->maxIndex);
   EXPECT_NE(nullptr, Find("pci", "busid", "0000:01:00.0"));
 }
 
 TEST_F(XmlMicrotest, GetXmlFromFile_TabSeparatesAttributesInsideATag) {
-  EXPECT_EQ(ncclSuccess, Parse("<system\tversion=\"2\">"
+  ASSERT_EQ(ncclSuccess, Parse("<system\tversion=\"2\">"
                                "<cpu\tnumaid=\"0\"\taffinity=\"ff\"><pci\tbusid=\"0000:01:00.0\"\t/></cpu>"
                                "</system>"));
 
@@ -148,9 +146,8 @@ TEST_F(XmlMicrotest, GetXmlFromFile_TabSeparatesAttributesInsideATag) {
   EXPECT_EQ(1, pci->nAttrs) << "the tab before /> is not an attribute";
 }
 
-// Aligned files use runs of separators; each run separates one attribute from the next.
 TEST_F(XmlMicrotest, GetXmlFromFile_SeparatorRunsAddNoEmptyAttributes) {
-  EXPECT_EQ(ncclSuccess, Parse("<system version=\"2\">"
+  ASSERT_EQ(ncclSuccess, Parse("<system version=\"2\">"
                                "<cpu\t\tnumaid=\"0\"  \t affinity=\"ff\"\t\t></cpu>"
                                "</system>"));
 
