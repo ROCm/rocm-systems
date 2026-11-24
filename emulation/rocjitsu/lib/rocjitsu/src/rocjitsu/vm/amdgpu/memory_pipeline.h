@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/vmem_direct.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -265,6 +266,12 @@ public:
   void set_prepared_atomic_boundary_handler(PreparedAtomicBoundaryHandler handler) {
     prepared_atomic_boundary_handler_ = std::move(handler);
   }
+  /// @brief Complete non-lane-shaped global spans, such as tensor DMA rows,
+  /// against local host backing, or decline before any effect.
+  /// @details Same switch, local ingress admission and direct-backing rules as
+  /// plain vector requests; the caller checks debugger and plugin state.
+  std::optional<VmAccessOutcome> try_direct_spans(uint32_t process_id, const GpuVmAccess &access,
+                                                  std::span<const DirectSpan> spans, bool is_load);
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;

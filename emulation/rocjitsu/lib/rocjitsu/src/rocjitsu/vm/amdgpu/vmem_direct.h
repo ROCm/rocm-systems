@@ -36,6 +36,11 @@ class VmDirectBacking;
 /// scalar loads alone on the K$ model.
 [[nodiscard]] bool vmem_scalar_direct_enabled();
 
+/// @brief Whether dense tensor DMA rows move directly between host backing and LDS.
+/// @details Requires vmem_direct_enabled(); RJ_VMEM_TDM_DIRECT=0 keeps tensor
+/// DMA alone on its element path.
+[[nodiscard]] bool vmem_tdm_direct_enabled();
+
 /// One plain vector request whose bounding box local ingress already admitted.
 struct DirectVectorRequest {
   const uint64_t *addrs = nullptr;
@@ -74,5 +79,24 @@ try_direct_vector_access(const DirectVectorRequest &request, const VmDirectBacki
 [[nodiscard]] std::optional<VmAccessOutcome>
 try_direct_swizzled_access(const VectorMemState &state, uint64_t lanes, uint8_t *data,
                            const VmDirectBacking &backing, const L1VectorCache &l1, L2Cache &l2);
+
+/// One span of a direct span request and its local bytes: the load destination or store source.
+struct DirectSpan {
+  uint64_t address = 0;
+  uint32_t size = 0;
+  uint8_t *data = nullptr;
+};
+
+/// @brief Copy whole spans between local host backing and @p spans' buffers,
+/// in order, or decline before any effect.
+/// @details For transfers that are not lane-shaped, such as tensor DMA rows.
+/// The caller holds a local ingress admission covering every span. The same
+/// extent, MTYPE, residency, permit, admission and fault rules as
+/// try_direct_vector_access() apply: a load may have filled part of its
+/// buffers before a host fault declines it, so callers must not publish them.
+[[nodiscard]] std::optional<VmAccessOutcome> try_direct_spans(std::span<const DirectSpan> spans,
+                                                              bool is_load, Mtype instruction_mtype,
+                                                              const VmDirectBacking &backing,
+                                                              const L1VectorCache &l1, L2Cache &l2);
 
 } // namespace rocjitsu::amdgpu
