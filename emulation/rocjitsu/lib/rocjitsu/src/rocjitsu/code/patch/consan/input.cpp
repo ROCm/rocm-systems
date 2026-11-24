@@ -139,6 +139,14 @@ struct ApertureWords {
                  active.contains({RegClass::SGPR, static_cast<uint16_t>(src->index + 1), 1})) {
         proven = RegisterRef{RegClass::SGPR, static_cast<uint16_t>(dst->index + 1), 1};
         all = true;
+      } else if (op == Op::S_CSELECT_B32 && dst && dst->cls == RegClass::SGPR && src &&
+                 active.contains(*src) && inst.num_src_operands() >= 2) {
+        // Both SGPR inputs retain their common aperture class whichever SCC selects.
+        const auto rhs = inst.src_operand(1)->to_register_ref();
+        if (rhs && active.contains(*rhs)) {
+          proven = dst;
+          all = true;
+        }
       } else if (dst && src && dst->width == 1 && src->width == 1 && active.contains(*src) &&
                  ((op == Op::S_MOV_B32 && dst->cls == RegClass::SGPR &&
                    src->cls == RegClass::SGPR) ||

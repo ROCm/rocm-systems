@@ -99,6 +99,7 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
   check({0xbe840100, copy}, false);                  // kernarg (global) pointer
   check({copy}, false);                              // no high-word definition
   check({shared, copy, 0xbf840001, clobber}, false); // conditional branch bypasses the clobber
+  check({shared, 0xbe8601eb, select, copy}, true);   // both high words are shared
   check({shared, select, copy}, true, FlatAssumption::SelectedSharedHigh);
   check({select, copy}, false);                     // neither high word is known shared
   check({shared, 0xbe8601ed, select, copy}, false); // known private alternative in s7
@@ -131,7 +132,7 @@ TEST(ConSanInput, StrictRejectsConditionalOnlyImageAndRevalidatesTheSavedPolicy)
   EXPECT_NE(error.message.find("no observed LDS sites"), std::string::npos);
 }
 
-TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndPrivateMappings) {
+TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndNonGroupMappings) {
   const std::filesystem::path fixture =
       test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
   if (fixture.empty())
@@ -141,8 +142,9 @@ TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndPrivateMappings) {
   InputError error;
   const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
   ASSERT_TRUE(baseline.succeeded()) << error.message;
-  const std::array<uint32_t, 9> words = {
-      0xbe8401ed, 0x7e060205, 0xdc500ffc, 0x02000002, // private-base pointer, load +4092
+  const std::array<uint32_t, 10> words = {
+      0xbe8401ed, 0x85050105,                         // select private high s5 or kernarg high s1
+      0x7e060205, 0xdc500ffc, 0x02000002,             // non-group pointer, load +4092
       0xbe8401eb, 0x7e060205, 0xdc500ffc, 0x02000002, // shared-base pointer, identical operation
       0xbf810000};
   const size_t entry =
@@ -154,7 +156,9 @@ TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndPrivateMappings) {
   ASSERT_EQ(result.value().manifest.sites.size(), 1u);
   EXPECT_EQ(result.value().manifest.sites.front().origin, AccessOrigin::GroupFlat);
   EXPECT_EQ(result.value().manifest.sites.front().original_offset,
-            baseline.value().kernel.entry_text_offset + 24);
+            baseline.value().kernel.entry_text_offset + 28);
+  ASSERT_EQ(result.value().manifest.flat_exclusions.size(), 1u);
+  EXPECT_EQ(result.value().manifest.flat_exclusions.front().reason, FlatExclusionReason::NonGroup);
   EXPECT_TRUE(validate_prepared(image, result.value(), error).succeeded()) << error.message;
 }
 
