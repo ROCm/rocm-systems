@@ -22,6 +22,7 @@
 * `hipFileReadAsync()` and `hipFileWriteAsync()` on `hipStreamPerThread` now run synchronously, like the null stream.
 * `hipFileStreamDeregister()` now synchronizes the stream before freeing its resources, so it waits for all work queued on the stream, including asynchronous I/O in flight. If the stream processed any asynchronous I/O, deregistering it also calls `hipFree` on the stream's signal memory, which synchronizes all streams on the device; do not deregister a stream that has processed I/O while another stream on the same device is blocked.
 * hipFile now reserves the device's greatest stream priority for its fallback I/O streams. For a stream at that priority, `hipFileStreamRegister()` returns `hipFileInvalidValue`, and `hipFileReadAsync()` and `hipFileWriteAsync()` return `hipFileAsyncNotSupported`. Use a lower priority for streams used for asynchronous I/O. Devices with a single stream priority level are not affected.
+* The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now also hardens the C++ standard library, by defining `_GLIBCXX_ASSERTIONS` (libstdc++) and `_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST` (libc++), so that standard library containers and views check their bounds at run time. The option no longer applies to the example programs, which are also built as C++17 when installed.
 
 ### Fixed
 
