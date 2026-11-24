@@ -15,6 +15,7 @@
 #include "platform/program.hpp"
 #include "hip_event.hpp"
 #include "hip_platform.hpp"
+#include "hip_library.hpp"
 #include "hip_comgr_helper.hpp"
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -721,6 +722,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidResourceHandle;
   }
+  IHIP_RETURN_ONFAIL(hip::ResolveLibraryFunctionForDevice(&f, deviceId));
   amd::Kernel* kernel = hip::asKernel(f);
 
   hipError_t status =

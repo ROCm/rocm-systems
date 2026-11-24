@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,8 @@ class LibraryContainer {
   hipError_t Kernel(hipKernel_t* k, const std::string &name);
   // Resolve an internal kernel for a specific device without changing the current device.
   hipError_t ResolveKernelForDevice(hipKernel_t* k, const std::string& name, int device);
+  // Code object loaded for device, loading it on first use.
+  hipError_t CodeObjectForDevice(hip::DynCO** code_object, int device);
 
   // Register the kernel function, make an entry in global state
   void Register(const std::string &name, int device, hipKernel_t k);
@@ -52,12 +55,11 @@ class LibraryContainer {
   hipError_t GetKernelName(const char** name, hipKernel_t kernel);
 
   // Variable lookups for hipLibraryGetGlobal / hipLibraryGetManaged
-  hipError_t GetGlobal(const std::string& name, void** dptr, size_t* bytes);
+  hipError_t GetGlobal(const std::string& name, void** dptr, size_t* bytes, int device);
   hipError_t GetManaged(const std::string& name, void** dptr, size_t* bytes);
 
-  // Module handle of the underlying DynCO, for hipLibraryGetModule. It returns
-  // the module for the device the library was built on.
-  hipError_t Module(hipModule_t* module);
+  // Module of device's code object, for hipLibraryGetModule.
+  hipError_t Module(hipModule_t* module, int device);
 
  private:
   LibraryContainer() = delete;
@@ -72,11 +74,16 @@ class LibraryContainer {
   const char* input_image_ = nullptr; // caller-owned image, used only when filename_ is empty
   std::vector<char> image_storage_;   // image copy needed for lazy-load of secondary devices
   std::unique_ptr<hip::DynCO> dynco_;
-  // Set once Module() has registered dynco_ into PlatformState.
-  bool module_registered_ = false;
-  // Function-only code objects keyed by device ID; dynco_ owns the primary full load.
+  // Modules Module() has registered into PlatformState.
+  std::set<hipModule_t> registered_modules_;
+  // Code objects of non-primary devices keyed by device ID; dynco_ owns the primary full load.
   std::map<int, std::unique_ptr<hip::DynCO>> code_objects_by_device_;
   // Cache of hipKernel_t handles keyed by (name, device).
   std::map<std::pair<std::string /* name */, int /* device */>, hipKernel_t> kernels_;
 };
+
+// Kernel of a library kernel's code object for device, or kernel itself if not a library kernel.
+hipError_t ResolveLibraryKernelForDevice(hipKernel_t* target, hipKernel_t kernel, int device);
+// Replaces a library kernel's function that has no code for device with device's function.
+hipError_t ResolveLibraryFunctionForDevice(hipFunction_t* function, int device);
 }  // namespace hip

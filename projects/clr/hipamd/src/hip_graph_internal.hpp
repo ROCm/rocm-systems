@@ -20,6 +20,7 @@
 #include "hip_graph_helper.hpp"
 #include "hip_event.hpp"
 #include "hip_platform.hpp"
+#include "hip_library.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_vm.hpp"
 #include "utils/nontemporal.hpp"
@@ -1819,6 +1820,7 @@ class GraphKernelNode : public GraphNode {
       // capturehipExtModuleLaunchKernel() mixes host function with hipFunction_t, so we convert
       // here. If it's wrong, later functions will fail
       func = static_cast<hipFunction_t>(params.func);
+      (void)hip::ResolveLibraryFunctionForDevice(&func, device);
     } else if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] getStatFunc() failed with err %d", status);
     }

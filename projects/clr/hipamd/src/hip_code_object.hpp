@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "hip/hip_runtime.h"
@@ -107,6 +108,10 @@ class DynCO : public CodeObject {
                             std::vector<char>* image_storage = nullptr);
   hipModule_t getModule() const { return module_; };
 
+  //! Creates this code object's variables from owner, a code object loaded from the same image for
+  //! another device. Managed variables share owner's allocations and are never freed here.
+  hipError_t linkGlobalVars(DynCO& owner);
+
   // Device the code object was loaded for at construction. Callers that key
   // per-device caches (e.g., LibraryContainer::kernels_) must use this and
   // not ihipGetDevice(): the active device may differ at use time, but the
@@ -158,6 +163,8 @@ class DynCO : public CodeObject {
   hipError_t populateDynGlobalFuncs();
   hipError_t populateDynGlobalVars();
   hipError_t initDynManagedVars(const std::string& managedVar);
+
+  std::unordered_set<std::string> borrowed_managed_vars_;
 };
 
 // Static Code Object
