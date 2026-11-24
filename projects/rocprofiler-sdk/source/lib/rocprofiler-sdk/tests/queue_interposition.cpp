@@ -972,6 +972,7 @@ struct stub_doorbell_queue
     }
 
     stub_doorbell_queue(const stub_doorbell_queue&) = delete;
+
     stub_doorbell_queue& operator=(const stub_doorbell_queue&) = delete;
 
     void write_packet(uint64_t idx, uint64_t kernel_object)

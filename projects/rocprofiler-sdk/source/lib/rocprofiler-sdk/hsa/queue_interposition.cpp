@@ -694,8 +694,11 @@ public:
     }
 
     root_admission_guard(const root_admission_guard&) = delete;
-    root_admission_guard(root_admission_guard&&)      = delete;
+
+    root_admission_guard(root_admission_guard&&) = delete;
+
     root_admission_guard& operator=(const root_admission_guard&) = delete;
+
     root_admission_guard& operator=(root_admission_guard&&) = delete;
 
     bool bypass() const { return m_bypass; }
@@ -1335,7 +1338,8 @@ write_interceptor(Queue*                                queue,
         }
     }};
 
-    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
+    using packet_vector_rref_t = packet_vector_t&&;
+    using packet_writer_fn_t   = std::function<void(packet_vector_rref_t)>;
 
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, &deferred_completions](
                                     const rocprofiler_packet* _packets,
