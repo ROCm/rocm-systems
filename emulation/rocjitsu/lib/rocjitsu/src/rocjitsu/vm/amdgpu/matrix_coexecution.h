@@ -86,17 +86,20 @@ inline void register_helper_fork_guard() {
 
 // Borrowed helper capacity. With a budget (RJ_MMA_BORROW=1: the process's
 // allowed CPUs; RJ_MMA_BORROW=<n>: n), helpers only use host threads that
-// engines and CU dispatch leave idle. Each command processor publishes the
-// threads its current quantum occupies (the engine thread plus its dispatch
-// workers) in its own cache line; a helper claim sums those shards and the
-// claimed helpers. Dispatch is never gated. Without a budget, helpers are a
-// separate reservation.
+// engines and CU dispatch leave idle. Engine threads count as always busy:
+// they meet at a barrier every epoch and must get a core the moment it
+// completes. One more core stays with the host process (the application
+// waits for the dispatch by spinning). Each command processor publishes the
+// dispatch workers its current quantum adds to its engine thread in its own
+// cache line; a helper claim sums those shards and the claimed helpers.
+// Dispatch is never gated. Without a budget, helpers are a separate reservation.
 struct alignas(64) OccupancyShard {
   std::atomic<int> threads{0};
 };
 inline constexpr unsigned kMaxOccupancyShards = 256;
 inline constinit std::array<std::atomic<OccupancyShard *>, kMaxOccupancyShards> occupancy_shards{};
 inline constinit std::atomic<unsigned> occupancy_shard_end{0};
+inline constinit std::atomic<int> reserved_threads{0};
 inline int borrow_budget() {
   static const int budget = [] {
     const char *value = std::getenv("RJ_MMA_BORROW");
@@ -451,7 +454,8 @@ private:
     int claimed = int(slots_.size());
     for (const auto &word : free_)
       claimed -= std::popcount(word.load(std::memory_order_relaxed));
-    return occupied_threads() + claimed < budget;
+    return reserved_threads.load(std::memory_order_relaxed) + occupied_threads() + claimed <
+           budget;
   }
 
   /// Helpers of the issuer's cache domain, or none with a single domain.
@@ -515,7 +519,9 @@ private:
 /// the first eligible instruction creates the pool.
 class ExecutionResources {
 public:
-  explicit ExecutionResources(unsigned helpers) : helpers_(helpers) {}
+  explicit ExecutionResources(unsigned helpers, unsigned engines = 1) : helpers_(helpers) {
+    reserved_threads.store(int(engines) + 1, std::memory_order_relaxed);
+  }
   unsigned helpers() const { return helpers_; }
   SharedPool &pool() {
     if (!helpers_enabled()) {

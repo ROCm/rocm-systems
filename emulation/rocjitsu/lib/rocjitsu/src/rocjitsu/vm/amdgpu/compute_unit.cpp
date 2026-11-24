@@ -2880,8 +2880,13 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
                                      vm_access ? vm_access->cache_namespace()
                                                : VmCacheNamespace{}};
   const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first);
-  if (!plan)
-    return false;
+  if (!plan->accept) {
+    // The planner found nothing that can run concurrently here, e.g. one
+    // serial chain. A lookahead window would offload it anyway and only add
+    // handoffs, so issue the MFMA synchronously.
+    (void)issue_instruction_impl<false>(active);
+    return true;
+  }
   // An exhausted pool still replays: each chain that finds no helper runs on
   // the issuer, which keeps the saved fetch, decode and scoreboard work.
   auto &pool = async_pool();

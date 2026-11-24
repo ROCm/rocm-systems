@@ -619,7 +619,7 @@ public:
     bool operator==(const Key &) const = default;
   };
 
-  /// @brief Find or build the plan for a block entry; nullptr if it offloads nothing.
+  /// @brief Find or build the plan for a block entry; check accept before replaying.
   template <typename Fetch>
   const Plan *lookup(Decoder &decoder, const InstructionCache &icache, Fetch &&fetch_words,
                      const Key &key, const Words &first) {
@@ -652,7 +652,7 @@ public:
     } else {
       ++stats.hits;
     }
-    return it->second.accept ? &it->second : nullptr;
+    return &it->second;
   }
 
   /// Wave whose lazy VGPR chunks were last allocated in a slot.

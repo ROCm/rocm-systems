@@ -102,8 +102,8 @@ bool configured_async_mma_supported(rocjitsu::IsaFamily arch) {
 }
 
 std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
-make_async_execution_resources(uint32_t helpers) {
-  return std::make_shared<amdgpu::matrix_coexecution::ExecutionResources>(helpers);
+make_async_execution_resources(uint32_t helpers, uint32_t engines) {
+  return std::make_shared<amdgpu::matrix_coexecution::ExecutionResources>(helpers, engines);
 }
 
 std::vector<uint32_t> resolve_cpu_dispatch_thread_budgets(uint32_t requested_threads,
@@ -1406,7 +1406,8 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
         result.async_resources ? result.async_resources->helpers() : 0;
     result.async_helper_threads = static_cast<int32_t>(result.execution_threads.helpers);
   } else {
-    result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+    result.async_resources = make_async_execution_resources(result.execution_threads.helpers,
+                                                            result.execution_threads.engines);
   }
   const auto image_config_for_device = [arch](const KfdDeviceConfig &device) {
     return device.present ? kmd::gb_addr_config_for_gfx_target_version(device.gfx_target_version)

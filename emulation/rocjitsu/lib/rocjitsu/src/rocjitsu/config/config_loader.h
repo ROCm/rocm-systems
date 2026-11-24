@@ -145,7 +145,7 @@ util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_str
 bool configured_async_mma_supported(rocjitsu::IsaFamily arch);
 /// @brief Create lazy VM-owned resources for the requested helper count.
 std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
-make_async_execution_resources(uint32_t helpers);
+make_async_execution_resources(uint32_t helpers, uint32_t engines = 1);
 
 /// Resolve the requested functional CU-dispatch width for each SoC.
 ///

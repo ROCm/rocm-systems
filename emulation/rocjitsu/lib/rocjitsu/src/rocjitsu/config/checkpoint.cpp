@@ -900,7 +900,8 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
   if (!engine_config.num_threads)
     engine_config.num_threads = result.execution_threads.engines;
 
-  result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+  result.async_resources = make_async_execution_resources(result.execution_threads.helpers,
+                                                          result.execution_threads.engines);
   vm_config.soc.xcd.shader_engine.compute_unit.async_resources = result.async_resources;
 
   // Rebuild the SoC root expected by LoadedConfig and create_from_loaded().
