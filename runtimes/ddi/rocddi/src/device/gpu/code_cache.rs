@@ -64,7 +64,7 @@ fn inactivation_failure(mut error: Error, outcome: WaitOutcome) -> CopyFailure {
 
 /// Writes one snapshot without replacing the publication or cleanup result.
 #[cold]
-fn write_failure_diagnostic(
+fn write_wait_diagnostic(
     output: &mut impl Write,
     outcome: WaitOutcome,
     (read, write): (u64, u64),
@@ -177,7 +177,7 @@ impl GpuDevice<'_> {
     /// Samples retained resources only after rechecking the native process owner.
     #[cold]
     #[allow(unsafe_code)]
-    fn diagnose_wait_failure(
+    fn diagnose_wait(
         &self,
         outcome: WaitOutcome,
         queue: &RetainedQueue<(crate::memory::Allocation, crate::device::Device)>,
@@ -211,7 +211,7 @@ impl GpuDevice<'_> {
                     (&*(exit as *const AtomicU32)).load(Ordering::Acquire),
                 )
             };
-            let _ = write_failure_diagnostic(
+            let _ = write_wait_diagnostic(
                 &mut std::io::stderr().lock(),
                 outcome,
                 progress,
@@ -365,9 +365,9 @@ impl GpuDevice<'_> {
             }
             std::thread::sleep(Duration::from_micros(50));
         };
-        if outcome != WaitOutcome::Completed {
+        if outcome != WaitOutcome::Completed || diagnostics {
             // SAFETY: The retained dependency bundle still owns this signal.
-            self.diagnose_wait_failure(
+            self.diagnose_wait(
                 outcome,
                 &queue,
                 unsafe { &*(host as *const Completion) },
@@ -403,7 +403,7 @@ mod tests {
     use super::{
         Completion, IB_ENTRY_MARKER_OFFSET, IB_EXIT_MARKER_OFFSET, INDIRECT_BUFFER_OFFSET,
         WaitOutcome, inactivation_failure, invalidate_packet, publication_commands,
-        publication_packet, write_failure_diagnostic,
+        publication_packet, write_wait_diagnostic,
     };
     use crate::{Error, ErrorKind};
     use std::io;
@@ -548,22 +548,28 @@ mod tests {
     }
 
     #[test]
-    fn failure_diagnostic_records_passive_snapshot() -> io::Result<()> {
+    fn wait_diagnostic_records_passive_snapshot() -> io::Result<()> {
         let mut output = Vec::new();
-        write_failure_diagnostic(&mut output, WaitOutcome::Deadline, (0, 1), 1, (1, 0))?;
+        write_wait_diagnostic(&mut output, WaitOutcome::Deadline, (0, 1), 1, (1, 0))?;
         assert_eq!(
             output,
             b"rocddi code-cache: wait=Deadline; read=0; write=1; completion=1; ib_entry=1; ib_exit=0\n"
         );
         output.clear();
-        write_failure_diagnostic(&mut output, WaitOutcome::Cancelled, (1, 1), -1, (1, 1))?;
+        write_wait_diagnostic(&mut output, WaitOutcome::Cancelled, (1, 1), -1, (1, 1))?;
         assert_eq!(
             output,
             b"rocddi code-cache: wait=Cancelled; read=1; write=1; completion=-1; ib_entry=1; ib_exit=1\n"
         );
+        output.clear();
+        write_wait_diagnostic(&mut output, WaitOutcome::Completed, (1, 1), 0, (1, 1))?;
+        assert_eq!(
+            output,
+            b"rocddi code-cache: wait=Completed; read=1; write=1; completion=0; ib_entry=1; ib_exit=1\n"
+        );
         let mut full = &mut [0_u8; 0][..];
         assert!(
-            write_failure_diagnostic(&mut full, WaitOutcome::Deadline, (0, 1), 1, (0, 0)).is_err()
+            write_wait_diagnostic(&mut full, WaitOutcome::Deadline, (0, 1), 1, (0, 0)).is_err()
         );
         Ok(())
     }
