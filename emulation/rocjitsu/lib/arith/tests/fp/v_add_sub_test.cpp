@@ -623,8 +623,10 @@ TEST(FpAddF64Gfx11, CapturedDirectedRounding) {
   check_captured_gfx11_exact<64, 64>(rj_arith_v_add_f64_w64, add_f64_rounding_lanes);
 }
 
-// Expected causes retain the inherited bridge classifiers, including their
-// distinction from the separately qualified strict MUL reporting model.
+// ADD/SUB/SUBREV and selection retain the inherited bridge classifiers, as does RDNA3 MUL,
+// which reports nothing for zero times infinity. gfx12 MUL reports the shared hardware
+// classifier: gfx1201 (R9700, 2026-11-18) raises INVALID there, and raises nothing for a
+// quiet NaN times a denormal or when input flushing turns the denormal factor into zero.
 TEST(FpBinaryF32, CompatibilityStatus) {
   using namespace rocjitsu::arith::test;
   struct Case {
@@ -640,11 +642,12 @@ TEST(FpBinaryF32, CompatibilityStatus) {
       {rj_arith_v_sub_f32_w32_gfx12, rj_arith_v_sub_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
       {rj_arith_v_subrev_f32_w32_gfx12, rj_arith_v_subrev_f32_w64_gfx12, 0x7f800000, 0x7f800000, 1},
       {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0, 0x7f800000, 1},
-      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x7fc00000, 2},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x7fc00000, 0},
       {rj_arith_v_mul_f32_w32, rj_arith_v_mul_f32_w64, 0, 0x7f800000, 0},
       {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 0x7f7fffff, 0x40000000, 8,
        RJ_ARITH_ALU_OMOD_HALF},
-      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0x32, 0,
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0x32},
+      {rj_arith_v_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w64_gfx12, 1, 0x3f000000, 0, 0,
        RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS},
       {rj_arith_v_min_num_f32_w32, rj_arith_v_min_num_f32_w64, 0x7f800000, 1, 2},
       {rj_arith_v_maximum_f32_w32, rj_arith_v_maximum_f32_w64, 0x7f800001, 1, 3},
