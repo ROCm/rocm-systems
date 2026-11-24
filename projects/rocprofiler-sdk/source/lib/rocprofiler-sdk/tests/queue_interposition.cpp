@@ -776,10 +776,15 @@ stub_cas_write_index(const hsa_queue_t*, uint64_t expected, uint64_t value)
     return cur;
 }
 
+// One-shot callback run from the forwarded raw write-index load.
+std::function<void()> g_stub_load_hook = {};
+
 uint64_t
 stub_load_write_index(const hsa_queue_t*)
 {
-    return __atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE);
+    const auto value = __atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE);
+    if(auto hook = std::exchange(g_stub_load_hook, nullptr)) hook();
+    return value;
 }
 
 // Doorbell values forwarded to the next table; read only after the storing thread is joined.
@@ -827,6 +832,7 @@ protected:
         core_table_.hsa_signal_silent_store_screlease_fn     = stub_signal_store;
         g_stub_doorbells.clear();
         g_stub_doorbell_hook = nullptr;
+        g_stub_load_hook     = nullptr;
         g_stub_add_hold_queue.store(nullptr);
         g_stub_add_held.store(false);
         g_stub_add_release.store(false);
@@ -1217,6 +1223,40 @@ TEST_F(QueueInterpositionConsumerTransitionConcurrent, user_signal_callback_can_
     EXPECT_EQ(core_table_.hsa_queue_add_write_index_relaxed_fn(&q.queue, 1), 0u);
     EXPECT_EQ(g_stub_hw_wdid, 1u);
     EXPECT_EQ(q.state->virtual_wptr.load(), 0u);
+}
+
+// A raw write-index load's callback may start the first consumer: a load is not an admitted root,
+// so the start's seal does not wait on the thread running it.
+TEST_F(QueueInterpositionConsumerTransitionConcurrent, raw_load_callback_can_start_first_consumer)
+{
+    auto q   = stub_doorbell_queue{};
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
+
+    bool started     = false;
+    g_stub_load_hook = [&]() {
+        notify_queue_interposition_consumer_context_started(&ctx);
+        started = true;
+    };
+    auto cleanup = common::scope_destructor{[&]() {
+        if(started) notify_queue_interposition_consumer_context_stopped(&ctx);
+    }};
+
+    uint64_t loaded = ~uint64_t{0};
+    auto     load   = std::async(std::launch::async, [&]() {
+        loaded = core_table_.hsa_queue_load_write_index_scacquire_fn(&q.queue);
+    });
+    require_ready_or_abort(load, "first-consumer start from a raw load callback");
+    load.get();
+
+    ASSERT_TRUE(started) << "the raw load never reached the next table";
+    EXPECT_EQ(loaded, 0u);
+    EXPECT_FALSE(get_root_admission_snapshot().sealed);
+    EXPECT_EQ(get_root_admission_snapshot().admitted_roots, 0u);
+    // Tracing really started: the next claim lands on shadow.
+    EXPECT_EQ(core_table_.hsa_queue_add_write_index_relaxed_fn(&q.queue, 1), 0u);
+    EXPECT_EQ(q.state->virtual_wptr.load(), 1u);
+    EXPECT_EQ(g_stub_hw_wdid, 0u);
 }
 
 // An add admitted under tracing is parked (on the registry lock) after selecting shadow mode but

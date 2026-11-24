@@ -98,9 +98,6 @@ auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
 auto s_intercept_installed = std::atomic<bool>{false};  // installed (may not be active)
 auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
-// Forces bypass for the duration of a 0→1 / 1→0 consumer cutover. Producers stay raw while start
-// drains with admission open; new roots stall only while admission is sealed.
-auto s_consumer_transition_in_progress = std::atomic<bool>{false};
 // Wrapper root admission: the low bits count admitted roots, the top bit seals new ones out.
 // Consumer-driven mode changes and resync happen only sealed with no admitted root; terminal
 // teardown flags can still turn a running root's later calls to bypass.
@@ -110,7 +107,8 @@ auto               s_root_admission      = std::atomic<uint64_t>{0};
 bool
 has_active_queue_interposition_consumers()
 {
-    return s_active_queue_interposition_consumers.load(std::memory_order_relaxed) > 0;
+    // Acquire: an unadmitted load that sees a consumer also sees the shadow resynced before it.
+    return s_active_queue_interposition_consumers.load(std::memory_order_acquire) > 0;
 }
 
 auto*&
@@ -626,9 +624,7 @@ should_bypass_inline_intercept()
             // arriving mid-teardown off the instrumented path while the pool is being destroyed.
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment() ||
-            s_consumer_transition_in_progress.load(std::memory_order_acquire) ||
-            !has_active_queue_interposition_consumers() ||
+            registration::supports_attachment() || !has_active_queue_interposition_consumers() ||
             // Last, and the order matters: this is the only term that names a static_object whose
             // destructor nulls it. interposition_fini stores s_intercept_active false during
             // finalize, which runs ahead of destroy_static_objects.
@@ -649,9 +645,9 @@ get_root_admission_tls()
     return _v;
 }
 
-// Held by write-index wrappers and tracked-doorbell signal stores across mode selection, state
-// lookup and the operation. Same-thread descendants (tool callbacks) inherit the root's admission
-// and mode, so a seal never blocks them.
+// Held by write-index mutation wrappers and tracked-doorbell signal stores across mode selection,
+// state lookup and the operation. Same-thread descendants (tool callbacks) inherit the root's
+// admission and mode, so a seal never blocks them.
 class root_admission_guard
 {
 public:
@@ -1966,8 +1962,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
             state_ptr->real_wdid ? __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE) : 0;
         ROCP_WARNING << fmt::format(
             "ring_underflow queue={} ring_used={} ring_size={} hw_rdid={} "
-            "hw_wdid={} virtual_wptr={} scan_pos={} scan_end={} submit_pos={} consumers={} "
-            "transition={}",
+            "hw_wdid={} virtual_wptr={} scan_pos={} scan_end={} submit_pos={} consumers={}",
             fmt::ptr(state_ptr->hsa_queue),
             ring_used,
             state_ptr->ring_size,
@@ -1977,8 +1972,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
             scan_pos,
             scan_end,
             state_ptr->next_submit_pos,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-            s_consumer_transition_in_progress.load(std::memory_order_acquire));
+            s_active_queue_interposition_consumers.load(std::memory_order_acquire));
     }
 
     // Register the completion waits before the doorbell makes the packets visible to the GPU,
@@ -2108,7 +2102,10 @@ namespace
 bool
 has_unflushed_intercept_writes(const QueueState* state)
 {
-    return state->virtual_wptr.load() > __atomic_load_n(state->real_wdid, __ATOMIC_SEQ_CST);
+    // Shadow first: the real index only grows, so it is never older than the shadow it is checked
+    // against, and a flushed claim cannot read as unflushed.
+    const uint64_t shadow = state->virtual_wptr.load();
+    return shadow > __atomic_load_n(state->real_wdid, __ATOMIC_SEQ_CST);
 }
 
 // Terminal checks that must pass before a bypass path touches the registry or a queue state.
@@ -2140,9 +2137,9 @@ namespace impl
 {
 // The 16 wrappers differ only by HSA suffix + memory order; generated via macros below.
 //
-// Each write-index wrapper is a root_admission_guard root. In bypass, a tracked queue with
-// unflushed shadow claims keeps claiming on shadow under claim_mu; once caught up it stays raw
-// until a sealed start.
+// Each write-index mutation wrapper is a root_admission_guard root. In bypass, a tracked queue
+// with unflushed shadow claims keeps claiming on shadow under claim_mu; once caught up it stays
+// raw until a sealed start.
 
 // add_write_index: uint64_t(const hsa_queue_t*, uint64_t)
 #define ROCP_QUEUE_ADD_WRITE_INDEX(SUFFIX, ORDER)                                                  \
@@ -2232,11 +2229,12 @@ ROCP_QUEUE_CAS_WRITE_INDEX(screlease, std::memory_order_release)
 #undef ROCP_QUEUE_CAS_WRITE_INDEX
 
 // load_write_index: uint64_t(const hsa_queue_t*)
+// Loads never mutate an index, so they are not admission roots: a raw load's callbacks may start
+// or stop a consumer without waiting on their own seal.
 #define ROCP_QUEUE_LOAD_WRITE_INDEX(SUFFIX, ORDER)                                                 \
     uint64_t queue_load_write_index_##SUFFIX(const hsa_queue_t* q)                                 \
     {                                                                                              \
-        const auto _admission = root_admission_guard{};                                            \
-        if(_admission.bypass())                                                                    \
+        if(internal_threading::fork_stale() || should_bypass_inline_intercept())                   \
         {                                                                                          \
             if(auto s = lookup_tracked_queue_state(q);                                             \
                s && has_unflushed_intercept_writes(s.get()))                                       \
@@ -2324,26 +2322,31 @@ unseal_root_admission()
 // Only called sealed. Hold gate_lock so resync never races with process_doorbell_impl, which
 // reads and updates next_scan_pos / next_submit_pos under the same lock.
 void
-resync_queue_shadow_state(QueueState* state)
+resync_queue_shadow_state(const hsa_queue_t* queue, const queue_state_ptr_t& state)
 {
     if(!state || !state->real_wdid) return;
 
-    auto           lk   = std::lock_guard<std::mutex>{state->gate_lock};
-    const uint64_t wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
-    // Shadow ahead of a real index only our own publish moved holds unflushed claims: keep them.
-    if(state->virtual_wptr.load() > wdid && wdid == state->next_submit_pos) return;
-    state->virtual_wptr.store(wdid, std::memory_order_release);
-    state->next_scan_pos   = wdid;
-    state->next_submit_pos = wdid;
+    auto lk = std::lock_guard<std::mutex>{state->gate_lock};
+    // Registration pins the runtime queue real_wdid points into (order: gate_lock -> registry).
+    get_queue_registry().rlock([queue, &state](const auto& registry) {
+        if(auto itr = registry.find(queue); itr == registry.end() || itr->second != state) return;
+
+        const uint64_t wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
+        // Shadow ahead of a real index only our own publish moved holds unflushed claims: keep.
+        if(state->virtual_wptr.load() > wdid && wdid == state->next_submit_pos) return;
+        state->virtual_wptr.store(wdid, std::memory_order_release);
+        state->next_scan_pos   = wdid;
+        state->next_submit_pos = wdid;
+    });
 }
 
 void
 resync_all_queue_shadow_states()
 {
-    get_queue_registry().rlock([](const auto& registry) {
-        for(const auto& entry : registry)
-            resync_queue_shadow_state(entry.second.get());
-    });
+    // Copy out first: taking gate_lock under the registry lock would invert the established order.
+    const auto states = get_queue_registry().rlock([](const auto& registry) { return registry; });
+    for(const auto& [queue, state] : states)
+        resync_queue_shadow_state(queue, state);
 }
 }  // namespace
 
@@ -2363,15 +2366,14 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
             if(s_active_queue_interposition_consumers.load() == 0)
             {
                 // Admission stays open while doorbell workers and completion handlers drain.
-                s_consumer_transition_in_progress.store(true);
                 fence_all_queue_gates();
                 interposition_sync();
 
-                seal_root_admission();
+                // Resync's registry copy can throw bad_alloc; never leave every root sealed out.
+                auto sealed = common::scope_destructor{[]() { unseal_root_admission(); },
+                                                       []() { seal_root_admission(); }};
                 resync_all_queue_shadow_states();
                 s_active_queue_interposition_consumers.fetch_add(1);
-                s_consumer_transition_in_progress.store(false);
-                unseal_root_admission();
                 return;
             }
             cur = s_active_queue_interposition_consumers.load();
@@ -2399,11 +2401,8 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
             if(cur == 1)
             {
                 seal_root_admission();
-                s_consumer_transition_in_progress.store(true);
-                fence_all_queue_gates();
                 const bool last =
                     s_active_queue_interposition_consumers.compare_exchange_strong(cur, cur - 1);
-                s_consumer_transition_in_progress.store(false);
                 unseal_root_admission();
                 if(last) return;
                 continue;
