@@ -580,6 +580,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
     if (ret == ncclSuccess) ret = finalizeResult;
   }
   // Self-guarded no-op if the GIN-SDMA path was never used. Must precede ncclDevrFinalize.
+  NCCLCHECK(ncclGinAllGatherFinalize(comm));
   NCCLCHECK(ncclGinA2AFinalize(comm));
   NCCLCHECK(ncclGinAllReduceFinalize(comm));
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/graphics/image_completion.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/buffer_format_detail.h"
 #include "rocjitsu/vm/graphics/image_bc.h"
 #include "rocjitsu/vm/graphics/image_filter.h"
@@ -20,14 +20,17 @@ uint32_t encode_filtered_unorm(uint64_t rounded_unorm, uint32_t unorm_width) {
   // texture normalization, not ordinary division by the UNORM maximum.
   const uint64_t numerator = rounded_unorm << (34 - 13 - unorm_width);
   uint64_t normalized = 0;
-  for (uint32_t offset = 0; offset < 34; offset += unorm_width)
+  for (uint32_t offset = 0; offset < 34; offset += unorm_width) {
     normalized += numerator >> offset;
+  }
   const uint32_t bits = std::bit_width(normalized);
   const uint32_t shift = bits > 24 ? bits - 24 : 0;
-  if (shift)
+  if (shift) {
     normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
-  if (!normalized)
+  }
+  if (!normalized) {
     return 0;
+  }
   const uint32_t leading = std::bit_width(normalized) - 1;
   const uint32_t significand = static_cast<uint32_t>((normalized << (63 - leading)) >> 40);
   const uint32_t exponent = leading + shift + (127 - 34);
@@ -44,12 +47,14 @@ bool sample_fraction_q8(float value, uint32_t &result) {
     return true;
   }
   const uint32_t exponent = (bits >> 23) & 255;
-  if ((bits >> 31) || exponent < 119 || exponent > 127)
+  if ((bits >> 31) || exponent < 119 || exponent > 127) {
     return false;
+  }
   const uint32_t shift = 142 - exponent;
   const uint32_t significand = (bits & 0x7fffffu) | 0x800000u;
-  if (significand & ((1u << shift) - 1))
+  if (significand & ((1u << shift) - 1)) {
     return false;
+  }
   result = significand >> shift;
   return result <= 256;
 }
@@ -65,26 +70,31 @@ bool filter_unorm8_single(const GraphicsSampleAccess &access, uint32_t lane, uin
                           std::span<const std::array<uint32_t, 4>> texels,
                           std::array<uint32_t, 4> &values) {
   if (access.filter_counts[lane] != 1 || access.texels_per_tap != 1 ||
-      (access.taps_per_filter != 4 && access.taps_per_filter != 8))
+      (access.taps_per_filter != 4 && access.taps_per_filter != 8)) {
     return false;
+  }
   const uint32_t levels = access.taps_per_filter / 4;
   std::array<std::array<uint32_t, 4>, 2> weights;
   uint32_t mip = 0;
-  if (levels == 2 && !sample_fraction_q8(access.mip_fractions[lane], mip))
+  if (levels == 2 && !sample_fraction_q8(access.mip_fractions[lane], mip)) {
     return false;
+  }
   for (uint32_t level = 0; level < levels; ++level) {
     uint32_t x, y;
     if (access.filters[0].cube_corners[lane][level] ||
         !sample_fraction_q8(access.filters[0].fractions[lane][level][0], x) ||
-        !sample_fraction_q8(access.filters[0].fractions[lane][level][1], y))
+        !sample_fraction_q8(access.filters[0].fractions[lane][level][1], y)) {
       return false;
+    }
     weights[level] = {(256 - x) * (256 - y), x * (256 - y), (256 - x) * y, x * y};
   }
   for (uint32_t c = 0; c < components; ++c) {
     std::array<uint32_t, 2> filtered{};
-    for (uint32_t level = 0; level < levels; ++level)
-      for (uint32_t tap = 0; tap < 4; ++tap)
+    for (uint32_t level = 0; level < levels; ++level) {
+      for (uint32_t tap = 0; tap < 4; ++tap) {
         filtered[level] += texels[4 * level + tap][c] * weights[level][tap];
+      }
+    }
     // UNORM8 texels are at most 255; Q16 weights sum to 65536. Each
     // level is at most 255 * 2^16, and either mip product is below 2^32.
     // Round each mip contribution separately to Q19, exactly as the double
@@ -118,27 +128,33 @@ double filter_image_float_texels(std::array<double, 4> channels,
     ++active;
     selected = tap;
     const double value = channels[tap];
-    if (std::isnan(value))
+    if (std::isnan(value)) {
       return kFilterNan;
+    }
     positive_inf |= value == std::numeric_limits<double>::infinity();
     negative_inf |= value == -std::numeric_limits<double>::infinity();
     maximum = std::max(maximum, std::abs(value));
   }
-  if (positive_inf && negative_inf)
+  if (positive_inf && negative_inf) {
     return kFilterNan;
-  if (positive_inf || negative_inf)
+  }
+  if (positive_inf || negative_inf) {
     return negative_inf ? -std::numeric_limits<double>::infinity()
                         : std::numeric_limits<double>::infinity();
-  if (active == 1)
+  }
+  if (active == 1) {
     return channels[selected]; // Preserve signed zero at an exact texel center.
+  }
 
   // RDNA3/4 filters align contributing texels to a shared exponent,
   // truncating toward zero: twelve bits for sRGB/FP16, twenty-five for FP32.
   const int exponent = maximum > 0 ? std::ilogb(maximum) : 0;
   const double scale = std::ldexp(1.0, int(precision) - 1 - exponent);
-  for (uint32_t i = 0; i < channels.size(); ++i)
-    if (!(unaligned & (1u << i)))
+  for (uint32_t i = 0; i < channels.size(); ++i) {
+    if (!(unaligned & (1u << i))) {
       channels[i] = std::trunc(channels[i] * scale) / scale;
+    }
+  }
   // Weighted zero sums are positive, including sums of only negative zeros.
   return 0.0 + channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
          channels[3] * weights[3];
@@ -174,8 +190,9 @@ public:
   void add(double term) {
     if (!std::isfinite(value) || !std::isfinite(term)) {
       value += term;
-      if (std::isnan(value))
+      if (std::isnan(value)) {
         value = kFilterNan;
+      }
       return;
     }
     if (term != 0) {
@@ -208,10 +225,10 @@ private:
 
 void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &d) {
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
-  if (!d.lds_dst && !cu.owns_vgpr_range(wf, d.dst_reg_base, registers))
+  if (!d.lds_dst && !cu.owns_vgpr_range(wf, d.dst_reg_base, registers)) {
     return;
+  }
   const auto &format = d.decoded_buffer_format;
-  const fp_mode::detail::ScopedFenv environment(0);
   // Fixed UNORM8 filtering consumes integer texel units. Decode those units
   // directly instead of normalizing to FP32 and rounding back for each tap.
   const bool unorm8_texels =
@@ -226,11 +243,13 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
       unorm8_texels && !d.lds_dst && !cu.observes_register_access() && !cu.debug_active();
   bool destinations_materialized = false;
   std::array<uint32_t, 4> channel_offsets{};
-  for (uint32_t c = 1; c < channel_offsets.size(); ++c)
+  for (uint32_t c = 1; c < channel_offsets.size(); ++c) {
     channel_offsets[c] = channel_offsets[c - 1] + format.widths[c - 1] / 8;
+  }
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(d.exec_mask & (1ULL << lane)))
+    if (!(d.exec_mask & (1ULL << lane))) {
       continue;
+    }
     if (d.image_status && d.image_status->zero_sample_result(lane)) {
       write_format_load_lane(wf, cu, d, lane, {});
       destinations_materialized = true;
@@ -271,10 +290,12 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
       std::array<uint32_t, 4> values{};
       if (d.image_status && ((d.graphics_sample ? d.graphics_sample->taps[tap].missing_lanes
                                                 : d.image_status->misses) &
-                             (uint64_t{1} << lane)))
+                             (uint64_t{1} << lane))) {
         return values;
-      if (d.graphics_sample && d.graphics_sample->gather && !valid)
+      }
+      if (d.graphics_sample && d.graphics_sample->gather && !valid) {
         return values;
+      }
       if (integer_texels) {
         for (uint32_t c = 0; c < d.buffer_components; ++c) {
           const uint32_t selector = (d.buffer_selectors >> (3 * c)) & 7;
@@ -311,10 +332,11 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
           // flushes subnormals to signed zero, independently of VALU MODE.
           // Image and buffer loads preserve the decoded texel bits.
           const uint32_t magnitude = values[i] & 0x7fffffffu;
-          if (magnitude > 0x7f800000u)
+          if (magnitude > 0x7f800000u) {
             values[i] = std::bit_cast<uint32_t>(kFilterNan);
-          else if (magnitude < 0x00800000u)
+          } else if (magnitude < 0x00800000u) {
             values[i] &= 0x80000000u;
+          }
         }
       }
       if (d.graphics_sample && d.graphics_sample->comparison) {
@@ -358,19 +380,21 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
       // the first texel already decoded above.
       std::array<std::array<uint32_t, 4>, GraphicsSampleAccess::kMaxTaps> texels;
       texels[0] = values;
-      for (uint32_t tap = 1; tap < tap_count; ++tap)
+      for (uint32_t tap = 1; tap < tap_count; ++tap) {
         texels[tap] = texel(tap);
+      }
       if (!(integer_texels && filter_unorm8_single(*d.graphics_sample, lane, d.buffer_components,
                                                    std::span(texels).first(tap_count), values))) {
         std::array<std::array<std::array<double, 4>, 2>, GraphicsSampleAccess::kMaxFilters> weights;
         const uint32_t levels =
             d.graphics_sample->taps_per_filter == 8 * d.graphics_sample->texels_per_tap ? 2 : 1;
-        for (uint32_t filter = 0; filter < filter_count; ++filter)
+        for (uint32_t filter = 0; filter < filter_count; ++filter) {
           for (uint32_t level = 0; level < levels; ++level) {
             const double x = d.graphics_sample->filters[filter].fractions[lane][level][0];
             const double y = d.graphics_sample->filters[filter].fractions[lane][level][1];
             weights[filter][level] = {(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
           }
+        }
         for (uint32_t c = 0; c < d.buffer_components; ++c) {
           const uint32_t selector = (d.buffer_selectors >> (3 * c)) & 7;
           const bool bc_scalar =
@@ -389,24 +413,28 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
               const uint32_t first =
                   filter_index * access.taps_per_filter + (level * 4 + tap) * access.texels_per_tap;
               const auto channel = [&](uint32_t source) {
-                if (integer_texels)
+                if (integer_texels) {
                   return double(texels[first + source][c]);
+                }
                 const double value = std::bit_cast<float>(texels[first + source][c]);
                 // BC4/5 retain six fractional bits in decoded texel units.
-                if (bc_scalar)
+                if (bc_scalar) {
                   return buffer_format_round_even(value * unorm_max * 64) / 64;
+                }
                 return fixed_unorm ? buffer_format_round_even(value * unorm_max) : value;
               };
               channels[tap] = channel(0);
-              if (corners & (1u << tap))
+              if (corners & (1u << tap)) {
                 channels[tap] =
                     (channels[tap] * 21846 + channel(1) * 21845 + channel(2) * 21845) / 65536;
+              }
             }
             const auto &level_weights = weights[filter_index][level];
-            if (!fixed_unorm && !bc_scalar)
+            if (!fixed_unorm && !bc_scalar) {
               return filter_image_float_texels(
                   channels, level_weights, corners,
                   format.number == Number::Float && format.widths[0] == 32 ? 25 : 12);
+            }
             return channels[0] * level_weights[0] + channels[1] * level_weights[1] +
                    channels[2] * level_weights[2] + channels[3] * level_weights[3];
           };
@@ -419,7 +447,7 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
             const uint32_t normalization = std::bit_floor(filter_count);
             for (uint32_t pass = 0; pass < levels; ++pass) {
               const uint32_t level =
-                  cu.arch() == ROCJITSU_CODE_ARCH_RDNA4 ? pass : levels - 1 - pass;
+                  cu.arch() == rocjitsu::IsaFamily::Rdna4 ? pass : levels - 1 - pass;
               const double mip_weight = levels == 1 ? 1.0
                                         : level     ? d.graphics_sample->mip_fractions[lane]
                                                     : 1.0 - d.graphics_sample->mip_fractions[lane];
@@ -455,13 +483,15 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
               } else {
                 // Do not multiply an unused mip's NaN/infinity by zero, or lose
                 // signed zero at an exact mip level.
-                if (fraction == 1)
+                if (fraction == 1) {
                   filtered = filter_level(filter_index, 1);
-                else if (fraction != 0)
+                } else if (fraction != 0) {
                   filtered =
                       0.0 + filtered * (1 - fraction) + filter_level(filter_index, 1) * fraction;
-                if (std::isnan(filtered))
+                }
+                if (std::isnan(filtered)) {
                   filtered = kFilterNan;
+                }
               }
             }
             return filtered;
@@ -481,12 +511,14 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
             };
             filtered = weighted_filter(0);
             if (fixed_unorm) {
-              for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
+              for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index) {
                 filtered += weighted_filter(filter_index);
+              }
             } else {
               ImageFilterAccumulator accumulator(filtered);
-              for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
+              for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index) {
                 accumulator.add(weighted_filter(filter_index));
+              }
               filtered = accumulator.value;
               accumulation_exponent = accumulator.exponent;
             }
@@ -512,8 +544,9 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
           values[c] = std::bit_cast<uint32_t>(static_cast<float>(filtered));
           // Sampling flushes FP32 underflow at the output as well as the input.
           if (format.number == Number::Float && format.widths[0] == 32 &&
-              (values[c] & 0x7fffffffu) < 0x00800000u)
+              (values[c] & 0x7fffffffu) < 0x00800000u) {
             values[c] &= 0x80000000u;
+          }
         }
       }
     }

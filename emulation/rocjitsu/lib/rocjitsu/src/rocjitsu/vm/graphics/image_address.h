@@ -26,27 +26,35 @@ consteval ImageAddressEquation make_image_equation(const uint32_t *masks, uint32
   ImageAddressEquation result;
   for (uint32_t bit = 0; bit < bits; ++bit) {
     // All current equations select only the low twelve bits of either axis.
-    if (masks[bit] & 0xf000f000u)
+    if (masks[bit] & 0xf000f000u) {
       throw "image equation exceeds coordinate table";
-    for (uint32_t axis = 0; axis < 2; ++axis)
-      for (uint32_t chunk = 0; chunk < 3; ++chunk)
-        for (uint32_t value = 0; value < 16; ++value)
+    }
+    for (uint32_t axis = 0; axis < 2; ++axis) {
+      for (uint32_t chunk = 0; chunk < 3; ++chunk) {
+        for (uint32_t value = 0; value < 16; ++value) {
           result.chunks[axis][chunk][value] |=
               (std::popcount((value << (chunk * 4)) & (masks[bit] >> (axis * 16))) & 1u) << bit;
+        }
+      }
+    }
   }
   return result;
 }
 
 /// Block-size log2 for a validated swizzle mode; zero denotes linear storage.
 inline uint32_t image_block_log2(bool gfx12, uint32_t swizzle) {
-  if (!swizzle)
+  if (!swizzle) {
     return 0;
-  if (gfx12)
+  }
+  if (gfx12) {
     return swizzle == 4 ? 18 : 4 * swizzle + 4;
-  if (swizzle == 2)
+  }
+  if (swizzle == 2) {
     return 8;
-  if (swizzle == 6 || swizzle == 22)
+  }
+  if (swizzle == 6 || swizzle == 22) {
     return 12;
+  }
   return swizzle >= 28 ? 18 : 16;
 }
 
@@ -54,12 +62,16 @@ inline uint32_t image_block_log2(bool gfx12, uint32_t swizzle) {
 /// The bit patterns match AddrLib's gfx12SwizzlePattern.h for 1xAA 2D blocks.
 inline std::optional<uint64_t> gfx12_image_offset(uint32_t x, uint32_t y, uint32_t width,
                                                   uint32_t bytes, uint32_t swizzle) {
-  if (!width || x >= width || (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16))
+  if (!width || x >= width ||
+      (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16)) {
     return std::nullopt;
-  if (!swizzle)
+  }
+  if (!swizzle) {
     return uint64_t{y} * ((uint64_t{width} * bytes + 127u) & ~uint64_t{127}) + uint64_t{x} * bytes;
-  if (swizzle > 4)
+  }
+  if (swizzle > 4) {
     return std::nullopt;
+  }
   // Positive selectors address x, negative selectors address y; zero is a byte bit.
   static constexpr std::array<std::array<int8_t, 18>, 5> patterns{{
       {{1, 2, -1, 3, -2, -3, 4, -4, -5, 5, -6, 6, -7, 7, -8, 8, -9, 9}},
@@ -107,10 +119,12 @@ inline std::optional<uint64_t> gfx12_image_address(uint64_t base, uint32_t x, ui
                                                    uint32_t width, uint32_t bytes,
                                                    uint32_t swizzle) {
   const auto offset = gfx12_image_offset(x, y, width, bytes, swizzle);
-  if (!offset)
+  if (!offset) {
     return std::nullopt;
-  if (!swizzle)
+  }
+  if (!swizzle) {
     return base + *offset;
+  }
   const uint32_t block_log2 = image_block_log2(true, swizzle);
   const uint64_t block_mask = (uint64_t{1} << block_log2) - 1;
   return (base & ~block_mask) + (*offset ^ (base & block_mask));
@@ -197,10 +211,12 @@ inline uint32_t gfx11_large_tile_offset(uint32_t x, uint32_t y, uint32_t bytes, 
   };
   static constexpr auto equations = []() consteval {
     std::array<std::array<ImageAddressEquation, 5>, 4> result{};
-    for (uint32_t pattern = 0; pattern < 4; ++pattern)
-      for (uint32_t element = 0; element < 5; ++element)
+    for (uint32_t pattern = 0; pattern < 4; ++pattern) {
+      for (uint32_t element = 0; element < 5; ++element) {
         result[pattern][element] =
             make_image_equation(masks[pattern][element], (pattern & 1) ? 18 : 16);
+      }
+    }
     return result;
   }();
   const uint32_t element_log2 = std::countr_zero(bytes);
@@ -212,12 +228,16 @@ inline uint32_t gfx11_large_tile_offset(uint32_t x, uint32_t y, uint32_t bytes, 
 /// XOR equations were checked against AddrLib's Gfx11 surface address API.
 inline std::optional<uint64_t> gfx11_image_offset(uint32_t x, uint32_t y, uint32_t width,
                                                   uint32_t bytes, uint32_t swizzle) {
-  if (!width || x >= width || (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16))
+  if (!width || x >= width ||
+      (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16)) {
     return std::nullopt;
-  if (swizzle == 0)
+  }
+  if (swizzle == 0) {
     return uint64_t{y} * ((uint64_t{width} * bytes + 255u) & ~uint64_t{255}) + uint64_t{x} * bytes;
-  if (swizzle == 2 || swizzle == 6 || swizzle == 10)
+  }
+  if (swizzle == 2 || swizzle == 6 || swizzle == 10) {
     return gfx12_image_offset(x, y, width, bytes, swizzle ? (swizzle + 2) / 4 : 0);
+  }
   if (swizzle == 22) {
     const uint32_t element_log2 = std::countr_zero(bytes);
     const uint32_t x_bits = (13 - element_log2) / 2, y_bits = (12 - element_log2) / 2;
@@ -228,8 +248,9 @@ inline std::optional<uint64_t> gfx11_image_offset(uint32_t x, uint32_t y, uint32
   }
   const bool display = swizzle == 26 || swizzle == 30;
   const bool render = swizzle == 24 || swizzle == 27 || swizzle == 28 || swizzle == 31;
-  if ((!display && !render) || ((swizzle == 24 || swizzle == 28) && bytes == 16))
+  if ((!display && !render) || ((swizzle == 24 || swizzle == 28) && bytes == 16)) {
     return std::nullopt;
+  }
   const uint32_t block_log2 = image_block_log2(false, swizzle);
   const uint32_t element_log2 = std::countr_zero(bytes);
   const uint32_t offset = gfx11_large_tile_offset(x, y, bytes, block_log2, render);
@@ -244,10 +265,12 @@ inline std::optional<uint64_t> gfx11_image_address(uint64_t base, uint32_t x, ui
                                                    uint32_t width, uint32_t bytes,
                                                    uint32_t swizzle) {
   const auto offset = gfx11_image_offset(x, y, width, bytes, swizzle);
-  if (!offset)
+  if (!offset) {
     return std::nullopt;
-  if (!swizzle)
+  }
+  if (!swizzle) {
     return base + *offset;
+  }
   const uint32_t block_log2 = image_block_log2(false, swizzle);
   const uint64_t block_mask = (uint64_t{1} << block_log2) - 1;
   return (base & ~block_mask) + (*offset ^ (base & block_mask));
@@ -259,19 +282,24 @@ inline uint32_t gfx11_image_slice_xor(uint32_t layer, uint32_t bytes, uint32_t s
   if (swizzle == 22 || swizzle == 26 || swizzle == 30) {
     const uint32_t bits = swizzle == 22 ? 4 : 5;
     uint32_t value = 0;
-    for (uint32_t bit = 0; bit < bits; ++bit)
+    for (uint32_t bit = 0; bit < bits; ++bit) {
       value |= ((layer >> bit) & 1u) << (7 + bits - bit);
+    }
     return value;
   }
-  if (swizzle != 24 && swizzle != 27 && swizzle != 28 && swizzle != 31)
+  if (swizzle != 24 && swizzle != 27 && swizzle != 28 && swizzle != 31) {
     return 0;
-  if (bytes <= 4)
+  }
+  if (bytes <= 4) {
     return ((layer & 1) << 10) | ((layer & 2) << 8);
-  if (swizzle >= 28)
+  }
+  if (swizzle >= 28) {
     return ((layer & 1) << 17) | ((layer & 2) << 11) | ((layer & 4) << 9) | ((layer & 8) << 7) |
            ((layer & 16) << 5);
-  if (bytes == 8)
+  }
+  if (bytes == 8) {
     return ((layer & 1) << 15) | ((layer & 2) << 10) | ((layer & 4) << 8) | ((layer & 8) << 6);
+  }
   return ((layer & 1) << 11) | ((layer & 2) << 9) | ((layer & 4) << 7);
 }
 
@@ -298,8 +326,9 @@ inline std::optional<ImageMipLayout> image_mip_layout(bool gfx12, uint32_t swizz
   if (!width || !height || width > 65536 || height > 65536 || !levels || level >= levels ||
       levels > 17 ||
       !(gfx12 ? gfx12_image_offset(0, 0, width, bytes, swizzle)
-              : gfx11_image_offset(0, 0, width, bytes, swizzle)))
+              : gfx11_image_offset(0, 0, width, bytes, swizzle))) {
     return std::nullopt;
+  }
   const uint32_t element_log2 = std::countr_zero(bytes);
   const uint32_t block_log2 = image_block_log2(gfx12, swizzle);
   const uint32_t block_width = swizzle ? 1u << ((block_log2 - element_log2 + 1) / 2) : 256 / bytes;
@@ -340,9 +369,10 @@ inline std::optional<ImageMipLayout> image_mip_layout(bool gfx12, uint32_t swizz
   }
   out.first_tail = first_tail;
   out.slice_size = first_tail < levels ? uint64_t{1} << block_log2 : 0;
-  for (uint32_t mip = 0; mip < first_tail; ++mip)
+  for (uint32_t mip = 0; mip < first_tail; ++mip) {
     out.slice_size += uint64_t{align(allocation_extent(width, mip), block_width)} *
                       align(allocation_extent(height, mip), block_height) * bytes;
+  }
   if (level >= first_tail) {
     const uint32_t slot = max_tail_levels - 1 - (level - first_tail);
     const uint32_t tail = slot > 6 ? 16u << slot : slot << 8;
@@ -356,16 +386,19 @@ inline std::optional<ImageMipLayout> image_mip_layout(bool gfx12, uint32_t swizz
     out.pitch = block_width;
   } else {
     // Small mips precede large mips; a packed tail occupies one whole block.
-    if (first_tail < levels)
+    if (first_tail < levels) {
       out.offset = uint64_t{1} << block_log2;
-    for (uint32_t mip = level + 1; mip < first_tail; ++mip)
+    }
+    for (uint32_t mip = level + 1; mip < first_tail; ++mip) {
       out.offset += uint64_t{align(allocation_extent(width, mip), block_width)} *
                     align(allocation_extent(height, mip), block_height) * bytes;
+    }
   }
   // GFX12 linear storage still allocates 256-byte rows, but addresses pixels
   // with a 128-byte row pitch.
-  if (gfx12 && !swizzle)
+  if (gfx12 && !swizzle) {
     out.pitch = align(allocation_extent(width, level), 128 / bytes);
+  }
   return out;
 }
 

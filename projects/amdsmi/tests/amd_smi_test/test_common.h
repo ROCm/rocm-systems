@@ -32,6 +32,10 @@ uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list);
 uint32_t GetTestVerbosity();
 void SetTestVerbosity(uint32_t verbosity);
 
+// True when the global verbosity is at least STANDARD. For helpers and plain TEST() cases, which
+// have no TestBase to supply VERB().
+inline bool IsVerbose() { return GetTestVerbosity() >= TestBase::VERBOSE_STANDARD; }
+
 void PrintTestHeader(uint32_t dv_ind);
 const char* GetPerfLevelStr(amdsmi_dev_perf_level_t lvl);
 const char* GetBlockNameStr(amdsmi_gpu_block_t id);

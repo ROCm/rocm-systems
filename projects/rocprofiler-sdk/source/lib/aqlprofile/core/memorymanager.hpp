@@ -392,7 +392,7 @@ public:
         outputbuf_size    = size;
     }
 
-    // DEBUG_TRACE-only buffer for copying out RLC_SPM_SAMPLE_CNT.
+    // AQLPROFILE_DEBUG_LEVEL-only buffer for copying out RLC_SPM_SAMPLE_CNT.
     // This is used during SPM integration-test debugging to compare the hardware
     // sample-pulse count against the number of received segments. For a successful
     // run, those two numbers should match.

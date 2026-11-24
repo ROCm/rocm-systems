@@ -21,6 +21,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 
 #include <algorithm>
@@ -74,13 +75,13 @@ struct CwsrAbiProperties {
 /// wave widths and register layout; RDNA4 also has a WGP-takeover LDS encoding.
 /// Supporting those targets requires their complete record layouts, not just
 /// an LDS unit. Unsupported targets have no layout or encoding unit here.
-constexpr CwsrAbiProperties cwsr_abi_properties(rj_code_arch_t arch) {
+constexpr CwsrAbiProperties cwsr_abi_properties(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return {CwsrLayoutKind::Gfx9_4, kCwsrGfx942LdsGranuleBytes};
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return {CwsrLayoutKind::Gfx9_4, kCwsrGfx950LdsGranuleBytes};
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return {CwsrLayoutKind::Gfx12_5, kCwsrGfx1250LdsGranuleBytes};
   default:
     return {};
@@ -88,7 +89,7 @@ constexpr CwsrAbiProperties cwsr_abi_properties(rj_code_arch_t arch) {
 }
 
 /// @brief Select the context-save record layout implemented for @p arch.
-constexpr CwsrLayoutKind cwsr_layout_kind(rj_code_arch_t arch) {
+constexpr CwsrLayoutKind cwsr_layout_kind(rocjitsu::IsaFamily arch) {
   return cwsr_abi_properties(arch).layout_kind;
 }
 
@@ -103,17 +104,17 @@ constexpr CwsrLayoutKind cwsr_layout_kind(rj_code_arch_t arch) {
 /// nonsense instead of reporting that the target is unsupported.
 /// @param arch Architecture of the GPU whose queue would be serialized.
 /// @returns True if serialize/deserialize produce an image dbgapi can decode.
-constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
+constexpr bool cwsr_layout_modelled(rocjitsu::IsaFamily arch) {
   return cwsr_layout_kind(arch) != CwsrLayoutKind::Unsupported;
 }
 
 /// @brief Each modelled CDNA XCC has its own queue save area.
-constexpr uint32_t cwsr_area_count(rj_code_arch_t arch, uint32_t num_xcc) {
+constexpr uint32_t cwsr_area_count(rocjitsu::IsaFamily arch, uint32_t num_xcc) {
   return cwsr_layout_modelled(arch) && num_xcc != 0 ? num_xcc : 1u;
 }
 
 /// @brief Area holding a queue whose owner is @p xcc_id.
-constexpr uint32_t cwsr_area_for_xcc(rj_code_arch_t arch, uint32_t xcc_id) {
+constexpr uint32_t cwsr_area_for_xcc(rocjitsu::IsaFamily arch, uint32_t xcc_id) {
   return cwsr_layout_modelled(arch) ? xcc_id : 0u;
 }
 
@@ -127,14 +128,17 @@ constexpr uint32_t cwsr_area_for_xcc(rj_code_arch_t arch, uint32_t xcc_id) {
 /// @param gc_ip_version Packed GC hardware IP version, as
 ///        gc_ip_version_for_gfx_target_version() produces.
 /// @returns The exact modelled architecture, or INVALID for unsupported ones.
-constexpr rj_code_arch_t cwsr_arch_for_gc_ip_version(uint32_t gc_ip_version) {
-  if (gc_ip_version == make_gc_ip_version(9, 4, 3)) // gfx942
-    return ROCJITSU_CODE_ARCH_CDNA3;
-  if (gc_ip_version == make_gc_ip_version(9, 5, 0)) // gfx950
-    return ROCJITSU_CODE_ARCH_CDNA4;
-  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) // gfx1250
-    return ROCJITSU_CODE_ARCH_CDNA5;
-  return ROCJITSU_CODE_ARCH_INVALID;
+constexpr rocjitsu::IsaFamily cwsr_arch_for_gc_ip_version(uint32_t gc_ip_version) {
+  if (gc_ip_version == make_gc_ip_version(9, 4, 3)) { // gfx942
+    return rocjitsu::IsaFamily::Cdna3;
+  }
+  if (gc_ip_version == make_gc_ip_version(9, 5, 0)) { // gfx950
+    return rocjitsu::IsaFamily::Cdna4;
+  }
+  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) { // gfx1250
+    return rocjitsu::IsaFamily::Cdna5;
+  }
+  return rocjitsu::IsaFamily::Invalid;
 }
 
 /// @brief The same layout selection as cwsr_layout_kind(), for KFD topology.
@@ -147,13 +151,13 @@ constexpr bool cwsr_layout_modelled_for_gc_ip_version(uint32_t gc_ip_version) {
 }
 
 /// @brief Bytes represented by one encoded LDS unit, or zero if unsupported.
-constexpr uint32_t cwsr_lds_granule_bytes(rj_code_arch_t arch) {
+constexpr uint32_t cwsr_lds_granule_bytes(rocjitsu::IsaFamily arch) {
   return cwsr_abi_properties(arch).lds_granule_bytes;
 }
 
 /// @brief Largest live LDS allocation representable in one save record.
 /// @returns Zero for unsupported architectures.
-constexpr uint32_t cwsr_max_encoded_lds_bytes(rj_code_arch_t arch) {
+constexpr uint32_t cwsr_max_encoded_lds_bytes(rocjitsu::IsaFamily arch) {
   switch (cwsr_layout_kind(arch)) {
   case CwsrLayoutKind::Gfx9_4:
     return kCwsrGfx94LdsFieldMax * cwsr_lds_granule_bytes(arch);
@@ -167,7 +171,7 @@ constexpr uint32_t cwsr_max_encoded_lds_bytes(rj_code_arch_t arch) {
 /// @brief Whether a device has the geometry needed for an @p arch capacity.
 /// @details The caller separately decides whether this device is published.
 constexpr bool cwsr_capacity_eligible_device(const config::KfdDeviceConfig &device,
-                                             rj_code_arch_t arch) {
+                                             rocjitsu::IsaFamily arch) {
   return device.simd_count != 0 && device.simd_per_cu != 0 && device.max_waves_per_simd != 0 &&
          cwsr_arch_for_gc_ip_version(
              gc_ip_version_for_gfx_target_version(device.gfx_target_version)) == arch;
@@ -182,27 +186,31 @@ struct CwsrProducerLimits {
 
 [[nodiscard]] constexpr CwsrProducerLimits
 cwsr_producer_limits_for_device(const config::KfdDeviceConfig &device, uint32_t num_xcc) {
-  const rj_code_arch_t arch =
+  const rocjitsu::IsaFamily arch =
       cwsr_arch_for_gc_ip_version(gc_ip_version_for_gfx_target_version(device.gfx_target_version));
-  if (num_xcc == 0 || !cwsr_capacity_eligible_device(device, arch))
+  if (num_xcc == 0 || !cwsr_capacity_eligible_device(device, arch)) {
     return {};
+  }
   const uint64_t kfd_cus =
       ((uint64_t{device.simd_count} + device.simd_per_cu - 1) / device.simd_per_cu + num_xcc - 1) /
       num_xcc;
   // KFD can advertise only enabled SIMDs, while the simulator can stop waves
   // in every configured CU slot. Bound the producer's complete XCC.
   const uint64_t arrays = std::max(1u, device.num_shader_arrays_per_engine);
-  if (device.num_shader_engines != 0 && arrays > kCwsrMaxAlignedBytes / device.num_shader_engines)
+  if (device.num_shader_engines != 0 && arrays > kCwsrMaxAlignedBytes / device.num_shader_engines) {
     return {};
+  }
   const uint64_t shader_arrays = uint64_t{device.num_shader_engines} * arrays;
-  if (shader_arrays != 0 && device.num_cu_per_sh > kCwsrMaxAlignedBytes / shader_arrays)
+  if (shader_arrays != 0 && device.num_cu_per_sh > kCwsrMaxAlignedBytes / shader_arrays) {
     return {};
+  }
   const uint64_t simulated_cus = shader_arrays * device.num_cu_per_sh;
   const uint64_t active_cus = std::max(kfd_cus, simulated_cus);
   const uint64_t slots_per_cu = std::max(uint64_t{device.simd_per_cu} * device.max_waves_per_simd,
                                          uint64_t{device.max_slots_scratch_cu});
-  if (active_cus == 0 || slots_per_cu == 0 || active_cus > kCwsrMaxAlignedBytes / slots_per_cu)
+  if (active_cus == 0 || slots_per_cu == 0 || active_cus > kCwsrMaxAlignedBytes / slots_per_cu) {
     return {};
+  }
   return {active_cus, active_cus * slots_per_cu};
 }
 
@@ -237,20 +245,23 @@ static_assert(kCwsrAliasedSgprEnd <= kCwsrSavedSgprSlots,
               "aliased slots must land inside the saved SGPR block");
 
 /// One past the final special-register slot in the saved block.
-constexpr uint32_t cwsr_sgpr_alias_end(rj_code_arch_t arch, uint32_t sgpr_count) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::sgpr_alias_end(sgpr_count) : kCwsrAliasedSgprEnd;
+constexpr uint32_t cwsr_sgpr_alias_end(rocjitsu::IsaFamily arch, uint32_t sgpr_count) {
+  return arch == rocjitsu::IsaFamily::Cdna3 ? cdna3::sgpr_alias_end(sgpr_count)
+                                            : kCwsrAliasedSgprEnd;
 }
 
 /// VCC and FLAT_SCRATCH are marshalled from their own wave fields. gfx12.5
 /// stores FLAT_SCRATCH in HWREGs and uses the last 16 saved scalars for TTMP.
-constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot, rj_code_arch_t arch,
+constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot, rocjitsu::IsaFamily arch,
                                          uint32_t sgpr_count = kCwsrSavedSgprSlots) {
   const uint32_t end = cwsr_sgpr_alias_end(arch, sgpr_count);
   const uint32_t vcc = cdna3::vcc_base(end);
-  if (slot == vcc || slot == vcc + 1)
+  if (slot == vcc || slot == vcc + 1) {
     return true;
-  if (cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5)
+  }
+  if (cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5) {
     return slot >= kCwsrGfx1250SavedSgprSlots - 16;
+  }
   const uint32_t flat_scratch = cdna3::flat_scratch_base(end);
   return slot == flat_scratch || slot == flat_scratch + 1;
 }
@@ -382,7 +393,7 @@ struct CwsrLayout {
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
-                                rj_code_arch_t arch, uint32_t control_stack_capacity = 0,
+                                rocjitsu::IsaFamily arch, uint32_t control_stack_capacity = 0,
                                 std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Serialize a queue using two block writes: payload first, then header.
@@ -403,8 +414,9 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 ///          made when the image is invalid or does not fit.
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
-    uint32_t control_stack_capacity = 0, std::optional<CwsrDebugRegion> runtime_debug_region = {});
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block,
+    rocjitsu::IsaFamily arch, uint32_t control_stack_capacity = 0,
+    std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Read wave register state back from a serialized CWSR area.
 ///
@@ -430,8 +442,8 @@ CwsrLayout serialize_queue_cwsr_bulk(
 ///          case @p waves is left unchanged).
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
-                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch,
-                            uint32_t control_stack_capacity = 0);
+                            const std::function<uint32_t(uint64_t)> &read32,
+                            rocjitsu::IsaFamily arch, uint32_t control_stack_capacity = 0);
 
 /// @brief Read and deserialize a queue CWSR image using block transfers.
 ///
@@ -442,7 +454,7 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 /// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch,
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rocjitsu::IsaFamily arch,
     uint32_t control_stack_capacity = 0);
 
 } // namespace kmd

@@ -61,8 +61,8 @@ constexpr uint32_t kUnwrittenDevFuncId = 0;
 constexpr int kTunedMaxChannels = 9;
 constexpr int kTunedWarps = 6;
 // Mirrors the ALGBIT(5) on algorithm_registry.cc's RING_SIMPLE row of algRegistry.
-constexpr uint64_t kRingSimpleAlgBit = 1ull << 5;
-constexpr uint64_t kAutomaticAlgMask = 0;
+constexpr rcclTuningMask kRingSimpleAlgBit = rcclTuningMask::bit(5);
+constexpr rcclTuningMask kAutomaticAlgMask{};
 constexpr int kLlTrafficMultiplier = 4;
 constexpr int kSingleNode = 1;
 constexpr int kMultiNode = 2;

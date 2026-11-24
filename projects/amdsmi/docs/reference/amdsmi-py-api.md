@@ -679,7 +679,10 @@ finally:
 
 ### amdsmi_get_gpu_driver_info
 
-Description: Returns the info of the driver
+Description: **deprecated** Returns the info of the driver. Use
+`amdsmi_get_gpu_driver_info_v2` instead, which returns the same three fields
+plus the driver build and package. This function emits a `DeprecationWarning`
+and is planned for removal in a future major release.
 
 Input parameters:
 
@@ -706,6 +709,8 @@ Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
 - `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
 - `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing a file
+- `AMDSMI_STATUS_DRM_ERROR` - Error when calling libdrm
 
 Example:
 
@@ -719,6 +724,86 @@ try:
     else:
         for device in devices:
             print("Driver info: ", amdsmi.amdsmi_get_gpu_driver_info(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_driver_info_v2
+
+Description: Returns the info of the driver, the parts of the amdgpu version,
+and the build number of the driver package. Supersedes
+`amdsmi_get_gpu_driver_info`.
+
+The driver package is the `amdgpu-dkms` package installed for the running
+kernel, or else its `amdgpu-kmod` RPM. It is reported only when it has the same
+base kernel version (`6.19.14` in `6.19.14.31400000`) as the loaded driver, and
+its build is then added to `driver_full_version`. Without such a package
+`driver_package` and `driver_build_version` are `N/A`.
+
+The build is read from the installed package, which is matched to the loaded
+driver by kernel version only. After a package upgrade it is the build of the
+loaded driver only once the driver has been reloaded.
+
+When the loaded driver has an amdgpu version (`A.B.C` or `A.B.C.D`) that no
+`amdgpu-dkms` package matches, the first call in a process runs `/usr/bin/rpm`
+to look for `amdgpu-kmod` and waits up to about 5 seconds for it. An rpm that
+has not answered by then is left to finish, and no `amdgpu-kmod` package is
+reported. A found ``amdgpu-kmod`` package, or an answer that none is installed,
+is kept until the process exits, also after a package upgrade. A failed lookup
+is asked again after 5 seconds, and not while that rpm still runs.
+``amdgpu-dkms`` is read on every call.
+
+A driver from an `amdgpu-kmod` package has a three-part version such as
+`6.16.13`, so its `amdgpu_driver_version` is `N/A`. On WSL `driver_version` and
+`driver_full_version` are the WDDM driver version, and the amdgpu parts and the
+package are `N/A`.
+
+Input parameters:
+
+* `processor_handle` device for which to query
+
+Output: Dictionary with fields. A value that is not available is `N/A`.
+
+Field | Content
+---|---
+`driver_name` | driver name
+`driver_version` | amdgpu module version, such as `6.19.14.31400000`
+`driver_date` | driver date, such as `2015/01/01 00:00`, or `N/A` when the kernel does not report one
+`driver_kernel_version` | base kernel version of the amdgpu source, such as `6.19.14`
+`amdgpu_driver_version` | amdgpu release, such as `31400000`
+`driver_build_version` | build number of the driver package, such as `2370381`
+`driver_full_version` | `driver_version` followed by the build, such as `6.19.14.31400000-2370381`; the same as `driver_version` when there is no build
+`driver_package` | `amdgpu-dkms` or `amdgpu-kmod`
+
+Exceptions that can be thrown by `amdsmi_get_gpu_driver_info_v2` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+The same as for `amdsmi_get_gpu_driver_info`. A package that cannot be looked
+up is not an error. In addition:
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Also when the loaded `libamd_smi.so` predates this call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_driver_info_v2(device)
+            print("amdgpu version:", info['driver_full_version'])
+            if info['driver_package'] != "N/A":
+                print("amdgpu package:", info['driver_package'])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

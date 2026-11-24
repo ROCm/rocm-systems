@@ -21,16 +21,19 @@ std::unique_ptr<rocjitsu::Decoder> create_target_decoder();
 
 inline constexpr IsaTargetDescriptor kTargetDescriptor{
     .id = "vendor-next",
-    .architecture_id = ROCJITSU_CODE_ARCH_VENDOR_NEXT,
-    .gpu_targets = kGpuTargets,
+    .family = IsaFamily::VendorNext,
+    .bindings = kGpuTargets,
     .decoder_factory = &create_target_decoder,
     .supports_execution = true,
 };
 ```
 
 The canonical string ID and aliases identify the target within the selected
-registry. The optional architecture and GPU bindings connect it to rocjitsu's
-closed public enums, offload-bundle processor names, and ELF machine values.
+registry. The internal family selects shared implementation traits. Concrete bindings
+connect canonical names to the public target enum and, when applicable,
+offload-bundle processor names and AMDGPU ELF machine values. An ELF machine
+value of zero means that the binding has no AMDGPU code-object identity, as
+for RV64I; code-object lookups skip these bindings.
 
 One ISA family may bind multiple concrete targets to a variant-aware decoder
 factory. Each binding carries immutable instruction-feature, target-behavior,
@@ -39,14 +42,14 @@ architecture-only default:
 
 ```cpp
 std::unique_ptr<rocjitsu::Decoder>
-create_variant_decoder(const IsaGpuTargetDescription &gpu_target);
+create_variant_decoder(const IsaTargetBinding &gpu_target);
 
 inline constexpr IsaTargetDescriptor kTargetDescriptor{
     .id = "vendor-family",
     .aliases = kTargetAliases,
-    .architecture_id = ROCJITSU_CODE_ARCH_VENDOR_FAMILY,
-    .gpu_targets = kGpuTargets,
-    .default_gpu_target = ROCJITSU_CODE_TARGET_VENDOR_BASE,
+    .family = IsaFamily::VendorFamily,
+    .bindings = kGpuTargets,
+    .default_target = ROCJITSU_CODE_TARGET_VENDOR_BASE,
     .decoder_factory = &create_target_decoder,
     .variant_decoder_factory = &create_variant_decoder,
     .supports_execution = true,
@@ -121,7 +124,7 @@ registry's direct dependency on its implementation.
 
 Exactly one registry composition may be linked into an executable or shared
 object because it defines that image's `default_isa_target_registry()` and
-enum-based decoder entry point.
+decoder entry points.
 
 ## Querying support
 
@@ -143,8 +146,8 @@ if (registry.find(requested_target) == nullptr)
 `targets()` enumerates descriptors in the provider order passed to
 `rj_add_isa_target_registry()`. Built-in provider lists preserve the order in
 which their CMake subdirectories register them. `find()` accepts a canonical
-ID, alias, integrated architecture enum, or integrated GPU target. Use
-`find_gpu_target()` when target-level capability or identity is required;
+ID, alias, internal ISA family, or public concrete target. Use
+`find_target()` when target-level capability or identity is required;
 family-level `supports_execution` does not imply that every concrete binding
 implements execution.
 
@@ -206,8 +209,9 @@ linked.
 
 1. Add the target description and provider source to the ISA implementation
    target.
-2. Add public architecture or GPU enum entries only when the public enum or
-   code-object APIs must address the target.
+2. Add a public target enum entry when the public enum or code-object APIs
+   must address the target. Extend the private ISA family only when a new
+   shared implementation is required.
 3. Select the provider in each executable or shared object that should contain
    it.
 4. Follow the existing `\NPI` markers for the remaining closed-world

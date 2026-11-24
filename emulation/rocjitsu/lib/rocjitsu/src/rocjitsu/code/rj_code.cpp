@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code_internal.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -13,14 +14,17 @@ using namespace rocjitsu;
 
 namespace {
 
-rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
+rocjitsu::IsaFamily arch_for_target(rj_code_target_id_t target) {
   const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
   if (descriptor == nullptr)
-    return ROCJITSU_CODE_ARCH_INVALID;
-  return descriptor->architecture_id;
+    return rocjitsu::IsaFamily::Invalid;
+  return descriptor->family;
 }
 
 bool code_object_accepts_target(const AmdGpuCodeObject &object, rj_code_target_id_t target) {
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target(target);
+  if (binding == nullptr || binding->elf_machine == 0)
+    return false;
   const rj_code_target_id_t object_target = object.target_id();
   return object_target == ROCJITSU_CODE_TARGET_INVALID || object_target == target;
 }
@@ -184,8 +188,8 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     if (!decoder)
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-    const rj_code_arch_t arch = arch_for_target(target_id);
-    if (arch == ROCJITSU_CODE_ARCH_INVALID)
+    const rocjitsu::IsaFamily arch = arch_for_target(target_id);
+    if (arch == rocjitsu::IsaFamily::Invalid)
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
     Instruction::ScopedHeapAllocation heap_allocation;
@@ -295,18 +299,6 @@ uint32_t rj_code_inst_size(const rj_code_inst_t *inst) {
   if (!inst)
     return 0;
   return static_cast<uint32_t>(reinterpret_cast<const Instruction *>(inst)->size());
-}
-
-uint32_t rj_code_inst_flags(const rj_code_inst_t *inst) {
-  if (!inst)
-    return 0;
-  const auto *i = reinterpret_cast<const Instruction *>(inst);
-  uint32_t flags = 0;
-  if (i->is_branch())
-    flags |= RJ_CODE_INST_BRANCH;
-  if (i->is_memory_op())
-    flags |= RJ_CODE_INST_MEMORY_OP;
-  return flags;
 }
 
 rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint32_t buf_size) {

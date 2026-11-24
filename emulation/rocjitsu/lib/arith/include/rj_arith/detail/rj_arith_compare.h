@@ -1595,8 +1595,9 @@ constexpr uint32_t RJ_ARITH_CLASS_POS_INF = 1U << 9;
 // Supports loose and empirical-exact semantics, independently of denormal
 // controls and guest IEEE mode. CLAMP is accepted and ignored.
 // Host FP controls are never changed; arithmetic may raise sticky host flags.
-// Gfx11 mode 3 is unsupported pending qualification of CLASS FP status. Other
-// modes retain exact masks. Gfx12 mode 3 succeeds with no FP-status output:
+// Unsuffixed APIs reject mode 3 pending qualification of CLASS FP status.
+// This also applies to the gfx908/gfx90a/gfx1010/gfx1030/gfx1150 adapters;
+// Compatibility retains classification masks. Gfx12 mode 3 succeeds without FP status:
 // observed gfx1201 CLASS does not raise flags, including for signaling NaNs.
 int rj_arith_v_cmp_class_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *d, const uint32_t *const *a, const uint32_t *const *b);

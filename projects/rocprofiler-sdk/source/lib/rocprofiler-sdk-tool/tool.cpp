@@ -28,6 +28,7 @@
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
+#include "kernel_dispatch_record.hpp"
 #include "kernel_iteration_filter.hpp"
 #include "stream_stack.hpp"
 
@@ -1309,9 +1310,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     header->payload);
 
                 auto attr = get_ext_attribution(record);
+                auto data = tool::copy_kernel_dispatch_record(record);
                 tool::write_ring_buffer(
                     tool::tool_buffer_tracing_kernel_dispatch_ext_record_t{
-                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
+                        data, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::KERNEL_DISPATCH);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||

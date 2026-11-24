@@ -6,6 +6,7 @@
 
 #include "amdgpu_elf_test_support.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -352,7 +353,7 @@ std::vector<uint8_t> make_minimal_amdgpu_kernel_elf(const std::vector<uint32_t> 
   return image;
 }
 
-std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
+std::unique_ptr<Instruction> decode_one(uint32_t word, rocjitsu::IsaFamily arch) {
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return nullptr;
@@ -762,7 +763,7 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
   return image;
 }
 std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
-  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, rocjitsu::IsaFamily::Cdna4);
   static_assert(kNopCdna4Result.succeeded());
 
   constexpr uint64_t rodata_offset = 0x100;

@@ -5244,6 +5244,9 @@ pub fn amdsmi_get_gpu_device_uuid(processor_handle: AmdsmiProcessorHandle) -> Am
 
 /// Get the GPU driver information for the device with the specified processor handle.
 ///
+/// Deprecated and planned for removal in a future major release: use
+/// [`amdsmi_get_gpu_driver_info_v2`] instead.
+///
 /// Given a processor handle `processor_handle`, this function retrieves the GPU driver information
 /// for the specified processor.
 ///
@@ -5286,6 +5289,72 @@ pub fn amdsmi_get_gpu_driver_info(
 ) -> AmdsmiResult<AmdsmiDriverInfoT> {
     let mut info = MaybeUninit::<AmdsmiDriverInfoT>::uninit();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_driver_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Get the GPU driver information, the parts of the amdgpu version and the driver package build
+/// for the device with the specified processor handle.
+///
+/// The returned [`AmdsmiDriverInfoV2T`] holds the fields of [`AmdsmiDriverInfoT`] and adds the
+/// kernel version and amdgpu release the module version is made of, the installed amdgpu-dkms or
+/// amdgpu-kmod package that has the kernel version of the loaded driver, the build of that
+/// package, and the full version that joins module version and build. A string that is not
+/// available is empty, except `driver_version`, which is `N/A` as in [`AmdsmiDriverInfoT`].
+///
+/// A call may wait up to about 5 seconds for `rpm`, as described for
+/// `amdsmi_get_gpu_driver_info_v2()` in `amdsmi.h`. An answer from `rpm` is kept until the
+/// process exits. A failed lookup is asked again after 5 seconds.
+///
+/// An amdgpu-kmod driver has a three-part version such as `6.16.13` and an empty
+/// `amdgpu_driver_version`. On WSL both version fields hold the WDDM driver version.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the GPU driver information is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiDriverInfoV2T>` - Returns `Ok(AmdsmiDriverInfoV2T)` containing the [`AmdsmiDriverInfoV2T`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example processor_handle, assuming the number of processors is greater than zero
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Retrieve the GPU driver information
+///     match amdsmi_get_gpu_driver_info_v2(processor_handle) {
+///         Ok(info) => println!(
+///             "amdgpu version: {} ({:?})",
+///             info.driver_full_version(),
+///             info.driver_package
+///         ),
+///         Err(e) => panic!("Failed to get GPU driver information: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_driver_info_v2` call fails.
+pub fn amdsmi_get_gpu_driver_info_v2(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiDriverInfoV2T> {
+    let mut info = MaybeUninit::<AmdsmiDriverInfoV2T>::zeroed();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_driver_info_v2(
         processor_handle,
         info.as_mut_ptr()
     ));

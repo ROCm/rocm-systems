@@ -1347,6 +1347,9 @@ typedef struct {
 /**
  * @brief Driver Information
  *
+ * @deprecated On Linux bare metal and Linux guests this struct is planned for
+ * removal in a future major release; use amdsmi_driver_info_v2_t instead
+ *
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
@@ -1354,6 +1357,49 @@ typedef struct {
   char driver_date[AMDSMI_MAX_STRING_LENGTH];
   char driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
+
+/**
+ * @brief Installed amdgpu driver package that has the kernel version of the
+ * loaded driver
+ *
+ * New values may be added; code that switches on it needs a default case.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{guest_1vf} @tag{guest_mvf} @endcond
+ */
+typedef enum {
+  AMDSMI_DRIVER_PACKAGE_NONE = 0,  //!< No matching installed package was found
+  AMDSMI_DRIVER_PACKAGE_DKMS = 1,  //!< amdgpu-dkms
+  AMDSMI_DRIVER_PACKAGE_KMOD = 2   //!< amdgpu-kmod
+} amdsmi_driver_package_t;
+
+/**
+ * @brief Driver Information, version 2
+ *
+ * driver_version, driver_date and driver_name are those of
+ * amdsmi_driver_info_t. Any other string that is not available is empty.
+ * The library zero-fills the whole struct, reserved included, before it
+ * writes the fields it has.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{guest_1vf} @tag{guest_mvf} @endcond
+ */
+typedef struct {
+  char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< amdgpu module version, such as
+                                                         //!< 6.19.14.31400000, or N/A when the
+                                                         //!< module has none
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];            //!< Driver date
+  char driver_name[AMDSMI_MAX_STRING_LENGTH];            //!< Driver name
+  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];  //!< Kernel version of the amdgpu
+                                                         //!< source, such as 6.19.14
+  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu release, such as 31400000
+  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];   //!< Build of driver_package, such
+                                                         //!< as 2370381
+  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];    //!< driver_version followed by the
+                                                         //!< build, such as
+                                                         //!< 6.19.14.31400000-2370381
+  amdsmi_driver_package_t driver_package;                //!< Installed package that matches
+                                                         //!< the loaded driver
+  uint32_t reserved[575];                                //!< Reserved for future fields
+} amdsmi_driver_info_v2_t;
 
 /**
  * @brief Board Information
@@ -8165,6 +8211,10 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
 /**
  *  @brief Returns the driver version information
  *
+ *  @deprecated On Linux bare metal and Linux guests this API is planned for
+ *  removal in a future major release; ::amdsmi_get_gpu_driver_info_v2() should
+ *  be used instead
+ *
  *  @ingroup tagSoftwareVersion
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
@@ -8179,6 +8229,53 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  */
 amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle,
                                            amdsmi_driver_info_t* info);
+
+/**
+ *  @brief Returns the driver version information, the parts of the amdgpu
+ *  version and the build of the driver package
+ *
+ *  @ingroup tagSoftwareVersion
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{guest_mvf}
+ *  @platform{guest_windows}
+ *
+ *  @details Returns the same status as ::amdsmi_get_gpu_driver_info(), and the
+ *  same driver_version, driver_date and driver_name. The amdgpu module version
+ *  is split into driver_kernel_version and amdgpu_driver_version.
+ *
+ *  The driver package is the amdgpu-dkms package installed for the running
+ *  kernel, or else its amdgpu-kmod RPM. It is reported only when it has the
+ *  kernel version of the loaded module. Its build is then
+ *  driver_build_version, and driver_full_version is driver_version followed by
+ *  that build. Without such a package driver_full_version is driver_version,
+ *  or empty when driver_version is N/A. The lookup is best effort and does not
+ *  change the status.
+ *
+ *  The build is read from the installed package, which is matched to the
+ *  loaded module by kernel version only. After a package upgrade it is the
+ *  build of the loaded module only once the module has been reloaded.
+ *
+ *  When the loaded module has an amdgpu version (A.B.C or A.B.C.D) that no
+ *  amdgpu-dkms package matches, the first call in a process runs /usr/bin/rpm
+ *  to look for amdgpu-kmod and waits up to about 5 seconds for it. An rpm that
+ *  has not answered by then is left to finish, and no amdgpu-kmod package is
+ *  reported. A found amdgpu-kmod package, or an answer that none is installed,
+ *  is kept until the process exits, also after a package upgrade. A failed
+ *  lookup is asked again after 5 seconds, and not while that rpm still runs.
+ *  amdgpu-dkms is read on every call.
+ *
+ *  @note The WSL backend has no amdgpu version or driver package to report;
+ *  driver_full_version is then the WDDM driver version.
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] info Reference to driver information structure. Must be
+ *              allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_driver_info_v2(amdsmi_processor_handle processor_handle,
+                                              amdsmi_driver_info_v2_t* info);
 
 /** @} End tagSoftwareVersion */
 

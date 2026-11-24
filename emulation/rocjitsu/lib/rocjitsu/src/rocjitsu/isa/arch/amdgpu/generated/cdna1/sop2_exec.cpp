@@ -28,8 +28,9 @@ void SAddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_add_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -47,8 +48,9 @@ void SSubU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_sub_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -66,8 +68,9 @@ void SAddI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_add_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -85,8 +88,9 @@ void SSubI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_sub_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -105,8 +109,9 @@ void SAddcU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_addc_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, input_scc, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -125,8 +130,9 @@ void SSubbU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_subb_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, input_scc, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -144,8 +150,9 @@ void SMinI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_min_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -163,8 +170,9 @@ void SMinU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_min_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -182,8 +190,9 @@ void SMaxI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_max_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -201,8 +210,9 @@ void SMaxU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_max_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -220,8 +230,9 @@ void SCselectB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input0 = input_scc ? registers.read_scalar(ssrc0) : 0;
   const uint32_t input1 = !input_scc ? registers.read_scalar(ssrc1) : 0;
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_cselect_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, input_scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -233,7 +244,22 @@ void SCselectB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCselectB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cselect_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint32_t input_scc = wf.read_scc();
+  const uint64_t input0 = input_scc ? registers.read_scalar64(ssrc0) : 0;
+  const uint64_t input1 = !input_scc ? registers.read_scalar64(ssrc1) : 0;
+  uint64_t result = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_cselect_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, input_scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
 }
 
 void SAndB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -242,8 +268,9 @@ void SAndB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_and_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -255,7 +282,25 @@ void SAndB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   wf.write_scc(scc);
 }
 
-void SAndB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_and_b64_sop2(*this, wf); }
+void SAndB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_and_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
+}
 
 void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess registers(wf);
@@ -263,8 +308,9 @@ void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_or_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -276,7 +322,25 @@ void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   wf.write_scc(scc);
 }
 
-void SOrB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b64_sop2(*this, wf); }
+void SOrB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_or_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
+}
 
 void SXorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess registers(wf);
@@ -284,8 +348,9 @@ void SXorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_xor_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -297,7 +362,25 @@ void SXorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   wf.write_scc(scc);
 }
 
-void SXorB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_xor_b64_sop2(*this, wf); }
+void SXorB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_xor_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
+}
 
 void SAndn2B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess registers(wf);
@@ -305,8 +388,9 @@ void SAndn2B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_andn2_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -319,7 +403,23 @@ void SAndn2B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SAndn2B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_andn2_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_andn2_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
 }
 
 void SOrn2B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -328,8 +428,9 @@ void SOrn2B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_orn2_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -342,7 +443,23 @@ void SOrn2B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SOrn2B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_orn2_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_orn2_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
 }
 
 void SNandB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -351,8 +468,9 @@ void SNandB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_nand_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -365,7 +483,23 @@ void SNandB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SNandB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_nand_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
 }
 
 void SNorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -374,8 +508,9 @@ void SNorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_nor_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -387,7 +522,25 @@ void SNorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   wf.write_scc(scc);
 }
 
-void SNorB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nor_b64_sop2(*this, wf); }
+void SNorB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_nor_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
+}
 
 void SXnorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess registers(wf);
@@ -395,8 +548,9 @@ void SXnorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_xnor_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -409,7 +563,23 @@ void SXnorB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SXnorB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint64_t input1 = registers.read_scalar64(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_xnor_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
 }
 
 void SLshlB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -418,8 +588,9 @@ void SLshlB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_lshl_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -432,7 +603,23 @@ void SLshlB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLshlB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshl_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint32_t input1 = registers.read_scalar(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_lshl_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
 }
 
 void SLshrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -441,8 +628,9 @@ void SLshrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_lshr_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -455,7 +643,23 @@ void SLshrB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLshrB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_lshr_b64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint32_t input1 = registers.read_scalar(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_lshr_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
 }
 
 void SAshrI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -464,8 +668,9 @@ void SAshrI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_ashr_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -478,7 +683,23 @@ void SAshrI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SAshrI64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ashr_i64_sop2(*this, wf);
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint32_t input1 = registers.read_scalar(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_ashr_i64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
 }
 
 void SBfmB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -486,8 +707,9 @@ void SBfmB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status = rj_arith_s_bfm_b32(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
   if (status != RJ_ARITH_SUCCESS) {
     wf.report_instruction_execution_error(
@@ -497,15 +719,31 @@ void SBfmB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   registers.write_scalar(sdst, result);
 }
 
-void SBfmB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfm_b64_sop2(*this, wf); }
+void SBfmB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess registers(wf);
+  const uint32_t input0 = registers.read_scalar(ssrc0);
+  const uint32_t input1 = registers.read_scalar(ssrc1);
+  uint64_t result = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status = rj_arith_s_bfm_b64(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+}
 
 void SMulI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess registers(wf);
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status = rj_arith_s_mul_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
   if (status != RJ_ARITH_SUCCESS) {
     wf.report_instruction_execution_error(
@@ -521,8 +759,9 @@ void SBfeU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_bfe_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -540,8 +779,9 @@ void SBfeI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_bfe_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -553,17 +793,54 @@ void SBfeI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   wf.write_scc(scc);
 }
 
-void SBfeU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_u64_sop2(*this, wf); }
+void SBfeU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint32_t input1 = registers.read_scalar(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_bfe_u64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
+}
 
-void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i64_sop2(*this, wf); }
+void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::RegisterAccess registers(wf);
+  const uint64_t input0 = registers.read_scalar64(ssrc0);
+  const uint32_t input1 = registers.read_scalar(ssrc1);
+  uint64_t result = 0;
+  uint32_t scc = 0;
+  if (wf.instruction_execution_failed()) {
+    return;
+  }
+  const int status =
+      rj_arith_s_bfe_i64(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
+  if (status != RJ_ARITH_SUCCESS) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  registers.write_scalar64(sdst, result);
+  wf.write_scc(scc);
+}
 
 void SCbranchGForkSop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t compare = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc1);
   uint64_t target = encoded & kPcAddressMask;
-  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)
+  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0) {
     target = wf.code_load_bias() + static_cast<int32_t>(encoded);
+  }
   wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;
 }
 
@@ -573,8 +850,9 @@ void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_absdiff_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -595,8 +873,9 @@ void SMulHiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status = rj_arith_s_mul_hi_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
   if (status != RJ_ARITH_SUCCESS) {
     wf.report_instruction_execution_error(
@@ -611,8 +890,9 @@ void SMulHiI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status = rj_arith_s_mul_hi_i32(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
   if (status != RJ_ARITH_SUCCESS) {
     wf.report_instruction_execution_error(
@@ -628,8 +908,9 @@ void SLshl1AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_lshl1_add_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -647,8 +928,9 @@ void SLshl2AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_lshl2_add_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -666,8 +948,9 @@ void SLshl3AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_lshl3_add_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -685,8 +968,9 @@ void SLshl4AddU32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
   uint32_t scc = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_lshl4_add_u32(wf.cu().arithmetic_flags(), 0, &result, input0, input1, &scc);
   if (status != RJ_ARITH_SUCCESS) {
@@ -703,8 +987,9 @@ void SPackLlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_pack_ll_b32_b16(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
   if (status != RJ_ARITH_SUCCESS) {
@@ -720,8 +1005,9 @@ void SPackLhB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_pack_lh_b32_b16(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
   if (status != RJ_ARITH_SUCCESS) {
@@ -737,8 +1023,9 @@ void SPackHhB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
-  if (wf.instruction_execution_failed())
+  if (wf.instruction_execution_failed()) {
     return;
+  }
   const int status =
       rj_arith_s_pack_hh_b32_b16(wf.cu().arithmetic_flags(), 0, &result, input0, input1);
   if (status != RJ_ARITH_SUCCESS) {

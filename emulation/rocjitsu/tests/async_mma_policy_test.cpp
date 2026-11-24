@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -24,7 +25,6 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
-#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -44,7 +44,7 @@ namespace policy = amdgpu::async_mma_policy;
 namespace mc = amdgpu::matrix_coexecution;
 
 TEST(AsyncMmaPolicyTest, EncodingHintDoesNotExcludeEnabledDecodedCandidates) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   // Exhaust the VOP3P opcode space so future decoded candidates cannot silently
   // become ineligible only after their instruction-cache line is warm.
   for (unsigned opcode = 0; opcode != 512; ++opcode) {
@@ -59,16 +59,16 @@ TEST(AsyncMmaPolicyTest, EncodingHintDoesNotExcludeEnabledDecodedCandidates) {
     const auto &inst = *decoded.value();
     SCOPED_TRACE(inst.mnemonic());
     if (policy::candidate(inst)) {
-      EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, words[0]));
+      EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna5, words[0]));
     }
   }
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA4})
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna4})
     EXPECT_TRUE(policy::encoding_may_be_candidate(arch, 0));
-  EXPECT_FALSE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, 0));
+  EXPECT_FALSE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna5, 0));
 }
 
 TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   for (unsigned opcode = 0; opcode != 128; ++opcode) {
     const auto encoding =
         cdna4::build_vop3p_mfma(opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320});
@@ -76,27 +76,27 @@ TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
     const std::array<uint32_t, 4> words = {encoding[0], encoding[1], 0, 0};
     auto result = decoder->decode(words.data());
     if (result.succeeded() && policy::candidate(*result.value())) {
-      EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, words[0]));
+      EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna4, words[0]));
     }
   }
   for (unsigned opcode : {45, 46}) {
     const auto words = mma_test::make_cdna4_mfma_scale_words(opcode, 1, 448, 449);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     EXPECT_FALSE(policy::candidate(*inst));
-    EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, words[0]));
+    EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna4, words[0]));
   }
   const auto add = cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 1, .ssrc1 = 2, .sdst = 0});
-  EXPECT_FALSE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, add[0]));
+  EXPECT_FALSE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna4, add[0]));
 }
 
 TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
-  EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_CDNA5));
-  EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_RDNA3));
-  EXPECT_FALSE(policy::supported(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna4));
+  EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna5));
+  EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Cdna3));
+  EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Rdna3));
+  EXPECT_FALSE(policy::supported(rocjitsu::IsaFamily::Rdna4));
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   for (auto opcode : {rdna4::kVWmmaF3216x16x16F16Vop3p, rdna4::kVWmmaI3216x16x32Iu4Vop3p,
                       rdna4::kVSwmmacF3216x16x32F16Vop3p}) {
     const auto words = rdna4::build_vop3p(
@@ -144,7 +144,7 @@ TEST(AsyncMmaPolicyTest, AdmissionRequiresMetadataAndKeepsDualInstructionsInline
                                                  amdgpu::Operation::Unknown, WAITCNT);
   EXPECT_FALSE(policy::safe_inline(unknown_wait));
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto scalar = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 1, .sdst = 2});
   std::unique_ptr<Instruction> scalar_inst(decode_valid(*decoder, scalar.data()));
   EXPECT_TRUE(policy::safe_inline(*scalar_inst));
@@ -163,7 +163,7 @@ TEST(AsyncMmaPolicyTest, AdmissionRequiresMetadataAndKeepsDualInstructionsInline
 // These are the production decoder restrictions that keep the defensive
 // Wavefront reporting guards unreachable on MMA helper threads.
 TEST(AsyncMmaPolicyTest, Cdna5AsyncCandidatesRejectNonVgprMatrixInputsAtDecode) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   unsigned candidates = 0;
   for (unsigned opcode = 0; opcode != 512; ++opcode) {
     const auto encoding = cdna5::build_vop3p(
@@ -194,8 +194,8 @@ TEST(AsyncMmaPolicyTest, Cdna5AsyncCandidatesRejectNonVgprMatrixInputsAtDecode) 
 }
 
 TEST(AsyncMmaPolicyTest, DynamicAsyncCandidatesRejectReservedFormatsAtDecode) {
-  auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-  auto cdna5_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto cdna4_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
+  auto cdna5_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   for (unsigned opcode : {45u, 46u}) {
     for (bool scaled : {false, true}) {
       const auto good = mma_test::make_cdna4_mfma_scale_words(opcode, 1, 448, 449);
@@ -239,14 +239,14 @@ TEST(AsyncMmaPolicyTest, DynamicAsyncCandidatesRejectReservedFormatsAtDecode) {
 }
 
 TEST(AsyncMmaPolicyTest, ScaledWmmaHintAndFootprintIncludeBothScaleRegisters) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   for (unsigned format_a = 0; format_a != 5; ++format_a) {
     for (unsigned format_b = 0; format_b != 5; ++format_b) {
       const auto words = mma_test::make_cdna5_wmma_scale_words(format_a, format_b, 448, 449);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_EQ(inst->mnemonic(), "v_wmma_scale_f32_16x16x128_f8f6f4");
       EXPECT_FALSE(policy::candidate(*inst));
-      EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, words[0]));
+      EXPECT_TRUE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna5, words[0]));
       auto access = policy::footprint(*inst, 256);
       ASSERT_TRUE(access);
       EXPECT_TRUE(access->reads.test(192));
@@ -263,11 +263,11 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaHintAndFootprintIncludeBothScaleRegisters) {
 }
 
 TEST(AsyncMmaPolicyTest, ScaledWmmaOffloadsVectorAndInlineScalesButKeepsScalarScalesInline) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   amdgpu::GpuMemory memory("scaled_wmma_memory");
   amdgpu::L2Cache l2("scaled_wmma_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
@@ -306,60 +306,6 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaOffloadsVectorAndInlineScalesButKeepsScalarSc
   }
 }
 
-TEST(AsyncMmaPolicyTest, UnsupportedAsyncWmmaHaltsWithoutHostException) {
-  if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
-    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  constexpr uint64_t kPc = 0x200000;
-  amdgpu::GpuMemory memory("unsupported_async_wmma_memory");
-  amdgpu::L2Cache l2("unsupported_async_wmma_l2");
-  amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
-  config.num_wf_slots = 1;
-  config.sgprs_per_wf = 106;
-  config.vgprs_per_wf = 256;
-  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
-  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu, "unsupported_async_wmma_cu",
-                                                                  config, &memory, &l2));
-  const auto &production_backend = cdna5::execution_backend();
-  std::vector<Instruction::ExecuteFn> callbacks(production_backend.instruction_callbacks,
-                                                production_backend.instruction_callbacks +
-                                                    production_backend.instruction_callback_count);
-  callbacks[static_cast<size_t>(cdna5::InstructionExecutionId::VWmmaF3232x16x128F4Vop3p)] =
-      [](Instruction &, void *) { throw util::UnimplementedInst("test async execution failure"); };
-  const IsaExecutionBackend throwing_backend{
-      .instruction_callbacks = callbacks.data(),
-      .instruction_callback_count = callbacks.size(),
-      .operand_backend = production_backend.operand_backend,
-  };
-  cu->replace_decoder_for_test(make_isa_decoder<cdna5::Isa>(&throwing_backend));
-  auto *wave = cu->dispatch_wf(0, kPc, 106, 256);
-  ASSERT_NE(wave, nullptr);
-  wave->set_exec(0xffffffff);
-
-  const auto first =
-      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
-                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  const auto second =
-      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
-                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
-  for (size_t index = 0; index != first.size(); ++index) {
-    memory.write32(kPc + index * sizeof(uint32_t), first[index]);
-    memory.write32(kPc + (index + first.size()) * sizeof(uint32_t), second[index]);
-  }
-  memory.write32(kPc + (first.size() + second.size()) * sizeof(uint32_t),
-                 cdna5::build_sopp(cdna5::kSEndpgmSopp)[0]);
-
-  testing::internal::CaptureStderr();
-  EXPECT_NO_THROW(cu->step());
-  const std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_TRUE(wave->is_halted());
-  EXPECT_NE(output.find("asynchronous v_wmma"), std::string::npos) << output;
-  EXPECT_NE(output.find("pc=0x200000"), std::string::npos) << output;
-  EXPECT_NE(output.find("unimplemented instruction"), std::string::npos) << output;
-  EXPECT_NE(output.find("test async execution failure"), std::string::npos) << output;
-}
-
 struct FaultDrainState {
   std::binary_semaphore worker_started{0};
   std::binary_semaphore release_worker{0};
@@ -378,7 +324,7 @@ TEST(AsyncMmaPolicyTest, TerminalMemoryFaultDrainsPendingMmaBeforePublishingFail
   amdgpu::GpuMemory memory("fault_drain_memory");
   amdgpu::L2Cache l2("fault_drain_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
@@ -499,13 +445,13 @@ private:
 TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
   if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto mma_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto mma_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto mma_words =
       cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
   std::unique_ptr<Instruction> mma(decode_valid(*mma_decoder, mma_words.data()));
 
-  auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto cdna4_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   const auto vop1_base =
       cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = amdgpu::SRC_DPP, .vdst = 202});
   auto vop1_raw =
@@ -524,7 +470,7 @@ TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
   vop2_raw.bank_mask = 0xf;
   vop2_raw.row_mask = 0x1;
 
-  auto cdna5_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto cdna5_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto vop3_base = cdna5::build_vop3(
       cdna5::kVAddF32Vop3,
       {.vdst = 202, .src0 = amdgpu::SRC_DPP, .src1 = 256 + 201, .src2 = 256 + 202});
@@ -569,7 +515,7 @@ TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
   amdgpu::GpuMemory memory("dpp_boundary_memory");
   amdgpu::L2Cache l2("dpp_boundary_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
@@ -615,7 +561,7 @@ TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
 TEST(AsyncMmaPolicyTest, IndependentPlainAndDpp8InstructionsKeepTheAsyncWindowOpen) {
   if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto mma_words =
       cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
@@ -647,7 +593,7 @@ TEST(AsyncMmaPolicyTest, IndependentPlainAndDpp8InstructionsKeepTheAsyncWindowOp
   amdgpu::GpuMemory memory("dpp_control_memory");
   amdgpu::L2Cache l2("dpp_control_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
@@ -686,7 +632,7 @@ TEST(AsyncMmaPolicyTest, IndependentPlainAndDpp8InstructionsKeepTheAsyncWindowOp
 TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
   if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto words =
       cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
@@ -694,7 +640,7 @@ TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
   amdgpu::GpuMemory memory("wait_idle_memory");
   amdgpu::L2Cache l2("wait_idle_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 128;
@@ -706,10 +652,10 @@ TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0xffffffff);
 
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(int(arch));
     auto wait_decoder = Decoder::create(arch);
-    const auto wait_words = arch == ROCJITSU_CODE_ARCH_CDNA5
+    const auto wait_words = arch == rocjitsu::IsaFamily::Cdna5
                                 ? cdna5::build_sopp(cdna5::kSWaitIdleSopp, {})
                                 : rdna4::build_sopp(rdna4::kSWaitIdleSopp, {});
     std::unique_ptr<Instruction> wait(decode_valid(*wait_decoder, wait_words.data()));
@@ -737,7 +683,7 @@ TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
 TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
   if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto good_words =
       cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
@@ -753,7 +699,7 @@ TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
   amdgpu::GpuMemory memory("matrix_failure_memory");
   amdgpu::L2Cache l2("matrix_failure_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 128;

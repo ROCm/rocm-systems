@@ -21,6 +21,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -115,7 +116,7 @@ template <int WaveSize> struct WaveFixture {
   amdgpu::Wavefront *wf = nullptr;
 
   WaveFixture(const char *mem_label, const char *l2_label, const char *cu_label,
-              rj_code_arch_t arch)
+              rocjitsu::IsaFamily arch)
       : gpu_mem(mem_label), l2(l2_label) {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -124,19 +125,21 @@ template <int WaveSize> struct WaveFixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     if constexpr (WaveSize == 64) {
-      if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      if (arch == rocjitsu::IsaFamily::Rdna4) {
         cu = std::make_unique<
             amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Rdna4Wave64CarryTestIsa>>(
             cu_label, cfg, &gpu_mem, &l2);
       } else {
         rocjitsu::test::initialize_compute_unit(cu, cu_label, cfg, &gpu_mem, &l2);
-        if (!cu)
+        if (!cu) {
           return;
+        }
       }
     } else {
       rocjitsu::test::initialize_compute_unit(cu, cu_label, cfg, &gpu_mem, &l2);
-      if (!cu)
+      if (!cu) {
         return;
+      }
     }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
@@ -183,8 +186,9 @@ template <int WaveSize> struct WaveFixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     Result res;
     uint32_t vbase = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WaveSize; ++lane)
+    for (uint32_t lane = 0; lane < WaveSize; ++lane) {
       res.dst[lane] = cu->read_vgpr(vbase + 2, lane);
+    }
     uint64_t lo = cu->read_sgpr(sdst_sgpr + 0);
     uint64_t hi = cu->read_sgpr(sdst_sgpr + 1);
     res.sdst = (hi << 32) | lo;
@@ -225,7 +229,8 @@ struct ForceScalarGuard {
 
 template <int WaveSize>
 void check_case(const char *mem_label, const char *l2_label, const char *cu_label,
-                rj_code_arch_t arch, const CarryCase &c, uint32_t encoding_marker, uint64_t exec) {
+                rocjitsu::IsaFamily arch, const CarryCase &c, uint32_t encoding_marker,
+                uint64_t exec) {
   ForceScalarGuard gate_guard;
 
   using Result = typename WaveFixture<WaveSize>::Result;
@@ -240,8 +245,9 @@ void check_case(const char *mem_label, const char *l2_label, const char *cu_labe
   auto run_mode = [&](bool force_scalar, uint64_t vcc_in, uint64_t cin_word) -> Result {
     util::set_force_scalar_for_testing(force_scalar);
     WaveFixture<WaveSize> fx(mem_label, l2_label, cu_label, arch);
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t sb = fx.wf->sgpr_alloc().base;
@@ -293,27 +299,32 @@ void check_case(const char *mem_label, const char *l2_label, const char *cu_labe
 }
 
 void run_cdna4(uint64_t exec) {
-  for (const auto &c : kCdna4Cases)
+  for (const auto &c : kCdna4Cases) {
     check_case<64>("vop3_carry_simd_mem", "vop3_carry_simd_l2", "cu_vop3_carry_simd",
-                   ROCJITSU_CODE_ARCH_CDNA4, c, kCdna4Encoding, exec);
+                   rocjitsu::IsaFamily::Cdna4, c, kCdna4Encoding, exec);
+  }
 }
 
 void run_rdna(uint64_t exec) {
-  for (const auto &c : kRdnaCases)
+  for (const auto &c : kRdnaCases) {
     check_case<32>("vop3_carry_simd_rdna_mem", "vop3_carry_simd_rdna_l2", "cu_vop3_carry_simd_rdna",
-                   ROCJITSU_CODE_ARCH_RDNA3, c, kRdna3Encoding, exec);
+                   rocjitsu::IsaFamily::Rdna3, c, kRdna3Encoding, exec);
+  }
 }
 
 void run_rdna4_wave64(uint64_t exec) {
-  for (const auto &c : kRdnaCases)
+  for (const auto &c : kRdnaCases) {
     check_case<64>("vop3_carry_simd_rdna4_mem", "vop3_carry_simd_rdna4_l2",
-                   "cu_vop3_carry_simd_rdna4", ROCJITSU_CODE_ARCH_RDNA4, c, kRdna3Encoding, exec);
+                   "cu_vop3_carry_simd_rdna4", rocjitsu::IsaFamily::Rdna4, c, kRdna3Encoding, exec);
+  }
 }
 
 void run_gfx1250_wave32(uint64_t exec) {
-  for (const auto &c : kRdnaCases)
+  for (const auto &c : kRdnaCases) {
     check_case<32>("vop3_carry_simd_gfx1250_mem", "vop3_carry_simd_gfx1250_l2",
-                   "cu_vop3_carry_simd_gfx1250", ROCJITSU_CODE_ARCH_CDNA5, c, kRdna3Encoding, exec);
+                   "cu_vop3_carry_simd_gfx1250", rocjitsu::IsaFamily::Cdna5, c, kRdna3Encoding,
+                   exec);
+  }
 }
 
 void check_rdna4_wave64_carry_in_oracle() {
@@ -323,7 +334,7 @@ void check_rdna4_wave64_carry_in_oracle() {
   for (bool force_scalar : {true, false}) {
     util::set_force_scalar_for_testing(force_scalar);
     WaveFixture<64> fx("vop3_carry_oracle_mem", "vop3_carry_oracle_l2", "cu_vop3_carry_oracle",
-                       ROCJITSU_CODE_ARCH_RDNA4);
+                       rocjitsu::IsaFamily::Rdna4);
     ASSERT_NE(fx.cu, nullptr);
     ASSERT_NE(fx.wf, nullptr);
 

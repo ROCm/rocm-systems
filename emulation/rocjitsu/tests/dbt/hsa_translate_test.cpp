@@ -6,6 +6,7 @@
 /// load via HSA, dispatch on the real GPU, and verify against CPU golden.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa.h>
@@ -23,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
@@ -104,7 +106,7 @@ hsa_amd_memory_pool_t find_pool(hsa_agent_t agent, hsa_amd_segment_t segment,
 }
 
 struct HostTarget {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t mach;
   char isa_name[128];
 };
@@ -121,22 +123,22 @@ HostTarget select_host_target(hsa_agent_t gpu) {
   // same for all three, but preserve the exact ELF MACH value that HSA expects
   // for the host agent's code object loader.
   if (std::strstr(t.isa_name, "gfx940")) {
-    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.arch = rocjitsu::IsaFamily::Cdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX940;
   } else if (std::strstr(t.isa_name, "gfx941")) {
-    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.arch = rocjitsu::IsaFamily::Cdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX941;
   } else if (std::strstr(t.isa_name, "gfx942")) {
-    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.arch = rocjitsu::IsaFamily::Cdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX942;
   } else if (std::strstr(t.isa_name, "gfx1100")) {
-    t.arch = ROCJITSU_CODE_ARCH_RDNA3;
+    t.arch = rocjitsu::IsaFamily::Rdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1100;
   } else if (std::strstr(t.isa_name, "gfx1201")) {
-    t.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    t.arch = rocjitsu::IsaFamily::Rdna4;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1201;
   } else if (std::strstr(t.isa_name, "gfx1200")) {
-    t.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    t.arch = rocjitsu::IsaFamily::Rdna4;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1200;
   }
   return t;
@@ -162,7 +164,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
                                 "(gfx1200/1201) GPU, found: "
                              << target.isa_name;
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, target.arch, target.mach);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
   EXPECT_TRUE(result.ok()) << "Translation diagnostic: " << result.diagnostics.front().message;
@@ -326,22 +328,26 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
   // RDNA3 accepts the target selector for vector_add, but this MFMA test still
   // needs RDNA4-only MFMA->WMMA expansion rules. Skip instead of translating
   // unsupported MFMA instructions into NOPs and comparing invalid output.
-  if (target.arch != ROCJITSU_CODE_ARCH_RDNA4) {
+  if (target.arch != rocjitsu::IsaFamily::Rdna4) {
     hsa_shut_down();
     GTEST_SKIP() << "MFMA→WMMA semantic expansion is currently implemented only for RDNA4; found: "
                  << target.isa_name;
   }
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, target.arch, target.mach);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
 
   // Dump translated CO for offline inspection.
   {
-    auto *f = std::fopen("/tmp/translated_mfma16.co", "wb");
-    if (f) {
-      std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
-      std::fclose(f);
+    std::error_code error;
+    const auto temporary = std::filesystem::temp_directory_path(error);
+    if (!error) {
+      const auto output = temporary / "translated_mfma16.co";
+      if (auto *f = std::fopen(output.c_str(), "wb")) {
+        std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
+        std::fclose(f);
+      }
     }
   }
 

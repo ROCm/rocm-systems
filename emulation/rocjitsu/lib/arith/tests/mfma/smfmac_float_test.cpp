@@ -91,6 +91,45 @@ template <int M, int K, int Bits> void arithmetic(Entry entry) {
   EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 7, nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
 }
+// The last NaN factor wins across terms. Within one term A precedes B,
+// and an initial accumulator payload survives if both factors stay numeric.
+TEST(SparseFloatMatrix, OrderedBf16NanPayloads) {
+  using Wave = std::array<uint32_t, 64>;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    std::array<Wave, 2> left{};
+    std::array<Wave, 4> right{}, accumulator{};
+    Wave metadata;
+    metadata.fill(0x44444444);
+    for (auto &reg : left) {
+      reg.fill(0x3f803f80);
+    }
+    for (auto &reg : right) {
+      reg.fill(0x3f803f80);
+    }
+    for (auto &reg : accumulator) {
+      reg.fill(0x7fa12345);
+    }
+    // In row 0, the earlier A NaN is replaced by either a later B NaN or
+    // by the A NaN at the last term (k=29). Row 1 has no NaN in A.
+    left[0][0] = 0x3f807fc1;
+    left[1][48] = 0xffa23f80;
+    // k=28 and k=29 occupy the low and high halves of B word 2.
+    right[2][48] = 0x7fa47fc3;
+    const uint32_t *a[] = {left[0].data(), left[1].data()};
+    const uint32_t *b[] = {right[0].data(), right[1].data(), right[2].data(), right[3].data()};
+    const uint32_t *index[] = {metadata.data()};
+    uint32_t *d[] = {accumulator[0].data(), accumulator[1].data(), accumulator[2].data(),
+                     accumulator[3].data()};
+    ASSERT_EQ(
+        rj_arith_v_smfmac_f32_16x16x32_bf16_w64(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, d, a, b, index),
+        RJ_ARITH_SUCCESS);
+    EXPECT_EQ(accumulator[0][0], 0xffe20000u);
+    EXPECT_EQ(accumulator[0][1], 0xffe20000u);
+    EXPECT_EQ(accumulator[1][0], 0x7fe40000u);
+    EXPECT_EQ(accumulator[1][1], 0x7fe12345u);
+  }
+}
+
 TEST(SparseFloatMatrix, smfmac_f32_16x16x32_f16_w64) {
   arithmetic<16, 32, 16>(rj_arith_v_smfmac_f32_16x16x32_f16_w64);
 }

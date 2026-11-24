@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/text_padding.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/relocation_function_table.h"
@@ -12,8 +13,8 @@
 
 namespace rocjitsu {
 
-TextAlignmentGaps::TextAlignmentGaps(const CodeObject &object, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || object.text_sections().size() != 1)
+TextAlignmentGaps::TextAlignmentGaps(const CodeObject &object, rocjitsu::IsaFamily arch) {
+  if (arch != rocjitsu::IsaFamily::Rdna4 || object.text_sections().size() != 1)
     return;
   const auto *elf = dynamic_cast<const AmdGpuCodeObject *>(&object);
   if (!elf)

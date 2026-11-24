@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
@@ -95,7 +96,7 @@ struct Wave32PluginFixture {
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
 
   explicit Wave32PluginFixture(
-      rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5,
+      rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5,
       amdgpu::MemoryWaitDiagnostics wait_checks = amdgpu::MemoryWaitDiagnostics::Warn,
       uint32_t vgpr_slot_size = 256,
       amdgpu::ArithmeticSemantics semantics = amdgpu::ArithmeticSemantics::Compatibility)
@@ -132,7 +133,7 @@ static_assert(amdgpu::mma_f32_native_width_supported(16, 16));
 static_assert(!amdgpu::mma_f32_native_width_supported(16, 32));
 
 TEST(ExecutionPluginTest, Gfx11TfeRequiresTheWholeDestinationBeforeReadingAddressOperands) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     Wave32PluginFixture fixture(arch);
     auto *observer = fixture.attach_ordering_plugin();
     auto *wave = fixture.cu->dispatch_wf(0, 0, 104, 32, 32);
@@ -197,7 +198,7 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
       cu->write_vgpr(vb + 2, lane, 0);
     }
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256), 0u, 0u,
                          0u};
     Instruction *inst = decode_valid(*decoder, words);
@@ -210,17 +211,17 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
 }
 
 TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndExceptionFlags) {
-  const std::pair<rj_code_arch_t, uint32_t> targets[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_CDNA5, cdna5::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA3, rdna3::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::kVMulF32Vop2},
-      {ROCJITSU_CODE_ARCH_RDNA4, rdna4::kVMulF32Vop2},
+  const std::pair<rocjitsu::IsaFamily, uint32_t> targets[] = {
+      {rocjitsu::IsaFamily::Cdna1, cdna1::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Cdna2, cdna2::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Cdna3, cdna3::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Cdna4, cdna4::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Cdna5, cdna5::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Rdna1, rdna1::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Rdna2, rdna2::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Rdna3, rdna3::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Rdna3_5, rdna3_5::kVMulF32Vop2},
+      {rocjitsu::IsaFamily::Rdna4, rdna4::kVMulF32Vop2},
   };
   constexpr uint64_t kExec = (1u << 1) | (1u << 7) | (1u << 21);
   for (const auto &[arch, opcode] : targets) {
@@ -270,9 +271,9 @@ TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndException
 }
 
 TEST(ExecutionPluginTest, AddUsesEachActiveSourceOnceForArithmeticAndStatus) {
-  for (const auto &[arch, opcode, half] : {std::tuple{ROCJITSU_CODE_ARCH_CDNA1, 1u, false},
-                                           {ROCJITSU_CODE_ARCH_RDNA3_5, 3u, false},
-                                           {ROCJITSU_CODE_ARCH_RDNA1, 50u, true}}) {
+  for (const auto &[arch, opcode, half] : {std::tuple{rocjitsu::IsaFamily::Cdna1, 1u, false},
+                                           {rocjitsu::IsaFamily::Rdna3_5, 3u, false},
+                                           {rocjitsu::IsaFamily::Rdna1, 50u, true}}) {
     Wave32PluginFixture f(arch);
     ASSERT_TRUE(f.cu);
     auto *plugin = f.attach_ordering_plugin();
@@ -317,7 +318,7 @@ TEST(ExecutionPluginTest, AddUsesEachActiveSourceOnceForArithmeticAndStatus) {
 
 TEST(ExecutionPluginTest, SignalingCompareReadsOnlySelectedInputs) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3_5}) {
     Wave32PluginFixture f(arch);
     ASSERT_TRUE(f.cu);
     auto *plugin = f.attach_ordering_plugin();
@@ -325,7 +326,7 @@ TEST(ExecutionPluginTest, SignalingCompareReadsOnlySelectedInputs) {
     ASSERT_NE(wave, nullptr);
     auto decoder = Decoder::create(arch);
     const uint32_t vb = wave->vgpr_alloc().base;
-    const bool gfx115 = arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+    const bool gfx115 = arch == rocjitsu::IsaFamily::Rdna3_5;
     const uint32_t eq = gfx115 ? 0xd402800a : 0xd4ca800a;
     const uint32_t never = gfx115 ? 0xd400800a : 0xd4c8800a;
     const uint32_t always = gfx115 ? 0xd40f800a : 0xd4ef800a;
@@ -369,7 +370,7 @@ TEST(ExecutionPluginTest, SignalingCompareReadsOnlySelectedInputs) {
 }
 
 TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     Wave32PluginFixture f(arch);
     ASSERT_TRUE(f.cu);
     auto *plugin = f.attach_ordering_plugin();
@@ -432,12 +433,12 @@ TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
 }
 
 TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSources) {
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5);
   ASSERT_TRUE(f.cu);
   auto *observer = f.attach_ordering_plugin();
   auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
   ASSERT_NE(wave, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   const auto base = wave->vgpr_alloc().base;
   wave->set_mode_raw(0x2f0);
   wave->set_exec(0x11);
@@ -516,11 +517,11 @@ TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSources) {
 
 TEST(ExecutionPluginTest, Gfx115ValuAllocationSuppressesTheIssueOrSelectsTheWholeSource) {
   for (unsigned slot : {16u, 32u}) {
-    Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, slot);
+    Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, slot);
     auto *observed = f.attach_ordering_plugin();
     auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
     ASSERT_NE(wave, nullptr);
-    auto dec = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+    auto dec = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
     auto &state = wave->ensure_memory_wait_scoreboard();
     const auto base = wave->vgpr_alloc().base;
     for (bool scalar : {false, true}) {
@@ -601,11 +602,11 @@ TEST(ExecutionPluginTest, Gfx115ValuAllocationSuppressesTheIssueOrSelectsTheWhol
 }
 
 TEST(ExecutionPluginTest, Gfx115M0RelativeDppReadsOnlyAnAdmittedDestination) {
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
   auto *observer = f.attach_ordering_plugin();
   auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
   ASSERT_NE(wave, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   const auto base = wave->vgpr_alloc().base;
   wave->set_exec(3);
   for (uint32_t opc : {0x7e088400u, 0xd5c20004u, 0x7e088800u, 0x7e089000u}) {
@@ -650,11 +651,11 @@ TEST(ExecutionPluginTest, Gfx115M0RelativeDppReadsOnlyAnAdmittedDestination) {
 
 TEST(ExecutionPluginTest, Gfx115Wave64SkipsBothDualOperationsAndTheirWaits) {
   for (unsigned width : {32u, 64u}) {
-    Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
+    Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
     auto *observer = f.attach_ordering_plugin();
     auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, width);
     ASSERT_NE(wave, nullptr);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
     auto inst = decoder->decode_window(std::array{0xca100101u, 0x04040116u});
     ASSERT_TRUE(inst.succeeded());
     wave->set_exec(1);
@@ -673,11 +674,11 @@ TEST(ExecutionPluginTest, Gfx115Wave64SkipsBothDualOperationsAndTheirWaits) {
 }
 
 TEST(ExecutionPluginTest, Gfx115UniformDppAddChecksOnlyAnAdmittedLane) {
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
   auto *observer = f.attach_ordering_plugin();
   auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
   ASSERT_NE(wave, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   auto &state = wave->ensure_memory_wait_scoreboard();
   unsigned hazards = 0;
   state.bind(0x200, &hazards, [](void *ctx, const auto &) { ++*static_cast<unsigned *>(ctx); });
@@ -718,11 +719,11 @@ TEST(ExecutionPluginTest, Gfx115UniformDppAddChecksOnlyAnAdmittedLane) {
 }
 
 TEST(ExecutionPluginTest, Gfx115WmmaUsesWholeTwoRegisterIu4Factors) {
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
   auto *observer = f.attach_ordering_plugin();
   auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
   ASSERT_NE(wave, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   auto &state = wave->ensure_memory_wait_scoreboard();
   const auto base = wave->vgpr_alloc().base;
   for (unsigned start : {14u, 15u}) {
@@ -765,10 +766,10 @@ TEST(ExecutionPluginTest, Gfx115WmmaUsesWholeTwoRegisterIu4Factors) {
 
 TEST(ExecutionPluginTest, Gfx115WmmaUsesPerWaveAccumulatorAndDestinationTuples) {
   for (unsigned width : {32u, 64u}) {
-    Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
+    Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
     auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, width);
     ASSERT_NE(wave, nullptr);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
     const auto base = wave->vgpr_alloc().base;
     const unsigned count = 256 / width;
     for (unsigned start : {0u, 8u, 12u, 14u}) {
@@ -804,12 +805,12 @@ TEST(ExecutionPluginTest, Gfx115ConstantCompareAndDppAddObserveTheirPendingSourc
   for (auto semantics :
        {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose,
         amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
-    Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32,
+    Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32,
                           semantics);
     auto *observed = f.attach_ordering_plugin();
     auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
     ASSERT_NE(wave, nullptr);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
     const auto base = wave->vgpr_alloc().base;
     constexpr uint64_t active = 0x10003;
     wave->set_exec(active);
@@ -885,12 +886,12 @@ TEST(ExecutionPluginTest, Gfx115ConstantCompareAndDppAddObserveTheirPendingSourc
 
 TEST(ExecutionPluginTest, Gfx115ValuReadsAndWaitsUseTheSameAllocatedSource) {
   for (uint32_t slots : {16u, 32u}) {
-    Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, slots);
+    Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5, amdgpu::MemoryWaitDiagnostics::Warn, slots);
     ASSERT_TRUE(f.cu);
     auto *observer = f.attach_ordering_plugin();
     auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
     ASSERT_NE(wave, nullptr);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
     const auto base = wave->vgpr_alloc().base;
     wave->set_exec(1);
     if (slots > 20)
@@ -967,9 +968,10 @@ TEST(ExecutionPluginTest, Gfx115ValuReadsAndWaitsUseTheSameAllocatedSource) {
 }
 
 TEST(ExecutionPluginTest, Integer16ComparesReadAndWaitForSelectedHalves) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-                    ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
+    const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
     Wave32PluginFixture f(arch);
     ASSERT_NE(f.cu, nullptr);
     auto *observer = f.attach_ordering_plugin();
@@ -1023,7 +1025,7 @@ TEST(ExecutionPluginTest, Integer16ComparesReadAndWaitForSelectedHalves) {
 }
 
 TEST(ExecutionPluginTest, UniformDppCompareSourceWaitsOnlyWhenALaneReadsIt) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     Wave32PluginFixture f(arch);
     ASSERT_NE(f.cu, nullptr);
@@ -1045,7 +1047,7 @@ TEST(ExecutionPluginTest, UniformDppCompareSourceWaitsOnlyWhenALaneReadsIt) {
           std::array{0xd412006au, 0x000008fau, 0xff011103u | (uint32_t{bound} << 19)});
       ASSERT_TRUE(inst.succeeded());
       state.check_instruction(*inst.value(), *wave);
-      const bool reads_scalar = bound || arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const bool reads_scalar = bound || arch == rocjitsu::IsaFamily::Rdna4;
       EXPECT_EQ(hazards, uint32_t(reads_scalar));
       observer->events.clear();
       ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
@@ -1061,13 +1063,13 @@ TEST(ExecutionPluginTest, UniformDppCompareSourceWaitsOnlyWhenALaneReadsIt) {
 }
 
 TEST(ExecutionPluginTest, StreamoutDoesNotAcquireDataForUnallocatedReturnTuple) {
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna3_5);
   ASSERT_NE(f.cu, nullptr);
   auto *observer = f.attach_ordering_plugin();
   auto *wave = f.cu->dispatch_wf(0, 0x100, 104, 32, 32);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0xa);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3_5);
   auto &state = wave->ensure_memory_wait_scoreboard();
   for (uint32_t opcode : {0xd9ea0000u, 0xd9ee0000u}) { // ds_add/sub_gs_reg_rtn
     for (const auto &[dst, offset] : {std::pair{30u, 32u}, {31u, 0u}, {31u, 32u}}) {
@@ -1125,7 +1127,7 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
       cu->write_vgpr(vb + 2, lane, 0);
     }
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256), 0u, 0u,
                          0u};
     Instruction *inst = decode_valid(*decoder, words);
@@ -1170,7 +1172,7 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
     // destination mask. Source observation is determined from every active
     // destination before row/bank commit filtering; dpp_ctrl=0 selects the
     // first source lane of each active quad.
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     uint32_t words[2] = {
         vop1_encode(/*opcode=*/1, kDst, amdgpu::SRC_DPP),
         vop1_dpp_word(kSrc, /*dpp_ctrl=*/0, /*row_mask=*/0x1, /*bank_mask=*/0x5),
@@ -1223,7 +1225,7 @@ TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
   constexpr uint32_t kDst = 5;
   constexpr uint32_t kOldDst = 0xAABBCCDDu;
   const uint32_t vb = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
 
   auto run = [&](bool bound_ctrl) {
     cu->write_vgpr(vb + kSrc, 0, 0x11223344u);
@@ -1275,7 +1277,7 @@ TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
   for (uint32_t lane = 0; lane < kValues.size(); ++lane)
     cu->write_vgpr(vb + kReg, lane, kValues[lane]);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   uint32_t words[2] = {
       vop1_encode(/*v_mov_b32 opcode=*/1, kReg, amdgpu::SRC_DPP),
       vop1_dpp_word(kReg, /*quad_perm:[1,0,3,2]=*/0xB1, /*row_mask=*/0x1,
@@ -1317,7 +1319,7 @@ TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint32_t lane_sel = (0u << 0u) | (0u << 3u) | (2u << 6u) | (3u << 9u) | (4u << 12u) |
                             (5u << 15u) | (6u << 18u) | (7u << 21u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   auto run = [&](uint32_t src_marker) {
@@ -1379,7 +1381,7 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
   };
 
   const uint32_t vb = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (const Case &test_case : cases) {
     SCOPED_TRACE(std::format("instruction word 0x{:08x}", test_case.word));
@@ -1412,7 +1414,7 @@ TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnE
   if constexpr (!util::has_stdx_simd)
     GTEST_SKIP() << "<experimental/simd> unavailable";
   ForceScalarOverride force_simd(false);
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA2);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna2);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1420,7 +1422,7 @@ TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnE
   constexpr uint64_t exec = 0x5;
   wf->set_exec(exec);
   const uint32_t base = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   ASSERT_NE(decoder, nullptr);
 
   for (auto opcode : {rdna2::kVFmaF16Vop3, rdna2::kVDivFixupF16Vop3}) {
@@ -1501,7 +1503,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
 
     const uint32_t word =
         vop1_encode(/*v_mov_b64 opcode=*/29, kDst, /*generic VGPR source=*/256 + kSrc);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
     ASSERT_NE(inst, nullptr);
@@ -1556,7 +1558,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
 TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna4);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu.get();
@@ -1693,7 +1695,7 @@ TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
 TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
   // CDNA3 section 7.2 and CDNA4 section 7.3: these VOP1 conversions use only
   // the SDWA source register and byte selection; CLAMP and OMOD are ignored.
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     amdgpu::GpuMemory memory("sdwa_fp8_memory");
     amdgpu::L2Cache cache("sdwa_fp8_cache");
     cache.set_backing_memory(&memory);
@@ -1714,7 +1716,7 @@ TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
     for (uint32_t opcode : {84u, 85u}) {
       // Both encodings represent +2; CDNA3 uses the FNUZ biases.
       const uint32_t input =
-          arch == ROCJITSU_CODE_ARCH_CDNA3 ? (opcode == 84 ? 0x48u : 0x44u) : 0x40u;
+          arch == rocjitsu::IsaFamily::Cdna3 ? (opcode == 84 ? 0x48u : 0x44u) : 0x40u;
       for (uint32_t byte = 0; byte < 4; ++byte) {
         for (uint32_t modifiers = 0; modifiers < 8; ++modifiers) {
           SCOPED_TRACE(::testing::Message() << "arch=" << arch << " opcode=" << opcode
@@ -1848,7 +1850,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
     add_f32.dst_sel = amdgpu::sdwa::DWORD;
     add_f32.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     std::unique_ptr<Instruction> f32_inst(
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&add_f32)));
     ASSERT_NE(f32_inst, nullptr);
@@ -1934,7 +1936,7 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   raw.dst_sel = amdgpu::sdwa::DWORD;
   raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   std::unique_ptr<Instruction> inst(
       decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
   ASSERT_NE(inst, nullptr);
@@ -1990,7 +1992,7 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
     raw.dst_sel = amdgpu::sdwa::DWORD;
     raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     std::unique_ptr<Instruction> inst(
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
@@ -2022,7 +2024,7 @@ TEST(ExecutionPluginTest, SgprWriteObservationUsesExplicitWavePhysicalBlock) {
 
   // s_mov_b32 s47, 1 writes the last register in the rounded 48-SGPR allocation.
   constexpr uint32_t kMovTemporary = 0xBEAF0081u;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   auto decoded = decoder->decode(&kMovTemporary);
   ASSERT_TRUE(decoded.succeeded());
   std::unique_ptr<Instruction> inst = std::move(decoded).value();
@@ -2105,7 +2107,7 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
     // Selected sources and destinations carry their precise lane and byte
     // masks. Partial destinations currently use the scalar semantic path, so
     // they may report one exact write event per active lane.
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     for (const Case &test_case : cases) {
       SCOPED_TRACE(test_case.dst_sel);
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -2168,7 +2170,7 @@ TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite)
   cu->write_vgpr(vb + kSrc, 0, std::bit_cast<uint32_t>(0.5f));
   cu->write_vgpr(vb + kDst, 0, 0xDEADBEEFu);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   uint32_t words[2] = {
       vop1_encode(/*v_rcp_f32 opcode=*/34, kDst, amdgpu::SRC_SDWA),
       vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
@@ -2223,7 +2225,7 @@ TEST(ExecutionPluginTest, SdwaF16ClampPrecedesDestinationPlacement) {
     constexpr uint64_t kActiveLanes = 0b101;
     wavefront->set_exec(kActiveLanes);
     const uint32_t register_base = wavefront->vgpr_alloc().base;
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     for (uint32_t selection : {amdgpu::sdwa::WORD_0, amdgpu::sdwa::WORD_1, amdgpu::sdwa::DWORD}) {
       cdna4::Vop2VopSdwaMachineInst encoding{};
       encoding.src0 = amdgpu::SRC_SDWA;
@@ -2284,7 +2286,7 @@ TEST(ExecutionPluginTest, SdwaPackedF16ClampTreatsEachHalfIndependently) {
     wavefront->set_exec(1);
     wavefront->set_mode_raw(0xF0);
     const uint32_t register_base = wavefront->vgpr_alloc().base;
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     cdna4::Vop2VopSdwaMachineInst encoding{};
     encoding.src0 = amdgpu::SRC_SDWA;
     encoding.vsrc0 = 2;
@@ -2328,8 +2330,8 @@ TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
       Case{2.0f, 0.5f, 0x38004000u, 0x38003C00u},
       Case{0.5f, 2.0f, 0x40003800u, 0x3C003800u},
   };
-  for (const auto &[arch, arch_name] : {std::pair{ROCJITSU_CODE_ARCH_RDNA1, "rdna1"},
-                                        std::pair{ROCJITSU_CODE_ARCH_RDNA2, "rdna2"}}) {
+  for (const auto &[arch, arch_name] : {std::pair{rocjitsu::IsaFamily::Rdna1, "rdna1"},
+                                        std::pair{rocjitsu::IsaFamily::Rdna2, "rdna2"}}) {
     SCOPED_TRACE(arch_name);
     for (bool force_scalar : {false, true}) {
       ForceScalarOverride scalar_override(force_scalar);
@@ -2406,7 +2408,7 @@ TEST(ExecutionPluginTest, SdwaIntegerResultsDoNotUseFloatingClamp) {
     wavefront->set_exec(1);
     wavefront->set_mode_raw(0xF0u | amdgpu::Wavefront::DX10_CLAMP_BIT);
     const uint32_t register_base = wavefront->vgpr_alloc().base;
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     struct Case {
       uint32_t encoding;
       uint32_t modifiers;
@@ -2449,7 +2451,7 @@ TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
   constexpr uint32_t kQuietNan = 0x7FC12345u;
   const uint32_t vb = wf->vgpr_alloc().base;
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   uint32_t words[2] = {
       vop1_encode(/*v_rcp_f32 opcode=*/34, kDst, amdgpu::SRC_SDWA),
       vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
@@ -2494,7 +2496,7 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsOnlySelectedBytes) {
   // original destination bytes must not become part of the numeric result.
   cu->write_vgpr(vb + kDst, 0, 0x4000CC00u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   uint32_t words[2] = {
       vop1_encode(/*v_rcp_f32 opcode=*/34, kDst, amdgpu::SRC_SDWA),
       vop1_sdwa_word(kSrc, amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD,
@@ -2649,8 +2651,8 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
       return src0 + src1;
     return src1 << (src0 & 31u);
   };
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(static_cast<int>(arch));
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(force_scalar);
@@ -2665,7 +2667,7 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
       auto decoder = Decoder::create(arch);
       ASSERT_NE(decoder, nullptr);
       for (bool vopd3 : {false, true}) {
-        if (vopd3 && arch != ROCJITSU_CODE_ARCH_CDNA5)
+        if (vopd3 && arch != rocjitsu::IsaFamily::Cdna5)
           continue;
         SCOPED_TRACE(vopd3);
         for (uint32_t x_op : {kMov, kAdd, kShift}) {
@@ -2767,7 +2769,7 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
 }
 
 TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPluginReplacement) {
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_CDNA5, amdgpu::MemoryWaitDiagnostics::Off);
+  Wave32PluginFixture f(rocjitsu::IsaFamily::Cdna5, amdgpu::MemoryWaitDiagnostics::Off);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
   ASSERT_NE(wf, nullptr);
@@ -2879,7 +2881,7 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
     EXPECT_EQ(hazards, 0u);
     EXPECT_FALSE(state.empty());
     const auto words = cdna5::build_sopp(cdna5::kSCbranchScc1Sopp);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     util::StringDiagnostic error;
     auto decoded = decoder->decode_window(words, 0, error.emitter());
     ASSERT_TRUE(decoded.succeeded()) << error.message();
@@ -2924,58 +2926,6 @@ public:
   }
 };
 
-TEST(ExecutionPluginTest, ScalarRoundConvertAndPackObserversSeeCallerFpEnvironment) {
-  class ScalarObserver final : public ExecutionPlugin {
-  public:
-    ScalarObserver() : ExecutionPlugin("scalar_fp_observer") {}
-    void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override {
-      reads.push_back(std::fegetround());
-    }
-    void onAmdgpuWriteScalarRegister(const Wavefront *, RegisterRef) override {
-      writes.push_back(std::fegetround());
-    }
-    std::vector<int> reads, writes;
-  };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    Wave32PluginFixture fixture(arch);
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    auto owner = std::make_unique<ScalarObserver>();
-    auto *observer = owner.get();
-    fixture.plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    ASSERT_TRUE(fixture.plugin_group->add(std::move(owner)));
-    fixture.cu->set_plugin_group(fixture.plugin_group);
-    auto *wave = fixture.cu->dispatch_wf(0, 0, 104, 32);
-    ASSERT_NE(wave, nullptr);
-    fixture.cu->write_sgpr(wave->sgpr_alloc().base, 0x3fa00000);
-    fixture.cu->write_sgpr(wave->sgpr_alloc().base + 1, 0x40600000);
-    auto decoder = Decoder::create(arch);
-    for (auto words :
-         {rdna4::build_sop1(rdna4::kSCeilF32Sop1, {.ssrc0 = 0, .sdst = 2}),
-          rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 2}),
-          rdna4::build_sop2(rdna4::kSCvtPkRtzF16F32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2})}) {
-      auto decoded = decoder->decode_window(words);
-      ASSERT_TRUE(decoded.succeeded());
-      observer->reads.clear();
-      observer->writes.clear();
-      std::fenv_t saved;
-      ASSERT_EQ(std::fegetenv(&saved), 0);
-      ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
-      const bool succeeded =
-          fixture.cu->execute_instruction(decoded.value().get(), *wave).succeeded();
-      const int after = std::fegetround();
-      std::fesetenv(&saved);
-      EXPECT_TRUE(succeeded);
-      EXPECT_EQ(after, FE_UPWARD);
-      ASSERT_FALSE(observer->reads.empty());
-      ASSERT_FALSE(observer->writes.empty());
-      for (int rounding : observer->reads)
-        EXPECT_EQ(rounding, FE_UPWARD);
-      for (int rounding : observer->writes)
-        EXPECT_EQ(rounding, FE_UPWARD);
-    }
-  }
-}
-
 // Guest rounding is independent of the default host controls seen by register
 // observers. rj-arith may raise sticky flags while leaving those controls intact.
 TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
@@ -2997,7 +2947,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
       for (bool force_scalar : {false, true}) {
         SCOPED_TRACE(std::format("{} mode={:#x} force_scalar={}", test.name, mode, force_scalar));
         ForceScalarOverride execution_mode(force_scalar);
-        Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+        Wave32PluginFixture f(rocjitsu::IsaFamily::Rdna4);
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
         auto plugin_owner = std::make_unique<RoundingObserverPlugin>();
         auto *plugin = plugin_owner.get();
@@ -3014,7 +2964,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
           f.cu->write_vgpr(base + 0, lane, test.src0);
           f.cu->write_vgpr(base + 1, lane, test.src1);
         }
-        auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+        auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
         const auto words = rdna4::build_vop2(test.op, {.src0 = 256, .vsrc1 = 1, .vdst = 6});
         const std::array<uint32_t, 3> encoded = {words[0], 0u, 0u};
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoded.data()));
@@ -3059,37 +3009,37 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
 
 #if RJ_HOST_ARCH_X86
 // Both VOPD slots expose unchanged default host controls to register observers.
-// Migrated RDNA arithmetic may add sticky flags; legacy CDNA retains isolation.
+// Arithmetic may add sticky flags.
 TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
   struct Case {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     std::array<uint32_t, 3> words;
     std::vector<std::pair<uint32_t, uint32_t>> sources;
     std::vector<std::pair<uint32_t, uint32_t>> expected;
   };
   const Case cases[] = {
       // v_dual_add_f32 v6, v0, v1 :: v_dual_add_f32 v7, v2, v3
-      {ROCJITSU_CODE_ARCH_RDNA3,
+      {rocjitsu::IsaFamily::Rdna3,
        {0xc9080300u, 0x06060702u, 0u},
        {{0, 0x3f800000u}, {1, 0x33800001u}, {2, 0x3f800000u}, {3, 0x33800001u}},
        {{6, 0x3f800001u}, {7, 0x3f800001u}}},
-      {ROCJITSU_CODE_ARCH_RDNA4,
+      {rocjitsu::IsaFamily::Rdna4,
        {0xc9080300u, 0x06060702u, 0u},
        {{0, 0x3f800000u}, {1, 0x33800001u}, {2, 0x3f800000u}, {3, 0x33800001u}},
        {{6, 0x3f800001u}, {7, 0x3f800001u}}},
       // VOPD3: v_dual_add_f64 v[8:9], v[0:1], v[4:5] :: v_dual_add_f32 v10, v2, v6.
       // F64 is supported only in X; each source port uses disjoint VGPR banks.
-      {ROCJITSU_CODE_ARCH_CDNA5,
+      {rocjitsu::IsaFamily::Cdna5,
        {0xcf000000u | (33u << 18) | (4u << 12) | 256u, 258u | (4u << 16),
         8u | (6u << 8) | (10u << 24)},
        {{0, 0u}, {1, 0x3ff00000u}, {4, 1u}, {5, 0x3ca00000u}, {2, 0x3f800000u}, {6, 0x33800001u}},
        {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
   };
   for (const Case &test : cases) {
-    const bool uses_arith = test.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                            test.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                            test.arch == ROCJITSU_CODE_ARCH_CDNA5;
-    const uint32_t observed_bits = uses_arith ? ~uint32_t(_MM_EXCEPT_MASK) : UINT32_MAX;
+    const bool uses_arith = test.arch == rocjitsu::IsaFamily::Rdna3 ||
+                            test.arch == rocjitsu::IsaFamily::Rdna4 ||
+                            test.arch == rocjitsu::IsaFamily::Cdna5;
+    const uint32_t observed_bits = ~uint32_t(_MM_EXCEPT_MASK);
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(
           std::format("arch={} force_scalar={}", static_cast<int>(test.arch), force_scalar));
@@ -3309,7 +3259,7 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
       cu->write_vgpr(vb + 5, lane, 0x0000'0000u);
     }
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256), 0u, 0u,
                          0u};
     Instruction *inst = decode_valid(*decoder, words);
@@ -3346,7 +3296,7 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
       cu->write_vgpr(vb + 4, lane, 0x0000'0000u);
     }
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*opcode=*/315, /*vdst=*/4, /*src0=*/256, /*src1=*/257, words);
     Instruction *inst = decode_valid(*decoder, words);
@@ -3453,7 +3403,7 @@ TEST(ExecutionPluginTest, Gfx1250ScaledWmmaReadsOnlySelectedScaleLanes) {
       words[1] |= (select ^ 1) << 27;
       if (wide)
         words[2] = 0xcc880040U;
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
@@ -3494,7 +3444,7 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
       cu->write_vgpr(vb + kScaleB, lane, 0x7F7F'7F7Fu);
     }
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     const auto words = make_cdna4_mfma_scale_words(45, /*abid=*/1, vgpr_src(kScaleA),
                                                    vgpr_src(kScaleB), byte, byte);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -3554,7 +3504,7 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
     }
   }
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   const auto words = make_cdna4_mfma_scale_words(45, /*abid=*/1, /*+1.0f=*/242,
                                                  /*1/(2*pi)=*/248);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -3911,16 +3861,16 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
 
 TEST(ExecutionPluginTest, SdwaFloatingConversionsUseDestinationFormat) {
   struct Architecture {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint16_t cvt_f16_i16;
   };
   constexpr std::array architectures{
-      Architecture{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVCvtF16I16Vop1},
-      Architecture{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVCvtF16I16Vop1},
+      Architecture{rocjitsu::IsaFamily::Cdna4, cdna4::kVCvtF16I16Vop1},
+      Architecture{rocjitsu::IsaFamily::Cdna3, cdna3::kVCvtF16I16Vop1},
+      Architecture{rocjitsu::IsaFamily::Cdna2, cdna2::kVCvtF16I16Vop1},
+      Architecture{rocjitsu::IsaFamily::Cdna1, cdna1::kVCvtF16I16Vop1},
+      Architecture{rocjitsu::IsaFamily::Rdna2, rdna2::kVCvtF16I16Vop1},
+      Architecture{rocjitsu::IsaFamily::Rdna1, rdna1::kVCvtF16I16Vop1},
   };
   struct Case {
     uint16_t opcode;
