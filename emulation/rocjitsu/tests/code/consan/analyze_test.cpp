@@ -2647,7 +2647,7 @@ TEST_F(ConSanAnalysis, SecondSelectedEntryContributesDualAndTransposeMetadata) {
 }
 
 #if defined(CONSAN_ANALYZER_FIXTURE)
-TEST_F(ConSanAnalysis, FreshCliDistinguishesAbsentExecutionsFromZeroObservationAnalysis) {
+TEST_F(ConSanAnalysis, FreshCliSeparatesResultsFromRequestedExitPolicies) {
   std::string pattern = (std::filesystem::temp_directory_path() / "consan-lds-cli-XXXXXX").string();
   std::vector<char> temporary(pattern.begin(), pattern.end());
   temporary.push_back(0);
@@ -2655,44 +2655,103 @@ TEST_F(ConSanAnalysis, FreshCliDistinguishesAbsentExecutionsFromZeroObservationA
   const std::filesystem::path directory = temporary.data();
   const std::filesystem::path capture_path = directory / "capture.bin";
   const std::filesystem::path output_path = directory / "analysis.json";
-  const auto execute = [&](std::string_view performed, bool covered) {
+  const auto execute = [&](std::string_view performed, bool covered, uint64_t observations,
+                           bool findings) {
     const FailureOr<std::vector<uint8_t>> encoded = encode();
     ASSERT_TRUE(encoded.succeeded()) << error_.message();
     std::ofstream file(capture_path, std::ios::binary);
     file.write(reinterpret_cast<const char *>(encoded.value().data()), encoded.value().size());
     file.close();
     ASSERT_TRUE(file);
-    const pid_t child = ::fork();
-    ASSERT_GE(child, 0);
-    if (child == 0) {
-      const int output = ::open(output_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
-      if (output < 0 || ::dup2(output, STDOUT_FILENO) < 0 || ::chdir(directory.c_str()) != 0)
-        std::_Exit(90);
-      ::close(output);
-      ::execl(CONSAN_ANALYZER_FIXTURE, CONSAN_ANALYZER_FIXTURE, "capture.bin", nullptr);
-      std::_Exit(91);
-    }
-    int status = 0;
-    ASSERT_EQ(::waitpid(child, &status, 0), child);
-    ASSERT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(WEXITSTATUS(status), 0);
-    std::ifstream output(output_path);
-    const std::string rendered{std::istreambuf_iterator<char>(output),
-                               std::istreambuf_iterator<char>()};
-    EXPECT_NE(rendered.find(std::string("\"lds_analysis\":\"") + std::string(performed) + "\""),
-              std::string::npos);
-    EXPECT_NE(rendered.find(std::string("\"provided_entry_coverage_complete\":") +
-                            (covered ? "true" : "false")),
-              std::string::npos);
-    if (covered)
-      EXPECT_NE(rendered.find("\"valid_observations\":0"), std::string::npos);
-    else
-      EXPECT_NE(rendered.find("\"executions\":[]"), std::string::npos);
+    std::string baseline;
+    for (const bool fail_on_findings : {false, true})
+      for (const bool require_complete : {false, true}) {
+        SCOPED_TRACE(fail_on_findings);
+        SCOPED_TRACE(require_complete);
+        std::vector<std::string> command = {CONSAN_ANALYZER_FIXTURE, "capture.bin"};
+        if (fail_on_findings)
+          command.emplace_back("--fail-on-findings");
+        if (require_complete)
+          command.emplace_back("--require-complete");
+        std::vector<char *> arguments;
+        for (std::string &argument : command)
+          arguments.push_back(argument.data());
+        arguments.push_back(nullptr);
+        const pid_t child = ::fork();
+        ASSERT_GE(child, 0);
+        if (child == 0) {
+          const int output = ::open(output_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
+          if (output < 0 || ::dup2(output, STDOUT_FILENO) < 0 || ::chdir(directory.c_str()) != 0)
+            std::_Exit(90);
+          ::close(output);
+          ::execv(arguments.front(), arguments.data());
+          std::_Exit(91);
+        }
+        int status = 0;
+        ASSERT_EQ(::waitpid(child, &status, 0), child);
+        ASSERT_TRUE(WIFEXITED(status));
+        EXPECT_EQ(WEXITSTATUS(status),
+                  int((fail_on_findings && findings) || (require_complete && !covered)));
+        std::ifstream output(output_path);
+        const std::string rendered{std::istreambuf_iterator<char>(output),
+                                   std::istreambuf_iterator<char>()};
+        EXPECT_NE(rendered.find(std::string("\"lds_analysis\":\"") + std::string(performed) + "\""),
+                  std::string::npos);
+        EXPECT_NE(rendered.find(std::string("\"provided_entry_coverage_complete\":") +
+                                (covered ? "true" : "false")),
+                  std::string::npos);
+        EXPECT_NE(rendered.find(std::string("\"verdict\":\"") +
+                                (findings ? "findings" : "no_observed_findings") + "\""),
+                  std::string::npos);
+        if (performed == "performed")
+          EXPECT_NE(rendered.find("\"valid_observations\":" + std::to_string(observations)),
+                    std::string::npos);
+        else
+          EXPECT_NE(rendered.find("\"executions\":[]"), std::string::npos);
+        if (!fail_on_findings && !require_complete)
+          baseline = rendered;
+        else
+          EXPECT_EQ(rendered, baseline);
+      }
   };
   // An executed dispatch with no committed LDS observations still ran analysis.
-  execute("performed", true);
+  execute("performed", true, 0, false);
+  access(0, 0, 1);
+  access(1, 1, 1);
+  execute("performed", true, 2, true);
+  wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowLoss, 1);
+  wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowStatus, 7);
+  execute("performed", false, 2, true);
   capture_.executions.clear();
-  execute("not_performed", false);
+  append_execution();
+  wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowLoss, 1);
+  wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowStatus, 7);
+  execute("performed", false, 0, false);
+  capture_.executions.clear();
+  append_execution();
+  ImageEntryFacts native;
+  native.key = 192;
+  native.original_sgprs = 16;
+  native.original_vgprs = 8;
+  native.binding = {.name = "native_uncovered",
+                    .original_descriptor_offset = 192,
+                    .prepared_descriptor_offset = 864,
+                    .original_entry_offset = 96,
+                    .prepared_entry_offset = 640,
+                    .original_kernarg_bytes = 16,
+                    .kernarg_alignment = 8,
+                    .prepared_sgprs = 16,
+                    .prepared_vgprs = 8};
+  native.native_code = {{.original_offset = 96, .prepared_offset = 640, .bytes = 4}};
+  capture_.header.image.entries.push_back(native);
+  // Complete selected execution transport cannot close an owning inventory gap.
+  execute("performed", false, 0, false);
+  NoProbesNeededProof proof = {.instruction_count = 1, .code_bytes = 4};
+  proof.code_sha256[0] = 1;
+  capture_.header.image.entries.back().no_probes_needed = proof;
+  execute("performed", true, 0, false);
+  capture_.executions.clear();
+  execute("not_performed", false, 0, false);
   std::filesystem::remove_all(directory);
 }
 #endif

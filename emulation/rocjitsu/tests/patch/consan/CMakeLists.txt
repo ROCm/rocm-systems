@@ -204,6 +204,16 @@ set(RJ_CONSAN_TEST_ARTIFACT_ROOT
     CACHE PATH
     "Directory for preserved ConSan integration evidence"
 )
+add_test(
+    NAME ConSanApplication.ContractGuards
+    COMMAND
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_application_contract.py
+)
+set_tests_properties(
+    ConSanApplication.ContractGuards
+    PROPERTIES TIMEOUT 30 LABELS "consan;required-consan"
+)
 if(TARGET consan_original_fixtures)
     add_test(
         NAME ConSanPrepareCli.CompositionCapacity
@@ -215,6 +225,17 @@ if(TARGET consan_original_fixtures)
             ${_composition_prologue_image} --split-prologue-fixture
             ${_composition_split_prologue_image} --root
             ${RJ_CONSAN_TEST_ARTIFACT_ROOT}
+    )
+    add_test(
+        NAME ConSanApplication.AllImagesPreparation
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/application_coordinator_test.py
+            --prepare $<TARGET_FILE:rj_consan_prepare> --coordinator
+            ${PROJECT_BINARY_DIR}/tools/consan_prepare_application.py
+            --analyze-coordinator
+            ${PROJECT_SOURCE_DIR}/tools/consan_analyze_application.py --fixtures
+            ${_fixture_dir} --artifacts ${RJ_CONSAN_TEST_ARTIFACT_ROOT}
     )
     add_test(
         NAME ConSanPrepareCli.BestEffortCoverage
@@ -926,6 +947,33 @@ endif()
 
 if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
     add_dependencies(consan_multi_entry_runner consan_multi_entry_fixture)
+    add_test(
+        NAME ConSanApplicationSim.AllImagesAllEntries
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/consan_all_images_e2e.py --prepare
+            $<TARGET_FILE:rj_consan_prepare> --runner
+            $<TARGET_FILE:consan_multi_entry_runner> --inspect
+            $<TARGET_FILE:consan_capture_inspect> --analyze
+            $<TARGET_FILE:rj_consan_analyze> --plugin
+            $<TARGET_FILE:hsa_consan_testable> --launcher
+            $<TARGET_FILE:rocjitsu_bin> --coordinator
+            ${PROJECT_SOURCE_DIR}/tools/consan_prepare_application.py
+            --analyze-coordinator
+            ${PROJECT_SOURCE_DIR}/tools/consan_analyze_application.py --first
+            ${_fixture_dir}/multi-entry.hsaco --second
+            ${_fixture_dir}/multi-entry-mixed.hsaco --config
+            ${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json --root
+            ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --source ${PROJECT_SOURCE_DIR}
+    )
+    rj_test_runtime_dir_env(_runtime ConSanApplicationSim.AllImagesAllEntries)
+    set_tests_properties(
+        ConSanApplicationSim.AllImagesAllEntries
+        PROPERTIES
+            TIMEOUT 240
+            LABELS "consan;simulator;required-consan"
+            ENVIRONMENT "${_runtime}"
+    )
     foreach(
         _profile
         IN
@@ -994,6 +1042,17 @@ add_test(
 )
 set_tests_properties(
     ConSanPrefillHarness.Guards
+    PROPERTIES TIMEOUT 30 LABELS "consan;required-consan"
+)
+
+add_test(
+    NAME ConSanPrefillReport.Guards
+    COMMAND
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_prefill_report.py
+)
+set_tests_properties(
+    ConSanPrefillReport.Guards
     PROPERTIES TIMEOUT 30 LABELS "consan;required-consan"
 )
 

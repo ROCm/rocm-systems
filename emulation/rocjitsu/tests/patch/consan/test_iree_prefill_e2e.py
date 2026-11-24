@@ -4,6 +4,7 @@
 """Check wrapper evidence and replay cleanup without IREE or a GPU."""
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -106,6 +107,253 @@ def lds_analysis():
 
 
 class PrefillEvidence(unittest.TestCase):
+    def test_static_summary_uses_owning_index_and_skips_native_only_images(self):
+        commands = mock.Mock()
+        commands.run.return_value = '{"entries": []}'
+        root = Path('/private/run')
+        identity = '11' * 32
+        index = {
+            'images': [
+                {
+                    'preparation': {'original_sha256': identity},
+                    'capture': 'captures/model.bin',
+                },
+                {'preparation': {'original_sha256': '22' * 32}, 'capture': None},
+            ]
+        }
+        summaries = prefill.collect_capture_summaries(
+            commands,
+            root / 'inspect',
+            root / 'trace.bin',
+            root / 'lds.bin',
+            index,
+            root,
+        )
+        self.assertEqual(
+            summaries,
+            {
+                'trace': {'entries': []},
+                'pinned_lds': {'entries': []},
+                'all_images': [{'entries': []}],
+            },
+        )
+        self.assertEqual(
+            commands.run.call_args_list,
+            [
+                mock.call(
+                    'inspect-trace', [root / 'inspect', '--summary', root / 'trace.bin']
+                ),
+                mock.call(
+                    'inspect-lds', [root / 'inspect', '--summary', root / 'lds.bin']
+                ),
+                mock.call(
+                    'inspect-all-' + identity,
+                    [root / 'inspect', '--summary', root / 'captures/model.bin'],
+                ),
+            ],
+        )
+
+    def test_independent_case_evidence_merges_without_replacing_sibling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'commands.json').write_text('[]')
+            args = SimpleNamespace(fixture=root, cpu_thread_budget=4)
+            fixture = {'baseline': {'passed': True}}
+            cases = {
+                'trace': {
+                    'passed': True,
+                    'capture_summaries': {'trace': {'entries': ['trace witness']}},
+                    'preparation_reports': {
+                        'trace': {'requested_scope': 'execution_trace'}
+                    },
+                },
+                'lds': {
+                    'passed': True,
+                    'capture_summaries': {
+                        'pinned_lds': {'entries': ['LDS witness']},
+                        'all_images': [{'entries': ['automatic selection witness']}],
+                    },
+                    'preparation_reports': {'pinned_lds': {'requested_scope': 'lds'}},
+                },
+            }
+            report_json, report_text = (
+                root / 'coverage-report.json',
+                root / 'coverage-report.txt',
+            )
+            report_json.write_text('{}')
+            report_text.write_text('report')
+            with mock.patch.object(
+                prefill, 'write_report', return_value=(report_json, report_text)
+            ) as report, mock.patch('builtins.print'):
+                combined = prefill.combine_case_results(args, fixture, cases)
+                report.assert_called_once_with(root / 'result.json')
+                self.assertEqual(
+                    set(combined['capture_summaries']),
+                    {'trace', 'pinned_lds', 'all_images'},
+                )
+                self.assertEqual(
+                    set(combined['preparation_reports']), {'trace', 'pinned_lds'}
+                )
+                self.assertEqual(
+                    combined['capture_summaries']['trace'],
+                    cases['trace']['capture_summaries']['trace'],
+                )
+                self.assertEqual(
+                    combined['capture_summaries']['pinned_lds'],
+                    cases['lds']['capture_summaries']['pinned_lds'],
+                )
+                report.reset_mock()
+                cases['trace']['passed'] = False
+                combined = prefill.combine_case_results(args, fixture, cases)
+                self.assertFalse(combined['passed'])
+                report.assert_not_called()
+                cases['lds']['capture_summaries']['trace'] = {
+                    'entries': ['wrong owner']
+                }
+                with self.assertRaisesRegex(
+                    ValueError, 'duplicate case evidence scope'
+                ):
+                    prefill.combine_case_results(args, fixture, cases)
+
+    def test_all_image_evidence_requires_every_attempt_and_actual_lds_observations(
+        self,
+    ):
+        native = lds_analysis()
+        native['entries'][0]['entry'] = prefill.LDS_FIRST_MATMUL
+        native['entries'][1]['entry'] = prefill.LDS_MATMUL
+        native['executions'] = native['executions'][:4]
+        for execution in native['executions']:
+            execution.update(
+                entry=prefill.LDS_FIRST_MATMUL,
+                workgroup_count=4,
+                valid_observations=9216,
+                lost_occurrences=1152,
+                address_group_exhaustion=1152,
+            )
+        model_entries = [
+            dict(
+                entry,
+                disposition=(
+                    'instrumented'
+                    if entry['disposition'] == 'selected'
+                    else 'native_uncovered'
+                ),
+                reason_code=(
+                    'none'
+                    if entry['disposition'] == 'selected'
+                    else 'unsupported_instruction'
+                ),
+                reason='' if entry['disposition'] == 'selected' else 'outside subset',
+            )
+            for entry in native['entries']
+        ]
+        model_entries[1]['reason_code'] = 'unsupported_control_transfer_range'
+        index = {
+            'schema_version': 2,
+            'scope': 'provided_application_images',
+            'images': [
+                {
+                    'preparation': {
+                        'original_sha256': '11' * 32,
+                        'requested': 55,
+                        'entries': model_entries,
+                    }
+                },
+                {
+                    'preparation': {
+                        'original_sha256': '22' * 32,
+                        'requested': 13,
+                        'entries': [
+                            {
+                                'entry': f'helper_{index}',
+                                'disposition': 'native_uncovered',
+                                'reason_code': 'unsupported_entry',
+                                'reason': 'no LDS sites',
+                            }
+                            for index in range(13)
+                        ],
+                    }
+                },
+            ],
+        }
+        for image_index, image in enumerate(index['images']):
+            prepared = image['preparation']
+            for entry_index, entry in enumerate(prepared['entries']):
+                entry.setdefault('entry_key', 8192 + entry_index * 64)
+                no_probes = (
+                    (2 <= entry_index < 50) if image_index == 0 else entry_index < 12
+                )
+                entry.update(
+                    stage='qualification', no_probes_needed=None, text_offset=None
+                )
+                if no_probes:
+                    entry.update(
+                        disposition='no_probes_needed',
+                        stage='applicability',
+                        reason_code='none',
+                        reason='closed original code has no LDS accesses',
+                        no_probes_needed={
+                            'version': 1,
+                            'scope': 'lds',
+                            'instruction_count': 1,
+                            'code_bytes': 4,
+                            'code_sha256': '33' * 32,
+                        },
+                    )
+                elif entry['disposition'] != 'instrumented':
+                    entry['disposition'] = 'blocked'
+            counts = {
+                name: sum(entry['disposition'] == name for entry in prepared['entries'])
+                for name in ('instrumented', 'no_probes_needed', 'blocked')
+            }
+            prepared.update(
+                schema_version=2,
+                requested_scope='lds',
+                target=1250,
+                inventory_entries=len(prepared['entries']),
+                not_requested=0,
+                original_bytes=1 << 20,
+                skipped=counts['blocked'],
+                outcome='instrumented' if counts['instrumented'] else 'native_only',
+                selection_profile='44' * 32 if counts['instrumented'] else None,
+                requested_coverage='partial',
+                **counts,
+            )
+        analysis = {
+            'scope': 'provided_application_images',
+            'whole_application_coverage': 'not_established',
+            'lds_analysis': 'performed',
+            'lds_observations_present': True,
+            'coverage_complete': False,
+            'images': [
+                {'original_sha256': '11' * 32, 'analysis': native},
+                {'original_sha256': '22' * 32, 'analysis': None},
+            ],
+        }
+        prefill.validate_all_images(index, analysis)
+        for field, value in (
+            ('scope', 'application'),
+            ('lds_analysis', 'not_performed'),
+            ('lds_observations_present', False),
+            ('coverage_complete', True),
+        ):
+            changed = deepcopy(analysis)
+            changed[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                prefill.validate_all_images(index, changed)
+        changed = deepcopy(index)
+        changed['images'][0]['preparation']['requested'] = 1
+        with self.assertRaisesRegex(ValueError, 'every model and helper'):
+            prefill.validate_all_images(changed, analysis)
+        changed = deepcopy(analysis)
+        changed['images'].pop()
+        with self.assertRaisesRegex(ValueError, 'dropped a provided image'):
+            prefill.validate_all_images(index, changed)
+        changed = deepcopy(analysis)
+        changed['images'][0]['analysis']['executions'][0]['valid_observations'] = 0
+        with self.assertRaisesRegex(ValueError, 'observation/loss'):
+            prefill.validate_all_images(index, changed)
+
     def test_default_all_attempts_lds_after_trace_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -121,6 +369,8 @@ class PrefillEvidence(unittest.TestCase):
                     'passed': True,
                     'stage_seconds': {},
                     'lds_analysis': {'lds_analysis': 'performed'},
+                    'all_images_analysis': {'lds_analysis': 'performed'},
+                    'all_images_instrumented': {'passed': True},
                 }
 
             with mock.patch.object(
@@ -145,6 +395,8 @@ class PrefillEvidence(unittest.TestCase):
             self.assertFalse(result['cases']['trace']['passed'])
             self.assertTrue(result['cases']['lds']['passed'])
             self.assertEqual(result['lds_analysis']['lds_analysis'], 'performed')
+            self.assertEqual(result['all_images_analysis']['lds_analysis'], 'performed')
+            self.assertTrue(result['all_images_instrumented']['passed'])
 
     def test_case_budget_reserves_sibling_and_reclaims_failed_case_time(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -189,6 +441,7 @@ class PrefillEvidence(unittest.TestCase):
                 'prepare': root / 'prepare',
                 'analyze': root / 'analyze',
                 'plugin': root / 'plugin',
+                'inspect': root / 'inspect',
             }
             identity = 'a' * 64
             analysis = lds_analysis() | {
@@ -210,12 +463,65 @@ class PrefillEvidence(unittest.TestCase):
             self.assertEqual(trace['stage_elapsed_seconds'], 2)
             self.assertIn('trace preparation failed', trace['error'])
 
+            all_analysis = {
+                'scope': 'provided_application_images',
+                'lds_analysis': 'performed',
+            }
+
             def lds_command(commands, stage, argv, **_kwargs):
-                commands.records.append({'stage': stage, 'exit': 0, 'seconds': 0.1})
+                code = (
+                    1
+                    if stage
+                    in ('analyze-all-images', 'fresh-all-image-analysis-without-inputs')
+                    else 0
+                )
+                commands.records.append({'stage': stage, 'exit': code, 'seconds': 0.1})
                 if stage == 'prepare-lds':
                     (commands.directory / 'artifact').mkdir()
+                    (commands.directory / 'artifact/preparation.json').write_text('{}')
                     self.assertIn('--require-all', argv)
                     return 'selection_profile=' + identity
+                if stage == 'prepare-all-images':
+                    self.assertNotIn('--entry', argv)
+                    artifacts = commands.directory / 'all-images'
+                    (artifacts / 'images').mkdir(parents=True)
+                    (artifacts / 'application.bin').write_bytes(b'catalog')
+                    (artifacts / 'application.json').write_text('{"images": []}')
+                    (artifacts / 'launch-environment.json').write_text('{}')
+                    return ''
+                if stage in (
+                    'analyze-all-images',
+                    'fresh-all-image-analysis-without-inputs',
+                ):
+                    self.assertIn('--fail-on-findings', argv)
+                    self.assertIn('--require-complete', argv)
+                    if stage.startswith('fresh-'):
+                        self.assertFalse((commands.directory / 'original').exists())
+                        self.assertFalse((commands.directory / 'artifact').exists())
+                        self.assertFalse(
+                            (commands.directory / 'all-images/images').exists()
+                        )
+                        self.assertFalse(
+                            (commands.directory / 'all-images/application.bin').exists()
+                        )
+                        self.assertTrue(inputs.exists())
+                        self.assertTrue((root / 'trace/original').exists())
+                    return json.dumps(all_analysis)
+                if stage in ('analyze-lds', 'fresh-lds-analysis-without-inputs'):
+                    self.assertIn('--fail-on-findings', argv)
+                    self.assertNotIn('--require-complete', argv)
+                if stage == 'inspect-lds':
+                    return json.dumps(
+                        {
+                            'entries': [
+                                {
+                                    'selected': True,
+                                    'lds_access_sites': 72,
+                                    'barrier_completion_sites': 5,
+                                }
+                            ]
+                        }
+                    )
                 if stage == 'fresh-lds-analysis-without-inputs':
                     self.assertFalse((commands.directory / 'original').exists())
                     self.assertFalse((commands.directory / 'artifact').exists())
@@ -235,11 +541,17 @@ class PrefillEvidence(unittest.TestCase):
                 prefill.Commands, 'run', lds_command
             ), mock.patch.object(
                 prefill, 'application', side_effect=application
-            ), mock.patch(
+            ), mock.patch.object(
+                prefill, 'validate_all_images'
+            ) as validate_all, mock.patch(
                 'builtins.print'
             ):
                 result = prefill.run_case(args, tools, fixture, 'lds')
             self.assertTrue(result['passed'])
+            self.assertEqual(result['all_images_analysis'], all_analysis)
+            validate_all.assert_called_once_with({'images': []}, all_analysis)
+            self.assertTrue((root / 'lds/all-images-instrumented/logits.npy').is_file())
+            self.assertTrue((root / 'lds/all-images/application.bin').is_file())
             self.assertEqual(result['timeout'], 54)
             self.assertTrue((root / 'lds/original/model.hsaco').is_file())
             self.assertEqual((inputs / 'model.hsaco').read_bytes(), b'model')

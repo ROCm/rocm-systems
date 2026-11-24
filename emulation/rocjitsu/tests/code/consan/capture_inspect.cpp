@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/consan/analysis/render_helpers.h"
 #include "rocjitsu/code/consan/capture.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "util/diagnostic.h"
@@ -8,14 +9,16 @@
 #include <array>
 #include <fstream>
 #include <iostream>
+#include <string_view>
 
 int main(int argc, char **argv) {
   using namespace rocjitsu::consan;
   using rocjitsu::FailureOr;
-  if (argc != 2) {
+  const bool summary = argc == 3 && std::string_view(argv[1]) == "--summary";
+  if (argc != 2 && !summary) {
     return 2;
   }
-  std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
+  std::ifstream file(argv[summary ? 2 : 1], std::ios::binary | std::ios::ate);
   if (!file || file.tellg() < 0 || uint64_t(file.tellg()) > CaptureLimits{}.file_bytes) {
     return 2;
   }
@@ -32,6 +35,33 @@ int main(int argc, char **argv) {
     return 2;
   }
   const Capture &capture = captured.value();
+  if (summary) {
+    std::cout << "{\"original_sha256\":\""
+              << render_detail::hex_bytes(capture.header.image.original.sha256)
+              << "\",\"entries\":[";
+    bool first = true;
+    for (const ImageEntryFacts &entry : capture.header.image.entries) {
+      if (!first)
+        std::cout << ',';
+      first = false;
+      std::cout << "{\"entry_key\":" << entry.key << ",\"entry\":";
+      render_detail::write_json_string(std::cout, entry.binding.name);
+      std::cout << ",\"selected\":" << (entry.selected ? "true" : "false");
+      if (entry.selected) {
+        const Manifest &manifest = *entry.selected;
+        std::cout << ",\"lds_access_sites\":"
+                  << (manifest.scope == ScopeKind::ExecutionTrace ? 0 : manifest.sites.size())
+                  << ",\"barrier_completion_sites\":" << manifest.barriers.size()
+                  << ",\"trace_boundary_sites\":" << manifest.boundaries.size();
+      } else {
+        std::cout << ",\"lds_access_sites\":null,\"barrier_completion_sites\":null,"
+                     "\"trace_boundary_sites\":null";
+      }
+      std::cout << '}';
+    }
+    std::cout << "]}\n";
+    return 0;
+  }
   const auto write_sites = [](const Manifest &manifest) {
     bool first_site = true;
     for (const SiteFacts &site : manifest.sites) {
@@ -90,6 +120,7 @@ int main(int argc, char **argv) {
       return 2;
     }
     std::cout << "{\"serial\":" << execution.serial << ",\"slot\":" << execution.storage_slot
+              << ",\"completion\":" << execution.completion
               << ",\"entry_key\":" << execution.entry_key
               << ",\"generation\":" << execution.storage_generation << ",\"report_address\":"
               << *wire::read_u64(execution.context, wire::kContextReportPointer)

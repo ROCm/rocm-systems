@@ -106,44 +106,51 @@ struct Entry {
 };
 
 int run(int argc, char **argv) {
-  if ((argc < 3 || argc > 5) ||
+  if ((argc < 3 || argc > 6) ||
       (std::string_view(argv[2]) != "baseline" && std::string_view(argv[2]) != "instrumented" &&
        std::string_view(argv[2]) != "native-application")) {
     return 3;
   }
   const bool instrumented = std::string_view(argv[2]) == "instrumented";
   const bool native_application = std::string_view(argv[2]) == "native-application";
-  const bool application_completion = argc >= 4;
-  if (native_application && application_completion)
-    return 3;
+  bool application_completion = false;
   uint32_t cluster_size = 0;
   uint32_t workgroups = 1;
-  if (application_completion) {
-    const std::string_view option(argv[3]);
-    const std::string_view prefix = option.starts_with("--application-workgroups=")
-                                        ? "--application-workgroups="
-                                        : "--trace-workgroups=";
+  std::vector<std::string_view> images = {argv[1]};
+  for (int index = 3; index < argc; ++index) {
+    const std::string_view option(argv[index]);
+    constexpr std::string_view second_prefix = "--second-image=";
+    if (option.starts_with(second_prefix)) {
+      if (images.size() != 1 || option.size() == second_prefix.size() || native_application)
+        return 3;
+      images.push_back(option.substr(second_prefix.size()));
+      continue;
+    }
+    const std::string_view prefix =
+        option.starts_with("--application-workgroups=") ? "--application-workgroups="
+        : option.starts_with("--trace-workgroups=")     ? "--trace-workgroups="
+                                                        : "--cluster-size=";
     if (!option.starts_with(prefix))
       return 3;
     const std::string_view count = option.substr(prefix.size());
+    uint32_t parsed_count = 0;
     const std::from_chars_result parsed =
-        std::from_chars(count.data(), count.data() + count.size(), workgroups);
-    if (parsed.ec != std::errc{} || parsed.ptr != count.data() + count.size() || workgroups == 0 ||
-        workgroups > 512)
+        std::from_chars(count.data(), count.data() + count.size(), parsed_count);
+    if (parsed.ec != std::errc{} || parsed.ptr != count.data() + count.size())
       return 3;
+    if (prefix == "--cluster-size=") {
+      if (cluster_size != 0 || (parsed_count != 1 && parsed_count != 2))
+        return 3;
+      cluster_size = parsed_count;
+    } else {
+      if (application_completion || native_application || parsed_count == 0 || parsed_count > 512)
+        return 3;
+      application_completion = true;
+      workgroups = parsed_count;
+    }
   }
-  if (argc == 5) {
-    const std::string_view option(argv[4]);
-    constexpr std::string_view prefix = "--cluster-size=";
-    if (!option.starts_with(prefix))
-      return 3;
-    const std::string_view count = option.substr(prefix.size());
-    const std::from_chars_result parsed =
-        std::from_chars(count.data(), count.data() + count.size(), cluster_size);
-    if (parsed.ec != std::errc{} || parsed.ptr != count.data() + count.size() ||
-        (cluster_size != 1 && cluster_size != 2) || workgroups % cluster_size != 0)
-      return 3;
-  }
+  if (cluster_size && (!application_completion || workgroups % cluster_size != 0))
+    return 3;
   if (hsa_init() != HSA_STATUS_SUCCESS) {
     return 20;
   }
@@ -185,8 +192,8 @@ int run(int argc, char **argv) {
       return 20;
     ++initializations;
   }
-  hsa_executable_t executable = {};
-  hsa_code_object_reader_t reader = {};
+  std::array<hsa_executable_t, 2> executables = {};
+  std::array<hsa_code_object_reader_t, 2> readers = {};
   hsa_queue_t *queue = nullptr;
   std::vector<hsa_queue_t *> native_queues;
   hsa_signal_t signal = {};
@@ -196,10 +203,11 @@ int run(int argc, char **argv) {
   uint32_t loads = 0;
   uint32_t completed = 0;
   uint32_t queues_created = 0, queues_destroyed = 0;
-  std::array<Entry, 3> entries = {
+  const std::array<Entry, 3> original_entries = {
       Entry{.name = "mk_a.kd", .argument_bytes = 16, .group_bytes = 8},
       Entry{.name = "mk_b.kd", .argument_bytes = 32, .group_bytes = 256},
       Entry{.name = "mk_c.kd", .argument_bytes = 24, .group_bytes = 64}};
+  std::array<std::array<Entry, 3>, 2> image_entries = {original_entries, original_entries};
   if (native_application) {
     constexpr uint32_t kNativeQueues = 17;
     for (uint32_t index = 0; index < kNativeQueues; ++index) {
@@ -223,65 +231,63 @@ int run(int argc, char **argv) {
       queue = descriptor.queue;
     }
   }
-  const int descriptor = result == 0 ? ::open(argv[1], O_RDONLY | O_CLOEXEC) : -1;
-  if (result == 0 &&
-      (descriptor < 0 ||
-       !require(hsa_code_object_reader_create_from_file(descriptor, &reader), "reader") ||
-       !require(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                                          nullptr, &executable),
-                "executable") ||
-       !require(hsa_executable_load_agent_code_object(executable, initialized.gpu, reader, nullptr,
-                                                      nullptr),
-                "whole-image load"))) {
-    result = 20;
-  } else if (result == 0) {
-    ++loads;
-  }
-  if (descriptor >= 0) {
-    ::close(descriptor);
-  }
-  if (result == 0 && !require(hsa_executable_freeze(executable, nullptr), "freeze")) {
-    result = 20;
-  }
-  for (Entry &entry : entries) {
-    if (result != 0) {
-      break;
-    }
-    hsa_executable_symbol_t symbol = {};
-    uint32_t argument_bytes = 0, group_bytes = 0, private_bytes = 0;
-    if (!require(
-            hsa_executable_get_symbol_by_name(executable, entry.name, &initialized.gpu, &symbol),
-            "symbol") ||
-        !require(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
-                                                &entry.kernel),
-                 "kernel object") ||
-        !require(
-            hsa_executable_symbol_get_info(
-                symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &argument_bytes),
-            "kernarg") ||
-        !require(hsa_executable_symbol_get_info(
-                     symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT,
-                     &entry.alignment),
-                 "kernarg alignment") ||
-        !require(hsa_executable_symbol_get_info(
-                     symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group_bytes),
-                 "group") ||
-        !require(
-            hsa_executable_symbol_get_info(
-                symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes),
-            "private") ||
-        entry.kernel == 0 || argument_bytes != entry.argument_bytes || entry.alignment != 16 ||
-        group_bytes != entry.group_bytes || private_bytes != 0) {
-      std::cerr << "entry ABI mismatch: " << entry.name << " arguments=" << argument_bytes
-                << " alignment=" << entry.alignment << " group=" << group_bytes
-                << " private=" << private_bytes << " kernel=" << entry.kernel << '\n';
+  for (size_t image = 0; image < images.size() && result == 0; ++image) {
+    const int descriptor = result == 0 ? ::open(images[image].data(), O_RDONLY | O_CLOEXEC) : -1;
+    if (result == 0 &&
+        (descriptor < 0 ||
+         !require(hsa_code_object_reader_create_from_file(descriptor, &readers[image]), "reader") ||
+         !require(hsa_executable_create_alt(HSA_PROFILE_FULL,
+                                            HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                            &executables[image]),
+                  "executable") ||
+         !require(hsa_executable_load_agent_code_object(executables[image], initialized.gpu,
+                                                        readers[image], nullptr, nullptr),
+                  "whole-image load")))
       result = 20;
+    else if (result == 0)
+      ++loads;
+    if (descriptor >= 0)
+      ::close(descriptor);
+    if (result == 0 && !require(hsa_executable_freeze(executables[image], nullptr), "freeze"))
+      result = 20;
+    for (Entry &entry : image_entries[image]) {
+      if (result != 0)
+        break;
+      hsa_executable_symbol_t symbol = {};
+      uint32_t argument_bytes = 0, group_bytes = 0, private_bytes = 0;
+      if (!require(hsa_executable_get_symbol_by_name(executables[image], entry.name,
+                                                     &initialized.gpu, &symbol),
+                   "symbol") ||
+          !require(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                                  &entry.kernel),
+                   "kernel object") ||
+          !require(
+              hsa_executable_symbol_get_info(
+                  symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &argument_bytes),
+              "kernarg") ||
+          !require(hsa_executable_symbol_get_info(
+                       symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT,
+                       &entry.alignment),
+                   "kernarg alignment") ||
+          !require(hsa_executable_symbol_get_info(
+                       symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group_bytes),
+                   "group") ||
+          !require(
+              hsa_executable_symbol_get_info(
+                  symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes),
+              "private") ||
+          entry.kernel == 0 || argument_bytes != entry.argument_bytes || entry.alignment != 16 ||
+          group_bytes != entry.group_bytes || private_bytes != 0) {
+        std::cerr << "entry ABI mismatch: " << entry.name << " arguments=" << argument_bytes
+                  << " alignment=" << entry.alignment << " group=" << group_bytes
+                  << " private=" << private_bytes << " kernel=" << entry.kernel << '\n';
+        result = 20;
+      }
     }
-  }
-  if (result == 0 &&
-      (entries[0].kernel == entries[1].kernel || entries[0].kernel == entries[2].kernel ||
-       entries[1].kernel == entries[2].kernel)) {
-    result = 20;
+    if (result == 0 && (image_entries[image][0].kernel == image_entries[image][1].kernel ||
+                        image_entries[image][0].kernel == image_entries[image][2].kernel ||
+                        image_entries[image][1].kernel == image_entries[image][2].kernel))
+      result = 20;
   }
   const hsa_amd_memory_pool_t pool = fine_pool(initialized.cpu);
   if (result == 0 &&
@@ -309,10 +315,12 @@ int run(int argc, char **argv) {
   const std::array<uint32_t, 4> order = {0, 1, 2, 0};
   const std::array<uint32_t, 4> seeds = {7, 23, 55, 39};
   constexpr uint32_t kGuard = 0xdeadbeef;
-  for (uint32_t ordinal = 0; result == 0 && ordinal < order.size(); ++ordinal) {
-    const uint32_t index = order[ordinal];
-    const Entry &entry = entries[index];
-    const uint32_t seed = seeds[ordinal];
+  for (uint32_t ordinal = 0; result == 0 && ordinal < order.size() * images.size(); ++ordinal) {
+    const size_t image = ordinal % images.size();
+    const size_t invocation = ordinal / images.size();
+    const uint32_t index = order[invocation];
+    const Entry &entry = image_entries[image][index];
+    const uint32_t seed = seeds[invocation];
     const uint32_t bias = 100;
     if (!native_application &&
         !require(hsa_signal_create(1, 0, nullptr, &signal), "dedicated completion")) {
@@ -407,7 +415,10 @@ int run(int argc, char **argv) {
     if (actual != expected) {
       result = 23;
     }
-    std::cout << "{\"ordinal\":" << ordinal + 1 << ",\"entry\":\"" << entry.name
+    std::cout << "{";
+    if (images.size() > 1)
+      std::cout << "\"image\":" << image << ",";
+    std::cout << "\"ordinal\":" << ordinal + 1 << ",\"entry\":\"" << entry.name
               << "\",\"native\":" << (native_application || index == 2 ? "true" : "false")
               << ",\"kernarg_bytes\":" << entry.argument_bytes
               << ",\"kernarg_alignment\":" << entry.alignment
@@ -443,13 +454,13 @@ int run(int argc, char **argv) {
     else if (result == 0)
       result = 22;
   }
-  if (reader.handle && !require(hsa_code_object_reader_destroy(reader), "reader cleanup") &&
-      result == 0) {
-    result = 22;
-  }
-  if (executable.handle && !require(hsa_executable_destroy(executable), "executable cleanup") &&
-      result == 0) {
-    result = 22;
+  for (size_t image = 0; image < images.size(); ++image) {
+    if (readers[image].handle &&
+        !require(hsa_code_object_reader_destroy(readers[image]), "reader cleanup") && result == 0)
+      result = 22;
+    if (executables[image].handle &&
+        !require(hsa_executable_destroy(executables[image]), "executable cleanup") && result == 0)
+      result = 22;
   }
   if (arguments && !require(hsa_amd_memory_pool_free(arguments), "arguments cleanup") &&
       result == 0) {

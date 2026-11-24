@@ -11,8 +11,8 @@
 
 namespace {
 
-constexpr int kExitNoObservedFindings = 0;
-constexpr int kExitFindings = 1;
+constexpr int kExitSuccess = 0;
+constexpr int kExitPolicyFailure = 1;
 constexpr int kExitInputError = 2;
 constexpr int kExitOutputFailure = 3;
 
@@ -21,13 +21,21 @@ constexpr int kExitOutputFailure = 3;
 int main(int argc, char **argv) {
   using namespace rocjitsu::consan;
   AnalysisOptions options;
+  bool fail_on_findings = false;
+  bool require_complete = false;
   if (argc < 2) {
     std::cerr
-        << "Usage: rj_consan_analyze CAPTURE [--examples 0.." << kMaxFindingExamples << "]\n"
+        << "Usage: rj_consan_analyze CAPTURE [--examples 0.." << kMaxFindingExamples
+        << "] [--fail-on-findings] [--require-complete]\n"
         << "  --examples LIMIT: retain at most LIMIT finding examples per check per execution\n"
         << "  (default " << options.examples << ", maximum " << kMaxFindingExamples
         << "; 0 hides finding examples).\n"
-        << "  Counts, coverage and integrity diagnostics are unchanged by this limit.\n";
+        << "  Counts, coverage and integrity diagnostics are unchanged by this limit.\n"
+        << "  Successful report output exits 0 by default, including findings or coverage gaps.\n"
+        << "  --fail-on-findings: exit 1 for observed LDS race/collision findings.\n"
+        << "  --require-complete: exit 1 for incomplete provided-entry LDS coverage or trace "
+           "transport.\n"
+        << "  These policies preserve the JSON report and combine with logical OR.\n";
     return kExitInputError;
   }
   for (int index = 2; index < argc; ++index) {
@@ -40,6 +48,10 @@ int main(int argc, char **argv) {
           options.examples > kMaxFindingExamples) {
         return kExitInputError;
       }
+    } else if (option == "--fail-on-findings") {
+      fail_on_findings = true;
+    } else if (option == "--require-complete") {
+      require_complete = true;
     } else {
       return kExitInputError;
     }
@@ -74,7 +86,8 @@ int main(int argc, char **argv) {
     std::cout.flush();
     if (!std::cout)
       return kExitOutputFailure;
-    return trace.value().transport_complete ? kExitNoObservedFindings : kExitFindings;
+    return require_complete && !trace.value().transport_complete ? kExitPolicyFailure
+                                                                 : kExitSuccess;
   }
   const rocjitsu::FailureOr<LdsRaceResult> result =
       analyze_capture(capture.value(), options, diagnostic.emitter());
@@ -87,5 +100,7 @@ int main(int argc, char **argv) {
   if (!std::cout) {
     return kExitOutputFailure;
   }
-  return has_findings(result.value()) ? kExitFindings : kExitNoObservedFindings;
+  const bool policy_failed = (fail_on_findings && has_findings(result.value())) ||
+                             (require_complete && !result.value().provided_entry_coverage_complete);
+  return policy_failed ? kExitPolicyFailure : kExitSuccess;
 }
