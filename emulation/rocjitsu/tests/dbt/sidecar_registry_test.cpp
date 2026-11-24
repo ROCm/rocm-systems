@@ -180,8 +180,9 @@ TEST_F(SidecarRegistryTest, ConcurrentMutationAndLookupIsRaceFree) {
   }
 
   start.store(true, std::memory_order_release);
-  for (auto &thread : threads)
+  for (auto &thread : threads) {
     thread.join();
+  }
 
   SUCCEED();
 }

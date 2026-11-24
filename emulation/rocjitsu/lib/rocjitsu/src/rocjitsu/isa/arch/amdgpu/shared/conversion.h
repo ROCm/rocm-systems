@@ -16,7 +16,7 @@
 ///      floating destinations).
 ///   4. OMOD, then CLAMP, on a floating result (output_modifier.h).
 ///
-/// ToFloat, F32ToInteger (FloorI32, NearestI32), PackU8, PackB32F16 and ToFp8
+/// ToFloat, PackU8, PackB32F16 and ToFp8
 /// hold the settings of every stage that applies to them, so a scalar body and
 /// its SIMD probe pass the same object. Every stage works on raw encodings in
 /// unsigned integer lanes, so host rounding, DAZ and FTZ cannot change a result.
@@ -93,8 +93,9 @@ template <typename V> using Lane = typename LaneOf<V>::type;
 template <typename Fmt, typename V, typename Mask>
 constexpr Mask rounds_up(Rounding rounding, const Mask &negative, V kept, V rest, V half) {
   const V zero(Lane<V>{0});
-  if (rounding == Rounding::NEAREST_UP)
+  if (rounding == Rounding::NEAREST_UP) {
     return rest > half || (rest == half && rest != zero && !negative);
+  }
   return rest != zero && round_increment::rounds_up<Fmt>(static_cast<uint32_t>(rounding), negative,
                                                          kept, rest, half);
 }
@@ -150,26 +151,6 @@ constexpr V f32_to_integer(V bits, Rounding rounding, NanResult nan_result) {
   return choose(magnitude > V(F32::kInfinity), nan, result);
 }
 
-/// @brief An F32-to-integer conversion with the instruction's ABS/NEG and input flush.
-/// @details Usable directly as a scalar or SIMD lane operation on raw F32 bits.
-template <typename Int, Rounding Direction, NanResult Nan> struct F32ToInteger {
-  /// VOP3 ABS and NEG fields; bit 0 applies to the source.
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-  input_denormal::Policy input;
-
-  template <typename V> constexpr V operator()(V bits) const {
-    bits = source_modifier::apply<fp_format::F32>(bits, 0, abs, neg);
-    return f32_to_integer<Int>(input_denormal::flush_input<fp_format::F32>(bits, input), Direction,
-                               Nan);
-  }
-};
-
-/// V_CVT_FLOOR_I32_F32 (V_CVT_FLR_I32_F32).
-using FloorI32 = F32ToInteger<int32_t, Rounding::FLOOR, NanResult::SATURATE_BY_SIGN>;
-/// V_CVT_NEAREST_I32_F32 (V_CVT_RPI_I32_F32).
-using NearestI32 = F32ToInteger<int32_t, Rounding::NEAREST_UP, NanResult::SATURATE_BY_SIGN>;
-
 /// @brief V_CVT_PK_U8_F32: an F32 source rounded in MODE to an unsigned byte.
 /// @details The byte replaces the one that bits [1:0] of the selector pick in
 /// the third source; the other bytes pass through. A NaN gives zero.
@@ -211,9 +192,10 @@ private:
     using F16 = fp_format::F16;
     bits = source_modifier::apply<F16>(bits & V(F16::kBits), index, abs, neg);
     bits = input_denormal::flush_input<F16>(bits, input);
-    if (quiet_nan)
+    if (quiet_nan) {
       bits = detail::choose((bits & V(F16::kMagnitude)) > V(F16::kInfinity), bits | V(F16::kQuiet),
                             bits);
+    }
     return bits;
   }
 };
@@ -517,8 +499,9 @@ private:
       } else {
         assert(rounding.prescale == 0 && "widening is exact and applies no prescale");
         const V widened = widen<Source, Destination>(bits);
-        if (quiet_nan)
+        if (quiet_nan) {
           return widened;
+        }
         // A signaling NaN keeps its quiet bit clear; its payload survives widening.
         const auto signaling = (bits & V(Source::kMagnitude)) > V(Source::kInfinity) &&
                                (bits & V(Source::kQuiet)) == V(Lane{0});

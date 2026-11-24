@@ -323,7 +323,7 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for IPC wave conduit.");
+      LOGD_WARN("Unsupported reduction size for IPC wave backend.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -616,7 +616,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for IPC conduit.");
+      LOGD_WARN("Unsupported reduction size for IPC backend.");
       return ROCSHMEM_ERROR;
     }
   }

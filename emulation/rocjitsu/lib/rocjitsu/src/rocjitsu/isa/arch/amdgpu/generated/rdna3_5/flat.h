@@ -20,8 +20,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -38,8 +39,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -56,8 +58,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -74,8 +77,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -92,8 +96,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -110,8 +115,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -128,8 +134,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -146,8 +153,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -164,8 +172,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -182,8 +191,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -200,8 +210,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -218,8 +229,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -236,8 +248,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -254,8 +267,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -272,8 +286,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
@@ -292,8 +307,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
@@ -312,8 +328,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
@@ -332,8 +349,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
@@ -352,8 +370,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
@@ -372,8 +391,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
@@ -392,8 +412,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -410,8 +431,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -428,8 +450,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -448,8 +471,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -468,8 +492,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -488,8 +513,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -508,8 +534,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -528,8 +555,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -548,8 +576,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -568,8 +597,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -588,8 +618,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -608,8 +639,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -628,8 +660,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -648,8 +681,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -668,8 +702,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -688,8 +723,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -708,8 +744,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -728,8 +765,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -748,8 +786,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -768,8 +807,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -788,8 +828,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -808,8 +849,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -828,8 +870,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -848,8 +891,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -868,8 +912,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -888,8 +933,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -908,8 +954,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -928,8 +975,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -948,8 +996,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -968,8 +1017,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -988,8 +1038,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -1008,8 +1059,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
@@ -1046,8 +1098,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
-    if (inst_.saddr != 0x7C && inst_.saddr != 127)
+    if (inst_.saddr != 0x7C && inst_.saddr != 127) {
       modifiers.flat_scalar_address = &saddr;
+    }
     modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
                                            : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }

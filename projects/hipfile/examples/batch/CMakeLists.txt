@@ -12,6 +12,7 @@ hipfile_add_executable(
     DEPS examples_common
     SRCS "batch-roundtrip.cpp"
     SYSINCLS ${HIPFILE_INCLUDE_PATH}
+    NO_SAFE_BUFFERS
 )
 
 if(BUILD_TESTING)

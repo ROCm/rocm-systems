@@ -44,6 +44,7 @@ class ExecuteContext:
     supports_dpp8: bool = False
     supports_sdwa: bool = False
     result_writer: str | None = None
+    uses_vop3_half_selectors: bool = False
 
     @property
     def cls(self) -> str:
@@ -78,7 +79,6 @@ DISPATCH: dict[str, Callable[[ExecuteContext], str]] = {}
 def _register_handlers() -> None:
     """Populate DISPATCH with handlers from the extracted modules."""
     from amdisa.codegen.execute.vector_cmp import (
-        gen_vector_cmp_class,
         gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
@@ -90,7 +90,6 @@ def _register_handlers() -> None:
         gen_vector_qsad,
         gen_vector_trig_preop,
         gen_vector_mad_64_32,
-        gen_vector_mad_32_16,
         gen_vector_div_fixup,
         gen_vector_div_scale,
         gen_vector_div_fmas,
@@ -126,11 +125,7 @@ def _register_handlers() -> None:
     # pseudo_scalar_unary retains its VALU expression/encoding contract but
     # uses ExecModel.SCALAR because the ISA says V_S_* ignores EXEC.
 
-    # Vector compare — vector_cmp, vector_add_co handled by SemaAST pipeline
-    # (_SEMA_CLASSES). vector_cmp_class is NOT: the SemaAST lowering mangles the
-    # operand (a bit_cast<float>(static_cast<uint32_t>(...)) value round-trip)
-    # and always classifies in f32, so the dedicated per-type generator here
-    # (correct f16/f32/f64 qnan masks, full 64-bit f64 read) owns it instead.
+    # Relational CMPX keeps the legacy fallback; CLASS is handled by rj-arith.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
         c.src_ops,
         c.op,
@@ -141,27 +136,6 @@ def _register_handlers() -> None:
         c.has_abs,
         c.result_writer,
     )
-    DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        False,
-        False,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-    DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        True,
-        c.cmpx_writes_vcc,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-
     # Vector special
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
         c.dst_ops,
@@ -213,9 +187,6 @@ def _register_handlers() -> None:
         c.dtype,
         c.result_writer,
         c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
-    )
-    DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
-        c.dst_ops, c.src_ops, c.dtype, c.is_vop3
     )
     DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
@@ -303,7 +274,6 @@ def _register_handlers() -> None:
         c.op,
         c.dtype,
         opsel_exprs=c.opsel_exprs,
-        multiply_clamp=c.profile.packed_mul_lo_u16_clamp,
     )
     DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
         c.dst_ops,
@@ -312,7 +282,6 @@ def _register_handlers() -> None:
         c.dtype,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        integer_clamp=c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
         c.dst_ops,

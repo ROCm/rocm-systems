@@ -17,6 +17,19 @@
 
 namespace {
 
+// FP16 square root consumes the DPP temporary in AVX2 chunks. Route it at the
+// same width so the store and the dependent load use the same granularity.
+template <rocjitsu::arith::Unary Op> uint64_t routing_level(uint64_t flags) {
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if constexpr (Op == rocjitsu::arith::Unary::Sqrt) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      return RJ_ARITH_CPU_X86_64_V3;
+    }
+  }
+#endif
+  return flags;
+}
+
 template <rocjitsu::arith::Unary Op>
 constexpr bool supports_exact =
     Op == rocjitsu::arith::Unary::Trunc || Op == rocjitsu::arith::Unary::Ceil ||
@@ -34,7 +47,7 @@ template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool PreserveClampNan =
 [[gnu::noinline]] int unary_exact(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a) {
   if (mode >> 32) {
-    return rocjitsu::arith::execute_dpp(flags, exec_mask, mode, a,
+    return rocjitsu::arith::execute_dpp(routing_level<Op>(flags), exec_mask, mode, a,
                                         [&](uint32_t exec_mask, const uint32_t *const *source) {
                                           return unary_exact<Op, Rdna3, PreserveClampNan>(
                                               flags, exec_mask, uint32_t(mode), d, source);
@@ -94,22 +107,27 @@ template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool PreserveClampNan =
 
 // Evaluate FP16 unary math for the selected lanes. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveClampNan = false>
+// FRACT has one model and no exact kernel; entry points checked against their architecture's
+// captures pass AcceptExact so strict exact runs this path.
+template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveClampNan = false,
+          bool AcceptExact = false>
 [[gnu::noinline]] int unary(uint64_t flags, uint32_t exec_mask, uint64_t modifiers,
                             uint32_t *const *d, const uint32_t *const *a) {
   if (modifiers >> 32) {
-    return rocjitsu::arith::execute_dpp(flags, exec_mask, modifiers, a,
-                                        [&](uint32_t exec_mask, const uint32_t *const *source) {
-                                          return unary<Op, GuestDenormals, PreserveClampNan>(
-                                              flags, exec_mask, uint32_t(modifiers), d, source);
-                                        });
+    return rocjitsu::arith::execute_dpp(
+        routing_level<Op>(flags), exec_mask, modifiers, a,
+        [&](uint32_t exec_mask, const uint32_t *const *source) {
+          return unary<Op, GuestDenormals, PreserveClampNan, AcceptExact>(
+              flags, exec_mask, uint32_t(modifiers), d, source);
+        });
   }
   const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_OMOD_MASK |
                          RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D;
   if (int error = rocjitsu::arith::validate(flags, modifiers & ~known, fp_flags)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+  if (!AcceptExact &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   // TRANS arithmetic and its overflow use fixed rounding, independently of guest ROUND.
@@ -245,7 +263,8 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
 
 // Evaluate FP16 unary math for the selected lanes. Requires validated controls; preserve
 // inactive destination lanes.
-template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool QuietNan = false>
+template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool QuietNan = false,
+          bool AcceptExact = false>
 int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
         const uint32_t *const *a, [[maybe_unused]] uint32_t *state) {
   if (rocjitsu::arith::reports_fp_status(flags)) {
@@ -280,26 +299,27 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if constexpr (Op == rocjitsu::arith::Unary::Exp || Op == rocjitsu::arith::Unary::Log) {
     if (!(flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))) {
       if (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) {
-        return unary<Op, false, true>(flags, exec_mask, mode, d, a);
+        return unary<Op, false, true, AcceptExact>(flags, exec_mask, mode, d, a);
       }
-      return unary<Op, false>(flags, exec_mask, mode, d, a);
+      return unary<Op, false, false, AcceptExact>(flags, exec_mask, mode, d, a);
     }
   }
   if constexpr (!supports_exact<Op> || rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op> ||
                 Op == rocjitsu::arith::Unary::Exp || Op == rocjitsu::arith::Unary::Log) {
     if (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) {
-      return unary<Op, true, true>(flags, exec_mask, mode, d, a);
+      return unary<Op, true, true, AcceptExact>(flags, exec_mask, mode, d, a);
     }
   }
-  return unary<Op>(flags, exec_mask, mode, d, a);
+  return unary<Op, true, false, AcceptExact>(flags, exec_mask, mode, d, a);
 }
 
 // Evaluate FP16 unary math for Wave64. Reject invalid controls before changing outputs.
-template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool QuietNan = false>
+template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool QuietNan = false,
+          bool AcceptExact = false>
 int unary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                  const uint32_t *const *a, [[maybe_unused]] uint32_t *state) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = run<Op, Rdna3, QuietNan>(flags, 0, mode, nullptr, nullptr, state)) {
+  if (int error = run<Op, Rdna3, QuietNan, AcceptExact>(flags, 0, mode, nullptr, nullptr, state)) {
     return error;
   }
   if (!exec_mask) {
@@ -315,8 +335,9 @@ int unary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *co
     }
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source = a[0] + half * 32;
-    if (int error = run<Op, Rdna3, QuietNan>(flags, uint32_t(exec_mask >> (half * 32)),
-                                             half_instruction_flags, &dest, &source, state)) {
+    if (int error =
+            run<Op, Rdna3, QuietNan, AcceptExact>(flags, uint32_t(exec_mask >> (half * 32)),
+                                                  half_instruction_flags, &dest, &source, state)) {
       return error;
     }
   }
@@ -350,8 +371,8 @@ int rj_arith_v_trunc_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Trunc, false>(flags, exec_mask, instruction_flags, d, a,
-                                                   excp_flag_user);
+  return run<rocjitsu::arith::Unary::Trunc>(flags, exec_mask, instruction_flags, d, a,
+                                            excp_flag_user);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -379,8 +400,8 @@ int rj_arith_v_ceil_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Ceil, false>(flags, exec_mask, instruction_flags, d, a,
-                                                  excp_flag_user);
+  return run<rocjitsu::arith::Unary::Ceil>(flags, exec_mask, instruction_flags, d, a,
+                                           excp_flag_user);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -408,8 +429,8 @@ int rj_arith_v_rndne_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Rndne, false>(flags, exec_mask, instruction_flags, d, a,
-                                                   excp_flag_user);
+  return run<rocjitsu::arith::Unary::Rndne>(flags, exec_mask, instruction_flags, d, a,
+                                            excp_flag_user);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -437,8 +458,8 @@ int rj_arith_v_floor_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Floor, false>(flags, exec_mask, instruction_flags, d, a,
-                                                   excp_flag_user);
+  return run<rocjitsu::arith::Unary::Floor>(flags, exec_mask, instruction_flags, d, a,
+                                            excp_flag_user);
 }
 
 // Compute the square root for selected lanes.
@@ -466,8 +487,8 @@ int rj_arith_v_sqrt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Sqrt, false>(flags, exec_mask, instruction_flags, d, a,
-                                                  excp_flag_user);
+  return run<rocjitsu::arith::Unary::Sqrt>(flags, exec_mask, instruction_flags, d, a,
+                                           excp_flag_user);
 }
 
 // Compute the reciprocal for selected lanes.
@@ -494,8 +515,8 @@ int rj_arith_v_rcp_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Rcp, false>(flags, exec_mask, instruction_flags, d, a,
-                                                 excp_flag_user);
+  return run<rocjitsu::arith::Unary::Rcp>(flags, exec_mask, instruction_flags, d, a,
+                                          excp_flag_user);
 }
 
 // Compute the reciprocal square root for selected lanes.
@@ -522,8 +543,8 @@ int rj_arith_v_rsq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Rsq, false>(flags, exec_mask, instruction_flags, d, a,
-                                                 excp_flag_user);
+  return run<rocjitsu::arith::Unary::Rsq>(flags, exec_mask, instruction_flags, d, a,
+                                          excp_flag_user);
 }
 
 // Compute base-two exponentiation for selected lanes.
@@ -537,8 +558,8 @@ int rj_arith_v_exp_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Exp, false>(flags, exec_mask, instruction_flags, d, a,
-                                                 excp_flag_user);
+  return run<rocjitsu::arith::Unary::Exp>(flags, exec_mask, instruction_flags, d, a,
+                                          excp_flag_user);
 }
 
 // Compute the base-two logarithm for selected lanes.
@@ -552,8 +573,8 @@ int rj_arith_v_log_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Log, false>(flags, exec_mask, instruction_flags, d, a,
-                                                 excp_flag_user);
+  return run<rocjitsu::arith::Unary::Log>(flags, exec_mask, instruction_flags, d, a,
+                                          excp_flag_user);
 }
 
 // Compute the fractional part for selected lanes.
@@ -561,12 +582,13 @@ int rj_arith_v_log_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 // require it.
 int rj_arith_v_fract_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Fract, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  trapsts);
+  return run<rocjitsu::arith::Unary::Fract, true, false, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, trapsts);
 }
 
 // Compute the fractional part for selected lanes.
@@ -575,12 +597,13 @@ int rj_arith_v_fract_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
 int rj_arith_v_fract_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::Fract, false>(flags, exec_mask, instruction_flags, d, a,
-                                                   excp_flag_user);
+  return run<rocjitsu::arith::Unary::Fract, false, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, excp_flag_user);
 }
 
 // Extract the requested exponent or mantissa component for selected lanes.
@@ -608,8 +631,8 @@ int rj_arith_v_frexp_mant_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return run<rocjitsu::arith::Unary::FrexpMant, false>(flags, exec_mask, instruction_flags, d, a,
-                                                       excp_flag_user);
+  return run<rocjitsu::arith::Unary::FrexpMant>(flags, exec_mask, instruction_flags, d, a,
+                                                excp_flag_user);
 }
 
 // Round toward zero for selected lanes.
@@ -637,8 +660,8 @@ int rj_arith_v_trunc_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Trunc, false>(flags, exec_mask, instruction_flags, d,
-                                                            a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Trunc>(flags, exec_mask, instruction_flags, d, a,
+                                                     excp_flag_user);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -666,8 +689,8 @@ int rj_arith_v_ceil_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Ceil, false>(flags, exec_mask, instruction_flags, d,
-                                                           a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Ceil>(flags, exec_mask, instruction_flags, d, a,
+                                                    excp_flag_user);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -695,8 +718,8 @@ int rj_arith_v_rndne_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Rndne, false>(flags, exec_mask, instruction_flags, d,
-                                                            a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Rndne>(flags, exec_mask, instruction_flags, d, a,
+                                                     excp_flag_user);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -724,8 +747,8 @@ int rj_arith_v_floor_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Floor, false>(flags, exec_mask, instruction_flags, d,
-                                                            a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Floor>(flags, exec_mask, instruction_flags, d, a,
+                                                     excp_flag_user);
 }
 
 // Compute the square root for selected lanes.
@@ -753,8 +776,8 @@ int rj_arith_v_sqrt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Sqrt, false>(flags, exec_mask, instruction_flags, d,
-                                                           a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Sqrt>(flags, exec_mask, instruction_flags, d, a,
+                                                    excp_flag_user);
 }
 
 // Compute the reciprocal for selected lanes.
@@ -782,8 +805,8 @@ int rj_arith_v_rcp_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Rcp, false>(flags, exec_mask, instruction_flags, d, a,
-                                                          excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Rcp>(flags, exec_mask, instruction_flags, d, a,
+                                                   excp_flag_user);
 }
 
 // Compute the reciprocal square root for selected lanes.
@@ -811,8 +834,8 @@ int rj_arith_v_rsq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Rsq, false>(flags, exec_mask, instruction_flags, d, a,
-                                                          excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Rsq>(flags, exec_mask, instruction_flags, d, a,
+                                                   excp_flag_user);
 }
 
 // Compute base-two exponentiation for selected lanes.
@@ -826,8 +849,8 @@ int rj_arith_v_exp_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Exp, false>(flags, exec_mask, instruction_flags, d, a,
-                                                          excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Exp>(flags, exec_mask, instruction_flags, d, a,
+                                                   excp_flag_user);
 }
 
 // Compute the base-two logarithm for selected lanes.
@@ -841,8 +864,8 @@ int rj_arith_v_log_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Log, false>(flags, exec_mask, instruction_flags, d, a,
-                                                          excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Log>(flags, exec_mask, instruction_flags, d, a,
+                                                   excp_flag_user);
 }
 
 // Compute the fractional part for selected lanes.
@@ -850,12 +873,13 @@ int rj_arith_v_log_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 // require it.
 int rj_arith_v_fract_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Fract, true>(flags, exec_mask, instruction_flags, d,
-                                                           a, trapsts);
+  return unary_wave64<rocjitsu::arith::Unary::Fract, true, false, true>(
+      flags, exec_mask, instruction_flags, d, a, trapsts);
 }
 
 // Compute the fractional part for selected lanes.
@@ -864,12 +888,13 @@ int rj_arith_v_fract_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
 int rj_arith_v_fract_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Fract, false>(flags, exec_mask, instruction_flags, d,
-                                                            a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Fract, false, false, true>(
+      flags, exec_mask, instruction_flags, d, a, excp_flag_user);
 }
 
 // Extract the requested exponent or mantissa component for selected lanes.
@@ -897,8 +922,8 @@ int rj_arith_v_frexp_mant_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::FrexpMant, false>(flags, exec_mask, instruction_flags,
-                                                                d, a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::FrexpMant>(flags, exec_mask, instruction_flags, d, a,
+                                                         excp_flag_user);
 }
 
 // Compute base-two exponentiation for selected lanes.

@@ -24,7 +24,6 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_bitop3,
     gen_vector_cvt_pk,
     gen_vector_div_fixup,
-    gen_vector_mad_32_16,
     gen_vector_movrel,
     gen_vector_mullit,
     gen_vector_perm_pk16,
@@ -651,18 +650,6 @@ def test_gfx1250_bitop3_b16_uses_true16_helpers():
     assert 'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, result, true)' in body
 
 
-def test_vop3_mad_32_16_uses_true16_sources_for_src0_src1_only():
-    body = gen_vector_mad_32_16(
-        ['vdst'], ['src0', 'src1', 'src2'], 'u32', is_vop3=True, opsel='inst_.opsel'
-    )
-
-    assert 'uint32_t opsel = inst_.opsel;' in body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
-    assert 'read_vop3_true16_src(src2' not in body
-    assert 'uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);' in body
-
-
 def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
     body = gen_vector_div_fixup(['vdst'], ['src0', 'src1', 'src2'], 'f16', is_vop3=True)
 
@@ -733,12 +720,6 @@ def test_pknorm_f16_spelling_matches_pk_norm(op):
 
 
 def test_true16_special_vop3_simd_routes_use_true16_glue():
-    assert simd_probe_line('v_mad_u32_u16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01'
-    )
-    assert simd_probe_line('v_mad_i32_i16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01'
-    )
     assert simd_probe_line('v_pack_b32_f16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC'
     )
@@ -804,33 +785,6 @@ def test_packed_integer_vop3_modifiers_precede_conversion(op, has_abs):
         )
         assert modifiers in cpp
         assert cpp.index(modifiers) < cpp.index(f'amdgpu::cvt_{op}(f0)')
-
-
-@pytest.mark.parametrize('name', ['v_cvt_i32_f64', 'v_cvt_u32_f64'])
-def test_f64_to_integer_simd_defers_source_modifiers_to_scalar(name):
-    vop3 = simd_probe_line(f'{name}_vop3')
-    # The glue carries no modifiers, so a modified encoding runs the scalar body.
-    assert vop3.startswith('  if (!inst.inst_.abs && !inst.inst_.neg) {\n')
-    assert '  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(' in vop3
-    assert 'apply_vop3_src_mod_f64' not in vop3
-    assert 'inst_.abs' not in simd_probe_line(f'{name}_vop1')
-
-
-@pytest.mark.parametrize(
-    ('name', 'operation'),
-    [
-        ('v_cvt_floor_i32_f32', 'FloorI32'),
-        ('v_cvt_flr_i32_f32', 'FloorI32'),
-        ('v_cvt_nearest_i32_f32', 'NearestI32'),
-        ('v_cvt_rpi_i32_f32', 'NearestI32'),
-    ],
-)
-def test_floor_nearest_simd_uses_shared_raw_bit_conversion(name, operation):
-    # Both forms pass the scalar body's FloorI32/NearestI32 stage object; for
-    # VOP3 it holds ABS/NEG, so a modified encoding stays on the SIMD path.
-    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
-    assert simd_probe_line(f'{name}_vop1') == probe
-    assert simd_probe_line(f'{name}_vop3') == probe
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])

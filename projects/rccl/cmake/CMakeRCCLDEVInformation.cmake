@@ -10,7 +10,7 @@ set(CMAKE_INCLUDE_SYSTEM_FLAG_RCCLDEV "-isystem")
 set(CMAKE_RCCLDEV_COMPILE_OBJECT
   "<CMAKE_RCCLDEV_COMPILER> --compile <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> <SOURCE>")
 
-# Link rule: objects -> shared module (device.elf)
+# Link rule: objects -> relocatable device.o
 # <LINK_FLAGS> carries target_link_options (e.g. --dispatcher=..., --arch=...).
 # <OBJECTS> is the list of compiled object files.
 set(CMAKE_RCCLDEV_CREATE_SHARED_MODULE

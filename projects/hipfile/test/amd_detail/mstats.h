@@ -37,5 +37,16 @@ public:
     MOCK_METHOD(void, fileRegistration, (), (const, noexcept, override));
     MOCK_METHOD(void, bufferRegistration, (), (const, noexcept, override));
     MOCK_METHOD(void, fastpathRejection, (), (const, noexcept, override));
+
+    // Busy-time tracking is exercised directly against the real StatsCollection in
+    // the stats tests; stub it here so trackers in backend tests that mock the
+    // collection don't reach into the stats server.
+    bool beginIo(IoType, StatsBackend, int, uint64_t) const noexcept override
+    {
+        return false;
+    }
+    void endIo(IoType, StatsBackend, int, uint64_t) const noexcept override
+    {
+    }
 };
 }

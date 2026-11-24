@@ -6,15 +6,17 @@
 
 /**
  * @file LlStepBarrierMPITests.cpp
- * @brief Ring LL and LL128 collectives over P2P, checked element by element.
+ * @brief Ring and Tree collectives on P2P, SHM and NET, and Simple's local copies, checked element by element.
  *
- * On gfx1250 these sends run storeFreeStepBarrier(), which does not wait for a step's peer stores before the next
- * step. Every rank and every iteration sends different input, so a line read before its data landed, or from an
- * earlier step, shows up as a wrong element rather than only as a hang. Other architectures run the full-fence
- * barrier through the same test. DDA, CE, direct and symmetric kernels are chosen ahead of Ring and their switches
- * are cached for the process, so run the test in its own process with them off:
+ * On gfx1250 these run the store-free step barriers (storeFreeStepBarrier() and Simple's stepStartBarrier()) and
+ * reduceCopy's 16-byte buffer stores, and catch end-of-step barrier regressions too. Every rank and every iteration
+ * sends different input, so data read before it landed, or a slot overwritten while it is still read, shows up as a
+ * wrong element rather than only as a hang. Other architectures run the full-fence barriers through the same test.
+ * DDA, CE, direct and symmetric kernels are chosen ahead of Ring and their switches are cached for the process, so run
+ * the test in its own process with them off:
  *   RCCL_LL128_FORCE_ENABLE=1 RCCL_DDA_ENABLE=0 RCCL_DIRECT_ALLGATHER_DISABLE=1 RCCL_DIRECT_REDUCE_SCATTER_DISABLE=1
  *   RCCL_SYM_K_MAX_BYTES=0 RCCL_TDM_LL128_ENABLE=0 mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=LlStepBarrierMPITest.*
+ * The *OverShm* case also needs NCCL_P2P_DISABLE=1, and the *OverNet* case NCCL_P2P_DISABLE=1 and NCCL_SHM_DISABLE=1.
  */
 
 #ifdef MPI_TESTS_ENABLED
@@ -32,6 +34,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iterator>
 #include <thread>
 #include <vector>
 
@@ -53,9 +56,30 @@ struct CollCase
     ncclFunc_t  func;
     const char* name;
 };
-constexpr CollCase kColls[] = {{ncclFuncAllReduce, "AllReduce"},
-                               {ncclFuncReduceScatter, "ReduceScatter"},
-                               {ncclFuncAllGather, "AllGather"}};
+// The LL and LL128 cases run the first kNumLlColls. Broadcast and Reduce move their root with the iteration.
+constexpr CollCase kRingColls[] = {{ncclFuncAllReduce, "AllReduce"},
+                                   {ncclFuncReduceScatter, "ReduceScatter"},
+                                   {ncclFuncAllGather, "AllGather"},
+                                   {ncclFuncBroadcast, "Broadcast"},
+                                   {ncclFuncReduce, "Reduce"}};
+constexpr size_t   kNumLlColls   = 3;
+constexpr CollCase kAllReduce[]  = {{ncclFuncAllReduce, "AllReduce"}};
+// A grouped send and receive to the calling rank, which sendrecv.h copies with reduceCopy.
+constexpr CollCase kSelfCopy[] = {{ncclFuncSendRecv, "SendRecv to self"}};
+
+// What a test runs and what it must select and run on.
+struct RunSpec
+{
+    const char*          algoName;  // NCCL_ALGO
+    int                  algo;      // NCCL_ALGO_*, or -1 for local copies, which no algorithm carries
+    const char*          protoName; // NCCL_PROTO
+    int                  protocol;
+    const ncclTransport* transport; // every hop of algo must be on it; nullptr checks no hop
+    const CollCase*      colls;
+    size_t               numColls;
+    ncclRedOp_t          op      = ncclSum; // ncclAvg only with oneRank, where it is exact
+    bool                 oneRank = false;   // each process runs on a one-rank communicator of its own
+};
 
 // Differs by rank and by iteration, and stays small enough that sums over ranks are exact in fp32.
 float inputValue(int rank, int iteration, size_t i)
@@ -77,14 +101,18 @@ size_t recvCount(ncclFunc_t func, size_t chunk, int nranks)
 // The count argument of the collective call.
 size_t callCount(ncclFunc_t func, size_t chunk, int nranks)
 {
-    return func == ncclFuncAllReduce ? chunk * nranks : chunk;
+    return func == ncclFuncReduceScatter || func == ncclFuncAllGather ? chunk : chunk * nranks;
 }
 
-float expectedValue(ncclFunc_t func, int rank, int nranks, int iteration, size_t chunk, size_t j)
+// root is the root of Broadcast and Reduce, and the calling rank for SendRecv.
+float expectedValue(ncclFunc_t func, int rank, int nranks, int root, int iteration, size_t chunk, size_t j)
 {
-    if(func == ncclFuncAllGather)
+    switch(func)
     {
-        return inputValue(static_cast<int>(j / chunk), iteration, j % chunk);
+        case ncclFuncAllGather: return inputValue(static_cast<int>(j / chunk), iteration, j % chunk);
+        case ncclFuncBroadcast:
+        case ncclFuncSendRecv: return inputValue(root, iteration, j);
+        default: break;
     }
     const size_t i   = func == ncclFuncReduceScatter ? rank * chunk + j : j;
     float        sum = 0;
@@ -95,32 +123,59 @@ float expectedValue(ncclFunc_t func, int rank, int nranks, int iteration, size_t
     return sum;
 }
 
-ncclResult_t launch(ncclFunc_t func, const void* send, void* recv, size_t count, ncclComm_t comm, hipStream_t stream)
+ncclResult_t launch(ncclFunc_t func, const void* send, void* recv, size_t count, ncclRedOp_t op, int root,
+                    ncclComm_t comm, hipStream_t stream)
 {
     switch(func)
     {
-        case ncclFuncAllReduce: return ncclAllReduce(send, recv, count, ncclFloat32, ncclSum, comm, stream);
-        case ncclFuncReduceScatter: return ncclReduceScatter(send, recv, count, ncclFloat32, ncclSum, comm, stream);
-        default: return ncclAllGather(send, recv, count, ncclFloat32, comm, stream);
+        case ncclFuncAllReduce: return ncclAllReduce(send, recv, count, ncclFloat32, op, comm, stream);
+        case ncclFuncReduceScatter: return ncclReduceScatter(send, recv, count, ncclFloat32, op, comm, stream);
+        case ncclFuncAllGather: return ncclAllGather(send, recv, count, ncclFloat32, comm, stream);
+        case ncclFuncBroadcast: return ncclBroadcast(send, recv, count, ncclFloat32, root, comm, stream);
+        case ncclFuncReduce: return ncclReduce(send, recv, count, ncclFloat32, op, root, comm, stream);
+        default: break;
     }
+    ncclResult_t result = ncclGroupStart();
+    if(result == ncclSuccess)
+    {
+        result = ncclSend(send, count, ncclFloat32, root, comm, stream);
+    }
+    if(result == ncclSuccess)
+    {
+        result = ncclRecv(recv, count, ncclFloat32, root, comm, stream);
+    }
+    const ncclResult_t end = ncclGroupEnd();
+    return result != ncclSuccess ? result : end;
 }
 
-bool selectsRing(ncclComm_t comm, ncclFunc_t func, size_t count, const void* send, void* recv, int protocol)
+bool selects(const RunSpec& spec, ncclComm_t comm, ncclFunc_t func, size_t count, const void* send, void* recv)
 {
     int algo = -1, selected = -1, maxChannels = -1;
-    return rcclGetCollImplInfo(comm, func, count, ncclFloat32, ncclSum, send, recv, /*graphCapturing=*/0, &algo,
+    return rcclGetCollImplInfo(comm, func, count, ncclFloat32, spec.op, send, recv, /*graphCapturing=*/0, &algo,
                                &selected, &maxChannels)
                == ncclSuccess
-           && algo == NCCL_ALGO_RING && selected == protocol;
+           && algo == spec.algo && selected == spec.protocol;
 }
 
-bool ringHopsOnP2p(ncclComm_t comm)
+// Ring: the send to ring.next and the receive from ring.prev. Tree: both directions to tree.up and every tree.down.
+bool hopsOn(ncclComm_t comm, int algo, const ncclTransport* transport)
 {
     for(int c = 0; c < comm->nChannels; ++c)
     {
         const ncclChannel& channel = comm->channels[c];
-        if(channel.peers[channel.ring.next]->send[0].transportComm != &p2pTransport.send
-           || channel.peers[channel.ring.prev]->recv[0].transportComm != &p2pTransport.recv)
+        auto               on      = [&](int peer, bool send, bool recv)
+        {
+            return peer < 0
+                   || ((!send || channel.peers[peer]->send[0].transportComm == &transport->send)
+                       && (!recv || channel.peers[peer]->recv[0].transportComm == &transport->recv));
+        };
+        bool ok = algo == NCCL_ALGO_TREE ? on(channel.tree.up, true, true)
+                                         : on(channel.ring.next, true, false) && on(channel.ring.prev, false, true);
+        for(int d = 0; algo == NCCL_ALGO_TREE && d < NCCL_MAX_TREE_ARITY; ++d)
+        {
+            ok = ok && on(channel.tree.down[d], true, true);
+        }
+        if(!ok)
         {
             return false;
         }
@@ -152,18 +207,34 @@ protected:
         return false;
     }
 
-    void runCollectives(const char* protoName, int protocol)
+    // Swaps the world communicator for a one-rank one per process, whose AllReduce launches oneRankReduce.
+    bool useOneRankCommunicator()
+    {
+        ncclComm_t one = nullptr;
+        const bool ok  = ncclCommSplit(test_comm_, MPIEnvironment::world_rank, 0, &one, nullptr) == ncclSuccess;
+        (void)ncclCommDestroy(test_comm_);
+        test_comm_ = one;
+        return ok;
+    }
+
+    void runCollectives(const RunSpec& spec)
     {
         SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI);
 
-        MPIHelpers::MpiEnvGuard algo("NCCL_ALGO", "Ring");
-        MPIHelpers::MpiEnvGuard proto("NCCL_PROTO", protoName);
+        MPIHelpers::MpiEnvGuard algo("NCCL_ALGO", spec.algoName);
+        MPIHelpers::MpiEnvGuard proto("NCCL_PROTO", spec.protoName);
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+        if(spec.oneRank)
+        {
+            ASSERT_MPI_TRUE(useOneRankCommunicator());
+        }
         ncclComm_t  comm   = getActiveCommunicator();
         hipStream_t stream = getActiveStream();
-        const int   rank   = MPIEnvironment::world_rank;
-        const int   nranks = MPIEnvironment::world_size;
+        int         rank   = -1;
+        int         nranks = 0;
+        ASSERT_MPI_TRUE(ncclCommUserRank(comm, &rank) == ncclSuccess && ncclCommCount(comm, &nranks) == ncclSuccess);
+        const CollCase* const collsEnd = spec.colls + spec.numColls;
 
         const size_t slotCount = kMaxChunkCount * nranks;
         void*        sends     = nullptr;
@@ -175,40 +246,41 @@ protected:
         auto sendSlot    = [&](int s) { return static_cast<float*>(sends) + s * slotCount; };
         auto recvSlot    = [&](int s) { return static_cast<float*>(recvs) + s * slotCount; };
 
-        // NCCL_PROTO is a request, and the backends above Ring are only off if the process env turned them off.
+        // NCCL_ALGO and NCCL_PROTO are requests, and the backends above them are only off if the process env said so.
         bool selected = true;
-        for(const CollCase& coll : kColls)
+        for(const CollCase* coll = spec.colls; spec.algo >= 0 && coll != collsEnd; ++coll)
         {
             for(size_t chunk : kChunkCounts)
             {
                 selected = selected
-                           && selectsRing(comm, coll.func, callCount(coll.func, chunk, nranks), sendSlot(0),
-                                          recvSlot(0), protocol);
+                           && selects(spec, comm, coll->func, callCount(coll->func, chunk, nranks), sendSlot(0),
+                                      recvSlot(0));
             }
         }
         if(!mpiAllRanks(selected))
         {
-            GTEST_SKIP() << "Not every case selects Ring/" << protoName << ": run this test in its own process with "
-                         << "the RCCL overrides in the file comment";
+            GTEST_SKIP() << "Not every case selects " << spec.algoName << "/" << spec.protoName << ": run this test in "
+                         << "its own process with the RCCL overrides in the file comment";
         }
 
-        // Ring connections are made by the first collective.
-        ASSERT_MPI_TRUE(finish(launch(ncclFuncAllReduce, sendSlot(0), recvSlot(0), kChunkCounts[0] * nranks, comm,
-                                      stream)
+        // Ring and Tree connections are made by the first collective.
+        ASSERT_MPI_TRUE(finish(launch(ncclFuncAllReduce, sendSlot(0), recvSlot(0), kChunkCounts[0] * nranks, spec.op,
+                                      0, comm, stream)
                                == ncclSuccess));
-        if(!mpiAllRanks(ringHopsOnP2p(getActiveCommunicator())))
+        if(spec.transport != nullptr && !mpiAllRanks(hopsOn(getActiveCommunicator(), spec.algo, spec.transport)))
         {
-            GTEST_SKIP() << "A ring hop is not on P2P";
+            GTEST_SKIP() << "A " << spec.algoName << " hop is not on " << spec.transport->name;
         }
 
         std::vector<float> host(slotCount);
         int                iteration = 0;
-        for(const CollCase& coll : kColls)
+        for(const CollCase* coll = spec.colls; coll != collsEnd; ++coll)
         {
             for(size_t chunk : kChunkCounts)
             {
-                const size_t nsend = sendCount(coll.func, chunk, nranks);
-                const size_t nrecv = recvCount(coll.func, chunk, nranks);
+                const size_t nsend = sendCount(coll->func, chunk, nranks);
+                const size_t nrecv = recvCount(coll->func, chunk, nranks);
+                auto         root  = [&](int it) { return coll->func == ncclFuncSendRecv ? rank : it % nranks; };
                 for(int round = 0; round < kRounds; ++round, iteration += kSlots)
                 {
                     bool ok = true;
@@ -224,8 +296,8 @@ protected:
                     }
                     for(int s = 0; ok && s < kSlots; ++s)
                     {
-                        ok = launch(coll.func, sendSlot(s), recvSlot(s), callCount(coll.func, chunk, nranks), comm,
-                                    stream)
+                        ok = launch(coll->func, sendSlot(s), recvSlot(s), callCount(coll->func, chunk, nranks),
+                                    spec.op, root(iteration + s), comm, stream)
                              == ncclSuccess;
                     }
                     ASSERT_MPI_TRUE(finish(ok));
@@ -233,6 +305,12 @@ protected:
                     size_t mismatches = 0;
                     for(int s = 0; s < kSlots; ++s)
                     {
+                        const int it = iteration + s;
+                        // Only the root receives a Reduce.
+                        if(coll->func == ncclFuncReduce && rank != root(it))
+                        {
+                            continue;
+                        }
                         if(hipMemcpy(host.data(), recvSlot(s), nrecv * sizeof(float), hipMemcpyDeviceToHost)
                            != hipSuccess)
                         {
@@ -243,16 +321,17 @@ protected:
                         size_t first          = 0;
                         for(size_t j = 0; j < nrecv; ++j)
                         {
-                            if(host[j] != expectedValue(coll.func, rank, nranks, iteration + s, chunk, j)
+                            if(host[j] != expectedValue(coll->func, rank, nranks, root(it), it, chunk, j)
                                && slotMismatches++ == 0)
                             {
                                 first = j;
                             }
                         }
                         EXPECT_EQ(size_t{0}, slotMismatches)
-                            << coll.name << " " << chunk << " elements per rank, iteration " << iteration + s
-                            << ", rank " << rank << ": first wrong element " << first << " is " << host[first]
-                            << ", expected " << expectedValue(coll.func, rank, nranks, iteration + s, chunk, first);
+                            << coll->name << " " << chunk << " elements per rank, iteration " << it << ", rank "
+                            << rank << ", root " << root(it) << ": first wrong element " << first << " is "
+                            << host[first] << ", expected "
+                            << expectedValue(coll->func, rank, nranks, root(it), it, chunk, first);
                         mismatches += slotMismatches;
                     }
                     ASSERT_MPI_TRUE(mismatches == 0);
@@ -264,12 +343,51 @@ protected:
 
 TEST_F(LlStepBarrierMPITest, RingLl128OverP2pMatchesPerIterationInput)
 {
-    runCollectives("LL128", NCCL_PROTO_LL128);
+    runCollectives({"Ring", NCCL_ALGO_RING, "LL128", NCCL_PROTO_LL128, &p2pTransport, kRingColls, kNumLlColls});
 }
 
 TEST_F(LlStepBarrierMPITest, RingLlOverP2pMatchesPerIterationInput)
 {
-    runCollectives("LL", NCCL_PROTO_LL);
+    runCollectives({"Ring", NCCL_ALGO_RING, "LL", NCCL_PROTO_LL, &p2pTransport, kRingColls, kNumLlColls});
+}
+
+TEST_F(LlStepBarrierMPITest, RingSimpleOverP2pMatchesPerIterationInput)
+{
+    runCollectives(
+        {"Ring", NCCL_ALGO_RING, "Simple", NCCL_PROTO_SIMPLE, &p2pTransport, kRingColls, std::size(kRingColls)});
+}
+
+// Default SHM has no connFifo, so stepStartBarrier() orders LDS only and this checks it over host memory. NET, and SHM
+// with NCCL_SHM_USE_CUDA_MEMCPY=1, set a connFifo: the full barrier is kept and the post-send fence drains for the proxy.
+TEST_F(LlStepBarrierMPITest, RingSimpleOverShmMatchesPerIterationInput)
+{
+    runCollectives(
+        {"Ring", NCCL_ALGO_RING, "Simple", NCCL_PROTO_SIMPLE, &shmTransport, kRingColls, std::size(kRingColls)});
+}
+
+TEST_F(LlStepBarrierMPITest, RingSimpleOverNetMatchesPerIterationInput)
+{
+    runCollectives(
+        {"Ring", NCCL_ALGO_RING, "Simple", NCCL_PROTO_SIMPLE, &netTransport, kRingColls, std::size(kRingColls)});
+}
+
+TEST_F(LlStepBarrierMPITest, TreeSimpleAllReduceOverP2pMatchesPerIterationInput)
+{
+    runCollectives(
+        {"Tree", NCCL_ALGO_TREE, "Simple", NCCL_PROTO_SIMPLE, &p2pTransport, kAllReduce, std::size(kAllReduce)});
+}
+
+// Simple's buffer stores outside the step loop: oneRankReduce (ncclAvg; a one-rank ncclSum is a memcpy) and the
+// sendrecv.h self copy. Neither has a step barrier, so these check the stored bytes.
+TEST_F(LlStepBarrierMPITest, OneRankAllReduceMatchesPerIterationInput)
+{
+    runCollectives({"Ring", -1, "Simple", NCCL_PROTO_SIMPLE, nullptr, kAllReduce, std::size(kAllReduce), ncclAvg,
+                    /*oneRank=*/true});
+}
+
+TEST_F(LlStepBarrierMPITest, SendRecvToSelfMatchesPerIterationInput)
+{
+    runCollectives({"Ring", -1, "Simple", NCCL_PROTO_SIMPLE, nullptr, kSelfCopy, std::size(kSelfCopy)});
 }
 
 #endif // MPI_TESTS_ENABLED

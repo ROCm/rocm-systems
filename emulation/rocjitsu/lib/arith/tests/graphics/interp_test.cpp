@@ -4,6 +4,7 @@
 // Tests for FP16/FP32 interpolation stages and quad-lane operand routing.
 
 #include "graphics/helpers.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 #include "rj_arith/detail/rj_arith_graphics.h"
 
 // Check graphics results, modifiers, EXEC masks, and source/destination aliases.
@@ -132,6 +133,95 @@ TEST(GraphicsInterpW32, ExactNanMatchesHardware) {
         ASSERT_EQ(calls[test.op](flags, 1, test.modifiers, r.v + 3, r.v, r.v + 1, r.v + 2),
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(r.v[3][0], test.expected);
+      }
+    }
+  }
+}
+
+namespace {
+
+// Operands spanning the ranges that separate the specialized kernels from the guest model:
+// normals, both zeroes, the denormal boundary, infinities, and quiet and signaling NaNs.
+const uint32_t dispatch_pool[] = {
+    0x00000000, 0x80000000, 0x3f800000, 0xbf800000, 0x40490fdb, 0x7f7fffff, 0xff7fffff,
+    0x00800000, 0x80800000, 0x00000001, 0x007fffff, 0x7f800000, 0xff800000, 0x7fc00000,
+    0x7f800001, 0xffc00000, 0x33000000, 0x4b000000, 0x3f7fffff, 0x5f000000,
+};
+
+} // namespace
+
+// Without a round or denormal control the specialized kernels serve every semantics, handing
+// back only the lanes the guest model must produce. Check each entry point against that model
+// directly -- the quad broadcast followed by the exact mixed FMA -- over the operand ranges
+// that separate the two, at every CPU level and in every semantics. Removing a backend's
+// divert leaves loose and exact agreeing with each other but no longer with this reference.
+TEST(GraphicsInterpW32, MatchesTheGuestModelWithoutGuestControls) {
+  constexpr int pool = sizeof(dispatch_pool) / sizeof(dispatch_pool[0]);
+  const uint32_t modifiers[] = {0, RJ_ARITH_ALU_NEG_A, RJ_ARITH_ALU_NEG_B, RJ_ARITH_ALU_NEG_C,
+                                RJ_ARITH_ALU_CLAMP};
+  // P10 and P2 read different quad lanes for A and C, and the FP16 form widens A and C.
+  struct Form {
+    const char *name;
+    decltype(&rj_arith_v_interp_p10_f32_w32) call;
+    bool p2, half;
+  };
+  const Form forms[] = {
+      {"p10_f32", rj_arith_v_interp_p10_f32_w32, false, false},
+      {"p2_f32", rj_arith_v_interp_p2_f32_w32, true, false},
+      {"p10_f16", rj_arith_v_interp_p10_f16_f32_w32, false, true},
+  };
+  for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (bool ieee : {false, true}) {
+      for (uint32_t modifier : modifiers) {
+        for (const Form &form : forms) {
+          for (int seed = 0; seed < pool; ++seed) {
+            SCOPED_TRACE(::testing::Message() << cpu << '/' << ieee << '/' << modifier << '/'
+                                              << form.name << '/' << seed);
+            uint32_t a[32], b[32], c[32];
+            // Walk the pool across lanes so each quad mixes finite and non-finite operands.
+            for (int lane = 0; lane < 32; ++lane) {
+              a[lane] = dispatch_pool[(seed + lane) % pool];
+              b[lane] = dispatch_pool[(seed + lane * 3 + 1) % pool];
+              c[lane] = dispatch_pool[(seed + lane * 7 + 2) % pool];
+            }
+
+            // The guest model: broadcast the quad coefficients, then one exact mixed FMA.
+            uint32_t av[32], cv[32], expected[32];
+            for (int lane = 0; lane < 32; ++lane) {
+              av[lane] = a[(lane & ~3) + (form.p2 ? 2 : 1)];
+              cv[lane] = c[form.p2 ? lane : (lane & ~3)];
+              expected[lane] = 0xdeadbe00u + uint32_t(lane);
+            }
+            uint32_t *ep = expected;
+            const uint32_t *avp = av, *bp = b, *cvp = cv;
+            const uint64_t guest_flags = cpu | (ieee ? RJ_ARITH_FP_IEEE_MODE : 0) |
+                                         RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+            const uint64_t guest_mode =
+                modifier | (form.half ? RJ_ARITH_MIX_F16_A | RJ_ARITH_MIX_F16_C : 0);
+            ASSERT_EQ(rj_arith_v_fma_mix_f32_w32(guest_flags, ~0u, guest_mode, &ep, &avp, &bp, &cvp,
+                                                 nullptr),
+                      RJ_ARITH_SUCCESS);
+
+            for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                                       RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                                       RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+              rocjitsu::arith::test::Registers<4, 32> r{};
+              for (int lane = 0; lane < 32; ++lane) {
+                r.v[0][lane] = a[lane];
+                r.v[1][lane] = b[lane];
+                r.v[2][lane] = c[lane];
+                r.v[3][lane] = 0xdeadbe00u + uint32_t(lane);
+              }
+              const uint64_t flags = cpu | semantics | (ieee ? RJ_ARITH_FP_IEEE_MODE : 0);
+              ASSERT_EQ(form.call(flags, ~0u, modifier, r.v + 3, r.v, r.v + 1, r.v + 2),
+                        RJ_ARITH_SUCCESS)
+                  << semantics;
+              for (int lane = 0; lane < 32; ++lane) {
+                EXPECT_EQ(r.v[3][lane], expected[lane]) << semantics << " lane " << lane;
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -75,6 +75,31 @@ if(random_replays)
     )
 endif()
 
+set(oracle_output "${WORK_DIRECTORY}/oracle-failure")
+execute_process(
+    COMMAND
+        "${ORACLE_FAILURE_EXECUTABLE}" --random 1 --seed 0 --output
+        "${oracle_output}"
+    RESULT_VARIABLE oracle_result
+    OUTPUT_VARIABLE oracle_stdout
+    ERROR_VARIABLE oracle_stderr
+)
+if(
+    NOT oracle_result STREQUAL "1"
+    OR NOT oracle_stderr MATCHES "injected concurrent dispatch oracle failure"
+)
+    message(
+        FATAL_ERROR
+        "oracle failure returned ${oracle_result}: ${oracle_stdout}${oracle_stderr}"
+    )
+endif()
+set(oracle_replay "${oracle_output}/failure-seed-0.bin")
+file(READ "${oracle_replay}" oracle_replay_hex HEX)
+string(REPEAT "5a" 64 expected_replay_hex)
+if(NOT oracle_replay_hex STREQUAL expected_replay_hex)
+    message(FATAL_ERROR "oracle failure did not preserve the generated replay")
+endif()
+
 set(retained_replay "${random_output}/failure-seed-0.bin")
 file(WRITE "${retained_replay}" "retained input")
 execute_process(
@@ -249,6 +274,48 @@ if(
         FATAL_ERROR
         "wrapped seed range was not rejected: ${overflow_stdout}${overflow_stderr}"
     )
+endif()
+
+function(expect_cli_error expected_status expected_message)
+    execute_process(
+        COMMAND "${FUZZ_EXECUTABLE}" ${ARGN}
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    if(
+        NOT result EQUAL expected_status
+        OR NOT stderr MATCHES "${expected_message}"
+    )
+        message(
+            FATAL_ERROR
+            "expected ${expected_status}/${expected_message}, got ${result}: ${stdout}${stderr}"
+        )
+    endif()
+    if(expected_status EQUAL 2 AND NOT stderr MATCHES "Usage:")
+        message(FATAL_ERROR "invalid input did not print usage: ${stderr}")
+    endif()
+endfunction()
+
+foreach(value IN ITEMS -1 1x 18446744073709551616)
+    expect_cli_error(2 "expected an unsigned integer" --random "${value}" --output "${random_output}")
+endforeach()
+expect_cli_error(2 "unknown or incomplete argument" --input)
+expect_cli_error(2 "input has an invalid size" --input "${WORK_DIRECTORY}/missing.bin")
+file(WRITE "${WORK_DIRECTORY}/empty.bin" "")
+expect_cli_error(2 "input has an invalid size" --input "${WORK_DIRECTORY}/empty.bin")
+string(REPEAT "x" 1025 oversized_input)
+file(WRITE "${WORK_DIRECTORY}/oversized.bin" "${oversized_input}")
+expect_cli_error(2 "input has an invalid size" --input "${WORK_DIRECTORY}/oversized.bin")
+file(WRITE "${WORK_DIRECTORY}/not-a-directory" "sentinel")
+expect_cli_error(2 "seed destination must be an empty directory" --emit-seeds "${WORK_DIRECTORY}/not-a-directory")
+expect_cli_error(1 "cannot create directory" --random 1 --output "${WORK_DIRECTORY}/not-a-directory/child")
+expect_cli_error(1 "cannot create directory" --emit-seeds "${WORK_DIRECTORY}/not-a-directory/child")
+file(CREATE_LINK "loop" "${WORK_DIRECTORY}/loop" SYMBOLIC)
+expect_cli_error(1 "cannot inspect seed destination" --emit-seeds "${WORK_DIRECTORY}/loop")
+file(READ "${WORK_DIRECTORY}/not-a-directory" sentinel)
+if(NOT sentinel STREQUAL "sentinel")
+    message(FATAL_ERROR "failed directory operation changed existing file")
 endif()
 
 file(REMOVE_RECURSE "${WORK_DIRECTORY}")

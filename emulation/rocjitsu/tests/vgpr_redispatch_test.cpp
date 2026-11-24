@@ -58,8 +58,9 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   compute_unit->write_sgpr(first_sgpr_base, 0x12345678u);
   compute_unit->write_sgpr(first_sgpr_base + 31, 0x9abcdef0u);
   for (uint32_t reg = 0; reg < block_size; ++reg) {
-    for (uint32_t lane = 0; lane < test_case.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < test_case.wave_size; ++lane) {
       compute_unit->write_vgpr(first_base + reg, lane, 1u + reg * test_case.wave_size + lane);
+    }
   }
 
   first->halt();

@@ -21,18 +21,36 @@ namespace rocjitsu {
 
 /// @brief One AMDHSA kernel descriptor located in an ELF image.
 struct KernelDescriptorInfo {
-  uint64_t descriptor_file_offset = 0; ///< File offset of the 64-byte descriptor (pre-growth).
-  std::string kernel_name;             ///< Symbol name minus the ".kd" suffix.
-  uint64_t entry_text_offset = 0;      ///< .text-relative kernel entry.
+  uint64_t descriptor_file_offset =
+      0;                   ///< File offset of the 64-byte descriptor in the supplied image.
+  std::string kernel_name; ///< Symbol name minus the ".kd" suffix.
+  /// Kernel entry relative to the selected executable section (usually .text).
+  uint64_t entry_text_offset = 0;
   rocjitsu::amdhsa::kernel_descriptor_t descriptor{}; ///< Raw descriptor bytes.
 };
 
-/// @brief Locate every ".kd" descriptor whose entry lands in .text.
+/// @brief Legacy CDNA preload firmware enters 256 bytes beyond the ordinary entry.
+inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rocjitsu::IsaFamily arch);
+
+/// @brief Derive hardware-entry candidates for one descriptor inside the text extent.
+/// @details A missing/out-of-range candidate fails. The caller must verify every
+/// candidate is a decoded instruction/block boundary before using it as a root.
+/// CDNA3/4 preload adds a firmware entry; CDNA5 does not.
+[[nodiscard]] std::optional<std::vector<uint64_t>>
+kernel_hardware_entry_candidates(const KernelDescriptorInfo &kernel, rocjitsu::IsaFamily arch,
+                                 uint64_t text_size);
+
+/// @brief Locate every ".kd" descriptor whose entry lands in a selected executable section.
 ///
-/// @details Walks .symtab/.dynsym, decodes each descriptor's file offset and
-/// .text-relative entry, drops entries outside .text, and dedups by file offset.
-/// The single discovery routine shared by DBT translation and DBI; operates on the
-/// raw, pre-growth image.
+/// @details text_offset and text_size identify the selected section's file range;
+/// text_section_index optionally identifies its section header. The selected section
+/// is usually .text. Walks .symtab/.dynsym, decodes each descriptor's file offset and
+/// entry, drops entries outside the selected section's half-open virtual-address
+/// range, and dedups by descriptor file offset. Returned entry_text_offset values
+/// are relative to the selected section's virtual address. This discovery routine
+/// is shared by DBT translation and DBI. It reads the supplied raw ELF image;
+/// offsets refer to that image's layout, pre-growth when scanning an input object.
 [[nodiscard]] std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                         std::optional<size_t> text_section_index = std::nullopt);

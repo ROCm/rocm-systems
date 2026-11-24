@@ -430,6 +430,13 @@ print(json.dumps([st, v.build]))
         ("RDC_FAKE_FAIL", "amdsmi_get_power_info@2"),  # GPUs 0 and 1 only
         ("RDC_FAKE_FAIL", "amdsmi_init=AMDSMI_STATUS_TYPO"),
         ("RDC_FAKE_COUNTER_RESET", "1"),  # without RDC_FAKE_ARM it would never reset
+        ("RDC_FAKE_LONG_STRINGS", "2"),
+        ("RDC_FAKE_GFXCLK_HOLES", "9"),
+        ("RDC_FAKE_GFXCLKS", "1000,fast"),
+        ("RDC_FAKE_GFXCLKS", "1,2,3,4,5,6,7,8,9"),
+        ("RDC_FAKE_CPER_LENGTH", "-1"),
+        ("RDC_FAKE_CPER_BYTES", "all"),
+        ("RDC_FAKE_CPER_AFID", "one"),
         ("RDC_FAKE_LOG", "/nonexistent/fake.log"),
     ],
 )

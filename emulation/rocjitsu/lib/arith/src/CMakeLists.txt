@@ -7,6 +7,7 @@
 add_library(
     rj_arith
     STATIC
+    mfma/gfx942_exact.cpp
     mfma/mfma_half.cpp
     mfma/mfma_f32.cpp
     mfma/mfma_fp8.cpp
@@ -38,6 +39,7 @@ add_library(
     compare/constant_compare.cpp
     compare/float_compare.cpp
     compare/float_compare_gfx1150.cpp
+    compare/float_compare_gfx908.cpp
     compare/integer_compare.cpp
     dot/scalar_repair.cpp
     dot/dot.cpp
@@ -87,6 +89,7 @@ add_library(
     integer/byte_shift.cpp
     integer/integer16.cpp
     integer/integer16_ternary.cpp
+    integer/packed_u64.cpp
     integer/integer_add.cpp
     integer/integer_mad.cpp
     integer/integer_minmax.cpp
@@ -96,10 +99,15 @@ add_library(
     integer/sad.cpp
     integer/shift.cpp
     register/cndmask.cpp
+    math/cdna_half.cpp
+    math/cdna_unary.cpp
+    math/bf16_gfx1250.cpp
     math/half_trig.cpp
     math/half_unary.cpp
     math/rcp_iflag.cpp
+    math/tanh_gfx1250.cpp
     math/trig.cpp
+    math/cdna_trig_preop.cpp
     math/trig_preop.cpp
     math/unary.cpp
     register/dpp.cpp

@@ -51,8 +51,9 @@ public:
       return;
     }
     const uint64_t relative = offset_ - owner_->base_offset();
-    if (relative > owner_->extent() || extent_ > owner_->extent() - relative)
+    if (relative > owner_->extent() || extent_ > owner_->extent() - relative) {
       owner_.reset();
+    }
   }
 
   [[nodiscard]] explicit operator bool() const noexcept { return owner_ != nullptr; }
@@ -65,11 +66,13 @@ public:
   /// @details A child cannot escape the request bounds even when the owner
   /// has a larger live allocation. An invalid or overflowing range refuses.
   [[nodiscard]] FabricBacking subview(uint64_t offset, size_t extent) const noexcept {
-    if (!owner_ || offset < offset_)
+    if (!owner_ || offset < offset_) {
       return {};
+    }
     const uint64_t relative = offset - offset_;
-    if (relative > extent_ || extent > extent_ - relative)
+    if (relative > extent_ || extent > extent_ - relative) {
       return {};
+    }
     // The parent was validated against its owner at construction. A child
     // inside that fixed parent needs no owner callback under cache locks.
     return FabricBacking(owner_, owner_gpu_id_, offset, extent, BoundedSubviewTag{});
