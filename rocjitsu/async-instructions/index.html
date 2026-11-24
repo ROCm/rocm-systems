@@ -1852,10 +1852,22 @@ Automatic selection uses CPU affinity and the target's allocation table.</p>
 <td style="text-align: right;">32 / 40</td>
 </tr>
 <tr>
-<td style="text-align: right;">48 and above</td>
-<td style="text-align: right;">8/25/0</td>
+<td style="text-align: right;">48</td>
 <td style="text-align: right;">8/41/0</td>
-<td style="text-align: right;">32 / 48</td>
+<td style="text-align: right;">8/41/0</td>
+<td style="text-align: right;">48 / 48</td>
+</tr>
+<tr>
+<td style="text-align: right;">56</td>
+<td style="text-align: right;">8/41/0</td>
+<td style="text-align: right;">8/49/0</td>
+<td style="text-align: right;">48 / 56</td>
+</tr>
+<tr>
+<td style="text-align: right;">64 and above</td>
+<td style="text-align: right;">8/41/0</td>
+<td style="text-align: right;">8/57/0</td>
+<td style="text-align: right;">48 / 64</td>
 </tr>
 </tbody>
 </table>
@@ -1863,11 +1875,11 @@ Automatic selection uses CPU affinity and the target's allocation table.</p>
 <code>cpu_thread_budget</code> limits the combined allocation. Larger hosts retain the
 highest table entry. Custom JSON allocations and explicit knobs remain
 available for workloads that benefit from more workers.</p>
-<p>The single-GPU gfx950 and gfx1250 presets allocate their full 32- and
-48-thread budgets to engines and CU dispatch. Their matrix handlers run
-synchronously.</p>
-<p>Desktop and MI210 presets stop at 1/24/0; CDNA3 stops at 8/17/0.
-Two- and four-GPU presets keep <strong>1/1/0</strong> for RCCL. Mirage embeds these native
+<p>The single-GPU gfx950 and gfx1250 presets use up to 48 and 64 threads,
+respectively, for engines and CU dispatch. Their matrix handlers run
+synchronously. See the <a href="../configuration/#thread-accounting-and-preferred-allocations">preferred allocations</a>
+for the other targets.</p>
+<p>Two- and four-GPU presets keep <strong>1/1/0</strong> for RCCL. Mirage embeds these native
 tables in its rocjitsu backend and exposes the helper option alongside the
 engine, dispatch and total-budget options.</p>
 <div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--thread-budget-table

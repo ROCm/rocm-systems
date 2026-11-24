@@ -2298,14 +2298,14 @@ helpers, the retained execution allocation is <strong>E + sum(D - 1) + H</strong
 engine caller and can share the SoC's D-1 persistent workers. Callers progress
 concurrently and join only their own submission. Runtime, doorbell and daemon
 threads are outside this execution budget.</p>
-<p>The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):</p>
+<p>The multi-XCD single-GPU presets use these synchronous engine/dispatch pairs (H=0).</p>
 <table>
 <thead>
 <tr>
 <th style="text-align: right;">Budget</th>
+<th style="text-align: right;">gfx942 E/D</th>
 <th style="text-align: right;">gfx950 E/D</th>
 <th style="text-align: right;">gfx1250 E/D</th>
-<th style="text-align: right;">gfx1100/gfx1151/gfx1201 E/D</th>
 </tr>
 </thead>
 <tbody>
@@ -2324,53 +2324,66 @@ threads are outside this execution budget.</p>
 <tr>
 <td style="text-align: right;">4</td>
 <td style="text-align: right;">2/3</td>
-<td style="text-align: right;">1/4</td>
+<td style="text-align: right;">2/3</td>
 <td style="text-align: right;">1/4</td>
 </tr>
 <tr>
 <td style="text-align: right;">8</td>
 <td style="text-align: right;">2/7</td>
 <td style="text-align: right;">2/7</td>
-<td style="text-align: right;">1/8</td>
+<td style="text-align: right;">2/7</td>
 </tr>
 <tr>
 <td style="text-align: right;">16</td>
 <td style="text-align: right;">8/9</td>
 <td style="text-align: right;">8/9</td>
-<td style="text-align: right;">1/16</td>
+<td style="text-align: right;">8/9</td>
 </tr>
 <tr>
 <td style="text-align: right;">24</td>
 <td style="text-align: right;">8/17</td>
 <td style="text-align: right;">8/17</td>
-<td style="text-align: right;">1/24</td>
+<td style="text-align: right;">8/17</td>
 </tr>
 <tr>
 <td style="text-align: right;">32</td>
 <td style="text-align: right;">8/25</td>
 <td style="text-align: right;">8/25</td>
-<td style="text-align: right;">1/24</td>
+<td style="text-align: right;">8/25</td>
 </tr>
 <tr>
 <td style="text-align: right;">40</td>
 <td style="text-align: right;">8/25</td>
+<td style="text-align: right;">8/25</td>
 <td style="text-align: right;">8/33</td>
-<td style="text-align: right;">1/24</td>
 </tr>
 <tr>
-<td style="text-align: right;">48 and above</td>
-<td style="text-align: right;">8/25</td>
+<td style="text-align: right;">48</td>
 <td style="text-align: right;">8/41</td>
-<td style="text-align: right;">1/24</td>
+<td style="text-align: right;">8/41</td>
+<td style="text-align: right;">8/41</td>
+</tr>
+<tr>
+<td style="text-align: right;">56</td>
+<td style="text-align: right;">8/41</td>
+<td style="text-align: right;">8/41</td>
+<td style="text-align: right;">8/49</td>
+</tr>
+<tr>
+<td style="text-align: right;">64 and above</td>
+<td style="text-align: right;">8/41</td>
+<td style="text-align: right;">8/41</td>
+<td style="text-align: right;">8/57</td>
 </tr>
 </tbody>
 </table>
-<p>At their highest budget, both single-GPU server presets use eight engines.
-gfx950 adds 24 shared CU dispatch workers at budget 32 and gfx1250 adds 40
-at budget 48. All matrix handlers execute on the issuing thread.
-See the <a href="../async-instructions/#thread-policy">async MMA thread policy</a>.
-Desktop and MI210 tables stop at 1/24/0. CDNA3 stops at 8/17/0.
-A budget of 12 selects the eight-thread row.</p>
+<p>The highest entries use eight engines. gfx942 and gfx950 add 40 shared CU
+dispatch workers, and gfx1250 adds 56. All matrix handlers execute on the
+issuing thread. See the
+<a href="../async-instructions/#thread-policy">async MMA thread policy</a>.</p>
+<p>Desktop and MI210 presets use one engine, so their dispatch width equals the
+retained thread count. Their granules are 1, 2, 4, 8, 16 and 24 threads.
+MI210 adds a 32-thread granule. A budget of 12 selects the eight-thread row.</p>
 <p>Print allocations for any target without constructing a simulated GPU:</p>
 <div class="highlight"><pre><span></span><code>rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi350x.json<span class="w"> </span>--thread-budget-table
 </code></pre></div>
@@ -2465,8 +2478,8 @@ selects them by the agent's GPU target and GPU count. The hardware agent format 
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts
 convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
-then leave selection to rocjitsu. Derived gfx950 tables use up to 32 threads
-and gfx1250 uses 48, while desktop and CDNA3 tables use 24.
+then leave selection to rocjitsu. The starting budgets come from the
+single-GPU tables above.
 Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 <code>num_threads: 0</code> retains it. Profile options may override <code>cpu_thread_budget</code>,
