@@ -999,13 +999,8 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
   if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path))
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  std::unique_ptr<rj_daemon_t> created;
-  try {
-    created = std::make_unique<rj_daemon_t>();
-    created->socket_path = socket_path;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  }
+  auto created = std::make_unique<rj_daemon_t>();
+  created->socket_path = socket_path;
 
   rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
   if (status != ROCJITSU_STATUS_SUCCESS)
