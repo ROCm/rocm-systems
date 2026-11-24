@@ -170,19 +170,23 @@ hipError_t ihipFree(void* ptr) {
 
     // Find out if memory belongs to any memory pool
     if (!g_devices[device_id]->FreeMemory(memory_object, nullptr)) {
+      // Non-SVM memory, such as external or registered host memory, is freed only through the
+      // address it is tracked under. The lookup above also resolves an interior address (offset
+      // != 0) and, for registered host memory, a device VA of it, which is known only by its host
+      // address. Reject those from the lookup result, before waiting on the device. (SVM
+      // allocations may be freed by an interior address, see below.)
+      if (memory_object->getSvmPtr() == nullptr &&
+          ((memory_object->getMemFlags() & CL_MEM_USE_HOST_PTR) ? memory_object->getHostMem() != ptr
+                                                                : offset != 0)) {
+        return hipErrorInvalidValue;
+      }
+
       // Wait on the device, associated with the current memory object during allocation
       g_devices[device_id]->SyncAllStreams();
 
-      // Non-SVM memory free, such as external or registered host memory. Only the address the
-      // object is tracked under frees it: an interior address, or a device VA of registered host
-      // memory, resolves to the object too but is not its key. (SVM allocations may be freed by an
-      // interior address, see below.) Registered host memory is known only by its host address.
+      // Non SVM memory free, such as external memory
       if (memory_object->getSvmPtr() == nullptr) {
-        if (((memory_object->getMemFlags() & CL_MEM_USE_HOST_PTR) &&
-             memory_object->getHostMem() != ptr) ||
-            !amd::MemObjMap::TryRemoveMemObj(ptr, memory_object)) {
-          return hipErrorInvalidValue;
-        }
+        amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
         if (!amd::SvmBuffer::free(memory_object->getContext(), ptr)) {
@@ -1490,7 +1494,7 @@ hipError_t ihipHostUnregister(void* hostPtr) {
 
   if (mem != nullptr) {
     // hostPtr resolves to the registration also when it is an interior address or a device VA
-    // of it; only the registered host address unregisters it.
+    // of it; only the registered host address, which is its key, unregisters it.
     if (mem->getHostMem() != hostPtr) {
       LogPrintfError("Cannot unregister host_ptr: %p, not the registered address", hostPtr);
       return hipErrorHostMemoryNotRegistered;
@@ -1499,10 +1503,7 @@ hipError_t ihipHostUnregister(void* hostPtr) {
     // Wait on the device, associated with the current memory object during allocation
     g_devices[mem->getUserData().deviceId]->SyncAllStreams();
 
-    if (!amd::MemObjMap::TryRemoveMemObj(hostPtr, mem)) {
-      LogPrintfError("Cannot unregister host_ptr: %p, not the registered address", hostPtr);
-      return hipErrorHostMemoryNotRegistered;
-    }
+    amd::MemObjMap::RemoveMemObj(hostPtr);
     for (const auto& device : g_devices) {
       // Remove device VA from per-device map
       amd::Device* amdDevice = device->devices()[0];
@@ -1513,7 +1514,9 @@ hipError_t ihipHostUnregister(void* hostPtr) {
           if (IS_WINDOWS) {
             amdDevice->RemoveDevMemObj(vAddr);
           } else {
-            amd::MemObjMap::TryRemoveMemObj(vAddr, mem);
+            if (amd::MemObjMap::FindMemObj(vAddr)) {
+              amd::MemObjMap::RemoveMemObj(vAddr);
+            }
           }
         }
       }

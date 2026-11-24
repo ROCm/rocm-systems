@@ -88,6 +88,7 @@ HIP_TEST_CASE(Unit_hipHostUnregister_InteriorPtr) {
 // touching the registration (it aborted the process on Windows, and released the registration on
 // Linux, leaving the host address pointing at a freed object).
 HIP_TEST_CASE(Unit_hipHostUnregister_DevicePtr) {
+  hipHostRegisterSupported();
   constexpr size_t kSize = 64 * 1024;
   std::vector<char> buffer(kSize);
   char* host = buffer.data();

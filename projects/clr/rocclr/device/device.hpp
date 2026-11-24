@@ -1522,10 +1522,6 @@ class MemObjMap : public AllStatic {
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
 
-  //!< Remove the entry for k only if k is a key that maps to v; returns false otherwise.
-  //!< For user-facing frees, where k may be an interior or per-device address of v.
-  static bool TryRemoveMemObj(const void* k, const amd::Memory* v);
-
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
   //!< Find any registered mem object whose range overlaps [ptr, ptr + size).

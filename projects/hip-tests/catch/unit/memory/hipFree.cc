@@ -180,6 +180,9 @@ HIP_TEST_CASE(Unit_hipFreeNegativeHost) {
 // hipFree on an address inside registered host memory must fail and leave the registration
 // alone; it used to abort the process in the runtime's pointer map.
 HIP_TEST_CASE(Unit_hipFreeNegativeHostRegisteredInteriorPtr) {
+#if HT_NVIDIA
+  HIP_SKIP_TEST("hipHostRegister is not supported on this device.");
+#endif
   constexpr size_t kSize = 64 * 1024;
   std::vector<char> buffer(kSize);
   char* host = buffer.data();
