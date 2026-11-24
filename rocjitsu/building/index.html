@@ -1930,6 +1930,11 @@ configuration. Keep that header tree at a matching revision.</p>
 <td>Source directory of the shared runtime API headers</td>
 </tr>
 <tr>
+<td><code>RJ_INSTALL_MINIDEBUGINFO</code></td>
+<td><code>ON</code> on Linux</td>
+<td>Compress private ELF symbols in the installed Release <code>librocjitsu.so</code> for GDB</td>
+</tr>
+<tr>
 <td><code>LTO</code></td>
 <td><code>OFF</code></td>
 <td>Enable link-time optimization for Release/RelWithDebInfo</td>
@@ -1941,6 +1946,11 @@ configuration. Keep that header tree at a matching revision.</p>
 </tr>
 </tbody>
 </table>
+<p>Linux Release installs retain private function names in the compressed
+<code>.gnu_debugdata</code> section when the toolchain provides objcopy and readelf.
+Use <code>-DRJ_INSTALL_MINIDEBUGINFO=OFF</code> to keep the regular ELF symbol table for
+tools that read it directly. Builds with DWARF and TheRock split-debug packages
+retain their existing debug information.</p>
 <h3 id="explicit-c-api-embedding">Explicit C API embedding<a class="headerlink" href="#explicit-c-api-embedding" title="Permanent link">&para;</a></h3>
 <p>Applications that manage rocjitsu through its C API can build without the
 preload interposer and without installing host signal handlers:</p>
