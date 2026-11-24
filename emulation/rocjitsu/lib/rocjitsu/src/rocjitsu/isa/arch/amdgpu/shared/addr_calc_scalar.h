@@ -48,9 +48,9 @@ inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint6
 /// @p align_mask clears low bits of the returned address. @p size_align_mask
 /// clears low bits of the byte bound before the per-DWORD mask is built; zero
 /// leaves the bound unrounded, so a DWORD counts as in range when its first byte
-/// is. GFX9 passes 3, so a DWORD must lie wholly in range, and RDNA4 passes its
-/// access alignment. RDNA1 through RDNA3.5 pass zero; their hardware rule is
-/// unverified.
+/// is. GFX9, RDNA3/3.5, and RDNA4 pass 3, so the byte bound rounds down to whole
+/// DWORDs (verified on gfx90a, gfx1100, and gfx1201). RDNA1 and RDNA2 pass zero;
+/// their hardware rule is unverified.
 ///
 /// An atomic's mask is all set or all clear. An aligned atomic is accessed only
 /// if every DWORD of its element is in range. A misaligned atomic keeps its full

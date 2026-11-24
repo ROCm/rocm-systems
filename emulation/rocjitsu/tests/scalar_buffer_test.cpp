@@ -445,22 +445,51 @@ TEST(RdnaAddrCalcTest, ScalarBufferLoadsMaskEachDwordAndHonorStride) {
         EXPECT_EQ(state.load_dword_mask, offset == 0 ? 7u : offset == 4 ? 3u : 0u);
       }
     }
+    // Non-multiple-of-4 NUM_RECORDS rounds down to whole DWORDs on both RDNA3 and RDNA4.
+    cu->write_sgpr(sb + 1, uint32_t(base >> 32) & 0xffff);
+    for (uint32_t records : {0u, 1u, 3u, 4u, 5u, 7u, 8u, 11u, 12u}) {
+      cu->write_sgpr(sb + 2, records);
+      amdgpu::ScalarMemState state;
+      state.num_dwords = 4;
+      std::optional<uint64_t> address;
+      if (arch == rocjitsu::IsaFamily::Rdna3) {
+        rdna3::SmemMachineInst inst{};
+        inst.op = 10;
+        inst.offset = 0;
+        inst.soffset = rdna3::OPR_SMEM_OFFSET_NULL;
+        address = rdna3::smem_calculate_address(inst, *wf, &state);
+      } else {
+        rdna4::SmemMachineInst inst{};
+        inst.op = 18;
+        inst.ioffset = 0;
+        inst.soffset = rdna4::OPR_SMEM_OFFSET_NULL;
+        address = rdna4::smem_calculate_address(inst, *wf, &state);
+      }
+      ASSERT_TRUE(address);
+      const uint32_t full_dwords = std::min(4u, records / 4u);
+      const uint32_t expected_mask = (1u << full_dwords) - 1u;
+      EXPECT_EQ(state.load_dword_mask, expected_mask) << "records=" << records;
+    }
     if (arch == rocjitsu::IsaFamily::Rdna4) {
       cu->write_sgpr(sb + 1, uint32_t(base >> 32) & 0xffff);
-      cu->write_sgpr(sb + 2, 12);
-      for (uint32_t size : {1u, 2u}) {
-        for (uint32_t offset : {1u, 2u, 3u, 11u, 12u}) {
-          rdna4::SmemMachineInst inst{};
-          inst.op = size == 1 ? 24 : 26;
-          inst.ioffset = offset;
-          inst.soffset = rdna4::OPR_SMEM_OFFSET_NULL;
-          amdgpu::ScalarMemState state;
-          state.num_dwords = 1;
-          state.elem_size = size;
-          const auto address = rdna4::smem_calculate_address(inst, *wf, &state);
-          ASSERT_TRUE(address);
-          EXPECT_EQ(*address, (base + offset) & ~uint64_t(size - 1));
-          EXPECT_EQ(state.load_dword_mask, offset < 12 ? 1u : 0u);
+      for (uint32_t records : {2u, 3u, 4u, 5u, 12u}) {
+        cu->write_sgpr(sb + 2, records);
+        for (uint32_t size : {1u, 2u}) {
+          for (uint32_t offset : {0u, 1u, 2u, 3u, 4u, 11u, 12u}) {
+            rdna4::SmemMachineInst inst{};
+            inst.op = size == 1 ? 24 : 26;
+            inst.ioffset = offset;
+            inst.soffset = rdna4::OPR_SMEM_OFFSET_NULL;
+            amdgpu::ScalarMemState state;
+            state.num_dwords = 1;
+            state.elem_size = size;
+            const auto address = rdna4::smem_calculate_address(inst, *wf, &state);
+            ASSERT_TRUE(address);
+            EXPECT_EQ(*address, (base + offset) & ~uint64_t(size - 1));
+            const uint32_t aligned_offset = offset & ~(size - 1);
+            EXPECT_EQ(state.load_dword_mask, aligned_offset < (records & ~3u) ? 1u : 0u)
+                << "records=" << records << " size=" << size << " offset=" << offset;
+          }
         }
       }
     }
@@ -575,7 +604,9 @@ TEST(Gfx12AddrCalcTest, ScalarLoadsAlignEachComponentAndBufferSize) {
         if (buffer) {
           EXPECT_EQ(state.load_dword_mask, 1u);
           EXPECT_EQ(address(0x1000, size, 0, size + 1, state), 0x1000u + size);
-          EXPECT_EQ(state.load_dword_mask, size == 1 ? 1u : 0u);
+          // gfx1201 rounds the bound down to whole dwords, so a 2-byte buffer holds none.
+          EXPECT_EQ(state.load_dword_mask,
+                    size == 1 && arch == rocjitsu::IsaFamily::Cdna5 ? 1u : 0u);
           EXPECT_EQ(address(0x1000, 0, 0, size - 1, state), 0x1000u);
           EXPECT_EQ(state.load_dword_mask, 0u);
         }
