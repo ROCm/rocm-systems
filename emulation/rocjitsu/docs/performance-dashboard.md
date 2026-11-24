@@ -1,12 +1,12 @@
 # Performance dashboard
 
-The Rocjitsu performance dashboard tracks **how quickly the simulator runs benchmark workloads**. It helps developers inspect benchmark history and identify changes in simulator performance.
+The rocjitsu performance dashboard tracks **how quickly the simulator runs benchmark workloads**. It helps developers inspect benchmark history and identify changes in simulator performance.
 
 !!! info "Simulator performance, not GPU hardware performance"
 
-    These results measure Rocjitsu's simulation runs. They are not benchmarks of physical AMD GPUs and should not be used to compare AMD hardware performance. Target names such as `gfx950` identify the architecture being simulated.
+    These results measure rocjitsu's simulation runs. They are not benchmarks of physical AMD GPUs and should not be used to compare AMD hardware performance. Target names such as `gfx950` identify the architecture being simulated.
 
-[**Rocjitsu / Simulation Performance Dashboard** :material-open-in-new:](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/){ .dashboard-launch aria-label="Open Rocjitsu Simulation Performance Dashboard (external site)" }
+[**rocjitsu / Simulation Performance Dashboard** :material-open-in-new:](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/){ .dashboard-launch aria-label="Open rocjitsu Simulation Performance Dashboard (external site)" }
 
 To benchmark an open same-repository pull request, including a stacked PR, add the [`rocjitsu-presubmit-benchmarks`](https://github.com/ROCm/rocm-systems/labels/rocjitsu-presubmit-benchmarks) label. The PR must match the workflow's [path filters](https://github.com/ROCm/rocm-systems/blob/develop/.github/workflows/rocjitsu-benchmarks.yml); fork PRs are excluded. Results from eligible runs are published to this dashboard.
 

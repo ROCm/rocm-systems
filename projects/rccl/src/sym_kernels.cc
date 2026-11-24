@@ -730,7 +730,7 @@ static bool ncclSymkImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncc
 }
 
 ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                                size_t nElts, bool symAligned16B) {
+                                size_t nElts, bool symAligned16B, bool ginWindowsUnregistered) {
   ncclSymkKernelMask kmask = kernelMask_coll(coll);
 
   bool const isReduction = coll == ncclFuncReduce || coll == ncclFuncAllReduce || coll == ncclFuncReduceScatter;
@@ -793,7 +793,8 @@ ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*nc
   kmask &= ~kernelMask_Genk;
 #endif
 
-  bool const hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported;
+  bool const hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported &&
+                      !ginWindowsUnregistered;
   bool const hasMultipleLsaTeams = ncclTeamLsa(comm).nRanks < comm->nRanks;
   if (hasMultipleLsaTeams) {
     kmask &= kernelMask_GinCapable | kernelMask_A2A;

@@ -850,6 +850,13 @@ def insert_minimal_data(
             ),
         )
 
+    # Kernel dispatch pipe_id was introduced in schema 3.1.1. Leave the second dispatch at the
+    # column default (-1, unknown).
+    if ver >= (3, 1, 1):
+        conn.execute(
+            f"UPDATE {tbl('rocpd_kernel_dispatch')} SET pipe_id = ? WHERE id = ?", (2, 1)
+        )
+
 
 # ---------------------------------------------------------------------------
 # Entry point

@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #if defined(ENABLE_ROCSHMEM_GIN)
+#include "algorithms/gin/gin_all_gather.h"
 #include "algorithms/gin/gin_all_reduce.h"
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
@@ -1034,6 +1035,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_A2A_GIN_SDMA:
       *algoName = "A2A-GIN";
       break;
+    case rcclAddonAlgos_t::RCCL_AG_GIN_SDMA:
+      *algoName = "AG-GIN";
+      break;
     default:
       WARN("Invalid algorithm value: %d", algo);
       return ncclInvalidArgument;
@@ -1479,6 +1483,11 @@ int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   return std::min(cap, table->ddaA2aLL128MaxBlocks);
 }
 
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr) return 0;
+  return (int)table->ddaLL128BcTwoShotThreads;
+}
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm) {
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   return table != nullptr ? table->ddaRsLL128Threads : 0;
@@ -2139,7 +2148,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // gfx1250: a registered call whose symk symMaxR2 withdrew takes DDA where DDA beats the backend that runs.
     const bool symkWithdrawn =
       ddaFabricArch1250 && symkRequested && !symSuppressedByMin && symSuppressedByMax && !ginYield;
-    // In graph capture that backend is Ring (no CE); re-route only where the planner picks Ring (fp8 plans Tree).
+    // In graph capture that backend is Ring (no CE); re-route only where the planner picks Ring (fp8 too).
     // Check-mode, suspended and revoked comms divert to enqueue, which plans Ring itself.
     struct rcclCollDecision ringChoice;
     memset(&ringChoice, 0, sizeof(ringChoice));
@@ -2359,6 +2368,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     ncclSymRegType_t winRegType;
     NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
     const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
+    // GIN allgather owns both symmetric windows and runs before the symmetric
+    // kernel/CE/DDA alternatives, matching the GIN AllReduce selection order.
+#if defined(ENABLE_ROCSHMEM_GIN)
+    if (ncclAllGatherGinSdmaEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      decision->algo = RCCL_AG_GIN_SDMA;
+      decision->nMaxChannels = ncclAllGatherGinSdmaCtaCount(comm->nRanks, sendcount * typeSize);
+      return rcclSelectDone("AG", query, decision);
+    }
+#endif
     // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
     // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
     const bool agSymkRequested =

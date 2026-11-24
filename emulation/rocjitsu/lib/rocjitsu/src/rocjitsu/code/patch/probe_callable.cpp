@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/probe_callable.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -117,8 +118,8 @@ template <typename T>
 // an atomic's data is reported only as written, and a tfe status register is not
 // reported. The live-in and clobber analyses would get those registers wrong, so
 // admitting these instructions is deferred until the decoder models the fields.
-[[nodiscard]] bool is_unmodeled_image_access(rj_code_arch_t arch, const Instruction &inst) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+[[nodiscard]] bool is_unmodeled_image_access(rocjitsu::IsaFamily arch, const Instruction &inst) {
+  return arch == rocjitsu::IsaFamily::Rdna4 &&
          inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Image;
 }
 
@@ -155,7 +156,7 @@ RegisterSet supplied_registers(const ProbeAbi &abi) {
 
 std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
-                                                  rj_code_arch_t arch, uint8_t num_arg_dwords,
+                                                  rocjitsu::IsaFamily arch, uint8_t num_arg_dwords,
                                                   std::string *error_out) {
   // Screened before the body is read so an unsupported count is reported as
   // such, rather than as whatever the body scan trips over first.
@@ -218,7 +219,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   const rj_code_target_id_t target = probe_obj.target_id();
   if (target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetDescriptor *descriptor = registry.find(target);
-    if (descriptor == nullptr || descriptor->architecture_id != arch) {
+    if (descriptor == nullptr || descriptor->family != arch) {
       report(error_out, "probe code-object target does not match the requested architecture");
       return std::nullopt;
     }
@@ -256,22 +257,22 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     // Memory waits do not prove these producers complete before guest restores.
     // Until return-path spacing is analyzed, reject them throughout the body.
     if (inst->is_mfma() ||
-        (arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(*inst))) {
+        (arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(*inst))) {
       const std::string message = "probe body contains " + std::string(m) +
                                   " with unproven register completion before restoration";
       report(error_out, message.c_str());
       return std::nullopt;
     }
     const amdgpu::Operation operation = inst->amdgpu_operation();
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (operation == amdgpu::Operation::S_SETREG_B32 ||
-                                             operation == amdgpu::Operation::S_SETREG_IMM32_B32 ||
-                                             operation == amdgpu::Operation::S_SET_VGPR_MSB)) {
+    if (arch == rocjitsu::IsaFamily::Cdna5 && (operation == amdgpu::Operation::S_SETREG_B32 ||
+                                               operation == amdgpu::Operation::S_SETREG_IMM32_B32 ||
+                                               operation == amdgpu::Operation::S_SET_VGPR_MSB)) {
       report(error_out, "probe body may change the VGPR bank state required by its call ABI");
       return std::nullopt;
     }
     // SGPR restores also use vector instructions through the spill bridge.
     // Widening EXEC cannot make those instructions execute while VSKIP is set.
-    if (may_enable_vskip(*inst, body_bytes, arch)) {
+    if (may_enable_vskip(*inst, body_bytes, arch, w * sizeof(uint32_t))) {
       report(error_out, "probe body may enable VSKIP and suppress the call envelope's restores");
       return std::nullopt;
     }

@@ -133,6 +133,7 @@ pub(super) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
 pub(super) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
 pub(super) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
+pub(super) const SVM_FLAG_EXT_COHERENT: u32 = 0x80;
 
 /// KFD UAPI version returned by `GET_VERSION`.
 #[repr(C)]

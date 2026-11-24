@@ -1,15 +1,15 @@
 ---
 myst:
     html_meta:
-        "description": "Tutorial walking through code object inspection and instruction disassembly using the rocJITsu C API."
-        "keywords": "rocJITsu, ROCm, code object, disassemble, basic block, C API, GPU, ISA"
+        "description": "Tutorial walking through code object inspection and instruction disassembly using the rocjitsu C API."
+        "keywords": "rocjitsu, ROCm, code object, disassemble, basic block, C API, GPU, ISA"
 ---
 # Inspect and disassemble a code object with the C API
 
 This tutorial walks through a complete workflow for loading a GPU
 executable, extracting a code object, decomposing it into basic blocks,
 iterating over instructions, and disassembling each instruction into
-human-readable text. You use the rocJITsu code object C API throughout,
+human-readable text. You use the rocjitsu code object C API throughout,
 and at the end you tear down every handle with the correct
 retain/release/destroy sequence.
 
@@ -122,11 +122,8 @@ A few things to note in this loop:
     `rj_code_basic_block_release` when you are done with it.
 -   `rj_code_basic_block_first_inst` returns `NULL` for an empty block.
     `rj_code_inst_next` returns `NULL` after the last instruction.
--   You can also query per-instruction metadata such as
-    `rj_code_inst_mnemonic`, `rj_code_inst_size`, and
-    `rj_code_inst_flags`. The flags bitmask uses values from
-    `rj_code_inst_flags_t` --- for example, `RJ_CODE_INST_BRANCH` and
-    `RJ_CODE_INST_PROGRAM_TERMINATOR`.
+-   You can also query per-instruction metadata with
+    `rj_code_inst_mnemonic` and `rj_code_inst_size`.
 
 ## Clean up handles
 
@@ -159,5 +156,5 @@ reference count of one, so you need both the destroy and the release.
     [Analyze a code object for wait hazards with waitcheck](waitcheck-analyze-code-object.md).
 -   For the full code object and instruction API reference, see
     [API reference: code object](../reference/api-code-object.md).
--   For an overview of how the code layer fits into the rocJITsu
+-   For an overview of how the code layer fits into the rocjitsu
     architecture, see [Architecture and component layers](../conceptual/architecture.md).

@@ -1,0 +1,32 @@
+{
+    "reference": "workload",
+    "run": {
+        "clean": [
+            "/tmp/rocprofsys-bench-gpu_kernels_all_on"
+        ],
+        "mode": "medium",
+        "output": "../../results/all_on/gpu_kernels_all_on.json",
+        "runs": 150
+    },
+    "tools": [
+        {
+            "name": "all_on",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_CONFIG_FILE",
+                    "value": "../../configs/all_on.cfg"
+                },
+                {
+                    "key": "ROCPROFSYS_ROCM_DOMAINS",
+                    "value": "hip_api,hip_compiler_api,hip_runtime_api,hipfile_api,hsa_amd_ext_api,hsa_api,hsa_core_api,hsa_finalize_ext_api,hsa_image_ext_api,kernel_dispatch,kfd_event_dropped_events,kfd_event_page_fault,kfd_event_page_migrate,kfd_event_queue,kfd_event_unmap_from_gpu,kfd_events,kfd_page_fault,kfd_page_migrate,kfd_queue,marker_api,memory_allocation,memory_copy,ompt,rccl_api,rocdecode_api,rocjpeg_api,rocshmem_api,roctx,scratch_memory"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-gpu_kernels_all_on"
+                }
+            ]
+        }
+    ],
+    "workload": "../../../build/gpu_kernels"
+}

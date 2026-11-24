@@ -521,7 +521,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
             vp_frames_.pop_back();
         }
     }
-    output_frame_cnt_ = 0;     // reset frame_count
+    output_frame_cnt_ = 0, output_frame_cnt_ret_ = 0;     // reset frame counts
     if (is_decode_res_changed) {
         coded_width_ = p_video_format->coded_width;
         coded_height_ = p_video_format->coded_height;
@@ -552,12 +552,13 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
 
     num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
 
-    if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
-        if (out_mem_type_ == OUT_SURFACE_MEM_DEV_INTERNAL || out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED) {
+    if (out_mem_type_ == OUT_SURFACE_MEM_DEV_INTERNAL || out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED) {
+        if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
             GetSurfaceStrideInternal(video_surface_format_, coded_width_, coded_height_, &surface_stride_, &surface_vstride_);
-        } else {
-            surface_stride_ = target_width_ * byte_per_pixel_;
         }
+    } else {
+        // copied frames are packed at the target width, so the pitch changes even when the decode surfaces are kept
+        surface_stride_ = target_width_ * byte_per_pixel_;
     }
     chroma_height_ = static_cast<int>(ceil(target_height_ * GetChromaHeightFactor(video_surface_format_)));
     num_chroma_planes_ = GetChromaPlaneCount(video_surface_format_);
@@ -861,9 +862,12 @@ uint8_t* RocVideoDecoder::GetFrame(int64_t *pts) {
             DecFrameBuffer *fb = &vp_frames_q_.front();
             if (pts) *pts = fb->pts;
             return fb->frame_ptr;
-        } else if (vp_frames_.size() > 0){
-            if (pts) *pts = vp_frames_[output_frame_cnt_ret_].pts;
-            return vp_frames_[output_frame_cnt_ret_++].frame_ptr;
+        } else if (output_frame_cnt_ret_ < static_cast<int>(vp_frames_.size())) {
+            DecFrameBuffer *fb = &vp_frames_[output_frame_cnt_ret_++];
+            // once every pending frame has been returned (e.g. by a reconfigure flush), the next display callback refills vp_frames_ from index 0
+            if (output_frame_cnt_ == 0) output_frame_cnt_ret_ = 0;
+            if (pts) *pts = fb->pts;
+            return fb->frame_ptr;
         }
     }
     return nullptr;
@@ -882,18 +886,9 @@ uint8_t* RocVideoDecoder::GetFrame(int64_t *pts) {
 bool RocVideoDecoder::ReleaseFrame(int64_t pTimestamp, bool b_flushing) {
     if (out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED)
         return true;    // nothing to do
-    if (out_mem_type_ != OUT_SURFACE_MEM_DEV_INTERNAL) {
-        if (!b_flushing)  // if not flushing the buffers are reused, so keep them
-            return true;            // nothing to do
-        else {
-            DecFrameBuffer *fb = &vp_frames_[0];
-            if (pTimestamp != fb->pts) {
-                RocVideoDecCriticalLog("Decoded frame released out of order");
-                return false;
-            }
-            vp_frames_.erase(vp_frames_.begin());     // get rid of the frames from the framestore
-        }
-    }
+    // the copied-frame buffers in vp_frames_ are reused, also when flushing; ReconfigureDecoder frees them when the output size changes
+    if (out_mem_type_ != OUT_SURFACE_MEM_DEV_INTERNAL)
+        return true;
     // only needed when using internal mapped buffer
     if (!vp_frames_q_.empty()) {
         std::lock_guard<std::mutex> lock(mtx_vp_frame_);
@@ -1085,11 +1080,13 @@ bool RocVideoDecoder::CodecSupported(int device_id, rocDecVideoCodec codec_id, u
     decode_caps.codec_type = codec_id;
     decode_caps.chroma_format = rocDecVideoChromaFormat_420;
     decode_caps.bit_depth_minus_8 = bit_depth - 8;
-    if((rocDecGetDecoderCaps(&decode_caps) != ROCDEC_SUCCESS) || !decode_caps.is_supported) {
-        return false;
-    } else {
-        return true;
+    // A failed query means the decode stack is unusable, not that the codec is unsupported; throw so callers don't
+    // mistake it for a reason to skip.
+    rocDecStatus status = rocDecGetDecoderCaps(&decode_caps);
+    if (status != ROCDEC_SUCCESS) {
+        ROCDEC_THROW("Decode capability query failed: " + std::string(rocDecGetErrorName(status)), status);
     }
+    return decode_caps.is_supported != 0;
 }
 
 void RocVideoDecoder::WaitForDecodeCompletion() {

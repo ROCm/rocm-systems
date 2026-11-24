@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/analysis/analyze.h"
+#include "util/diagnostic.h"
 
 #include <charconv>
 #include <fstream>
@@ -53,16 +54,16 @@ int main(int argc, char **argv) {
     std::cerr << "capture input error: incomplete or changing input\n";
     return kExitInputError;
   }
-  ContractError error;
-  rocjitsu::FailureOr<Capture> capture = decode_capture(bytes, &error);
+  util::StringDiagnostic diagnostic;
+  rocjitsu::FailureOr<Capture> capture = decode_capture(bytes, diagnostic.emitter());
   if (capture.failed()) {
-    std::cerr << "capture input error: " << error.message << '\n';
+    std::cerr << "capture input error: " << diagnostic.message() << '\n';
     return kExitInputError;
   }
   const rocjitsu::FailureOr<LdsRaceResult> result =
-      analyze_capture(capture.value(), options, &error);
+      analyze_capture(capture.value(), options, diagnostic.emitter());
   if (result.failed()) {
-    std::cerr << "analysis input error: " << error.message << '\n';
+    std::cerr << "analysis input error: " << diagnostic.message() << '\n';
     return kExitInputError;
   }
   std::cout << render_analysis(result.value());

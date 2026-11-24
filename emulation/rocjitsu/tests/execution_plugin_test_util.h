@@ -12,6 +12,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -199,7 +200,7 @@ prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wa
   }
   const auto dst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base);
   std::array<uint32_t, 3> words{};
-  if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (cu.arch() == rocjitsu::IsaFamily::Cdna5) {
     words = cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = dst, .vaddr = 0});
   } else {
     const auto encoded = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
@@ -228,8 +229,9 @@ protected:
     return amdgpu::VmAccessOutcome::Complete;
   }
 
-  amdgpu::MemoryAccessCompletion complete_access(Instruction &, amdgpu::Wavefront &,
-                                                 amdgpu::MemoryAccessDeferredCompletion) override {
+  amdgpu::MemoryAccessCompletion
+  complete_access(Instruction &, amdgpu::Wavefront &,
+                  const amdgpu::MemoryAccessCompletionFactory &) override {
     return amdgpu::MemoryAccessCompletion::Complete;
   }
 };
@@ -251,6 +253,9 @@ struct HookEvent {
     READ_SGPR,
     WRITE_SGPR,
     BARRIER_RESOLVED,
+    BARRIER_SIGNALED,
+    BARRIER_ROUND_COMPLETED,
+    BARRIER_WAIT_PASSED,
     INIT,
     SHUTDOWN,
     KIND_COUNT,
@@ -281,6 +286,7 @@ struct HookEvent {
   uint32_t cluster_size_y = 0;
   uint32_t cluster_size_z = 0;
   BarrierKind barrier_kind = BarrierKind::Workgroup;
+  BarrierRound barrier_round;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -602,6 +608,36 @@ public:
     e.barrier_kind = kind;
     events.push_back(e);
   }
+
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_SIGNALED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> wfs,
+                                     std::span<amdgpu::Wavefront *> /*armed*/,
+                                     const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_ROUND_COMPLETED};
+    if (!wfs.empty()) {
+      e.dispatch_id = wfs[0]->dispatch_id();
+      e.wg_id = wfs[0]->wg_id();
+    }
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_WAIT_PASSED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
+    events.push_back(e);
+  }
 };
 
 inline std::vector<HookEvent> vgpr_read_events(const OrderingPlugin &plugin) {
@@ -773,8 +809,8 @@ struct PluginFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
-    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
-        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (cu()->arch() == rocjitsu::IsaFamily::Cdna2 || cu()->arch() == rocjitsu::IsaFamily::Cdna3 ||
+        cu()->arch() == rocjitsu::IsaFamily::Cdna4) {
       // These kernels use the 256-register allocation for ordinary VGPRs.
       RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
     }

@@ -23,6 +23,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/diagnostic.h"
 #include "util/result.h"
@@ -46,9 +47,10 @@ struct GlobalOpcodes {
 /// @details CDNA's FLAT offset is a 13-bit signed field whose low 12 bits the
 /// generated builder carries; only non-negative offsets below 4096 are used here.
 /// RDNA4's ioffset is 24-bit signed.
-inline util::FailureOr<uint32_t> checked_global_offset(uint32_t byte_offset, rj_code_arch_t arch,
+inline util::FailureOr<uint32_t> checked_global_offset(uint32_t byte_offset,
+                                                       rocjitsu::IsaFamily arch,
                                                        util::DiagnosticEmitter emit_error = {}) {
-  const uint32_t limit = arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0x7FFFFFu : 0xFFFu;
+  const uint32_t limit = arch == rocjitsu::IsaFamily::Rdna4 ? 0x7FFFFFu : 0xFFFu;
   if (byte_offset > limit)
     return emit_error.emit() << "global memory offset does not fit the immediate field";
   return byte_offset;
@@ -58,9 +60,9 @@ inline util::FailureOr<uint32_t> checked_global_offset(uint32_t byte_offset, rj_
 ///        start on an even register; RDNA4 does not.
 /// @details The simulator does not enforce this, so a misaligned tuple would
 /// pass there and be illegal on hardware.
-inline util::Result check_tuple_alignment(uint8_t base, uint32_t dwords, rj_code_arch_t arch,
+inline util::Result check_tuple_alignment(uint8_t base, uint32_t dwords, rocjitsu::IsaFamily arch,
                                           util::DiagnosticEmitter emit_error = {}) {
-  if (dwords > 1 && base % 2 != 0 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+  if (dwords > 1 && base % 2 != 0 && arch != rocjitsu::IsaFamily::Rdna4)
     return emit_error.emit() << "multi-dword VGPR operand must start on an even register";
   return util::Result::success();
 }
@@ -71,11 +73,11 @@ inline util::Result check_tuple_alignment(uint8_t base, uint32_t dwords, rj_code
 /// base past the ordinary SGPRs selects something other than an SGPR pair:
 /// special registers, RDNA4's `off` at 124 (which takes the address from a VGPR
 /// pair instead), and from 128 a wrap of the 7-bit field (128 encodes s0).
-inline util::Result check_scalar_base(uint8_t saddr, rj_code_arch_t arch,
+inline util::Result check_scalar_base(uint8_t saddr, rocjitsu::IsaFamily arch,
                                       util::DiagnosticEmitter emit_error = {}) {
   if (saddr % 2 != 0)
     return emit_error.emit() << "SGPR base pair must start on an even register";
-  const uint32_t ordinary_sgprs = arch == ROCJITSU_CODE_ARCH_RDNA4
+  const uint32_t ordinary_sgprs = arch == rocjitsu::IsaFamily::Rdna4
                                       ? amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF
                                       : amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF;
   if (saddr + 1u >= ordinary_sgprs)
@@ -85,7 +87,7 @@ inline util::Result check_scalar_base(uint8_t saddr, rj_code_arch_t arch,
 
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_load(GlobalOpcodes ops, uint32_t dwords, uint8_t vdst, uint8_t voffset, uint8_t saddr,
-                  uint32_t byte_offset, rj_code_arch_t arch,
+                  uint32_t byte_offset, rocjitsu::IsaFamily arch,
                   util::DiagnosticEmitter emit_error = {}) {
   const util::FailureOr<uint32_t> maybe_offset =
       checked_global_offset(byte_offset, arch, emit_error);
@@ -94,7 +96,7 @@ build_global_load(GlobalOpcodes ops, uint32_t dwords, uint8_t vdst, uint8_t voff
     return util::Result::failure();
   const uint32_t offset = maybe_offset.value();
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3: {
+  case rocjitsu::IsaFamily::Cdna3: {
     const auto encoded = cdna3::build_flat(ops.cdna3, {.offset = static_cast<uint16_t>(offset),
                                                        .seg = 2,
                                                        .addr = voffset,
@@ -102,7 +104,7 @@ build_global_load(GlobalOpcodes ops, uint32_t dwords, uint8_t vdst, uint8_t voff
                                                        .vdst = vdst});
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
   }
-  case ROCJITSU_CODE_ARCH_CDNA4: {
+  case rocjitsu::IsaFamily::Cdna4: {
     const auto encoded = cdna4::build_flat(ops.cdna4, {.offset = static_cast<uint16_t>(offset),
                                                        .seg = 2,
                                                        .addr = voffset,
@@ -110,7 +112,7 @@ build_global_load(GlobalOpcodes ops, uint32_t dwords, uint8_t vdst, uint8_t voff
                                                        .vdst = vdst});
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
   }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
+  case rocjitsu::IsaFamily::Rdna4: {
     const auto encoded = rdna4::build_vglobal(
         ops.rdna4, {.saddr = saddr, .vdst = vdst, .vaddr = voffset, .ioffset = offset});
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
@@ -122,7 +124,7 @@ build_global_load(GlobalOpcodes ops, uint32_t dwords, uint8_t vdst, uint8_t voff
 
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_store(GlobalOpcodes ops, uint32_t dwords, uint8_t vdata, uint8_t voffset,
-                   uint8_t saddr, uint32_t byte_offset, rj_code_arch_t arch,
+                   uint8_t saddr, uint32_t byte_offset, rocjitsu::IsaFamily arch,
                    util::DiagnosticEmitter emit_error = {}) {
   const util::FailureOr<uint32_t> maybe_offset =
       checked_global_offset(byte_offset, arch, emit_error);
@@ -131,7 +133,7 @@ build_global_store(GlobalOpcodes ops, uint32_t dwords, uint8_t vdata, uint8_t vo
     return util::Result::failure();
   const uint32_t offset = maybe_offset.value();
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3: {
+  case rocjitsu::IsaFamily::Cdna3: {
     const auto encoded = cdna3::build_flat(ops.cdna3, {.offset = static_cast<uint16_t>(offset),
                                                        .seg = 2,
                                                        .addr = voffset,
@@ -139,7 +141,7 @@ build_global_store(GlobalOpcodes ops, uint32_t dwords, uint8_t vdata, uint8_t vo
                                                        .saddr = saddr});
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
   }
-  case ROCJITSU_CODE_ARCH_CDNA4: {
+  case rocjitsu::IsaFamily::Cdna4: {
     const auto encoded = cdna4::build_flat(ops.cdna4, {.offset = static_cast<uint16_t>(offset),
                                                        .seg = 2,
                                                        .addr = voffset,
@@ -147,7 +149,7 @@ build_global_store(GlobalOpcodes ops, uint32_t dwords, uint8_t vdata, uint8_t vo
                                                        .saddr = saddr});
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
   }
-  case ROCJITSU_CODE_ARCH_RDNA4: {
+  case rocjitsu::IsaFamily::Rdna4: {
     const auto encoded = rdna4::build_vglobal(
         ops.rdna4, {.saddr = saddr, .vsrc = vdata, .vaddr = voffset, .ioffset = offset});
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
@@ -163,7 +165,7 @@ build_global_store(GlobalOpcodes ops, uint32_t dwords, uint8_t vdata, uint8_t vo
 /// @note A build_wait_loads_complete() must precede any use of @p vdst.
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_load_dword(uint8_t vdst, uint8_t voffset, uint8_t saddr, uint32_t byte_offset,
-                        rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {}) {
+                        rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error = {}) {
   return detail::build_global_load(
       {cdna3::kFlatLoadDwordFlat, cdna4::kFlatLoadDwordFlat, rdna4::kGlobalLoadB32Vglobal}, 1, vdst,
       voffset, saddr, byte_offset, arch, emit_error);
@@ -174,7 +176,7 @@ build_global_load_dword(uint8_t vdst, uint8_t voffset, uint8_t saddr, uint32_t b
 /// @note A build_wait_loads_complete() must precede any use of the destination.
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_load_dwordx2(uint8_t vdst, uint8_t voffset, uint8_t saddr, uint32_t byte_offset,
-                          rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {}) {
+                          rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error = {}) {
   return detail::build_global_load(
       {cdna3::kFlatLoadDwordx2Flat, cdna4::kFlatLoadDwordx2Flat, rdna4::kGlobalLoadB64Vglobal}, 2,
       vdst, voffset, saddr, byte_offset, arch, emit_error);
@@ -183,7 +185,7 @@ build_global_load_dwordx2(uint8_t vdst, uint8_t voffset, uint8_t saddr, uint32_t
 /// @brief Encode `global_store_dword voffset, vdata, s[saddr:saddr+1] offset:byte_offset`.
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_store_dword(uint8_t vdata, uint8_t voffset, uint8_t saddr, uint32_t byte_offset,
-                         rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {}) {
+                         rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error = {}) {
   return detail::build_global_store(
       {cdna3::kFlatStoreDwordFlat, cdna4::kFlatStoreDwordFlat, rdna4::kGlobalStoreB32Vglobal}, 1,
       vdata, voffset, saddr, byte_offset, arch, emit_error);
@@ -192,7 +194,7 @@ build_global_store_dword(uint8_t vdata, uint8_t voffset, uint8_t saddr, uint32_t
 /// @brief Encode `global_store_dwordx2` of v[vdata:vdata+1].
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_store_dwordx2(uint8_t vdata, uint8_t voffset, uint8_t saddr, uint32_t byte_offset,
-                           rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {}) {
+                           rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error = {}) {
   return detail::build_global_store(
       {cdna3::kFlatStoreDwordx2Flat, cdna4::kFlatStoreDwordx2Flat, rdna4::kGlobalStoreB64Vglobal},
       2, vdata, voffset, saddr, byte_offset, arch, emit_error);
@@ -201,7 +203,7 @@ build_global_store_dwordx2(uint8_t vdata, uint8_t voffset, uint8_t saddr, uint32
 /// @brief Encode `global_store_dwordx3` of v[vdata:vdata+2].
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_store_dwordx3(uint8_t vdata, uint8_t voffset, uint8_t saddr, uint32_t byte_offset,
-                           rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {}) {
+                           rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error = {}) {
   return detail::build_global_store(
       {cdna3::kFlatStoreDwordx3Flat, cdna4::kFlatStoreDwordx3Flat, rdna4::kGlobalStoreB96Vglobal},
       3, vdata, voffset, saddr, byte_offset, arch, emit_error);
@@ -210,7 +212,7 @@ build_global_store_dwordx3(uint8_t vdata, uint8_t voffset, uint8_t saddr, uint32
 /// @brief Encode `global_store_dwordx4` of v[vdata:vdata+3].
 inline util::FailureOr<std::vector<uint32_t>>
 build_global_store_dwordx4(uint8_t vdata, uint8_t voffset, uint8_t saddr, uint32_t byte_offset,
-                           rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {}) {
+                           rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error = {}) {
   return detail::build_global_store(
       {cdna3::kFlatStoreDwordx4Flat, cdna4::kFlatStoreDwordx4Flat, rdna4::kGlobalStoreB128Vglobal},
       4, vdata, voffset, saddr, byte_offset, arch, emit_error);

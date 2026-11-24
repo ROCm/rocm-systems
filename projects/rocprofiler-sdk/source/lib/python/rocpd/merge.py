@@ -287,6 +287,9 @@ def merge_sqlite_dbs(
 def add_args(parser):
     """Add arguments for merger."""
 
+    # temporary deprecation message for --output-path
+    from . import output_config
+
     io_options = parser.add_argument_group("I/O options")
 
     io_options.add_argument(
@@ -299,9 +302,20 @@ def add_args(parser):
     )
     io_options.add_argument(
         "-d",
-        "--output-path",
+        "--output-directory",
+        metavar="OUTPUT_DIRECTORY",
+        dest="output_path",
         help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
         default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
+        type=str,
+        required=False,
+    )
+    io_options.add_argument(
+        "--output-path",
+        dest="output_path",
+        action=output_config._DeprecatedOutputPath,
+        help=argparse.SUPPRESS,
+        default=argparse.SUPPRESS,  # keeps the --output-directory / ROCPD_OUTPUT_PATH default intact
         type=str,
         required=False,
     )
@@ -370,7 +384,7 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
 
-    merge_args = process_args(args)
+    merge_args = process_args(None, args)
 
     execute(args.input, **merge_args)
 

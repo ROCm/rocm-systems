@@ -77,21 +77,26 @@ bool isVop3pOp(const MachineInst opcode, uint32_t op) {
 }
 
 bool isGfx1250WmmaScaleSource(uint32_t selector, bool scale16) {
-  if (selector <= 105u || selector == 128u)
+  if (selector <= 105u || selector == 128u) {
     return true;
-  if (selector < 256u || selector > 511u)
+  }
+  if (selector < 256u || selector > 511u) {
     return false;
+  }
   return !scale16 || ((selector - 256u) % 2u == 0u && selector < 511u);
 }
 
 bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
                                        uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
-  if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
+  if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u) {
     return false;
-  if (scale_a_fmt == 0u && scale_b_fmt == 0u)
+  }
+  if (scale_a_fmt == 0u && scale_b_fmt == 0u) {
     return true;
-  if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) || (scale_b_fmt != 0u && matrix_b_fmt != 4u))
+  }
+  if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) || (scale_b_fmt != 0u && matrix_b_fmt != 4u)) {
     return false;
+  }
   return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
 }
 
@@ -104,11 +109,13 @@ bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
   if (scale->vdst != 0u || (scale->neg_hi & 0x4u) != 0u || (scale->opsel & 0x2u) != 0u ||
       scale->clamp != 0u || !fixed_src2_valid || (scale->opsel_hi & 0x2u) != 0u ||
       (scale->neg & 0x4u) != 0u || (matrix->neg_hi & 0x3u) != 0u || matrix->clamp != 0u ||
-      (matrix->neg & 0x3u) != 0u)
+      (matrix->neg & 0x3u) != 0u) {
     return false;
+  }
   if (!isGfx1250WmmaScaleSource(scale->src0, scale16) ||
-      !isGfx1250WmmaScaleSource(scale->src1, scale16))
+      !isGfx1250WmmaScaleSource(scale->src1, scale16)) {
     return false;
+  }
 
   const uint32_t scale_a_fmt = scale->neg & 0x3u;
   const uint32_t scale_b_fmt = scale->neg_hi & 0x3u;
@@ -141,8 +148,9 @@ DecodeResult DecoderImpl::decodeInvalid(const MachineInst *opcode,
 DecodeResult DecoderImpl::decodeVopd(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vopd::validate_encoding(opcode, emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<Vopd>(opcode);
 }
 
@@ -218,10 +226,12 @@ DecodeResult DecoderImpl::subDecodeVop3p(const MachineInst *opcode,
 
 DecodeResult DecoderImpl::decodeVWmmaScaleF32Vop3px2(const MachineInst *opcode,
                                                      const DecodeErrorEmitter &emit_error) {
-  if (!isVop3pOp(opcode[2], 0x33) && !isVop3pOp(opcode[2], 0x88))
+  if (!isVop3pOp(opcode[2], 0x33) && !isVop3pOp(opcode[2], 0x88)) {
     return decodeInvalid(opcode, emit_error);
-  if (!isGfx1250WmmaScalePairValid(opcode))
+  }
+  if (!isGfx1250WmmaScalePairValid(opcode)) {
     return decodeInvalid(opcode, emit_error);
+  }
   return std::make_unique<VWmmaScaleF32Vop3px2>(opcode);
 }
 

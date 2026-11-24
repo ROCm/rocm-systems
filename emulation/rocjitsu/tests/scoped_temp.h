@@ -95,15 +95,18 @@ public:
   /// @brief Create the resource; check success before using path().
   /// @details An initial creation failure leaves the path empty. Reinitializing
   /// an owned resource fails and preserves its existing path.
-  [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix) {
+  [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix,
+                                                    std::filesystem::path parent = {}) {
     if (!path_.empty())
       return testing::AssertionFailure() << "Temporary resource is already initialized";
-    std::error_code error;
-    const std::filesystem::path directory = std::filesystem::temp_directory_path(error);
-    if (error)
-      return testing::AssertionFailure()
-             << "Failed to locate temporary directory: " << error.message();
-    std::string pattern = (directory / (std::string(prefix) + "XXXXXX")).string();
+    if (parent.empty()) {
+      std::error_code error;
+      parent = std::filesystem::temp_directory_path(error);
+      if (error)
+        return testing::AssertionFailure()
+               << "Failed to locate temporary directory: " << error.message();
+    }
+    std::string pattern = (parent / (std::string(prefix) + "XXXXXX")).string();
     if (::mkdtemp(pattern.data()) == nullptr)
       return testing::AssertionFailure()
              << "Failed to create temporary directory: " << std::strerror(errno);
@@ -141,6 +144,14 @@ private:
 
   std::string path_;
 };
+
+/// @brief Create an isolated runtime directory for a Unix-domain socket.
+[[nodiscard]] inline testing::AssertionResult
+initialize_runtime_directory(ScopedTempDirectory &directory, std::string_view prefix) {
+  if (const char *runtime_dir = std::getenv("XDG_RUNTIME_DIR"); runtime_dir && *runtime_dir)
+    return directory.initialize(prefix, runtime_dir);
+  return directory.initialize(prefix);
+}
 
 /// @brief Sets an environment variable for the current scope and restores it on exit.
 /// @details Tests that steer config discovery through the environment share one process

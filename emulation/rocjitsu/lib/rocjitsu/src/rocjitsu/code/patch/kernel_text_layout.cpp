@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/kernel_text_layout.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -93,7 +94,7 @@ void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words) {
 }
 
 util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
-                                rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+                                rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
   assert(byte_count % sizeof(uint32_t) == 0 && "padding must be word-aligned");
   if (byte_count == 0)
     return util::Result::success();
@@ -140,7 +141,7 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
 
 [[nodiscard]] bool write_launch_stub(std::vector<uint8_t> &text,
                                      const KernelEntryLayoutPlan &translation, uint64_t stub_offset,
-                                     uint64_t target_offset, rj_code_arch_t arch) {
+                                     uint64_t target_offset, rocjitsu::IsaFamily arch) {
   uint64_t cursor = stub_offset + translation.prologue_words.size() * sizeof(uint32_t);
 
   const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
@@ -207,7 +208,7 @@ void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta) {
 
 KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
                                                   const SkippedKernelLayoutPlan &plan,
-                                                  rj_code_arch_t arch) {
+                                                  rocjitsu::IsaFamily arch) {
   std::string builder_message;
   OptionalStringDiagnosticSink record_error(&builder_message);
   const util::DiagnosticEmitter error(record_error);
@@ -242,7 +243,7 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
 KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &translated_text,
                                                     KernelTextLayout &layout,
                                                     std::span<const uint8_t> kernel_text,
-                                                    rj_code_arch_t arch) {
+                                                    rocjitsu::IsaFamily arch) {
   std::string builder_message;
   OptionalStringDiagnosticSink record_error(&builder_message);
   const util::DiagnosticEmitter error(record_error);
@@ -362,7 +363,8 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
 
 [[nodiscard]] bool append_recovered_indirect_sequence(std::vector<uint32_t> &words,
                                                       const RecoveredIndirectFixup &fixup,
-                                                      uint64_t target_offset, rj_code_arch_t arch,
+                                                      uint64_t target_offset,
+                                                      rocjitsu::IsaFamily arch,
                                                       const util::DiagnosticEmitter *error) {
   if (!fixup.preserve_marked_long_transfer) {
     if (const std::optional<int16_t> direct_simm =
@@ -447,7 +449,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   return true;
 }
 
-[[nodiscard]] bool append_long_pc_transfer(std::vector<uint32_t> &words, rj_code_arch_t arch,
+[[nodiscard]] bool append_long_pc_transfer(std::vector<uint32_t> &words, rocjitsu::IsaFamily arch,
                                            uint16_t pc_sreg, uint64_t sequence_offset,
                                            uint64_t target_offset,
                                            std::optional<uint16_t> call_sdst,
@@ -534,7 +536,7 @@ void TextOffsetRebaser::rebase(uint64_t &offset) const {
 std::optional<std::vector<TextLayoutInsertion>>
 grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
                           std::span<const ControlFlowWindowRequirement> requirements,
-                          rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+                          rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error) {
   struct ValidatedGrowth {
     ControlFlowWindowKind kind = ControlFlowWindowKind::DirectBranch;
     size_t fixup_index = 0;
@@ -667,7 +669,7 @@ uint64_t next_direct_branch_island_pool_offset(uint64_t current_body_size) {
 }
 
 util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
-                                              KernelTextLayout &layout, rj_code_arch_t arch,
+                                              KernelTextLayout &layout, rocjitsu::IsaFamily arch,
                                               const util::DiagnosticEmitter *error) {
   util::FailureOr<uint32_t> maybe_marker =
       build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch, error);
@@ -702,7 +704,8 @@ util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
 
 [[nodiscard]] std::optional<uint32_t>
 build_inverted_conditional_skip(const Instruction &inst, uint32_t translated_word,
-                                uint64_t window_offset, uint64_t window_bytes, rj_code_arch_t arch,
+                                uint64_t window_offset, uint64_t window_bytes,
+                                rocjitsu::IsaFamily arch,
                                 const util::DiagnosticEmitter *error = nullptr) {
   if (!conditional_branch_can_invert(inst.amdgpu_operation()))
     return std::nullopt;
@@ -796,11 +799,10 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
   return chain;
 }
 
-[[nodiscard]] bool
-append_branch_island_direct_sequence(std::vector<uint32_t> &words, const Instruction &inst,
-                                     uint32_t translated_word, uint64_t window_offset,
-                                     uint64_t window_bytes, uint64_t first_target,
-                                     rj_code_arch_t arch, const util::DiagnosticEmitter *error) {
+[[nodiscard]] bool append_branch_island_direct_sequence(
+    std::vector<uint32_t> &words, const Instruction &inst, uint32_t translated_word,
+    uint64_t window_offset, uint64_t window_bytes, uint64_t first_target, rocjitsu::IsaFamily arch,
+    const util::DiagnosticEmitter *error) {
   if ((inst.flags() & BRANCH) != 0) {
     const std::optional<int16_t> simm = compute_sopp_branch_simm16(window_offset, first_target);
     if (!simm)
@@ -840,7 +842,7 @@ append_branch_island_direct_sequence(std::vector<uint32_t> &words, const Instruc
 
 [[nodiscard]] bool append_long_direct_branch_sequence(
     std::vector<uint32_t> &words, const Instruction &inst, uint32_t translated_word,
-    uint64_t window_offset, uint64_t window_bytes, uint64_t target_offset, rj_code_arch_t arch,
+    uint64_t window_offset, uint64_t window_bytes, uint64_t target_offset, rocjitsu::IsaFamily arch,
     uint16_t pc_sreg, const util::DiagnosticEmitter *error) {
   util::FailureOr<uint32_t> maybe_marker =
       build_s_nop(kLongDirectBranchMarkerNopImmediate, arch, error);
@@ -871,7 +873,7 @@ append_branch_island_direct_sequence(std::vector<uint32_t> &words, const Instruc
 
 TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                                                 const KernelTextLayout &layout,
-                                                rj_code_arch_t arch) {
+                                                rocjitsu::IsaFamily arch) {
   std::string builder_message;
   OptionalStringDiagnosticSink record_error(&builder_message);
   const util::DiagnosticEmitter error(record_error);
@@ -1039,7 +1041,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
 
 TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
                                                      const KernelTextLayout &layout,
-                                                     rj_code_arch_t arch) {
+                                                     rocjitsu::IsaFamily arch) {
   std::string builder_message;
   OptionalStringDiagnosticSink record_error(&builder_message);
   const util::DiagnosticEmitter error(record_error);
@@ -1127,7 +1129,7 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
 
 TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                                                     const KernelTextLayout &layout,
-                                                    rj_code_arch_t arch) {
+                                                    rocjitsu::IsaFamily arch) {
   std::string builder_message;
   OptionalStringDiagnosticSink record_error(&builder_message);
   const util::DiagnosticEmitter error(record_error);

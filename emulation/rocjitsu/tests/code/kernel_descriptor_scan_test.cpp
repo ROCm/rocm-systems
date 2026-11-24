@@ -8,6 +8,7 @@
 ///        stripped/.dynsym discovery are exercised by tests/dbt/translate_test.cpp.
 
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -21,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -37,6 +39,33 @@ std::vector<KernelDescriptorInfo> scan_via_text_section(const std::vector<uint8_
   EXPECT_FALSE(obj.text_sections().empty());
   const Section *text = obj.text_sections().front();
   return scan_kernel_descriptors({image.data(), image.size()}, text->sectionOffset(), text->size());
+}
+
+TEST(KernelDescriptorScan, HardwareRootsRespectPreloadFamilyAndExtent) {
+  KernelDescriptorInfo kernel = {
+      .descriptor_file_offset = 0, .kernel_name = "", .entry_text_offset = 32, .descriptor = {}};
+  const std::optional<std::vector<uint64_t>> ordinary =
+      kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna4, 64);
+  ASSERT_TRUE(ordinary);
+  EXPECT_EQ(*ordinary, (std::vector<uint64_t>{32}));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna4, 32));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Invalid, 512));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Rv64i, 512));
+  RJ_AMDHSA_BITS_SET(kernel.descriptor.kernarg_preload, amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 3);
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const std::optional<std::vector<uint64_t>> roots =
+        kernel_hardware_entry_candidates(kernel, arch, 512);
+    ASSERT_TRUE(roots);
+    EXPECT_EQ(*roots, (std::vector<uint64_t>{32, 288}));
+    EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, arch, 288));
+  }
+  const std::optional<std::vector<uint64_t>> cdna5 =
+      kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna5, 512);
+  ASSERT_TRUE(cdna5);
+  EXPECT_EQ(*cdna5, (std::vector<uint64_t>{32}));
+  kernel.entry_text_offset = std::numeric_limits<uint64_t>::max() - 1;
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna3,
+                                                std::numeric_limits<uint64_t>::max()));
 }
 
 void rewrite_descriptor_entry(std::vector<uint8_t> &image, uint64_t descriptor_vaddr,
@@ -337,23 +366,23 @@ TEST(KernelDescriptorScan, StridedSymbolTableIsReadSafely) {
 // means Wave64. CDNA is always Wave64, gfx1250 always Wave32.
 TEST(KernelWavefrontSize, Rdna4HonorsEnableWavefrontSize32Bit) {
   rocjitsu::amdhsa::kernel_descriptor_t desc{};
-  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, desc), 64); // bit clear
+  EXPECT_EQ(kernel_wavefront_size(rocjitsu::IsaFamily::Rdna4, desc), 64); // bit clear
   RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
                      rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
-  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, desc), 32); // bit set
-  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA4, desc), 64);
-  EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA5, desc), 32);
+  EXPECT_EQ(kernel_wavefront_size(rocjitsu::IsaFamily::Rdna4, desc), 32); // bit set
+  EXPECT_EQ(kernel_wavefront_size(rocjitsu::IsaFamily::Cdna4, desc), 64);
+  EXPECT_EQ(kernel_wavefront_size(rocjitsu::IsaFamily::Cdna5, desc), 32);
 }
 
 // The AMDHSA descriptor VGPR granule is wave-size dependent on RDNA: 8 for Wave32,
 // 4 for Wave64. Using the Wave32 granule for a Wave64 kernel doubles the decoded
 // allocation.
 TEST(KernelDescriptorVgprGranule, RdnaIsWaveSizeDependent) {
-  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_RDNA4, 32), 8u);
-  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_RDNA4, 64), 4u);
-  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA4, 64), 8u);
-  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA1, 64), 4u);
-  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(ROCJITSU_CODE_ARCH_CDNA5, 32), 16u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily::Rdna4, 32), 8u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily::Rdna4, 64), 4u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily::Cdna4, 64), 8u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily::Cdna1, 64), 4u);
+  EXPECT_EQ(descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily::Cdna5, 32), 16u);
 }
 
 // Paired Wave32/Wave64 example: an RDNA4 descriptor with GRANULATED_WORKITEM_VGPR_COUNT=0
@@ -365,14 +394,14 @@ TEST(KernelDescriptorVgprGranule, Rdna4Wave64ZeroGranulatedCountDeclaresFourVgpr
 
   rocjitsu::amdhsa::kernel_descriptor_t wave64{}; // ENABLE_WAVEFRONT_SIZE32 clear
   const uint32_t g64 = descriptor_vgpr_granularity_for_wavefront(
-      ROCJITSU_CODE_ARCH_RDNA4, kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, wave64));
+      rocjitsu::IsaFamily::Rdna4, kernel_wavefront_size(rocjitsu::IsaFamily::Rdna4, wave64));
   EXPECT_EQ((granulated + 1) * g64, 4u);
 
   rocjitsu::amdhsa::kernel_descriptor_t wave32{};
   RJ_AMDHSA_BITS_SET(wave32.kernel_code_properties,
                      rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
   const uint32_t g32 = descriptor_vgpr_granularity_for_wavefront(
-      ROCJITSU_CODE_ARCH_RDNA4, kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, wave32));
+      rocjitsu::IsaFamily::Rdna4, kernel_wavefront_size(rocjitsu::IsaFamily::Rdna4, wave32));
   EXPECT_EQ((granulated + 1) * g32, 8u);
 }
 
@@ -453,7 +482,7 @@ TEST(KernargPreload, LengthAndOffsetDecodeIndependently) {
 // to repair when it inserts a kernarg pointer; DBI as a floor for framework
 // storage. Distinct values per field so a dropped or double-counted term shows.
 TEST(KernelDescriptorScan, InitialSgprCountFoldsTheSystemBlockOntoTheUserBlock) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
 
   KD none{};
   set_kernel_descriptor_user_sgpr_count(kArch, none, 6);
@@ -478,8 +507,8 @@ TEST(KernelDescriptorScan, InitialSgprCountFoldsTheSystemBlockOntoTheUserBlock) 
   RJ_AMDHSA_BITS_SET(priv.compute_pgm_rsrc2,
                      rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
   EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, priv), 9u);
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                          ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                          rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     SCOPED_TRACE(arch);
     EXPECT_EQ(kernel_descriptor_initial_sgpr_count(arch, info), 9u);
     EXPECT_EQ(kernel_descriptor_initial_sgpr_count(arch, priv), 10u);

@@ -20,8 +20,8 @@ RuntimeStatus DispatchLifecycle::submitted() {
   if (layout.failed())
     return RuntimeStatus::InvalidFacts;
   // Admission starts with an identity and no snapshot, not previously copied bytes.
-  if (envelope_.serial == 0 || envelope_.storage_slot == 0 || envelope_.storage_generation == 0 ||
-      !envelope_.report.empty())
+  if (envelope_.entry_key != facts_->entry.original_descriptor_offset || envelope_.serial == 0 ||
+      envelope_.storage_slot == 0 || envelope_.storage_generation == 0 || !envelope_.report.empty())
     return RuntimeStatus::InvalidFacts;
   // Only a valid layout can establish the extent promised by this context.
   if (wire::read_u64(envelope_.context, wire::kContextSerial) != envelope_.serial ||
@@ -100,7 +100,9 @@ RuntimeStatus SnapshotWriter::start(const CaptureHeader &header, CaptureSink sin
 RuntimeStatus SnapshotWriter::append(const OwnedSnapshot &snapshot) {
   if (status_ != RuntimeStatus::Success)
     return status_;
-  if (!started_ || closed_ || snapshot.facts == nullptr || *snapshot.facts != header_.manifest)
+  const Manifest *expected = selected_manifest(header_.image, snapshot.execution.entry_key);
+  if (!started_ || closed_ || snapshot.facts == nullptr || expected == nullptr ||
+      *snapshot.facts != *expected)
     return status_ = RuntimeStatus::InvalidFacts;
   const FailureOr<std::vector<uint8_t>> frame = encoder_.append(snapshot.execution);
   if (frame.failed())

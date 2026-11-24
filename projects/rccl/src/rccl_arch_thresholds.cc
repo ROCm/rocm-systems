@@ -41,9 +41,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
-    128ULL*1024,         // [0] Broadcast       -- LL128 beats Ring to 1M/512K/512K/256K at 4/8/12/16 ranks and
-                         //                        ties it at 64K-128K at 24; the crossover halves as ranks
-                         //                        double, so this is the 24-rank total
+    32ULL*1024*1024,     // [0] Broadcast      -- DDA LL128 two-shot (SPX)
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
     224ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 224M total below 8 ranks
@@ -251,6 +249,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  .ddaLL128BcTwoShotThreads = 256,  // two-shot broadcast: 256 threads
   // ReduceScatter LL128 block size: 256 threads beat 512 at 8M-128M on 4-32 ranks.
   .ddaRsLL128Threads = 256,
   // ReduceScatter LL128 kernel crossover by shard and message size.
@@ -307,7 +306,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
-    128ULL*1024,         // [0] Broadcast       -- LL128 beats Ring 1.5x to 128K at 16 ranks (256K at 8)
+    8ULL*1024*1024,      // [0] Broadcast      -- DDA LL128 two-shot through 8M (DPX)
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather       -- Ring beats it 1.1-1.4x at 128M-256M on 8/16/32 (DPX)
     4ULL*1024*1024,      // [3] ReduceScatter   -- below 8 ranks: LL128 through 1 MiB/rank at 4 GPUs.
@@ -511,6 +510,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaA2aLL128MaxBlocks = 72,
   .ddaA2aLL128MaxBlocksMinBytes = 256ULL*1024,
   .ddaA2aLL128MaxBlocksMaxBytes = 16ULL*1024*1024,
+
+  .ddaLL128BcTwoShotThreads = 256,  // two-shot broadcast: 256 threads
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)

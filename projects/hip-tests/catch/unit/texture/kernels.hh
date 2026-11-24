@@ -105,7 +105,12 @@ __global__ void tex2DgatherKernel(TexelType* const out, int comp, size_t N_x, si
   float x = GetCoordinate(tid_x, N_x, width, num_subdivisions, normalized_coords);
   float y = GetCoordinate(tid_y, N_y, height, num_subdivisions, normalized_coords);
 
-  out[tid_y * N_x + tid_x] = tex2Dgather<TexelType>(tex_obj, x, y, comp);
+  // Both overloads are checked against the independent host reference.
+  const auto index = tid_y * N_x + tid_x;
+  if (index & 1)
+    tex2Dgather(out + index, tex_obj, x, y, comp);
+  else
+    out[index] = tex2Dgather<TexelType>(tex_obj, x, y, comp);
 #endif
 }
 
@@ -366,7 +371,12 @@ __global__ void tex2DLayeredKernel(TexelType* const out, size_t N_x, size_t N_y,
   float x = GetCoordinate(tid_x, N_x, width, num_subdivisions, normalized_coords);
   float y = GetCoordinate(tid_y, N_y, height, num_subdivisions, normalized_coords);
 
-  out[tid_y * N_x + tid_x] = tex2DLayered<TexelType>(tex_obj, x, y, layer);
+  // Both overloads are checked against the independent host reference.
+  const auto index = tid_y * N_x + tid_x;
+  if (index & 1)
+    tex2DLayered(out + index, tex_obj, x, y, layer);
+  else
+    out[index] = tex2DLayered<TexelType>(tex_obj, x, y, layer);
 #endif
 }
 

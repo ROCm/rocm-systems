@@ -298,7 +298,7 @@ void inspect_object(const AmdGpuCodeObject &object, RunStats &stats) {
   const IsaTargetDescriptor *target = default_isa_target_registry().find(object.target_id());
   uint64_t metadata_checksum = object.mem_size();
   if (target != nullptr)
-    metadata_checksum ^= object.min_kernel_sgpr_count(target->architecture_id).value_or(0);
+    metadata_checksum ^= object.min_kernel_sgpr_count(target->family).value_or(0);
   LoadSink sink(image);
   object.load_to_memory(&sink, 0x100000);
   stats.load_segments += sink.loads();

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -37,17 +38,17 @@ namespace rocjitsu {
 uint32_t Sysfs::GpuInfo::clock_frequency_mhz() const {
   switch (gfx_target_version) {
   case 90008:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA1);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna1);
   case 90010:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA2);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna2);
   case 90400:
   case 90401:
   case 90402:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA3);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna3);
   case 90500:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA4);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Cdna4);
   default:
-    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_INVALID);
+    return amdgpu::gpu_clock_mhz(rocjitsu::IsaFamily::Invalid);
   }
 }
 
@@ -75,8 +76,9 @@ std::string make_tagged_dir(const char *kind) {
   // Fail closed on an empty root: an empty base would make tmpl "/rocjitsu_..._XXXXXX"
   // and try to mkdtemp scratch dirs in the filesystem root. rpc_default_runtime_dir()
   // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset; guard defensively.
-  if (root.empty())
+  if (root.empty()) {
     return {};
+  }
   // Errors from create_directories are intentionally not checked here: if the root
   // could not be created, mkdtemp below fails and returns empty, which both callers
   // already treat as "no synthetic tree" via an empty-string early return.
@@ -103,8 +105,9 @@ void reap_stale_sysfs_dirs() {
   // Never scan an empty root: directory_iterator("") walks the CWD, and this loop
   // remove_all's matching entries. rpc_default_runtime_dir() already maps a set-but-
   // empty $ROCJITSU_RUNTIME_DIR to a real path; guard here too since we delete.
-  if (root.empty())
+  if (root.empty()) {
     return;
+  }
   fs::directory_iterator it(root, ec);
   const fs::directory_iterator end;
   for (; !ec && it != end; it.increment(ec)) {
@@ -115,23 +118,28 @@ void reap_stale_sysfs_dirs() {
     // hardened launcher reaper (main.cpp reap_stale_runtime_dirs).
     std::error_code st_ec;
     auto st = fs::symlink_status(entry.path(), st_ec);
-    if (st_ec || st.type() != fs::file_type::directory)
+    if (st_ec || st.type() != fs::file_type::directory) {
       continue;
+    }
     std::string name = entry.path().filename().string();
-    if (name.rfind("rocjitsu_drm_", 0) != 0 && name.rfind("rocjitsu_topology_", 0) != 0)
+    if (name.rfind("rocjitsu_drm_", 0) != 0 && name.rfind("rocjitsu_topology_", 0) != 0) {
       continue;
+    }
     // Extract the PID between the last two underscores: <prefix>_<pid>_<suffix>.
     auto suffix_us = name.rfind('_');
-    if (suffix_us == std::string::npos || suffix_us == 0)
+    if (suffix_us == std::string::npos || suffix_us == 0) {
       continue;
+    }
     auto pid_us = name.rfind('_', suffix_us - 1);
-    if (pid_us == std::string::npos)
+    if (pid_us == std::string::npos) {
       continue;
+    }
     std::string pid_str = name.substr(pid_us + 1, suffix_us - pid_us - 1);
     pid_t pid = 0;
     auto [ptr, perr] = std::from_chars(pid_str.data(), pid_str.data() + pid_str.size(), pid);
-    if (perr != std::errc{} || ptr != pid_str.data() + pid_str.size() || pid <= 0)
+    if (perr != std::errc{} || ptr != pid_str.data() + pid_str.size() || pid <= 0) {
       continue;
+    }
     if (kill(pid, 0) == -1 && errno == ESRCH) {
       // Use a dedicated error_code for the removal: reusing the loop-control `ec`
       // would let one un-removable orphan (e.g. EACCES on another user's tree)
@@ -212,16 +220,18 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
   make_dir(node_dir);
   make_dir(node_dir + "/mem_banks/0");
 
-  for (uint32_t i = 0; i < num_gpu_links; ++i)
+  for (uint32_t i = 0; i < num_gpu_links; ++i) {
     make_dir(node_dir + "/io_links/" + std::to_string(i));
+  }
 
   queue_file(node_dir + "/gpu_id", "0\n");
   // KFD publishes a name file for every topology node.
   queue_file(node_dir + "/name", "\n");
 
   long nproc = sysconf(_SC_NPROCESSORS_ONLN);
-  if (nproc < 1)
+  if (nproc < 1) {
     nproc = 1;
+  }
 
   long pages = sysconf(_SC_PHYS_PAGES);
   long page_size = sysconf(_SC_PAGE_SIZE);
@@ -305,8 +315,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 
   // IO link 0 reaches the CPU. Peer links require an executable route.
   uint32_t num_io_links = publish_peer_links ? total_gpus : 1;
-  for (uint32_t i = 0; i < num_io_links; ++i)
+  for (uint32_t i = 0; i < num_io_links; ++i) {
     make_dir(node_dir + "/io_links/" + std::to_string(i));
+  }
 
   std::ostringstream gpu_id;
   gpu_id << gpu.gpu_id << "\n";
@@ -373,8 +384,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "vram_public " << fully_visible << "\n"
         << "vram_size " << gpu.local_mem_size << "\n";
 
-  if (gpu.family_id > 0)
+  if (gpu.family_id > 0) {
     props << "family_id " << gpu.family_id << "\n";
+  }
 
   queue_file(node_dir + "/properties", props.str());
 
@@ -441,8 +453,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   if (publish_peer_links && total_gpus > 1) {
     uint32_t link_idx = 1;
     for (uint32_t peer = 1; peer <= total_gpus; ++peer) {
-      if (peer == node_idx)
+      if (peer == node_idx) {
         continue;
+      }
       std::ostringstream link;
       link << "type 11\n"
            << "version_major 0\n"
@@ -462,8 +475,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 
     uint32_t p2p_idx = 0;
     for (uint32_t peer = 1; peer <= total_gpus; ++peer) {
-      if (peer == node_idx)
+      if (peer == node_idx) {
         continue;
+      }
       make_dir(node_dir + "/p2p_links/" + std::to_string(p2p_idx));
       std::ostringstream plink;
       plink << "type 11\n"
@@ -487,8 +501,9 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 
 void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
   drm_dir_ = make_tagged_dir("drm");
-  if (drm_dir_.empty())
+  if (drm_dir_.empty()) {
     return;
+  }
 
   for (size_t i = 0; i < gpus.size(); ++i) {
     auto &gpu = gpus[i];
@@ -562,11 +577,13 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_
   std::call_once(reap_once, reap_stale_sysfs_dirs);
 
   topology_dir_ = make_tagged_dir("topology");
-  if (topology_dir_.empty())
+  if (topology_dir_.empty()) {
     return {};
+  }
 
-  if (!gpus.empty())
+  if (!gpus.empty()) {
     gpu_info_ = gpus[0];
+  }
 
   auto num_gpus = static_cast<uint32_t>(gpus.size());
 
@@ -577,18 +594,21 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_
   make_dir(nodes_dir);
 
   write_cpu_node(nodes_dir, num_gpus);
-  for (uint32_t i = 0; i < num_gpus; ++i)
+  for (uint32_t i = 0; i < num_gpus; ++i) {
     write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus, publish_peer_links);
+  }
 
   write_drm_tree(gpus);
 
   // Publish only after all files have been populated. Reuse a temporary helper
   // connection for the tree without retaining application file descriptors.
   create_backing_files(pending_files_);
-  for (const BackingFile &file : pending_files_)
-    if (file.error)
+  for (const BackingFile &file : pending_files_) {
+    if (file.error) {
       util::Logger::warn("Cannot generate topology file '", file.path,
                          "': ", std::strerror(file.error));
+    }
+  }
   pending_files_.clear();
 
   return topology_dir_;

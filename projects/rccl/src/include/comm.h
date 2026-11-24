@@ -23,6 +23,7 @@
 #include "allocator.h"
 #include "dev_runtime.h"
 #include "sym_kernels.h"
+#include "algorithms/gin/gin_all_gather.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "algorithms/gin/gin_all_reduce.h"
 #include "ce_coll.h"
@@ -304,7 +305,7 @@ struct ncclTaskColl {
   int nvlsCTAs;
   int cgaClusterSize;
   // Resolved algorithm selection, captured at append time for the same reason.
-  uint64_t algMask;    // set bit == algorithm allowed by the filter; 0 == automatic (no filter)
+  rcclTuningMask algMask; // Set bit == algorithm allowed by the filter; empty == automatic (no filter)
   int forceAlgSelection; // 1 (default) == error on unsatisfiable selection; 0 == fall back to automatic
   int CTAPolicy;  // resolved effective CTAPolicy for this task
   // Per-call profiler annotation (0 == untagged), resolved at task-append time and
@@ -1103,6 +1104,7 @@ struct ncclComm {
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
+  struct ncclGinAllGatherState ginAllGatherState; // GIN-SDMA allgather state (private devComm)
   struct ncclGinA2AState ginA2AState; // GIN-SDMA alltoall state (private devComm)
   struct ncclGinAllReduceState ginAllReduceState; // GIN-SDMA AllReduce state (private devComm)
 

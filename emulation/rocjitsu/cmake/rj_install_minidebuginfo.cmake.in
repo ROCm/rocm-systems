@@ -1,0 +1,67 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+string(TOLOWER "${CMAKE_INSTALL_CONFIG_NAME}" _config)
+if(NOT _config STREQUAL "release" OR CMAKE_INSTALL_DO_STRIP)
+    return()
+endif()
+
+cmake_path(
+    APPEND CMAKE_INSTALL_PREFIX
+    "@CMAKE_INSTALL_LIBDIR@"
+    "@CMAKE_SHARED_LIBRARY_PREFIX@rocjitsu@CMAKE_SHARED_LIBRARY_SUFFIX@"
+    OUTPUT_VARIABLE _library
+)
+set(_library "$ENV{DESTDIR}${_library}")
+if(IS_SYMLINK "${_library}")
+    return()
+endif()
+
+# Leave explicit debug information and existing packaging choices intact.
+execute_process(
+    COMMAND "@CMAKE_READELF@" -SW "${_library}"
+    OUTPUT_VARIABLE _sections
+    COMMAND_ERROR_IS_FATAL ANY
+)
+if(
+    NOT _sections MATCHES "] +[.]symtab "
+    OR _sections MATCHES "] +[.]((z?debug|gnu_debug|stab|BTF)[^ ]*|gdb_index|ctf) "
+)
+    return()
+endif()
+
+# Stage the replacement next to the installed copy so rename is atomic.
+string(RANDOM LENGTH 12 _suffix)
+set(_tmp "${_library}.${_suffix}")
+file(MAKE_DIRECTORY "${_tmp}")
+execute_process(
+    COMMAND "@CMAKE_OBJCOPY@" --only-keep-debug "${_library}" "${_tmp}/symbols"
+    RESULT_VARIABLE _result
+)
+if(_result STREQUAL "0")
+    file(
+        ARCHIVE_CREATE
+        OUTPUT "${_tmp}/symbols.xz"
+        PATHS "${_tmp}/symbols"
+        FORMAT raw
+        COMPRESSION XZ
+        COMPRESSION_LEVEL 3
+    )
+    execute_process(
+        COMMAND
+            "@CMAKE_OBJCOPY@" --strip-unneeded --add-section
+            ".gnu_debugdata=${_tmp}/symbols.xz" "${_library}"
+            "${_tmp}/librocjitsu.so"
+        RESULT_VARIABLE _result
+    )
+endif()
+if(_result STREQUAL "0")
+    file(RENAME "${_tmp}/librocjitsu.so" "${_library}" RESULT _result)
+endif()
+file(REMOVE_RECURSE "${_tmp}")
+if(NOT _result STREQUAL "0")
+    message(
+        FATAL_ERROR
+        "Could not install MiniDebugInfo for ${_library}: ${_result}"
+    )
+endif()

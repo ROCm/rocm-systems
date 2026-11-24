@@ -197,7 +197,7 @@ int main() {
   const auto &inst = *decoded.value();
   assert(inst.is_waitcnt());
   assert(inst.amdgpu_operation() == amdgpu::Operation::S_WAITCNT);
-  auto fields = amdgpu::WaitCounterPolicy::explicit_wait_fields(inst, ROCJITSU_CODE_ARCH_CDNA1);
+  auto fields = amdgpu::WaitCounterPolicy::explicit_wait_fields(inst, rocjitsu::IsaFamily::Cdna1);
   assert(fields.succeeded() && fields.value().has_value());
   assert((*fields.value())[static_cast<size_t>(amdgpu::WaitCounterKind::Load)] == 0);
   assert(!(*fields.value())[static_cast<size_t>(amdgpu::WaitCounterKind::Ds)]);
@@ -206,7 +206,7 @@ int main() {
   auto &loads = state.pending[static_cast<size_t>(amdgpu::WaitCounterKind::Load)];
   loads.emplace_back();
   assert(waitcheck_detail::WaitcheckStateOps::apply_waitcnt(
-      state, inst, ROCJITSU_CODE_ARCH_CDNA1).succeeded());
+      state, inst, rocjitsu::IsaFamily::Cdna1).succeeded());
   assert(loads.empty());
 }
 ''')

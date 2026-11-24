@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -23,13 +24,14 @@ namespace {
 using KD = amdhsa::kernel_descriptor_t;
 } // namespace
 
-uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc, rj_code_arch_t arch) {
+uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc,
+                                 rocjitsu::IsaFamily arch) {
   return std::max(explicit_ordinary_sgpr_bound(blocks, kernel_wavefront_size(arch, desc)),
                   kernel_descriptor_initial_sgpr_count(arch, desc));
 }
 
 std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, const KD &desc,
-                                                      rj_code_arch_t arch,
+                                                      rocjitsu::IsaFamily arch,
                                                       uint32_t kernel_sgpr_count,
                                                       const RegisterSet &reserved,
                                                       std::string *error_out) {
@@ -77,7 +79,7 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
                          .entry_temp_base = static_cast<uint16_t>(*base + 2)};
 }
 
-std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code_arch_t arch,
+std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rocjitsu::IsaFamily arch,
                                                          DbiEntryStorage storage,
                                                          std::string *error_out) {
   // The sequence, for storage s[res:res+3] and kernarg pair s[karg:karg+1]:
@@ -208,7 +210,7 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
 }
 
 std::optional<DbiEntryProloguePlan> plan_dbi_entry_prologue(KernelBlockScope blocks, const KD &desc,
-                                                            rj_code_arch_t arch,
+                                                            rocjitsu::IsaFamily arch,
                                                             uint32_t kernel_sgpr_count,
                                                             const RegisterSet &reserved,
                                                             std::string *error_out) {

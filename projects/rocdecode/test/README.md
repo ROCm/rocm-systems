@@ -57,7 +57,7 @@ to `$HOME/rocDecode_validation_results/<timestamp>/` (outside the repo, to keep 
 status` clean; override the base with `ROCDECODE_VALIDATION_RESULTS_DIR`).
 
 ```shell
-test/validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance]
+test/validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance] [--mem-type LIST]
 ```
 
 | Option | Description |
@@ -65,7 +65,12 @@ test/validate.sh [--build-dir DIR] [--skip-ctest] [--skip-conformance]
 | `--build-dir DIR` | Path to the CMake build directory (default: `build`). |
 | `--skip-ctest` | Skip the CTest phase. |
 | `--skip-conformance` | Skip all conformance phases. |
+| `--mem-type LIST` | Run conformance once per output surface memory type in `LIST`, a comma-separated list of `0` (device internal), `1` (device copied) and `2` (host copied), e.g. `1` or `0,1`. Phases are then labelled per type, e.g. `Conformance VP9 (-m 1)`. Default: the sample's own default (`0`), labelled as before. CTest is not affected. |
 | `-h`, `--help` | Show usage and exit. |
+
+The copied modes exercise different code in the `RocVideoDecoder` utility than the default,
+so a bug there can pass a default run: for example, VP9 resolution-change streams that pass
+in `-m 0` and fail in `-m 1`. Run `--mem-type 0,1` to check both.
 
 ### Conformance stream location
 
@@ -198,6 +203,8 @@ Defined in `.claude/skills/validate/SKILL.md`. Runs the entire pipeline end to e
 4. `test/validate.sh` — run CTest + conformance and report the summary.
 
 Invoke it by typing `/validate` in a Claude Code session started from the project root.
+Optional arguments `m0`, `m1`, `m2` run conformance in those output surface memory types,
+e.g. `/validate m0 m1` runs `test/validate.sh --mem-type 0,1`.
 
 ### `/perf-check` — performance regression check
 

@@ -79,8 +79,9 @@ bool ncclSymkAlltoAllLLForced(struct ncclComm* comm) { return g_symkAlltoAllLLFo
 
 // [RCCL] tuning.cc now calls ncclSymkMask() once per ncclTuningCompute() invocation.
 // Return all bits set so no sym kernel entry is pre-filtered in host tests.
+// The last flag matches src/sym_kernels.cc; host tests do not model unregistered GIN windows.
 ncclSymkKernelMask ncclSymkMask(struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                size_t, bool) { return ~ncclSymkKernelMask{0}; }
+                                size_t, bool, bool) { return ~ncclSymkKernelMask{0}; }
 
 void ResetSymKernelsFakes() {
   g_symRegType = ncclSymSendNonregRecvNonreg;

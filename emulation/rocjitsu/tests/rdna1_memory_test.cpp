@@ -6,6 +6,7 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -28,7 +29,7 @@ namespace rocjitsu {
 namespace {
 class Rdna1Memory : public testing::Test {
 protected:
-  virtual rj_code_arch_t arch() const { return ROCJITSU_CODE_ARCH_RDNA1; }
+  virtual rocjitsu::IsaFamily arch() const { return rocjitsu::IsaFamily::Rdna1; }
 
   void SetUp() override {
     config_.arch = arch();
@@ -144,12 +145,12 @@ public:
 };
 
 class Gfx10MemoryAllocation : public Rdna1Memory,
-                              public testing::WithParamInterface<rj_code_arch_t> {
+                              public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 
   void bind_single_texel_image(uint64_t address) {
-    const bool gfx1010 = arch() == ROCJITSU_CODE_ARCH_RDNA1;
+    const bool gfx1010 = arch() == rocjitsu::IsaFamily::Rdna1;
     scalar(0, address >> 8);
     scalar(1, (20u << 20) | (gfx1010 ? 1u << 29 : 0u));
     scalar(3, (9u << 28) | 4u);
@@ -159,7 +160,7 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx10, Gfx10MemoryAllocation,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
+                         testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2));
 
 TEST_P(Gfx10MemoryAllocation, DebuggerAndTexelPipelineShareTheIssuedResidencySnapshot) {
   constexpr uint32_t code = 0x8000, texel = 0x5000, value = 0x13579000;
@@ -317,7 +318,7 @@ TEST_P(Gfx10MemoryAllocation, FlatWaitUsesTheSharedApertureAtIssue) {
     memory_.write32(pc + 4 * i, code[i]);
 
   for (bool ptr32 : {false, true}) {
-    if (ptr32 && arch() != ROCJITSU_CODE_ARCH_RDNA1)
+    if (ptr32 && arch() != rocjitsu::IsaFamily::Rdna1)
       continue;
     const uint64_t launch = uint64_t{1} << (ptr32 ? 16 : 48);
     for (bool relocate : {false, true}) {

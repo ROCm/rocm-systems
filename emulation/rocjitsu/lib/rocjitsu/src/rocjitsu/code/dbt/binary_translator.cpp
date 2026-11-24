@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -98,28 +99,29 @@ private:
   std::unique_ptr<Decoder> decoder_;
 };
 
-EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
+EncodingTranslateFn select_encoding_translator(rocjitsu::IsaFamily guest,
+                                               rocjitsu::IsaFamily host) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3)
     return cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3)
     return cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3;
   return nullptr;
 }
 
-LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
+LegalizationLookupFn select_legalization(rocjitsu::IsaFamily guest, rocjitsu::IsaFamily host) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
     };
   }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_cdna3, enc_id, opcode);
     };
   }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna3, enc_id, opcode);
     };
@@ -151,7 +153,7 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 /// same site differently and wrap a consumer this pass deliberately left dynamic, re-growing the
 /// body it had just kept flat. Treat the padding as part of the run.
 [[nodiscard]] bool builder_runs_into_consumer(std::span<const uint8_t> text, uint64_t recovery_end,
-                                              uint64_t call_offset, rj_code_arch_t arch) {
+                                              uint64_t call_offset, rocjitsu::IsaFamily arch) {
   if (recovery_end > call_offset || (call_offset - recovery_end) % sizeof(uint32_t) != 0)
     return false;
   util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
@@ -390,7 +392,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
 }
 
 [[nodiscard]] std::unordered_set<uint64_t>
-generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch_t arch) {
+generated_branch_island_pool_offsets(std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
   std::unordered_set<uint64_t> offsets;
   auto decoder = Decoder::create(arch);
   if (!decoder)
@@ -515,9 +517,9 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
 /// The decoder check stays with the caller because it gates constructing the decoder that the
 /// rest of translation needs.
 [[nodiscard]] std::optional<TranslationDiagnostic>
-translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
-                    rj_code_arch_t host_arch, uint32_t target_mach,
-                    const BinaryTranslatorOptions &options) {
+translation_refusal(const CodeObjectPatcher &patcher, rocjitsu::IsaFamily guest_arch,
+                    rocjitsu::IsaFamily host_arch, uint32_t target_mach,
+                    const BinaryTranslatorOptions &options, rj_code_target_id_t guest_target) {
   const auto error = [](DiagnosticKind kind, std::string message) {
     return TranslationDiagnostic{.severity = DiagnosticSeverity::Error,
                                  .kind = kind,
@@ -553,14 +555,16 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
   const uint32_t target_machine = target_mach & EF_AMDGPU_MACH;
   const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetBinding *guest_binding = registry.find_target(guest_target);
+  const uint32_t guest_machine = guest_binding ? guest_binding->elf_machine : source_mach;
   const auto is_concrete_cdna5_target = [&](uint32_t machine) {
-    const IsaGpuTargetDescription *target = registry.find_gpu_target_by_elf_machine(machine);
+    const IsaTargetBinding *target = registry.find_target_by_elf_machine(machine);
     const IsaTargetDescriptor *descriptor =
         target != nullptr ? registry.find(target->public_id) : nullptr;
-    return descriptor != nullptr && descriptor->architecture_id == ROCJITSU_CODE_ARCH_CDNA5;
+    return descriptor != nullptr && descriptor->family == rocjitsu::IsaFamily::Cdna5;
   };
-  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      source_mach != target_machine && is_concrete_cdna5_target(source_mach) &&
+  if (guest_arch == rocjitsu::IsaFamily::Cdna5 && host_arch == rocjitsu::IsaFamily::Cdna5 &&
+      guest_machine != target_machine && is_concrete_cdna5_target(guest_machine) &&
       is_concrete_cdna5_target(target_machine)) {
     // Same-architecture translation otherwise copies raw encodings. Different concrete CDNA5
     // targets may have different instruction legality, and no cross-target legalization contract
@@ -627,7 +631,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
   return os.str();
 }
 
-[[nodiscard]] uint32_t max_descriptor_sgpr_allocation_for_long_branch(rj_code_arch_t arch) {
+[[nodiscard]] uint32_t max_descriptor_sgpr_allocation_for_long_branch(rocjitsu::IsaFamily arch) {
   // Long direct branches consume their scratch pair at the final
   // s_setpc_b64/s_swappc_b64 transfer, so DBT may only use a pair that can be
   // made descriptor-backed for the destination kernel.
@@ -636,7 +640,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
 /// @brief Find the next even SGPR pair that can be descriptor-backed for a branch thunk.
 [[nodiscard]] std::optional<uint16_t> next_long_branch_sgpr_pair(const TranslationContext &context,
-                                                                 rj_code_arch_t arch) {
+                                                                 rocjitsu::IsaFamily arch) {
   const uint32_t current = std::max(context.num_sgprs, context.required_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
   if (base > 126)
@@ -899,8 +903,8 @@ checkpoint_scope_descriptors(std::span<const KdTranslation> translations,
 }
 
 [[nodiscard]] bool scope_uses_virtualizable_lds(const KernelTranslationScope &scope,
-                                                rj_code_arch_t guest_arch,
-                                                rj_code_arch_t host_arch) {
+                                                rocjitsu::IsaFamily guest_arch,
+                                                rocjitsu::IsaFamily host_arch) {
   if (scope.translation == nullptr)
     return false;
   if (scope.translation->target_lds_size != 0)
@@ -1503,8 +1507,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     std::span<const TextOffsetRelocation> text_relocations,
     std::span<const PcRelativeDataRelocation> data_relocations,
     std::span<const PcRelativeTextRelocation> code_relocations,
-    std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
-    bool require_every_text_symbol_mapped,
+    std::span<const KdTranslation> translations, rocjitsu::IsaFamily host_arch,
+    uint32_t target_mach, bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
     std::vector<TranslationDiagnostic> &diagnostics) {
   auto record_builder_error = [&](std::string_view message) {
@@ -2033,7 +2037,28 @@ bool scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
 
 BinaryTranslator::~BinaryTranslator() = default;
 
-BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+BinaryTranslator::BinaryTranslator(rj_code_target_id_t guest_target,
+                                   rj_code_target_id_t host_target, BinaryTranslatorOptions options)
+    : BinaryTranslator(
+          [&] {
+            const IsaTargetDescriptor *descriptor =
+                default_isa_target_registry().find(guest_target);
+            return descriptor ? descriptor->family : IsaFamily::Invalid;
+          }(),
+          [&] {
+            const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(host_target);
+            return descriptor ? descriptor->family : IsaFamily::Invalid;
+          }(),
+          [&] {
+            const IsaTargetBinding *binding =
+                default_isa_target_registry().find_target(host_target);
+            return binding ? binding->elf_machine : 0;
+          }(),
+          options) {
+  guest_target_ = guest_target;
+}
+
+BinaryTranslator::BinaryTranslator(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch,
                                    uint32_t target_mach, BinaryTranslatorOptions options)
     : guest_arch_(guest_arch), host_arch_(host_arch),
       target_mach_(target_mach ? target_mach : elf_mach_for_arch(host_arch)), options_(options),
@@ -2043,7 +2068,7 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
           guest_arch, host_arch, options.input_revision, options.output_revision)) {}
 
 bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
-  return guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+  return guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
          (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250 &&
          options_.input_revision == ProcessorRevision::Gfx1250B0 &&
          options_.output_revision == ProcessorRevision::Gfx1250A0;
@@ -2094,8 +2119,8 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     return;
   }
 
-  const IsaGpuTargetDescription *host_target =
-      default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
+  const IsaTargetBinding *host_target =
+      default_isa_target_registry().find_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
   auto decoder = host_target == nullptr
                      ? Decoder::create(host_arch_)
                      : Decoder::create(default_isa_target_registry(), host_target->public_id);
@@ -2172,7 +2197,7 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 
     uint32_t first_word = 0;
     std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
-    if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
+    if (host_arch_ == rocjitsu::IsaFamily::Cdna5 && first_word == 0) {
       ++instruction_word_index;
       instruction_offset += sizeof(uint32_t);
       continue;
@@ -2321,15 +2346,20 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *object_target = registry.find(obj.target_id());
   rj_code_target_id_t effective_guest_target = ROCJITSU_CODE_TARGET_INVALID;
-  if (object_target != nullptr && object_target->architecture_id == guest_arch_) {
+  if (guest_target_ != ROCJITSU_CODE_TARGET_INVALID) {
+    if (obj.target_id() != ROCJITSU_CODE_TARGET_INVALID && obj.target_id() != guest_target_) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "source code-object target does not match the selected guest target");
+      return leave_unchanged();
+    }
+    effective_guest_target = guest_target_;
+  } else if (object_target != nullptr && object_target->family == guest_arch_) {
     effective_guest_target = obj.target_id();
   } else if (const IsaTargetDescriptor *guest_descriptor = registry.find(guest_arch_)) {
-    if (const IsaGpuTargetDescription *default_target =
-            registry.find_default_gpu_target(*guest_descriptor))
+    if (const IsaTargetBinding *default_target = registry.find_default_target(*guest_descriptor))
       effective_guest_target = default_target->public_id;
   }
-  const IsaGpuTargetDescription *effective_guest_gpu_target =
-      registry.find_gpu_target(effective_guest_target);
+  const IsaTargetBinding *effective_guest_gpu_target = registry.find_target(effective_guest_target);
   const bool effective_setreg_vgpr_msb_fixup =
       effective_guest_gpu_target != nullptr &&
       effective_guest_gpu_target->capabilities.setreg_vgpr_msb_fixup;
@@ -2337,7 +2367,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // A same-target gfx1250 translation is direction-specific: A0 and B0 share
   // an ELF machine ID, so both revisions must be given. Do not apply this
   // revision contract to other concrete CDNA5 targets.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
       effective_guest_target == ROCJITSU_CODE_TARGET_GFX1250 &&
       (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
@@ -2383,8 +2413,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   }
 
   auto text = patcher.text_bytes();
-  if (auto refusal =
-          translation_refusal(patcher, guest_arch_, host_arch_, target_mach_, options_)) {
+  if (auto refusal = translation_refusal(patcher, guest_arch_, host_arch_, target_mach_, options_,
+                                         effective_guest_target)) {
     result.diagnostics.push_back(std::move(*refusal));
     return leave_unchanged();
   }
@@ -2474,7 +2504,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   if (descriptor_translations.empty()) {
     const bool descriptorless_gfx1250_b0_to_a0 =
-        guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+        guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
         options_.input_revision == ProcessorRevision::Gfx1250B0 &&
         options_.output_revision == ProcessorRevision::Gfx1250A0;
     if (!descriptorless_gfx1250_b0_to_a0) {

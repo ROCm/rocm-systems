@@ -38,6 +38,7 @@
 #include "../config_test_util.h"
 #include "../dbi_test_util.h"
 #include "../halt_snapshot_plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
@@ -182,7 +183,7 @@ public:
         static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                        ((256 / 8) - 1));
-    if (soc_->arch() == ROCJITSU_CODE_ARCH_CDNA3 || soc_->arch() == ROCJITSU_CODE_ARCH_CDNA4)
+    if (soc_->arch() == rocjitsu::IsaFamily::Cdna3 || soc_->arch() == rocjitsu::IsaFamily::Cdna4)
       RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 128 / 4 - 1);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count_);

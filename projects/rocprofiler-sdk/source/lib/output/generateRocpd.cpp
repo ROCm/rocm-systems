@@ -299,7 +299,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 1, 0};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 1, 1};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -2198,7 +2198,8 @@ write_rocpd(
                                     const auto& grid,
                                     const auto& workgroup,
                                     uint64_t    graph_exec_id,
-                                    uint64_t    graph_node_id) {
+                                    uint64_t    graph_node_id,
+                                    int32_t     pipe_id) {
             // Skip if we've already processed this dispatch_id.
             if(dispatch_evt_ids.count(dispatch_id) > 0) return;
 
@@ -2256,6 +2257,7 @@ write_rocpd(
                     insert_value("grid_size_z", grid.z),
                     insert_value("graph_exec_id", graph_exec_id),
                     insert_value("graph_node_id", graph_node_id),
+                    insert_value("pipe_id", pipe_id),
                     insert_value("region_name_id", string_entries.at(region_name)),
                     insert_value("event_id", evt_id),
                 });
@@ -2278,20 +2280,21 @@ write_rocpd(
                         tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
 
                     // Process this dispatch (counter-collection path: no graph attribution).
-                    process_dispatch(info.dispatch_id,                 // dispatch_id
-                                     info.kernel_id,                   // kernel_id
-                                     dispatch_data.correlation_id,     // corr_id
-                                     info,                             // info
-                                     kind,                             // kind
-                                     record.thread_id,                 // thread_id
-                                     get_queue_id(info.queue_id),      // queue_id
-                                     get_stream_id(record.stream_id),  // stream_id
-                                     dispatch_data.start_timestamp,    // start_timestamp
-                                     dispatch_data.end_timestamp,      // end_timestamp
-                                     info.grid_size,                   // grid
-                                     info.workgroup_size,              // workgroup
-                                     0,                                // graph_exec_id
-                                     0                                 // graph_node_id
+                    process_dispatch(info.dispatch_id,                         // dispatch_id
+                                     info.kernel_id,                           // kernel_id
+                                     dispatch_data.correlation_id,             // corr_id
+                                     info,                                     // info
+                                     kind,                                     // kind
+                                     record.thread_id,                         // thread_id
+                                     get_queue_id(info.queue_id),              // queue_id
+                                     get_stream_id(record.stream_id),          // stream_id
+                                     dispatch_data.start_timestamp,            // start_timestamp
+                                     dispatch_data.end_timestamp,              // end_timestamp
+                                     info.grid_size,                           // grid
+                                     info.workgroup_size,                      // workgroup
+                                     0,                                        // graph_exec_id
+                                     0,                                        // graph_node_id
+                                     ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE  // pipe_id
                     );
                 }
             }
@@ -2319,12 +2322,13 @@ write_rocpd(
                                      record.thread_id,              // thread_id
                                      get_queue_id(info.queue_id),   // queue_id
                                      get_stream_id(record.stream_id),
-                                     0,                    // start_timestamp
-                                     0,                    // end_timestamp
-                                     info.grid_size,       // grid
-                                     info.workgroup_size,  // workgroup
-                                     0,                    // graph_exec_id
-                                     0                     // graph_node_id
+                                     0,                                        // start_timestamp
+                                     0,                                        // end_timestamp
+                                     info.grid_size,                           // grid
+                                     info.workgroup_size,                      // workgroup
+                                     0,                                        // graph_exec_id
+                                     0,                                        // graph_node_id
+                                     ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE  // pipe_id
                     );
                 }
             }
@@ -2352,7 +2356,8 @@ write_rocpd(
                                      itr.dispatch_info.grid_size,               // grid
                                      itr.dispatch_info.workgroup_size,          // workgroup
                                      itr.graph_exec_id.handle,                  // graph_exec_id
-                                     itr.graph_node_id.handle                   // graph_node_id
+                                     itr.graph_node_id.handle,                  // graph_node_id
+                                     itr.pipe_id                                // pipe_id
                     );
                 }
             }

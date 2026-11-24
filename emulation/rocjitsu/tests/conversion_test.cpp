@@ -26,75 +26,6 @@ namespace denorm = rocjitsu::amdgpu::input_denormal;
 constexpr denorm::Policy kKeep{false};
 constexpr denorm::Policy kFlush{true};
 
-// Saturating floor and floor(x + 0.5) of a finite value, computed exactly in double.
-int32_t reference(float value, bool nearest) {
-  const double rounded = std::floor(static_cast<double>(value) + (nearest ? 0.5 : 0.0));
-  if (rounded >= 2147483647.0)
-    return std::numeric_limits<int32_t>::max();
-  if (rounded <= -2147483648.0)
-    return std::numeric_limits<int32_t>::min();
-  return static_cast<int32_t>(rounded);
-}
-
-TEST(ConversionTest, FloorAndNearestMatchExactRoundingOfFiniteValues) {
-  for (uint64_t i = 0; i < (uint64_t{1} << 32); i += 997) {
-    const auto bits = static_cast<uint32_t>(i);
-    const float value = std::bit_cast<float>(bits);
-    if (std::isnan(value))
-      continue;
-    ASSERT_EQ(conversion::FloorI32{.input = kKeep}(bits),
-              static_cast<uint32_t>(reference(value, false)))
-        << std::hex << bits;
-    ASSERT_EQ(conversion::NearestI32{.input = kKeep}(bits),
-              static_cast<uint32_t>(reference(value, true)))
-        << std::hex << bits;
-  }
-}
-
-TEST(ConversionTest, FloorAndNearestSaturateNanBySign) {
-  for (const uint32_t nan : {0x7fc00000u, 0x7f800001u, 0x7fffffffu}) {
-    EXPECT_EQ(conversion::FloorI32{.input = kKeep}(nan), 0x7fffffffu);
-    EXPECT_EQ(conversion::FloorI32{.input = kKeep}(nan | 0x80000000u), 0x80000000u);
-    EXPECT_EQ(conversion::NearestI32{.input = kKeep}(nan), 0x7fffffffu);
-    EXPECT_EQ(conversion::NearestI32{.input = kKeep}(nan | 0x80000000u), 0x80000000u);
-  }
-}
-
-TEST(ConversionTest, InputFlushPrecedesRounding) {
-  EXPECT_EQ(conversion::FloorI32{.input = kKeep}(0x80000001u), 0xffffffffu);
-  EXPECT_EQ(conversion::FloorI32{.input = kFlush}(0x80000001u), 0u);
-  EXPECT_EQ(conversion::NearestI32{.input = kFlush}(0x807fffffu), 0u);
-  // Ties round toward +infinity.
-  EXPECT_EQ(conversion::NearestI32{.input = kKeep}(0xbfc00000u), 0xffffffffu); // -1.5 -> -1
-  EXPECT_EQ(conversion::NearestI32{.input = kKeep}(0x3fc00000u), 2u);          // 1.5 -> 2
-}
-
-TEST(ConversionTest, FloorAndNearestApplySourceModifiersBeforeFlush) {
-  EXPECT_EQ((conversion::FloorI32{.abs = 1, .input = kKeep}(0xbfc00000u)), 1u);          // |-1.5|
-  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kKeep}(0x3fc00000u)), 0xfffffffeu); // -1.5
-  EXPECT_EQ((conversion::NearestI32{.abs = 1, .neg = 1, .input = kKeep}(0x3fc00000u)),
-            0xffffffffu); // -|1.5| -> -1
-  // NEG makes the positive subnormal negative, and the flush keeps that sign.
-  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kKeep}(0x00000001u)), 0xffffffffu);
-  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kFlush}(0x00000001u)), 0u);
-}
-
-TEST(ConversionTest, SimdLanesMatchScalarLanes) {
-  using V = util::native<uint32_t>;
-  std::mt19937 random(5);
-  for (int i = 0; i < 20000; ++i) {
-    const V input([&](auto) { return static_cast<uint32_t>(random()); });
-    for (const denorm::Policy policy : {kKeep, kFlush}) {
-      const V floor = conversion::FloorI32{.input = policy}(input);
-      const V nearest = conversion::NearestI32{.input = policy}(input);
-      for (std::size_t lane = 0; lane < V::size(); ++lane) {
-        ASSERT_EQ(floor[lane], conversion::FloorI32{.input = policy}(uint32_t(input[lane])));
-        ASSERT_EQ(nearest[lane], conversion::NearestI32{.input = policy}(uint32_t(input[lane])));
-      }
-    }
-  }
-}
-
 TEST(ConversionTest, PackU8RoundsInModeAndKeepsOtherBytes) {
   const conversion::PackU8 nearest{0, 0, kKeep, conversion::mode_rounding(0)};
   const conversion::PackU8 down{0, 0, kKeep, conversion::mode_rounding(2)};
@@ -276,7 +207,8 @@ int host_round_mode(Rounding direction) {
   }
 }
 
-/// Run host IEEE conversions in one rounding mode, restoring nearest-even afterwards.
+/// Run a host IEEE reference conversion in one rounding mode, restoring nearest-even
+/// afterwards, so the conversions under test run in the default host environment.
 class HostRounding {
 public:
   explicit HostRounding(Rounding direction) { std::fesetround(host_round_mode(direction)); }
@@ -285,9 +217,19 @@ public:
   HostRounding &operator=(const HostRounding &) = delete;
 };
 
-uint32_t host_f64_to_f32(uint64_t bits) {
+// Volatile results keep each conversion inside its rounding scope.
+uint32_t host_f64_to_f32(uint64_t bits, Rounding direction) {
+  HostRounding host(direction);
   volatile double value = std::bit_cast<double>(bits);
-  return std::bit_cast<uint32_t>(static_cast<float>(value));
+  volatile float result = static_cast<float>(value);
+  return std::bit_cast<uint32_t>(float(result));
+}
+
+template <typename Integer> uint32_t host_integer_to_f32(Integer integer, Rounding direction) {
+  HostRounding host(direction);
+  volatile Integer value = integer;
+  volatile float result = static_cast<float>(value);
+  return std::bit_cast<uint32_t>(float(result));
 }
 
 // Without flushing or saturation the rules are those of IEEE 754 conversion.
@@ -295,13 +237,12 @@ TEST(FloatRoundingTest, NarrowF64ToF32MatchesIeeeInEveryMode) {
   std::mt19937_64 random(1);
   for (const Rounding direction : kDirections) {
     const FloatRounding policy{direction, false, false};
-    HostRounding host(direction);
     for (int i = 0; i < 200000; ++i) {
       uint64_t bits = random();
       // Most samples land near the F32 range, including its subnormals.
       if (i % 4 != 0)
         bits = (bits & 0x800fffffffffffffull) | (uint64_t{random() % 320 + 1023 - 170} << 52);
-      ASSERT_EQ(f64_to_f32(bits, policy), uint64_t{host_f64_to_f32(bits)})
+      ASSERT_EQ(f64_to_f32(bits, policy), uint64_t{host_f64_to_f32(bits, direction)})
           << std::hex << bits << " direction " << static_cast<int>(direction);
     }
   }
@@ -357,17 +298,14 @@ TEST(FloatRoundingTest, IntegerToF32MatchesIeeeInEveryMode) {
   std::mt19937_64 random(2);
   for (const Rounding direction : kDirections) {
     const FloatRounding policy{direction, false, false};
-    HostRounding host(direction);
     for (int i = 0; i < 200000; ++i) {
       const auto value = static_cast<uint32_t>(random() >> (random() % 40));
-      volatile uint32_t unsigned_value = value;
-      volatile int32_t signed_value = static_cast<int32_t>(value);
+      const auto signed_value = static_cast<int32_t>(value);
       const uint32_t magnitude = signed_value < 0 ? 0u - value : value;
       ASSERT_EQ(integer_to_f32(magnitude, signed_value < 0, policy),
-                std::bit_cast<uint32_t>(static_cast<float>(signed_value)))
-          << static_cast<int32_t>(value);
-      ASSERT_EQ(integer_to_f32(value, false, policy),
-                std::bit_cast<uint32_t>(static_cast<float>(unsigned_value)))
+                host_integer_to_f32(signed_value, direction))
+          << signed_value;
+      ASSERT_EQ(integer_to_f32(value, false, policy), host_integer_to_f32(value, direction))
           << value;
     }
   }

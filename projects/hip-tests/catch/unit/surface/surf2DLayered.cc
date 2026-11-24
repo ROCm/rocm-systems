@@ -14,6 +14,7 @@
 #include <hip_test_common.hh>
 #include <hip_texture_helper.hh>
 #include "surf_common.h"
+#include "surf_layered_common.hh"
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -68,7 +69,8 @@ template <typename T> static void runTestR(const int width, const int height) {
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
   hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMalloc3DArray(&hipArray, &channelDesc, make_hipExtent(width, height, 1),
+                             hipArrayLayered | hipArraySurfaceLoadStore));
 
   // Need set source pitch, but we don't have any padding here
   const size_t spitch = width * sizeof(T);
@@ -119,7 +121,8 @@ template <typename T> static void runTestW(const int width, const int height) {
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
   hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMalloc3DArray(&hipArray, &channelDesc, make_hipExtent(width, height, 1),
+                             hipArrayLayered | hipArraySurfaceLoadStore));
 
   // Need set source pitch, but we don't have any padding here
   const size_t spitch = width * sizeof(T);
@@ -189,7 +192,8 @@ template <typename T> static void runTestRW(const int width, const int height) {
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
   hipArray_t hipArray = nullptr, hipOutArray = nullptr;
-  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMalloc3DArray(&hipArray, &channelDesc, make_hipExtent(width, height, 1),
+                             hipArrayLayered | hipArraySurfaceLoadStore));
 
   // Need set source pitch, but we don't have any padding here
   const size_t spitch = width * sizeof(T);
@@ -205,7 +209,8 @@ template <typename T> static void runTestRW(const int width, const int height) {
   hipSurfaceObject_t surfaceObject = 0;
   HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
 
-  HIP_CHECK(hipMallocArray(&hipOutArray, &channelDesc, width, height, hipArraySurfaceLoadStore));
+  HIP_CHECK(hipMalloc3DArray(&hipOutArray, &channelDesc, make_hipExtent(width, height, 1),
+                             hipArrayLayered | hipArraySurfaceLoadStore));
 
   hipResourceDesc resOutDesc;
   memset(&resOutDesc, 0, sizeof(resOutDesc));
@@ -321,6 +326,24 @@ HIP_TEMPLATE_TEST_CASE(Unit_surf2DLayered_Positive_ReadWrite, char, unsigned cha
   runTestRW<vector_type_helper_t<TestType, 1>>(width, height);
   runTestRW<vector_type_helper_t<TestType, 2>>(width, height);
   runTestRW<vector_type_helper_t<TestType, 4>>(width, height);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Read all layers independently and preserve unselected pixels and layers on writes.
+ * Test source
+ * ------------------------
+ *    - unit/surface/surf2DLayered.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.18
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_surf2DLayered_Positive_NonzeroLayers, unsigned char, unsigned short,
+                       unsigned int, float, uint2, float4) {
+  CHECK_IMAGE_SUPPORT;
+
+  checkLayeredSurface<TestType, true>();
 }
 
 /**

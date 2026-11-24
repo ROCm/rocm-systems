@@ -29,6 +29,7 @@
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -75,7 +76,7 @@ constexpr uint32_t kMovV2V1 = 0x7E040301u;
 
 struct MaskSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
   // The descriptor's wave32 bit drives the patch-time gates, which is all this
@@ -86,13 +87,13 @@ struct MaskSimArch {
   bool wave32;
 };
 
-inline constexpr MaskSimArch kCdna3MaskArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
+inline constexpr MaskSimArch kCdna3MaskArch{"cdna3", rocjitsu::IsaFamily::Cdna3,
                                             EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64,
                                             /*wave32=*/false};
-inline constexpr MaskSimArch kCdna4MaskArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
+inline constexpr MaskSimArch kCdna4MaskArch{"cdna4", rocjitsu::IsaFamily::Cdna4,
                                             EF_AMDGPU_MACH_AMDGCN_GFX950, /*wave_size=*/64,
                                             /*wave32=*/false};
-inline constexpr MaskSimArch kRdna4MaskArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
+inline constexpr MaskSimArch kRdna4MaskArch{"rdna4", rocjitsu::IsaFamily::Rdna4,
                                             EF_AMDGPU_MACH_AMDGCN_GFX1200, /*wave_size=*/32,
                                             /*wave32=*/true};
 

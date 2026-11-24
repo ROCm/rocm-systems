@@ -10,6 +10,7 @@
 #include "instruction_failure_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
@@ -30,6 +31,7 @@
 
 #include <gtest/gtest-spi.h>
 
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -402,6 +404,9 @@ inline const char *kindName(HookEvent::Kind k) {
       "READ_SGPR",
       "WRITE_SGPR",
       "BARRIER_RESOLVED",
+      "BARRIER_SIGNALED",
+      "BARRIER_ROUND_COMPLETED",
+      "BARRIER_WAIT_PASSED",
       "INIT",
       "SHUTDOWN",
   };
@@ -1328,7 +1333,7 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
 }
 
 TEST(InstructionMixPluginTest, DecodedTimestampsRemainScalarWork) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t opcode : {cdna4::kSMemtimeSmem, cdna4::kSMemrealtimeSmem}) {
     const auto words = cdna4::build_smem(opcode, {.sdata = 4});
@@ -2222,6 +2227,69 @@ TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
   EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before + 1);
 }
 
+// Barrier signal and wait fire for one wave at a time, as often as its barrier
+// instructions execute, so like the per-instruction hooks they take the
+// callback lock only when a plugin requires serial hot hooks. Round completion
+// fires once per round and always takes it.
+TEST(ExecutionPluginTest, BarrierSignalAndWaitLockOnlyForSerialHotHooks) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  std::array<amdgpu::Wavefront *, 1> members{wave};
+  const BarrierRound round{.kind = BarrierKind::Workgroup,
+                           .completion_bit = amdgpu::kWorkgroupBarrierBit,
+                           .named_id = 0,
+                           .generation = 0};
+  for (bool serial : {false, true}) {
+    SCOPED_TRACE(serial);
+    ExecutionPluginGroup group(PluginSinkConfig{});
+    if (serial)
+      ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
+    else
+      ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
+    ASSERT_EQ(group.requires_serial_hot_hooks(), serial);
+    const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+
+    group.onAmdgpuBarrierSignaled(*wave, round);
+    group.onAmdgpuBarrierWaitPassed(*wave, round);
+    EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group),
+              before + (serial ? 2 : 0));
+
+    group.onAmdgpuBarrierRoundResolved(members, members, round);
+    EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group),
+              before + (serial ? 3 : 1));
+  }
+}
+
+// The simulator reports a completed round through both completion hooks, the
+// resolve first, under one acquisition of the callback lock.
+TEST(ExecutionPluginTest, BarrierRoundResolvedTakesTheCallbackLockOnce) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  std::array<amdgpu::Wavefront *, 1> members{wave};
+  const BarrierRound round{.kind = BarrierKind::Named,
+                           .completion_bit = amdgpu::kNamedBarrierBit,
+                           .named_id = 2,
+                           .generation = 5};
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<OrderingPlugin>();
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+
+  group.onAmdgpuBarrierRoundResolved(members, members, round);
+
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before + 1);
+  ASSERT_EQ(plugin_ptr->events.size(), 2u);
+  EXPECT_EQ(plugin_ptr->events[0].kind, HookEvent::BARRIER_RESOLVED);
+  EXPECT_EQ(plugin_ptr->events[0].barrier_kind, BarrierKind::Named);
+  EXPECT_EQ(plugin_ptr->events[1].kind, HookEvent::BARRIER_ROUND_COMPLETED);
+  EXPECT_EQ(plugin_ptr->events[1].barrier_round, round);
+}
+
 TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
   for (bool serialized : {false, true}) {
     SCOPED_TRACE(serialized);
@@ -2602,6 +2670,53 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
 }
 
+// A single-instruction s_barrier is a split barrier whose signal and wait
+// coincide: when it resolves, every member signals, the round completes, and
+// every member passes its wait, with no instruction in between.
+TEST(HookOrderingTest, LegacyBarrierEmitsSignalCompletionWaitTogether) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize());
+  auto *p = f.attach_ordering_plugin();
+  const uint32_t code[] = {S_BARRIER, S_ENDPGM};
+  f.run_kernel(code, 2, /*grid=*/128, /*workgroup=*/128);
+  f.shutdown();
+
+  using enum HookEvent::Kind;
+  std::vector<HookEvent::Kind> barrier_kinds;
+  std::vector<uint32_t> signalling_waves;
+  std::vector<uint32_t> waiting_waves;
+  const BarrierRound round{.kind = BarrierKind::Workgroup,
+                           .completion_bit = amdgpu::kWorkgroupBarrierBit,
+                           .named_id = 0,
+                           .generation = 0};
+  auto first = std::ranges::find_if(p->events,
+                                    [](const HookEvent &e) { return e.kind == BARRIER_SIGNALED; });
+  ASSERT_NE(first, p->events.end());
+  for (auto it = first; it != p->events.end() && barrier_kinds.size() < 6; ++it) {
+    barrier_kinds.push_back(it->kind);
+    if (it->kind == BARRIER_SIGNALED)
+      signalling_waves.push_back(it->wf_id);
+    if (it->kind == BARRIER_WAIT_PASSED)
+      waiting_waves.push_back(it->wf_id);
+    if (it->kind != BARRIER_RESOLVED) {
+      EXPECT_EQ(it->barrier_round, round) << kindName(it->kind);
+    }
+  }
+  EXPECT_EQ(barrier_kinds, (std::vector<HookEvent::Kind>{
+                               BARRIER_SIGNALED, BARRIER_SIGNALED, BARRIER_RESOLVED,
+                               BARRIER_ROUND_COMPLETED, BARRIER_WAIT_PASSED, BARRIER_WAIT_PASSED}));
+  // Each dispatched wave signals once and passes its wait once.
+  std::vector<uint32_t> dispatched_waves;
+  for (const HookEvent &e : p->events)
+    if (e.kind == WAVEFRONT_DISPATCHED)
+      dispatched_waves.push_back(e.wf_id);
+  std::ranges::sort(dispatched_waves);
+  std::ranges::sort(signalling_waves);
+  std::ranges::sort(waiting_waves);
+  EXPECT_EQ(signalling_waves, dispatched_waves);
+  EXPECT_EQ(waiting_waves, dispatched_waves);
+}
+
 TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize());
@@ -2670,7 +2785,7 @@ TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
 
   const auto words =
       cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = 2});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> flat(decode_valid(*decoder, words.data()));
   ASSERT_NE(flat, nullptr);

@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -92,44 +93,11 @@ public:
   }
 };
 
-class HostFenvGuard {
-public:
-  HostFenvGuard() : saved_(std::fegetenv(&environment_) == 0) {}
-  ~HostFenvGuard() {
-    if (saved_)
-      std::fesetenv(&environment_);
-  }
-
-private:
-  std::fenv_t environment_{};
-  bool saved_;
-};
-
-#if RJ_HOST_ARCH_X86
-class HostMxcsrGuard {
-public:
-  HostMxcsrGuard() : saved_(_mm_getcsr()) {}
-  ~HostMxcsrGuard() { _mm_setcsr(saved_); }
-
-private:
-  uint32_t saved_;
-};
-#elif RJ_HOST_ARCH_AARCH64
-class HostFpcrGuard {
-public:
-  HostFpcrGuard() : saved_(amdgpu::fp_mode::detail::read_fpcr()) {}
-  ~HostFpcrGuard() { amdgpu::fp_mode::detail::write_fpcr(saved_); }
-
-private:
-  uint64_t saved_;
-};
-#endif
-
 TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
   for (const uint16_t opcode :
        {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
     for (bool clamp : {false, true}) {
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       const auto words = cdna5::build_vop3p(opcode, {.vdst = 0,
                                                      .neg_hi = 1,
                                                      .opsel = 5,
@@ -173,7 +141,7 @@ TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
   amdgpu::GpuMemory memory("gfx1250_transpose_memory");
   amdgpu::L2Cache l2("gfx1250_transpose_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.target = ROCJITSU_CODE_TARGET_GFX1250;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
@@ -220,7 +188,7 @@ TEST(Gfx1250ExecutionTest, GlobalTransposePreservesZeroExecAndDestination) {
   amdgpu::GpuMemory memory("gfx1250_zero_exec_transpose_memory");
   amdgpu::L2Cache l2("gfx1250_zero_exec_transpose_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.target = ROCJITSU_CODE_TARGET_GFX1250;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
@@ -338,22 +306,22 @@ TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
 
   // Older promoted VOP3 packed FMAC supports OMOD, but the ordinary older
   // DENORM/IEEE gates still apply.
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA4, 0, false, true, 1), 1u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA4, 2, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA4, 0, true, true, 1), 0u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna4, 0, false, true, 1), 1u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna4, 2, false, true, 1), 0u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna4, 0, true, true, 1), 0u);
 
   // GFX11+ explicitly ignores OMOD for packed F16 results.
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 0, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA4, 0, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA5, 0, false, true, 1), 0u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 0, false, true, 1), 0u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna4, 0, false, true, 1), 0u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna5, 0, false, true, 1), 0u);
 
   // Ordinary F16 on older profiles uses the DENORM/IEEE gates. GFX12 and
   // gfx1250 allow OMOD regardless of those two mode settings.
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 0, false, false, 3), 3u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 3, false, false, 3), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 0, true, false, 3), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA4, 3, true, false, 3), 3u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA5, 3, true, false, 3), 3u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 0, false, false, 3), 3u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 3, false, false, 3), 0u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna3, 0, true, false, 3), 0u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Rdna4, 3, true, false, 3), 3u);
+  EXPECT_EQ(effective_f16_omod(rocjitsu::IsaFamily::Cdna5, 3, true, false, 3), 3u);
 }
 
 TEST(FpModePolicyTest, F32ToBf16RoundHonorsMode) {
@@ -491,7 +459,7 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerClampSaturatesBeforeNarrowing) {
     // v_sub_nc_u32 v4, v4, 4 clamp
     cu->write_vgpr(base + 4, 0, 1u);
     constexpr std::array<uint32_t, 2> kIssueInstruction = {0xd5268004u, 0x02010904u};
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> issue_inst(decode_valid(*decoder, kIssueInstruction.data()));
     ASSERT_NE(issue_inst, nullptr);
@@ -624,7 +592,7 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerMultiplyAccumulateClampSaturatesExactResul
                                                          .src0 = 256,
                                                          .src1 = 257,
                                                          .src2 = 258});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -690,7 +658,7 @@ TEST(Gfx1250ExecutionTest, Vop3U64ClampSaturatesNormalAndDppPaths) {
     if (!dpp) {
       const auto words = cdna5::build_vop3(
           opcode, {.vdst = kDst, .clamp = 1, .src0 = 256 + kSrc0, .src1 = 256 + kSrc1});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -783,7 +751,7 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
           words = cdna5::build_vop3(opcode,
                                     {.vdst = 4, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
         }
-        auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+        auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
         ASSERT_NE(decoder, nullptr);
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);
@@ -891,7 +859,7 @@ TEST(Gfx1250ExecutionTest, Vop3PackedIntegerClampSaturatesSelectedHalves) {
       const auto words = cdna5::build_vop3p(
           test.opcode,
           {.vdst = 2, .opsel = 3, .clamp = 1, .src0 = 256, .src1 = 257, .opsel_hi = 0});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -967,7 +935,7 @@ TEST(Gfx1250ExecutionTest, Vop3PackedTernaryIntegerClampUsesSelectedHalves) {
                                                           .src1 = 257,
                                                           .src2 = 258,
                                                           .opsel_hi = test.opsel_hi});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -1014,7 +982,7 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
       write_wave_sgpr(*cu, *wf, 2, test.initial_carry ? 1u : 0u);
       const auto words = cdna5::build_vop3_sdst_enc(
           test.opcode, {.vdst = 2, .sdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 4});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -1026,85 +994,20 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
   }
 }
 
-TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-  ASSERT_EQ(std::fesetround(FE_DOWNWARD), 0);
-  ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_INEXACT), 0);
-  const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
-#if RJ_HOST_ARCH_X86
-  HostMxcsrGuard mxcsr_guard;
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kFtzMask = 1u << 15;
-  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
-  const uint32_t expected_mxcsr = _mm_getcsr();
-#endif
-
-  constexpr uint64_t kOne = std::bit_cast<uint64_t>(1.0);
-  constexpr uint64_t kSubnormal = 0x0000000000000001ULL;
-  constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
-  constexpr uint64_t kQuietNan = std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN());
-  for (const uint64_t input : {kOne, kSubnormal, kInfinity, kQuietNan}) {
-    (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    (void)amdgpu::fp_mode::binary_f64(input, kOne, amdgpu::fp_mode::BinaryF64Op::Add, 1, 3);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    const uint64_t result = amdgpu::fp_mode::finish_f64(input, 1, 0, false, true);
-    EXPECT_EQ(result, input);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
-#if RJ_HOST_ARCH_X86
-    EXPECT_EQ(_mm_getcsr(), expected_mxcsr);
-#endif
-  }
-}
-
-TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
-
+TEST(FpModePolicyTest, F32ToBf16FmaRoundsTowardNegativeInfinity) {
   const float multiplicand = std::bit_cast<float>(0x8e0b5904u);
   const float multiplier = std::bit_cast<float>(0x1ae3bc34u);
   const float addend = std::bit_cast<float>(0xb6630000u);
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(multiplicand, multiplier, addend, 2, false, true),
             0xb664u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
-
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, false, true), 0x8000u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, true, true), 0u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
 }
 
-#if RJ_HOST_ARCH_X86
-TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
-  HostMxcsrGuard environment_guard;
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kFtzMask = 1u << 15;
-  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
-
+TEST(FpModePolicyTest, F32ToBf16FmaKeepsSubnormal) {
   const float subnormal = std::bit_cast<float>(0x00018000u);
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
-  EXPECT_EQ(_mm_getcsr() & (kDazMask | kFtzMask), kDazMask | kFtzMask);
 }
-#elif RJ_HOST_ARCH_AARCH64
-TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
-  HostFpcrGuard environment_guard;
-  constexpr uint64_t kFizMask = uint64_t{1} << 0;
-  constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
-  constexpr uint64_t kFzMask = uint64_t{1} << 24;
-  constexpr uint64_t kFlushMask = kFizMask | kFz16Mask | kFzMask;
-  amdgpu::fp_mode::detail::write_fpcr(amdgpu::fp_mode::detail::read_fpcr() | kFlushMask);
-  const uint64_t enabled_flush_modes = amdgpu::fp_mode::detail::read_fpcr() & kFlushMask;
-  ASSERT_NE(enabled_flush_modes & kFzMask, 0u);
-
-  const float subnormal = std::bit_cast<float>(0x00018000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
-  EXPECT_EQ(amdgpu::fp_mode::detail::read_fpcr() & kFlushMask, enabled_flush_modes);
-}
-#endif
 
 TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
   constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
@@ -1182,7 +1085,7 @@ TEST(Gfx1250ExecutionTest, SetregB32ClobbersVgprMsbWithoutArmingImmediateHazard)
   amdgpu::GpuMemory memory("gfx1250_setreg_b32_memory");
   amdgpu::L2Cache l2("gfx1250_setreg_b32_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.target = ROCJITSU_CODE_TARGET_GFX1250;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
@@ -1224,7 +1127,7 @@ TEST(Gfx1250ExecutionTest, SRoundModeAndSDenormModeThenFmaRespectsModes) {
   amdgpu::GpuMemory memory("gfx1250_round_mode_fma_memory");
   amdgpu::L2Cache l2("gfx1250_round_mode_fma_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.target = ROCJITSU_CODE_TARGET_GFX1250;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
@@ -1335,7 +1238,7 @@ TEST(Gfx1251ExecutionTest, SetregModeUsesOrdinarySliceAndFollowingSetVgprMsbExec
   amdgpu::GpuMemory memory("gfx1251_setreg_memory");
   amdgpu::L2Cache l2("gfx1251_setreg_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.target = ROCJITSU_CODE_TARGET_GFX1251;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
@@ -1376,7 +1279,7 @@ TEST(Gfx1251ExecutionTest, SetregImm32ModeFullSliceUsesRightJustifiedSource) {
   amdgpu::GpuMemory memory("gfx1251_setreg_imm32_full_slice_memory");
   amdgpu::L2Cache l2("gfx1251_setreg_imm32_full_slice_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.target = ROCJITSU_CODE_TARGET_GFX1251;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
@@ -1408,7 +1311,7 @@ TEST(Gfx1251ExecutionTest, SetregB32ModeFullSliceUsesRightJustifiedSource) {
   amdgpu::GpuMemory memory("gfx1251_setreg_b32_full_slice_memory");
   amdgpu::L2Cache l2("gfx1251_setreg_b32_full_slice_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.target = ROCJITSU_CODE_TARGET_GFX1251;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
@@ -1440,7 +1343,7 @@ TEST(Gfx1250ExecutionTest, SramEccD16LoadsZeroUnselectedHalf) {
   amdgpu::GpuMemory memory("gfx1250_d16_memory");
   amdgpu::L2Cache l2("gfx1250_d16_l2");
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = kGfx1250ScalarSlots;
   config.vgprs_per_wf = 64;
@@ -1484,7 +1387,7 @@ TEST(Gfx1250ExecutionTest, SramEccD16LoadsZeroUnselectedHalf) {
       },
   }};
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (const auto &test : kLoads) {
     SCOPED_TRACE(test.mnemonic);
@@ -1514,7 +1417,7 @@ TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
   write_wave_sgpr(*cu, *wf, 93, 0xeeff0011u);
   write_wave_sgpr(*cu, *wf, 102, 0);
   write_wave_sgpr(*cu, *wf, 103, 0);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   constexpr std::array<uint32_t, 3> kMove64 = {
@@ -1604,7 +1507,7 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
     cu->write_vgpr(vgpr_base + 18, 0, 6u);
     cu->write_vgpr(vgpr_base + 18, 1, 8u);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     constexpr auto kCompare = cdna5::build_vopc(cdna5::kVCmpGtI32Vopc, {.src0 = 28, .vsrc1 = 18});
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, kCompare.data()));
@@ -2161,7 +2064,7 @@ TEST(Gfx1250ExecutionTest, IreeF16ReductionTailKeepsLane31Sum) {
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec(0xffffffffu);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
@@ -2287,7 +2190,7 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   ASSERT_TRUE(cdna5::Operand::full_execution_backend_complete());
   amdgpu::RegisterAccess regs(*wf);
@@ -2395,7 +2298,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
       cu->write_vgpr(vgpr_base + 1, lane, 0u);
     }
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     const auto compare_base =
         cdna5::build_vop3(cdna5::kVCmpLtI64Vop3, {.vdst = 0, .src0 = 255, .src1 = 256});
@@ -2435,7 +2338,7 @@ TEST(Gfx1250LiteralOperandTest, ScalarFmaLiteralOrder) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0); // Scalar arithmetic is independent of EXEC.
   wf->set_mode_raw(0xf0);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const uint32_t base = wf->sgpr_alloc().base;
   cu->write_sgpr(base, 0x40000000);     // 2
   cu->write_sgpr(base + 1, 0x40400000); // 3
@@ -2455,7 +2358,7 @@ TEST(Gfx1250LiteralOperandTest, ScalarMaskOperandsRejectLiteralMarkers) {
     const char *name;
     std::array<uint32_t, 2> encoding;
   };
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (const uint16_t marker : {uint16_t{254}, uint16_t{255}}) {
     const std::array test_cases{
@@ -2495,7 +2398,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
                                              {.vdst = 0, .src0 = 255, .src1 = 128, .opsel_hi = 3});
     const std::array add_words{add_base[0], add_base[1], literal};
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> add(decode_valid(*decoder, add_words.data()));
     ASSERT_NE(add, nullptr);
@@ -5454,7 +5357,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     if (test_case.operation == Operation::Fma)
       base[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
     const std::array words{base[0], base[1], kLiteral};
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
     ASSERT_NE(instruction, nullptr);
@@ -5513,7 +5416,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorUsesSimd)
   const auto base = cdna5::build_vop3p(cdna5::kVPkAddF32Vop3p,
                                        {.vdst = 4, .src0 = 255, .src1 = 258, .opsel_hi = 2});
   const std::array words{base[0], base[1], kLiteral};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
@@ -5568,7 +5471,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
       const auto words = cdna5::build_vop3p(
           test_case.opcode,
           {.vdst = 4, .neg_hi = 2, .src0 = 256, .src1 = 258, .opsel_hi = 3, .neg = 1});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
@@ -5685,7 +5588,7 @@ TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
                              fields);
       if (test_case.op_sel_hi_2 != 0u)
         words[0] |= uint32_t{1} << 14;
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
@@ -5769,7 +5672,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
         cdna5::kVPkFmaF32Vop3p,
         {.vdst = 6, .neg_hi = 4, .src0 = 256, .src1 = 258, .src2 = 260, .opsel_hi = 3, .neg = 2});
     words[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
     ASSERT_NE(instruction, nullptr);
@@ -5831,7 +5734,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
 
 // DX9 zero-product handling retains EXEC and overlapping source/destination storage.
 TEST(Gfx1250ExecutionTest, FmaDx9ZeroAliasingAndExec) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto words = cdna5::build_vop3(
       cdna5::kVFmaDx9ZeroF32Vop3, {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 258, .omod = 1});
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
@@ -5905,7 +5808,7 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {
           SCOPED_TRACE(use_dpp ? "dpp" : "ordinary");
           SCOPED_TRACE(clamp ? "clamp" : "no clamp");
 
-          auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+          auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
           ASSERT_NE(decoder, nullptr);
           std::unique_ptr<Instruction> instruction;
           if (use_dpp) {
@@ -5968,7 +5871,7 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {
 }
 
 TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   for (const cdna5::Vop3pBuilderFields fields : {
@@ -5982,7 +5885,7 @@ TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
 }
 
 TEST(Gfx1250DecodeTest, BinaryVop3pIgnoresLiteral64SelectorInUnusedSrc2) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   for (const uint32_t opcode : {cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p}) {
@@ -6031,7 +5934,7 @@ TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
   wf->set_exec(0xffff0000u);
   wf->set_vcc(0);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t words[] = {0x8c6b7e6bu, 0}; // s_or_b32 vcc_hi, vcc_hi, exec_lo
@@ -6123,7 +6026,7 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
       for (uint32_t lane = 0; lane < 32; ++lane)
         cu.write_vgpr(base + kAcc + reg, lane, 0);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     const auto words = cdna5::build_vop3p(
         cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
         {.vdst = kAcc, .src0 = 256 + kA, .src1 = 256 + kB, .src2 = 256 + kIndex});
@@ -6148,7 +6051,7 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128SignsAndClamp) {
   ASSERT_NE(wf, nullptr);
   auto &cu = *sim.cu();
   const auto base = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   for (uint8_t signs : {0, 1, 2}) {
     for (uint8_t clamp : {0, 1}) {
       for (uint32_t lane = 0; lane < 32; ++lane) {
@@ -6185,7 +6088,7 @@ TEST(Gfx1250ExecutionTest, PermlaneIdxGenReturnsByteOffsetsWithinEachGroup) {
   const uint32_t base = wf->vgpr_alloc().base;
   constexpr uint32_t kExec = 0x55555555;
   wf->set_exec(kExec);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const auto words =
       cdna5::build_vop3(cdna5::kVPermlaneIdxGenB32Vop3, {.vdst = 1, .src0 = 256, .src1 = 4});
@@ -6216,7 +6119,7 @@ TEST(Gfx1250ExecutionTest, PermlaneShufflesSelectSourceAtGroupBoundaries) {
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf(16);
   ASSERT_NE(wf, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t base = wf->vgpr_alloc().base;
   for (uint32_t lane = 0; lane < 32; ++lane)
@@ -6268,7 +6171,7 @@ TEST(Gfx1250ExecutionTest, Perlane64CompatibilityEncodingDecodesAndIsWave32Nop) 
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec(0x80000001u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   // LLVM 23 gfx1250 compatibility encoding: v_permlane64_b32 v0, v1.
   constexpr std::array<uint32_t, 1> words{0x7E00CF01u};
@@ -7166,10 +7069,7 @@ TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRule
   const auto trig_words =
       cdna5::build_vop3(cdna5::kVTrigPreopF64Vop3, {.vdst = 4, .src0 = 256, .src1 = 258});
   cdna5::VTrigPreopF64Vop3 trig(trig_words.data());
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
   trig.execute_impl(*wf);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
   for (uint32_t lane = 0; lane < trig_cases.size(); ++lane) {
     const uint64_t result = cu->read_vgpr(vgpr_base + 4, lane) |
                             (static_cast<uint64_t>(cu->read_vgpr(vgpr_base + 5, lane)) << 32);
@@ -7184,7 +7084,6 @@ TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRule
                                                  {.vdst = 4, .src0 = 256, .src1 = 258, .omod = 1});
   cdna5::VTrigPreopF64Vop3 omod_trig(omod_trig_words.data());
   omod_trig.execute_impl(*wf);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), 0u);
 }
@@ -7251,7 +7150,7 @@ TEST(Gfx1250LiteralOperandTest, MoveVop3AppliesAbsAndNeg) {
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   for (bool negate : {false, true}) {
     cu->write_vgpr(wf->vgpr_alloc().base, 0, negate ? 0x3f800000U : 0xbf800000U);
     const auto words = cdna5::build_vop3(

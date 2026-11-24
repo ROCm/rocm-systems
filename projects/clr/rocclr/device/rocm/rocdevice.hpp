@@ -87,10 +87,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   uint32_t event_id_ = 0;          //!< amd_signal_t::event_id, which never changes
   bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
   bool timed_use_ = true;    //!< The current use captures timestamps
-  //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
-  //! which only the owning tracker updates. The other bits count uses, so a check that loaded the
-  //! previous use can't mark this one. Holders keep the signal from being reused, so the value
-  //! stays 0 until the next use.
+  //! Bit 0: a host check or wait on any thread saw the current use's value reach 0, unlike
+  //! use_retired_, which only the owning tracker updates. The other bits count uses, so a check
+  //! that loaded the previous use can't mark this one. Holders keep the signal from being reused,
+  //! so the value stays 0 until the next use.
   std::atomic<uint64_t> use_completion_{0};
   static constexpr uint64_t kUseCompleteBit = 1;
 
@@ -99,6 +99,13 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   void StartUse() {
     const uint64_t completion = use_completion_.load(std::memory_order_relaxed);
     use_completion_.store((completion | kUseCompleteBit) + 1, std::memory_order_release);
+  }
+
+  //! Marks the use whose use_completion_ was loaded as completion finished. Fails if a newer use
+  //! started since, which must not be marked.
+  void MarkUseComplete(uint64_t completion) {
+    use_completion_.compare_exchange_strong(completion, completion | kUseCompleteBit,
+                                            std::memory_order_release, std::memory_order_relaxed);
   }
 
   typedef union {
@@ -676,8 +683,10 @@ class Device : public NullDevice {
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
-  //! return a new device pointer accessible by the GPU agent.
-  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+  //! return a new device pointer accessible by the GPU agent(s).
+  //! mapAllAgents locks the range to every GPU agent in one call instead of just this one.
+  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment,
+                 bool mapAllAgents = false) const;
 
   [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
                                        const void* src) const override;

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/image_addressing.h"
 #include "rocjitsu/vm/graphics/image_address.h"
@@ -15,9 +16,9 @@ using namespace rocjitsu;
 
 constexpr uint64_t kBase = 0x10000;
 
-class AllImageAddressingTest : public testing::TestWithParam<rj_code_arch_t> {
+class AllImageAddressingTest : public testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const { return GetParam(); }
+  rocjitsu::IsaFamily arch() const { return GetParam(); }
 };
 
 TEST_P(AllImageAddressingTest, MisalignedLinearPitchNeedsQualifiedRounding) {
@@ -25,7 +26,8 @@ TEST_P(AllImageAddressingTest, MisalignedLinearPitchNeedsQualifiedRounding) {
   const amdgpu::ImageLayout layout{.width = 30, .height = 5, .pitch = 35, .element_bytes = 4};
   const std::optional<amdgpu::ImageAddressing> addressing =
       amdgpu::ImageAddressing::prepare(config, layout);
-  const bool qualified = arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool qualified =
+      arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna4;
   ASSERT_EQ(addressing.has_value(), qualified);
   if (addressing) {
     EXPECT_EQ(addressing->byte_offset(0, 1, 0), 256u);
@@ -536,23 +538,23 @@ TEST_P(AllImageAddressingTest, NativeAddressingMatchesIndependentOffsets) {
   };
   Column column;
   switch (arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
     column = {&Offsets::gfx9, k4kbDisplayX, k64kbDisplayX, k4kbDisplayX, k4kbDisplayX};
     break;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     column = {&Offsets::rdna1, k4kbDisplayX, k64kbRenderX, k64kbRenderX, k64kbRenderX};
     break;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     column = {&Offsets::rdna2, k4kbDisplayX, k64kbRenderX, k64kbRenderX, k64kbRenderX};
     break;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     column = {&Offsets::rdna3, k4kbDisplayX, k256kbRenderX, k64kbZX, k64kbRenderX};
     break;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     column = {&Offsets::rdna3_5, k4kbDisplayX, k256kbRenderX, k64kbZX, k64kbRenderX};
     break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     column = {&Offsets::rdna4, kGfx12_4kb2d, kGfx12_256kb2d, kGfx12_4kb2d, kGfx12_4kb2d};
     break;
   default:
@@ -620,7 +622,7 @@ TEST_P(AllImageAddressingTest, BaseAlignmentDependsOnTheStorageBlock) {
       amdgpu::ImageAddressing::prepare(config, layout);
   ASSERT_TRUE(addressing);
   EXPECT_TRUE(addressing->has_supported_base(kBase + 256));
-  layout.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 2 : 22;
+  layout.swizzle_mode = arch() == rocjitsu::IsaFamily::Rdna4 ? 2 : 22;
   addressing = amdgpu::ImageAddressing::prepare(config, layout);
   ASSERT_TRUE(addressing);
   EXPECT_TRUE(addressing->has_supported_base(kBase));
@@ -628,7 +630,7 @@ TEST_P(AllImageAddressingTest, BaseAlignmentDependsOnTheStorageBlock) {
 }
 
 TEST(ImageAddressingTest, Gfx11ZModeMipTailUsesThe32BitDepthThresholdOnBothAxes) {
-  const amdgpu::ImageAddressConfig config{ROCJITSU_CODE_ARCH_RDNA3, 0x545};
+  const amdgpu::ImageAddressConfig config{rocjitsu::IsaFamily::Rdna3, 0x545};
   for (const auto swizzle : {24u, 28u}) {
     // Scaled 64 KiB and 256 KiB layouts have the same mip-tail transition.
     const uint32_t scale = swizzle == 24 ? 1 : 2;
@@ -659,7 +661,7 @@ TEST(ImageAddressingTest, Gfx11ZModeMipTailUsesThe32BitDepthThresholdOnBothAxes)
 TEST(ImageAddressingTest, Navi10ZModeMipTailMatchesIndependentOffsets) {
   // Same Addr2 recipe as NativeAddressingMatchesIndependentOffsets, using
   // its RDNA1 (Navi10) column and ADDR_SW_64KB_Z_X.
-  const amdgpu::ImageAddressConfig config{ROCJITSU_CODE_ARCH_RDNA1, 0x44};
+  const amdgpu::ImageAddressConfig config{rocjitsu::IsaFamily::Rdna1, 0x44};
   for (const auto &[bytes, mip, offset] :
        {std::array{1u, 0u, 32768u}, std::array{2u, 1u, 18432u}, std::array{2u, 3u, 1024u}}) {
     const amdgpu::ImageLayout layout{
@@ -672,7 +674,7 @@ TEST(ImageAddressingTest, Navi10ZModeMipTailMatchesIndependentOffsets) {
 }
 
 TEST(ImageAddressingTest, UnqualifiedCdnaTilingRegistersAreRejected) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2}) {
     const amdgpu::ImageAddressConfig config{arch, 0x82004};
     const amdgpu::ImageLayout layout{.element_bytes = 4, .swizzle_mode = 22};
     EXPECT_FALSE(amdgpu::ImageAddressing::prepare(config, layout));
@@ -681,18 +683,18 @@ TEST(ImageAddressingTest, UnqualifiedCdnaTilingRegistersAreRejected) {
 
 TEST(ImageAddressingTest, RejectsArchitecturesWithoutImageMemoryInstructions) {
   const amdgpu::ImageLayout layout{.element_bytes = 4};
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I,
-        ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Invalid, rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i,
+        rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     const amdgpu::ImageAddressConfig config = amdgpu::default_image_address_config(arch);
     EXPECT_FALSE(amdgpu::ImageAddressing::prepare(config, layout));
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, AllImageAddressingTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                         ROCJITSU_CODE_ARCH_RDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                         rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                         rocjitsu::IsaFamily::Rdna4));
 
 } // namespace

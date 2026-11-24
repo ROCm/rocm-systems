@@ -23,9 +23,9 @@
 #ifndef ROCSHMEM_LIBRARY_SRC_NET_IBV_HPP_
 #define ROCSHMEM_LIBRARY_SRC_NET_IBV_HPP_
 
-// Self-contained libibverbs access for the reverse-offload verbs conduit.
+// Self-contained libibverbs access for the reverse-offload verbs backend.
 //
-// Design (see ro_multi_conduit_design.md):
+// Design (see ro_multi_backend_design.md):
 //   - ABI from the real <infiniband/verbs.h> (exact structs/enums), so nothing
 //     is hand-vendored and post_send/poll_cq's inline op-table layout is correct.
 //   - Functions are resolved at runtime via dlopen("libibverbs.so.1") + dlsym,
@@ -52,7 +52,7 @@ namespace net {
  *
  * Not copyable. Thread-safety follows libibverbs: distinct QPs/CQs may be
  * driven concurrently; a single QP/CQ must be serialized by the caller (the
- * conduit uses one QP+CQ per lane on its progress thread).
+ * backend uses one QP+CQ per lane on its progress thread).
  */
 class Ibv {
  public:

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 
 #include <array>
@@ -50,12 +51,12 @@ public:
   /// Access the per-process GDS bytes used by indexed instructions on this target.
   /// The same lock serializes RMW operations from independently scheduled CUs.
   template <typename Access>
-  void access_gds(rj_code_arch_t arch, uint32_t process_id, Access &&access) {
+  void access_gds(rocjitsu::IsaFamily arch, uint32_t process_id, Access &&access) {
     std::lock_guard lock(mutex_);
-    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) {
       access(data_shares_[process_id].memory);
-    else {
-      assert(arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2);
+    } else {
+      assert(arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2);
       access(gds_.try_emplace(process_id, kGfx10GdsSizeKiB).first->second);
     }
   }

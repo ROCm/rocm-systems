@@ -270,10 +270,14 @@ amdsmi_status_t amdsmi_shut_down() {
   return amd::smi::AMDSmiSystem::getInstance().cleanup();
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string) {
   if (status_string == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
+  *status_string = nullptr;
+  // Add a case for every new amdsmi_status_t; a missing case fails the build (-Wswitch).
   switch (status) {
     case AMDSMI_STATUS_SUCCESS:
       *status_string = "AMDSMI_STATUS_SUCCESS: Call succeeded.";
@@ -298,6 +302,9 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
       break;
     case AMDSMI_STATUS_API_FAILED:
       *status_string = "AMDSMI_STATUS_API_FAILED: API call failed.";
+      break;
+    case AMDSMI_STATUS_TIMEOUT:
+      *status_string = "AMDSMI_STATUS_TIMEOUT: Timeout in API call.";
       break;
     case AMDSMI_STATUS_RETRY:
       *status_string = "AMDSMI_STATUS_RETRY: Retry operation.";
@@ -362,6 +369,11 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
       break;
     case AMDSMI_STATUS_DRIVER_NOT_LOADED:
       *status_string = "AMDSMI_STATUS_DRIVER_NOT_LOADED: Processor driver not loaded.";
+      break;
+    case AMDSMI_STATUS_MORE_DATA:
+      *status_string =
+          "AMDSMI_STATUS_MORE_DATA: There is more data than the buffer"
+          " size the user passed.";
       break;
     case AMDSMI_STATUS_NO_DATA:
       *status_string = "AMDSMI_STATUS_NO_DATA: No data was found for a given input.";
@@ -428,22 +440,15 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
     case AMDSMI_STATUS_UNKNOWN_ERROR:
       *status_string = "AMDSMI_STATUS_UNKNOWN_ERROR: An unknown error occurred.";
       break;
-    default:
-      // The case above didn't have a match, so look up the amdsmi status in the rsmi
-      // status map
-      // If found, get the rsmi status string.  If not, return unknown error string
-      for (auto& iter : amd::smi::rsmi_status_map) {
-        if (iter.second == status) {
-          rsmi_status_string(iter.first, status_string);
-          return AMDSMI_STATUS_SUCCESS;
-        }
-      }
-      // Not found
-      *status_string = "An unknown error occurred";
-      return AMDSMI_STATUS_UNKNOWN_ERROR;
+  }
+  // A value outside the enum matches no case.
+  if (*status_string == nullptr) {
+    *status_string = "An unknown error occurred";
+    return AMDSMI_STATUS_UNKNOWN_ERROR;
   }
   return AMDSMI_STATUS_SUCCESS;
 }
+#pragma GCC diagnostic pop
 
 amdsmi_status_t amdsmi_get_socket_handles(uint32_t* socket_count,
                                           amdsmi_socket_handle* socket_handles) {
@@ -1326,7 +1331,7 @@ namespace {
 // A CUID library failure in amd-smi's vocabulary. The distinction that has to
 // survive the mapping is "this caller may not know" against "this node cannot
 // answer": they ask different things of an operator.
-amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
+constexpr amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
       return AMDSMI_STATUS_SUCCESS;
@@ -1399,6 +1404,17 @@ std::string cuid_partition_node(amdsmi_processor_handle processor_handle) {
   return node;
 }
 
+// A GPU amd-smi has a handle for but the library cannot name has no CUID: it
+// is not a bad handle. Under WSL there is neither a render node nor a PCI
+// function in sysfs for the library to find.
+constexpr amdsmi_status_t cuid_lookup_status(amdcuid_status_t status) {
+  return status == AMDCUID_STATUS_DEVICE_NOT_FOUND ? AMDSMI_STATUS_NOT_SUPPORTED
+                                                   : cuid_status_to_amdsmi(status);
+}
+
+static_assert(cuid_lookup_status(AMDCUID_STATUS_DEVICE_NOT_FOUND) == AMDSMI_STATUS_NOT_SUPPORTED,
+              "a valid processor absent from the CUID inventory is unsupported");
+
 // Resolve a processor handle to its CUID handle, which is the component's
 // derived CUID. A partition node amdgpu publishes names the partition, and
 // its answer stands. Otherwise the library resolves the render node: to a
@@ -1408,12 +1424,12 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
                                 amdcuid_id_t& handle_out) {
   const std::string partition_node = cuid_partition_node(processor_handle);
   if (!partition_node.empty()) {
-    return cuid_status_to_amdsmi(amdcuid_get_handle_by_dev_path(
-        partition_node.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
+    return cuid_lookup_status(amdcuid_get_handle_by_dev_path(partition_node.c_str(),
+                                                             AMDCUID_DEVICE_TYPE_GPU, &handle_out));
   }
   const std::string render = cuid_render_node(processor_handle, "/sys");
   if (!render.empty() && access(render.c_str(), F_OK) == 0) {
-    return cuid_status_to_amdsmi(
+    return cuid_lookup_status(
         amdcuid_get_handle_by_dev_path(render.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
   }
   amdsmi_bdf_t bdf = {};
@@ -1422,7 +1438,7 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
     return smi_status;
   }
   const std::string bdf_str = stringify_bdf(bdf);
-  return cuid_status_to_amdsmi(
+  return cuid_lookup_status(
       amdcuid_get_handle_by_bdf(bdf_str.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
 }
 
@@ -1507,10 +1523,9 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
   // The handle is the derived CUID.
   copy_cuid_string(handle, info->derived, sizeof(info->derived));
 
-  // The primary is CAP_SYS_ADMIN-gated at the source because its payload embeds
-  // the raw serial number. An unprivileged caller gets an empty string and a
-  // successful call: the derived CUID is what it is supposed to be reading, and
-  // failing the whole snapshot would push it back onto the legacy UUID.
+  // A temporary CUID has no primary, for any caller; a permanent one is
+  // root-only because its payload embeds the raw serial number. If a primary
+  // is available, copy it; otherwise leave the primary field empty.
   amdcuid_id_t primary = {};
   uint32_t length = sizeof(primary);
   const amdcuid_status_t primary_status =
@@ -1530,7 +1545,7 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
   }
 
   // The auxiliary flag has no "unknown" encoding, so keeping the zero on a
-  // failed query would present an unestablished value as canonical. Fail with
+  // failed query would present an unestablished value as permanent. Fail with
   // the reason instead: an absent primary can say so with an empty string,
   // this cannot.
   bool temporary = false;
@@ -1542,7 +1557,7 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
     return cuid_status_to_amdsmi(auxiliary_status);
   }
 
-  // A canonical CUID was keyed from its primary or published beside it, so a
+  // A permanent CUID was keyed from its primary or published beside it, so a
   // caller allowed to read the primary and not getting it has hit a fault. A
   // temporary CUID may have no primary behind it at all.
   if (primary_status != AMDCUID_STATUS_SUCCESS &&
@@ -6525,6 +6540,66 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   ss << __PRETTY_FUNCTION__ << " | Driver version: " << info->driver_version << "\n"
      << " | Driver date: " << info->driver_date << "\n"
      << " | Driver name: " << info->driver_name << "\n"
+     << " | Returning: " << smi_amdgpu_get_status_string(status, false);
+  LOG_INFO(ss);
+  return status;
+}
+
+// rpm is slow to start, so the amdgpu-kmod versions of the running kernel are kept. A failed
+// lookup is asked again after kKmodRetryInterval.
+static KmodVersionCache g_kmod_version_cache{kRpmPath};
+
+static std::vector<std::string> amdgpu_kmod_versions(std::string_view release) {
+  return g_kmod_version_cache.versions(release);
+}
+
+amdsmi_status_t amdsmi_get_gpu_driver_info_v2(amdsmi_processor_handle processor_handle,
+                                              amdsmi_driver_info_v2_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+#ifdef ENABLE_WSL_BACKEND
+  // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
+  if (auto* b = gpu_device->backend()) return b->GetDriverInfoV2(info);
+#endif
+
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  std::memset(info, 0, sizeof(*info));
+
+  amdsmi_driver_info_t base{};
+  status = amdsmi_get_gpu_driver_info(processor_handle, &base);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  std::memcpy(info->driver_version, base.driver_version, sizeof(info->driver_version));
+  std::memcpy(info->driver_date, base.driver_date, sizeof(info->driver_date));
+  std::memcpy(info->driver_name, base.driver_name, sizeof(info->driver_name));
+
+  // The package lookup is best effort: when it fails, the package fields stay empty.
+  utsname uts{};
+  if (uname(&uts) != 0) {
+    uts = utsname{};
+  }
+  status = smi_amdgpu_get_driver_versions(base.driver_version, kAmdgpuDkmsRoot, uts,
+                                          amdgpu_kmod_versions, info);
+
+  const char* package_name = "none";
+  if (info->driver_package == AMDSMI_DRIVER_PACKAGE_DKMS) {
+    package_name = "amdgpu-dkms";
+  } else if (info->driver_package == AMDSMI_DRIVER_PACKAGE_KMOD) {
+    package_name = "amdgpu-kmod";
+  }
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | Driver version: " << info->driver_version << "\n"
+     << " | Driver kernel version: " << info->driver_kernel_version << "\n"
+     << " | amdgpu driver version: " << info->amdgpu_driver_version << "\n"
+     << " | Driver build version: " << info->driver_build_version << "\n"
+     << " | Driver full version: " << info->driver_full_version << "\n"
+     << " | Driver package: " << package_name << "\n"
      << " | Returning: " << smi_amdgpu_get_status_string(status, false);
   LOG_INFO(ss);
   return status;

@@ -9,6 +9,7 @@
 #include <ios>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace rocjitsu::detail {
 
@@ -16,7 +17,7 @@ bool fits_in_bounds(uint64_t offset, uint64_t size, size_t limit) {
   return offset <= limit && size <= limit - offset;
 }
 
-util::FailureOr<std::vector<char>> read_file_bytes(std::string_view path) {
+util::FailureOr<std::vector<char>> read_file_bytes(std::string_view path, size_t max_bytes) {
   std::string path_str(path);
   std::error_code error;
   if (!std::filesystem::is_regular_file(path_str, error))
@@ -26,8 +27,9 @@ util::FailureOr<std::vector<char>> read_file_bytes(std::string_view path) {
   if (!file)
     return util::Result::failure();
 
-  std::ifstream::pos_type end = file.tellg();
-  if (end < 0)
+  const std::streamoff end = file.tellg();
+  if (end < 0 || !std::in_range<size_t>(end) || !std::in_range<std::streamsize>(end) ||
+      std::cmp_greater(end, max_bytes))
     return util::Result::failure();
 
   std::vector<char> bytes(static_cast<size_t>(end));
