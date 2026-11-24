@@ -130,9 +130,18 @@ void SignalExhaustionErrorHandlerTest::RunOnAgent(hsa_agent_t gpu_agent) {
   ASSERT_SUCCESS(hsa_agent_get_info(gpu_agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max));
   queue_max = (queue_max < kQueueSize) ? queue_max : kQueueSize;
 
+  // The signals and the queue are released on every exit path so that a failed assertion does
+  // not leave them behind. The guard is armed before the first allocation.
+  std::vector<hsa_signal_t> signals;
+  hsa_queue_t* queue = nullptr;
+  MAKE_SCOPE_GUARD([&]() {
+    if (queue != nullptr) hsa_queue_destroy(queue);
+    for (auto& signal : signals) hsa_signal_destroy(signal);
+    clear_code_object();
+  });
+
   // 1) Use up the KFD events. The runtime falls back to signals without an event when it runs
   // out, so creation keeps succeeding.
-  std::vector<hsa_signal_t> signals;
   signals.reserve(kTargetSignalCount);
   for (uint32_t i = 0; i < kTargetSignalCount; ++i) {
     hsa_signal_t signal;
@@ -145,15 +154,6 @@ void SignalExhaustionErrorHandlerTest::RunOnAgent(hsa_agent_t gpu_agent) {
   if (verbosity() > 0) {
     std::cout << "Allocated " << signals.size() << " signals" << std::endl;
   }
-
-  // The signals and the queue are released on every exit path so that a failed assertion does
-  // not leave them behind.
-  hsa_queue_t* queue = nullptr;
-  MAKE_SCOPE_GUARD([&]() {
-    if (queue != nullptr) hsa_queue_destroy(queue);
-    for (auto& signal : signals) hsa_signal_destroy(signal);
-    clear_code_object();
-  });
 
   // A system that cannot create this many signals cannot run out of KFD events, so there is
   // nothing to test. Skip instead of failing.
