@@ -35,6 +35,8 @@ constexpr size_t kWholeBytes = 40 * kDdaLL128DataBytesPerSlice;
 constexpr uint32_t kFlag = 2;  // epoch cells start at 1, so the kernels use flag 2 and bank 0
 constexpr uint8_t kUntouched = 0xA5;
 constexpr unsigned kMaxGrid = 8;
+// Room for a user buffer at any byte offset up to a 16B chunk.
+constexpr size_t kOffsetRoom = 16;
 
 enum class Kind { kOneShot, kTwoShot };
 
@@ -111,18 +113,18 @@ __global__ void UnpackSlot(const uint64_t* slot, int8_t* out, size_t bytes, uint
   dda::common::ddaLL128StoreRegs<int8_t>(out + sliceByte, vr, elt, lane, flagLane);
 }
 
-template <typename T, int N>
+template <typename T, int N, bool kAligned>
 void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, uint32_t* abortFlag) {
   const DdaKernelParams params{abortFlag};
   const size_t bank = bankBytes(c.kind, c.nRanks, c.bytes);
   const size_t n = slices(c.bytes);
   const size_t lds = dda::common::ddaLL128ArPeerLdsBytes(c.block);
   if (c.kind == Kind::kOneShot) {
-    hipLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128PeerPar<T, N>), dim3(c.grid), dim3(c.block), lds, 0, scratch,
-                       recv, send, c.bytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
+    hipLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128PeerPar<T, N, kAligned>), dim3(c.grid), dim3(c.block), lds,
+                       0, scratch, recv, send, c.bytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
   } else {
-    hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128PeerPar<T, N>), dim3(c.grid), dim3(c.block), lds, 0,
-                       scratch, recv, send, c.bytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
+    hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128PeerPar<T, N, kAligned>), dim3(c.grid), dim3(c.block),
+                       lds, 0, scratch, recv, send, c.bytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
   }
 }
 
@@ -135,9 +137,12 @@ class DdaAllReduceFabricLL128PeerPar : public DeviceTestBase {
     }
   }
 
-  // send_[r] is rank r's message; reduced_ is the whole message folded in rank order.
-  void setUp(const Case& c, const std::vector<std::vector<uint8_t>>& send, const std::vector<uint8_t>& reduced) {
+  // send_[r] is rank r's message; reduced_ is the whole message folded in rank order. My sendbuff and recvbuff start
+  // `offset` bytes into their allocations.
+  void setUp(const Case& c, const std::vector<std::vector<uint8_t>>& send, const std::vector<uint8_t>& reduced,
+             size_t offset = 0) {
     c_ = c;
+    offset_ = offset;
     send_ = send;
     reduced_ = reduced;
     scratch_.clear();
@@ -148,8 +153,8 @@ class DdaAllReduceFabricLL128PeerPar : public DeviceTestBase {
     }
     scratchPtrs_ = std::make_unique<DeviceBuffer<uint8_t*>>(ptrs.size());
     scratchPtrs_->copyFrom(ptrs);
-    sendBuf_ = std::make_unique<DeviceBuffer<uint8_t>>(messageBytes(c));
-    recvBuf_ = std::make_unique<DeviceBuffer<uint8_t>>(messageBytes(c));
+    sendBuf_ = std::make_unique<DeviceBuffer<uint8_t>>(messageBytes(c) + kOffsetRoom);
+    recvBuf_ = std::make_unique<DeviceBuffer<uint8_t>>(messageBytes(c) + kOffsetRoom);
   }
 
   // Zeroed scratch, my message, untouched recvbuff, fresh epoch cells, then the peers' lines: every peer's copy of
@@ -158,7 +163,8 @@ class DdaAllReduceFabricLL128PeerPar : public DeviceTestBase {
     for (DeviceBuffer<uint8_t>& b : scratch_) {
       b.zero();
     }
-    sendBuf_->copyFrom(send_[(size_t)c_.self]);
+    HIP_CHECK(hipMemset(sendBuf_->ptr, kUntouched, sendBuf_->count));
+    HIP_CHECK(hipMemcpy(sendBuf_->ptr + offset_, send_[(size_t)c_.self].data(), messageBytes(c_), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(recvBuf_->ptr, kUntouched, recvBuf_->count));
     epoch_.copyFrom(std::vector<uint32_t>(kMaxGrid, kFlag - 1));
     abort_.upload(abortFlag);
@@ -194,29 +200,49 @@ class DdaAllReduceFabricLL128PeerPar : public DeviceTestBase {
     HIP_CHECK(hipDeviceSynchronize());
   }
 
-  // The kernel of c_, with recvbuff sendbuff when inPlace.
+  // The kernel of c_, with recvbuff sendbuff when inPlace, and the user-buffer access the launcher picks for them.
   template <typename T>
   void run(bool inPlace = false) {
+    if (offset_ % 16 == 0) {
+      run<T, true>(inPlace);
+    } else {
+      run<T, false>(inPlace);
+    }
+  }
+
+  template <typename T, bool kAligned>
+  void run(bool inPlace) {
     T** scratch = reinterpret_cast<T**>(scratchPtrs_->ptr);
-    T* recv = reinterpret_cast<T*>(inPlace ? sendBuf_->ptr : recvBuf_->ptr);
-    const T* send = reinterpret_cast<const T*>(sendBuf_->ptr);
+    T* recv = reinterpret_cast<T*>((inPlace ? sendBuf_->ptr : recvBuf_->ptr) + offset_);
+    const T* send = reinterpret_cast<const T*>(sendBuf_->ptr + offset_);
     switch (c_.ct) {
       case 4:
-        launch<T, 4>(c_, scratch, recv, send, epoch_.ptr, abort_.ptr);
+        launch<T, 4, kAligned>(c_, scratch, recv, send, epoch_.ptr, abort_.ptr);
         break;
       case 8:
-        launch<T, 8>(c_, scratch, recv, send, epoch_.ptr, abort_.ptr);
+        launch<T, 8, kAligned>(c_, scratch, recv, send, epoch_.ptr, abort_.ptr);
         break;
       default:
-        launch<T, 0>(c_, scratch, recv, send, epoch_.ptr, abort_.ptr);
+        launch<T, 0, kAligned>(c_, scratch, recv, send, epoch_.ptr, abort_.ptr);
         break;
     }
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
   }
 
+  // The result. Also expects no byte written around it, before the offset or past the message.
   std::vector<uint8_t> result(bool inPlace = false) {
-    return inPlace ? sendBuf_->copyTo() : recvBuf_->copyTo();
+    const std::vector<uint8_t> buf = inPlace ? sendBuf_->copyTo() : recvBuf_->copyTo();
+    const size_t end = offset_ + messageBytes(c_);
+    for (size_t i = 0; i < buf.size(); ++i) {
+      if (i < offset_ || i >= end) {
+        EXPECT_EQ(buf[i], kUntouched) << "a store landed outside the buffer at byte " << i;
+        if (buf[i] != kUntouched) {
+          break;
+        }
+      }
+    }
+    return std::vector<uint8_t>(buf.begin() + (std::ptrdiff_t)offset_, buf.begin() + (std::ptrdiff_t)end);
   }
 
   // What peer unpacks from my slot of `area` in its scratch.
@@ -289,6 +315,7 @@ class DdaAllReduceFabricLL128PeerPar : public DeviceTestBase {
   }
 
   Case c_{};
+  size_t offset_ = 0;
   std::vector<std::vector<uint8_t>> send_;
   std::vector<uint8_t> reduced_;
   std::vector<DeviceBuffer<uint8_t>> scratch_;
@@ -415,6 +442,24 @@ TEST_F(DdaAllReduceFabricLL128PeerPar, Bf16MatchesTheExactSum) {
     const auto send = Bf16IntMessages(c.nRanks, messageBytes(c));
     setUp(c, send, Bf16Sum(send));
     expectRankOrderFold<bf16>();
+  }
+}
+
+// Buffers at any byte offset: the unaligned instance gives the same fold and sends every peer the same lines, so a
+// rank whose buffers are aligned differently from its peers' still runs their algorithm.
+TEST_F(DdaAllReduceFabricLL128PeerPar, MisalignedBuffersMatchTheRankOrderFold) {
+  for (size_t offset : {1, 4, 8}) {
+    for (const Case& c : {Case{Kind::kOneShot, 3, 2, 0, 2, 512, kPartialBytes},
+                          Case{Kind::kOneShot, 8, 5, 8, 3, 512, kPartialBytes},
+                          Case{Kind::kTwoShot, 4, 1, 4, 2, 512, kPartialBytes},
+                          Case{Kind::kTwoShot, 16, 9, 0, 2, 512, kPartialBytes}}) {
+      for (bool inPlace : {false, true}) {
+        SCOPED_TRACE(Describe(c) + ", offset " + std::to_string(offset) + (inPlace ? ", in place" : ""));
+        const auto send = FloatMessages(c.nRanks, messageBytes(c));
+        setUp(c, send, FloatRankOrderFold(send), offset);
+        expectRankOrderFold<float>(inPlace);
+      }
+    }
   }
 }
 

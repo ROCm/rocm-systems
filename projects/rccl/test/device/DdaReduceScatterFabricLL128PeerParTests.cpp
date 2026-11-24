@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 #include "DeviceTestBase.hpp"
@@ -35,6 +36,7 @@ constexpr size_t kWholeShardBytes = 40 * kDdaLL128DataBytesPerSlice;
 constexpr uint32_t kFlag = 2;  // epoch cells start at 1, so the kernels use flag 2 and bank 0
 constexpr uint8_t kUntouched = 0xA5;
 constexpr size_t kGuardBytes = 256;  // after recvbuff, so a store past the shard lands here
+constexpr size_t kOffsetRoom = 16;   // room for a user buffer at any byte offset up to a 16B chunk
 constexpr unsigned kMaxGrid = 8;
 constexpr unsigned kBatchedThreads = 256;  // the batched kernel's SPX block: eight slices a block
 
@@ -98,18 +100,18 @@ __global__ void UnpackSlot(const uint64_t* slot, int8_t* out, size_t shardBytes,
   dda::common::ddaLL128StoreRegs<int8_t>(out + sliceByte, vr, elt, lane, flagLane);
 }
 
-template <typename T>
+template <typename T, bool kAligned>
 void launch(bool peerPar, const Case& c, unsigned grid, unsigned block, T** scratch, T* recv, const T* send,
             uint32_t* epoch, uint32_t* abortFlag) {
   const DdaKernelParams params{abortFlag};
   const size_t bank = bankBytes(c.nRanks, c.shardBytes);
   const size_t n = slices(c.shardBytes);
   if (peerPar) {
-    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128PeerPar<T, 0>), dim3(grid), dim3(block), 0, 0, scratch,
-                       recv, send, c.shardBytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
+    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128PeerPar<T, 0, kAligned>), dim3(grid), dim3(block), 0, 0,
+                       scratch, recv, send, c.shardBytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
   } else {
-    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0>), dim3(grid), dim3(block), 0, 0, scratch, recv,
-                       send, c.shardBytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
+    hipLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0, kAligned>), dim3(grid), dim3(block), 0, 0,
+                       scratch, recv, send, c.shardBytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
   }
 }
 
@@ -122,9 +124,12 @@ class DdaReduceScatterFabricLL128PeerPar : public DeviceTestBase {
     }
   }
 
-  // send_[r] is rank r's message of nRanks shards.
-  void setUp(int nRanks, int self, size_t shardBytes, const std::vector<std::vector<uint8_t>>& send) {
+  // send_[r] is rank r's message of nRanks shards. My sendbuff and recvbuff start `offset` bytes into their
+  // allocations.
+  void setUp(int nRanks, int self, size_t shardBytes, const std::vector<std::vector<uint8_t>>& send,
+             size_t offset = 0) {
     nRanks_ = nRanks;
+    offset_ = offset;
     self_ = self;
     shardBytes_ = shardBytes;
     send_ = send;
@@ -136,8 +141,8 @@ class DdaReduceScatterFabricLL128PeerPar : public DeviceTestBase {
     }
     scratchPtrs_ = std::make_unique<DeviceBuffer<uint8_t*>>(ptrs.size());
     scratchPtrs_->copyFrom(ptrs);
-    sendBuf_ = std::make_unique<DeviceBuffer<uint8_t>>((size_t)nRanks * shardBytes);
-    recvBuf_ = std::make_unique<DeviceBuffer<uint8_t>>(shardBytes + kGuardBytes);
+    sendBuf_ = std::make_unique<DeviceBuffer<uint8_t>>((size_t)nRanks * shardBytes + kOffsetRoom);
+    recvBuf_ = std::make_unique<DeviceBuffer<uint8_t>>(shardBytes + kGuardBytes + kOffsetRoom);
   }
 
   // Zeroed scratch, my message, untouched recvbuff, fresh epoch cells, then every peer's copy of my shard but skip's.
@@ -145,7 +150,9 @@ class DdaReduceScatterFabricLL128PeerPar : public DeviceTestBase {
     for (DeviceBuffer<uint8_t>& b : scratch_) {
       b.zero();
     }
-    sendBuf_->copyFrom(send_[(size_t)self_]);
+    HIP_CHECK(hipMemset(sendBuf_->ptr, kUntouched, sendBuf_->count));
+    HIP_CHECK(hipMemcpy(sendBuf_->ptr + offset_, send_[(size_t)self_].data(), send_[(size_t)self_].size(),
+                        hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(recvBuf_->ptr, kUntouched, recvBuf_->count));
     epoch_.copyFrom(std::vector<uint32_t>(kMaxGrid, kFlag - 1));
     abort_.upload(abortFlag);
@@ -170,15 +177,24 @@ class DdaReduceScatterFabricLL128PeerPar : public DeviceTestBase {
   }
 
   // The batched kernel on its launcher's grid, or the peer-parallel one on c's, with recvbuff my shard of sendbuff
-  // when inPlace.
+  // when inPlace, and the user-buffer access the launcher picks for them.
   template <typename T>
   void run(bool peerPar, const Case& c, bool inPlace = false) {
     constexpr unsigned kBatchedSlices = kBatchedThreads / kDdaLL128Warp;
     const unsigned grid = peerPar ? c.grid : (unsigned)((slices(c.shardBytes) + kBatchedSlices - 1) / kBatchedSlices);
     const unsigned block = peerPar ? c.block : kBatchedThreads;
-    uint8_t* recv = inPlace ? sendBuf_->ptr + (size_t)self_ * shardBytes_ : recvBuf_->ptr;
-    launch<T>(peerPar, c, grid, block, reinterpret_cast<T**>(scratchPtrs_->ptr), reinterpret_cast<T*>(recv),
-              reinterpret_cast<const T*>(sendBuf_->ptr), epoch_.ptr, abort_.ptr);
+    uint8_t* send = sendBuf_->ptr + offset_;
+    uint8_t* recv = inPlace ? send + (size_t)self_ * shardBytes_ : recvBuf_->ptr + offset_;
+    const auto go = [&](auto aligned) {
+      launch<T, decltype(aligned)::value>(peerPar, c, grid, block, reinterpret_cast<T**>(scratchPtrs_->ptr),
+                                          reinterpret_cast<T*>(recv), reinterpret_cast<const T*>(send), epoch_.ptr,
+                                          abort_.ptr);
+    };
+    if (offset_ % 16 == 0) {
+      go(std::true_type{});
+    } else {
+      go(std::false_type{});
+    }
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
   }
@@ -186,11 +202,13 @@ class DdaReduceScatterFabricLL128PeerPar : public DeviceTestBase {
   // My shard of the result. Also expects nothing written past it: the guard after recvbuff, or in place the other
   // shards of sendbuff.
   std::vector<uint8_t> recvBytes(bool inPlace = false) {
-    const size_t at = inPlace ? (size_t)self_ * shardBytes_ : 0;
+    const size_t at = offset_ + (inPlace ? (size_t)self_ * shardBytes_ : 0);
+    const size_t sendEnd = offset_ + send_[(size_t)self_].size();
     const std::vector<uint8_t> buf = inPlace ? sendBuf_->copyTo() : recvBuf_->copyTo();
     for (size_t i = 0; i < buf.size(); ++i) {
       if (i < at || i >= at + shardBytes_) {
-        const uint8_t want = inPlace ? send_[(size_t)self_][i] : kUntouched;
+        const bool mine = inPlace && i >= offset_ && i < sendEnd;
+        const uint8_t want = mine ? send_[(size_t)self_][i - offset_] : kUntouched;
         EXPECT_EQ(buf[i], want) << "a store landed outside my shard at byte " << i;
         if (buf[i] != want) {
           break;
@@ -259,6 +277,7 @@ class DdaReduceScatterFabricLL128PeerPar : public DeviceTestBase {
 
   int nRanks_ = 0;
   int self_ = 0;
+  size_t offset_ = 0;
   size_t shardBytes_ = 0;
   std::vector<std::vector<uint8_t>> send_;
   std::vector<DeviceBuffer<uint8_t>> scratch_;
@@ -346,6 +365,23 @@ TEST_F(DdaReduceScatterFabricLL128PeerPar, InPlaceMatchesTheRankOrderFold) {
   setUp(c.nRanks, c.self, c.shardBytes, send);
   const std::vector<uint8_t> got = expectMatchesBatched<float>(c, /*inPlace=*/true);
   EXPECT_TRUE(got == FloatRankOrderFold(send, c.nRanks, c.self, c.shardBytes)) << "left the rank-order fold";
+}
+
+// Buffers at any byte offset: both kernels' unaligned instances give the same fold and send every peer the same
+// shard, so a rank whose buffers are aligned differently from its peers' still runs their algorithm.
+TEST_F(DdaReduceScatterFabricLL128PeerPar, MisalignedBuffersMatchTheRankOrderFold) {
+  for (size_t offset : {1, 4, 8}) {
+    for (const Case& c : {Case{6, 5, 3, 512, kPartialShardBytes}, Case{16, 0, 2, 512, kPartialShardBytes}}) {
+      for (bool inPlace : {false, true}) {
+        SCOPED_TRACE(testing::Message() << c.nRanks << " ranks, self " << c.self << ", offset " << offset
+                                        << (inPlace ? ", in place" : ""));
+        const auto send = FloatMessages(c.nRanks, c.shardBytes);
+        setUp(c.nRanks, c.self, c.shardBytes, send, offset);
+        const std::vector<uint8_t> got = expectMatchesBatched<float>(c, inPlace);
+        EXPECT_TRUE(got == FloatRankOrderFold(send, c.nRanks, c.self, c.shardBytes)) << "left the rank-order fold";
+      }
+    }
+  }
 }
 
 // A peer that never sends aborts the kernel: recvbuff stays untouched and the epoch still moves on.

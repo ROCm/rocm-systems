@@ -70,19 +70,18 @@ constexpr size_t ddaLL128ArTwoShotSlotWords(size_t bankSize, int nRanks) {
 // warp still has to read.
 //
 // WIRE (DdaLL128Wire) picks the phase-1 and phase-2 writer; staged, it takes ddaLL128StageBytes(blockDim.x) of LDS.
-template <typename T, int NRANKS_CT, int WIRE = kDdaLL128WireCoop>
-__launch_bounds__(512)
-  __global__ void ddaAllReduceTwoShotLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
-                                           T* __restrict__ recvbuff, // local user output
-                                           const T* __restrict__ sendbuff, // local user input
-                                           size_t shardBytes, // per-rank shard payload; multiple of 16
-                                           int selfRank, int nRanksRt,
-                                           uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                           int epochLen, // number of cells in epochDev
-                                           size_t slicesTotal, // slices per shard this call uses
-                                           size_t bankSize, // scratch bank size (from host)
-                                           DdaKernelParams params) {
-
+template <typename T, int NRANKS_CT, int WIRE = kDdaLL128WireCoop, bool kAligned = true>
+__launch_bounds__(512) __global__
+  void ddaAllReduceTwoShotLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+                                T* __restrict__ recvbuff, // local user output
+                                const T* __restrict__ sendbuff, // local user input
+                                size_t shardBytes, // per-rank shard payload; multiple of 16
+                                int selfRank, int nRanksRt,
+                                uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                int epochLen, // number of cells in epochDev
+                                size_t slicesTotal, // slices per shard this call uses
+                                size_t bankSize, // scratch bank size (from host)
+                                DdaKernelParams params) {
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
   const int tid = threadIdx.x;
@@ -137,8 +136,8 @@ __launch_bounds__(512)
     // With look-ahead, the round's batch was loaded by the round before.
     uint64_t cur[kBatch][kDdaLL128WordsPerThread] = {};
     if constexpr (kAhead) {
-      ddaLL128LoadRegs<int8_t>(cur[0], srcBytes + (size_t)((selfRank + 1) % nRanks) * shardBytes + sliceByte,
-                               eltInSlice, lane, flagLane);
+      ddaLL128LoadRegs<int8_t, kDdaLL128LineElems, kAligned>(
+        cur[0], srcBytes + (size_t)((selfRank + 1) % nRanks) * shardBytes + sliceByte, eltInSlice, lane, flagLane);
     }
 #pragma unroll 1
     for (int base = 1; base < nRanks; base += kBatch) {
@@ -151,8 +150,8 @@ __launch_bounds__(512)
         if (r + kAhead < nRanks) {
           const int peer = (selfRank + r) % nRanks;
           const int src = kAhead ? (peer + 1) % nRanks : peer;
-          ddaLL128LoadRegs<int8_t>(next[i], srcBytes + (size_t)src * shardBytes + sliceByte, eltInSlice, lane,
-                                   flagLane);
+          ddaLL128LoadRegs<int8_t, kDdaLL128LineElems, kAligned>(
+            next[i], srcBytes + (size_t)src * shardBytes + sliceByte, eltInSlice, lane, flagLane);
         }
       } while (++i < kBatch);
       uint64_t (&send)[kBatch][kDdaLL128WordsPerThread] = kAhead ? cur : next;
@@ -187,7 +186,8 @@ __launch_bounds__(512)
 
     // Seed with my own shard; peers are folded on top.
     uint64_t acc[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane, flagLane);
+    ddaLL128LoadRegs<int8_t, kDdaLL128LineElems, kAligned>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte,
+                                                           eltInSlice, lane, flagLane);
 
     for (int r = 1; r < foldRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
@@ -221,7 +221,8 @@ __launch_bounds__(512)
       ddaLL128StagePush<WIRE>(stage, scatterSlice(peer, bankWordsNext, wireOff), acc, flag, flagLane, lane);
     }
 
-    ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)selfRank * shardBytes + sliceByte, acc, eltInSlice, lane, flagLane);
+    ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + (size_t)selfRank * shardBytes + sliceByte, acc,
+                                                            eltInSlice, lane, flagLane);
   }
 
   // Phase 3: collect the peers' reduced shards into the rest of recvbuff.
@@ -241,7 +242,8 @@ __launch_bounds__(512)
         ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
         return;
       }
-      ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
+      ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr,
+                                                              eltInSlice, lane, flagLane);
     }
   }
 

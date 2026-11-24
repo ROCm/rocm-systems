@@ -123,19 +123,18 @@ __device__ __forceinline__ bool ddaLL128RsWaitBatch(const uint64_t* const (&line
 // peer shards while phase 2 only ever writes recvbuff (this rank's shard), so an
 // in-place call (recvbuff aliasing sendbuff[selfRank]) never has one warp's
 // write land on a range another warp still has to read.
-template <typename T, int NRANKS_CT>
-__launch_bounds__(kDdaLL128RsMaxThreads)
-  __global__ void ddaReduceScatterFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
-                                              T* __restrict__ recvbuff, // local user output (one shard)
-                                              const T* __restrict__ sendbuff, // local user input (nRanks shards)
-                                              size_t shardBytes, // per-rank shard payload; multiple of 16
-                                              int selfRank, int nRanksRt,
-                                              uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                              int epochLen, // number of cells in epochDev
-                                              size_t slicesTotal, // slices per shard this call uses
-                                              size_t bankSize, // scratch bank size (from host)
-                                              DdaKernelParams params) {
-
+template <typename T, int NRANKS_CT, bool kAligned = true>
+__launch_bounds__(kDdaLL128RsMaxThreads) __global__
+  void ddaReduceScatterFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
+                                   T* __restrict__ recvbuff, // local user output (one shard)
+                                   const T* __restrict__ sendbuff, // local user input (nRanks shards)
+                                   size_t shardBytes, // per-rank shard payload; multiple of 16
+                                   int selfRank, int nRanksRt,
+                                   uint32_t* __restrict__ epochDev, // per-block LL epoch cells
+                                   int epochLen, // number of cells in epochDev
+                                   size_t slicesTotal, // slices per shard this call uses
+                                   size_t bankSize, // scratch bank size (from host)
+                                   DdaKernelParams params) {
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
   const int tid = threadIdx.x;
@@ -184,8 +183,8 @@ __launch_bounds__(kDdaLL128RsMaxThreads)
         // branch splits its batch.
         if (NRANKS_CT == 0 || r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
-          ddaLL128LoadRegsBegin<int8_t>(regs[i], srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, lane,
-                                        flagLane);
+          ddaLL128LoadRegsBegin<int8_t, kDdaLL128LineElems, kAligned>(
+            regs[i], srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, lane, flagLane);
         }
       }
       // Keeps every flag-lane shuffle below the batch's loads, so no peer's loads wait on another peer's.
@@ -223,8 +222,8 @@ __launch_bounds__(kDdaLL128RsMaxThreads)
     // Seed with my own shard; peers are folded on top.
     // Its loads stay in flight through the first poll batch, which is when it is finished.
     uint64_t acc[kDdaLL128WordsPerThread];
-    ddaLL128LoadRegsBegin<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane,
-                                  flagLane);
+    ddaLL128LoadRegsBegin<int8_t, kDdaLL128LineElems, kAligned>(
+      acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane, flagLane);
 
     int peer = firstRecvPeer;
     for (int base = 1; base < nRanks; base += kPollBatch) {
@@ -268,7 +267,7 @@ __launch_bounds__(kDdaLL128RsMaxThreads)
       break;
     }
 
-    ddaLL128StoreRegs<int8_t>(dstBytes + sliceByte, acc, eltInSlice, lane, flagLane);
+    ddaLL128StoreRegs<int8_t, kDdaLL128LineElems, kAligned>(dstBytes + sliceByte, acc, eltInSlice, lane, flagLane);
   }
 
   ddaLL128WaitStores();

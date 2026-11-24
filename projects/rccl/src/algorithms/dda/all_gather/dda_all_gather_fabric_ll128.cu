@@ -90,30 +90,34 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  // Alignment differs between ranks, so it only picks this rank's user-buffer access, never the wire.
+  const bool aligned = dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff);
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu)",
-       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
-       ddaLL128AgSlotWords(bankSize, nRanks));
+       "(warp-per-slice, bpp=%u, slotWords=%zu, aligned=%d)",
+       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer, ddaLL128AgSlotWords(bankSize, nRanks),
+       (int)aligned);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  const auto launch = [&](auto kernel) {
+    hipExtLaunchKernelGGL(kernel, grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers,
+                          static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes, comm->rank, nRanks,
+                          epochDev, epochLen, slices, bankSize, params);
+  };
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    aligned ? launch(dda::common::ddaAllGatherFabricLL128<T, 4, true>) :
+              launch(dda::common::ddaAllGatherFabricLL128<T, 4, false>);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    aligned ? launch(dda::common::ddaAllGatherFabricLL128<T, 8, true>) :
+              launch(dda::common::ddaAllGatherFabricLL128<T, 8, false>);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    aligned ? launch(dda::common::ddaAllGatherFabricLL128<T, 0, true>) :
+              launch(dda::common::ddaAllGatherFabricLL128<T, 0, false>);
     break;
   }
 
@@ -147,10 +151,8 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
     return false;
   }
   const size_t perRankBytes = sendcount * ncclTypeSize(datatype);
+  // Buffer alignment is not checked: it differs between ranks, and every rank has to pick the same tier.
   if (perRankBytes % 16 != 0) {
-    return false;
-  }
-  if ((reinterpret_cast<uintptr_t>(sendbuff) % 16) != 0 || (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
     return false;
   }
   if (perRankBytes * (size_t)comm->nRanks > rcclDdaLL128Threshold(comm, ncclFuncAllGather)) {
