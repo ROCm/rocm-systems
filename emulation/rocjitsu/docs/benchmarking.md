@@ -486,11 +486,53 @@ Each `--variant` starts its own server; the first one is the baseline of the
 (affinity through `taskset`) and `target=GPU`. Without `--variant` the script
 runs `build/tools/rocjitsu/rocjitsu` from the source tree.
 
-Every run begins by checking each kernel's output for all 4096 work items
-against a model in the script. `--verify-only` stops there. A variant with
-wrong output, or whose server fails, makes the script exit with status 1; it
-then prints the end of the server log and keeps the work directory that holds
-the full logs.
+The script compares kernel output with models it carries, at two points:
+
+- Every run begins with one dispatch of each kernel over 4096 work items and
+  37 iterations, and compares all 4096 outputs. `--verify-only` stops there.
+- Each timed dispatch starts from an output buffer the script has overwritten,
+  and the script keeps a copy of what the dispatch wrote. When the timing and
+  the server's CPU accounting for that kernel and grid are closed, it compares
+  every work item of every timed dispatch at the calibrated iteration count.
+  The `result` column of the Throughput table is `ok`, or the number of wrong
+  work items in the worst of the `--repeats` dispatches; `results.json` holds
+  the count for each one in `wrong_items`.
+
+A wrong output at either point, or a server that fails, makes the script exit
+with status 1. It names the failed check on standard error and keeps the work
+directory that holds the full logs; when the server itself failed it also
+prints the end of the server log. A variant whose timed output is wrong still
+has its rates in the tables; do not use them.
+
+What the checks do not cover:
+
+- The dispatches that calibrate the iteration count are not checked, and the
+  no-op dispatches of the Transport table write no output to check.
+- The timed output is compared with closed-form models, because walking tens
+  of millions of iterations per work item in Python is not affordable. The
+  unit tests hold those models to the stepwise one for every kernel: at
+  iteration counts up to about a million for the integer kernels, and past
+  the point where it stops changing for `fp_loop`.
+- `fp_loop` stops changing within about 10,000 iterations, when every work
+  item holds one of three values near 1.0. A timed dispatch runs far more
+  iterations than that, so its `fp_loop` check shows that every work item was
+  written with the converged value for its start, and not that the requested
+  number of iterations ran. The integer kernels do confirm the count.
+- Integer outputs must be equal. An `fp_loop` output may differ from the model
+  by one part in a million, and may match either a fused or a separate
+  multiply-add.
+- The script overwrites the output with all-ones words. That is a NaN for
+  `fp_loop`; for an integer kernel a work item whose correct value happens to
+  be `0xFFFFFFFF` would pass without being written.
+- The grid is at most 65,536 work items.
+
+Overwriting and copying the output happen between the timed dispatches. They
+are outside the interval that gives the lane-iteration and wave-instruction
+rates. They are inside the interval over which the server's cores, context
+switches per second and run-queue share are taken, as queueing each dispatch
+already was: the copies run in the client and cost microseconds per dispatch
+(up to 256 KiB each way at the largest grid), so they lengthen that interval
+by a negligible fraction unless `--target-seconds` is set to milliseconds.
 
 | Kernel | Exercises |
 |---|---|
@@ -502,9 +544,9 @@ the full logs.
 
 | Report table | Content |
 |---|---|
-| Verify | Per-kernel verdict and any startup or dispatch error |
+| Verify | Per-kernel verdict of the check before timing, and any startup or dispatch error |
 | Transport | Register-read round trip, no-op dispatch latency (polled, interrupt-driven, posted doorbell), and dispatches per second when one doorbell covers a batch |
-| Throughput | Per kernel and grid: lane-iterations and wave-instructions per second, server cores in use, system-time share, run-queue wait share and voluntary context switches |
+| Throughput | Per kernel and grid: lane-iterations and wave-instructions per second, server cores in use, system-time share, run-queue wait share, voluntary context switches, and the verdict on the timed output |
 
 A grid of 64 is one workgroup; 4096 is 64 workgroups, which a server with
 several dispatch threads can run side by side. A timed dispatch is calibrated
@@ -519,9 +561,10 @@ the client spins on one more CPU while it waits for a dispatch.
 
 Two CTest entries cover the script. `VfioUserBenchUnitTest` tests it against
 fakes and needs no server. `RocjitsuVfioUserBenchVerify` runs `--verify-only`
-against the built server. It is registered only when `ROCJITSU_ENABLE_VFIO` is
-`ON` and the clang under the selected `ROCM_PATH` compiles the kernels for
-gfx1250; the configure output says which was missing otherwise.
+against the built server, so it covers the check before timing and no timed
+dispatch. It is registered only when `ROCJITSU_ENABLE_VFIO` is `ON` and the
+clang under the selected `ROCM_PATH` compiles the kernels for gfx1250; the
+configure output says which was missing otherwise.
 
 ## Case study: gfx1250 IREE and Gluon
 

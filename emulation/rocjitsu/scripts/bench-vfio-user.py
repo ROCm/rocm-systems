@@ -46,6 +46,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 PAGE = 4096
 
@@ -1153,6 +1154,171 @@ def expected(name: str, gid: int, iters: int, buf: list[int]) -> list[float]:
     return []
 
 
+# The same results without stepping through every iteration, so that a timed
+# dispatch of any length can be checked in full. expected() above stays the
+# reference; the unit tests hold the two to each other.
+
+
+def linear_power(step: Callable[[int], int], bits: int, count: int) -> list[list[int]]:
+    """Byte lookup tables for `count` applications of a GF(2)-linear step.
+
+    A map that only shifts and XORs is linear over GF(2), so it is fixed by the
+    images of the single-bit states, and composing it with itself squares it.
+    """
+
+    def apply(images: list[int], state: int) -> int:
+        result = 0
+        while state:
+            low = state & -state
+            result ^= images[low.bit_length() - 1]
+            state ^= low
+        return result
+
+    power = [1 << bit for bit in range(bits)]
+    square = [step(1 << bit) for bit in range(bits)]
+    while count:
+        if count & 1:
+            power = [apply(square, image) for image in power]
+        square = [apply(square, image) for image in square]
+        count >>= 1
+    tables = []
+    for base in range(0, bits, 8):
+        table = [0] * 256
+        for value in range(1, 256):
+            low = value & -value
+            table[value] = table[value ^ low] ^ power[base + low.bit_length() - 1]
+        tables.append(table)
+    return tables
+
+
+def int_loop_step(state: int) -> int:
+    state ^= (state << 13) & U32
+    state ^= state >> 17
+    return state ^ ((state << 5) & U32)
+
+
+def i64_loop_step(state: int) -> int:
+    state ^= (state << 13) & U64
+    state ^= state >> 7
+    return state ^ ((state << 17) & U64)
+
+
+# (start value index, fused) -> (iterations after which fp_loop stops changing, value).
+FP_SETTLED: dict[tuple[int, bool], tuple[int, float]] = {}
+
+
+def fp_loop_value(index: int, iters: int, fused: bool) -> float:
+    """fp_loop's result for a work item whose gid & 1023 is `index`.
+
+    Rounding keeps x * 0.999 + 0.001 non-decreasing in x, so the iterates move
+    one way and stop at a value the step maps to itself. Nothing changes after
+    that, however many iterations follow.
+    """
+    settled = FP_SETTLED.get((index, fused))
+    if settled is not None and iters >= settled[0]:
+        return settled[1]
+    pack, unpack = struct.Struct("<f").pack, struct.Struct("<f").unpack
+    scale, offset = f32(0.999), f32(0.001)
+    value = f32(f32(f32(float(index)) * f32(0.001)) + f32(0.5))
+    for step in range(iters):
+        # Two binary32 values multiply exactly in binary64.
+        product = value * scale
+        if fused:
+            total = product + offset
+            tail = total - product
+            if (product - (total - tail)) + (offset - tail) == 0.0:
+                # The sum was exact as well, so this is the one rounding of a fused step.
+                after = unpack(pack(total))[0]
+            else:
+                after = fma32(value, scale, offset)
+        else:
+            after = unpack(pack(unpack(pack(product))[0] + offset))[0]
+        if after == value:
+            FP_SETTLED[(index, fused)] = (step, value)
+            return value
+        value = after
+    return value
+
+
+def expected_grid(
+    name: str, grid: int, iters: int, buf: list[int]
+) -> list[list[float]]:
+    """Acceptable outputs of work items 0..grid-1, one list per acceptable device.
+
+    Agrees with expected() for every work item and takes time that does not
+    grow with `iters` (fp_loop: not beyond the point where it stops changing).
+    """
+    if name == "int_loop":
+        t0, t1, t2, t3 = linear_power(int_loop_step, 32, iters)
+        starts = ((gid * 2654435761 + 1) & U32 for gid in range(grid))
+        return [
+            [t0[x & 255] ^ t1[x >> 8 & 255] ^ t2[x >> 16 & 255] ^ t3[x >> 24] for x in starts]
+        ]  # fmt: skip
+    if name == "i64_loop":
+        tables = linear_power(i64_loop_step, 64, iters)
+        values = []
+        for gid in range(grid):
+            start, state = (gid * 0x9E3779B97F4A7C15 + 1) & U64, 0
+            for table in tables:
+                state ^= table[start & 255]
+                start >>= 8
+            values.append((state ^ (state >> 32)) & U32)
+        return [values]
+    if name == "fp_loop":
+        distinct = min(grid, 1024)
+        return [
+            [values[gid & 1023] for gid in range(grid)]
+            for values in (
+                [fp_loop_value(index, iters, fused) for index in range(distinct)]
+                for fused in (False, True)
+            )
+        ]
+    if name in BUFFER_PLACEMENT:
+        # 97 is odd, so gid + 97 * step visits every word once per MEM_WORDS
+        # steps. Sum along that order once and every item is two lookups.
+        mask = MEM_WORDS - 1
+        prefix, total = [0], 0
+        for position in range(MEM_WORDS):
+            total += buf[(position * 97) & mask]
+            prefix.append(total)
+        laps, rest = divmod(iters, MEM_WORDS)
+        inverse = pow(97, -1, MEM_WORDS)
+        values = []
+        for gid in range(grid):
+            first = (gid * inverse) & mask
+            last = first + rest
+            part = prefix[last] - prefix[first] if last <= MEM_WORDS else (
+                total - prefix[first] + prefix[last - MEM_WORDS])  # fmt: skip
+            values.append((gid + laps * total + part) & U32)
+        return [values]
+    if name == "lds_loop":
+        # Sum of (lid + step) % WORKGROUP over the steps left after whole laps.
+        prefix = [0]
+        for position in range(2 * WORKGROUP):
+            prefix.append(prefix[-1] + position % WORKGROUP)
+        laps, rest = divmod(iters, WORKGROUP)
+        values = []
+        for gid in range(grid):
+            lid = gid % WORKGROUP
+            lids = laps * prefix[WORKGROUP] + prefix[lid + rest] - prefix[lid]
+            values.append((gid + iters * ((gid - lid) * 3 + 1) + lids * 3) & U32)
+        return [values]
+    return []
+
+
+def count_wrong(name: str, raw: bytes, candidates: list[list[float]]) -> int:
+    """How many work items in `raw`, a dispatch's output, match no candidate."""
+    if name == "fp_loop":
+        return sum(
+            not any(math.isclose(got, value, rel_tol=1e-6) for value in want)
+            for got, *want in zip(array.array("f", raw), *candidates)
+        )
+    (want,) = candidates
+    if raw == array.array("I", want).tobytes():
+        return 0
+    return sum(got != value for got, value in zip(array.array("I", raw), want))
+
+
 # Benchmarks
 
 
@@ -1190,25 +1356,28 @@ class Bench:
             self.kernel(name), grid, self.args(iters, name), self.timeout, self.server
         )
 
-    def output(self, name: str, gid: int) -> float:
-        fmt = "<f" if name == "fp_loop" else "<I"
-        return struct.unpack_from(fmt, self.device.mem, self.out_off + gid * 4)[0]
+    def clear_output(self, grid: int) -> None:
+        """Overwrite the output with all-ones words.
+
+        That is a NaN for fp_loop, which never matches. An integer kernel
+        computes it for a work item only by coincidence, so an item left
+        unwritten is counted wrong unless its expected value is 0xFFFFFFFF.
+        """
+        self.device.mem[self.out_off : self.out_off + grid * 4] = b"\xff" * (grid * 4)
+
+    def read_output(self, grid: int) -> bytes:
+        return bytes(self.device.mem[self.out_off : self.out_off + grid * 4])
 
     def verify(self, grid: int = 4096, iters: int = 37) -> dict[str, str]:
         """Check every work item of every kernel, across enough workgroups to span compute units."""
         verdicts = {}
         for name in BENCHMARKS:
-            self.device.mem[self.out_off : self.out_off + grid * 4] = bytes(grid * 4)
+            self.clear_output(grid)
             self.run(name, grid, iters)
-            bad = 0
-            for gid in range(grid):
-                got, want = self.output(name, gid), expected(name, gid, iters, self.buf)
-                if name == "fp_loop":
-                    bad += not any(
-                        math.isclose(got, value, rel_tol=1e-6) for value in want
-                    )
-                else:
-                    bad += got not in want
+            items = [expected(name, gid, iters, self.buf) for gid in range(grid)]
+            bad = count_wrong(
+                name, self.read_output(grid), [list(c) for c in zip(*items)]
+            )
             verdicts[name] = "ok" if bad == 0 else f"{bad}/{grid} wrong"
         return verdicts
 
@@ -1248,6 +1417,12 @@ class Bench:
     def throughput(
         self, name: str, grid: int, target_seconds: float, repeats: int
     ) -> dict[str, object]:
+        """Time `repeats` dispatches and check every work item each one wrote.
+
+        "wrong_items" counts the wrong work items of each timed dispatch and
+        "output" is "ok" or the worst of them. The calibration dispatches are
+        neither timed nor checked.
+        """
         pid = self.server.process.pid
         iters = 64
         while True:
@@ -1259,7 +1434,14 @@ class Bench:
         before, wall_start = process_cpu_seconds(pid), time.perf_counter()
         sched_before = process_sched(pid)
         io_before = self.server.io_syscalls()
-        times = [self.run(name, grid, iters) for _ in range(repeats)]
+        times, outputs = [], []
+        for _ in range(repeats):
+            # Each timed dispatch has to produce its own output, and all of it
+            # is kept. Both copies are outside the interval run() times; the
+            # comparison waits until the accounting below is closed.
+            self.clear_output(grid)
+            times.append(self.run(name, grid, iters))
+            outputs.append(self.read_output(grid))
         wall = time.perf_counter() - wall_start
         after = process_cpu_seconds(pid)
         run_ns, wait_ns, voluntary, involuntary = (
@@ -1281,16 +1463,8 @@ class Bench:
         )[::-1]
         best = min(times)
         loop_insts = executed.loop_insts
-        sample = (
-            expected(name, grid - 1, iters, self.buf) if iters <= 2_000_000 else None
-        )
-        got = self.output(name, grid - 1)
-        if sample is None:
-            sample_ok = None
-        elif name == "fp_loop":
-            sample_ok = any(math.isclose(got, value, rel_tol=1e-5) for value in sample)
-        else:
-            sample_ok = got in sample
+        candidates = expected_grid(name, grid, iters, self.buf)
+        wrong = [count_wrong(name, raw, candidates) for raw in outputs]
         return {
             "kernel": name,
             "grid": grid,
@@ -1311,8 +1485,8 @@ class Bench:
             "io_syscalls_per_wave_iter": io_per_wave_iter,
             "busy_threads": sum(1 for share in threads if share > 0.5),
             "top_thread_share": threads[0] if threads else 0.0,
-            "last_item": got,
-            "sample_ok": sample_ok,
+            "wrong_items": wrong,
+            "output": "ok" if not any(wrong) else f"{max(wrong)}/{grid} wrong",
         }
 
 
@@ -1453,9 +1627,6 @@ def print_report(results: list[dict]) -> None:
                 timing["lane_iters_per_s"]
                 / baseline[(timing["kernel"], timing["grid"])]
             )
-            checked = {True: "ok", False: "WRONG", None: "unchecked"}[
-                timing["sample_ok"]
-            ]
             print(
                 f"| {result['variant']} | {result['target']} | "
                 f"{timing['kernel']} | {timing['grid']} | {timing['iters']} | "
@@ -1472,8 +1643,24 @@ def print_report(results: list[dict]) -> None:
                     if timing["io_syscalls_per_wave_iter"] is None
                     else f"{timing['io_syscalls_per_wave_iter']:.2f}"
                 )
-                + f" | {checked} |"
+                + f" | {timing['output']} |"
             )
+
+
+def wrong_outputs(result: dict) -> list[str]:
+    """Each check of a variant's output that failed, before or after timing."""
+    wrong = [
+        f"{name}: {verdict}"
+        for name, verdict in result.get("verify", {}).items()
+        if verdict != "ok"
+    ]
+    wrong += [
+        f"{timing['kernel']} timed at grid {timing['grid']}, {timing['iters']} "
+        f"iterations: {timing['output']} (per run: {timing['wrong_items']})"
+        for timing in result.get("throughput", [])
+        if timing["output"] != "ok"
+    ]
+    return wrong
 
 
 def require_inputs(variants: list[Variant]) -> None:
@@ -1634,11 +1821,12 @@ def main(arguments: list[str] | None = None) -> int:
             # why the server stopped here as well.
             for line in result.get("server_log_tail", []):
                 print(f"[{result['variant']}] server log: {line}", file=sys.stderr)
+            for line in wrong_outputs(result):
+                print(f"[{result['variant']}] wrong output: {line}", file=sys.stderr)
         failed = [
             result["variant"]
             for result in results
-            if "error" in result
-            or any(verdict != "ok" for verdict in result["verify"].values())
+            if "error" in result or wrong_outputs(result)
         ]
         if failed:
             raise HarnessError(f"variants failed: {', '.join(failed)}")

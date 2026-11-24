@@ -40,6 +40,7 @@ sys.modules[SPEC.name] = BENCH
 SPEC.loader.exec_module(BENCH)
 
 PAGE = 4096
+U32 = 0xFFFF_FFFF
 
 # One function without a loop, and one whose loop holds a two-dword instruction
 # and is preceded by a forward branch that must not be taken for a loop.
@@ -777,6 +778,176 @@ class ExpectedTest(unittest.TestCase):
 
     def test_kernel_without_a_model_has_no_expected_output(self) -> None:
         self.assertEqual(BENCH.expected("noop", 3, 9, []), [])
+
+
+def mixed_words() -> list[int]:
+    """A buffer whose words differ, as the one the script loads does."""
+    return [(index * 2246822519 + 374761393) & U32 for index in range(BENCH.MEM_WORDS)]
+
+
+class ExpectedGridTest(unittest.TestCase):
+    """expected_grid() is the model the timed runs are checked against."""
+
+    WORDS = mixed_words()
+
+    def assert_matches_reference(self, name: str, grid: int, iterations: int) -> None:
+        fast = BENCH.expected_grid(name, grid, iterations, self.WORDS)
+        for gid in range(grid):
+            self.assertEqual(
+                [values[gid] for values in fast],
+                BENCH.expected(name, gid, iterations, self.WORDS),
+                (name, gid, iterations),
+            )
+
+    def test_every_work_item_matches_the_stepwise_model(self) -> None:
+        for name in BENCH.BENCHMARKS:
+            for iterations in (0, 1, 2, 37, 63, 64, 65, 200):
+                with self.subTest(kernel=name, iterations=iterations):
+                    self.assert_matches_reference(name, 192, iterations)
+
+    def test_work_items_past_the_first_1024_and_the_last_of_the_largest_grid(
+        self,
+    ) -> None:
+        grid = BENCH.Bench.max_grid
+        for name in BENCH.BENCHMARKS:
+            with self.subTest(kernel=name):
+                fast = BENCH.expected_grid(name, grid, 5, self.WORDS)
+                self.assertEqual({len(values) for values in fast}, {grid})
+                for gid in (1023, 1024, 1025, 4095, 40000, grid - 1):
+                    self.assertEqual(
+                        [values[gid] for values in fast],
+                        BENCH.expected(name, gid, 5, self.WORDS),
+                    )
+
+    def test_buffer_and_lds_sums_match_across_a_whole_lap(self) -> None:
+        # The buffer walk repeats every MEM_WORDS steps and the LDS walk every
+        # workgroup; the remainder is taken from a lap that wraps.
+        for name, iterations in (
+            ("mem_loop", BENCH.MEM_WORDS - 1),
+            ("mem_loop", BENCH.MEM_WORDS),
+            ("mem_loop_vram", BENCH.MEM_WORDS + 1),
+            ("mem_loop", 3 * BENCH.MEM_WORDS + 4097),
+            ("lds_loop", 64 * 1000 + 63),
+        ):
+            with self.subTest(kernel=name, iterations=iterations):
+                fast = BENCH.expected_grid(name, 4096, iterations, self.WORDS)[0]
+                for gid in (0, 1, 63, 64, 97, 4095):
+                    self.assertEqual(
+                        [fast[gid]], BENCH.expected(name, gid, iterations, self.WORDS)
+                    )
+
+    def test_integer_loops_return_to_their_start_after_a_full_period(self) -> None:
+        # Both xorshifts visit every nonzero state before repeating, which no
+        # stepwise model could confirm; the power of the step has to.
+        for name, bits in (("int_loop", 32), ("i64_loop", 64)):
+            with self.subTest(kernel=name):
+                start = BENCH.expected_grid(name, 128, 0, [])
+                self.assertEqual(
+                    BENCH.expected_grid(name, 128, (1 << bits) - 1, []), start
+                )
+                self.assertEqual(
+                    BENCH.expected_grid(name, 128, (1 << bits) + 36, []),
+                    BENCH.expected_grid(name, 128, 37, []),
+                )
+                self.assertNotEqual(
+                    BENCH.expected_grid(name, 128, (1 << bits) - 2, []), start
+                )
+
+    def test_iteration_count_of_the_calibration_limit_is_modelled(self) -> None:
+        limit = 1 << 28
+        laps = limit // BENCH.MEM_WORDS
+        total = sum(self.WORDS)
+        self.assertEqual(
+            BENCH.expected_grid("mem_loop", 128, limit, self.WORDS)[0][5],
+            (5 + laps * total) & U32,
+        )
+        # Every workgroup-sized lap adds each of the group's 64 values once.
+        group = sum((64 + lid) * 3 + 1 for lid in range(64))
+        self.assertEqual(
+            BENCH.expected_grid("lds_loop", 128, limit, [])[0][70],
+            (70 + (limit // 64) * group) & U32,
+        )
+
+    def test_fp_loop_stops_changing_and_is_then_the_stepwise_value(self) -> None:
+        settled = 12000
+        for gid in (0, 499, 500, 501, 1023):
+            with self.subTest(gid=gid):
+                reference = BENCH.expected("fp_loop", gid, settled, [])
+                self.assertEqual(
+                    reference, BENCH.expected("fp_loop", gid, settled + 1, [])
+                )
+                self.assertEqual(
+                    [BENCH.fp_loop_value(gid, 1 << 28, fused) for fused in (0, 1)],
+                    reference,
+                )
+        fast = BENCH.expected_grid("fp_loop", 64, 1 << 28, [])
+        self.assertEqual(
+            [values[60] for values in fast],
+            BENCH.expected("fp_loop", 60, settled, []),
+        )
+
+    def test_fp_loop_before_it_settles_is_not_answered_from_a_settled_value(
+        self,
+    ) -> None:
+        BENCH.expected_grid("fp_loop", 64, 1 << 20, [])
+
+        self.assert_matches_reference("fp_loop", 64, 300)
+
+    def test_random_work_items_and_iteration_counts_match_the_stepwise_model(
+        self,
+    ) -> None:
+        # Iteration counts are drawn evenly over their magnitudes, up to what
+        # the stepwise model can still walk, and one count per integer kernel
+        # is as long as a short timed dispatch. fp_loop has stopped changing
+        # well before its limit here.
+        grid = BENCH.Bench.max_grid
+        for name in BENCH.BENCHMARKS:
+            rng = random.Random(f"expected_grid {name}")
+            limit, longest = (
+                (20_000, []) if name == "fp_loop" else (200_000, [1_000_003])
+            )
+            drawn = [int(math.exp(rng.uniform(0, math.log(limit)))) for _ in range(6)]
+            for iterations in drawn + longest:
+                fast = BENCH.expected_grid(name, grid, iterations, self.WORDS)
+                gids = [
+                    rng.randrange(grid) for _ in range(1 if iterations > limit else 4)
+                ]
+                for gid in gids:
+                    with self.subTest(kernel=name, iterations=iterations, gid=gid):
+                        self.assertEqual(
+                            [values[gid] for values in fast],
+                            BENCH.expected(name, gid, iterations, self.WORDS),
+                        )
+
+    def test_kernel_without_a_model_has_no_expected_output(self) -> None:
+        self.assertEqual(BENCH.expected_grid("noop", 64, 9, []), [])
+
+
+class CountWrongTest(unittest.TestCase):
+    def test_integer_outputs_must_be_equal(self) -> None:
+        want = [[7, 0xFFFF_FFFF, 0, 9]]
+        raw = array.array("I", want[0])
+
+        self.assertEqual(BENCH.count_wrong("int_loop", raw.tobytes(), want), 0)
+        raw[1] ^= 1 << 31
+        raw[3] += 1
+        self.assertEqual(BENCH.count_wrong("int_loop", raw.tobytes(), want), 2)
+
+    def test_fp_output_may_match_either_device_within_the_last_bits(self) -> None:
+        want = [[1.0, 2.0, 3.0, 4.0], [1.5, 2.0, 3.0, 4.0]]
+        last_bit = binary32_from_bits(binary32_bits(3.0) + 1)
+        raw = array.array("f", [1.0, 1.5, last_bit, 4.0])
+
+        self.assertEqual(BENCH.count_wrong("fp_loop", raw.tobytes(), want), 1)
+        raw[3] = 4.0 * (1 + 1e-4)
+        self.assertEqual(BENCH.count_wrong("fp_loop", raw.tobytes(), want), 2)
+
+    def test_output_no_dispatch_wrote_is_wrong_for_every_kernel(self) -> None:
+        cleared = b"\xff" * 16
+        self.assertEqual(
+            BENCH.count_wrong("fp_loop", cleared, [[1.0] * 4, [1.0] * 4]), 4
+        )
+        self.assertEqual(BENCH.count_wrong("lds_loop", cleared, [[1, 2, 3, 4]]), 4)
 
 
 def binary32_bits(value: float) -> int:
@@ -1941,20 +2112,56 @@ class BenchTest(DeviceTestCase):
         )
         self.bench = BENCH.Bench(self.device, self.server, self.code, 1.0)
         self.root = self.fake.queue_registration().page_table_root
+        self.known: dict[tuple[str, int, int], list[int]] = {}
 
-    def measure(self, seconds: list[float]) -> dict[str, object]:
-        """Run throughput() with stubbed dispatch times, CPU accounting and clock."""
+    def results(self, name: str, grid: int, iterations: int) -> list[int]:
+        """What a correct device writes, from the stepwise model."""
+        key = (name, grid, iterations)
+        if key not in self.known:
+            self.known[key] = [
+                BENCH.expected(name, gid, iterations, self.bench.buf)[0]
+                for gid in range(grid)
+            ]
+        return list(self.known[key])
+
+    def measure(
+        self,
+        seconds: list[float],
+        spoil: Callable[[int, list[int]], list[int] | None] | None = None,
+        name: str = "int_loop",
+        results: Callable[[str, int, int], list[int]] | None = None,
+    ) -> dict[str, object]:
+        """Run throughput() with stubbed dispatch times, CPU accounting and clock.
+
+        Each stubbed dispatch writes a correct device's output. `spoil` gets
+        the index of the dispatch and that output, and returns what the device
+        writes instead, or None for a dispatch that writes nothing.
+        """
         cpu_seconds = [
             {"11 rocjitsu": (1.0, 0.5)},
             {"11 rocjitsu": (2.0, 1.0), "12 dispatch": (0.2, 0.0)},
         ]
         scheduling = [(100, 50, 10, 2), (300, 150, 30, 6)]
         self.server.io_syscalls.side_effect = [100, 100 + 15360]
+        self.seen_before: list[bytes] = []
+        times = iter(seconds)
+
+        def run(kernel: str, grid: int, iterations: int) -> float:
+            start = self.bench.out_off
+            self.seen_before.append(bytes(self.device.mem[start : start + grid * 4]))
+            values = (results or self.results)(kernel, grid, iterations)
+            if spoil is not None:
+                values = spoil(len(self.seen_before) - 1, values)
+            if values is not None:
+                raw = array.array("I", values).tobytes()
+                self.device.mem[start : start + len(raw)] = raw
+            return next(times)
+
         with contextlib.ExitStack() as stack:
             self.run_calls = stack.enter_context(
-                mock.patch.object(self.bench, "run", side_effect=seconds)
+                mock.patch.object(self.bench, "run", side_effect=run)
             )
-            stack.enter_context(
+            self.cpu_calls = stack.enter_context(
                 mock.patch.object(BENCH, "process_cpu_seconds", side_effect=cpu_seconds)
             )
             stack.enter_context(
@@ -1963,15 +2170,9 @@ class BenchTest(DeviceTestCase):
             stack.enter_context(
                 mock.patch.object(BENCH.time, "perf_counter", side_effect=[10.0, 12.0])
             )
-            return self.bench.throughput("int_loop", 128, 1.0, 3)
-
-    def write_output(self, gid: int, value: int) -> None:
-        self.device.put(self.bench.out_off + gid * 4, "<I", value)
+            return self.bench.throughput(name, 128, 1.0, 3)
 
     def test_throughput_calibrates_then_reports_rates_from_the_best_run(self) -> None:
-        last_item = BENCH.expected("int_loop", 127, 640, self.bench.buf)[0]
-        self.write_output(127, last_item)
-
         # 0.1 s at 64 iterations is under half the target, so the run is scaled 10x.
         result = self.measure([0.1, 0.6, 0.5, 0.25, 0.5])
 
@@ -1988,8 +2189,8 @@ class BenchTest(DeviceTestCase):
         self.assertEqual((result["wave_lanes"], result["loop_insts"]), (32, 5))
         # 15360 calls over 4 waves * 640 iterations * 3 timed runs.
         self.assertEqual(result["io_syscalls_per_wave_iter"], 2.0)
-        self.assertEqual(result["last_item"], last_item)
-        self.assertIs(result["sample_ok"], True)
+        self.assertEqual(result["wrong_items"], [0, 0, 0])
+        self.assertEqual(result["output"], "ok")
 
     def test_throughput_accounts_cpu_per_thread_over_the_timed_runs(self) -> None:
         result = self.measure([0.6, 0.5, 0.25, 0.5])
@@ -2003,13 +2204,87 @@ class BenchTest(DeviceTestCase):
         self.assertEqual(result["vol_switches_per_s"], 10.0)
         self.assertEqual(result["invol_switches_per_s"], 2.0)
 
-    def test_throughput_flags_a_wrong_last_work_item(self) -> None:
-        self.write_output(127, 0xDEAD_BEEF)
+    def test_throughput_counts_wrong_work_items_of_every_timed_run(self) -> None:
+        def spoil(dispatch: int, values: list[int]) -> list[int]:
+            # Dispatch 0 calibrates. The first timed run gets one item wrong
+            # and the second three; none is the last item or in the last run.
+            for gid in {1: [0], 2: [5, 64, 126]}.get(dispatch, []):
+                values[gid] ^= 1
+            return values
 
-        result = self.measure([0.6, 0.5, 0.25, 0.5])
+        result = self.measure([0.6, 0.5, 0.25, 0.5], spoil)
 
         self.assertEqual(result["iters"], 64)
-        self.assertIs(result["sample_ok"], False)
+        self.assertEqual(result["wrong_items"], [1, 3, 0])
+        self.assertEqual(result["output"], "3/128 wrong")
+
+    def test_throughput_does_not_check_a_calibration_run(self) -> None:
+        result = self.measure(
+            [0.1, 0.6, 0.5, 0.25, 0.5],
+            lambda dispatch, values: [0] * 128 if dispatch < 2 else values,
+        )
+
+        self.assertEqual(result["output"], "ok")
+
+    def test_timed_run_that_writes_nothing_is_wrong_in_every_work_item(self) -> None:
+        # The calibration run and the first timed run leave correct results
+        # for the same iteration count behind them.
+        result = self.measure(
+            [0.6, 0.5, 0.25, 0.5],
+            lambda dispatch, values: None if dispatch >= 2 else values,
+        )
+
+        self.assertEqual(result["wrong_items"], [0, 128, 128])
+        self.assertEqual(result["output"], "128/128 wrong")
+
+    def test_output_is_cleared_before_each_timed_run_only(self) -> None:
+        self.measure([0.1, 0.6, 0.5, 0.25, 0.5])
+
+        cleared = b"\xff" * (128 * 4)
+        calibration = array.array("I", self.results("int_loop", 128, 64)).tobytes()
+        self.assertEqual(self.seen_before[1], calibration)
+        self.assertEqual(self.seen_before[2:], [cleared] * 3)
+        # A cleared fp_loop item is a NaN, which no tolerance accepts.
+        self.assertTrue(math.isnan(struct.unpack("<f", cleared[:4])[0]))
+
+    def test_output_is_compared_after_the_accounting_is_closed(self) -> None:
+        model = BENCH.expected_grid
+        closed = []
+
+        def expected_grid(*arguments: object) -> list[list[float]]:
+            closed.append(
+                (self.cpu_calls.call_count, self.server.io_syscalls.call_count)
+            )
+            return model(*arguments)
+
+        with mock.patch.object(BENCH, "expected_grid", expected_grid):
+            self.measure([0.6, 0.5, 0.25, 0.5])
+
+        # Once for all three runs, after the second reading of each counter.
+        self.assertEqual(closed, [(2, 2)])
+
+    def test_run_calibrated_to_the_iteration_limit_is_still_checked(self) -> None:
+        limit = 1 << 28
+
+        def device(name: str, grid: int, iterations: int) -> list[int]:
+            return BENCH.expected_grid(name, grid, iterations, self.bench.buf)[0]
+
+        def spoil(dispatch: int, values: list[int]) -> list[int]:
+            if dispatch == self.dispatches - 1:
+                values[77] += 1
+            return values
+
+        # A server this fast never reaches half the target.
+        seconds = [1e-9] * 40
+        for name in ("int_loop", "mem_loop_vram"):
+            with self.subTest(kernel=name):
+                result = self.measure(seconds, name=name, results=device)
+                self.dispatches = self.run_calls.call_count
+                self.assertEqual(result["iters"], limit)
+                self.assertEqual(result["output"], "ok")
+
+                result = self.measure(seconds, spoil, name=name, results=device)
+                self.assertEqual(result["wrong_items"], [0, 0, 1])
 
     def test_buffer_is_reachable_in_guest_ram_and_in_vram_with_the_same_words(
         self,
@@ -2144,6 +2419,76 @@ class VerifyTest(ExecutingDeviceTestCase):
 
         with self.assertRaisesRegex(BENCH.HarnessError, "server exited with 3"):
             self.verify()
+
+
+class TimedOutputTest(ExecutingDeviceTestCase):
+    """throughput() on a device that runs the stepwise model for each dispatch."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.server.io_syscalls = lambda: None
+        for name, value in (
+            ("process_cpu_seconds", {"11 rocjitsu": (1.0, 0.5)}),
+            ("process_sched", (100, 50, 10, 2)),
+        ):
+            patcher = mock.patch.object(BENCH, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def timed(self, name: str, repeats: int = 2) -> dict[str, object]:
+        # Any dispatch is longer than half of this target, so 64 iterations stay.
+        return self.bench.throughput(name, self.GRID, 1e-9, repeats)
+
+    def test_every_kernel_of_a_correct_device_is_ok(self) -> None:
+        for name in BENCH.BENCHMARKS:
+            with self.subTest(kernel=name):
+                result = self.timed(name)
+
+                self.assertEqual(result["iters"], 64)
+                self.assertEqual(result["wrong_items"], [0, 0])
+                self.assertEqual(result["output"], "ok")
+        # One calibration and two timed dispatches per benchmark.
+        self.assertEqual(
+            self.fake.dispatches,
+            [Dispatch(name, self.GRID, 64) for name in BENCH.BENCHMARKS for _ in "123"],
+        )
+
+    def test_fp_loop_is_ok_whether_or_not_the_device_fuses(self) -> None:
+        for fuses in (True, False):
+            with self.subTest(fuses=fuses):
+                self.fake.fused_multiply_add = fuses
+
+                self.assertEqual(self.timed("fp_loop")["output"], "ok")
+
+    def test_wrong_items_anywhere_in_any_timed_run_are_counted(self) -> None:
+        def spoil(benchmark: str, gid: int, value: float) -> float | None:
+            timed_run = len(self.fake.dispatches) - 1
+            if benchmark == "fp_loop" and timed_run == 1 and gid == 9:
+                return value * (1 + 1e-4)
+            if benchmark == "i64_loop" and timed_run == 2 and gid in (0, 100):
+                return value ^ 0x8000_0000
+            return value
+
+        self.fake.spoil = spoil
+
+        for name, wrong in (("fp_loop", [1, 0]), ("i64_loop", [0, 2])):
+            with self.subTest(kernel=name):
+                self.fake.dispatches.clear()
+                result = self.timed(name)
+
+                self.assertEqual(result["wrong_items"], wrong)
+                self.assertEqual(result["output"], f"{max(wrong)}/128 wrong")
+
+    def test_timed_run_that_completes_without_writing_is_wrong(self) -> None:
+        self.fake.spoil = lambda benchmark, gid, value: (
+            None if len(self.fake.dispatches) == 3 else value
+        )
+
+        for name in ("fp_loop", "lds_loop"):
+            with self.subTest(kernel=name):
+                self.fake.dispatches.clear()
+
+                self.assertEqual(self.timed(name)["wrong_items"], [0, 128])
 
 
 FAKE_SERVER = """#!/usr/bin/env python3
@@ -2392,7 +2737,8 @@ def variant_result(name: str, lane_iters_per_s: float, **extra: object) -> dict:
         "runq_wait_share": 0.1,
         "vol_switches_per_s": 1234.0,
         "io_syscalls_per_wave_iter": None,
-        "sample_ok": True,
+        "wrong_items": [0, 0, 0],
+        "output": "ok",
     }
     result = {
         "variant": name,
@@ -2445,19 +2791,18 @@ class PrintReportTest(unittest.TestCase):
         self.assertEqual(row[header.index("p99 us")], "40.0")
         self.assertEqual(row[-2:], ["1,000", "20,000"])
 
-    def test_sample_and_syscall_columns_say_when_nothing_was_measured(self) -> None:
-        unchecked = variant_result("base", 1e6)
-        unchecked["throughput"][0]["sample_ok"] = None
+    def test_result_column_is_the_verdict_on_the_timed_output(self) -> None:
+        uncounted = variant_result("base", 1e6)
         wrong = variant_result("wrong", 1e6)
-        wrong["throughput"][0]["sample_ok"] = False
+        wrong["throughput"][0]["output"] = "3/64 wrong"
         wrong["throughput"][0]["io_syscalls_per_wave_iter"] = 2.0
 
-        tables = self.report([unchecked, wrong])
+        tables = self.report([uncounted, wrong])
 
         header, first, second = tables["Throughput (best of repeats)"]
         syscalls = header.index("pread+pwrite per wave-iter")
-        self.assertEqual((first[syscalls], first[-1]), ("-", "unchecked"))
-        self.assertEqual((second[syscalls], second[-1]), ("2.00", "WRONG"))
+        self.assertEqual((first[syscalls], first[-1]), ("-", "ok"))
+        self.assertEqual((second[syscalls], second[-1]), ("2.00", "3/64 wrong"))
 
     def test_failed_variant_is_listed_with_its_error_and_left_out_of_timings(
         self,
@@ -2872,6 +3217,57 @@ class MainTest(unittest.TestCase):
         self.assertTrue(self.workdirs[0].is_dir())
         # The report is still printed, so the failure can be read from it.
         self.assertIn("3/4096 wrong", output)
+
+    def test_a_wrong_timed_output_fails_the_run_like_a_wrong_check(self) -> None:
+        for name in ("base", "slow"):
+            self.results[name] = variant_result(name, 1e6)
+            first = self.results[name]["throughput"][0]
+            self.results[name]["throughput"].append(dict(first, grid=4096))
+        self.results["slow"]["throughput"][1].update(
+            output="2/4096 wrong", wrong_items=[0, 2, 1]
+        )
+        results = self.root / "results.json"
+
+        status, output, errors = self.main(
+            "--variant", "base", "--variant", "slow", "--output", str(results)
+        )
+
+        self.assertEqual(status, 1)
+        self.assertIn("error: variants failed: slow\n", errors)
+        self.assertIn(
+            "[slow] wrong output: int_loop timed at grid 4096, 640 iterations: "
+            "2/4096 wrong (per run: [0, 2, 1])\n",
+            errors,
+        )
+        self.assertNotIn("[base] wrong output", errors)
+        self.assertIn(f"work directory kept: {self.workdirs[0]}\n", errors)
+        self.assertTrue(self.workdirs[0].is_dir())
+        # The pre-timing check passed, and the row still shows its rate.
+        rows = markdown_tables(output)["Throughput (best of repeats)"]
+        self.assertEqual(
+            [row[-1] for row in rows[1:]], ["ok", "ok", "ok", "2/4096 wrong"]
+        )
+        written = json.loads(results.read_text())[1]["throughput"][1]
+        self.assertEqual(written["wrong_items"], [0, 2, 1])
+
+    def test_timed_runs_with_correct_output_exit_zero(self) -> None:
+        self.results["default"] = variant_result("default", 1e6)
+
+        status, output, errors = self.main()
+
+        self.assertEqual(status, 0)
+        self.assertNotIn("wrong output", errors)
+        self.assertIn("## Throughput", output)
+
+    def test_a_wrong_check_is_named_on_stderr(self) -> None:
+        self.results["default"] = {
+            "verify": {"int_loop": "ok", "fp_loop": "3/4096 wrong"}
+        }
+
+        status, _, errors = self.main()
+
+        self.assertEqual(status, 1)
+        self.assertIn("[default] wrong output: fp_loop: 3/4096 wrong\n", errors)
 
     def test_every_failed_variant_is_named_in_order(self) -> None:
         self.results["first"] = {"error": "server did not become ready"}

@@ -157,8 +157,8 @@ build-vfio/tools/rj-ip-discovery/rj-ip-discovery
 ```
 
 To check the built server without a guest, let `scripts/bench-vfio-user.py`
-bring the device up as a driver would and verify the output of its compute
-kernels:
+bring the device up as a driver would and verify the output of one short
+dispatch of each of its compute kernels:
 
 ```bash
 python3 scripts/bench-vfio-user.py --verify-only \
