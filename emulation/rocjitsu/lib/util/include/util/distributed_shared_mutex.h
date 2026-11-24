@@ -29,8 +29,9 @@ public:
   void unlock_shared() { shards_[reader_shard()].mutex.unlock_shared(); }
 
   void lock() {
-    for (size_t acquired = 0; acquired < kShards; ++acquired)
+    for (size_t acquired = 0; acquired < kShards; ++acquired) {
       shards_[acquired].mutex.lock();
+    }
   }
 
   bool try_lock() {
@@ -71,8 +72,9 @@ private:
   }
 
   void unlock_prefix(size_t count) {
-    while (count != 0)
+    while (count != 0) {
       shards_[--count].mutex.unlock();
+    }
   }
 };
 

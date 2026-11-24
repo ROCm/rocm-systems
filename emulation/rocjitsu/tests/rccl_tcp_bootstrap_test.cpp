@@ -30,8 +30,9 @@ constexpr char kRunId[] = "0123456789abcdef0123456789abcdef";
 
 std::array<int, 2> socket_pair() {
   std::array<int, 2> fds{};
-  if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds.data()) < 0)
+  if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds.data()) < 0) {
     tcp_bootstrap::detail::fail_errno("create bootstrap test socket pair");
+  }
   return fds;
 }
 
@@ -84,17 +85,20 @@ TEST(RcclTcpBootstrapTest, ExchangesExactIdsAcrossTwoCases) {
       std::array<uint8_t, 128> id{};
       const std::string name = ordinal == 0 ? "RcclTest.AllReduce" : "RcclTest.Broadcast";
       session.ExchangeCase(name, ordinal, id.data());
-      for (size_t i = 0; i < id.size(); ++i)
-        if (id[i] != static_cast<uint8_t>(i + ordinal))
+      for (size_t i = 0; i < id.size(); ++i) {
+        if (id[i] != static_cast<uint8_t>(i + ordinal)) {
           throw std::runtime_error("rank 1 received an incorrect NCCL ID byte");
+        }
+      }
     }
   });
 
   auto session = Session::FromConnectedFd(fds[0], config(Role::Listen));
   for (uint32_t ordinal = 0; ordinal < 2; ++ordinal) {
     std::array<uint8_t, 128> id{};
-    for (size_t i = 0; i < id.size(); ++i)
+    for (size_t i = 0; i < id.size(); ++i) {
       id[i] = static_cast<uint8_t>(i + ordinal);
+    }
     const std::string name = ordinal == 0 ? "RcclTest.AllReduce" : "RcclTest.Broadcast";
     session.ExchangeCase(name, ordinal, id.data());
   }
@@ -157,22 +161,26 @@ TEST(RcclTcpBootstrapTest, ExchangesExactIdsAcrossEightRanksAndCases) {
         std::array<uint8_t, 128> id{};
         const std::string name = ordinal == 0 ? "RcclTest.AllReduce" : "RcclTest.Broadcast";
         session.ExchangeCase(name, ordinal, id.data());
-        for (size_t i = 0; i < id.size(); ++i)
-          if (id[i] != static_cast<uint8_t>(i + ordinal))
+        for (size_t i = 0; i < id.size(); ++i) {
+          if (id[i] != static_cast<uint8_t>(i + ordinal)) {
             throw std::runtime_error("connector received an incorrect NCCL ID byte");
+          }
+        }
       }
     }));
   }
   auto listener = Session::Open(Config{Role::Listen, endpoint, kRunId, 0, 8, 42, 128, 5s});
   for (uint32_t ordinal = 0; ordinal < 2; ++ordinal) {
     std::array<uint8_t, 128> id{};
-    for (size_t i = 0; i < id.size(); ++i)
+    for (size_t i = 0; i < id.size(); ++i) {
       id[i] = static_cast<uint8_t>(i + ordinal);
+    }
     const std::string name = ordinal == 0 ? "RcclTest.AllReduce" : "RcclTest.Broadcast";
     listener.ExchangeCase(name, ordinal, id.data());
   }
-  for (auto &connector : connectors)
+  for (auto &connector : connectors) {
     EXPECT_NO_THROW(connector.get());
+  }
 }
 
 TEST(RcclTcpBootstrapTest, HandlesFragmentedReadsAndPartialWrites) {
@@ -183,8 +191,9 @@ TEST(RcclTcpBootstrapTest, HandlesFragmentedReadsAndPartialWrites) {
   tcp_bootstrap::detail::set_nonblocking(sender.get());
 
   std::array<uint8_t, 128> input{};
-  for (size_t i = 0; i < input.size(); ++i)
+  for (size_t i = 0; i < input.size(); ++i) {
     input[i] = static_cast<uint8_t>(i);
+  }
   auto fragmented_writer = std::async(std::launch::async, [&] {
     for (uint8_t byte : input) {
       tcp_bootstrap::detail::write_exact(sender.get(), &byte, 1, Clock::now() + 2s);
@@ -201,8 +210,9 @@ TEST(RcclTcpBootstrapTest, HandlesFragmentedReadsAndPartialWrites) {
   ASSERT_EQ(::setsockopt(sender.get(), SOL_SOCKET, SO_SNDBUF, &small_buffer, sizeof(small_buffer)),
             0);
   std::vector<uint8_t> large_input(256 * 1024);
-  for (size_t i = 0; i < large_input.size(); ++i)
+  for (size_t i = 0; i < large_input.size(); ++i) {
     large_input[i] = static_cast<uint8_t>(i);
+  }
   auto bulk_writer = std::async(std::launch::async, [&] {
     tcp_bootstrap::detail::write_exact(sender.get(), large_input.data(), large_input.size(),
                                        Clock::now() + 5s);

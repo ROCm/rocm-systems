@@ -41,8 +41,9 @@ public:
 
   /// Copy all addresses into an exactly sized destination.
   bool copy_to(std::span<uint64_t> destination) const {
-    if (destination.size() != size_)
+    if (destination.size() != size_) {
       return false;
+    }
     return empty() || (copy_ != nullptr && copy_(context_, destination));
   }
 
@@ -52,8 +53,9 @@ private:
 
   static bool copy_span(const void *context, std::span<uint64_t> destination) {
     const auto *source = static_cast<const uint64_t *>(context);
-    for (size_t i = 0; i < destination.size(); ++i)
+    for (size_t i = 0; i < destination.size(); ++i) {
       destination[i] = source[i];
+    }
     return true;
   }
 

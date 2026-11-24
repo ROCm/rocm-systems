@@ -91,19 +91,23 @@ public:
   };
 
   [[nodiscard]] std::optional<Permit> try_acquire(uint64_t begin, uint64_t size) noexcept {
-    if (!valid(begin, size))
+    if (!valid(begin, size)) {
       return std::nullopt;
+    }
     static std::atomic<size_t> next_shard{0};
     static thread_local const size_t index =
         next_shard.fetch_add(1, std::memory_order_relaxed) % kShards;
     auto &shard = shards_[index];
     std::lock_guard lock(shard.mutex);
-    if (shard.next_id == 0)
+    if (shard.next_id == 0) {
       return std::nullopt;
+    }
     const Span requested{begin, size};
-    for (const Entry &closed : closed_)
-      if (overlaps(requested, closed.span))
+    for (const Entry &closed : closed_) {
+      if (overlaps(requested, closed.span)) {
         return std::nullopt;
+      }
+    }
     try {
       const uint64_t id = shard.next_id;
       shard.active.push_back({requested, id});
@@ -115,16 +119,21 @@ public:
   }
 
   [[nodiscard]] std::optional<Closed> try_close(uint64_t begin, uint64_t size) noexcept {
-    if (!valid(begin, size))
+    if (!valid(begin, size)) {
       return std::nullopt;
+    }
     auto locks = lock_all_shards();
-    if (next_id_ == 0)
+    if (next_id_ == 0) {
       return std::nullopt;
+    }
     const Span requested{begin, size};
-    for (const auto &shard : shards_)
-      for (const Entry &active : shard.active)
-        if (overlaps(requested, active.span))
+    for (const auto &shard : shards_) {
+      for (const Entry &active : shard.active) {
+        if (overlaps(requested, active.span)) {
           return std::nullopt;
+        }
+      }
+    }
     try {
       const uint64_t id = next_id_;
       closed_.push_back({requested, id});
@@ -184,8 +193,9 @@ private:
   };
   std::array<std::unique_lock<std::mutex>, kShards> lock_all_shards() {
     std::array<std::unique_lock<std::mutex>, kShards> locks;
-    for (size_t i = 0; i < kShards; ++i)
+    for (size_t i = 0; i < kShards; ++i) {
       locks[i] = std::unique_lock(shards_[i].mutex);
+    }
     return locks;
   }
 

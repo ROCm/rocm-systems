@@ -38,8 +38,9 @@ public:
     if (frequency_hz == 0) {
       return emit_error.emit() << "Clock frequency must be positive";
     }
-    if (frequency_hz > TICKS_PER_SECOND)
+    if (frequency_hz > TICKS_PER_SECOND) {
       return emit_error.emit() << "Clock frequency must not exceed " << TICKS_PER_SECOND << " Hz";
+    }
     return ClockDomain(std::move(name), frequency_hz, phase_offset);
   }
 

@@ -36,8 +36,9 @@ inline std::optional<std::array<double, 2>>
 image_cube_project(uint32_t face, const std::array<double, 3> &direction) {
   const auto [x, y, z] = direction;
   const double major = 2 * std::abs(direction[face / 2]);
-  if (major == 0)
+  if (major == 0) {
     return std::nullopt;
+  }
   const double s = face == 0 ? -z : face == 1 ? z : face == 5 ? -x : x;
   const double t = face == 2 ? z : face == 3 ? -z : -y;
   return std::array{s / major + 0.5, t / major + 0.5};

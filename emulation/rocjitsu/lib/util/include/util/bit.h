@@ -188,14 +188,16 @@ inline T extract_bits_from_words(const T *words, int bit_offset, int bit_width) 
   assert(bit_offset >= 0);
   assert(bit_width >= 0 && bit_width <= word_bits);
 
-  if (bit_width == 0)
+  if (bit_width == 0) {
     return T{0};
+  }
   int word_idx = bit_offset / word_bits;
   int local_offset = bit_offset % word_bits;
   T m = bit_width >= word_bits ? std::numeric_limits<T>::max()
                                : static_cast<T>((T{1} << bit_width) - 1);
-  if (local_offset + bit_width <= word_bits)
+  if (local_offset + bit_width <= word_bits) {
     return (words[word_idx] >> local_offset) & m;
+  }
   T lo = words[word_idx] >> local_offset;
   T hi = words[word_idx + 1] << (word_bits - local_offset);
   return (lo | hi) & m;
@@ -213,8 +215,9 @@ inline void insert_bits_into_words(T *words, int bit_offset, int bit_width, T va
   assert(bit_offset >= 0);
   assert(bit_width >= 0 && bit_width <= word_bits);
 
-  if (bit_width == 0)
+  if (bit_width == 0) {
     return;
+  }
   int word_idx = bit_offset / word_bits;
   int local_offset = bit_offset % word_bits;
   T m = bit_width >= word_bits ? std::numeric_limits<T>::max()
@@ -284,8 +287,9 @@ constexpr inline bool is_range_in_bounds(uint64_t offset, uint64_t size, uint64_
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
 constexpr inline std::optional<T> checked_add(T lhs, T rhs) {
-  if (rhs > std::numeric_limits<T>::max() - lhs)
+  if (rhs > std::numeric_limits<T>::max() - lhs) {
     return std::nullopt;
+  }
   return lhs + rhs;
 }
 
@@ -293,8 +297,9 @@ constexpr inline std::optional<T> checked_add(T lhs, T rhs) {
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
 constexpr inline std::optional<T> checked_mul(T lhs, T rhs) {
-  if (lhs != 0 && rhs > std::numeric_limits<T>::max() / lhs)
+  if (lhs != 0 && rhs > std::numeric_limits<T>::max() / lhs) {
     return std::nullopt;
+  }
   return lhs * rhs;
 }
 

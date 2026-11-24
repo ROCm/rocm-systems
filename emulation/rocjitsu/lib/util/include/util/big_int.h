@@ -38,10 +38,12 @@ public:
   friend constexpr bool operator<(fallback_int128_t lhs, fallback_int128_t rhs) {
     const bool lhs_negative = (lhs.high_ >> 63) != 0;
     const bool rhs_negative = (rhs.high_ >> 63) != 0;
-    if (lhs_negative != rhs_negative)
+    if (lhs_negative != rhs_negative) {
       return lhs_negative;
-    if (lhs.high_ != rhs.high_)
+    }
+    if (lhs.high_ != rhs.high_) {
       return lhs.high_ < rhs.high_;
+    }
     return lhs.low_ < rhs.low_;
   }
 
@@ -99,18 +101,22 @@ public:
   }
 
   friend constexpr fallback_uint128_t operator<<(fallback_uint128_t value, int distance) {
-    if (distance == 0)
+    if (distance == 0) {
       return value;
-    if (distance >= 64)
+    }
+    if (distance >= 64) {
       return {0, value.low_ << (distance - 64)};
+    }
     return {value.low_ << distance, (value.high_ << distance) | (value.low_ >> (64 - distance))};
   }
 
   friend constexpr fallback_uint128_t operator>>(fallback_uint128_t value, int distance) {
-    if (distance == 0)
+    if (distance == 0) {
       return value;
-    if (distance >= 64)
+    }
+    if (distance >= 64) {
       return {value.high_ >> (distance - 64), 0};
+    }
     return {(value.low_ >> distance) | (value.high_ << (64 - distance)), value.high_ >> distance};
   }
 

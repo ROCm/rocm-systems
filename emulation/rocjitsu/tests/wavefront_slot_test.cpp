@@ -55,8 +55,9 @@ InstructionTiming classify_rdna4(Decoder &decoder, std::array<uint32_t, 4> encod
                                  uint8_t wave_size = 32) {
   auto decoded = decoder.decode(encoding.data());
   EXPECT_TRUE(decoded.succeeded());
-  if (!decoded.succeeded())
+  if (!decoded.succeeded()) {
     return {};
+  }
   auto timing = InstructionTiming::classify(std::move(decoded.value()), 0x100, wave_size);
   EXPECT_TRUE(timing.has_value());
   return timing ? std::move(*timing) : InstructionTiming{};
@@ -69,13 +70,16 @@ MemoryPipeline::WaitCounterTokens routed_flat_counters(const InstructionTiming &
   MemoryPipeline::WaitCounterTokens tokens;
   const auto *issue = flat.instruction().amdgpu_memory_issue_info();
   EXPECT_NE(issue, nullptr);
-  if (!issue)
+  if (!issue) {
     return tokens;
+  }
   // Hold the routed info: counter_obligations() is a view into it.
   const MemoryIssueInfo routed = issue->for_flat_memory_domains(global, lds);
-  for (const auto obligation : routed.counter_obligations())
-    for (uint8_t i = 0; i < obligation.counter_increment(); ++i)
+  for (const auto obligation : routed.counter_obligations()) {
+    for (uint8_t i = 0; i < obligation.counter_increment(); ++i) {
       tokens.types[tokens.size++] = obligation.wait_counter_type();
+    }
+  }
   return tokens;
 }
 
@@ -178,8 +182,9 @@ public:
       : Instruction(name, nullptr) {
     flags_ = flags;
     set_amdgpu_operation(operation);
-    if (kind != MemoryKind::None)
+    if (kind != MemoryKind::None) {
       set_amdgpu_memory(MemoryAddressing::Global, kind);
+    }
   }
 };
 
@@ -230,9 +235,11 @@ protected:
   }
 
   void TearDown() override {
-    for (uint32_t slot = 0; cu && slot < cu->num_wf_slots(); ++slot)
-      if (Wavefront *wave = cu->wf(slot); wave && !wave->is_halted())
+    for (uint32_t slot = 0; cu && slot < cu->num_wf_slots(); ++slot) {
+      if (Wavefront *wave = cu->wf(slot); wave && !wave->is_halted()) {
         wave->halt();
+      }
+    }
   }
 
   Wavefront *dispatch(uint64_t pc = kProgram) { return cu->dispatch_wf(0, pc, 104, 256); }
@@ -439,18 +446,20 @@ void expect_flat_charges_only_its_route(WavefrontSlot &slot, const InstructionTi
 
   // A wait on the other domain's counter does not stall behind this load.
   WaitTarget other;
-  if (global)
+  if (global) {
     other.dscnt = 0;
-  else
+  } else {
     other.vmcnt = 0;
+  }
   slot.waiting = other;
   EXPECT_FALSE(slot.waiting_on_counters());
 
   WaitTarget own;
-  if (global)
+  if (global) {
     own.vmcnt = 0;
-  else
+  } else {
     own.dscnt = 0;
+  }
   slot.waiting = own;
   EXPECT_TRUE(slot.waiting_on_counters());
 

@@ -103,17 +103,20 @@ public:
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
                      uint64_t private_limit, bool ptr32 = false) {
-    for (auto *xcd : xcds_)
+    for (auto *xcd : xcds_) {
       xcd->set_apertures(shared_base, shared_limit, private_base, private_limit, ptr32);
+    }
   }
   void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
                           uint64_t private_base, uint64_t private_limit) {
-    for (auto *xcd : xcds_)
+    for (auto *xcd : xcds_) {
       xcd->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+    }
   }
   void clear_vmid_apertures() {
-    for (auto *xcd : xcds_)
+    for (auto *xcd : xcds_) {
       xcd->clear_vmid_apertures();
+    }
   }
   /// @brief Install legacy backing during configuration.
   /// @details A non-null backing cannot be replaced with a different object.
@@ -168,8 +171,9 @@ public:
   ///
   /// @returns Pointer to the selected CommandProcessor, or nullptr if no XCDs.
   amdgpu::CommandProcessor *assign_queue_owner_cp(uint32_t queue_ordinal) {
-    if (xcds_.empty())
+    if (xcds_.empty()) {
       return nullptr;
+    }
     return xcds_[queue_xcd_id(queue_ordinal)]->command_processor();
   }
 
@@ -201,16 +205,19 @@ public:
   /// @details Used for broadcast operations (setting callbacks, flushing, etc.)
   /// that must reach every CP on the device.
   template <typename Fn> void for_each_cp(Fn &&fn) {
-    for (auto *xcd_ptr : xcds_)
-      if (auto *cp = xcd_ptr->command_processor())
+    for (auto *xcd_ptr : xcds_) {
+      if (auto *cp = xcd_ptr->command_processor()) {
         fn(cp);
+      }
+    }
   }
 
   /// @brief Apply a function to every compute unit without exposing queue owners.
   template <typename Fn> void for_each_cu(Fn &&fn) {
     for_each_cp([&](amdgpu::CommandProcessor *cp) {
-      for (auto *cu : cp->compute_units())
+      for (auto *cu : cp->compute_units()) {
         fn(cu);
+      }
     });
   }
 
@@ -223,9 +230,11 @@ public:
   bool has_active_wfs_for_process(uint32_t process_id) const {
     for (auto *xcd_ptr : xcds_) {
       if (auto *cp = xcd_ptr->command_processor()) {
-        for (auto *cu : cp->compute_units())
-          if (cu->has_active_wfs_for_process(process_id))
+        for (auto *cu : cp->compute_units()) {
+          if (cu->has_active_wfs_for_process(process_id)) {
             return true;
+          }
+        }
       }
     }
     return false;

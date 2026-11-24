@@ -94,8 +94,9 @@ bool for_each_lane_ordered_run(const uint64_t *addrs, uint64_t lane_mask, uint32
                              .lane_mask = mask,
                              .first_lane = first,
                              .size = (last - first + 1) * stride,
-                             .lane_ordered = true}))
+                             .lane_ordered = true})) {
       return false;
+    }
   }
   return true;
 }
@@ -108,12 +109,14 @@ inline bool proves_lane_overlap(const uint64_t *addrs, uint64_t lane_mask, uint3
                                 uint32_t lane, uint32_t stride) {
   const uint64_t last_start = std::numeric_limits<uint64_t>::max() - (stride - 1);
   const uint64_t address = addrs[lane];
-  if (address > last_start || addrs[previous] > last_start)
+  if (address > last_start || addrs[previous] > last_start) {
     return true;
+  }
   for (uint64_t prior = lane_mask & (~uint64_t{0} >> (63 - previous)); prior; prior &= prior - 1) {
     const uint64_t other = addrs[std::countr_zero(prior)];
-    if ((address > other ? address - other : other - address) < stride)
+    if ((address > other ? address - other : other - address) < stride) {
       return true;
+    }
   }
   return false;
 }
@@ -132,8 +135,9 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
     address_ordered &= count == 0 || lanes[count - 1].address <= addrs[lane];
     lanes[count++] = {addrs[lane], lane};
   }
-  if (!address_ordered)
+  if (!address_ordered) {
     sort_lane_addresses(lanes.data(), count);
+  }
 
   // Preserve the existing lane order for overlapping operands. In particular,
   // sorting must not change which lane supplies the final byte of a store.
@@ -149,8 +153,9 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
     split_operands |= (lanes[i].address & transaction_mask) !=
                       ((lanes[i].address + stride - 1) & transaction_mask);
   }
-  if (overlap)
+  if (overlap) {
     return for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
+  }
 
   if (split_operands) {
     // A lane may contribute to two transactions. Partition contiguous bytes
@@ -160,18 +165,21 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
     runs.reserve(count * 2);
     for (uint32_t first = 0; first < count;) {
       uint32_t last = first;
-      while (last + 1 < count && lanes[last + 1].address - lanes[last].address == stride)
+      while (last + 1 < count && lanes[last + 1].address - lanes[last].address == stride) {
         ++last;
+      }
       uint64_t address = lanes[first].address;
       uint64_t remaining = uint64_t{last - first + 1} * stride;
       uint32_t begin = first;
       while (remaining) {
         const uint32_t chunk = transactions.chunk_size(address, remaining);
-        while (address - lanes[begin].address >= stride)
+        while (address - lanes[begin].address >= stride) {
           ++begin;
+        }
         uint32_t end = begin;
-        while (end < last && lanes[end + 1].address - address < chunk)
+        while (end < last && lanes[end + 1].address - address < chunk) {
           ++end;
+        }
         uint64_t mask = 0;
         bool ordered = address == lanes[begin].address && chunk == (end - begin + 1) * stride;
         for (uint32_t i = begin; i <= end; ++i) {
@@ -194,8 +202,9 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
       return first_a != first_b ? first_a < first_b : a.address < b.address;
     });
     for (const auto &run : runs) {
-      if (!fn(run))
+      if (!fn(run)) {
         return false;
+      }
     }
     return true;
   }
@@ -220,14 +229,16 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
                                  .first_lane = lanes[first].index,
                                  .size = (last - first + 1) * stride,
                                  .lane_ordered = ordered};
-      if (!emit(run))
+      if (!emit(run)) {
         return false;
+      }
       first = last + 1;
     }
     return true;
   };
-  if (address_ordered)
+  if (address_ordered) {
     return visit_runs(fn);
+  }
   std::array<CoalescedLaneRun, 64> runs;
   uint32_t run_count = 0;
   visit_runs([&](const CoalescedLaneRun &run) {
@@ -241,8 +252,9 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
                       return std::countr_zero(a.lane_mask) < std::countr_zero(b.lane_mask);
                     });
   for (uint32_t i = 0; i < run_count; ++i) {
-    if (!fn(runs[i]))
+    if (!fn(runs[i])) {
       return false;
+    }
   }
   return true;
 }
@@ -259,17 +271,19 @@ template <typename F>
 bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
                                  uint32_t stride, MemoryTransactionPolicy transactions, F &&fn) {
   assert(wf_size <= 64 && stride != 0);
-  if (!lane_mask)
+  if (!lane_mask) {
     return true;
+  }
   if constexpr (detail::kVectorizedStrideCheck) {
     const bool full_wave =
         (wf_size == 32 && lane_mask == UINT32_MAX) || (wf_size == 64 && lane_mask == UINT64_MAX);
-    if (full_wave && detail::is_strided_lane_addresses(addrs, wf_size, stride))
+    if (full_wave && detail::is_strided_lane_addresses(addrs, wf_size, stride)) {
       return fn(CoalescedLaneRun{.address = addrs[0],
                                  .lane_mask = lane_mask,
                                  .first_lane = 0,
                                  .size = wf_size * stride,
                                  .lane_ordered = true});
+    }
   }
   const uint32_t first = std::countr_zero(lane_mask);
   uint32_t last = first;
@@ -280,12 +294,13 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
     ++last;
     remaining &= ~(uint64_t{1} << last);
   }
-  if (!remaining)
+  if (!remaining) {
     return fn(CoalescedLaneRun{.address = addrs[first],
                                .lane_mask = lane_mask,
                                .first_lane = first,
                                .size = (last - first + 1) * stride,
                                .lane_ordered = true});
+  }
   // Ordinary strided instructions also stay inline: validating monotonic,
   // non-overlapping operands needs no lane/run arrays or gather buffers. A
   // contiguous address across an inactive lane still needs the reordered path.
@@ -296,9 +311,10 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
     if (addrs[previous] > std::numeric_limits<uint64_t>::max() - stride ||
         addrs[lane] < addrs[previous] + stride ||
         (lane != previous + 1 && addrs[lane] == addrs[previous] + stride)) {
-      if (!detail::proves_lane_overlap(addrs, lane_mask, previous, lane, stride))
+      if (!detail::proves_lane_overlap(addrs, lane_mask, previous, lane, stride)) {
         return detail::for_each_reordered_lane_run(addrs, lane_mask, wf_size, stride, transactions,
                                                    fn);
+      }
       break;
     }
     previous = lane;

@@ -37,8 +37,9 @@ struct HartState : public ThreadContext {
 
   int64_t read_xreg(int idx) const { return (idx == 0) ? 0 : xreg[idx]; }
   void write_xreg(int idx, int64_t val) {
-    if (idx != 0)
+    if (idx != 0) {
       xreg[idx] = val;
+    }
   }
 
   uint64_t read_freg(int idx) const { return freg[idx]; }

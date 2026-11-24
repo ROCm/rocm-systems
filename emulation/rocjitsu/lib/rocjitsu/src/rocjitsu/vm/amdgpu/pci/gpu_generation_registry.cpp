@@ -51,27 +51,35 @@ GpuGenerationRegistry::validate(std::span<const GpuGenerationDescriptor> descrip
       return std::format("generation {} answers for no gfx target", descriptor.id);
     }
     const GpuDiscoveryTopology &topology = descriptor.topology_defaults;
-    if (topology.graphics_instances == 0)
+    if (topology.graphics_instances == 0) {
       return std::format("generation {} has a zero graphics_instances topology default",
                          descriptor.id);
-    if (topology.shader_engines == 0)
+    }
+    if (topology.shader_engines == 0) {
       return std::format("generation {} has a zero shader_engines topology default", descriptor.id);
-    if (topology.shader_arrays_per_engine == 0)
+    }
+    if (topology.shader_arrays_per_engine == 0) {
       return std::format("generation {} has a zero shader_arrays_per_engine topology default",
                          descriptor.id);
-    if (topology.compute_units_per_shader_array == 0)
+    }
+    if (topology.compute_units_per_shader_array == 0) {
       return std::format("generation {} has a zero compute_units_per_shader_array topology default",
                          descriptor.id);
-    if (topology.wavefront_size == 0)
+    }
+    if (topology.wavefront_size == 0) {
       return std::format("generation {} has a zero wavefront_size topology default", descriptor.id);
-    if (topology.max_waves_per_simd == 0)
+    }
+    if (topology.max_waves_per_simd == 0) {
       return std::format("generation {} has a zero max_waves_per_simd topology default",
                          descriptor.id);
-    if (topology.max_scratch_slots_per_cu == 0)
+    }
+    if (topology.max_scratch_slots_per_cu == 0) {
       return std::format("generation {} has a zero max_scratch_slots_per_cu topology default",
                          descriptor.id);
-    if (topology.lds_size_kb == 0)
+    }
+    if (topology.lds_size_kb == 0) {
       return std::format("generation {} has a zero lds_size_kb topology default", descriptor.id);
+    }
     const IpDiscoveryBuild default_profile =
         build_ip_discovery_table(descriptor.discovery_factory(topology));
     if (!default_profile.ok()) {
@@ -148,27 +156,35 @@ const GpuGenerationRegistry &gpu_generations() {
 GpuDiscoveryTopology resolved_discovery_topology(const GpuGenerationDescriptor &generation,
                                                  const config::KfdDiscoveryOverrides &overrides) {
   GpuDiscoveryTopology topology = generation.topology_defaults;
-  if (overrides.num_shader_engines)
+  if (overrides.num_shader_engines) {
     topology.shader_engines = *overrides.num_shader_engines;
-  if (overrides.num_shader_arrays_per_engine)
+  }
+  if (overrides.num_shader_arrays_per_engine) {
     topology.shader_arrays_per_engine = *overrides.num_shader_arrays_per_engine;
-  if (overrides.num_cu_per_sh)
+  }
+  if (overrides.num_cu_per_sh) {
     topology.compute_units_per_shader_array = *overrides.num_cu_per_sh;
-  if (overrides.wave_front_size)
+  }
+  if (overrides.wave_front_size) {
     topology.wavefront_size = *overrides.wave_front_size;
-  if (overrides.max_waves_per_simd)
+  }
+  if (overrides.max_waves_per_simd) {
     topology.max_waves_per_simd = *overrides.max_waves_per_simd;
-  if (overrides.max_slots_scratch_cu)
+  }
+  if (overrides.max_slots_scratch_cu) {
     topology.max_scratch_slots_per_cu = *overrides.max_slots_scratch_cu;
-  if (overrides.lds_size_kb)
+  }
+  if (overrides.lds_size_kb) {
     topology.lds_size_kb = *overrides.lds_size_kb;
+  }
   return topology;
 }
 
 bool resolve_gpu_generation_topology(config::KfdDeviceConfig &device) {
   const GpuGenerationDescriptor *generation = gpu_generations().find(device.gfx_target_version);
-  if (generation == nullptr)
+  if (generation == nullptr) {
     return false;
+  }
   const GpuDiscoveryTopology topology =
       resolved_discovery_topology(*generation, device.discovery_overrides);
   device.num_shader_engines = topology.shader_engines;

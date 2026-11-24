@@ -171,14 +171,18 @@ struct WaitTarget {
   /// Architectural limits installed by a GFX10 SOPK wait after reading SDST.
   [[nodiscard]] WaitFields gfx10_wait_fields() const {
     WaitFields fields{};
-    if (vmcnt < WaitCounters::VMCNT_MAX)
+    if (vmcnt < WaitCounters::VMCNT_MAX) {
       fields[static_cast<size_t>(WaitCounterKind::Load)] = vmcnt;
-    if (vscnt < WaitCounters::VSCNT_MAX)
+    }
+    if (vscnt < WaitCounters::VSCNT_MAX) {
       fields[static_cast<size_t>(WaitCounterKind::Store)] = vscnt;
-    if (lgkmcnt < WaitCounters::LGKMCNT_MAX)
+    }
+    if (lgkmcnt < WaitCounters::LGKMCNT_MAX) {
       fields[static_cast<size_t>(WaitCounterKind::Ds)] = lgkmcnt;
-    if (expcnt < WaitCounters::EXPCNT_MAX)
+    }
+    if (expcnt < WaitCounters::EXPCNT_MAX) {
       fields[static_cast<size_t>(WaitCounterKind::Exp)] = expcnt;
+    }
     return fields;
   }
 

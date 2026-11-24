@@ -21,16 +21,19 @@ public:
       : scheduler_(scheduler), handle_(handle) {}
 
   ~SdmaQueueBinding() override {
-    if (handle_)
+    if (handle_) {
       (void)scheduler_.detach(handle_);
+    }
   }
 
   QueuePrepareCloseStatus prepare_close() noexcept override {
-    if (!handle_)
+    if (!handle_) {
       return QueuePrepareCloseStatus::Ready;
+    }
     const QueuePrepareCloseStatus status = scheduler_.prepare_detach(handle_);
-    if (status == QueuePrepareCloseStatus::Ready)
+    if (status == QueuePrepareCloseStatus::Ready) {
       handle_ = {};
+    }
     return status;
   }
 
@@ -59,21 +62,24 @@ SdmaQueueBindingFactory::SdmaQueueBindingFactory(
 
 QueueBindingCreateResult
 SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request) {
-  if (request.type != QueueType::Sdma || request.packet_format != QueuePacketFormat::Sdma)
+  if (request.type != QueueType::Sdma || request.packet_format != QueuePacketFormat::Sdma) {
     return {};
+  }
   // The SDMA scheduler can observe a host pointer or an explicit frontend
   // notification. It does not read a producer cursor through GPU VM, so
   // accepting VmPolled here would create a queue that never notices guest
   // progress unless an unrelated explicit submission happens to arrive.
-  if (request.doorbell.mode == QueueDoorbellMode::VmPolled)
+  if (request.doorbell.mode == QueueDoorbellMode::VmPolled) {
     return {};
+  }
   SdmaRingConfig ring = {.address_space = request.identity.address_space,
                          .ring_base = request.ring.base_address,
                          .ring_bytes = request.ring.size_bytes,
                          .read_pointer_address = request.ring.consumer_pointer_address,
                          .initial_cursor = request.initial_consumer_cursor};
-  if (!valid_sdma_ring_config(ring))
+  if (!valid_sdma_ring_config(ring)) {
     return {};
+  }
   const SdmaQueueContext context{.process_id = request.identity.process_id,
                                  .queue_id = request.identity.queue_id,
                                  .engine_id = request.engine_id};
@@ -96,8 +102,9 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
       };
       auto acquired =
           coherence->acquire_cache_maintenance(operation, util::DiagnosticEmitter(report));
-      if (acquired.failed())
+      if (acquired.failed()) {
         return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+      }
       return util::FailureOr<CacheMaintenanceResult>(
           CacheMaintenanceResult{.lease = std::move(acquired.value())});
     };
@@ -122,8 +129,9 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
        .last_doorbell = request.doorbell.last_value,
        .host_accessible = request.doorbell.mode == QueueDoorbellMode::HostPolled},
       std::move(callbacks), std::move(progress_observer));
-  if (!handle)
+  if (!handle) {
     return {};
+  }
   // Once attached, allocation failure must not strand a live scheduler slot.
   return [&]() noexcept -> QueueBindingCreateResult {
     return {.status = QueueBindingCreateStatus::Bound,

@@ -25,8 +25,9 @@ bool valid_atomic(VmMemoryDomain domain, uint64_t address, uint32_t width) {
 
 VmAccessOutcome GpuMemoryPhysicalAccess::read(VmMemoryDomain domain, uint64_t address,
                                               std::span<std::byte> bytes) {
-  if (domain != VmMemoryDomain::Local || !valid_range(address, bytes.size()))
+  if (domain != VmMemoryDomain::Local || !valid_range(address, bytes.size())) {
     return VmAccessOutcome::Malformed;
+  }
   memory_->read_block(
       address, {reinterpret_cast<uint8_t *>(bytes.data()), static_cast<std::size_t>(bytes.size())});
   return VmAccessOutcome::Complete;
@@ -34,16 +35,18 @@ VmAccessOutcome GpuMemoryPhysicalAccess::read(VmMemoryDomain domain, uint64_t ad
 
 VmAccessOutcome GpuMemoryPhysicalAccess::write(VmMemoryDomain domain, uint64_t address,
                                                std::span<const std::byte> bytes) {
-  if (domain != VmMemoryDomain::Local || !valid_range(address, bytes.size()))
+  if (domain != VmMemoryDomain::Local || !valid_range(address, bytes.size())) {
     return VmAccessOutcome::Malformed;
+  }
   memory_->write_block(address, {reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()});
   return VmAccessOutcome::Complete;
 }
 
 AtomicLoadResult GpuMemoryPhysicalAccess::atomic_load(VmMemoryDomain domain, uint64_t address,
                                                       uint32_t width) {
-  if (!valid_atomic(domain, address, width))
+  if (!valid_atomic(domain, address, width)) {
     return {.outcome = VmAccessOutcome::Malformed};
+  }
 
   uint64_t value = 0;
   const bool loaded = memory_->atomic_modify(
@@ -54,8 +57,9 @@ AtomicLoadResult GpuMemoryPhysicalAccess::atomic_load(VmMemoryDomain domain, uin
 
 VmAccessOutcome GpuMemoryPhysicalAccess::atomic_store(VmMemoryDomain domain, uint64_t address,
                                                       uint32_t width, uint64_t value) {
-  if (!valid_atomic(domain, address, width))
+  if (!valid_atomic(domain, address, width)) {
     return VmAccessOutcome::Malformed;
+  }
   const bool stored = memory_->atomic_modify(
       address, width, [&](uint8_t *bytes) { std::memcpy(bytes, &value, width); });
   return stored ? VmAccessOutcome::Complete : VmAccessOutcome::Malformed;
@@ -64,8 +68,9 @@ VmAccessOutcome GpuMemoryPhysicalAccess::atomic_store(VmMemoryDomain domain, uin
 AtomicCompareExchangeResult
 GpuMemoryPhysicalAccess::compare_exchange(VmMemoryDomain domain, uint64_t address, uint32_t width,
                                           uint64_t expected, uint64_t desired) {
-  if (!valid_atomic(domain, address, width))
+  if (!valid_atomic(domain, address, width)) {
     return {.outcome = VmAccessOutcome::Malformed};
+  }
 
   uint64_t observed = 0;
   bool exchanged = false;
@@ -86,8 +91,9 @@ GpuMemoryPhysicalAccess::compare_exchange(VmMemoryDomain domain, uint64_t addres
 VmAccessOutcome
 GpuMemoryPhysicalAccess::atomic_modify(VmMemoryDomain domain, uint64_t address, uint32_t width,
                                        const PhysicalMemoryAccess::AtomicMutation &mutation) {
-  if (!valid_atomic(domain, address, width) || !mutation)
+  if (!valid_atomic(domain, address, width) || !mutation) {
     return VmAccessOutcome::Malformed;
+  }
   const bool modified = memory_->atomic_modify(address, width, [&](uint8_t *bytes) {
     mutation({reinterpret_cast<std::byte *>(bytes), width});
   });

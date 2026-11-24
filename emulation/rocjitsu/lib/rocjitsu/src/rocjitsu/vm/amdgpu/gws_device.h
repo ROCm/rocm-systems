@@ -53,9 +53,9 @@ public:
   template <typename Access>
   void access_gds(rocjitsu::IsaFamily arch, uint32_t process_id, Access &&access) {
     std::lock_guard lock(mutex_);
-    if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
+    if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) {
       access(data_shares_[process_id].memory);
-    else {
+    } else {
       assert(arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2);
       access(gds_.try_emplace(process_id, kGfx10GdsSizeKiB).first->second);
     }

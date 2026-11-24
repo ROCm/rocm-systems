@@ -129,8 +129,9 @@ class MesTestMemory final : public rocjitsu::amdgpu::PhysicalMemoryAccess {
 public:
   rocjitsu::amdgpu::VmAccessOutcome read(rocjitsu::amdgpu::VmMemoryDomain, uint64_t address,
                                          std::span<std::byte> bytes) override {
-    if (!contains(address, bytes.size()))
+    if (!contains(address, bytes.size())) {
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+    }
     std::memcpy(bytes.data(), bytes_.data() + address, bytes.size());
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
@@ -141,8 +142,9 @@ public:
       unavailable_write_.reset();
       return rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
     }
-    if (!contains(address, bytes.size()))
+    if (!contains(address, bytes.size())) {
       return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+    }
     std::memcpy(bytes_.data() + address, bytes.data(), bytes.size());
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }

@@ -93,16 +93,19 @@ public:
 
 private:
   void source() {
-    if (next_ < count_)
+    if (next_ < count_) {
       source_to_double_.write(next_++);
+    }
   }
   void double_stage() {
-    if (source_to_double_.valid())
+    if (source_to_double_.valid()) {
       double_to_sink_.write(2 * source_to_double_.take());
+    }
   }
   void sink() {
-    if (double_to_sink_.valid())
+    if (double_to_sink_.valid()) {
       arrivals.emplace_back(cycle_, double_to_sink_.take());
+    }
   }
 
   PipeLatch<int> source_to_double_;
@@ -117,8 +120,9 @@ std::vector<std::pair<uint64_t, int>> run_pipeline(int count, bool back_to_front
   util::StringDiagnostic diagnostic;
   auto maybe_domain = ClockDomain::create("clk", 1'000'000'000, 0, diagnostic.emitter());
   EXPECT_TRUE(maybe_domain.succeeded()) << diagnostic.message();
-  if (maybe_domain.failed())
+  if (maybe_domain.failed()) {
     return {};
+  }
   const auto &domain = maybe_domain.value();
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
@@ -127,8 +131,9 @@ std::vector<std::pair<uint64_t, int>> run_pipeline(int count, bool back_to_front
   engine.topology().set_root(std::move(root));
   const auto created = engine.create(diagnostic.emitter());
   EXPECT_TRUE(created.succeeded()) << diagnostic.message();
-  if (created.failed())
+  if (created.failed()) {
     return {};
+  }
   const ExitStatus exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
   return pipeline->arrivals;

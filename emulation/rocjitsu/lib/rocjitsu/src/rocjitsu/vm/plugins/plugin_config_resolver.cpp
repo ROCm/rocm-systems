@@ -25,8 +25,9 @@ void append_value(std::string &out, const flexbuffers::Reference &v) {
 
 std::string trimmed(const std::string &s) {
   size_t b = s.find_first_not_of(" \t\r\n");
-  if (b == std::string::npos)
+  if (b == std::string::npos) {
     return "";
+  }
   size_t e = s.find_last_not_of(" \t\r\n");
   return s.substr(b, e - b + 1);
 }
@@ -34,13 +35,15 @@ std::string trimmed(const std::string &s) {
 } // namespace
 
 bool is_valid_plugin_name(const std::string &name) {
-  if (name.empty())
+  if (name.empty()) {
     return false;
+  }
   for (char c : name) {
     bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
               c == '_' || c == '-';
-    if (!ok)
+    if (!ok) {
       return false;
+    }
   }
   return true;
 }
@@ -51,12 +54,15 @@ bool flexbuffer_from_json(const std::string &json, flexbuffers::Builder &out) {
 }
 
 bool type_matches(const std::string &type, const flexbuffers::Reference &v) {
-  if (type == "string")
+  if (type == "string") {
     return v.IsString();
-  if (type == "number")
+  }
+  if (type == "number") {
     return v.IsInt() || v.IsUInt() || v.IsFloat();
-  if (type == "boolean" || type == "bool")
+  }
+  if (type == "boolean" || type == "bool") {
     return v.IsBool();
+  }
   return false; // Unknown schema type.
 }
 
@@ -66,29 +72,32 @@ bool resolve_config(const std::string &plugin_name, const char *schema_json,
 
   // No schema: pass the user config object through unchanged.
   if (schema_str.empty() || schema_str == "{}" || schema_str == "null") {
-    if (user_cfg.IsMap())
+    if (user_cfg.IsMap()) {
       user_cfg.ToString(true, true, out);
-    else
+    } else {
       out = "{}";
+    }
     return true;
   }
 
   flexbuffers::Builder schema_fbb;
   if (!flexbuffer_from_json(schema_str, schema_fbb)) {
     util::Logger::warn("plugin '", plugin_name, "': invalid config_schema, ignoring");
-    if (user_cfg.IsMap())
+    if (user_cfg.IsMap()) {
       user_cfg.ToString(true, true, out);
-    else
+    } else {
       out = "{}";
+    }
     return true;
   }
 
   auto schema_root = flexbuffers::GetRoot(schema_fbb.GetBuffer());
   if (!schema_root.IsMap()) {
-    if (user_cfg.IsMap())
+    if (user_cfg.IsMap()) {
       user_cfg.ToString(true, true, out);
-    else
+    } else {
       out = "{}";
+    }
     return true;
   }
 
@@ -100,8 +109,9 @@ bool resolve_config(const std::string &plugin_name, const char *schema_json,
   out = "{";
   bool first = true;
   auto emit = [&](const std::string &key, const flexbuffers::Reference &val) {
-    if (!first)
+    if (!first) {
       out += ", ";
+    }
     first = false;
     append_key(out, key);
     append_value(out, val);

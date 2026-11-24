@@ -25,10 +25,12 @@ public:
     // process ID, and save_wave verifies ownership of resident waves. Custom controls,
     // exports and trace sinks can affect standalone waves and have no saved owner.
     if (cu.shader_export_handler_ || cu.shader_trace_handler_ || cu.external_trap_resolver_ ||
-        cu.external_trap_updater_ || cu.external_sendmsg_handler_)
+        cu.external_trap_updater_ || cu.external_sendmsg_handler_) {
       return emit_error.emit() << "Cannot checkpoint GFX10 frontend callbacks on " << cu.name();
-    if (cu.lds_allocation_pinned())
+    }
+    if (cu.lds_allocation_pinned()) {
       return emit_error.emit() << "Cannot checkpoint shared LDS reservations on " << cu.name();
+    }
     const fb::Gfx10Apertures aperture(cu.shared_aperture_base_, cu.shared_aperture_limit_,
                                       cu.private_aperture_base_, cu.private_aperture_limit_,
                                       cu.flat_pointer32_);
@@ -48,21 +50,24 @@ public:
             util::DiagnosticEmitter emit_error) {
     if (!wave.wait_counters().empty() ||
         (wave.memory_wait_scoreboard() && !wave.memory_wait_scoreboard()->empty()) ||
-        (wave.state() != amdgpu::WfState::RUNNING && wave.state() != amdgpu::WfState::BARRIER))
+        (wave.state() != amdgpu::WfState::RUNNING && wave.state() != amdgpu::WfState::BARRIER)) {
       return emit_error.emit() << "Cannot checkpoint pending GFX10 memory or wait state on "
                                << cu.name() << " wf" << wave.wf_id();
+    }
     if ((!internal_address_space &&
          (wave.address_space() || wave.vm_access() || wave.process_id())) ||
         wave.pm4_failure_ || wave.scratch_lease_ || (wave.lds_size() && &wave.lds() != &cu.lds()) ||
-        (internal_address_space && wave.scratch_lane_size()))
+        (internal_address_space && wave.scratch_lane_size())) {
       return emit_error.emit() << "Cannot checkpoint an externally owned GFX10 wave resource";
+    }
     // Trap entry captures private handler state and a debugger stop retains
     // its external owner. Preserve TRAPSTS for ordinary waves after return.
     const bool halt_requested = (wave.status_raw() & ((1u << 13) | (1u << 23))) != 0;
     if ((wave.status_raw() & (1u << 5)) || (wave.self_halted() && !halt_requested) ||
         wave.debug_halted() != wave.self_halted() || wave.fatal_exception_pending() ||
-        wave.debug_single_step())
+        wave.debug_single_step()) {
       return emit_error.emit() << "Cannot checkpoint GFX10 privileged or halted wave state";
+    }
     const fb::Gfx10Apertures aperture(wave.shared_aperture_base(), wave.shared_aperture_limit(),
                                       wave.private_aperture_base(), wave.private_aperture_limit(),
                                       wave.flat_pointer32());
@@ -81,12 +86,14 @@ public:
     if ((a.ptr32() && cu.arch() != rocjitsu::IsaFamily::Rdna1) ||
         (s.lds() && s.lds()->size() > cu.lds().size_bytes()) ||
         (s.next_lds_alloc() && (!s.lds() || s.next_lds_alloc() > s.lds()->size())) ||
-        !cu.restore_lds_cursor(s.next_lds_alloc()))
+        !cu.restore_lds_cursor(s.next_lds_alloc())) {
       return emit_error.emit() << "Invalid GFX10 CU resource state";
+    }
     cu.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit(),
                      a.ptr32());
-    if (s.lds())
+    if (s.lds()) {
       cu.lds().write(uint32_t{0}, s.lds()->data(), s.lds()->size());
+    }
     return util::Result::success();
   }
 
@@ -98,8 +105,9 @@ public:
         uint64_t{s.lds_base()} + s.lds_size() > cu.lds().size_bytes() ||
         (wave.status_raw() & (1u << 5)) ||
         (s.self_halted() && !(wave.status_raw() & ((1u << 13) | (1u << 23)))) || limits.vm() > 63 ||
-        limits.lgkm() > 63 || limits.exp() > 7 || limits.vs() > 63)
+        limits.lgkm() > 63 || limits.exp() > 7 || limits.vs() > 63) {
       return emit_error.emit() << "Invalid GFX10 wave resource state";
+    }
     wave.flat_pointer32_ = a.ptr32();
     wave.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit(),
                        s.override_launch());

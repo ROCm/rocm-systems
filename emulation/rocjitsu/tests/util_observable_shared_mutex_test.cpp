@@ -19,8 +19,9 @@ using util::ObservableSharedMutex;
 [[nodiscard]] bool wait_for_blocked_writers(ObservableSharedMutex &mutex, uint64_t expected) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
   while (mutex.blocked_writers() != expected) {
-    if (std::chrono::steady_clock::now() > deadline)
+    if (std::chrono::steady_clock::now() > deadline) {
       return false;
+    }
     std::this_thread::yield();
   }
   return true;
@@ -84,13 +85,15 @@ TEST(ObservableSharedMutexTest, EveryBlockedWriterIsCounted) {
   std::vector<std::jthread> writers;
   {
     auto reader = mutex.lock_shared();
-    for (uint64_t i = 0; i < kWriters; ++i)
+    for (uint64_t i = 0; i < kWriters; ++i) {
       writers.emplace_back([&] { auto guard = mutex.lock_exclusive(); });
+    }
 
     ASSERT_TRUE(wait_for_blocked_writers(mutex, kWriters));
   }
-  for (auto &writer : writers)
+  for (auto &writer : writers) {
     writer.join();
+  }
   EXPECT_EQ(mutex.blocked_writers(), 0u);
 }
 

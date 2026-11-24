@@ -104,8 +104,9 @@ public:
   template <size_t OtherN, typename OtherVecElem>
     requires(num_elems_ == VectorReg<OtherN, OtherVecElem>::num_elems_)
   VectorReg &operator=(const VectorReg<OtherN, OtherVecElem> &vreg) {
-    for (size_t i = 0; i < num_elems_; ++i)
+    for (size_t i = 0; i < num_elems_; ++i) {
       data_[i] = static_cast<VecElem>(vreg[i]);
+    }
     return *this;
   }
 
@@ -209,21 +210,24 @@ private:
   template <size_t OtherN, typename OtherVecElem, typename Op>
   VectorReg elementwise(const VectorReg<OtherN, OtherVecElem> &rhs, Op op) const {
     VectorReg result;
-    for (size_t i = 0; i < num_elems_; ++i)
+    for (size_t i = 0; i < num_elems_; ++i) {
       result[i] = op((*this)[i], rhs[i]);
+    }
     return result;
   }
 
   template <typename Scalar, typename Op> VectorReg scalar_op(Scalar s, Op op) const {
     VectorReg result;
-    for (size_t i = 0; i < num_elems_; ++i)
+    for (size_t i = 0; i < num_elems_; ++i) {
       result[i] = op((*this)[i], s);
+    }
     return result;
   }
 
   friend std::ostream &operator<<(std::ostream &os, const VectorReg<NUM_ELEMS, VecElem> &vec_reg) {
-    for (size_t i = 0; i < num_elems_; ++i)
+    for (size_t i = 0; i < num_elems_; ++i) {
       os << vec_reg.data_[i] << " ";
+    }
     return os;
   }
 

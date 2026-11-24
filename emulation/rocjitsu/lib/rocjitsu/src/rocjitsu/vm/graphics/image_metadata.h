@@ -26,8 +26,9 @@ inline std::optional<uint64_t> gfx11_metadata_address(uint64_t base, uint32_t x,
                                                       uint32_t layer = 0) {
   if (!width || !height || x >= width || y >= height || !std::has_single_bit(bytes) || bytes > 16 ||
       (depth && bytes != 1 && bytes != 2 && bytes != 4) ||
-      (depth ? (swizzle != 24 && swizzle != 28) : (swizzle != 27 && swizzle != 31)))
+      (depth ? (swizzle != 24 && swizzle != 28) : (swizzle != 27 && swizzle != 31))) {
     return std::nullopt;
+  }
   const uint32_t element_log2 = std::countr_zero(bytes);
   static constexpr uint32_t dcc_masks[2][5][14] = {
       {
@@ -65,9 +66,11 @@ inline std::optional<uint64_t> gfx11_metadata_address(uint64_t base, uint32_t x,
   static constexpr auto htile_equation = make_image_equation(htile_masks, 17);
   static constexpr auto dcc_equations = []() consteval {
     std::array<std::array<ImageAddressEquation, 5>, 2> result{};
-    for (uint32_t mode = 0; mode < 2; ++mode)
-      for (uint32_t element = 0; element < 5; ++element)
+    for (uint32_t mode = 0; mode < 2; ++mode) {
+      for (uint32_t element = 0; element < 5; ++element) {
         result[mode][element] = make_image_equation(dcc_masks[mode][element], 14);
+      }
+    }
     return result;
   }();
   static constexpr auto unaligned_equations = []() consteval {
@@ -92,8 +95,9 @@ inline std::optional<uint64_t> gfx11_metadata_address(uint64_t base, uint32_t x,
   const uint64_t block =
       uint64_t{layer} * slice_blocks + uint64_t{y >> yb} * pitch_blocks + (x >> xb);
   const uint64_t mask = (1u << block_log2) - 1;
-  if (depth || pipe_aligned)
+  if (depth || pipe_aligned) {
     offset ^= gfx11_image_slice_xor(layer, bytes, swizzle) & mask;
+  }
   return (base & ~mask) + (block << block_log2) + (offset ^ (base & mask));
 }
 
@@ -111,11 +115,13 @@ inline std::optional<Gfx11DccMipLayout> gfx11_dcc_mip_layout(uint32_t swizzle, u
                                                              uint32_t width, uint32_t height,
                                                              uint32_t levels, uint32_t level,
                                                              bool pipe_aligned) {
-  if (swizzle != 27 && swizzle != 31)
+  if (swizzle != 27 && swizzle != 31) {
     return std::nullopt;
+  }
   const auto pixels = image_mip_layout(false, swizzle, bytes, width, height, levels, level);
-  if (!pixels)
+  if (!pixels) {
     return std::nullopt;
+  }
   const uint32_t block_log2 = pipe_aligned ? 14 : 12;
   const uint32_t bits = block_log2 + 8 - std::countr_zero(bytes);
   const uint32_t bw = 1u << ((bits + 1) / 2), bh = 1u << (bits / 2);
@@ -126,8 +132,9 @@ inline std::optional<Gfx11DccMipLayout> gfx11_dcc_mip_layout(uint32_t swizzle, u
                            .enabled = level <= pixels->first_tail};
   result.slice_size = pixels->first_tail < levels ? uint64_t{1} << block_log2 : 0;
   for (uint32_t mip = pixels->first_tail; mip-- > 0;) {
-    if (mip == level)
+    if (mip == level) {
       result.offset = result.slice_size;
+    }
     result.slice_size +=
         uint64_t{(extent(width, mip) + bw - 1) / bw} * ((extent(height, mip) + bh - 1) / bh)
         << block_log2;
@@ -151,10 +158,12 @@ ImageMetadataResult expand_gfx11_clear_block(Memory &memory, ImageMetadataProgre
     const auto texel =
         gfx11_image_address(base, x + progress.next_pixel % width + tail_x,
                             y + progress.next_pixel / width + tail_y, pitch, bytes, swizzle);
-    if (!texel)
+    if (!texel) {
       return util::Result::failure();
-    if (const auto outcome = memory.write(*texel, value); outcome != VmAccessOutcome::Complete)
+    }
+    if (const auto outcome = memory.write(*texel, value); outcome != VmAccessOutcome::Complete) {
       return outcome;
+    }
   }
   return VmAccessOutcome::Complete;
 }
@@ -169,21 +178,25 @@ materialize_gfx11_dcc_at_address(Memory &memory, ImageMetadataProgress &progress
                                  uint32_t height, uint32_t bytes, uint32_t swizzle,
                                  uint32_t layer = 0, uint64_t slice_size = 0, uint32_t pitch = 0,
                                  uint32_t tail_x = 0, uint32_t tail_y = 0) {
-  if (x >= width || y >= height || !std::has_single_bit(bytes) || bytes > 16)
+  if (x >= width || y >= height || !std::has_single_bit(bytes) || bytes > 16) {
     return util::Result::failure();
-  if (!pitch)
+  }
+  if (!pitch) {
     pitch = width;
+  }
   base = image_layer_base(false, base, slice_size, layer, bytes, swizzle);
   if (progress.stage == ImageMetadataProgress::Stage::Key) {
     if (const auto outcome =
             memory.read(address, std::as_writable_bytes(std::span{&progress.key, 1}).first(1));
-        outcome != VmAccessOutcome::Complete)
+        outcome != VmAccessOutcome::Complete) {
       return outcome;
+    }
     progress.stage = ImageMetadataProgress::Stage::ClearValue;
   }
   const auto key = std::to_integer<uint8_t>(std::as_bytes(std::span{&progress.key, 1}).front());
-  if (key == 0xff)
+  if (key == 0xff) {
     return VmAccessOutcome::Complete;
+  }
   const uint32_t bits = 8 - std::countr_zero(bytes);
   const uint32_t bw = 1u << ((bits + 1) / 2), bh = 1u << (bits / 2);
   x &= ~(bw - 1);
@@ -192,27 +205,33 @@ materialize_gfx11_dcc_at_address(Memory &memory, ImageMetadataProgress &progress
   if (progress.stage == ImageMetadataProgress::Stage::ClearValue) {
     if (key == 1) {
       const auto clear = gfx11_image_address(base, x + tail_x, y + tail_y, pitch, bytes, swizzle);
-      if (!clear)
+      if (!clear) {
         return util::Result::failure();
+      }
       if (const VmAccessOutcome outcome =
               memory.read(*clear, std::as_writable_bytes(std::span{value}.first(bytes)));
-          outcome != VmAccessOutcome::Complete)
+          outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
     } else if (key == 2) {
       value.fill(0xff);
     } else if (key == 4 || key == 6) {
       const uint32_t step = key == 4 ? 2 : 4;
       const uint32_t one = key == 4 ? 0x3c00 : 0x3f800000;
-      if (bytes % step)
+      if (bytes % step) {
         return util::Result::failure();
-      for (uint32_t i = 0; i < bytes; ++i)
+      }
+      for (uint32_t i = 0; i < bytes; ++i) {
         value[i] = one >> (8 * (i % step));
+      }
     } else if (key == 8 || key == 10) {
-      if (bytes != 2 && bytes != 4 && bytes != 8)
+      if (bytes != 2 && bytes != 4 && bytes != 8) {
         return util::Result::failure();
+      }
       const uint32_t last_component = bytes == 2 ? 1 : 3 * bytes / 4;
-      for (uint32_t i = 0; i < bytes; ++i)
+      for (uint32_t i = 0; i < bytes; ++i) {
         value[i] = ((i >= last_component) == (key == 8)) ? 0xff : 0;
+      }
     } else if (key != 0) {
       return util::Result::failure();
     }
@@ -221,8 +240,9 @@ materialize_gfx11_dcc_at_address(Memory &memory, ImageMetadataProgress &progress
   const auto expanded = expand_gfx11_clear_block(
       memory, progress, base, x, y, std::min(bw, width - x), std::min(bh, height - y), pitch, bytes,
       swizzle, tail_x, tail_y, std::as_bytes(std::span{value}.first(bytes)));
-  if (expanded.failed() || expanded.value() != VmAccessOutcome::Complete)
+  if (expanded.failed() || expanded.value() != VmAccessOutcome::Complete) {
     return expanded;
+  }
   const uint8_t uncompressed = 0xff;
   return memory.write(address, std::as_bytes(std::span{&uncompressed, 1}));
 }
@@ -235,8 +255,9 @@ ImageMetadataResult materialize_gfx11_dcc(Memory &memory, ImageMetadataProgress 
                                           uint32_t layer = 0, uint64_t slice_size = 0) {
   const auto address = gfx11_metadata_address(metadata, x, y, width, height, bytes, swizzle, false,
                                               pipe_aligned, layer);
-  if (!address)
+  if (!address) {
     return util::Result::failure();
+  }
   return materialize_gfx11_dcc_at_address(memory, progress, base, *address, x, y, width, height,
                                           bytes, swizzle, layer, slice_size);
 }
@@ -248,16 +269,19 @@ ImageMetadataResult materialize_gfx11_dcc_mip(Memory &memory, ImageMetadataProgr
                                               uint32_t y, uint32_t bytes, uint32_t swizzle,
                                               bool pipe_aligned, uint32_t layer,
                                               const Gfx11DccMipLayout &mip) {
-  if (!mip.enabled)
+  if (!mip.enabled) {
     return VmAccessOutcome::Complete;
+  }
   const uint32_t metadata_mask = (1u << (pipe_aligned ? 14 : 12)) - 1;
   metadata += mip.offset + layer * mip.slice_size;
-  if (pipe_aligned)
+  if (pipe_aligned) {
     metadata ^= gfx11_image_slice_xor(layer, bytes, swizzle) & metadata_mask;
+  }
   const auto address = gfx11_metadata_address(metadata, x, y, mip.width, mip.height, bytes, swizzle,
                                               false, pipe_aligned);
-  if (!address)
+  if (!address) {
     return util::Result::failure();
+  }
   const auto &pixels = mip.pixels;
   return materialize_gfx11_dcc_at_address(
       memory, progress, base + pixels.offset, *address, x, y, pixels.width, pixels.height, bytes,
@@ -270,42 +294,49 @@ ImageMetadataResult materialize_gfx11_htile_at_address(
     Memory &memory, ImageMetadataProgress &progress, uint64_t base, uint64_t address, uint32_t x,
     uint32_t y, uint32_t width, uint32_t height, uint32_t bytes, uint32_t swizzle,
     std::optional<uint32_t> clear_bits = std::nullopt, bool has_stencil = false) {
-  if (x >= width || y >= height || (bytes != 1 && bytes != 2 && bytes != 4))
+  if (x >= width || y >= height || (bytes != 1 && bytes != 2 && bytes != 4)) {
     return util::Result::failure();
+  }
   if (progress.stage == ImageMetadataProgress::Stage::Key) {
     if (const auto outcome =
             memory.read(address, std::as_writable_bytes(std::span{&progress.key, 1}));
-        outcome != VmAccessOutcome::Complete)
+        outcome != VmAccessOutcome::Complete) {
       return outcome;
+    }
     progress.stage = ImageMetadataProgress::Stage::Expand;
   }
   const auto key = progress.key;
   if (bytes == 1) {
-    if ((key & 0x300u) != 0x300u)
+    if ((key & 0x300u) != 0x300u) {
       return util::Result::failure();
+    }
     return VmAccessOutcome::Complete;
   }
-  if ((key & 15) == 15)
+  if ((key & 15) == 15) {
     return VmAccessOutcome::Complete;
-  if (key & 15)
+  }
+  if (key & 15) {
     return util::Result::failure();
+  }
   if (!clear_bits) {
     // Texture-compatible fast clears encode the endpoints exactly. Other
     // clears require DB_DEPTH_CLEAR, which an image descriptor cannot supply.
-    if (key == 0)
+    if (key == 0) {
       clear_bits = 0;
-    else if (key == 0xfffffff0)
+    } else if (key == 0xfffffff0) {
       clear_bits = bytes == 2 ? 65535 : 0x3f800000;
-    else
+    } else {
       return util::Result::failure();
+    }
   }
   x &= ~7u;
   y &= ~7u;
   const auto expanded = expand_gfx11_clear_block(
       memory, progress, base, x, y, std::min(8u, width - x), std::min(8u, height - y), width, bytes,
       swizzle, 0, 0, std::as_bytes(std::span{&*clear_bits, 1}).first(bytes));
-  if (expanded.failed() || expanded.value() != VmAccessOutcome::Complete)
+  if (expanded.failed() || expanded.value() != VmAccessOutcome::Complete) {
     return expanded;
+  }
   const uint32_t uncompressed = has_stencil ? (key & 0x3f0u) | 0xfffff00fu : 0xfffc000fu;
   return memory.write(address, std::as_bytes(std::span{&uncompressed, 1}));
 }
@@ -318,8 +349,9 @@ ImageMetadataResult materialize_gfx11_htile(Memory &memory, ImageMetadataProgres
                                             std::optional<uint32_t> clear_bits = std::nullopt,
                                             bool has_stencil = false) {
   const auto address = gfx11_metadata_address(metadata, x, y, width, height, bytes, swizzle, true);
-  if (!address)
+  if (!address) {
     return util::Result::failure();
+  }
   return materialize_gfx11_htile_at_address(memory, progress, base, *address, x, y, width, height,
                                             bytes, swizzle, clear_bits, has_stencil);
 }

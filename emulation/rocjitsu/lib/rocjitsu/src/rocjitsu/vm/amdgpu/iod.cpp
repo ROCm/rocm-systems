@@ -48,10 +48,12 @@ Iod::Iod(std::string name, const Config &config, GpuMemory *memory,
 
 util::Result Iod::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
                                        util::DiagnosticEmitter emit_error) {
-  if (!coherence)
+  if (!coherence) {
     return emit_error.emit() << "IOD requires a cache-coherence domain";
-  if (msc_->set_coherence_domain(coherence, emit_error).failed())
+  }
+  if (msc_->set_coherence_domain(coherence, emit_error).failed()) {
     return util::Result::failure();
+  }
   coherence_ = std::move(coherence);
   return util::Result::success();
 }

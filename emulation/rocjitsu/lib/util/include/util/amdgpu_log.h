@@ -111,8 +111,9 @@ inline uint32_t near_one_positive(uint32_t bits) {
 inline uint32_t ordinary(uint32_t bits) {
   const uint32_t fraction = bits & 0x3ffffu;
   unsigned index = (bits >> 18) & 31;
-  if (index == 1 && fraction >= 0x20000u)
+  if (index == 1 && fraction >= 0x20000u) {
     index = 32;
+  }
   const auto c = coefficients[index];
   const uint64_t linear = (uint64_t{c.linear} * fraction) >> 16;
   const uint64_t inner =
@@ -137,21 +138,28 @@ inline uint32_t ordinary(uint32_t bits) {
 }
 inline uint32_t evaluate(uint32_t bits, bool quiet_snan = true) {
   const uint32_t magnitude = bits & 0x7fffffffu;
-  if (magnitude > 0x7f800000u)
+  if (magnitude > 0x7f800000u) {
     return bits | (quiet_snan ? 0x00400000u : 0u);
+  }
   // LOG flushes either sign of subnormal input independently of MODE.
-  if (magnitude < 0x00800000u)
+  if (magnitude < 0x00800000u) {
     return 0xff800000u;
-  if (bits & 0x80000000u)
+  }
+  if (bits & 0x80000000u) {
     return 0xffc00000u;
-  if (magnitude == 0x7f800000u)
+  }
+  if (magnitude == 0x7f800000u) {
     return 0x7f800000u;
-  if (bits == 0x3f800000u)
+  }
+  if (bits == 0x3f800000u) {
     return 0;
-  if (bits >= 0x3f7c0000u && bits < 0x3f800000u)
+  }
+  if (bits >= 0x3f7c0000u && bits < 0x3f800000u) {
     return near_one_negative(bits);
-  if (bits > 0x3f800000u && bits < 0x3f840000u)
+  }
+  if (bits > 0x3f800000u && bits < 0x3f840000u) {
     return near_one_positive(bits);
+  }
   return ordinary(bits);
 }
 } // namespace util::detail::log

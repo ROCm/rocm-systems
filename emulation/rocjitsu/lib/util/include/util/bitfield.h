@@ -343,10 +343,11 @@ std::ostream &operator<<(std::ostream &os, const Bitfield<size_bits> &bf) {
 template <size_t size, size_t f, size_t l, bool M>
 std::ostream &operator<<(std::ostream &os, const BitfieldMember<size, f, l, M> &member) {
   auto v = member.value();
-  if constexpr (sizeof(decltype(v)) == 1)
+  if constexpr (sizeof(decltype(v)) == 1) {
     os << static_cast<unsigned>(v);
-  else
+  } else {
     os << v;
+  }
   return os;
 }
 

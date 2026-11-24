@@ -60,8 +60,9 @@ inline rj_vm_gpu_info_t gpu_info_to_c(const Sysfs::GpuInfo &gpu) {
   info.sdma_fw_version = gpu.sdma_fw_version;
 
   size_t name_len = gpu.marketing_name.size();
-  if (name_len >= sizeof(info.marketing_name))
+  if (name_len >= sizeof(info.marketing_name)) {
     name_len = sizeof(info.marketing_name) - 1;
+  }
   std::memcpy(info.marketing_name, gpu.marketing_name.data(), name_len);
   info.marketing_name[name_len] = '\0';
   return info;

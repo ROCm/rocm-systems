@@ -78,18 +78,21 @@ public:
                                       uint64_t admission_generation) const noexcept {
     const Entry *entry =
         find_entry(address, bytes.size(), vmid, cache_identity, admission_generation);
-    if (entry == nullptr || !effect_gate_)
+    if (entry == nullptr || !effect_gate_) {
       return VmAccessOutcome::Unavailable;
+    }
 
     const uint64_t backing_offset = entry->backing_offset_ + (address - entry->address_);
     const FabricBacking view = entry->backing_.subview(backing_offset, bytes.size());
-    if (!view)
+    if (!view) {
       return VmAccessOutcome::Unavailable;
+    }
 
     bool written = false;
     const bool entered = effect_gate_->commit([&] { written = view.write(bytes); });
-    if (!entered)
+    if (!entered) {
       return VmAccessOutcome::Revoked;
+    }
     return written ? VmAccessOutcome::Complete : VmAccessOutcome::Unavailable;
   }
 
@@ -130,8 +133,9 @@ private:
     [[nodiscard]] bool covers(uint64_t address, size_t size, uint32_t vmid, uint64_t cache_identity,
                               uint64_t admission_generation) const noexcept {
       if (size == 0 || vmid_ != vmid || cache_identity_ != cache_identity ||
-          admission_generation_ != admission_generation || address < address_)
+          admission_generation_ != admission_generation || address < address_) {
         return false;
+      }
       const uint64_t relative = address - address_;
       return relative <= extent_ && size <= extent_ - relative;
     }
@@ -156,25 +160,31 @@ private:
                              std::shared_ptr<VmTransferEffectGate> effect_gate)
       : entries_(std::move(entries)), permit_(std::move(permit)),
         effect_gate_(std::move(effect_gate)) {
-    if (!permit_ || !effect_gate_ || entries_.empty())
+    if (!permit_ || !effect_gate_ || entries_.empty()) {
       return;
-    for (const Entry &entry : entries_)
-      if (!entry.valid())
+    }
+    for (const Entry &entry : entries_) {
+      if (!entry.valid()) {
         return;
+      }
+    }
     outcome_ = VmAccessOutcome::Complete;
   }
 
   [[nodiscard]] const Entry *find_entry(uint64_t address, size_t size, uint32_t vmid,
                                         uint64_t cache_identity,
                                         uint64_t admission_generation) const noexcept {
-    if (!*this)
+    if (!*this) {
       return nullptr;
+    }
     const Entry *match = nullptr;
     for (const Entry &entry : entries_) {
-      if (!entry.covers(address, size, vmid, cache_identity, admission_generation))
+      if (!entry.covers(address, size, vmid, cache_identity, admission_generation)) {
         continue;
-      if (match != nullptr)
+      }
+      if (match != nullptr) {
         return nullptr;
+      }
       match = &entry;
     }
     return match;
@@ -184,13 +194,15 @@ private:
   resolve_line(uint64_t address, size_t size, uint32_t vmid, uint64_t cache_identity,
                uint64_t admission_generation) const noexcept {
     const Entry *entry = find_entry(address, size, vmid, cache_identity, admission_generation);
-    if (entry == nullptr)
+    if (entry == nullptr) {
       return std::nullopt;
+    }
     const size_t relative = static_cast<size_t>(address - entry->address_);
     const uint64_t offset = entry->backing_offset_ + relative;
     FabricBacking backing = entry->backing_.subview(offset, size);
-    if (!backing)
+    if (!backing) {
       return std::nullopt;
+    }
     const std::span<std::byte> direct_bytes = entry->direct_bytes_.empty()
                                                   ? std::span<std::byte>{}
                                                   : entry->direct_bytes_.subspan(relative, size);

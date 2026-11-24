@@ -48,9 +48,10 @@ template <typename Function> Function load_function(void *library, const char *n
 void expect_same_action(const struct sigaction &actual, const struct sigaction &expected) {
   EXPECT_EQ(actual.sa_sigaction, expected.sa_sigaction);
   EXPECT_EQ(actual.sa_flags, expected.sa_flags);
-  for (int signal_number = 1; signal_number < NSIG; ++signal_number)
+  for (int signal_number = 1; signal_number < NSIG; ++signal_number) {
     EXPECT_EQ(sigismember(&actual.sa_mask, signal_number),
               sigismember(&expected.sa_mask, signal_number));
+  }
 }
 
 size_t keeper_lease_count() {
@@ -62,8 +63,9 @@ size_t keeper_lease_count() {
     // named memfd with an unnamed /dev/shm inode; GPU backing remains accessible.
     if (line.find(" ---s ") != std::string::npos &&
         (line.find("/memfd:rocjitsu-owner (deleted)") != std::string::npos ||
-         (line.find("/dev/shm/#") != std::string::npos && line.ends_with(" (deleted)"))))
+         (line.find("/dev/shm/#") != std::string::npos && line.ends_with(" (deleted)")))) {
       ++count;
+    }
   }
   EXPECT_TRUE(mappings.eof());
   return count;
@@ -103,8 +105,9 @@ void exercise_lifecycle(Lifecycle lifecycle, Teardown teardown = Teardown::Comma
   const size_t initial_leases = keeper_lease_count();
   constexpr std::array signals{SIGSEGV, SIGBUS, SIGINT, SIGTERM};
   std::array<struct sigaction, signals.size()> actions{};
-  for (size_t index = 0; index < signals.size(); ++index)
+  for (size_t index = 0; index < signals.size(); ++index) {
     ASSERT_EQ(sigaction(signals[index], nullptr, &actions[index]), 0);
+  }
   ASSERT_EQ(dlsym(RTLD_DEFAULT, "rj_vm_create_from_string"), nullptr);
   for (unsigned cycle = 0; cycle < 2; ++cycle) {
     SCOPED_TRACE(cycle);
@@ -171,8 +174,9 @@ void exercise_lifecycle(Lifecycle lifecycle, Teardown teardown = Teardown::Comma
     auto &ring = storage.ring;
     auto &completion = storage.completion;
     auto &kernel = storage.kernel;
-    for (auto &packet : ring)
+    for (auto &packet : ring) {
       packet.header = HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE;
+    }
     descriptor.hsa_queue.base_address = ring.data();
     descriptor.hsa_queue.size = ring.size();
     descriptor.hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
@@ -300,14 +304,17 @@ void exercise_lifecycle(Lifecycle lifecycle, Teardown teardown = Teardown::Comma
           reinterpret_cast<uint64_t *>(doorbell.mapped_addr + (queue.doorbell_offset & 4095));
       std::atomic_ref<uint64_t>(*doorbell_word).store(0, std::memory_order_release);
       if (lifecycle == Lifecycle::StepBarrier || lifecycle == Lifecycle::StepKernel) {
-        while (!completed())
+        while (!completed()) {
           ASSERT_EQ(step(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+        }
       } else {
         std::jthread stopper([&](std::stop_token stop) {
-          while (!stop.stop_requested() && !completed())
+          while (!stop.stop_requested() && !completed()) {
             std::this_thread::yield();
-          if (completed())
+          }
+          if (completed()) {
             request_exit(vm.get(), "embedding packet completed");
+          }
         });
         EXPECT_EQ(run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
         stopper.request_stop();
@@ -377,15 +384,19 @@ TEST(VmEmbeddingApiDeathTest, UnloadsAfterStoresWithoutMemfd) {
   ASSERT_EXIT(
       {
         rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
-        if (::testing::Test::HasFatalFailure())
+        if (::testing::Test::HasFatalFailure()) {
           _exit(1);
+        }
         exercise_lifecycle(Lifecycle::StepKernel);
-        if (!::testing::Test::HasFailure())
+        if (!::testing::Test::HasFailure()) {
           exercise_lifecycle(Lifecycle::RunKernel);
+        }
         const auto *result = ::testing::UnitTest::GetInstance()->current_test_info()->result();
-        for (int index = 0; index < result->total_part_count(); ++index)
-          if (const auto &failure = result->GetTestPartResult(index); failure.failed())
+        for (int index = 0; index < result->total_part_count(); ++index) {
+          if (const auto &failure = result->GetTestPartResult(index); failure.failed()) {
             std::fprintf(stderr, "%s\n", failure.message());
+          }
+        }
         _exit(::testing::Test::HasFailure() ? 1 : 0);
       },
       ::testing::ExitedWithCode(0), "");
@@ -436,8 +447,9 @@ TEST(VmEmbeddingApi, ConcurrentLocalCreationAndSharedMappingInitializeLibc) {
         created.fetch_add(1, std::memory_order_release);
       });
     }
-    for (auto &creator : creators)
+    for (auto &creator : creators) {
       creator.join();
+    }
     mapper.join();
     uint32_t stored = 0;
     EXPECT_EQ(pread(fileno(backing.get()), &stored, sizeof(stored), 0), sizeof(stored));

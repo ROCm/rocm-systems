@@ -123,16 +123,18 @@ void GraphicsBlockModel::observe_register_write(uint64_t byte_offset, PciMemoryA
     publish_selected_apertures(memory);
     return;
   }
-  if (registers_.resolve(kGcControlSegment, kShMemBases) != byte_offset)
+  if (registers_.resolve(kGcControlSegment, kShMemBases) != byte_offset) {
     return;
+  }
 
   sh_mem_bases_[selected_vmid_] = registers_.read(kGcControlSegment, kShMemBases);
   publish_selected_apertures(memory);
 }
 
 void GraphicsBlockModel::publish_selected_apertures(PciMemoryAccess &memory) {
-  if (selected_vmid_ == 0)
+  if (selected_vmid_ == 0) {
     return;
+  }
   if ((sh_mem_config_[selected_vmid_] & 1u) != 0) {
     (void)memory.program_shader_apertures(selected_vmid_, 0, 0, 0, 0);
     return;
@@ -144,8 +146,9 @@ void GraphicsBlockModel::publish_selected_apertures(PciMemoryAccess &memory) {
   const uint64_t shared_base = uint64_t{bases >> kSharedBaseShift} << 48;
   if (!memory.program_shader_apertures(selected_vmid_, shared_base,
                                        shared_base + kSharedApertureBytes - 1, private_base,
-                                       private_base + kPrivateApertureBytes - 1))
+                                       private_base + kPrivateApertureBytes - 1)) {
     util::Logger::warn("graphics core: shader aperture register write could not reach its SoC");
+  }
 }
 
 } // namespace rocjitsu

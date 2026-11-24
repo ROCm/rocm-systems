@@ -35,8 +35,9 @@ TEST(IssueQueueTest, FixedLatencySustainsOneEntryPerCycle) {
   IssueQueue<int> queue;
   std::vector<std::pair<uint64_t, int>> left;
   for (uint64_t cycle = 0; cycle < 8; ++cycle) {
-    if (queue.ready(cycle))
+    if (queue.ready(cycle)) {
       left.emplace_back(cycle, queue.pop());
+    }
     queue.push(static_cast<int>(cycle), cycle + kLatency);
   }
   const std::vector<std::pair<uint64_t, int>> expected{{3, 0}, {4, 1}, {5, 2}, {6, 3}, {7, 4}};

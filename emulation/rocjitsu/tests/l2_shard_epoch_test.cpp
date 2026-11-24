@@ -59,17 +59,20 @@ TEST(L2ShardEpochTest, EightSharedCachesPublishDirtyLinesAndRefreshConcurrentRea
       for (uint32_t n = 0; n < kReadIterations; ++n) {
         uint32_t observed = 0;
         if (readers[i]->load(kCounter, 1, &observed) != VmAccessOutcome::Complete ||
-            observed < previous || observed == 0 || observed > kAtomicIterations)
+            observed < previous || observed == 0 || observed > kAtomicIterations) {
           failures.fetch_add(1, std::memory_order_relaxed);
+        }
         previous = observed;
-        if ((n & 15) == 0)
+        if ((n & 15) == 0) {
           std::this_thread::yield();
+        }
       }
       all_atomics_complete.wait();
       uint32_t final_value = 0;
       if (readers[i]->load(kCounter, 1, &final_value) != VmAccessOutcome::Complete ||
-          final_value != kAtomicIterations)
+          final_value != kAtomicIterations) {
         failures.fetch_add(1, std::memory_order_relaxed);
+      }
     });
   }
   start.arrive_and_wait();
@@ -81,10 +84,12 @@ TEST(L2ShardEpochTest, EightSharedCachesPublishDirtyLinesAndRefreshConcurrentRea
           ++value;
           std::memcpy(line + offset, &value, sizeof(value));
         });
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
       failures.fetch_add(1, std::memory_order_relaxed);
-    if (n == 0)
+    }
+    if (n == 0) {
       first_atomic_complete.count_down();
+    }
     std::this_thread::yield();
   }
   all_atomics_complete.count_down();
@@ -122,8 +127,9 @@ TEST(L2ShardEpochTest, ConcurrentReadersRefreshOneCacheAfterEveryAtomicEpoch) {
         uint32_t observed = 0;
         if (l2.read(kCounter, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)) !=
                 VmAccessOutcome::Complete ||
-            observed != epoch)
+            observed != epoch) {
           failures.fetch_add(1, std::memory_order_relaxed);
+        }
         done.arrive_and_wait();
       }
     });

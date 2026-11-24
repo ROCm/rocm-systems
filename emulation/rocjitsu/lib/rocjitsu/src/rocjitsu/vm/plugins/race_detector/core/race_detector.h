@@ -196,8 +196,9 @@ public:
   /// Bytes in complete elements that fit the LDS backing. Vector transfers
   /// can retain a valid prefix when later elements are dropped as out of bounds.
   uint64_t ldsBytesInRange(uint64_t address, uint64_t bytes, uint64_t elementBytes) const {
-    if (elementBytes == 0 || !validLdsRange(address, elementBytes))
+    if (elementBytes == 0 || !validLdsRange(address, elementBytes)) {
       return 0;
+    }
     return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
   }
 

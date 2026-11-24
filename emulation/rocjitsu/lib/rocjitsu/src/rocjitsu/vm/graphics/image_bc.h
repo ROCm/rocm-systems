@@ -25,8 +25,9 @@ public:
 
 constexpr std::optional<ImageBlockFormat> decode_image_block_format(uint32_t format, bool gfx10) {
   const uint32_t index = format - (gfx10 ? 169u : 109u);
-  if (index >= 10)
+  if (index >= 10) {
     return std::nullopt;
+  }
   return ImageBlockFormat{index / 2, bool(index & 1)};
 }
 
@@ -42,10 +43,12 @@ inline int32_t decode_image_bc_scalar(std::span<const uint8_t> block, uint32_t t
   const uint32_t bit = 3 * texel, byte = 2 + bit / 8;
   const uint32_t pair = block[byte] | (byte < 7 ? uint32_t(block[byte + 1]) << 8 : 0);
   const uint32_t index = (pair >> (bit % 8)) & 7;
-  if (index < 2)
+  if (index < 2) {
     return (index ? b : a) * 64;
-  if (a <= b && index >= 6)
+  }
+  if (a <= b && index >= 6) {
     return (index == 7 ? (signed_format ? 127 : 255) : (signed_format ? -127 : 0)) * 64;
+  }
   constexpr int32_t weights7[]{9, 18, 27, 37, 46, 55};
   constexpr int32_t weights5[]{13, 26, 38, 51};
   const int32_t weight = a > b ? weights7[index - 2] : weights5[index - 2];
@@ -57,8 +60,9 @@ inline int32_t decode_image_bc_scalar(std::span<const uint8_t> block, uint32_t t
 inline std::array<uint8_t, 4> decode_image_bc(uint32_t kind, uint32_t texel,
                                               std::span<const uint8_t> block) {
   std::array<uint8_t, 4> out{};
-  if (block.empty())
+  if (block.empty()) {
     return out;
+  }
   const auto color = block.subspan(kind ? 8 : 0);
   const uint32_t endpoints[]{uint32_t(color[0]) | (uint32_t(color[1]) << 8),
                              uint32_t(color[2]) | (uint32_t(color[3]) << 8)};

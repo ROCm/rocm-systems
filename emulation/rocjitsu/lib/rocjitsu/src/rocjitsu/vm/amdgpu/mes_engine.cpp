@@ -193,8 +193,9 @@ bool MesEngine::detach_frontend() {
 }
 
 bool MesEngine::reset() {
-  if (!teardown_queues())
+  if (!teardown_queues()) {
     return false;
+  }
   next_queue_ordinal_ = 0;
   return true;
 }
@@ -210,9 +211,10 @@ bool MesEngine::teardown_queues() {
   for (std::vector<Queue>::iterator queue = mapped_queues_.begin();
        queue != mapped_queues_.end();) {
     bool released = true;
-    if (queue->queue_handle)
+    if (queue->queue_handle) {
       released = static_cast<bool>(
           queue_registry_.unregister_queue(queue->queue_handle, QueueCloseMode::ForceCancel));
+    }
     if (!released) {
       complete = false;
       ++queue;
@@ -264,15 +266,18 @@ MesEngine::QueueLookup MesEngine::queue_from_mqd(uint64_t mqd_address, QueueKind
   if (kind == QueueKind::Sdma) {
     constexpr std::size_t kSdmaMqdBytes = (kSdmaMqdQueueIdDword + 1) * sizeof(uint32_t);
     std::array<std::byte, kSdmaMqdBytes> mqd{};
-    if (mqd_address == 0)
+    if (mqd_address == 0) {
       return {amdgpu::VmAccessOutcome::Malformed, std::nullopt};
+    }
     const amdgpu::VmAccessOutcome outcome = gart_access.read(mqd_address, mqd);
-    if (outcome != amdgpu::VmAccessOutcome::Complete)
+    if (outcome != amdgpu::VmAccessOutcome::Complete) {
       return {outcome, std::nullopt};
+    }
     const uint32_t queue_size =
         (dword(mqd, kSdmaMqdQueueControlDword) & kSdmaQueueSizeMask) >> kSdmaQueueSizeShift;
-    if (queue_size >= 30)
+    if (queue_size >= 30) {
       return {amdgpu::VmAccessOutcome::Malformed, std::nullopt};
+    }
     return {
         amdgpu::VmAccessOutcome::Complete,
         Queue{
@@ -298,18 +303,21 @@ MesEngine::QueueLookup MesEngine::queue_from_mqd(uint64_t mqd_address, QueueKind
 
   constexpr std::size_t kMqdBytes = (kMqdLastDword - kMqdFirstDword + 1) * sizeof(uint32_t);
   std::array<std::byte, kMqdBytes> mqd{};
-  if (mqd_address == 0)
+  if (mqd_address == 0) {
     return {amdgpu::VmAccessOutcome::Malformed, std::nullopt};
+  }
   const amdgpu::VmAccessOutcome outcome =
       gart_access.read(mqd_address + kMqdFirstDword * sizeof(uint32_t), mqd);
-  if (outcome != amdgpu::VmAccessOutcome::Complete)
+  if (outcome != amdgpu::VmAccessOutcome::Complete) {
     return {outcome, std::nullopt};
+  }
   const auto field = [&mqd](uint32_t absolute_dword) {
     return dword(mqd, absolute_dword - kMqdFirstDword);
   };
   const uint32_t queue_size = field(kMqdQueueControlDword) & kQueueSizeMask;
-  if (queue_size >= 30)
+  if (queue_size >= 30) {
     return {amdgpu::VmAccessOutcome::Malformed, std::nullopt};
+  }
   return {amdgpu::VmAccessOutcome::Complete,
           Queue{
               .ring_base = join(field(kMqdQueueBaseLowDword), field(kMqdQueueBaseHighDword)) << 8,
@@ -357,8 +365,9 @@ bool MesEngine::bind_process_address_space(Queue &queue,
     }
     const amdgpu::AddressSpaceHandle handle = gpu_vm_.register_unrouted_gfx12_address_space(
         queue.process_id, queue.page_table_base, physical_memory, std::move(fault_reporter));
-    if (!handle)
+    if (!handle) {
       return false;
+    }
     existing_address_space =
         address_spaces_
             .emplace(queue.process_id,
@@ -378,8 +387,9 @@ bool MesEngine::bind_process_address_space(Queue &queue,
     // PASID's root transition. UPDATE_ROOT_PAGE_TABLE performs that operation
     // explicitly. Rejecting a mismatched root here keeps every existing queue
     // on its committed translation until that separate transaction succeeds.
-    if (address_space.page_table_base != queue.page_table_base)
+    if (address_space.page_table_base != queue.page_table_base) {
       return false;
+    }
   }
 
   queue.address_space = existing_address_space->second.handle;
@@ -397,29 +407,35 @@ MesEngine::process_address_space_for_test(uint32_t process_id) const {
 bool MesEngine::update_process_address_space(uint64_t process_context_address,
                                              uint64_t page_table_base,
                                              std::shared_ptr<PhysicalMemoryAccess> memory) {
-  if (process_context_address == 0 || page_table_base == 0 || memory == nullptr)
+  if (process_context_address == 0 || page_table_base == 0 || memory == nullptr) {
     return false;
+  }
 
   std::unordered_map<uint32_t, AddressSpace>::iterator matching = address_spaces_.end();
   for (std::unordered_map<uint32_t, AddressSpace>::iterator candidate = address_spaces_.begin();
        candidate != address_spaces_.end(); ++candidate) {
-    if (candidate->second.process_context_address != process_context_address)
+    if (candidate->second.process_context_address != process_context_address) {
       continue;
-    if (matching != address_spaces_.end())
+    }
+    if (matching != address_spaces_.end()) {
       return false;
+    }
     matching = candidate;
   }
-  if (matching == address_spaces_.end())
+  if (matching == address_spaces_.end()) {
     return false;
+  }
 
   if (!gpu_vm_.replace_gfx12_address_space_root(matching->second.handle, page_table_base,
-                                                std::move(memory)))
+                                                std::move(memory))) {
     return false;
+  }
 
   matching->second.page_table_base = page_table_base;
   for (Queue &queue : mapped_queues_) {
-    if (queue.address_space == matching->second.handle)
+    if (queue.address_space == matching->second.handle) {
       queue.page_table_base = page_table_base;
+    }
   }
   return true;
 }
@@ -429,12 +445,14 @@ bool MesEngine::register_aql_queue(Queue &queue) {
       queue.ring_dwords > UINT32_MAX / sizeof(uint32_t)) {
     return false;
   }
-  if (next_queue_ordinal_ >= kMesManagedQueueIdBase)
+  if (next_queue_ordinal_ >= kMesManagedQueueIdBase) {
     return false;
+  }
   const std::optional<ComputeQueueBindingPlan> plan =
       compute_bindings_.make_aql(next_queue_ordinal_);
-  if (!plan || !plan->factory)
+  if (!plan || !plan->factory) {
     return false;
+  }
   queue.queue_id = kMesManagedQueueIdBase | next_queue_ordinal_;
   queue.queue_handle = queue_registry_.register_queue({
       .identity = {.address_space = queue.address_space,
@@ -468,14 +486,16 @@ bool MesEngine::register_pm4_queue(Queue &queue) {
   amdgpu::Pm4PacketCallbacks packet_callbacks{
       .write_uconfig_register = [writer = callbacks_.pm4_uconfig_writer()](uint64_t register_dword,
                                                                            uint32_t value) {
-        if (!writer || !writer(register_dword, value))
+        if (!writer || !writer(register_dword, value)) {
           return amdgpu::Pm4RegisterWriteStatus::Rejected;
+        }
         return amdgpu::Pm4RegisterWriteStatus::Complete;
       }};
   const std::optional<ComputeQueueBindingPlan> plan =
       compute_bindings_.make_pm4(next_queue_ordinal_, std::move(packet_callbacks));
-  if (!plan || !plan->factory)
+  if (!plan || !plan->factory) {
     return false;
+  }
   queue.queue_handle = queue_registry_.register_queue({
       .identity = {.address_space = queue.address_space,
                    .interrupt_sink = interrupt_sink_,
@@ -524,8 +544,9 @@ bool MesEngine::register_sdma_queue(Queue &queue) {
 }
 
 void MesEngine::rollback_created_address_space(const Queue &queue, bool created_address_space) {
-  if (!created_address_space || !queue.address_space)
+  if (!created_address_space || !queue.address_space) {
     return;
+  }
   (void)gpu_vm_.unregister_address_space(queue.address_space);
   address_spaces_.erase(queue.process_id);
 }
@@ -535,8 +556,9 @@ void MesEngine::release_unused_address_space(uint32_t process_id) {
       std::ranges::any_of(mapped_queues_, [process_id](const Queue &candidate) {
         return candidate.process_id == process_id && candidate.address_space;
       });
-  if (process_still_used)
+  if (process_still_used) {
     return;
+  }
   const std::unordered_map<uint32_t, AddressSpace>::iterator address_space =
       address_spaces_.find(process_id);
   if (address_space != address_spaces_.end() &&
@@ -558,8 +580,9 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space)
   // configuration. Replacing that queue would either strand the journal or let
   // it acknowledge work against a different queue generation.
   if (pending_mes_frames_.contains(queue.doorbell_offset)) {
-    if (queue.queue_handle)
+    if (queue.queue_handle) {
       (void)queue_registry_.unregister_queue(queue.queue_handle, QueueCloseMode::ForceCancel);
+    }
     rollback_created_address_space(queue, created_address_space);
     return VmAccessOutcome::Unavailable;
   }
@@ -567,51 +590,60 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space)
       std::ranges::find(mapped_queues_, queue.doorbell_offset, &Queue::doorbell_offset);
   if (existing == mapped_queues_.end()) {
     mapped_queues_.push_back(queue);
-    if (queue.queue_handle)
+    if (queue.queue_handle) {
       ++next_queue_ordinal_;
+    }
     if (queue.address_space && queue.process_context_address != 0) {
       AddressSpace &address_space = address_spaces_.at(queue.process_id);
-      if (address_space.process_context_address == 0)
+      if (address_space.process_context_address == 0) {
         address_space.process_context_address = queue.process_context_address;
+      }
     }
     return VmAccessOutcome::Complete;
   }
 
   const Queue replaced = *existing;
   QueueCloseResult detached{.found = true, .status = QueueCloseStatus::Closed};
-  if (replaced.queue_handle)
+  if (replaced.queue_handle) {
     detached = queue_registry_.unregister_queue(replaced.queue_handle);
+  }
   if (!detached) {
-    if (queue.queue_handle)
+    if (queue.queue_handle) {
       (void)queue_registry_.unregister_queue(queue.queue_handle, QueueCloseMode::ForceCancel);
+    }
     rollback_created_address_space(queue, created_address_space);
     return detached.status == QueueCloseStatus::Busy ? VmAccessOutcome::Unavailable
                                                      : VmAccessOutcome::Faulted;
   }
 
   *existing = queue;
-  if (queue.queue_handle)
+  if (queue.queue_handle) {
     ++next_queue_ordinal_;
+  }
   if (queue.address_space && queue.process_context_address != 0) {
     AddressSpace &address_space = address_spaces_.at(queue.process_id);
-    if (address_space.process_context_address == 0)
+    if (address_space.process_context_address == 0) {
       address_space.process_context_address = queue.process_context_address;
+    }
   }
-  if (replaced.process_id != queue.process_id)
+  if (replaced.process_id != queue.process_id) {
     release_unused_address_space(replaced.process_id);
+  }
   return VmAccessOutcome::Complete;
 }
 
 VmAccessOutcome MesEngine::remove_queue(uint64_t doorbell_offset) {
   // Destruction of the queue that owns a pending frame would remove the only
   // route by which its completion/read-pointer publication can resume.
-  if (pending_mes_frames_.contains(doorbell_offset))
+  if (pending_mes_frames_.contains(doorbell_offset)) {
     return VmAccessOutcome::Unavailable;
+  }
 
   const std::vector<Queue>::iterator queue =
       std::ranges::find(mapped_queues_, doorbell_offset, &Queue::doorbell_offset);
-  if (queue == mapped_queues_.end())
+  if (queue == mapped_queues_.end()) {
     return VmAccessOutcome::Malformed;
+  }
 
   const uint32_t process_id = queue->process_id;
   if (queue->queue_handle) {
@@ -691,8 +723,9 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
       mapped.doorbell_offset =
           static_cast<uint64_t>(dword(frame, kAddQueueDoorbellDword)) * sizeof(uint32_t);
       mapped.write_pointer_address = qword(frame, kAddQueueWritePointerAddressDword);
-      if (const uint32_t ring_dwords = dword(frame, kAddQueueSizeDword); ring_dwords != 0)
+      if (const uint32_t ring_dwords = dword(frame, kAddQueueSizeDword); ring_dwords != 0) {
         mapped.ring_dwords = ring_dwords;
+      }
       if (!bind_process_address_space(mapped, std::move(physical_memory), created_address_space) ||
           !register_sdma_queue(mapped)) {
         rollback_created_address_space(mapped, created_address_space);
@@ -757,18 +790,21 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
 }
 
 amdgpu::VmAccessOutcome MesEngine::publish_mes_frame(PendingMesFrame &pending) {
-  if (pending.phase_ == MesFramePhase::Semantic)
+  if (pending.phase_ == MesFramePhase::Semantic) {
     return amdgpu::VmAccessOutcome::Malformed;
-  if (pending.phase_ == MesFramePhase::Terminal)
+  }
+  if (pending.phase_ == MesFramePhase::Terminal) {
     return pending.terminal_outcome_;
+  }
 
   if (pending.phase_ == MesFramePhase::Completion) {
     const std::array<std::byte, sizeof(uint64_t)> raw_completion =
         std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(pending.completion_value_);
     const amdgpu::VmAccessOutcome outcome =
         pending.access_.write(pending.completion_address_, raw_completion);
-    if (outcome == amdgpu::VmAccessOutcome::Unavailable)
+    if (outcome == amdgpu::VmAccessOutcome::Unavailable) {
       return outcome;
+    }
     if (outcome != amdgpu::VmAccessOutcome::Complete) {
       pending.phase_ = MesFramePhase::Terminal;
       pending.terminal_outcome_ = outcome;
@@ -810,8 +846,9 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
       pending_mes_frames_.find(queue.doorbell_offset);
   if (pending_frame != pending_mes_frames_.end()) {
     PendingMesFrame &pending = pending_frame->second;
-    if (pending.phase_ == MesFramePhase::Terminal)
+    if (pending.phase_ == MesFramePhase::Terminal) {
       return MesDoorbellDisposition::Faulted;
+    }
     if (!same_source(pending, context)) {
       pending.phase_ = MesFramePhase::Terminal;
       pending.terminal_outcome_ = amdgpu::VmAccessOutcome::Malformed;
@@ -829,17 +866,20 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
       return MesDoorbellDisposition::Faulted;
     }
     const amdgpu::VmAccessOutcome outcome = publish_mes_frame(pending);
-    if (outcome == amdgpu::VmAccessOutcome::Unavailable)
+    if (outcome == amdgpu::VmAccessOutcome::Unavailable) {
       return MesDoorbellDisposition::Retry;
-    if (outcome != amdgpu::VmAccessOutcome::Complete)
+    }
+    if (outcome != amdgpu::VmAccessOutcome::Complete) {
       return MesDoorbellDisposition::Faulted;
+    }
     read_pointer = pending.next_read_pointer_;
     pending_mes_frames_.erase(pending_frame);
   } else {
     const amdgpu::AddressSpaceHandle gart = gpu_vm_.gart_address_space();
     access = gpu_vm_.snapshot_pinned(gart);
-    if (!access)
+    if (!access) {
       return MesDoorbellDisposition::Faulted;
+    }
     std::array<std::byte, sizeof(uint64_t)> raw_read_pointer{};
     const amdgpu::VmAccessOutcome outcome =
         access->read(queue.read_pointer_address, raw_read_pointer);
@@ -861,8 +901,9 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
 
   if (read_pointer != write_pointer && !access) {
     access = gpu_vm_.snapshot_pinned(gpu_vm_.gart_address_space());
-    if (!access)
+    if (!access) {
       return MesDoorbellDisposition::Faulted;
+    }
   }
 
   while (read_pointer != write_pointer) {
@@ -872,8 +913,9 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
         std::min<std::size_t>(frame.size(), static_cast<std::size_t>(ring_bytes - ring_offset));
     amdgpu::VmAccessOutcome outcome =
         access->read(queue.ring_base + ring_offset, std::span(frame).first(first));
-    if (outcome == amdgpu::VmAccessOutcome::Complete && first != frame.size())
+    if (outcome == amdgpu::VmAccessOutcome::Complete && first != frame.size()) {
       outcome = access->read(queue.ring_base, std::span(frame).subspan(first));
+    }
     if (outcome != amdgpu::VmAccessOutcome::Complete) {
       util::Logger::warn(std::format("{}: cannot read a MES frame at {:#x}", diagnostic_name_,
                                      queue.ring_base + ring_offset));
@@ -905,8 +947,9 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
                                   context.source_generation());
     auto [pending_it, inserted] =
         pending_mes_frames_.try_emplace(queue.doorbell_offset, std::move(pending_frame));
-    if (!inserted)
+    if (!inserted) {
       return MesDoorbellDisposition::Faulted;
+    }
 
     const amdgpu::VmAccessOutcome semantic = execute_mes_semantic(frame, opcode, context, *access);
     if (semantic == amdgpu::VmAccessOutcome::Unavailable) {
@@ -925,10 +968,12 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
     }
     pending_it->second.phase_ = MesFramePhase::Completion;
     const amdgpu::VmAccessOutcome publication = publish_mes_frame(pending_it->second);
-    if (publication == amdgpu::VmAccessOutcome::Unavailable)
+    if (publication == amdgpu::VmAccessOutcome::Unavailable) {
       return MesDoorbellDisposition::Retry;
-    if (publication != amdgpu::VmAccessOutcome::Complete)
+    }
+    if (publication != amdgpu::VmAccessOutcome::Complete) {
       return MesDoorbellDisposition::Faulted;
+    }
 
     read_pointer = pending_it->second.next_read_pointer_;
     pending_mes_frames_.erase(pending_it);
@@ -941,8 +986,9 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
 MesDoorbellDisposition MesEngine::notify_doorbell(uint64_t byte_offset, uint64_t write_pointer,
                                                   const std::optional<MesKernelQueue> &direct_queue,
                                                   const MesDoorbellContext &context) {
-  if (!frontend_attached_)
+  if (!frontend_attached_) {
     return MesDoorbellDisposition::Faulted;
+  }
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: doorbell {:#x} <- {}", diagnostic_name_, byte_offset, write_pointer);
   });
@@ -952,8 +998,9 @@ MesDoorbellDisposition MesEngine::notify_doorbell(uint64_t byte_offset, uint64_t
     if (mapped->queue_handle) {
       const amdgpu::QueueSubmissionResult result =
           queue_registry_.submit_producer(mapped->queue_handle, write_pointer);
-      if (!result.found)
+      if (!result.found) {
         return MesDoorbellDisposition::Faulted;
+      }
       switch (result.status) {
       case amdgpu::QueueSubmissionStatus::Accepted:
         return MesDoorbellDisposition::Complete;
@@ -965,8 +1012,9 @@ MesDoorbellDisposition MesEngine::notify_doorbell(uint64_t byte_offset, uint64_t
     }
     return process_queue(*mapped, write_pointer, context);
   }
-  if (direct_queue && direct_queue->doorbell_offset == byte_offset)
+  if (direct_queue && direct_queue->doorbell_offset == byte_offset) {
     return process_queue(kernel_queue(*direct_queue), write_pointer, context);
+  }
   return MesDoorbellDisposition::Ignored;
 }
 

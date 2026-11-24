@@ -43,14 +43,16 @@ void skip_filler(std::string_view json, size_t &at) {
 
 FailureOr<uint32_t> parse_hex_digits(std::string_view json, size_t &at, size_t count,
                                      const util::DiagnosticEmitter &emit_error) {
-  if (json.size() - at < count)
+  if (json.size() - at < count) {
     return emit_error.emit() << "unterminated escape sequence";
+  }
 
   const std::string_view digits = json.substr(at, count);
   uint32_t value = 0;
   const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, 16);
-  if (ec != std::errc{} || ptr != digits.data() + digits.size())
+  if (ec != std::errc{} || ptr != digits.data() + digits.size()) {
     return emit_error.emit() << "escape code must be followed by hexadecimal digits";
+  }
 
   at += count;
   return value;
@@ -81,8 +83,9 @@ Result append_utf8(uint32_t code_point, std::string &decoded,
 /// @brief Decode a quoted string and advance past it.
 FailureOr<std::string> parse_quoted_string(std::string_view json, size_t &at,
                                            const util::DiagnosticEmitter &emit_error) {
-  if (at >= json.size() || (json[at] != '"' && json[at] != '\''))
+  if (at >= json.size() || (json[at] != '"' && json[at] != '\'')) {
     return emit_error.emit() << "expected a quoted string";
+  }
 
   const char quote = json[at++];
   std::string decoded;
@@ -90,25 +93,30 @@ FailureOr<std::string> parse_quoted_string(std::string_view json, size_t &at,
   while (at < json.size()) {
     const char c = json[at++];
     if (c == quote) {
-      if (unicode_high_surrogate != -1)
+      if (unicode_high_surrogate != -1) {
         return emit_error.emit() << "illegal Unicode sequence";
+      }
       return decoded;
     }
 
-    if (static_cast<unsigned char>(c) < ' ')
+    if (static_cast<unsigned char>(c) < ' ') {
       return emit_error.emit() << "illegal character in string constant";
+    }
     if (c != '\\') {
-      if (unicode_high_surrogate != -1)
+      if (unicode_high_surrogate != -1) {
         return emit_error.emit() << "illegal Unicode sequence";
+      }
       decoded += c;
       continue;
     }
 
-    if (at >= json.size())
+    if (at >= json.size()) {
       return emit_error.emit() << "unterminated escape sequence";
+    }
     const char escape = json[at++];
-    if (unicode_high_surrogate != -1 && escape != 'u')
+    if (unicode_high_surrogate != -1 && escape != 'u') {
       return emit_error.emit() << "illegal Unicode sequence";
+    }
 
     switch (escape) {
     case 'n':
@@ -140,36 +148,43 @@ FailureOr<std::string> parse_quoted_string(std::string_view json, size_t &at,
       break;
     case 'x': {
       FailureOr<uint32_t> digits = parse_hex_digits(json, at, 2, emit_error);
-      if (digits.failed())
+      if (digits.failed()) {
         return Result::failure();
+      }
       decoded += static_cast<char>(digits.value());
       break;
     }
     case 'u': {
       FailureOr<uint32_t> digits = parse_hex_digits(json, at, 4, emit_error);
-      if (digits.failed())
+      if (digits.failed()) {
         return Result::failure();
+      }
       const uint32_t value = digits.value();
       if (value >= 0xd800 && value <= 0xdbff) {
-        if (unicode_high_surrogate != -1)
+        if (unicode_high_surrogate != -1) {
           return emit_error.emit() << "illegal Unicode sequence";
+        }
         unicode_high_surrogate = static_cast<int>(value);
       } else if (value >= 0xdc00 && value <= 0xdfff) {
-        if (unicode_high_surrogate == -1)
+        if (unicode_high_surrogate == -1) {
           return emit_error.emit() << "illegal Unicode sequence";
+        }
         const uint32_t code_point =
             0x10000 + ((static_cast<uint32_t>(unicode_high_surrogate) & 0x3ff) << 10) +
             (value & 0x3ff);
         Result appended = append_utf8(code_point, decoded, emit_error);
-        if (appended.failed())
+        if (appended.failed()) {
           return Result::failure();
+        }
         unicode_high_surrogate = -1;
       } else {
-        if (unicode_high_surrogate != -1)
+        if (unicode_high_surrogate != -1) {
           return emit_error.emit() << "illegal Unicode sequence";
+        }
         Result appended = append_utf8(value, decoded, emit_error);
-        if (appended.failed())
+        if (appended.failed()) {
           return Result::failure();
+        }
       }
       break;
     }
@@ -184,18 +199,21 @@ FailureOr<std::string> parse_quoted_string(std::string_view json, size_t &at,
 /// @brief Advance past a quoted string, honoring the loader's escapes.
 Result skip_string(std::string_view json, size_t &at, const util::DiagnosticEmitter &emit_error) {
   FailureOr<std::string> parsed = parse_quoted_string(json, at, emit_error);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return Result::failure();
+  }
   return Result::success();
 }
 
 /// @brief Advance past one value, descending through nested objects and arrays.
 Result skip_value(std::string_view json, size_t &at, const util::DiagnosticEmitter &emit_error) {
-  if (at >= json.size())
+  if (at >= json.size()) {
     return Result::success();
+  }
 
-  if (json[at] == '"' || json[at] == '\'')
+  if (json[at] == '"' || json[at] == '\'') {
     return skip_string(json, at, emit_error);
+  }
 
   if (json[at] == '{' || json[at] == '[') {
     size_t depth = 0;
@@ -203,8 +221,9 @@ Result skip_value(std::string_view json, size_t &at, const util::DiagnosticEmitt
       const char c = json[at];
       if (c == '"' || c == '\'') {
         Result skipped = skip_string(json, at, emit_error);
-        if (skipped.failed())
+        if (skipped.failed()) {
           return skipped;
+        }
         continue;
       }
       if (starts_comment(json, at)) {
@@ -227,8 +246,9 @@ Result skip_value(std::string_view json, size_t &at, const util::DiagnosticEmitt
 
   while (at < json.size() && json[at] != ',' && json[at] != '}' && json[at] != ']' &&
          json[at] != ' ' && json[at] != '\t' && json[at] != '\r' && json[at] != '\n') {
-    if (starts_comment(json, at))
+    if (starts_comment(json, at)) {
       break;
+    }
     ++at;
   }
   return Result::success();
@@ -245,8 +265,9 @@ FailureOr<FieldRange> find_top_level_field(std::string_view json, std::string_vi
                                            const util::DiagnosticEmitter &emit_error) {
   size_t at = json.starts_with("\xef\xbb\xbf") ? 3 : 0;
   skip_filler(json, at);
-  if (at >= json.size() || json[at] != '{')
+  if (at >= json.size() || json[at] != '{') {
     return emit_error.emit() << "simulation config must be a JSON object";
+  }
   const size_t fields_begin = ++at;
 
   skip_filler(json, at);
@@ -254,41 +275,48 @@ FailureOr<FieldRange> find_top_level_field(std::string_view json, std::string_vi
 
   while (at < json.size()) {
     skip_filler(json, at);
-    if (at >= json.size() || json[at] == '}')
+    if (at >= json.size() || json[at] == '}') {
       break;
+    }
 
     std::string name;
     if (json[at] == '"' || json[at] == '\'') {
       FailureOr<std::string> parsed_name = parse_quoted_string(json, at, emit_error);
-      if (parsed_name.failed())
+      if (parsed_name.failed()) {
         return Result::failure();
+      }
       name = std::move(parsed_name.value());
     } else {
       const size_t name_begin = at;
-      if (at >= json.size() || !is_identifier_start(json[at]))
+      if (at >= json.size() || !is_identifier_start(json[at])) {
         return emit_error.emit() << "simulation config has an unreadable field name";
-      while (at < json.size() && is_identifier_char(json[at]))
+      }
+      while (at < json.size() && is_identifier_char(json[at])) {
         ++at;
+      }
       name.assign(json.substr(name_begin, at - name_begin));
     }
 
     skip_filler(json, at);
-    if (at >= json.size() || json[at] != ':')
+    if (at >= json.size() || json[at] != ':') {
       return emit_error.emit() << "simulation config field '" << name << "' has no value";
+    }
     ++at;
 
     skip_filler(json, at);
     const size_t value_begin = at;
     Result skipped_value = skip_value(json, at, emit_error);
-    if (skipped_value.failed())
+    if (skipped_value.failed()) {
       return Result::failure();
+    }
     if (name == field) {
       return FieldRange{value_begin, at, false};
     }
 
     skip_filler(json, at);
-    if (at < json.size() && json[at] == ',')
+    if (at < json.size() && json[at] == ',') {
       ++at;
+    }
   }
 
   return FieldRange{fields_begin, fields_begin, has_fields};
@@ -301,15 +329,18 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
                                            std::string_view value,
                                            const util::DiagnosticEmitter &emit_error) {
   auto found = find_top_level_field(json, field, emit_error);
-  if (found.failed())
+  if (found.failed()) {
     return Result::failure();
+  }
   const auto range = found.value();
   std::string rewritten(json.substr(0, range.begin));
-  if (range.begin == range.end)
+  if (range.begin == range.end) {
     rewritten.append("\"").append(field).append("\": ");
+  }
   rewritten.append(value);
-  if (range.insertion_needs_comma)
+  if (range.insertion_needs_comma) {
     rewritten.append(",");
+  }
   rewritten.append(json.substr(range.end));
   return rewritten;
 }
@@ -317,8 +348,9 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
 FailureOr<std::string> json_top_level_field(std::string_view json, std::string_view field,
                                             const util::DiagnosticEmitter &emit_error) {
   auto found = find_top_level_field(json, field, emit_error);
-  if (found.failed())
+  if (found.failed()) {
     return Result::failure();
+  }
   const auto range = found.value();
   return std::string(json.substr(range.begin, range.end - range.begin));
 }

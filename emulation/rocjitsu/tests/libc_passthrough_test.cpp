@@ -24,17 +24,22 @@ extern "C" void *__real_dlsym(void *, const char *);
 
 // Exercise the real legacy libc entry points on modern hosts too.
 extern "C" void *__wrap_dlsym(void *handle, const char *name) {
-  if (std::strcmp(name, "openat") == 0)
+  if (std::strcmp(name, "openat") == 0) {
     openat_resolutions.fetch_add(1, std::memory_order_relaxed);
+  }
   if (std::getenv("RJ_TEST_LEGACY_STAT")) {
 #if defined(__GLIBC__) && defined(__x86_64__)
-    if (std::strcmp(name, "realpath") == 0)
-      if (auto *legacy = dlvsym(handle, name, "GLIBC_2.2.5"))
+    if (std::strcmp(name, "realpath") == 0) {
+      if (auto *legacy = dlvsym(handle, name, "GLIBC_2.2.5")) {
         return legacy;
+      }
+    }
 #endif
-    for (const char *symbol : {"stat", "lstat", "fstat", "stat64", "lstat64", "fstat64"})
-      if (std::strcmp(name, symbol) == 0)
+    for (const char *symbol : {"stat", "lstat", "fstat", "stat64", "lstat64", "fstat64"}) {
+      if (std::strcmp(name, symbol) == 0) {
         return nullptr;
+      }
+    }
   }
   return __real_dlsym(handle, name);
 }
@@ -122,7 +127,8 @@ TEST(LibcPassthroughTest, ConcurrentFirstUseResolvesOneCompleteTable) {
       EXPECT_NE(table.exit_immediately, nullptr);
     });
   }
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
   EXPECT_EQ(openat_resolutions.load(), before + 1);
 }

@@ -54,8 +54,9 @@ struct Channel {
 template <typename T> T *allocate_record() {
   auto result = host_call(libc_passthrough().mmap, ::mmap, nullptr, sizeof(T),
                           PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (result == MAP_FAILED)
+  if (result == MAP_FAILED) {
     return nullptr;
+  }
   return new (reinterpret_cast<void *>(result)) T{};
 }
 
@@ -64,31 +65,35 @@ template <typename T> void free_record(T *record) {
 }
 
 void release_region(Region *region) {
-  if (region->file >= 0)
+  if (region->file >= 0) {
     host_close_fd(region->file);
-  else
+  } else {
     host_call(libc_passthrough().shmdt, ::shmdt, region->mapping);
+  }
   free_record(region);
 }
 
 Region *create_region(size_t size, bool device_backing) {
   auto *region = allocate_record<Region>();
-  if (!region)
+  if (!region) {
     return nullptr;
+  }
   int shmid = -1;
   for (uint32_t slot = 0; slot < kDeviceTokenSlotCount; ++slot) {
     const key_t key =
         device_backing ? static_cast<key_t>(kDeviceTokenKeyPrefix | slot) : IPC_PRIVATE;
     shmid = host_call(libc_passthrough().shmget, ::shmget, key, size,
                       IPC_CREAT | IPC_EXCL | SHM_NORESERVE | 0600);
-    if (shmid >= 0 || errno != EEXIST || !device_backing)
+    if (shmid >= 0 || errno != EEXIST || !device_backing) {
       break;
+    }
   }
   // The marker is best effort; namespace-wide key contention must not reject
   // an allocation when anonymous shared-memory capacity is still available.
-  if (device_backing && shmid < 0 && errno == EEXIST)
+  if (device_backing && shmid < 0 && errno == EEXIST) {
     shmid = host_call(libc_passthrough().shmget, ::shmget, IPC_PRIVATE, size,
                       IPC_CREAT | IPC_EXCL | SHM_NORESERVE | 0600);
+  }
   if (shmid < 0) {
     const int error = errno;
     free_record(region);
@@ -136,16 +141,18 @@ Region *create_region(size_t size, bool device_backing) {
 // limit is handled by shared RAM below, without changing application limits.
 int create_file(size_t size, bool preallocate, const char *name) {
   rlimit limit{};
-  if (host_call(libc_passthrough().prlimit, ::prlimit, 0, RLIMIT_FSIZE, nullptr, &limit) != 0)
+  if (host_call(libc_passthrough().prlimit, ::prlimit, 0, RLIMIT_FSIZE, nullptr, &limit) != 0) {
     return -1;
+  }
   if (size > limit.rlim_cur) {
     errno = EFBIG;
     return -1;
   }
   const int fd = host_call(libc_passthrough().memfd_create, ::memfd_create, name,
                            MFD_CLOEXEC | MFD_ALLOW_SEALING);
-  if (fd < 0)
+  if (fd < 0) {
     return -1;
+  }
   if (host_call(libc_passthrough().ftruncate, ::ftruncate, fd, size) != 0 ||
       host_call(libc_passthrough().fcntl, ::fcntl, fd, F_ADD_SEALS,
                 F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
@@ -154,15 +161,17 @@ int create_file(size_t size, bool preallocate, const char *name) {
     errno = error;
     return -1;
   }
-  if (preallocate)
+  if (preallocate) {
     host_call(libc_passthrough().fallocate, ::fallocate, fd, 0, 0, size);
+  }
   return fd;
 }
 
 int create_token(int epoll, Region *region, int mode, uint64_t serial) {
   auto *token = allocate_record<Channel>();
-  if (!token)
+  if (!token) {
     return -1;
+  }
   int sockets[2];
   if (host_call(libc_passthrough().socketpair, ::socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC,
                 0, sockets) != 0) {
@@ -231,9 +240,11 @@ void *watch_lease(void *argument) {
   struct sigaction action {};
   action.sa_handler = SIG_DFL;
   sigemptyset(&action.sa_mask);
-  for (int signal = 1; signal < NSIG; ++signal)
-    if (signal != SIGKILL && signal != SIGSTOP)
+  for (int signal = 1; signal < NSIG; ++signal) {
+    if (signal != SIGKILL && signal != SIGSTOP) {
       sigaction(signal, &action, nullptr);
+    }
+  }
   // This process only sizes internal backing files. Ignore its own size-limit
   // signal so even an external prlimit racing create_file falls back to RAM.
   action.sa_handler = SIG_IGN;
@@ -250,11 +261,13 @@ void *watch_lease(void *argument) {
   // constrain metadata files or the number of simultaneously retained tokens.
   for (const auto resource : {RLIMIT_FSIZE, RLIMIT_NOFILE}) {
     rlimit limit{};
-    if (host_call(libc_passthrough().prlimit, ::prlimit, 0, resource, nullptr, &limit) != 0)
+    if (host_call(libc_passthrough().prlimit, ::prlimit, 0, resource, nullptr, &limit) != 0) {
       fail_startup(errno);
+    }
     limit.rlim_cur = limit.rlim_max;
-    if (host_call(libc_passthrough().prlimit, ::prlimit, 0, resource, &limit, nullptr) != 0)
+    if (host_call(libc_passthrough().prlimit, ::prlimit, 0, resource, &limit, nullptr) != 0) {
       fail_startup(errno);
+    }
   }
 
   // Create the listener after exec so an application fork can never retain
@@ -262,16 +275,18 @@ void *watch_lease(void *argument) {
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
   const size_t length = std::strlen(listener_name);
-  if (length == 0 || length >= sizeof(address.sun_path))
+  if (length == 0 || length >= sizeof(address.sun_path)) {
     fail_startup(EINVAL);
+  }
   std::memcpy(address.sun_path + 1, listener_name, length);
   const int listener =
       host_call(libc_passthrough().socket, ::socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
   if (listener < 0 ||
       host_call(libc_passthrough().bind, ::bind, listener, reinterpret_cast<sockaddr *>(&address),
                 offsetof(sockaddr_un, sun_path) + 1 + length) != 0 ||
-      host_call(libc_passthrough().listen, ::listen, listener, SOMAXCONN) != 0)
+      host_call(libc_passthrough().listen, ::listen, listener, SOMAXCONN) != 0) {
     fail_startup(errno);
+  }
   int parent = host_pidfd_open(owner, 0);
   UniqueDriverFd owner_stat;
   if (parent < 0 && errno == ENOSYS) {
@@ -279,19 +294,22 @@ void *watch_lease(void *argument) {
     // procfs belongs to an ancestor PID namespace.
     const int pass_credentials = 1;
     if (host_call(libc_passthrough().setsockopt, ::setsockopt, startup, SOL_SOCKET, SO_PASSCRED,
-                  &pass_credentials, sizeof(pass_credentials)) != 0)
+                  &pass_credentials, sizeof(pass_credentials)) != 0) {
       fail_startup(errno);
+    }
     if (send_keeper_descriptor(startup, &kKeeperRequestOwnerStat, sizeof(kKeeperRequestOwnerStat),
-                               -1) < 0)
+                               -1) < 0) {
       fail_startup(errno);
+    }
     // A concurrent application fork can retain a startup socket after the owner exits.
     pollfd reply{startup, POLLIN, 0};
     int ready;
     do {
       ready = host_call(libc_passthrough().poll, ::poll, &reply, 1, 10000);
     } while (ready < 0 && errno == EINTR);
-    if (ready <= 0)
+    if (ready <= 0) {
       fail_startup(ready < 0 ? errno : ETIMEDOUT);
+    }
     uint32_t response = 0;
     int file = -1;
     pid_t sender = -1;
@@ -299,43 +317,52 @@ void *watch_lease(void *argument) {
                                                     MSG_DONTWAIT, nullptr, &sender);
     owner_stat.reset(file);
     if (received != sizeof(response) || response != kKeeperRequestOwnerStat || !owner_stat ||
-        sender != owner)
+        sender != owner) {
       fail_startup(received < 0 ? errno : EPROTO);
+    }
     parent = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
     if (parent >= 0) {
       constexpr itimerspec interval{{0, 250'000'000}, {0, 250'000'000}};
-      if (timerfd_settime(parent, 0, &interval, nullptr) < 0)
+      if (timerfd_settime(parent, 0, &interval, nullptr) < 0) {
         fail_startup(errno);
+      }
     }
   }
-  if (parent < 0)
+  if (parent < 0) {
     fail_startup(errno);
+  }
   const int epoll = host_call(libc_passthrough().epoll_create1, ::epoll_create1, EPOLL_CLOEXEC);
-  if (epoll < 0)
+  if (epoll < 0) {
     fail_startup(errno);
+  }
   const int lease_eventfd = host_call(libc_passthrough().eventfd, ::eventfd, 0, EFD_CLOEXEC);
-  if (lease_eventfd < 0)
+  if (lease_eventfd < 0) {
     fail_startup(errno);
+  }
   Channel listener_event{}, parent_event{}, lease_event{};
   epoll_event event{};
   event.events = EPOLLIN;
   event.data.ptr = &listener_event;
   if (host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, listener,
-                &event) != 0)
+                &event) != 0) {
     fail_startup(errno);
+  }
   event.data.ptr = &parent_event;
   if (host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, parent, &event) !=
-      0)
+      0) {
     fail_startup(errno);
+  }
   event.data.ptr = &lease_event;
   if (host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, lease_eventfd,
-                &event) != 0)
+                &event) != 0) {
     fail_startup(errno);
+  }
   LeaseWatch watch{lease, lease_eventfd};
   pthread_t watcher;
   const int started = pthread_create(&watcher, nullptr, watch_lease, &watch);
-  if (started != 0)
+  if (started != 0) {
     fail_startup(started);
+  }
   pthread_detach(watcher);
   // Only the inherited startup channel and the authenticated owner receive this cookie.
   KeeperCookie cookie;
@@ -343,8 +370,9 @@ void *watch_lease(void *argument) {
   do {
     bytes = host_call(libc_passthrough().getrandom, ::getrandom, cookie.data(), sizeof(cookie), 0);
   } while (bytes < 0 && errno == EINTR);
-  if (bytes != sizeof(cookie))
+  if (bytes != sizeof(cookie)) {
     fail_startup(bytes < 0 ? errno : EIO);
+  }
   // Linux pidfs on 64-bit kernels allocates a monotonically increasing inode
   // for each process. Old anonymous pidfds share an inode, and 32-bit pidfs
   // may recycle inode numbers. Use the launch cookie in those configurations.
@@ -355,12 +383,14 @@ void *watch_lease(void *argument) {
     struct statfs fs {};
     struct stat info {};
     if (self >= 0 && fstatfs(self, &fs) == 0 && fs.f_type == kPidfsMagic &&
-        host_call(libc_passthrough().fstat_fn, ::fstat, self, &info) == 0)
+        host_call(libc_passthrough().fstat_fn, ::fstat, self, &info) == 0) {
       process_inode = info.st_ino;
+    }
     host_close_fd(self);
   }
-  if (send_keeper_startup_reply(startup, 0, cookie, process_inode) != 0)
+  if (send_keeper_startup_reply(startup, 0, cookie, process_inode) != 0) {
     host_call(libc_passthrough().exit_immediately, ::_exit, 1);
+  }
   host_close_fd(startup);
   size_t tokens = 0;
   uint64_t serial = 0;
@@ -374,10 +404,12 @@ void *watch_lease(void *argument) {
       if (--channel->region->tokens == 0) {
         if (channel->region->file >= 0) {
           Region **link = &file_regions;
-          while (*link && *link != channel->region)
+          while (*link && *link != channel->region) {
             link = &(*link)->next_file;
-          if (*link)
+          }
+          if (*link) {
             *link = channel->region->next_file;
+          }
         }
         release_region(channel->region);
       }
@@ -394,8 +426,9 @@ void *watch_lease(void *argument) {
   auto serve = [&](Channel &channel) {
     const int socket = channel.socket;
     Region *region = channel.region;
-    if (!region && !owner_alive)
+    if (!region && !owner_alive) {
       return false;
+    }
     KeeperFilePacket packet;
     KeeperRequest &request = packet.request;
     int incoming = -1;
@@ -405,8 +438,9 @@ void *watch_lease(void *argument) {
     if (received == 0 || (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
       return false;
     }
-    if (received < 0)
+    if (received < 0) {
       return true;
+    }
     // Allocation connections are private to a single request, so their
     // responses can use the connection itself. Exported tokens can be shared
     // across processes and threads; those still supply a private reply socket.
@@ -426,8 +460,9 @@ void *watch_lease(void *argument) {
     if (!region && request.operation == KeeperOperation::FlushFiles) {
       const bool valid = !missing_descriptor && incoming < 0 && request.size == channel.files.count;
       host_close_fd(incoming);
-      if (!valid)
+      if (!valid) {
         return false;
+      }
       const bool sent =
           send_keeper_descriptor(socket, &channel.files, sizeof(channel.files), -1) == 0;
       channel.files.count = 0;
@@ -478,21 +513,24 @@ void *watch_lease(void *argument) {
         bool conflicting_policy = false;
         for (Region *candidate = file_regions; candidate; candidate = candidate->next_file) {
           if (candidate->identity.ipc_namespace != info.st_dev ||
-              candidate->identity.object != info.st_ino)
+              candidate->identity.object != info.st_ino) {
             continue;
-          if (candidate->allocation_flags != request.size)
+          }
+          if (candidate->allocation_flags != request.size) {
             conflicting_policy = true;
-          else if (candidate->identity.mode == request.mode &&
-                   candidate->identity.size == static_cast<uint64_t>(info.st_size))
+          } else if (candidate->identity.mode == request.mode &&
+                     candidate->identity.size == static_cast<uint64_t>(info.st_size)) {
             backing = candidate;
+          }
         }
         if (conflicting_policy) {
           result = EEXIST;
         } else if (backing) {
           descriptor = create_token(epoll, backing, request.mode, ++serial);
           result = descriptor >= 0 ? 0 : errno;
-          if (descriptor >= 0)
+          if (descriptor >= 0) {
             ++tokens;
+          }
         } else if ((backing = allocate_record<Region>())) {
           backing->identity.size = static_cast<uint64_t>(info.st_size);
           backing->identity.object = info.st_ino;
@@ -539,12 +577,14 @@ void *watch_lease(void *argument) {
         while (result == 0 && inline_file && written < request.size) {
           const ssize_t count =
               ::pwrite(incoming, packet.data + written, request.size - written, written);
-          if (count < 0 && errno == EINTR)
+          if (count < 0 && errno == EINTR) {
             continue;
-          if (count <= 0)
+          }
+          if (count <= 0) {
             result = count < 0 ? errno : EIO;
-          else
+          } else {
             written += count;
+          }
         }
       }
     } else if ((request.operation == KeeperOperation::Backing ||
@@ -573,10 +613,11 @@ void *watch_lease(void *argument) {
         if (backing) {
           descriptor = create_token(epoll, backing, request.mode, ++serial);
           result = descriptor >= 0 ? 0 : errno;
-          if (descriptor >= 0)
+          if (descriptor >= 0) {
             ++tokens;
-          else if (!region)
+          } else if (!region) {
             release_region(backing);
+          }
         } else {
           result = errno;
         }
@@ -596,22 +637,26 @@ void *watch_lease(void *argument) {
     epoll_event events[32];
     const int count = host_call(libc_passthrough().epoll_wait, ::epoll_wait, epoll, events, 32, -1);
     if (count < 0) {
-      if (errno == EINTR)
+      if (errno == EINTR) {
         continue;
+      }
       break;
     }
     for (int index = 0; index < count; ++index) {
       auto *channel = static_cast<Channel *>(events[index].data.ptr);
       if (channel == &parent_event || channel == &lease_event) {
-        if (!owner_alive)
+        if (!owner_alive) {
           continue;
+        }
         if (channel == &parent_event && owner_stat) {
           uint64_t expirations;
           if (host_call(libc_passthrough().read, ::read, parent, &expirations,
-                        sizeof(expirations)) < 0)
+                        sizeof(expirations)) < 0) {
             continue;
-          if (proc_stat_is_exited(owner_stat.get()) == 0)
+          }
+          if (proc_stat_is_exited(owner_stat.get()) == 0) {
             continue;
+          }
         }
         owner_alive = false;
         owner_stat.reset();
@@ -625,12 +670,14 @@ void *watch_lease(void *argument) {
         continue;
       }
       if (channel == &listener_event) {
-        if (!owner_alive)
+        if (!owner_alive) {
           continue;
+        }
         const int socket = host_call(libc_passthrough().accept4, ::accept4, listener, nullptr,
                                      nullptr, SOCK_CLOEXEC);
-        if (socket < 0)
+        if (socket < 0) {
           continue;
+        }
         ucred peer{};
         socklen_t peer_size = sizeof(peer);
         // A new process can reuse the PID between timer ticks. Check the pinned
@@ -665,14 +712,17 @@ void *watch_lease(void *argument) {
         }
         continue;
       }
-      if (!serve(*channel))
+      if (!serve(*channel)) {
         retire(channel);
+      }
     }
     // epoll_wait may have returned private channels alongside the owner event.
     // Finish the batch before freeing any remaining channel records.
-    if (!owner_alive)
-      while (Channel *channel = LIST_FIRST(&private_channels))
+    if (!owner_alive) {
+      while (Channel *channel = LIST_FIRST(&private_channels)) {
         retire(channel);
+      }
+    }
   }
   host_call(libc_passthrough().exit_immediately, ::_exit, 0);
   __builtin_unreachable();

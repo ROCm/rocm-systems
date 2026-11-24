@@ -64,8 +64,9 @@ TYPED_TEST(RegisterBlockCountTest, CountsAvailableBlocksAcrossExhaustionAndReuse
   EXPECT_EQ(file.free_block_count(), 1u);
   EXPECT_EQ(file.allocate(8), 24);
   EXPECT_EQ(file.free_block_count(), 0u);
-  for (uint32_t block = 0; block < 4; ++block)
+  for (uint32_t block = 0; block < 4; ++block) {
     file.free(block * 8);
+  }
   EXPECT_EQ(file.free_block_count(), 4u);
 }
 
@@ -74,13 +75,15 @@ TEST(RegisterFileTest, ContiguousStorageClearsReusedBlock) {
   file.init(/*total_regs=*/16, /*regs_per_block=*/8);
 
   ASSERT_EQ(file.allocate(4), 0);
-  for (uint32_t i = 0; i < 8; ++i)
+  for (uint32_t i = 0; i < 8; ++i) {
     file[i] = i + 1;
+  }
 
   file.free(0);
   ASSERT_EQ(file.allocate(1), 0);
-  for (uint32_t i = 0; i < 8; ++i)
+  for (uint32_t i = 0; i < 8; ++i) {
     EXPECT_EQ(file[i], 0u) << "register " << i;
+  }
 }
 
 TEST(RegisterFileTest, SoftwareLazyStorageMaterializesOnlyMutableChunks) {
@@ -145,8 +148,9 @@ TEST(RegisterFileTest, SoftwareLazyRecycledChunksAreZeroBeforeEveryMaterializati
       break;
     }
     EXPECT_EQ(read_only[0], value);
-    for (uint32_t index = 1; index < count; ++index)
+    for (uint32_t index = 1; index < count; ++index) {
       EXPECT_EQ(read_only[index], 0u) << index;
+    }
   }
 }
 
@@ -174,23 +178,27 @@ TEST_P(LazyScalarRegisterFileTest, SharedChunksPreserveNeighborsAndClearReusedBl
   File file("sgpr");
   file.init(block_count * block_size, block_size);
   const File &const_file = file;
-  for (uint32_t block = 0; block < block_count; ++block)
+  for (uint32_t block = 0; block < block_count; ++block) {
     ASSERT_EQ(file.allocate(block_size), static_cast<int32_t>(block * block_size));
+  }
 
   std::vector<uint32_t> copied(block_size, 0xFFFFFFFFu);
   const uint32_t reused_base = 9 * block_size;
   const_file.copy_to(reused_base, block_size, std::as_writable_bytes(std::span(copied)));
-  for (uint32_t value : copied)
+  for (uint32_t value : copied) {
     EXPECT_EQ(value, 0u);
+  }
   EXPECT_EQ(const_file[block_count * block_size - 1], 0u);
   EXPECT_EQ(file.materialized_chunk_count(), 0u);
 
-  for (uint32_t reg = 0; reg < block_count * block_size; ++reg)
+  for (uint32_t reg = 0; reg < block_count * block_size; ++reg) {
     file[reg] = reg + 1;
+  }
   // The 104-register layout crosses a 4 KiB chunk boundary in this block.
   const_file.copy_to(reused_base, block_size, std::as_writable_bytes(std::span(copied)));
-  for (uint32_t reg = 0; reg < block_size; ++reg)
+  for (uint32_t reg = 0; reg < block_size; ++reg) {
     EXPECT_EQ(copied[reg], reused_base + reg + 1);
+  }
 
   file.free(reused_base);
   ASSERT_EQ(file.allocate(1), static_cast<int32_t>(reused_base));
@@ -198,8 +206,9 @@ TEST_P(LazyScalarRegisterFileTest, SharedChunksPreserveNeighborsAndClearReusedBl
     const bool was_freed = reg >= reused_base && reg < reused_base + block_size;
     EXPECT_EQ(const_file[reg], was_freed ? 0u : reg + 1) << reg;
   }
-  for (uint32_t block = 0; block < block_count; ++block)
+  for (uint32_t block = 0; block < block_count; ++block) {
     file.free(block * block_size);
+  }
   EXPECT_EQ(file.materialized_chunk_count(), 0u);
   ASSERT_EQ(file.allocate(block_size), 0);
   EXPECT_EQ(const_file[block_size - 1], 0u);
@@ -288,8 +297,9 @@ TEST(RegisterFileTest, SoftwareLazyLogicalRangeTraversalAndCopyCrossChunks) {
 
   const size_t byte_count = static_cast<size_t>(reg_count) * sizeof(Vgpr) - 3;
   std::vector<std::byte> source(byte_count);
-  for (size_t idx = 0; idx < source.size(); ++idx)
+  for (size_t idx = 0; idx < source.size(); ++idx) {
     source[idx] = static_cast<std::byte>((idx * 37 + 11) & 0xFF);
+  }
   file.copy_from(0, reg_count, source);
 
   std::vector<std::byte> copied(byte_count);

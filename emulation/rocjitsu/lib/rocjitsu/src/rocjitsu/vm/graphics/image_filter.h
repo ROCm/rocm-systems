@@ -103,8 +103,9 @@ struct ImageReciprocal {
 /// Keep the reciprocal's carry bit in the mantissa at exact powers of two.
 /// Renormalizing it changes the precision of subsequent aligned products.
 inline ImageReciprocal image_reciprocal(uint32_t value) {
-  if (value == 0)
+  if (value == 0) {
     return {0, 0};
+  }
   const uint32_t leading = std::bit_width(value) - 1;
   const uint32_t index = ((value - (1u << leading)) * 1024) >> leading;
   return {kImageNormReciprocals[index], -static_cast<int>(leading)};
@@ -126,30 +127,35 @@ public:
     const std::array transformed{gradients[0] + gradients[3], gradients[2] - gradients[1],
                                  gradients[0] - gradients[3], gradients[2] + gradients[1]};
     for (uint32_t pair = 0; pair < 2; ++pair) {
-      if (norms[pair] == 0)
+      if (norms[pair] == 0) {
         continue;
+      }
       const auto [reciprocal, reciprocal_exponent] = image_reciprocal(norms[pair]);
       exponents[pair] = 11 + reciprocal_exponent;
-      for (uint32_t i = pair * 2; i < pair * 2 + 2; ++i)
+      for (uint32_t i = pair * 2; i < pair * 2 + 2; ++i) {
         products[i] = (transformed[i] * static_cast<int32_t>(reciprocal) + 512) >> 10;
+      }
     }
     const int exponent = norms[0] == 0   ? exponents[1]
                          : norms[1] == 0 ? exponents[0]
                                          : std::max(exponents[0], exponents[1]);
     for (uint32_t i = 0; i < products.size(); ++i) {
-      if (norms[i / 2] == 0)
+      if (norms[i / 2] == 0) {
         continue;
+      }
       const uint32_t shift = exponent - exponents[i / 2];
-      if (shift)
+      if (shift) {
         products[i] = (products[i] + (1 << (shift - 1))) >> shift;
+      }
     }
     const auto component = [exponent](int32_t x, int32_t y, uint32_t extent) {
       uint32_t norm = image_polygon_norm(x, y);
       const auto [reciprocal, reciprocal_exponent] = image_reciprocal(extent);
       // Convert back to normalized coordinates before truncating the norm.
       norm = (norm * reciprocal + 512) >> 10;
-      if (const uint32_t bits = std::bit_width(norm); bits > 11)
+      if (const uint32_t bits = std::bit_width(norm); bits > 11) {
         norm = (norm >> (bits - 11)) << (bits - 11);
+      }
       return std::ldexp(double(norm), exponent + reciprocal_exponent - 12);
     };
     const std::array sum{products[0] + products[2], products[1] + products[3]};
@@ -181,14 +187,16 @@ inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv
   const std::array<double, 4> gradients{xu, xv, yu, yv};
   const std::array largest{std::max(std::abs(xu), std::abs(yu)),
                            std::max(std::abs(xv), std::abs(yv))};
-  if (largest[0] == 0 && largest[1] == 0)
+  if (largest[0] == 0 && largest[1] == 0) {
     return {};
+  }
   const std::array extents{width, height};
   std::array<int, 2> exponents{};
   std::array<double, 4> scaled{};
   for (uint32_t coordinate = 0; coordinate < 2; ++coordinate) {
-    if (largest[coordinate] == 0)
+    if (largest[coordinate] == 0) {
       continue;
+    }
     int coordinate_exponent;
     std::frexp(largest[coordinate], &coordinate_exponent);
     const int extent_exponent = std::bit_width(extents[coordinate]) - 1;
@@ -210,9 +218,10 @@ inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv
                        : largest[1] == 0 ? exponents[0]
                                          : std::max(exponents[0], exponents[1]);
   std::array<int32_t, 4> fixed{};
-  for (uint32_t i = 0; i < gradients.size(); ++i)
+  for (uint32_t i = 0; i < gradients.size(); ++i) {
     fixed[i] =
         static_cast<int32_t>(std::floor(std::ldexp(scaled[i], exponents[i % 2] - exponent) + 0.5));
+  }
   const uint32_t first_norm = image_polygon_norm(fixed[0] + fixed[3], fixed[1] - fixed[2]);
   const uint32_t second_norm = image_polygon_norm(fixed[0] - fixed[3], fixed[1] + fixed[2]);
   const uint32_t major = (first_norm + second_norm) >> 1;
@@ -220,8 +229,9 @@ inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv
   // differences therefore produce a larger minor axis than positive ones.
   const uint32_t minor = std::abs((int32_t(first_norm) - int32_t(second_norm)) >> 1);
   const auto logarithm = [exponent](uint32_t axis) -> int32_t {
-    if (axis == 0)
+    if (axis == 0) {
       return -8192;
+    }
     const uint32_t leading = std::bit_width(axis) - 1;
     const uint32_t denominator = 1u << leading;
     const uint32_t fraction = (axis - denominator) * 1024;
@@ -243,8 +253,9 @@ inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv
 /// Operand alignment truncates magnitudes; a sum carry drops the low signed
 /// bit. This differs from rounding the final sum in either host FP32 mode.
 inline double image_sample_coordinate(double coordinate, double offset) {
-  if (offset == 0)
+  if (offset == 0) {
     return coordinate;
+  }
   int coordinate_exponent, offset_exponent;
   std::frexp(coordinate, &coordinate_exponent);
   std::frexp(offset, &offset_exponent);
@@ -266,8 +277,9 @@ inline double image_sample_coordinate(double coordinate, double offset) {
 inline uint32_t image_anisotropic_filter_count(const ImageFootprint &footprint,
                                                uint32_t max_anisotropy, uint32_t threshold,
                                                uint32_t bias, uint32_t perf_mod) {
-  if (max_anisotropy == 1)
+  if (max_anisotropy == 1) {
     return 1;
+  }
   const auto [major_lod, minor_lod] = footprint.lods;
   const int32_t footprint_lod = image_anisotropic_lod(major_lod, minor_lod, max_anisotropy);
   const uint32_t perf_scale = kImagePerfScales[perf_mod];
@@ -277,8 +289,9 @@ inline uint32_t image_anisotropic_filter_count(const ImageFootprint &footprint,
   // texel. Applying all bias after that clamp miscounts sub-texel footprints.
   const int32_t biased_lod =
       major_lod - std::max(0, footprint_lod) - std::max(0, minor_lod + bias_lod - footprint_lod);
-  if (biased_lod <= 0)
+  if (biased_lod <= 0) {
     return 1;
+  }
   const double fraction_threshold = (threshold * perf_scale >> 4) * 0.25;
   const double ratio = std::exp2(biased_lod / 256.0);
   // Counts above one are even. The threshold extends each lower even count's interval.
@@ -299,8 +312,9 @@ inline double image_filter_step_truncate(double value) {
 inline double image_anisotropic_filter_step(const ImageFootprint &footprint,
                                             uint32_t max_anisotropy, uint32_t count,
                                             uint32_t unbiased_count, bool linear_mip) {
-  if (count <= 1)
+  if (count <= 1) {
     return 0;
+  }
   const auto [major_lod, minor_lod] = footprint.lods;
   const int32_t rho = std::max(0, image_anisotropic_lod(major_lod, minor_lod, max_anisotropy));
   constexpr std::array<uint16_t, 64> spans{
@@ -321,8 +335,9 @@ inline double image_anisotropic_filter_step(const ImageFootprint &footprint,
   }
   if (unbiased_count == 2) {
     const uint32_t difference = std::clamp(major_lod - rho, 0, 256);
-    if (difference == 0)
+    if (difference == 0) {
       return 0;
+    }
     const int taper = difference < 16 ? -6 : std::min(0, int(std::bit_width(difference)) - 8);
     const int fractional_bits = linear_mip || (rho % 256) < 128 ? 12 : 11;
     const uint32_t fixed =

@@ -20,26 +20,32 @@ namespace {
 
 ClusterLdsMulticastResult write_cluster_lds_target(const ClusterLdsMulticastTransaction &txn,
                                                    const ClusterLdsTarget &target) {
-  if (!target.cu)
+  if (!target.cu) {
     return ClusterLdsMulticastResult::Complete;
+  }
 
   auto &lds = target.cu->lds();
   for (uint32_t lane = 0; lane < txn.wf_size; ++lane) {
-    if ((txn.lane_mask & (1ULL << lane)) == 0)
-      continue;
-    uint32_t data_offset = lane * txn.bytes_per_lane;
-    if (data_offset + txn.bytes_per_lane > txn.payload.size())
-      return ClusterLdsMulticastResult::InvalidPayload;
-    uint64_t lds_addr = cluster_lds_lane_addr(txn, lane, target.lds_base);
-    if (txn.per_lane_addr && lds_addr == kInvalidLdsAddress)
-      continue;
-    if (lds_addr + txn.bytes_per_lane > lds.size_bytes()) {
-      if (!txn.per_lane_addr)
-        return ClusterLdsMulticastResult::InvalidTarget;
+    if ((txn.lane_mask & (1ULL << lane)) == 0) {
       continue;
     }
-    for (uint32_t b = 0; b < txn.bytes_per_lane; ++b)
+    uint32_t data_offset = lane * txn.bytes_per_lane;
+    if (data_offset + txn.bytes_per_lane > txn.payload.size()) {
+      return ClusterLdsMulticastResult::InvalidPayload;
+    }
+    uint64_t lds_addr = cluster_lds_lane_addr(txn, lane, target.lds_base);
+    if (txn.per_lane_addr && lds_addr == kInvalidLdsAddress) {
+      continue;
+    }
+    if (lds_addr + txn.bytes_per_lane > lds.size_bytes()) {
+      if (!txn.per_lane_addr) {
+        return ClusterLdsMulticastResult::InvalidTarget;
+      }
+      continue;
+    }
+    for (uint32_t b = 0; b < txn.bytes_per_lane; ++b) {
       lds.write8(static_cast<uint32_t>(lds_addr + b), txn.payload[data_offset + b]);
+    }
   }
   return ClusterLdsMulticastResult::Complete;
 }
@@ -48,8 +54,9 @@ ClusterLdsMulticastResult write_cluster_lds_target(const ClusterLdsMulticastTran
 
 util::FailureOr<uint64_t> remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
                                                  uint64_t source_lds_addr) {
-  if (source_lds_addr < source_lds_base)
+  if (source_lds_addr < source_lds_base) {
     return util::Result::failure();
+  }
   return static_cast<uint64_t>(target_lds_base) + (source_lds_addr - source_lds_base);
 }
 
@@ -58,8 +65,9 @@ uint64_t cluster_lds_lane_addr(const ClusterLdsMulticastTransaction &txn, uint32
   uint64_t source_lds_addr = static_cast<uint64_t>(txn.source_lds_base) + lane * txn.bytes_per_lane;
   if (txn.per_lane_addr) {
     source_lds_addr = txn.per_lane_lds_addr[lane];
-    if (source_lds_addr == kInvalidLdsAddress || source_lds_addr < txn.source_lds_base)
+    if (source_lds_addr == kInvalidLdsAddress || source_lds_addr < txn.source_lds_base) {
       return kInvalidLdsAddress;
+    }
   }
   // Both address forms above are at or above the source base.
   return remap_cluster_lds_addr(txn.source_lds_base, target_lds_base, source_lds_addr).value();
@@ -97,15 +105,17 @@ bool cluster_lds_source_rank_selected(const ClusterLdsMulticastTransaction &txn)
 ClusterLdsMulticastResult
 ImmediateClusterLdsMulticastEngine::submit(ClusterLdsMulticastTransaction txn,
                                            ClusterLdsMulticastCompletion /*complete*/) {
-  if (!cluster_lds_source_rank_selected(txn))
+  if (!cluster_lds_source_rank_selected(txn)) {
     return ClusterLdsMulticastResult::Complete;
+  }
 
   auto target_it = std::ranges::find_if(txn.targets, [&](const auto &target) {
     return target.wg_id == txn.source_wg_id && target.cluster_rank == txn.source_cluster_rank;
   });
 
-  if (target_it != txn.targets.end())
+  if (target_it != txn.targets.end()) {
     return write_cluster_lds_target(txn, *target_it);
+  }
   return ClusterLdsMulticastResult::Complete;
 }
 

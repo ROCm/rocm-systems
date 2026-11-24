@@ -101,8 +101,9 @@ std::unique_ptr<MesBlockModel> MesBlockModel::create(const IpBlock &block,
 std::vector<RegisterClaim> MesBlockModel::claims() const {
   std::vector<RegisterClaim> claimed;
   claimed.reserve(kWritableRegisters.size() + 5);
-  for (const uint32_t reg : kWritableRegisters)
+  for (const uint32_t reg : kWritableRegisters) {
     claimed.push_back({.segment_index = kGcSegment, .first_dword = reg, .count = 1});
+  }
   claimed.push_back(
       {.segment_index = kGcSegment, .first_dword = kQueueWritePointerLow, .count = 2});
   claimed.push_back({.segment_index = kGcControlSegment, .first_dword = kMesControl, .count = 1});
@@ -117,8 +118,9 @@ bool MesBlockModel::attach_engine(
     std::shared_ptr<amdgpu::SdmaQueueBindingFactory> sdma_queue_binding_factory,
     amdgpu::InterruptSink interrupt_sink,
     std::function<amdgpu::InterruptSubscription()> make_vm_fault_subscription) {
-  if (engine_ != nullptr)
+  if (engine_ != nullptr) {
     return engine_ == &engine;
+  }
   amdgpu::MesFrontendCallbacks callbacks(
       [this](uint64_t register_dword, uint32_t value) {
         return write_pm4_uconfig_register(register_dword, value);
@@ -140,10 +142,12 @@ bool MesBlockModel::attach_engine(
 }
 
 bool MesBlockModel::detach_engine() {
-  if (engine_ == nullptr)
+  if (engine_ == nullptr) {
     return true;
-  if (!engine_->detach_frontend())
+  }
+  if (!engine_->detach_frontend()) {
     return false;
+  }
   engine_ = nullptr;
   return true;
 }
@@ -151,11 +155,13 @@ bool MesBlockModel::detach_engine() {
 bool MesBlockModel::teardown_queues() { return engine_ == nullptr || engine_->teardown_queues(); }
 
 bool MesBlockModel::reset() {
-  if (engine_ != nullptr && !engine_->reset())
+  if (engine_ != nullptr && !engine_->reset()) {
     return false;
+  }
   bool defined = true;
-  for (const uint32_t reg : kWritableRegisters)
+  for (const uint32_t reg : kWritableRegisters) {
     defined = registers_.define(kGcSegment, reg, 0) && defined;
+  }
   defined = registers_.define(kGcSegment, kQueueWritePointerLow, 0) && defined;
   defined = registers_.define(kGcSegment, kQueueWritePointerHigh, 0) && defined;
   defined = registers_.define(kGcControlSegment, kMesControl, 0) && defined;
@@ -197,10 +203,12 @@ void MesBlockModel::update_kernel_queue_pointers(uint64_t read_pointer, uint64_t
 DoorbellDisposition MesBlockModel::observe_doorbell_write(uint64_t byte_offset,
                                                           uint64_t write_pointer, std::size_t width,
                                                           PciMemoryAccess &memory) {
-  if (width != sizeof(uint32_t) && width != sizeof(uint64_t))
+  if (width != sizeof(uint32_t) && width != sizeof(uint64_t)) {
     return DoorbellDisposition::Ignored;
-  if (engine_ == nullptr)
+  }
+  if (engine_ == nullptr) {
     return DoorbellDisposition::Faulted;
+  }
 
   const std::shared_ptr<simdojo::PciTransportSession> session = memory.capture_transport_session();
   amdgpu::MesDoorbellContext context(

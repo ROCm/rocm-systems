@@ -35,8 +35,9 @@ class alignas(64) PartitionContext {
 public:
   explicit PartitionContext(PartitionID pid, uint32_t num_partitions) : partition_id(pid) {
     incoming.reserve(num_partitions);
-    for (uint32_t i = 0; i < num_partitions; ++i)
+    for (uint32_t i = 0; i < num_partitions; ++i) {
       incoming.push_back(std::make_unique<CrossPartitionQueue>());
+    }
   }
 
   // Non-copyable, non-movable (atomics are not movable).

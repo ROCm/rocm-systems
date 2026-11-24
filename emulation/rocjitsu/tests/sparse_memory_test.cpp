@@ -34,15 +34,17 @@ TEST(SparseMemoryThreadingTest, ConcurrentDifferentPageWritesArePreserved) {
       for (uint32_t i = 0; i < kPagesPerThread; ++i) {
         const uint64_t addr =
             kBase + (static_cast<uint64_t>(i) * kThreads + tid) * simdojo::SparseMemory::PAGE_SIZE;
-        for (uint32_t b = 0; b < page.size(); ++b)
+        for (uint32_t b = 0; b < page.size(); ++b) {
           page[b] = static_cast<uint8_t>((tid << 4) ^ i ^ b);
+        }
         memory.write_block(addr, page);
       }
     });
   }
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   EXPECT_EQ(memory.num_pages(), kThreads * kPagesPerThread);
 
@@ -52,8 +54,9 @@ TEST(SparseMemoryThreadingTest, ConcurrentDifferentPageWritesArePreserved) {
     for (uint32_t i = 0; i < kPagesPerThread; ++i) {
       const uint64_t addr =
           kBase + (static_cast<uint64_t>(i) * kThreads + tid) * simdojo::SparseMemory::PAGE_SIZE;
-      for (uint32_t b = 0; b < expected.size(); ++b)
+      for (uint32_t b = 0; b < expected.size(); ++b) {
         expected[b] = static_cast<uint8_t>((tid << 4) ^ i ^ b);
+      }
       memory.read_block(addr, actual);
       EXPECT_EQ(actual, expected) << "addr=0x" << std::hex << addr;
       uint32_t expected_word = 0;
@@ -79,13 +82,15 @@ TEST(SparseMemoryThreadingTest, ConcurrentSamePageWritesArePreserved) {
       std::array<uint8_t, kBytesPerThread> bytes{};
       std::ranges::fill(bytes, static_cast<uint8_t>(0x20 + tid));
       start.arrive_and_wait();
-      for (uint32_t iteration = 0; iteration < 64; ++iteration)
+      for (uint32_t iteration = 0; iteration < 64; ++iteration) {
         memory.write_block(kBase + tid * kBytesPerThread, bytes);
+      }
     });
   }
 
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
 
   std::array<uint8_t, simdojo::SparseMemory::PAGE_SIZE> actual{};
   memory.read_block(kBase, actual);
@@ -102,8 +107,9 @@ TEST(SparseMemoryTest, UnalignedBlockRoundTripCrossesPageBoundary) {
 
   constexpr uint64_t kAddr = simdojo::SparseMemory::PAGE_SIZE - 37;
   std::array<uint8_t, 128> input{};
-  for (size_t i = 0; i < input.size(); ++i)
+  for (size_t i = 0; i < input.size(); ++i) {
     input[i] = static_cast<uint8_t>((i * 17) ^ 0xA5);
+  }
 
   memory.write_block(kAddr, input);
 
@@ -135,10 +141,12 @@ TEST(SparseMemoryTest, HasPageSeesPagesWrittenThroughEveryStripe) {
 
   // Spread across many pages so the answer cannot come from one lucky stripe:
   // the old page-number key collided with the aligned key only at address 0.
-  for (uint64_t page = 0; page < 64; ++page)
+  for (uint64_t page = 0; page < 64; ++page) {
     memory.write8(page * kPageSize + 8u, static_cast<uint8_t>(page));
-  for (uint64_t page = 0; page < 64; ++page)
+  }
+  for (uint64_t page = 0; page < 64; ++page) {
     EXPECT_TRUE(memory.has_page(page * kPageSize + 8u)) << "page " << page;
+  }
 }
 
 TEST(SparseMemoryThreadingTest, ConcurrentOverlappingBlocksRemainAtomicPerPage) {
@@ -154,13 +162,15 @@ TEST(SparseMemoryThreadingTest, ConcurrentOverlappingBlocksRemainAtomicPerPage) 
   std::barrier start(2);
   std::thread first_writer([&] {
     start.arrive_and_wait();
-    for (uint32_t iteration = 0; iteration < 128; ++iteration)
+    for (uint32_t iteration = 0; iteration < 128; ++iteration) {
       memory.write_block(kBase, first);
+    }
   });
   std::thread second_writer([&] {
     start.arrive_and_wait();
-    for (uint32_t iteration = 0; iteration < 128; ++iteration)
+    for (uint32_t iteration = 0; iteration < 128; ++iteration) {
       memory.write_block(kBase, second);
+    }
   });
 
   first_writer.join();

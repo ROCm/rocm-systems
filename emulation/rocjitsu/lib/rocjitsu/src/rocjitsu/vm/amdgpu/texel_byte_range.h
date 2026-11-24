@@ -24,19 +24,23 @@ inline uint64_t image_tap_misses(const GraphicsSampleAccess::Tap &tap) { return 
 // The pipeline issues one address set per filtered tap or multisample fragment.
 template <typename State, typename Visit> bool visit_image_sample_taps(State &state, Visit visit) {
   auto apply = [&](auto &tap) {
-    if constexpr (std::is_const_v<State>)
+    if constexpr (std::is_const_v<State>) {
       visit(std::as_const(tap));
-    else
+    } else {
       visit(tap);
+    }
   };
   if (state.image_sample) {
-    for (auto &tap : state.image_sample->taps)
+    for (auto &tap : state.image_sample->taps) {
       apply(tap);
+    }
     return true;
   }
   if (state.graphics_sample) {
-    for (auto &tap : std::span(state.graphics_sample->taps).first(state.graphics_sample->tap_count))
+    for (auto &tap :
+         std::span(state.graphics_sample->taps).first(state.graphics_sample->tap_count)) {
       apply(tap);
+    }
     return true;
   }
   return false;
@@ -56,11 +60,13 @@ bool any_texel_byte_range(const VectorMemState &d, uint32_t lane, uint64_t base,
   const bool swizzled = d.scratch_swizzle && (d.scratch_lane_mask & lane_bit);
   const uint32_t unit = d.scratch_swizzle_unit;
   const uint32_t first_byte = swizzled ? (base - d.scratch_addr_base_offset) % unit : 0;
-  if (!swizzled && element_lanes.empty())
+  if (!swizzled && element_lanes.empty()) {
     return visit(MemoryByteRange{base, d.num_elems * d.elem_size});
+  }
   for (uint32_t elem = 0; elem < d.num_elems; ++elem) {
-    if (!element_lanes.empty() && !(element_lanes[elem] & lane_bit))
+    if (!element_lanes.empty() && !(element_lanes[elem] & lane_bit)) {
       continue;
+    }
     uint32_t copied = elem * d.elem_size;
     const uint32_t end = copied + d.elem_size;
     while (copied < end) {
@@ -70,8 +76,9 @@ bool any_texel_byte_range(const VectorMemState &d, uint32_t lane, uint64_t base,
                                               logical % unit
                                         : base + copied;
       const uint32_t size = swizzled ? std::min(end - copied, unit - logical % unit) : end - copied;
-      if (visit(MemoryByteRange{address, size}))
+      if (visit(MemoryByteRange{address, size})) {
         return true;
+      }
       copied += size;
     }
   }
@@ -87,8 +94,9 @@ inline bool overlaps_nonresident_prt(MemoryByteRange access, const PrtRanges &ra
 inline uint64_t nonresident_texel_lanes(const VectorMemState &d,
                                         std::span<const uint64_t> addresses, uint64_t lanes,
                                         const PrtRanges *ranges) {
-  if (!ranges || ranges->empty())
+  if (!ranges || ranges->empty()) {
     return 0;
+  }
   const auto overlaps = [&](MemoryByteRange access) {
     return overlaps_nonresident_prt(access, *ranges);
   };
@@ -96,8 +104,9 @@ inline uint64_t nonresident_texel_lanes(const VectorMemState &d,
   while (lanes) {
     const auto lane = std::countr_zero(lanes);
     lanes &= lanes - 1;
-    if (any_texel_byte_range(d, lane, addresses[lane], d.element_lane_masks, overlaps))
+    if (any_texel_byte_range(d, lane, addresses[lane], d.element_lane_masks, overlaps)) {
       missing |= uint64_t{1} << lane;
+    }
   }
   return missing;
 }

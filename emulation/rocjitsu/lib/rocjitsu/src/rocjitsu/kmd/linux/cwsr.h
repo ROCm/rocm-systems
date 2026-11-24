@@ -129,12 +129,15 @@ constexpr uint32_t cwsr_area_for_xcc(rocjitsu::IsaFamily arch, uint32_t xcc_id) 
 ///        gc_ip_version_for_gfx_target_version() produces.
 /// @returns The exact modelled architecture, or INVALID for unsupported ones.
 constexpr rocjitsu::IsaFamily cwsr_arch_for_gc_ip_version(uint32_t gc_ip_version) {
-  if (gc_ip_version == make_gc_ip_version(9, 4, 3)) // gfx942
+  if (gc_ip_version == make_gc_ip_version(9, 4, 3)) { // gfx942
     return rocjitsu::IsaFamily::Cdna3;
-  if (gc_ip_version == make_gc_ip_version(9, 5, 0)) // gfx950
+  }
+  if (gc_ip_version == make_gc_ip_version(9, 5, 0)) { // gfx950
     return rocjitsu::IsaFamily::Cdna4;
-  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) // gfx1250
+  }
+  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) { // gfx1250
     return rocjitsu::IsaFamily::Cdna5;
+  }
   return rocjitsu::IsaFamily::Invalid;
 }
 
@@ -185,25 +188,29 @@ struct CwsrProducerLimits {
 cwsr_producer_limits_for_device(const config::KfdDeviceConfig &device, uint32_t num_xcc) {
   const rocjitsu::IsaFamily arch =
       cwsr_arch_for_gc_ip_version(gc_ip_version_for_gfx_target_version(device.gfx_target_version));
-  if (num_xcc == 0 || !cwsr_capacity_eligible_device(device, arch))
+  if (num_xcc == 0 || !cwsr_capacity_eligible_device(device, arch)) {
     return {};
+  }
   const uint64_t kfd_cus =
       ((uint64_t{device.simd_count} + device.simd_per_cu - 1) / device.simd_per_cu + num_xcc - 1) /
       num_xcc;
   // KFD can advertise only enabled SIMDs, while the simulator can stop waves
   // in every configured CU slot. Bound the producer's complete XCC.
   const uint64_t arrays = std::max(1u, device.num_shader_arrays_per_engine);
-  if (device.num_shader_engines != 0 && arrays > kCwsrMaxAlignedBytes / device.num_shader_engines)
+  if (device.num_shader_engines != 0 && arrays > kCwsrMaxAlignedBytes / device.num_shader_engines) {
     return {};
+  }
   const uint64_t shader_arrays = uint64_t{device.num_shader_engines} * arrays;
-  if (shader_arrays != 0 && device.num_cu_per_sh > kCwsrMaxAlignedBytes / shader_arrays)
+  if (shader_arrays != 0 && device.num_cu_per_sh > kCwsrMaxAlignedBytes / shader_arrays) {
     return {};
+  }
   const uint64_t simulated_cus = shader_arrays * device.num_cu_per_sh;
   const uint64_t active_cus = std::max(kfd_cus, simulated_cus);
   const uint64_t slots_per_cu = std::max(uint64_t{device.simd_per_cu} * device.max_waves_per_simd,
                                          uint64_t{device.max_slots_scratch_cu});
-  if (active_cus == 0 || slots_per_cu == 0 || active_cus > kCwsrMaxAlignedBytes / slots_per_cu)
+  if (active_cus == 0 || slots_per_cu == 0 || active_cus > kCwsrMaxAlignedBytes / slots_per_cu) {
     return {};
+  }
   return {active_cus, active_cus * slots_per_cu};
 }
 
@@ -249,10 +256,12 @@ constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot, rocjitsu::IsaFamily arch
                                          uint32_t sgpr_count = kCwsrSavedSgprSlots) {
   const uint32_t end = cwsr_sgpr_alias_end(arch, sgpr_count);
   const uint32_t vcc = cdna3::vcc_base(end);
-  if (slot == vcc || slot == vcc + 1)
+  if (slot == vcc || slot == vcc + 1) {
     return true;
-  if (cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5)
+  }
+  if (cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5) {
     return slot >= kCwsrGfx1250SavedSgprSlots - 16;
+  }
   const uint32_t flat_scratch = cdna3::flat_scratch_base(end);
   return slot == flat_scratch || slot == flat_scratch + 1;
 }

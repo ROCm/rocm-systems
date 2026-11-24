@@ -34,8 +34,9 @@ util::FailureOr<ArithmeticPolicy> parse_arithmetic_policy(std::string_view seman
   for (auto mode : {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
                     ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
                     ArithmeticSemantics::BitExactEmpirical, ArithmeticSemantics::Compatibility}) {
-    if (semantics == arithmetic_semantics_name(mode))
+    if (semantics == arithmetic_semantics_name(mode)) {
       return ArithmeticPolicy{mode};
+    }
   }
   return util::Result::failure();
 }

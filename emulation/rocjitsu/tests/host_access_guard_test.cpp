@@ -43,14 +43,16 @@ TEST(HostAccessGuardDeathTest, DisabledRecoveryDeliversRealFaultsToTheHost) {
       EXPECT_EXIT(([&] {
                     if (disable_memfd) {
                       rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
-                      if (::testing::Test::HasFatalFailure())
+                      if (::testing::Test::HasFatalFailure()) {
                         _exit(5);
+                      }
                     }
                     struct sigaction action {};
                     action.sa_handler = [](int signal_number) { _exit(64 + signal_number); };
                     if (sigemptyset(&action.sa_mask) != 0 ||
-                        sigaction(expected_signal, &action, nullptr) != 0)
+                        sigaction(expected_signal, &action, nullptr) != 0) {
                       _exit(1);
+                    }
                     rocjitsu::install_host_access_guard();
                     const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
                     int descriptor = -1;
@@ -59,16 +61,18 @@ TEST(HostAccessGuardDeathTest, DisabledRecoveryDeliversRealFaultsToTheHost) {
                       // Access beyond an empty regular file produces a real SIGBUS
                       // even on hosts where memfd_create is unavailable.
                       FILE *file = std::tmpfile();
-                      if (!file)
+                      if (!file) {
                         _exit(2);
+                      }
                       descriptor = fileno(file);
                       flags = MAP_SHARED;
                     }
                     void *page =
                         mmap(nullptr, page_size, PROT_READ | PROT_WRITE, flags, descriptor, 0);
                     if (page == MAP_FAILED ||
-                        (expected_signal == SIGSEGV && mprotect(page, page_size, PROT_NONE) != 0))
+                        (expected_signal == SIGSEGV && mprotect(page, page_size, PROT_NONE) != 0)) {
                       _exit(3);
+                    }
                     (void)rocjitsu::with_host_access_guard(
                         [&] { *static_cast<volatile unsigned char *>(page) = 1; });
                     _exit(4);
@@ -87,8 +91,9 @@ TEST(HostAccessGuardTest, DisabledRecoveryPreservesHostActions) {
     ASSERT_EQ(sigaction(signal_number, nullptr, &after), 0);
     EXPECT_EQ(after.sa_sigaction, before.sa_sigaction);
     EXPECT_EQ(after.sa_flags, before.sa_flags);
-    for (int member = 1; member < NSIG; ++member)
+    for (int member = 1; member < NSIG; ++member) {
       EXPECT_EQ(sigismember(&after.sa_mask, member), sigismember(&before.sa_mask, member));
+    }
   }
 }
 #endif

@@ -72,8 +72,9 @@ bool read_exactly(int socket, void *into, std::size_t length) {
 VfioUserClient::~VfioUserClient() { close_socket(); }
 
 bool VfioUserClient::set_io_timeout(std::chrono::seconds timeout) {
-  if (socket_ < 0 || timeout <= std::chrono::seconds::zero())
+  if (socket_ < 0 || timeout <= std::chrono::seconds::zero()) {
     return false;
+  }
   const timeval limit{.tv_sec = static_cast<time_t>(timeout.count()), .tv_usec = 0};
   return ::setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof(limit)) == 0 &&
          ::setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof(limit)) == 0;

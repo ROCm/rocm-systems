@@ -58,14 +58,16 @@ struct PacketProcessResult {
   if (result.status == PacketProcessStatus::NeedInput) {
     return result.retirement == PacketRetirement::Hold && result.required_bytes > available_bytes;
   }
-  if (result.required_bytes != 0)
+  if (result.required_bytes != 0) {
     return false;
+  }
 
   if (result.status == PacketProcessStatus::Complete) {
     return result.retirement == PacketRetirement::Retire && result.retirement_bytes != 0;
   }
-  if (result.status == PacketProcessStatus::Blocked)
+  if (result.status == PacketProcessStatus::Blocked) {
     return result.retirement == PacketRetirement::Hold;
+  }
 
   return result.retirement == PacketRetirement::Hold || result.retirement_bytes != 0;
 }

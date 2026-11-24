@@ -67,14 +67,16 @@ TEST(L2MaintenanceMutexTest, ReaderRechecksAdmissionAfterWriterEnters) {
       if (blocking) {
         MutexTestAccess::lock_shared(mutex, hooks);
         // If the recheck was removed, entry precedes the retry notification.
-        if (outcome.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        if (outcome.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
           reader_outcome.set_value(true);
+        }
         mutex.unlock_shared();
       } else {
         const bool acquired = MutexTestAccess::try_lock_shared(mutex, hooks);
         reader_outcome.set_value(acquired);
-        if (acquired)
+        if (acquired) {
           mutex.unlock_shared();
+        }
       }
     });
     checked_open.wait();
@@ -111,8 +113,9 @@ TEST(L2MaintenanceMutexTest, WriterWaitsAgainAfterNonzeroCounterWake) {
   };
   std::jthread writer([&] {
     MutexTestAccess::lock(mutex, Hooks{waiting_for_two, resume_writer, writer_outcome});
-    if (outcome.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    if (outcome.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
       writer_outcome.set_value(true);
+    }
     mutex.unlock();
   });
   waiting_for_two.wait();
@@ -137,10 +140,11 @@ TEST(L2MaintenanceMutexTest, CoherenceDomainWritersUnderOuterLocks) {
   std::array<rocjitsu::amdgpu::L2MaintenanceMutex, kCaches> mutexes;
   std::array<std::unique_lock<rocjitsu::amdgpu::L2MaintenanceMutex>, kCaches> writers;
   for (size_t i = 0; i < kCaches; ++i) {
-    if (i < kCaches / 2)
+    if (i < kCaches / 2) {
       writers[i] = std::unique_lock(mutexes[i]);
-    else
+    } else {
       writers[i] = std::unique_lock(mutexes[i], std::try_to_lock);
+    }
     ASSERT_TRUE(writers[i].owns_lock());
   }
 
@@ -168,8 +172,9 @@ TEST(L2MaintenanceMutexTest, FailedWriterTryReopensReaderAdmission) {
   // Verify failure cleanup before any later exclusive unlock can reopen it.
   const bool new_reader = mutex.try_lock_shared();
   EXPECT_TRUE(new_reader);
-  if (new_reader)
+  if (new_reader) {
     mutex.unlock_shared();
+  }
   release.set_value();
   reader.join();
   ASSERT_TRUE(mutex.try_lock());
@@ -184,12 +189,14 @@ TEST(L2MaintenanceMutexTest, WriterExcludesReadersAndOtherWriters) {
   std::jthread contender([&] {
     const bool read_acquired = mutex.try_lock_shared();
     EXPECT_FALSE(read_acquired);
-    if (read_acquired)
+    if (read_acquired) {
       mutex.unlock_shared();
+    }
     const bool write_acquired = mutex.try_lock();
     EXPECT_FALSE(write_acquired);
-    if (write_acquired)
+    if (write_acquired) {
       mutex.unlock();
+    }
   });
   contender.join();
 }
@@ -209,8 +216,9 @@ TEST(L2MaintenanceMutexTest, ConcurrentReadersObserveCompleteWriterUpdates) {
       start.arrive_and_wait();
       for (unsigned j = 0; j < kIterations; ++j) {
         std::shared_lock lock(mutex);
-        if (first != second)
+        if (first != second) {
           inconsistent.store(true, std::memory_order_relaxed);
+        }
       }
     });
   }
@@ -284,8 +292,9 @@ TEST(L2MaintenanceMutexTest, CollidingReadersOverlapAndWriterWaitsForTheLastOwne
       }
       held_changed.notify_one();
       others_released.wait();
-      if (i == last_reader)
+      if (i == last_reader) {
         last_released.wait();
+      }
     });
   }
   bool all_held;
@@ -332,9 +341,11 @@ TEST(L2MaintenanceMutexTest, CollidingReadersOverlapAndWriterWaitsForTheLastOwne
   }
   EXPECT_TRUE(admission_closed);
   release_others.set_value();
-  for (size_t i = 0; i < kReaders; ++i)
-    if (i != last_reader)
+  for (size_t i = 0; i < kReaders; ++i) {
+    if (i != last_reader) {
       readers[i].join();
+    }
+  }
   EXPECT_EQ(acquired.wait_for(std::chrono::milliseconds(10)), std::future_status::timeout);
   release_last.set_value();
   readers.clear();
@@ -378,8 +389,9 @@ TEST(L2MaintenanceMutexTest, RepeatedMaintenanceWakesArrivingReaders) {
         start.arrive_and_wait();
         {
           std::shared_lock lock(mutex);
-          if (payload[i] != round || payload[payload.size() - 1 - i] != round)
+          if (payload[i] != round || payload[payload.size() - 1 - i] != round) {
             failures.fetch_add(1, std::memory_order_relaxed);
+          }
         }
         done.arrive_and_wait();
       }

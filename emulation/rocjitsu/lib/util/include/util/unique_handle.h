@@ -38,8 +38,9 @@ public:
 
   BasicUniqueHandle(BasicUniqueHandle &&other) noexcept : handle_(other.release()) {}
   BasicUniqueHandle &operator=(BasicUniqueHandle &&other) noexcept {
-    if (this != &other)
+    if (this != &other) {
       reset(other.release());
+    }
     return *this;
   }
 
@@ -55,11 +56,13 @@ public:
   /// @brief Close the current handle and take ownership of @p handle.
   void reset(handle_type handle = Traits::invalid()) noexcept {
     handle = normalize(handle);
-    if (handle_ == handle)
+    if (handle_ == handle) {
       return;
+    }
     handle_type previous = std::exchange(handle_, handle);
-    if (Traits::is_valid(previous))
+    if (Traits::is_valid(previous)) {
       Traits::close(previous);
+    }
   }
 
 private:

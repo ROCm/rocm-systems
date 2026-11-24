@@ -148,10 +148,12 @@ public:
   /// may leave additional zero pages but cannot leave a partial byte write.
   /// @returns False if the span exceeds the address space.
   [[nodiscard]] bool reserve_write_pages(uint64_t addr, size_t size) {
-    if (size == 0)
+    if (size == 0) {
       return true;
-    if (size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+    }
+    if (size - 1 > std::numeric_limits<uint64_t>::max() - addr) {
       return false;
+    }
     size_t visited = 0;
     while (visited < size) {
       const uint64_t ea = addr + visited;
@@ -171,8 +173,9 @@ public:
   /// observe the mutation atomically. Missing pages are allocated as zeroes.
   /// @returns false when the range is empty or crosses a page boundary.
   template <typename Mutation> bool atomic_modify(uint64_t addr, size_t size, Mutation &&mutation) {
-    if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
+    if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE) {
       return false;
+    }
     auto &stripe = page_stripe(addr);
     std::unique_lock<std::shared_mutex> lock(stripe.mutex);
     Page &page = get_page_locked(stripe, addr);
@@ -205,11 +208,13 @@ public:
       {
         std::shared_lock<std::shared_mutex> lock(stripe.mutex);
         pages.reserve(stripe.pages.size());
-        for (const auto &[addr, page] : stripe.pages)
+        for (const auto &[addr, page] : stripe.pages) {
           pages.emplace_back(addr, page);
+        }
       }
-      for (const auto &[addr, page] : pages)
+      for (const auto &[addr, page] : pages) {
         fn(addr, page);
+      }
     }
   }
 

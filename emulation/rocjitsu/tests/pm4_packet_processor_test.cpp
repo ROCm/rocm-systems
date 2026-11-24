@@ -36,13 +36,15 @@ public:
         break;
       }
     }
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     const VmPermissions permissions = protected_address_ && address == *protected_address_
                                           ? protected_permissions_
                                           : VmPermissions{.readable = true, .writable = true};
-    if (!permissions.allows(access))
+    if (!permissions.allows(access)) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {.outcome = VmAccessOutcome::Complete,
             .translation = {.domain = VmMemoryDomain::System,
                             .address = address,
@@ -52,10 +54,12 @@ public:
   }
 
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
-    if (unavailable_read_ && address == *unavailable_read_)
+    if (unavailable_read_ && address == *unavailable_read_) {
       return VmAccessOutcome::Unavailable;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     return VmAccessOutcome::Complete;
@@ -63,18 +67,21 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
-    if (unavailable_read_ && address == *unavailable_read_)
+    if (unavailable_read_ && address == *unavailable_read_) {
       return {.outcome = VmAccessOutcome::Unavailable};
+    }
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
-        width > bytes_.size() - address)
+        width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Malformed};
+    }
     uint64_t value = 0;
     std::memcpy(&value, bytes_.data() + address, width);
     return {.outcome = VmAccessOutcome::Complete, .value = value};
@@ -83,8 +90,9 @@ public:
   VmAccessOutcome atomic_store(VmMemoryDomain, uint64_t address, uint32_t width,
                                uint64_t value) override {
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
-        width > bytes_.size() - address)
+        width > bytes_.size() - address) {
       return VmAccessOutcome::Malformed;
+    }
     if (store_outcome_once_ && address == store_outcome_once_->first) {
       const VmAccessOutcome outcome = store_outcome_once_->second;
       store_outcome_once_.reset();
@@ -237,8 +245,9 @@ TEST_F(Pm4PacketProcessorTest, LoadsHighRegisterAddressesInTheQueueAddressSpace)
     SCOPED_TRACE(native_ring);
     memory->aliases = {native_ring ? raw : canonical, wide};
     const uint32_t value = native_ring ? 40 : 20;
-    for (uint32_t i = 0; i < 4; ++i)
+    for (uint32_t i = 0; i < 4; ++i) {
       memory->store(i * 4, value + i);
+    }
     submit(packets, native_ring);
     queue.commands.submissions.front().graphics_engine = true;
     ASSERT_EQ(service(), Pm4TestStatus::Ready);
@@ -424,8 +433,9 @@ TEST_F(Pm4PacketProcessorTest, RetriesRegisterBackpressureWithoutAdvancingThePac
   bool ready = false;
   uint32_t writes = 0;
   queue.packet_callbacks.write_uconfig_register = [&](uint64_t, uint32_t) {
-    if (!ready)
+    if (!ready) {
       return Pm4RegisterWriteStatus::Blocked;
+    }
     ++writes;
     return Pm4RegisterWriteStatus::Complete;
   };
@@ -530,8 +540,9 @@ TEST_F(Pm4PacketProcessorTest, RejectsInvalidRegisterOffsetsBeforeApplyingAnEffe
 
 TEST_F(Pm4PacketProcessorTest, ReturnsFromAnIndirectBufferWithPersistentRegisterState) {
   const std::array child{0xc0017600u, kPm4ComputeNumThreadY, 8u};
-  for (size_t word_index = 0; word_index < child.size(); ++word_index)
+  for (size_t word_index = 0; word_index < child.size(); ++word_index) {
     memory->store<uint32_t>(0x400 + word_index * 4, child[word_index]);
+  }
   const std::array words{0xc0017600u, kPm4ComputeNumThreadX, 4u, 0xc0023f00u, 0x400u, 0u, 3u,
                          0xc0017600u, kPm4ComputeNumThreadZ, 2u};
   submit(words);

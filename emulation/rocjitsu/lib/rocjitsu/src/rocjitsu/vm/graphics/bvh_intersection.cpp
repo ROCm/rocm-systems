@@ -68,8 +68,9 @@ BvhResultWords box(const Node &node, const BvhIntersectionAccess &resource, cons
   for (unsigned child_index = 0; child_index < children.size(); ++child_index) {
     children[child_index] = kInvalidNode;
     if (node[child_index] == kInvalidNode ||
-        culled_child(ray.flags, node[child_index], half ? 0 : node[28] >> (8 * child_index)))
+        culled_child(ray.flags, node[child_index], half ? 0 : node[28] >> (8 * child_index))) {
       continue;
+    }
     // Bounding boxes store min.xyz, max.xyz starting at byte 16.
     const auto bound = [&](unsigned bound_component) {
       const unsigned bound_index = 6 * child_index + bound_component;
@@ -135,9 +136,11 @@ BvhResultWords triangle(const Node &node, const BvhIntersectionAccess &resource,
   const Vector3 vertex0 = vertex(0), vertex1 = vertex(1), vertex2 = vertex(2);
   // W7900 breaks equal-magnitude ties in X, Y, Z order.
   unsigned dominant_axis = 0;
-  for (unsigned axis : {1u, 2u})
-    if (std::abs(ray.direction[axis]) > std::abs(ray.direction[dominant_axis]))
+  for (unsigned axis : {1u, 2u}) {
+    if (std::abs(ray.direction[axis]) > std::abs(ray.direction[dominant_axis])) {
       dominant_axis = axis;
+    }
+  }
   // W7900 returns the three projected edge functions in unnormalized ray space.
   // Each subtraction, product and ordered sum rounds toward zero at FP32 precision.
   std::array<float, 4> bary{};
@@ -171,12 +174,14 @@ BvhResultWords triangle(const Node &node, const BvhIntersectionAccess &resource,
   // edge the dominant ray direction determines the orientation of X.
   const auto covers_edge = [&](unsigned edge_index) {
     const float edge = bary[edge_index];
-    if (edge != 0)
+    if (edge != 0) {
       return denominator < 0 ? edge < 0 : edge > 0;
+    }
     const auto &first = projected[(edge_index + 1) % 3];
     const auto &second = projected[(edge_index + 2) % 3];
-    if (first[1] != second[1])
+    if (first[1] != second[1]) {
       return denominator < 0 ? second[1] < first[1] : second[1] > first[1];
+    }
     const bool decreasing_x = (denominator < 0) != (ray.direction[dominant_axis] < 0);
     return decreasing_x ? second[0] < first[0] : second[0] > first[0];
   };
@@ -196,16 +201,18 @@ BvhResultWords triangle(const Node &node, const BvhIntersectionAccess &resource,
     value = value == 0 ? 0.f : value;
     return flip ? -value : value;
   };
-  for (unsigned vertex_index = 0; vertex_index < 3; ++vertex_index)
+  for (unsigned vertex_index = 0; vertex_index < 3; ++vertex_index) {
     bary[vertex_index] = orient(bary[vertex_index]);
+  }
   numerator = orient(numerator);
   denominator = orient(denominator);
   const bool cull_face = !double_sided && (ray.flags & (denominator >= 0 ? CullFront : CullBack));
   const bool culled = cull_face || (ray.flags & (opaque ? CullOpaque : CullNonOpaque));
   const bool hit = intersect && !culled;
   if (resource.barycentrics) {
-    if (!hit)
+    if (!hit) {
       numerator = std::copysign(kInfinity, denominator);
+    }
     // W7900 aliases selector 3 to the oriented weight of vertex 0.
     bary[3] = bary[0];
     return {std::bit_cast<uint32_t>(numerator), std::bit_cast<uint32_t>(denominator),
@@ -214,8 +221,9 @@ BvhResultWords triangle(const Node &node, const BvhIntersectionAccess &resource,
   }
   // With pointer flags disabled the node holds a base primitive ID shared by its triangles.
   const uint32_t id = resource.pointer_flags ? control : node[15] + triangle_index;
-  if (!hit)
+  if (!hit) {
     return {std::bit_cast<uint32_t>(kInfinity), std::bit_cast<uint32_t>(1.0f), id, 0};
+  }
   return {std::bit_cast<uint32_t>(numerator), std::bit_cast<uint32_t>(denominator), id, 1};
 }
 } // namespace
@@ -229,14 +237,17 @@ util::Result prepare_gfx11_bvh_intersection(Wavefront &wf, VectorMemState &state
                                           detail);
     return util::Result::failure();
   };
-  if (!valid_encoding || !scalar_selector_range_is_backed(wf, descriptor, 4))
+  if (!valid_encoding || !scalar_selector_range_is_backed(wf, descriptor, 4)) {
     return fail("invalid image_bvh encoding or resource tuple");
+  }
   uint32_t word[4];
-  for (unsigned i = 0; i < 4; ++i)
+  for (unsigned i = 0; i < 4; ++i) {
     word[i] = read_scalar_selector(wf, descriptor + i);
+  }
   const auto last_node = gfx11_bvh_last_node(word[2], word[3]);
-  if (!last_node)
+  if (!last_node) {
     return fail("invalid BVH resource type");
+  }
   const uint64_t base = (word[0] | (uint64_t(word[1] & 255) << 32)) << 8;
   auto access = std::make_unique<BvhIntersectionAccess>();
   access->pointer_flags = gfx11_bvh_pointer_flags_enabled(word[3]);
@@ -264,17 +275,20 @@ util::Result prepare_gfx11_bvh_intersection(Wavefront &wf, VectorMemState &state
       return regs.read_vgpr(wf.vgpr_alloc().base + reg, lane);
     };
     uint64_t pointer = read(0);
-    if (wide)
+    if (wide) {
       pointer |= uint64_t(read(1)) << 32;
+    }
     ray.node_type = gfx11_bvh_node_type(pointer);
     ray.flags = access->pointer_flags ? uint16_t(pointer >> 54) : 0;
-    if (!bvh_node_can_load(pointer, *last_node, access->pointer_flags))
+    if (!bvh_node_can_load(pointer, *last_node, access->pointer_flags)) {
       continue;
+    }
     const uint64_t index = gfx11_bvh_node_index(pointer);
     state.per_lane_addr[lane] = addr_calc::buffer_virtual_address(base + index * 64);
     state.lane_mask |= uint64_t{1} << lane;
-    if (ray.node_type == Gfx11BvhNodeType::Box32)
+    if (ray.node_type == Gfx11BvhNodeType::Box32) {
       box32 |= uint64_t{1} << lane;
+    }
     ray.extent = std::bit_cast<float>(read(extent));
     for (unsigned ax = 0; ax < 3; ++ax) {
       ray.origin[ax] = std::bit_cast<float>(read(origin + ax));
@@ -294,8 +308,9 @@ util::Result prepare_gfx11_bvh_intersection(Wavefront &wf, VectorMemState &state
 }
 
 void complete_bvh_intersection(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &state) {
-  if (!cu.owns_vgpr_range(wf, state.dst_reg_base, 4))
+  if (!cu.owns_vgpr_range(wf, state.dst_reg_base, 4)) {
     return;
+  }
   const fp_mode::detail::ScopedFenv environment(0);
   for (uint64_t mask = state.exec_mask; mask; mask &= mask - 1) {
     const unsigned lane = std::countr_zero(mask);
@@ -311,8 +326,9 @@ void complete_bvh_intersection(Wavefront &wf, ComputeUnitCore &cu, const VectorM
                   ray.node_type == Gfx11BvhNodeType::Box32 ? 128 : 64);
       result = triangle_node ? triangle(node, *state.bvh, ray) : box(node, *state.bvh, ray);
     }
-    for (unsigned i = 0; i < result.size(); ++i)
+    for (unsigned i = 0; i < result.size(); ++i) {
       cu.write_vgpr(state.dst_reg_base + i, lane, result[i]);
+    }
   }
 }
 

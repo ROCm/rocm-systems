@@ -48,10 +48,12 @@ inline void reset_gfx11_context_registers(std::array<uint32_t, 0x2000> &register
       {0x2fc, 0x3f800000}, {0x2fd, 0x3f800000}, {0x30e, 0xffffffff}, {0x30f, 0xffffffff},
       {0x311, 0x00000003}, {0x313, 0x00100000},
   };
-  for (const auto &[first, count] : kRanges)
+  for (const auto &[first, count] : kRanges) {
     std::fill_n(registers.begin() + first, count, 0u);
-  for (const auto &[reg, value] : kNonzeroDefaults)
+  }
+  for (const auto &[reg, value] : kNonzeroDefaults) {
     registers[reg] = value;
+  }
 }
 
 } // namespace rocjitsu::amdgpu

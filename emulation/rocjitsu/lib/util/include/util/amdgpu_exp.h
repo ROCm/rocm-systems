@@ -40,18 +40,22 @@ inline uint64_t round_even(uint64_t value, unsigned shift) {
 inline uint32_t evaluate(uint32_t input, bool quiet_snan = true) {
   const uint32_t mag = input & 0x7fffffffu;
   if (mag >= 0x7f800000u) {
-    if (mag > 0x7f800000u)
+    if (mag > 0x7f800000u) {
       return input | (quiet_snan ? 0x00400000u : 0u);
+    }
     return input >> 31 ? 0u : 0x7f800000u;
   }
   // The small-input interval returns one, including negative inputs.
-  if (mag < 0x33800000u)
+  if (mag < 0x33800000u) {
     return 0x3f800000u;
+  }
   const bool negative = input >> 31;
-  if (!negative && mag >= 0x43000000u)
+  if (!negative && mag >= 0x43000000u) {
     return 0x7f800000u;
-  if (negative && mag > 0x42fc0000u)
+  }
+  if (negative && mag > 0x42fc0000u) {
     return 0;
+  }
   // Retain 29 fractional bits. Negative arguments use a ones-complement
   // reduction, so exact negative integers approach the previous interval.
   const int exponent = static_cast<int>(mag >> 23) - 127;

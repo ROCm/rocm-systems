@@ -331,13 +331,15 @@ inline uint32_t amdgpu_rcp_normalized_bits(uint32_t mantissa) {
   const uint32_t end = last;
   while (first < last) {
     const uint32_t middle = first + (last - first) / 2;
-    if ((kAmdgpuRcpCorrections[middle] & 0x7fffu) < key)
+    if ((kAmdgpuRcpCorrections[middle] & 0x7fffu) < key) {
       first = middle + 1;
-    else
+    } else {
       last = middle;
+    }
   }
-  if (first != end && (kAmdgpuRcpCorrections[first] & 0x7fffu) == key)
+  if (first != end && (kAmdgpuRcpCorrections[first] & 0x7fffu) == key) {
     result = (kAmdgpuRcpCorrections[first] & 0x8000u) ? result + 1 : result - 1;
+  }
   return result;
 }
 
@@ -352,18 +354,23 @@ inline float amdgpu_rcp_f32(float value, bool quiet_snan = true) {
   const uint32_t bits = std::bit_cast<uint32_t>(value);
   const uint32_t sign = bits & 0x80000000u;
   const uint32_t magnitude = bits & 0x7fffffffu;
-  if (magnitude > 0x7f800000u)
+  if (magnitude > 0x7f800000u) {
     return std::bit_cast<float>(bits | (quiet_snan ? 0x00400000u : 0u));
-  if (magnitude < 0x00800000u)
+  }
+  if (magnitude < 0x00800000u) {
     return std::bit_cast<float>(sign | 0x7f800000u);
-  if (magnitude == 0x7f800000u)
+  }
+  if (magnitude == 0x7f800000u) {
     return std::bit_cast<float>(sign);
+  }
   const uint32_t normalized = detail::amdgpu_rcp_normalized_bits(magnitude & 0x7fffffu);
   const int exponent = int(normalized >> 23) + 127 - int(magnitude >> 23);
-  if (exponent <= 0)
+  if (exponent <= 0) {
     return std::bit_cast<float>(sign);
-  if (exponent >= 255)
+  }
+  if (exponent >= 255) {
     return std::bit_cast<float>(sign | 0x7f800000u);
+  }
   return std::bit_cast<float>(sign | (uint32_t(exponent) << 23) | (normalized & 0x7fffffu));
 }
 

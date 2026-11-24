@@ -18,8 +18,9 @@ UnixTransport::~UnixTransport() { close(); }
 
 std::unique_ptr<UnixTransport> UnixTransport::listen(const std::string &endpoint) {
   int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (sock < 0)
+  if (sock < 0) {
     return nullptr;
+  }
 
   std::filesystem::create_directories(std::filesystem::path(endpoint).parent_path());
   unlink(endpoint.c_str());
@@ -39,15 +40,17 @@ std::unique_ptr<UnixTransport> UnixTransport::listen(const std::string &endpoint
 
 std::unique_ptr<UnixTransport> UnixTransport::accept() {
   int client = ::accept(fd_, nullptr, nullptr);
-  if (client < 0)
+  if (client < 0) {
     return nullptr;
+  }
   return std::make_unique<UnixTransport>(client);
 }
 
 std::unique_ptr<UnixTransport> UnixTransport::connect(const std::string &endpoint) {
   int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (sock < 0)
+  if (sock < 0) {
     return nullptr;
+  }
 
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;

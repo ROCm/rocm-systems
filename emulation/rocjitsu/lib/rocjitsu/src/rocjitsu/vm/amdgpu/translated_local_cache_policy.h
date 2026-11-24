@@ -42,11 +42,13 @@ inline std::optional<TranslatedLocalLine> query_translated_local_line(const GpuV
   const VmTranslationResult result =
       access.query_translation(line_address, line_size, VmAccessKind::Read);
   if (!result || result.translation.domain != VmMemoryDomain::Local ||
-      result.translation.contiguous_bytes < line_size || !result.translation.permissions.readable)
+      result.translation.contiguous_bytes < line_size || !result.translation.permissions.readable) {
     return std::nullopt;
+  }
   const Mtype effective = effective_mtype(instruction_type, result.translation.mtype);
-  if (effective != Mtype::RW && effective != Mtype::WB && effective != Mtype::NT)
+  if (effective != Mtype::RW && effective != Mtype::WB && effective != Mtype::NT) {
     return std::nullopt;
+  }
   return TranslatedLocalLine{.backing_address = result.translation.address,
                              .mapping_attributes =
                                  translated_mapping_attributes(result.translation),
@@ -68,8 +70,9 @@ inline bool translated_local_tag_matches(const simdojo::CacheTag &tag,
 /// generic cache so a PASID cannot be mistaken for a hardware VMID.
 inline bool cache_tag_matches_completion_access(const simdojo::CacheTag &tag, uint32_t vmid,
                                                 uint64_t cache_identity) {
-  if (tag.cache_identity != cache_identity)
+  if (tag.cache_identity != cache_identity) {
     return false;
+  }
   return (tag.vmid == vmid && tag.address_space_identity == 0) ||
          (tag.vmid == 0 && tag.address_space_identity == cache_identity);
 }

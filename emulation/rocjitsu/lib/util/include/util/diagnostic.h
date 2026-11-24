@@ -38,15 +38,17 @@ public:
       : context_(std::addressof(callable)),
         callback_([](const void *context, std::string_view message) {
           using Object = std::remove_const_t<Callable>;
-          if constexpr (std::is_const_v<Callable>)
+          if constexpr (std::is_const_v<Callable>) {
             std::invoke(*static_cast<const Object *>(context), message);
-          else
+          } else {
             std::invoke(*const_cast<Object *>(static_cast<const Object *>(context)), message);
+          }
         }) {}
 
   void emit(std::string_view message) const {
-    if (callback_ != nullptr)
+    if (callback_ != nullptr) {
       callback_(context_, message);
+    }
   }
 
   [[nodiscard]] bool ignores_messages() const { return callback_ == nullptr; }
@@ -63,8 +65,9 @@ private:
 class InFlightDiagnostic {
 public:
   explicit InFlightDiagnostic(DiagnosticSink sink) : sink_(sink) {
-    if (!sink_.ignores_messages())
+    if (!sink_.ignores_messages()) {
       stream_.emplace();
+    }
   }
 
   InFlightDiagnostic(const InFlightDiagnostic &) = delete;
@@ -76,8 +79,9 @@ public:
   }
 
   InFlightDiagnostic &operator=(InFlightDiagnostic &&other) noexcept {
-    if (this == &other)
+    if (this == &other) {
       return *this;
+    }
     (void)emit();
     sink_ = other.sink_;
     stream_ = std::move(other.stream_);
@@ -90,15 +94,17 @@ public:
 
   template <typename T> InFlightDiagnostic &operator<<(T &&fragment) {
     assert(active_ && "cannot append to an emitted diagnostic");
-    if (stream_)
+    if (stream_) {
       *stream_ << std::forward<T>(fragment);
+    }
     return *this;
   }
 
   InFlightDiagnostic &operator<<(std::ostream &(*manipulator)(std::ostream &)) {
     assert(active_ && "cannot append to an emitted diagnostic");
-    if (stream_)
+    if (stream_) {
       *stream_ << manipulator;
+    }
     return *this;
   }
 
@@ -106,8 +112,9 @@ public:
   Result emit() {
     if (active_) {
       active_ = false;
-      if (stream_)
+      if (stream_) {
         sink_.emit(stream_->str());
+      }
     }
     return Result::failure();
   }

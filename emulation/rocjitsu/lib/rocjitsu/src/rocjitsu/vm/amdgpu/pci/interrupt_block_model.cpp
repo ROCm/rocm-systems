@@ -385,8 +385,9 @@ bool InterruptBlockModel::deliver(const InterruptEntry &entry, const InterruptRi
   if (!dma.write(programmed.wptr_address, published)) {
     return false;
   }
-  if (newly_overflowed)
+  if (newly_overflowed) {
     overflow_latched_.store(true, std::memory_order_release);
+  }
   (void)registers_.write(kRingSegment, layout_->write_pointer, reported);
 
   // The ring can be switched on while messages for it are switched off, in

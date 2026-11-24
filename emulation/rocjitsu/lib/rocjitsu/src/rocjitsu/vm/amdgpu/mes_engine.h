@@ -111,8 +111,9 @@ public:
   [[nodiscard]] const Pm4UconfigWriter &pm4_uconfig_writer() const { return pm4_uconfig_writer_; }
   /// @brief Publish MES ring positions when the frontend exposes matching registers.
   void publish_queue_pointers(uint64_t read_pointer, uint64_t write_pointer) const {
-    if (pointer_publisher_)
+    if (pointer_publisher_) {
       pointer_publisher_(read_pointer, write_pointer);
+    }
   }
   /// @brief Resolve transport-specific notification state for a created queue.
   [[nodiscard]] QueueDoorbellBinding queue_doorbell(uint32_t offset,

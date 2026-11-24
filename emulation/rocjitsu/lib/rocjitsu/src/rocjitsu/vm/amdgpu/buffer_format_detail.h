@@ -33,17 +33,20 @@ inline double buffer_format_round_even(double value) {
 inline uint32_t read_buffer_format_bits(std::span<const uint8_t> bytes, uint32_t offset,
                                         uint32_t width) {
   uint64_t value = 0;
-  for (uint32_t i = offset / 8; i < (offset + width + 7) / 8; ++i)
+  for (uint32_t i = offset / 8; i < (offset + width + 7) / 8; ++i) {
     value |= uint64_t{bytes[i]} << ((i - offset / 8) * 8);
+  }
   return static_cast<uint32_t>(value >> (offset % 8)) & buffer_format_mask(width);
 }
 
 inline uint32_t unpack_buffer_component(uint32_t value, uint32_t width, BufferNumberFormat n) {
   const int32_t signed_value = static_cast<int32_t>(value << (32 - width)) >> (32 - width);
-  if (n == BufferNumberFormat::Uint || (n == BufferNumberFormat::Float && width == 32))
+  if (n == BufferNumberFormat::Uint || (n == BufferNumberFormat::Float && width == 32)) {
     return value;
-  if (n == BufferNumberFormat::Sint)
+  }
+  if (n == BufferNumberFormat::Sint) {
     return static_cast<uint32_t>(signed_value);
+  }
   float result = 0;
   switch (n) {
   case BufferNumberFormat::Unorm:
@@ -59,15 +62,17 @@ inline uint32_t unpack_buffer_component(uint32_t value, uint32_t width, BufferNu
     result = static_cast<float>(signed_value);
     break;
   case BufferNumberFormat::Float:
-    if (width == 16)
+    if (width == 16) {
       return std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(value)));
+    }
     // Unsigned 10/11-bit floats have five exponent bits and bias 15.
     {
       const uint32_t mantissa_bits = width - 5;
       const uint32_t exponent = value >> mantissa_bits;
       const uint32_t mantissa = value & buffer_format_mask(mantissa_bits);
-      if (exponent == 31)
+      if (exponent == 31) {
         return 0x7f800000u | (mantissa << (23 - mantissa_bits));
+      }
       result = std::ldexp(static_cast<float>(mantissa + (exponent ? 1u << mantissa_bits : 0)),
                           (exponent ? static_cast<int>(exponent) - 15 : -14) -
                               static_cast<int>(mantissa_bits));
@@ -84,9 +89,10 @@ inline std::array<uint32_t, 4> unpack_format(const BufferFormat &f, uint32_t sel
   std::array<uint32_t, 4> channels{}, result{};
   uint32_t offset = 0;
   for (uint32_t i = 0; i < 4; ++i) {
-    if (f.widths[i] && !bytes.empty())
+    if (f.widths[i] && !bytes.empty()) {
       channels[i] = unpack_buffer_component(read_buffer_format_bits(bytes, offset, f.widths[i]),
                                             f.widths[i], f.number);
+    }
     offset += f.widths[i];
   }
   for (uint32_t i = 0; i < 4; ++i) {
@@ -104,13 +110,14 @@ inline void write_format_load_lane(Wavefront &wf, ComputeUnitCore &cu, const Vec
   const auto &format = d.decoded_buffer_format;
   for (uint32_t reg = 0; reg < registers; ++reg) {
     if (!d.buffer_d16) {
-      if (d.lds_dst)
+      if (d.lds_dst) {
         wf.lds().write(
             (d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * registers * 4) +
                 reg * 4,
             reinterpret_cast<const uint8_t *>(&values[reg]), 4);
-      else
+      } else {
         cu.write_vgpr(d.dst_reg_base + reg, lane, values[reg]);
+      }
       continue;
     }
     uint32_t packed = 0, write_mask = 0;
@@ -135,15 +142,17 @@ inline void write_format_load_lane(Wavefront &wf, ComputeUnitCore &cu, const Vec
       packed |= uint32_t{half} << shift;
       write_mask |= 0xffffu << shift;
     }
-    if (write_mask != ~0u && !cu.sram_ecc() && !d.lds_dst)
+    if (write_mask != ~0u && !cu.sram_ecc() && !d.lds_dst) {
       packed |= cu.read_vgpr_storage(d.dst_reg_base + reg, lane) & ~write_mask;
-    if (d.lds_dst)
+    }
+    if (d.lds_dst) {
       wf.lds().write(
           (d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * registers * 4) +
               reg * 4,
           reinterpret_cast<const uint8_t *>(&packed), 4);
-    else
+    } else {
       cu.write_vgpr(d.dst_reg_base + reg, lane, packed);
+    }
   }
 }
 

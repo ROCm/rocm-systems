@@ -55,15 +55,18 @@ void WavefrontSlot::squash(bool flush) {
 bool WavefrontSlot::has_hazard(const InstructionTiming &inst, uint64_t cycle) {
   std::erase_if(pending_writes_,
                 [&](const PendingWrite &write) { return write.ready_cycle <= cycle; });
-  for (const auto &write : pending_writes_)
-    if (write.registers.intersects(inst.hazards))
+  for (const auto &write : pending_writes_) {
+    if (write.registers.intersects(inst.hazards)) {
       return true;
+    }
+  }
   return false;
 }
 
 void WavefrontSlot::reserve(const InstructionTiming &inst, uint64_t seq) {
-  if (!inst.writes.none())
+  if (!inst.writes.none()) {
     pending_writes_.push_back({.registers = inst.writes, .seq = seq});
+  }
   memory_tokens += inst.counters.size;
   ++reserved;
 }
@@ -78,44 +81,50 @@ void WavefrontSlot::cancel(uint64_t seq, uint8_t tokens) {
 
 void WavefrontSlot::issued(uint64_t seq) {
   // Each instruction reserves at most one entry.
-  for (auto &write : pending_writes_)
+  for (auto &write : pending_writes_) {
     if (write.seq == seq) {
       write.issued = true;
       return;
     }
+  }
 }
 
 void WavefrontSlot::written_back(uint64_t seq, uint64_t cycle) {
-  for (auto &write : pending_writes_)
+  for (auto &write : pending_writes_) {
     if (write.seq == seq) {
       write.ready_cycle = cycle;
       return;
     }
+  }
 }
 
 void WavefrontSlot::issued_memory(const InstructionTiming &inst,
                                   const MemoryPipeline::WaitCounterTokens &charged) {
   assert(charged.size <= inst.counters.size && "charged more counters than were reserved");
   assert(memory_tokens >= inst.counters.size && "issued an instruction that was not reserved");
-  for (uint8_t i = 0; i < charged.size; ++i)
+  for (uint8_t i = 0; i < charged.size; ++i) {
     outstanding.increment(charged.types[i]);
+  }
   memory_tokens -= inst.counters.size - charged.size;
 }
 
 void WavefrontSlot::memory_returned(uint64_t seq, const MemoryPipeline::WaitCounterTokens &counters,
                                     uint64_t cycle) {
   assert(memory_tokens >= counters.size && "returned more counters than were issued");
-  for (uint8_t i = 0; i < counters.size; ++i)
+  for (uint8_t i = 0; i < counters.size; ++i) {
     outstanding.decrement(counters.types[i]);
+  }
   memory_tokens -= counters.size;
   written_back(seq, cycle);
 }
 
 bool WavefrontSlot::waiting_on_counters() {
-  if (!waiting)
+  if (!waiting) {
     return false;
-  if (!waiting->satisfied(outstanding))
+  }
+  if (!waiting->satisfied(outstanding)) {
     return true;
+  }
   waiting.reset();
   return false;
 }
@@ -133,8 +142,9 @@ void WavefrontSlots::slot_reserved(Wavefront &wave) {
 }
 
 WavefrontSlot *WavefrontSlots::live(const WavefrontKey &key) {
-  if (key.cu != cu_index_ || key.slot >= slots_.size())
+  if (key.cu != cu_index_ || key.slot >= slots_.size()) {
     return nullptr;
+  }
   WavefrontSlot &slot = slots_[key.slot];
   return slot.active() && slot.generation == key.generation ? &slot : nullptr;
 }

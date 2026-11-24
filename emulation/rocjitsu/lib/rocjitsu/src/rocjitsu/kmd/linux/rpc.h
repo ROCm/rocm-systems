@@ -224,8 +224,9 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
 
   ssize_t bytes_received = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC | MSG_WAITALL);
   if (bytes_received <= 0) {
-    if (num_fds)
+    if (num_fds) {
       *num_fds = 0;
+    }
     return bytes_received;
   }
 
@@ -238,10 +239,11 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
         size_t count = ancillary_bytes / sizeof(int);
         auto *received = reinterpret_cast<int *>(CMSG_DATA(cmsg));
         for (size_t i = 0; i < count; ++i) {
-          if (fd_count < capacity)
+          if (fd_count < capacity) {
             fds[fd_count] = received[i];
-          else
+          } else {
             ::close(received[i]);
+          }
           ++fd_count;
         }
       }
@@ -273,10 +275,12 @@ inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
     ssize_t bytes_read = recvmsg(sock, &msg, 0);
-    if (bytes_read < 0 && errno == EINTR)
+    if (bytes_read < 0 && errno == EINTR) {
       continue;
-    if (bytes_read <= 0)
+    }
+    if (bytes_read <= 0) {
       return false;
+    }
     cursor += bytes_read;
     remaining -= static_cast<size_t>(bytes_read);
   }
@@ -301,16 +305,19 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
   auto *cursor = static_cast<const uint8_t *>(buffer);
   size_t remaining = total_bytes;
   auto report = [&](bool complete) {
-    if (bytes_sent_out)
+    if (bytes_sent_out) {
       *bytes_sent_out = total_bytes - remaining;
+    }
     return complete;
   };
   while (remaining > 0) {
     ssize_t bytes_sent = rpc_send_msg(sock, cursor, remaining);
-    if (bytes_sent < 0 && errno == EINTR)
+    if (bytes_sent < 0 && errno == EINTR) {
       continue;
-    if (bytes_sent <= 0)
+    }
+    if (bytes_sent <= 0) {
       return report(false);
+    }
     cursor += bytes_sent;
     remaining -= static_cast<size_t>(bytes_sent);
   }
@@ -325,10 +332,12 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
 /// the filesystem root and make the reapers iterate/delete from "/" or CWD, so we
 /// never return an empty string.
 inline std::string rpc_default_runtime_dir() {
-  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"); rj && *rj)
+  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"); rj && *rj) {
     return rj;
-  if (const char *xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg)
+  }
+  if (const char *xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg) {
     return std::string(xdg) + "/rocjitsu";
+  }
   return "/tmp/rocjitsu-" + std::to_string(getuid());
 }
 

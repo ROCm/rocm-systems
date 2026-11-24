@@ -113,15 +113,17 @@ public:
         // Only the matching live snapshot owns the counters referenced by the
         // copied grant. Check its unique identity before touching those counters.
         const uint32_t bytes = head == byte_count ? kLineSize : 2 * kLineSize;
-        if (code_grant_.identity() != access.cache_identity() || !code_grant_.covers(base, bytes))
+        if (code_grant_.identity() != access.cache_identity() || !code_grant_.covers(base, bytes)) {
           code_grant_ = access.local_grant_view(base, bytes);
+        }
         const auto &second = lines_[((base / kLineSize) + 1) & (kNumLines - 1)];
         if (code_grant_ && first.admission_generation == code_grant_.generation() &&
             (head == byte_count || (resident(second, base + kLineSize) &&
                                     second.admission_generation == code_grant_.generation()))) {
           std::memcpy(dst, first.data + line_offset, head);
-          if (head != byte_count)
+          if (head != byte_count) {
             std::memcpy(dst + head, second.data, byte_count - head);
+          }
           return VmAccessOutcome::Complete;
         }
       }
@@ -130,8 +132,9 @@ public:
       // PCI/VFIO bindings have no live execute grant to recheck. A resident
       // line still belongs to its original VM generation and may not survive
       // revocation or an instruction-cache maintenance event.
-      if (access.revoked())
+      if (access.revoked()) {
         return VmAccessOutcome::Revoked;
+      }
       const uint64_t line_address = pc & ~uint64_t{kLineSize - 1};
       const Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
       if (line.valid && line.translated && line.addr == line_address &&
@@ -141,14 +144,16 @@ public:
       }
     }
     const VmAccessAdmission admission = access.admit_access(pc, byte_count, VmAccessKind::Execute);
-    if (!admission)
+    if (!admission) {
       return admission.outcome;
+    }
     uint32_t copied = 0;
     while (copied < byte_count) {
       // A translated hit otherwise bypasses GpuVmAccess entirely and could
       // continue executing cached code after its snapshot was revoked.
-      if (access.revoked())
+      if (access.revoked()) {
         return VmAccessOutcome::Revoked;
+      }
       const uint64_t address = pc + copied;
       const uint64_t line_address = address & ~uint64_t{kLineSize - 1};
       const uint32_t line_offset = static_cast<uint32_t>(address) & (kLineSize - 1);
@@ -157,8 +162,9 @@ public:
           copied == 0 && chunk == byte_count
               ? admission
               : access.admit_access(address, chunk, VmAccessKind::Execute);
-      if (!chunk_admission)
+      if (!chunk_admission) {
         return chunk_admission.outcome;
+      }
       const VmAccessAdmission line_admission =
           access.admit_access(line_address, kLineSize, VmAccessKind::Execute,
                               /*report_fault=*/false);
@@ -177,14 +183,16 @@ public:
         const VmAccessOutcome outcome = access.read(
             address, std::span<std::byte>(reinterpret_cast<std::byte *>(dst + copied), chunk),
             VmAccessKind::Execute);
-        if (outcome != VmAccessOutcome::Complete)
+        if (outcome != VmAccessOutcome::Complete) {
           return outcome;
+        }
       } else {
         const uint8_t *line_data = nullptr;
         const VmAccessOutcome outcome =
             line_for(access, address, chunk_admission.generation, line_data);
-        if (outcome != VmAccessOutcome::Complete)
+        if (outcome != VmAccessOutcome::Complete) {
           return outcome;
+        }
         std::memcpy(dst + copied, line_data + line_offset, chunk);
       }
       copied += chunk;
@@ -204,8 +212,9 @@ public:
   void invalidate_all() {
     ++epoch_;
     if (has_cached_lines_) {
-      for (Line &line : lines_)
+      for (Line &line : lines_) {
         line.valid = false;
+      }
       has_cached_lines_ = false;
     }
     coherence_epoch_ = coherence_->current_instruction_epoch();
@@ -218,16 +227,19 @@ public:
   void invalidate_for_completion(const VmCacheNamespace &cache_namespace) {
     synchronize_coherence_epoch();
     ++epoch_;
-    if (!has_cached_lines_)
+    if (!has_cached_lines_) {
       return;
+    }
     bool retained_line = false;
     for (Line &line : lines_) {
-      if (!line.valid)
+      if (!line.valid) {
         continue;
-      if (line.translated && line.cache_namespace == cache_namespace)
+      }
+      if (line.translated && line.cache_namespace == cache_namespace) {
         line.valid = false;
-      else
+      } else {
         retained_line = true;
+      }
     }
     has_cached_lines_ = retained_line;
   }
@@ -240,8 +252,9 @@ public:
   bool peek_word(uint64_t pc, uint32_t vmid, uint32_t &word) const {
     const uint64_t addr = pc & ~uint64_t{kLineSize - 1};
     const auto &line = lines_[(addr / kLineSize) & (kNumLines - 1)];
-    if ((pc & 3) || !line.valid || line.translated || line.addr != addr || line.vmid != vmid)
+    if ((pc & 3) || !line.valid || line.translated || line.addr != addr || line.vmid != vmid) {
       return false;
+    }
     std::memcpy(&word, line.data + (pc & (kLineSize - 1)), sizeof(word));
     return true;
   }
@@ -254,8 +267,9 @@ public:
     const uint64_t addr = pc & ~uint64_t{kLineSize - 1};
     const auto &line = lines_[(addr / kLineSize) & (kNumLines - 1)];
     if ((pc & 3) || !line.valid || !line.translated || line.addr != addr ||
-        line.cache_namespace != access.cache_namespace())
+        line.cache_namespace != access.cache_namespace()) {
       return false;
+    }
     std::memcpy(&word, line.data + (pc & (kLineSize - 1)), sizeof(word));
     return true;
   }
@@ -263,8 +277,9 @@ public:
 private:
   void synchronize_coherence_epoch() {
     const uint64_t current_epoch = coherence_->current_instruction_epoch();
-    if (coherence_epoch_ != current_epoch)
+    if (coherence_epoch_ != current_epoch) {
       invalidate_all();
+    }
   }
 
   struct Line {
@@ -280,8 +295,9 @@ private:
   const uint8_t *line_for(const GpuMemory &memory, uint64_t addr) {
     const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
     Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
-    if (line.valid && !line.translated && line.addr == line_addr)
+    if (line.valid && !line.translated && line.addr == line_addr) {
       return line.data;
+    }
 
     memory.read_block(line_addr, std::span<uint8_t>(line.data, kLineSize));
     line.addr = line_addr;

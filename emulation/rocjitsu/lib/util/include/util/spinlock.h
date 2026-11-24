@@ -44,8 +44,9 @@ public:
 #endif
     while (true) {
       // Outer TTAS spin: cache-local relaxed read avoids coherence traffic.
-      while (locked_.load(std::memory_order_relaxed))
+      while (locked_.load(std::memory_order_relaxed)) {
         locked_.wait(true, std::memory_order_relaxed);
+      }
       // Attempt to acquire via exchange (cache-line transfer).
       if (!locked_.exchange(true, std::memory_order_acquire)) {
 #ifdef SPINLOCK_TSAN
@@ -73,10 +74,11 @@ public:
 #endif
     bool acquired = !locked_.exchange(true, std::memory_order_acquire);
 #ifdef SPINLOCK_TSAN
-    if (acquired)
+    if (acquired) {
       __tsan_mutex_post_lock(this, __tsan_mutex_try_lock, 0);
-    else
+    } else {
       __tsan_mutex_post_lock(this, __tsan_mutex_try_lock | __tsan_mutex_try_lock_failed, 0);
+    }
 #endif
     return acquired;
   }

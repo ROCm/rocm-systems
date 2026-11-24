@@ -235,8 +235,9 @@ public:
       data_maintenance_ = [this] {
         auto acquired =
             callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate);
-        if (acquired.failed())
+        if (acquired.failed()) {
           data_maintenance_failed_ = true;
+        }
         return acquired;
       };
     }
@@ -264,8 +265,9 @@ public:
 
   SdmaPacketExecutionResult process(std::span<const uint32_t> words, const GpuVmAccess &access,
                                     State &state) {
-    if (state_ != nullptr)
+    if (state_ != nullptr) {
       return {};
+    }
     state_ = &state;
     access_ = &access;
     data_maintenance_failed_ = false;
@@ -277,8 +279,9 @@ public:
       }
     } invocation{*this};
 
-    if (state_->pending)
+    if (state_->pending) {
       return run();
+    }
 
     const PacketExtent extent = packet_extent(words);
     if (extent.outcome != SdmaPacketExecutionOutcome::Complete) {
@@ -301,16 +304,18 @@ public:
   }
 
   void clear() {
-    if (state_ != nullptr)
+    if (state_ != nullptr) {
       state_->clear();
+    }
   }
 
   void clear(State &state) noexcept { state.clear(); }
 
 private:
   SdmaPacketExecutionOutcome map_data_outcome(VmAccessOutcome outcome) {
-    if (data_maintenance_failed_)
+    if (data_maintenance_failed_) {
       return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
+    }
     return map_outcome(outcome);
   }
 
@@ -318,8 +323,9 @@ private:
     std::optional<uint32_t> malformed_header = std::nullopt;
     if (outcome == SdmaPacketExecutionOutcome::Malformed && !state_->frames.empty()) {
       const Frame &frame = state_->frames.back();
-      if (frame.at < frame.words.size())
+      if (frame.at < frame.words.size()) {
         malformed_header = word(frame, 0);
+      }
     }
     return {.outcome = outcome,
             .packet_dwords = state_->root_dwords,
@@ -375,8 +381,9 @@ private:
                                                            : SdmaPacketExecutionOutcome::Complete,
                           .dwords = dwords};
     };
-    if (words.empty())
+    if (words.empty()) {
       return need(1);
+    }
 
     const uint32_t header = words.front();
     const uint8_t opcode = header & 0xff;
@@ -386,17 +393,20 @@ private:
       return need(((header >> 16) & 0x3fff) + 1);
     case kOpCopy: {
       constexpr uint8_t kSubopLinearBroadcast = 16;
-      if (subopcode == kSubopLinearRect)
+      if (subopcode == kSubopLinearRect) {
         return need(kCopyLinearRectDwords);
+      }
       if (subopcode == kSubopLinearSwap) {
         // This selects compatible packet layouts, not device capabilities.
         // CDNA2 and RDNA2 also use LegacyExtendedCount; ROCr gates submission
         // to devices that advertise swap support.
         if (dialect_ != SdmaPacketDialect::LegacyExtendedCount &&
-            dialect_ != SdmaPacketDialect::Gfx1250)
+            dialect_ != SdmaPacketDialect::Gfx1250) {
           return {};
-      } else if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast)
+        }
+      } else if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast) {
         return {};
+      }
       if (gfx11_plus() && (header & ((1u << 30) | (1u << 31))) != 0) {
         const std::size_t copy_base = 1 + ((header & (1u << 30)) != 0 ? kWaitDwords : 0);
         const std::size_t signal_base = copy_base + kCopyBodyDwords;
@@ -427,13 +437,16 @@ private:
     case kOpHdpFlush:
       return need(1);
     case kOpWrite: {
-      if (subopcode != kSubopLinear)
+      if (subopcode != kSubopLinear) {
         return {};
-      if (words.size() < 4)
+      }
+      if (words.size() < 4) {
         return need(4);
+      }
       const std::size_t count = (words[3] & 0x000fffff) + std::size_t{1};
-      if (count > std::numeric_limits<std::size_t>::max() - 4)
+      if (count > std::numeric_limits<std::size_t>::max() - 4) {
         return {};
+      }
       return need(4 + count);
     }
     case kOpIndirect:
@@ -457,8 +470,9 @@ private:
     const uint64_t alignment = gfx1250 ? 32 : 64;
     if ((word(frame, 0) & ~header_mask) != 0 || (word(frame, copy_base) & ~0x3fffffffu) != 0 ||
         (word(frame, copy_base + 1) & ~parameter_mask) != 0 || operation.source % alignment != 0 ||
-        operation.destinations[0] % alignment != 0)
+        operation.destinations[0] % alignment != 0) {
       return false;
+    }
     // Partially overlapping ranges cannot be exchanged independently.
     const uint64_t address_a = operation.source;
     const uint64_t address_b = operation.destinations[0];
@@ -471,24 +485,28 @@ private:
     }
     if (operation.wait_enabled &&
         ((word(frame, 1) & ~0x007c0007u) != 0 || operation.function > 6 ||
-         (word(frame, 2) & 7u) != 0 || !valid_range(operation.address, sizeof(uint64_t))))
+         (word(frame, 2) & 7u) != 0 || !valid_range(operation.address, sizeof(uint64_t)))) {
       return false;
+    }
     if (operation.signal_enabled &&
         ((word(frame, signal_base) & ~0x007c007fu) != 0 ||
          (word(frame, signal_base) & 0x7f) != 0x70 || (word(frame, signal_base + 1) & 7u) != 0 ||
-         !valid_range(operation.signal_address, sizeof(uint64_t))))
+         !valid_range(operation.signal_address, sizeof(uint64_t)))) {
       return false;
+    }
     return true;
   }
 
   SdmaPacketExecutionOutcome decode(Frame &frame) {
-    if (!has(frame, 1))
+    if (!has(frame, 1)) {
       return SdmaPacketExecutionOutcome::Malformed;
+    }
 
     const PacketExtent extent =
         packet_extent(std::span<const uint32_t>(frame.words).subspan(frame.at));
-    if (extent.outcome != SdmaPacketExecutionOutcome::Complete)
+    if (extent.outcome != SdmaPacketExecutionOutcome::Complete) {
       return SdmaPacketExecutionOutcome::Malformed;
+    }
 
     Operation operation;
     operation.dwords = extent.dwords;
@@ -504,13 +522,15 @@ private:
       operation.kind = Kind::Copy;
       constexpr uint8_t kSubopLinearBroadcast = 16;
       if (subopcode == kSubopLinearRect) {
-        if (!decode_linear_rect(frame, operation))
+        if (!decode_linear_rect(frame, operation)) {
           return SdmaPacketExecutionOutcome::Malformed;
+        }
         break;
       }
       operation.swapping = subopcode == kSubopLinearSwap;
-      if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast && !operation.swapping)
+      if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast && !operation.swapping) {
         return SdmaPacketExecutionOutcome::Malformed;
+      }
       if (gfx11_plus() && (header & ((1u << 30) | (1u << 31))) != 0) {
         operation.wait_enabled = (header & (1u << 30)) != 0;
         operation.signal_enabled = (header & (1u << 31)) != 0;
@@ -527,8 +547,9 @@ private:
         operation.destinations[0] = join(word(frame, copy_base + 4), word(frame, copy_base + 5));
         operation.destination_count = 1;
         if (!valid_range(operation.source, operation.count) ||
-            !valid_range(operation.destinations[0], operation.count))
+            !valid_range(operation.destinations[0], operation.count)) {
           return SdmaPacketExecutionOutcome::Malformed;
+        }
         if (operation.signal_enabled) {
           const uint32_t signal_op = word(frame, signal_base) & 0x7f;
           operation.signal_address =
@@ -536,8 +557,9 @@ private:
           operation.signal_data = join(word(frame, signal_base + 3), word(frame, signal_base + 4));
           operation.signal_decrement = operation.signal_address > 0x1000 && signal_op == 0x70;
         }
-        if (operation.swapping && !valid_swap(frame, operation, copy_base, signal_base))
+        if (operation.swapping && !valid_swap(frame, operation, copy_base, signal_base)) {
           return SdmaPacketExecutionOutcome::Malformed;
+        }
         break;
       }
       const bool broadcast =
@@ -550,14 +572,17 @@ private:
       operation.source = join(word(frame, 3), word(frame, 4));
       operation.destinations[0] = join(word(frame, 5), word(frame, 6));
       operation.destination_count = broadcast ? 2 : 1;
-      if (broadcast)
+      if (broadcast) {
         operation.destinations[1] = join(word(frame, 7), word(frame, 8));
+      }
       if (!valid_range(operation.source, operation.count) ||
           !valid_range(operation.destinations[0], operation.count) ||
-          (broadcast && !valid_range(operation.destinations[1], operation.count)))
+          (broadcast && !valid_range(operation.destinations[1], operation.count))) {
         return SdmaPacketExecutionOutcome::Malformed;
-      if (operation.swapping && !valid_swap(frame, operation, 1, 0))
+      }
+      if (operation.swapping && !valid_swap(frame, operation, 1, 0)) {
         return SdmaPacketExecutionOutcome::Malformed;
+      }
       break;
     }
     case kOpFence:
@@ -609,8 +634,9 @@ private:
       operation.count = (word(frame, 4) & 0x3fffffff) + uint64_t{1};
       // The count names the first byte of the final dword, so include the
       // remaining three bytes of that element.
-      if (operation.fill_size == kFillSizeDword)
+      if (operation.fill_size == kFillSizeDword) {
         operation.count = (operation.count + 3) & ~uint64_t{3};
+      }
       break;
     case kOpTimestamp:
       operation.kind = Kind::Timestamp;
@@ -626,12 +652,14 @@ private:
     case kOpWrite: {
       operation.kind = Kind::Write;
       const std::size_t count = (word(frame, 3) & 0x000fffff) + std::size_t{1};
-      if (count > std::numeric_limits<std::size_t>::max() / 4)
+      if (count > std::numeric_limits<std::size_t>::max() / 4) {
         return SdmaPacketExecutionOutcome::Malformed;
+      }
       operation.address = join(word(frame, 1), word(frame, 2));
       operation.count = count * sizeof(uint32_t);
-      if (!valid_range(operation.address, operation.count))
+      if (!valid_range(operation.address, operation.count)) {
         return SdmaPacketExecutionOutcome::Malformed;
+      }
       operation.payload.resize(static_cast<std::size_t>(operation.count));
       std::memcpy(operation.payload.data(), &frame.words[frame.at + 4], operation.payload.size());
       break;
@@ -639,12 +667,15 @@ private:
     case kOpIndirect: {
       operation.kind = Kind::Indirect;
       const std::size_t count = word(frame, 3) & 0x000fffff;
-      if (count > std::numeric_limits<std::size_t>::max() / sizeof(uint32_t))
+      if (count > std::numeric_limits<std::size_t>::max() / sizeof(uint32_t)) {
         return SdmaPacketExecutionOutcome::Malformed;
+      }
       operation.address = join(word(frame, 1), word(frame, 2));
       operation.indirect.resize(count * sizeof(uint32_t));
-      if (!operation.indirect.empty() && !valid_range(operation.address, operation.indirect.size()))
+      if (!operation.indirect.empty() &&
+          !valid_range(operation.address, operation.indirect.size())) {
         return SdmaPacketExecutionOutcome::Malformed;
+      }
       break;
     }
     case kOpConditionalExecute:
@@ -662,15 +693,17 @@ private:
       return SdmaPacketExecutionOutcome::Malformed;
     }
 
-    if (!has(frame, operation.dwords))
+    if (!has(frame, operation.dwords)) {
       return SdmaPacketExecutionOutcome::Malformed;
+    }
     if (frame.root) {
       state_->root_dwords = operation.dwords;
       // COND_EXE controls the dwords following its five-dword header. Keep the
       // available root stream until its predicate determines whether those
       // dwords execute as later packets or retire as one skipped region.
-      if (operation.kind != Kind::Conditional)
+      if (operation.kind != Kind::Conditional) {
         frame.words.resize(frame.at + operation.dwords);
+      }
     }
     state_->operation.emplace(std::move(operation));
     return SdmaPacketExecutionOutcome::Complete;
@@ -678,15 +711,17 @@ private:
 
   MemoryIngressAdmission admit_memory_ingress(uint64_t address, std::size_t size,
                                               VmAccessKind access) const {
-    if (!callbacks_.admit_memory_ingress)
+    if (!callbacks_.admit_memory_ingress) {
       return {};
+    }
     const std::array spans{MemoryIngressSpan{address, size, access}};
     return callbacks_.admit_memory_ingress(*access_, spans);
   }
 
   util::FailureOr<CacheMaintenanceResult> acquire_write_cache_maintenance() const {
-    if (callbacks_.acquire_cache_maintenance)
+    if (callbacks_.acquire_cache_maintenance) {
       return callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate);
+    }
     return CacheMaintenanceResult{};
   }
 
@@ -694,16 +729,18 @@ private:
                                               uint64_t amount) {
     if (!operation.cas_expected_valid) {
       const AtomicLoadResult loaded = access_->atomic_load(address, sizeof(uint64_t));
-      if (loaded.outcome != VmAccessOutcome::Complete)
+      if (loaded.outcome != VmAccessOutcome::Complete) {
         return map_outcome(loaded.outcome);
+      }
       operation.cas_expected = loaded.value;
       operation.cas_expected_valid = true;
     }
     for (;;) {
       const AtomicCompareExchangeResult exchanged = access_->compare_exchange(
           address, sizeof(uint64_t), operation.cas_expected, operation.cas_expected + amount);
-      if (exchanged.outcome != VmAccessOutcome::Complete)
+      if (exchanged.outcome != VmAccessOutcome::Complete) {
         return map_outcome(exchanged.outcome);
+      }
       if (exchanged.exchanged) {
         operation.cas_expected_valid = false;
         state_->operation_committed = true;
@@ -722,8 +759,9 @@ private:
   bool decode_linear_rect(const Frame &frame, Operation &operation) {
     const bool gfx12_rect = gfx12_linear_rect();
     const uint32_t element = util::bits(word(frame, 0), 29, 31);
-    if (element > 4 || !has(frame, kCopyLinearRectDwords))
+    if (element > 4 || !has(frame, kCopyLinearRectDwords)) {
       return false;
+    }
     const uint64_t element_bytes = uint64_t{1} << element;
     // Highest bit of each field: GFX12 widens the offsets, pitches, and rectangle size.
     const int xy_last = gfx12_rect ? 15 : 13;
@@ -742,8 +780,9 @@ private:
     const uint64_t rect_y = util::bits(word(frame, 11), 16, 16 + xy_last) + uint64_t{1};
     const uint64_t rect_z = util::bits(word(frame, 12), 0, z_last) + uint64_t{1};
     if (!gfx12_rect &&
-        (util::bits(word(frame, 12), 16, 17) != 0 || util::bits(word(frame, 12), 24, 25) != 0))
+        (util::bits(word(frame, 12), 16, 17) != 0 || util::bits(word(frame, 12), 24, 25) != 0)) {
       return false;
+    }
 
     // A one-slice copy can still name a nonzero Z origin. The slice field is
     // stored as value-minus-one, including when the copy itself has one slice.
@@ -760,11 +799,13 @@ private:
     const std::optional<uint64_t> row_count = util::checked_mul(rect_y, rect_z);
     if (!src_pitch || !dst_pitch || !src_slice || !dst_slice || !row_bytes || !row_count ||
         *row_bytes > std::numeric_limits<uint32_t>::max() ||
-        rect_y > std::numeric_limits<uint32_t>::max())
+        rect_y > std::numeric_limits<uint32_t>::max()) {
       return false;
+    }
     const std::optional<uint64_t> total_bytes = util::checked_mul(*row_bytes, *row_count);
-    if (!total_bytes)
+    if (!total_bytes) {
       return false;
+    }
 
     const auto origin_address = [&](uint32_t low, uint32_t high, uint64_t off_x, uint64_t off_y,
                                     uint64_t off_z, uint64_t pitch,
@@ -772,22 +813,28 @@ private:
       const std::optional<uint64_t> x_bytes = util::checked_mul(off_x, element_bytes);
       const std::optional<uint64_t> y_bytes = util::checked_mul(off_y, pitch);
       const std::optional<uint64_t> z_bytes = util::checked_mul(off_z, slice);
-      if (!x_bytes || !y_bytes || !z_bytes)
+      if (!x_bytes || !y_bytes || !z_bytes) {
         return std::nullopt;
+      }
       std::optional<uint64_t> address = util::checked_add(*x_bytes, *y_bytes);
-      if (address)
+      if (address) {
         address = util::checked_add(*address, *z_bytes);
-      if (address)
+      }
+      if (address) {
         address = util::checked_add(join(low, high), *address);
+      }
       const std::optional<uint64_t> y_span = util::checked_mul(rect_y - 1, pitch);
       const std::optional<uint64_t> z_span = util::checked_mul(rect_z - 1, slice);
-      if (!address || !y_span || !z_span)
+      if (!address || !y_span || !z_span) {
         return std::nullopt;
+      }
       std::optional<uint64_t> span = util::checked_add(*y_span, *z_span);
-      if (span)
+      if (span) {
         span = util::checked_add(*span, *row_bytes);
-      if (!span || !valid_range(*address, *span))
+      }
+      if (!span || !valid_range(*address, *span)) {
         return std::nullopt;
+      }
       return address;
     };
 
@@ -795,8 +842,9 @@ private:
         word(frame, 1), word(frame, 2), src_off_x, src_off_y, src_off_z, *src_pitch, *src_slice);
     const std::optional<uint64_t> destination = origin_address(
         word(frame, 6), word(frame, 7), dst_off_x, dst_off_y, dst_off_z, *dst_pitch, *dst_slice);
-    if (!source || !destination)
+    if (!source || !destination) {
       return false;
+    }
 
     operation.rectangular = true;
     operation.source = *source;
@@ -826,18 +874,21 @@ private:
       if (operation.wait_enabled && operation.address > 0x1000) {
         MemoryIngressAdmission admitted =
             admit_memory_ingress(operation.address, sizeof(uint64_t), VmAccessKind::Read);
-        if (admitted.outcome != VmAccessOutcome::Complete)
+        if (admitted.outcome != VmAccessOutcome::Complete) {
           return map_outcome(admitted.outcome);
+        }
         const VmAccessOutcome outcome =
             access_->read(operation.address, std::span(operation.scratch).first(sizeof(uint64_t)),
                           operation.io_progress);
-        if (outcome != VmAccessOutcome::Complete)
+        if (outcome != VmAccessOutcome::Complete) {
           return map_outcome(outcome);
+        }
         uint64_t value = 0;
         std::memcpy(&value, operation.scratch.data(), sizeof(value));
         operation.io_progress = 0;
-        if (!compare(operation.function, value & operation.mask, operation.reference))
+        if (!compare(operation.function, value & operation.mask, operation.reference)) {
           return SdmaPacketExecutionOutcome::Unavailable;
+        }
       }
       operation.phase = 1;
     }
@@ -845,13 +896,15 @@ private:
       if (operation.signal_decrement) {
         MemoryIngressAdmission admitted =
             admit_memory_ingress(operation.signal_address, sizeof(uint64_t), VmAccessKind::Read);
-        if (admitted.outcome != VmAccessOutcome::Complete)
+        if (admitted.outcome != VmAccessOutcome::Complete) {
           return map_outcome(admitted.outcome);
+        }
         const VmAccessOutcome outcome = access_->read(
             operation.signal_address, std::span(operation.scratch).first(sizeof(uint64_t)),
             operation.io_progress);
-        if (outcome != VmAccessOutcome::Complete)
+        if (outcome != VmAccessOutcome::Complete) {
           return map_outcome(outcome);
+        }
         operation.io_progress = 0;
       }
       operation.phase = 2;
@@ -868,21 +921,24 @@ private:
           room = std::min(room, static_cast<uint64_t>(operation.rect_row_bytes) - column);
         }
         operation.chunk_size = static_cast<std::size_t>(std::min<uint64_t>(kTransferBytes, room));
-        if (operation.swapping)
+        if (operation.swapping) {
           operation.payload.resize(operation.chunk_size);
+        }
       }
       if (operation.swapping) {
         const SdmaPacketExecutionOutcome outcome = execute_swap_chunk(operation);
-        if (outcome != SdmaPacketExecutionOutcome::Complete)
+        if (outcome != SdmaPacketExecutionOutcome::Complete) {
           return outcome;
+        }
         operation.completed += operation.chunk_size;
         operation.chunk_size = 0;
         operation.swap_step = 0;
         continue;
       }
       const auto address_at = [&](uint64_t base, uint64_t pitch, uint64_t slice) {
-        if (!operation.rectangular)
+        if (!operation.rectangular) {
           return base + operation.completed;
+        }
         return rectangular_address(base, pitch, slice, operation.rect_row_bytes,
                                    operation.rect_rows, operation.completed);
       };
@@ -892,8 +948,9 @@ private:
                           std::span(operation.scratch).first(operation.chunk_size),
                           operation.io_progress, operation.transfer_token, VmAccessKind::Read, true,
                           data_maintenance_, data_ingress_, copy_source_);
-        if (read != VmAccessOutcome::Complete)
+        if (read != VmAccessOutcome::Complete) {
           return map_data_outcome(read);
+        }
         operation.io_progress = 0;
         operation.destination_index = 1;
       }
@@ -906,10 +963,12 @@ private:
             destination, std::span<const std::byte>(operation.scratch).first(operation.chunk_size),
             operation.io_progress, operation.transfer_token, true, data_maintenance_,
             data_ingress_);
-        if (operation.io_progress != 0)
+        if (operation.io_progress != 0) {
           state_->operation_committed = true;
-        if (write != VmAccessOutcome::Complete)
+        }
+        if (write != VmAccessOutcome::Complete) {
           return map_data_outcome(write);
+        }
         state_->operation_committed = true;
         operation.io_progress = 0;
         ++operation.destination_index;
@@ -922,17 +981,21 @@ private:
     if (operation.signal_decrement) {
       MemoryIngressAdmission admitted =
           admit_memory_ingress(operation.signal_address, sizeof(uint64_t), VmAccessKind::Atomic);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
-      if (cache_lease.failed())
+      if (cache_lease.failed()) {
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
-      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+      }
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry) {
         return SdmaPacketExecutionOutcome::Unavailable;
+      }
       const SdmaPacketExecutionOutcome outcome = atomic_fetch_add(
           operation, operation.signal_address, uint64_t{0} - operation.signal_data);
-      if (outcome != SdmaPacketExecutionOutcome::Complete)
+      if (outcome != SdmaPacketExecutionOutcome::Complete) {
         return outcome;
+      }
     }
     return SdmaPacketExecutionOutcome::Complete;
   }
@@ -958,11 +1021,13 @@ private:
                       : std::span<const std::byte>(operation.scratch).first(operation.chunk_size);
         outcome = access_->write(address, bytes, operation.io_progress, operation.transfer_token,
                                  true, data_maintenance_, data_ingress_);
-        if (operation.io_progress != 0)
+        if (operation.io_progress != 0) {
           state_->operation_committed = true;
+        }
       }
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return map_data_outcome(outcome);
+      }
       operation.io_progress = 0;
       ++operation.swap_step;
     }
@@ -987,10 +1052,12 @@ private:
           operation.address + operation.completed,
           std::span<const std::byte>(operation.scratch).first(operation.chunk_size),
           operation.io_progress, operation.transfer_token, true, data_maintenance_, data_ingress_);
-      if (operation.io_progress != 0)
+      if (operation.io_progress != 0) {
         state_->operation_committed = true;
-      if (outcome != VmAccessOutcome::Complete)
+      }
+      if (outcome != VmAccessOutcome::Complete) {
         return map_data_outcome(outcome);
+      }
       state_->operation_committed = true;
       operation.completed += operation.chunk_size;
       operation.chunk_size = 0;
@@ -1003,10 +1070,12 @@ private:
     const VmAccessOutcome outcome =
         access_->write(operation.address, operation.payload, operation.io_progress,
                        operation.transfer_token, true, data_maintenance_, data_ingress_);
-    if (operation.io_progress != 0)
+    if (operation.io_progress != 0) {
       state_->operation_committed = true;
-    if (outcome != VmAccessOutcome::Complete)
+    }
+    if (outcome != VmAccessOutcome::Complete) {
       return map_data_outcome(outcome);
+    }
     state_->operation_committed = true;
     return SdmaPacketExecutionOutcome::Complete;
   }
@@ -1014,73 +1083,88 @@ private:
   SdmaPacketExecutionOutcome execute_atomic(Operation &operation) {
     // Preserve the established CP behavior for the reserved low-address range.
     // In particular, do not derive signal metadata below address zero.
-    if (operation.address <= 0x1000)
+    if (operation.address <= 0x1000) {
       return SdmaPacketExecutionOutcome::Complete;
+    }
     const uint64_t signal_base = operation.address - sizeof(uint64_t);
     if (operation.completes_signal && operation.phase == 0) {
       MemoryIngressAdmission admitted =
           admit_memory_ingress(signal_base + 16, sizeof(uint64_t), VmAccessKind::Read);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       VmAccessOutcome outcome =
           access_->read(signal_base + 16, operation.mailbox_bytes, operation.mailbox_read_progress);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return map_outcome(outcome);
+      }
       std::memcpy(&operation.mailbox, operation.mailbox_bytes.data(), sizeof(operation.mailbox));
       operation.phase = 1;
     }
     if (operation.completes_signal && operation.phase == 1) {
       MemoryIngressAdmission admitted =
           admit_memory_ingress(signal_base + 24, sizeof(uint32_t), VmAccessKind::Read);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       VmAccessOutcome outcome =
           access_->read(signal_base + 24, operation.event_bytes, operation.event_read_progress);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return map_outcome(outcome);
+      }
       std::memcpy(&operation.event_id, operation.event_bytes.data(), sizeof(operation.event_id));
       operation.phase = 2;
     }
-    if (!operation.completes_signal)
+    if (!operation.completes_signal) {
       operation.phase = 2;
+    }
     if (operation.phase == 2) {
       MemoryIngressAdmission admitted =
           admit_memory_ingress(operation.address, sizeof(uint64_t), VmAccessKind::Atomic);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
-      if (cache_lease.failed())
+      if (cache_lease.failed()) {
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
-      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+      }
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry) {
         return SdmaPacketExecutionOutcome::Unavailable;
+      }
       const SdmaPacketExecutionOutcome outcome =
           atomic_fetch_add(operation, operation.address, operation.value);
-      if (outcome != SdmaPacketExecutionOutcome::Complete)
+      if (outcome != SdmaPacketExecutionOutcome::Complete) {
         return outcome;
+      }
       operation.phase = 3;
     }
     if (operation.completes_signal && operation.phase == 3 && operation.mailbox != 0) {
       MemoryIngressAdmission admitted =
           admit_memory_ingress(operation.mailbox, sizeof(uint64_t), VmAccessKind::Write);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
-      if (cache_lease.failed())
+      if (cache_lease.failed()) {
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
-      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+      }
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry) {
         return SdmaPacketExecutionOutcome::Unavailable;
+      }
       const VmAccessOutcome outcome =
           access_->atomic_store(operation.mailbox, sizeof(uint64_t), operation.event_id);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return map_outcome(outcome);
+      }
       operation.phase = 4;
     } else if (operation.phase == 3) {
       operation.phase = 4;
     }
     if (operation.completes_signal && operation.phase == 4 && operation.event_id != 0) {
       const VmAccessOutcome outcome = callbacks_.deliver_interrupt(operation.event_id);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return map_outcome(outcome);
+      }
     }
     state_->completion_published = true;
     return SdmaPacketExecutionOutcome::Complete;
@@ -1096,25 +1180,30 @@ private:
     case Kind::Fence: {
       MemoryIngressAdmission admitted = admit_memory_ingress(
           operation.address, static_cast<std::size_t>(operation.count), VmAccessKind::Write);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
-      if (cache_lease.failed())
+      if (cache_lease.failed()) {
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
-      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+      }
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry) {
         return SdmaPacketExecutionOutcome::Unavailable;
+      }
       std::memcpy(operation.scratch.data(), &operation.value,
                   static_cast<std::size_t>(operation.count));
       const VmAccessOutcome outcome = access_->write(
           operation.address, std::span<const std::byte>(operation.scratch).first(operation.count),
           operation.io_progress);
-      if (operation.io_progress != 0)
+      if (operation.io_progress != 0) {
         state_->operation_committed = true;
+      }
       return map_outcome(outcome);
     }
     case Kind::Trap: {
-      if (!callbacks_.deliver_interrupt)
+      if (!callbacks_.deliver_interrupt) {
         return SdmaPacketExecutionOutcome::Faulted;
+      }
       const VmAccessOutcome outcome = callbacks_.deliver_interrupt(operation.value32);
       if (outcome == VmAccessOutcome::Complete) {
         state_->operation_committed = true;
@@ -1127,19 +1216,23 @@ private:
       if (operation.value32 != 0) {
         MemoryIngressAdmission admitted = admit_memory_ingress(
             operation.address, static_cast<std::size_t>(operation.count), VmAccessKind::Read);
-        if (admitted.outcome != VmAccessOutcome::Complete)
+        if (admitted.outcome != VmAccessOutcome::Complete) {
           return map_outcome(admitted.outcome);
+        }
         const AtomicLoadResult loaded = access_->atomic_load(operation.address, operation.count);
-        if (loaded.outcome != VmAccessOutcome::Complete)
+        if (loaded.outcome != VmAccessOutcome::Complete) {
           return map_outcome(loaded.outcome);
+        }
         value = loaded.value;
       } else {
-        if (!callbacks_.read_register)
+        if (!callbacks_.read_register) {
           return SdmaPacketExecutionOutcome::Complete;
+        }
         const SdmaPacketRegisterReadResult loaded =
             callbacks_.read_register(static_cast<uint32_t>(operation.address));
-        if (loaded.outcome != VmAccessOutcome::Complete)
+        if (loaded.outcome != VmAccessOutcome::Complete) {
           return map_outcome(loaded.outcome);
+        }
         value = loaded.value;
       }
       return compare(operation.function, value & operation.mask,
@@ -1152,17 +1245,21 @@ private:
     case Kind::Fill:
       return execute_fill(operation);
     case Kind::Timestamp: {
-      if (operation.address <= 0x1000)
+      if (operation.address <= 0x1000) {
         return SdmaPacketExecutionOutcome::Complete;
+      }
       MemoryIngressAdmission admitted =
           admit_memory_ingress(operation.address, sizeof(uint64_t), VmAccessKind::Write);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       [[maybe_unused]] auto cache_lease = acquire_write_cache_maintenance();
-      if (cache_lease.failed())
+      if (cache_lease.failed()) {
         return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
-      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry)
+      }
+      if (cache_lease.value().outcome == CacheMaintenanceOutcome::Retry) {
         return SdmaPacketExecutionOutcome::Unavailable;
+      }
       if (!operation.timestamp_captured) {
         operation.value = callbacks_.timestamp ? callbacks_.timestamp() : 0;
         operation.timestamp_captured = true;
@@ -1171,8 +1268,9 @@ private:
       const VmAccessOutcome outcome = access_->write(
           operation.address, std::span<const std::byte>(operation.scratch).first(sizeof(uint64_t)),
           operation.io_progress);
-      if (operation.io_progress != 0)
+      if (operation.io_progress != 0) {
         state_->operation_committed = true;
+      }
       return map_outcome(outcome);
     }
     case Kind::Gcr: {
@@ -1183,20 +1281,24 @@ private:
         if (callbacks_.acquire_cache_maintenance) {
           util::FailureOr<CacheMaintenanceResult> lease =
               callbacks_.acquire_cache_maintenance(SdmaCacheOperation::WritebackInvalidate);
-          if (lease.failed())
+          if (lease.failed()) {
             return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
-          if (lease.value().outcome == CacheMaintenanceOutcome::Retry)
+          }
+          if (lease.value().outcome == CacheMaintenanceOutcome::Retry) {
             return SdmaPacketExecutionOutcome::Unavailable;
+          }
           state_->operation_committed = true;
         }
       } else if ((operation.value32 & inv) != 0) {
         if (callbacks_.acquire_cache_maintenance) {
           util::FailureOr<CacheMaintenanceResult> lease =
               callbacks_.acquire_cache_maintenance(SdmaCacheOperation::Invalidate);
-          if (lease.failed())
+          if (lease.failed()) {
             return SdmaPacketExecutionOutcome::CacheMaintenanceFailed;
-          if (lease.value().outcome == CacheMaintenanceOutcome::Retry)
+          }
+          if (lease.value().outcome == CacheMaintenanceOutcome::Retry) {
             return SdmaPacketExecutionOutcome::Unavailable;
+          }
           state_->operation_committed = true;
         }
       }
@@ -1205,19 +1307,23 @@ private:
     case Kind::Write:
       return execute_write(operation);
     case Kind::Indirect: {
-      if (state_->frames.size() > kMaxIndirectDepth)
+      if (state_->frames.size() > kMaxIndirectDepth) {
         return SdmaPacketExecutionOutcome::Malformed;
+      }
       MemoryIngressAdmission admitted =
           admit_memory_ingress(operation.address, operation.indirect.size(), VmAccessKind::Read);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       const VmAccessOutcome outcome =
           access_->read(operation.address, operation.indirect, operation.io_progress);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return map_outcome(outcome);
+      }
       std::vector<uint32_t> words(operation.indirect.size() / sizeof(uint32_t));
-      if (!operation.indirect.empty())
+      if (!operation.indirect.empty()) {
         std::memcpy(words.data(), operation.indirect.data(), operation.indirect.size());
+      }
       frame.at += operation.dwords;
       state_->operation.reset();
       state_->frames.push_back({.words = std::move(words), .at = 0, .root = false});
@@ -1226,20 +1332,23 @@ private:
     case Kind::Conditional: {
       MemoryIngressAdmission admitted =
           admit_memory_ingress(operation.address, sizeof(uint32_t), VmAccessKind::Read);
-      if (admitted.outcome != VmAccessOutcome::Complete)
+      if (admitted.outcome != VmAccessOutcome::Complete) {
         return map_outcome(admitted.outcome);
+      }
       const VmAccessOutcome outcome =
           access_->read(operation.address, std::span(operation.scratch).first(sizeof(uint32_t)),
                         operation.io_progress);
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return map_outcome(outcome);
+      }
       uint32_t value = 0;
       std::memcpy(&value, operation.scratch.data(), sizeof(value));
       if (value != operation.reference) {
         const std::size_t next = frame.at + operation.dwords;
         if (frame.root) {
-          if (operation.skip_dwords > std::numeric_limits<std::size_t>::max() - operation.dwords)
+          if (operation.skip_dwords > std::numeric_limits<std::size_t>::max() - operation.dwords) {
             return SdmaPacketExecutionOutcome::Malformed;
+          }
           state_->root_dwords = operation.dwords + operation.skip_dwords;
           // The ring owns the skipped commands and validates the reported
           // retirement extent. Its continuation retains only the COND_EXE packet.
@@ -1253,12 +1362,14 @@ private:
       return SdmaPacketExecutionOutcome::Complete;
     }
     case Kind::RegisterWrite: {
-      if (!callbacks_.write_register)
+      if (!callbacks_.write_register) {
         return SdmaPacketExecutionOutcome::Faulted;
+      }
       const VmAccessOutcome outcome =
           callbacks_.write_register(static_cast<uint32_t>(operation.address), operation.value32);
-      if (outcome == VmAccessOutcome::Complete)
+      if (outcome == VmAccessOutcome::Complete) {
         state_->operation_committed = true;
+      }
       return map_outcome(outcome);
     }
     }
@@ -1271,16 +1382,19 @@ private:
       if (frame.at == frame.words.size()) {
         const bool root = frame.root;
         state_->frames.pop_back();
-        if (root)
+        if (root) {
           return finish(SdmaPacketExecutionOutcome::Complete);
+        }
         continue;
       }
-      if (frame.at > frame.words.size())
+      if (frame.at > frame.words.size()) {
         return finish(SdmaPacketExecutionOutcome::Malformed);
+      }
       if (!state_->operation) {
         const SdmaPacketExecutionOutcome decoded = decode(frame);
-        if (decoded != SdmaPacketExecutionOutcome::Complete)
+        if (decoded != SdmaPacketExecutionOutcome::Complete) {
           return finish(decoded);
+        }
       }
       Operation *operation = &*state_->operation;
       const std::size_t dwords = operation->dwords;
@@ -1289,10 +1403,12 @@ private:
       if (outcome == SdmaPacketExecutionOutcome::Unavailable) {
         return result(outcome);
       }
-      if (outcome != SdmaPacketExecutionOutcome::Complete)
+      if (outcome != SdmaPacketExecutionOutcome::Complete) {
         return finish(outcome);
-      if (kind == Kind::Indirect)
+      }
+      if (kind == Kind::Indirect) {
         continue;
+      }
       frame.at += dwords + operation->skip_dwords;
       state_->operation.reset();
     }
@@ -1363,8 +1479,9 @@ SdmaPacketProcessResult SdmaPacketProcessor::process(Request request) {
 }
 
 void SdmaPacketProcessor::reset(SdmaPacketContinuation &continuation) noexcept {
-  if (impl_ != nullptr && continuation.impl_ != nullptr)
+  if (impl_ != nullptr && continuation.impl_ != nullptr) {
     impl_->clear(*continuation.impl_);
+  }
 }
 
 } // namespace rocjitsu::amdgpu

@@ -27,8 +27,9 @@ resolve_valid_execution_threads(config::ExecutionThreadAllocation &output,
   util::StringDiagnostic diagnostic;
   util::FailureOr<config::ExecutionThreadAllocation> result =
       settings.resolve(host_threads, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -40,8 +41,9 @@ restore_valid_checkpoint(const std::string &path, config::LoadedConfig &output) 
   util::StringDiagnostic diagnostic;
   util::FailureOr<config::LoadedConfig> result =
       config::restore_checkpoint(path, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -56,8 +58,9 @@ load_valid_config(const std::string &path, config::LoadedConfig &output,
   util::FailureOr<config::LoadedConfig> result =
       host_threads ? config::load_config(path, kEmbeddedSchema, diagnostic.emitter(), *host_threads)
                    : config::load_config(path, kEmbeddedSchema, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -73,8 +76,9 @@ load_valid_config_for_node(const std::string &path, config::LoadedConfig &output
           ? config::load_config_for_node(path, kEmbeddedSchema, node_id, diagnostic.emitter(),
                                          *host_threads)
           : config::load_config_for_node(path, kEmbeddedSchema, node_id, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }
@@ -88,8 +92,9 @@ load_valid_config_from_string(const std::string &json, config::LoadedConfig &out
       host_threads ? config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(),
                                                      *host_threads)
                    : config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
-  if (result.failed())
+  if (result.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
+  }
   output = std::move(result).value();
   return testing::AssertionSuccess();
 }

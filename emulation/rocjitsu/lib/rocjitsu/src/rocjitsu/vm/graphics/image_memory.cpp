@@ -27,24 +27,29 @@ ImageMetadataResult transfer_image_metadata(GpuVmTransferBatch &memory, VectorMe
         d.graphics_sample ? d.graphics_sample->taps[tap].lane_mask : d.lane_mask;
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       const uint32_t transfer = tap * d.wf_size + lane;
-      if (transfer < image.next_transfer || !(lane_mask & (uint64_t{1} << lane)))
+      if (transfer < image.next_transfer || !(lane_mask & (uint64_t{1} << lane))) {
         continue;
+      }
       const uint32_t x = coordinates[lane] & 0xffff;
       const uint32_t y = coordinates[lane] >> 16;
       const ImageMetadataResult result = [&]() -> ImageMetadataResult {
-        if (image.progress.stage == ImageMetadataProgress::Stage::Texel)
+        if (image.progress.stage == ImageMetadataProgress::Stage::Texel) {
           return VmAccessOutcome::Complete;
+        }
         if (image.mip_levels > 1) {
           const uint32_t level =
               d.graphics_sample ? image.tap_levels[tap][lane] : image.levels[lane];
-          if (image.depth || level >= mip_layouts.size())
+          if (image.depth || level >= mip_layouts.size()) {
             return util::Result::failure();
+          }
           auto &mip = mip_layouts[level];
-          if (!mip)
+          if (!mip) {
             mip = gfx11_dcc_mip_layout(image.swizzle, d.elem_size, image.width, image.height,
                                        image.mip_levels, level, image.pipe_aligned);
-          if (!mip)
+          }
+          if (!mip) {
             return util::Result::failure();
+          }
           const uint32_t layer =
               d.graphics_sample ? d.graphics_sample->taps[tap].layers[lane] : image.layers[lane];
           return materialize_gfx11_dcc_mip(memory, image.progress, image.base, image.metadata, x, y,
@@ -62,8 +67,9 @@ ImageMetadataResult transfer_image_metadata(GpuVmTransferBatch &memory, VectorMe
                                                        : image.layers[lane],
                                                    image.slice_size);
       }();
-      if (result.failed() || result.value() != VmAccessOutcome::Complete)
+      if (result.failed() || result.value() != VmAccessOutcome::Complete) {
         return result;
+      }
       image.progress.stage = ImageMetadataProgress::Stage::Texel;
       const VmAccessOutcome outcome =
           d.is_load ? memory.read(addresses[lane],
@@ -73,8 +79,9 @@ ImageMetadataResult transfer_image_metadata(GpuVmTransferBatch &memory, VectorMe
                     : memory.write(addresses[lane],
                                    std::as_bytes(std::span{d.store_data.data() + lane * d.elem_size,
                                                            d.elem_size}));
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       image.progress = {};
       image.next_transfer = transfer + 1;
     }
@@ -86,10 +93,12 @@ ImageMetadataResult transfer_image_metadata(GpuVmTransferBatch &memory, VectorMe
 
 VmAccessOutcome GlobalMemPipeline::initiate_image_metadata_access(VectorMemState &d,
                                                                   Wavefront &wf) {
-  if (!l2_)
+  if (!l2_) {
     return VmAccessOutcome::Faulted;
-  if (!d.translated.access->info().ready)
+  }
+  if (!d.translated.access->info().ready) {
     return VmAccessOutcome::Unavailable;
+  }
   if (d.is_load) {
     const auto taps = d.graphics_sample ? d.graphics_sample->tap_count : 1;
     d.response_data.resize(size_t(taps) * d.wf_size * d.elem_size);

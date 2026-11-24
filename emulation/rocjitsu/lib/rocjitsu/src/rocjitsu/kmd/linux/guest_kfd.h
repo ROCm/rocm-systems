@@ -258,8 +258,9 @@ private:
 
     /// @brief Drop the lease now. Idempotent.
     void release() {
-      if (owner_ != nullptr)
+      if (owner_ != nullptr) {
         std::exchange(owner_, nullptr)->release_wait_lease();
+      }
     }
 
   private:

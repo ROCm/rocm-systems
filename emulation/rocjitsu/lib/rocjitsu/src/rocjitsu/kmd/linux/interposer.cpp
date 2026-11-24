@@ -186,8 +186,9 @@ int try_connect(const std::string &path) {
   }
   std::memcpy(addr.sun_path, path.c_str(), path.size());
   int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (sock < 0)
+  if (sock < 0) {
     return -1;
+  }
   if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
     int saved = errno;
     rocjitsu::libc_passthrough().close(sock);
@@ -198,26 +199,30 @@ int try_connect(const std::string &path) {
 }
 
 bool is_proc_maps_path(const char *path) {
-  if (!path || !std::string_view(path).starts_with("/proc/"))
+  if (!path || !std::string_view(path).starts_with("/proc/")) {
     return false;
+  }
   const std::string_view name(path);
   return name.ends_with("/maps") || name.ends_with("/smaps");
 }
 
 std::optional<int> open_proc_maps_snapshot(const char *path, int flags) {
-  if (!is_proc_maps_path(path) || (flags & O_ACCMODE) != O_RDONLY)
+  if (!is_proc_maps_path(path) || (flags & O_ACCMODE) != O_RDONLY) {
     return std::nullopt;
+  }
 
   auto &libc = rocjitsu::libc_passthrough();
   int source = libc.openat(AT_FDCWD, path, flags, 0);
-  if (source < 0)
+  if (source < 0) {
     return std::nullopt;
+  }
   std::string contents;
   std::array<char, 16384> buffer{};
   while (true) {
     ssize_t count = libc.read(source, buffer.data(), buffer.size());
-    if (count <= 0)
+    if (count <= 0) {
       break;
+    }
     contents.append(buffer.data(), static_cast<size_t>(count));
   }
   int read_errno = errno;
@@ -249,8 +254,9 @@ std::optional<int> open_proc_maps_snapshot(const char *path, int flags) {
   while ((position = contents.find(allocation_marker, position)) != std::string::npos) {
     const size_t digits = position + allocation_marker.size();
     size_t end = digits;
-    while (end < contents.size() && contents[end] >= '0' && contents[end] <= '9')
+    while (end < contents.size() && contents[end] >= '0' && contents[end] <= '9') {
       ++end;
+    }
     if (end != digits && contents.compare(end, kDeleted.size(), kDeleted) == 0) {
       const std::string device = "/dev/dri/renderD" + contents.substr(digits, end - digits);
       contents.replace(position, end + kDeleted.size() - position, device);
@@ -278,8 +284,9 @@ std::optional<int> open_proc_maps_snapshot(const char *path, int flags) {
   }
 
   int snapshot = rocjitsu::create_scratch_fd("rocjitsu_proc_maps");
-  if (snapshot < 0)
+  if (snapshot < 0) {
     return -1;
+  }
   if (rocjitsu::populate_backing_file(snapshot, contents.data(), contents.size(), true) != 0) {
     int saved_errno = errno;
     libc.close(snapshot);
@@ -298,8 +305,9 @@ std::optional<int> open_proc_maps_snapshot(const char *path, int flags) {
 /// well-known socket if its own daemon's socket is transiently unavailable.
 int connect_to_daemon(const std::string &runtime_dir) {
   int sock = try_connect(runtime_dir + "/daemon.sock");
-  if (sock >= 0)
+  if (sock >= 0) {
     return sock;
+  }
   // Preserve the per-PID connect() failure reason across the access() probe below:
   // access() overwrites errno on error and leaves it unspecified on success
   // (POSIX), so without saving it a caller that reaches the final `return -1`
@@ -315,8 +323,9 @@ int connect_to_daemon(const std::string &runtime_dir) {
   // cross-connected to an unrelated daemon at the shared socket.
   const bool dir_absent = rocjitsu::libc_passthrough().access(runtime_dir.c_str(), F_OK) != 0 &&
                           (errno == ENOENT || errno == ENOTDIR);
-  if (dir_absent)
+  if (dir_absent) {
     return try_connect(rocjitsu::rpc_default_socket_path());
+  }
   errno = connect_errno;
   return -1;
 }
@@ -345,8 +354,9 @@ child_config_handoff(const std::string &cfg_file) {
   constexpr size_t kReadChunkSize = 4096;
   auto &real = rocjitsu::libc_passthrough();
   int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
-  if (cfg_fd < 0)
+  if (cfg_fd < 0) {
     return std::nullopt;
+  }
 
   std::string contents;
   contents.reserve(kReadChunkSize);
@@ -361,8 +371,9 @@ child_config_handoff(const std::string &cfg_file) {
       real.close(cfg_fd);
       return std::nullopt;
     }
-    if (bytes_read == 0)
+    if (bytes_read == 0) {
       break;
+    }
     contents.append(buffer, static_cast<size_t>(bytes_read));
   }
 
@@ -372,8 +383,9 @@ child_config_handoff(const std::string &cfg_file) {
     extra_bytes = real.read(cfg_fd, &extra, 1);
   } while (extra_bytes < 0 && errno == EINTR);
   real.close(cfg_fd);
-  if (contents.empty() || extra_bytes != 0)
+  if (contents.empty() || extra_bytes != 0) {
     return std::nullopt;
+  }
 
   return rocjitsu::config::parse_dbt_runtime_config_handoff(contents);
 }
@@ -383,16 +395,18 @@ void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, o
   // kernel errors it returns -1 and sets errno. For mmap(2), success returns
   // the mapped address; for munmap(2), success returns exactly 0.
   long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc == -1)
+  if (rc == -1) {
     return MAP_FAILED;
+  }
   return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
 }
 
 void *raw_mremap_syscall(void *old_address, size_t old_size, size_t new_size, int flags,
                          void *new_address) {
   long rc = syscall(SYS_mremap, old_address, old_size, new_size, flags, new_address);
-  if (rc < 0)
+  if (rc < 0) {
     return MAP_FAILED;
+  }
   return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
 }
 
@@ -422,21 +436,25 @@ void preallocate_backing_fd_table() {
   // their threading state is known.
   const char *single_threaded =
       static_cast<const char *>(dlsym(RTLD_DEFAULT, "__libc_single_threaded"));
-  if (!single_threaded || !*single_threaded)
+  if (!single_threaded || !*single_threaded) {
     return;
+  }
   struct rlimit original {};
-  if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &original) != 0)
+  if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &original) != 0) {
     return;
+  }
   const bool raise_limit = original.rlim_cur <= SimulatedKfd::kBackingFdMin;
   if (raise_limit) {
-    if (original.rlim_max <= SimulatedKfd::kBackingFdMin)
+    if (original.rlim_max <= SimulatedKfd::kBackingFdMin) {
       return;
+    }
     // SimulatedKfd::open can raise a low soft limit later, after workers exist.
     // Temporarily lift it while this thread owns the process limit exclusively.
     struct rlimit temporary = original;
     temporary.rlim_cur = SimulatedKfd::kBackingFdMin + 1;
-    if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &temporary, nullptr) != 0)
+    if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &temporary, nullptr) != 0) {
       return;
+    }
   }
   // Use only raw syscalls until the limit is restored: no callback can create a
   // thread while the process limit differs from the application's setting.
@@ -445,12 +463,14 @@ void preallocate_backing_fd_table() {
   if (temporary_fd >= 0) {
     const int high_fd = static_cast<int>(
         syscall(SYS_fcntl, temporary_fd, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin));
-    if (high_fd >= 0)
+    if (high_fd >= 0) {
       syscall(SYS_close, high_fd);
+    }
     syscall(SYS_close, temporary_fd);
   }
-  if (raise_limit && syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &original, nullptr) != 0)
+  if (raise_limit && syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &original, nullptr) != 0) {
     std::fprintf(stderr, "rocjitsu: cannot restore descriptor limit: %s\n", std::strerror(errno));
+  }
 }
 
 /// @brief All mutable interposer state.
@@ -503,8 +523,9 @@ public:
     // matches nothing.
     {
       struct stat kfd_st {};
-      if (::stat("/dev/kfd", &kfd_st) == 0 && S_ISCHR(kfd_st.st_mode))
+      if (::stat("/dev/kfd", &kfd_st) == 0 && S_ISCHR(kfd_st.st_mode)) {
         ctx.host_kfd_rdev_ = kfd_st.st_rdev;
+      }
     }
     // Resolve the per-invocation runtime directory once here, in the library
     // constructor: this runs single-threaded before any app code (and thus before
@@ -528,11 +549,12 @@ public:
     // the CWD — either mis-gating the fallback or connecting to an unintended
     // socket. Fall back to this process's PID-scoped default in that case.
     const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv);
-    if (dir && *dir)
+    if (dir && *dir) {
       ctx.invocation_runtime_dir_ = new const std::string(dir);
-    else
+    } else {
       ctx.invocation_runtime_dir_ =
           new const std::string(rocjitsu::rpc_invocation_runtime_dir(getpid()));
+    }
     // A child may start its own backend only if none was ever started in the
     // parent. Forkserver workers satisfy this condition; a process that already
     // used a GPU may hold driver locks across blocking waits and still requires
@@ -541,9 +563,10 @@ public:
     // inherit its function-local initialization guard in progress.
     (void)rocjitsu::host_mapping_lock();
     const int fork_error = pthread_atfork(nullptr, nullptr, reset_unused_context_after_fork);
-    if (fork_error != 0)
+    if (fork_error != 0) {
       std::fprintf(stderr, "rocjitsu: cannot register fork child initialization: %s\n",
                    std::strerror(fork_error));
+    }
     real().resolve();
     // A library loaded with RTLD_LOCAL can still serve the C VM API while
     // libc owns the application's mappings. Enable the index only when our
@@ -570,8 +593,9 @@ public:
   static bool inherits_real_gpu_descriptor() {
     const int directory = static_cast<int>(
         syscall(SYS_openat, AT_FDCWD, "/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0));
-    if (directory < 0)
+    if (directory < 0) {
       return true;
+    }
     struct DirectoryEntry {
       uint64_t inode;
       int64_t offset;
@@ -583,8 +607,9 @@ public:
     bool found = false;
     for (;;) {
       const long count = syscall(SYS_getdents64, directory, entries, sizeof(entries));
-      if (count < 0 && errno == EINTR)
+      if (count < 0 && errno == EINTR) {
         continue;
+      }
       if (count <= 0) {
         found = count < 0;
         break;
@@ -598,11 +623,13 @@ public:
         }
         const char *name = entries + offset + offsetof(DirectoryEntry, name);
         offset += entry->record_size;
-        if (*name < '0' || *name > '9')
+        if (*name < '0' || *name > '9') {
           continue;
+        }
         int fd = 0;
-        for (const char *digit = name; *digit >= '0' && *digit <= '9'; ++digit)
+        for (const char *digit = name; *digit >= '0' && *digit <= '9'; ++digit) {
           fd = fd * 10 + (*digit - '0');
+        }
         struct stat info {};
         long status;
         do {
@@ -614,8 +641,9 @@ public:
           break;
         }
       }
-      if (found)
+      if (found) {
         break;
+      }
     }
     (void)syscall(SYS_close, directory);
     return found;
@@ -627,13 +655,15 @@ public:
   /// remaining context state is bookkeeping; immutable launch metadata can be
   /// shared across fork. This handler does not run for vfork/posix_spawn.
   static void reset_unused_context_after_fork() {
-    if (ctx.backend_started_.load(std::memory_order_acquire))
+    if (ctx.backend_started_.load(std::memory_order_acquire)) {
       return;
+    }
     const int saved_errno = errno;
     const bool inherited_gpu = inherits_real_gpu_descriptor();
     errno = saved_errno;
-    if (inherited_gpu)
+    if (inherited_gpu) {
       return;
+    }
     const std::string *invocation_dir = ctx.invocation_runtime_dir_;
     const dev_t host_kfd = ctx.host_kfd_rdev_;
     new (storage_) InterposerContext();
@@ -698,8 +728,9 @@ public:
     while (current) {
       rj_vm_t *next = current->pending_destroy_next;
       current->pending_destroy_next = nullptr;
-      if (rj_vm_destroy_checked(current) != ROCJITSU_STATUS_SUCCESS)
+      if (rj_vm_destroy_checked(current) != ROCJITSU_STATUS_SUCCESS) {
         retain_failed_local_vm(current);
+      }
       current = next;
     }
   }
@@ -753,10 +784,12 @@ public:
     }
     LocalOpen result;
     result.fd = drv->open();
-    if (result.fd < 0)
+    if (result.fd < 0) {
       return result;
-    if (result.fd != drv->fd())
+    }
+    if (result.fd != drv->fd()) {
       track_open_fd(result.fd);
+    }
     result.clear_dups_needed = !drv->owns_fd(drv->fd());
     return result;
   }
@@ -791,16 +824,19 @@ public:
       // the whole handshake deadline. Gated on shutdown_requested_, which is only ever
       // set and never cleared, so an ordinary close is untouched: cancelling early is
       // sound exactly when the process is already on its way out.
-      if (active_driver && shutdown_requested_)
+      if (active_driver && shutdown_requested_) {
         active_driver->begin_local_shutdown();
+      }
       if (active_driver) {
         errno = 0;
         close_result = active_driver->close();
-        if (close_result == -1)
+        if (close_result == -1) {
           close_result = -(errno != 0 ? errno : EIO);
+        }
       }
-      if (shutdown_requested_)
+      if (shutdown_requested_) {
         doomed = shutdown_local_vm_if_idle_locked();
+      }
     }
     auto teardown_status = doomed.close_status;
     // A last owner can run checked VM destruction here. It must finish outside
@@ -821,8 +857,9 @@ public:
 #ifdef RJ_INTERPOSER_TEST_HOOKS
       waiting_for_local_vm_close_.store(false, std::memory_order_release);
 #endif
-      if (close_result == 0)
+      if (close_result == 0) {
         close_result = status;
+      }
     }
     return close_result;
   }
@@ -875,8 +912,9 @@ public:
   /// concurrent teardown cannot interleave with it.
   bool retain_remote_open_if_active() {
     std::lock_guard lock(remote_mutex_);
-    if (!remote())
+    if (!remote()) {
       return false;
+    }
     remote_open_refs_.fetch_add(1, std::memory_order_acq_rel);
     return true;
   }
@@ -898,18 +936,21 @@ public:
       // dup close that lost the race can still land here. Only decrement a live
       // reference.
       int prev = remote_open_refs_.load(std::memory_order_acquire);
-      if (prev <= 0)
+      if (prev <= 0) {
         return 0;
+      }
       remote_open_refs_.store(prev - 1, std::memory_order_release);
-      if (prev == 1)
+      if (prev == 1) {
         dead = teardown_remote_locked();
+      }
     }
     // Perform the graceful RPC_CLOSE OUTSIDE remote_mutex_. The atomic shared_ptr
     // already guarantees the driver's lifetime, so the (blocking) RPC shutdown
     // does not need the lock; holding remote_mutex_ across a blocking send/recv
     // would stall every other remote_mutex_ user behind an arbitrary-length RPC.
-    if (dead)
+    if (dead) {
       return dead->close();
+    }
     return 0;
   }
 
@@ -955,23 +996,26 @@ public:
       return {active_remote, fd};
     }
     int sock = connect_to_daemon(invocation_runtime_dir());
-    if (sock < 0)
+    if (sock < 0) {
       return {};
+    }
     // Build the driver and open its KFD connection BEFORE publishing remote_.
     // Publishing early (then returning on open()<0) would leave remote_ non-null
     // with remote_kfd_fd_ == -1, so initialized() would report success and gate
     // out local-VM creation / a later remote retry. Only a fully-open driver is
     // ever visible to lock-free readers.
-    if (!active_remote)
+    if (!active_remote) {
       active_remote = std::make_shared<RemoteDriver>(sock, [] {
         // The daemon has stopped servicing GPU work. Native signal waits can
         // otherwise spin forever without touching the disconnected RPC stream.
         std::fprintf(stderr, "rocjitsu: daemon connection lost; exiting native process\n");
         std::_Exit(EXIT_FAILURE);
       });
+    }
     int fd = active_remote->open();
-    if (fd < 0)
+    if (fd < 0) {
       return {};
+    }
     // Publish the fd and open refcount BEFORE remote_. initialized() and the
     // lock-free readers gate on remote_, so making the remote_ release-store the
     // LAST step guarantees any thread that observes a non-null remote_ also sees
@@ -1003,19 +1047,22 @@ public:
   }
 
   std::string redirect_sysfs_path(const char *path) {
-    if (!path)
+    if (!path) {
       return {};
+    }
 
     std::string_view sv(path);
     if (!sv.starts_with("/sys/class/drm") && !sv.starts_with("/sys/devices/virtual/kfd") &&
-        !sv.starts_with("/sys/class/kfd"))
+        !sv.starts_with("/sys/class/kfd")) {
       return {};
+    }
 
     // initialized() already covers a live remote (remote_ != nullptr), which is
     // the stable signal independent of the primary fd number; only create a local
     // VM when nothing is initialized yet.
-    if (!initialized())
+    if (!initialized()) {
       get_or_create();
+    }
 
     // Read topology and drm paths from ONE remote snapshot so a concurrent
     // teardown/reconnect between the two reads cannot combine a topology path from
@@ -1026,8 +1073,9 @@ public:
       if (!remote_topology.empty()) {
         std::string redirected = LinuxKfd::redirect_sysfs_root_path(
             path, remote_topology, std::string(active_remote->drm_path()));
-        if (!redirected.empty())
+        if (!redirected.empty()) {
           return redirected;
+        }
       }
     }
 
@@ -1044,8 +1092,9 @@ public:
   }
 
   void track_open_fd(int fd) {
-    if (fd < 0 || is_kfd_primary(fd))
+    if (fd < 0 || is_kfd_primary(fd)) {
       return;
+    }
     std::lock_guard lock(fd_mutex_);
     // GuestKfd::open() already retained one driver (local) reference before
     // returning this app-facing dup fd. Track it as a Local dup so ioctl/mmap/
@@ -1062,16 +1111,20 @@ public:
   /// active, both driver() and remote_ are non-null, so guessing would mis-tag a
   /// dup of the remote fd as Local and release the wrong backend on close.
   std::optional<DupBackend> kfd_backend_of(int fd) {
-    if (fd < 0)
+    if (fd < 0) {
       return std::nullopt;
-    if (fd == driver_fd())
+    }
+    if (fd == driver_fd()) {
       return DupBackend::Local;
-    if (fd == remote_kfd_fd_.load(std::memory_order_acquire))
+    }
+    if (fd == remote_kfd_fd_.load(std::memory_order_acquire)) {
       return DupBackend::Remote;
+    }
     std::lock_guard lock(fd_mutex_);
     auto it = kfd_dup_fds_.find(fd);
-    if (it != kfd_dup_fds_.end())
+    if (it != kfd_dup_fds_.end()) {
       return it->second;
+    }
     return std::nullopt;
   }
 
@@ -1124,8 +1177,9 @@ public:
     // lifecycle, while that dup holds drm_fd_lifecycle_mutex_ and thereby blocks
     // every close() too. kfd_backend_of() is safe to call unlocked: it snapshots the
     // driver internally and takes only the fd table's own lock.
-    if (!kfd_backend_of(src_fd))
+    if (!kfd_backend_of(src_fd)) {
       return std::nullopt;
+    }
 
     // Now the authoritative classify+retain, under init_mutex_ -- the SAME lock
     // shutdown_local_vm_if_idle_locked() makes its idle decision under. That mutual
@@ -1136,10 +1190,12 @@ public:
     // a filter; it is deliberately re-done here rather than trusted.
     std::lock_guard lock(init_mutex_);
     auto backend = kfd_backend_of(src_fd);
-    if (!backend)
+    if (!backend) {
       return std::nullopt;
-    if (!retain_backend(*backend))
+    }
+    if (!retain_backend(*backend)) {
       return std::nullopt; // backend went away before we could reserve.
+    }
     return backend;
   }
 
@@ -1165,15 +1221,17 @@ public:
       std::lock_guard lock(fd_mutex_);
       inserted = kfd_dup_fds_.emplace(fd, backend).second;
     }
-    if (!inserted)
+    if (!inserted) {
       // fd already tracked (dup returned a recycled number we still hold): undo
       // the reserved reference so the count stays balanced.
       release_backend(backend);
+    }
   }
 
   int untrack_dup(int fd) {
-    if (fd < 0)
+    if (fd < 0) {
       return 0;
+    }
     DupBackend backend;
     bool was_tracked = false;
     {
@@ -1185,8 +1243,9 @@ public:
         was_tracked = true;
       }
     }
-    if (was_tracked)
+    if (was_tracked) {
       return release_backend(backend);
+    }
     return 0;
   }
 
@@ -1200,15 +1259,17 @@ public:
   /// The primary paths mirror close()'s handling of the primary fd, minus the
   /// real close() (dup2/dup3 already replaced the descriptor).
   void invalidate_overwritten_kfd_fd(int fd) {
-    if (fd < 0)
+    if (fd < 0) {
       return;
+    }
     // Remote primary? Compare-and-clear remote_kfd_fd_ under remote_mutex_ so the
     // "is this the primary?" test and the clear are atomic with respect to
     // get_or_create_remote() (which retains/reissues the fd under the same lock).
     // Without the lock a racing open could observe the old fd number after this
     // cleared it, and hand back a stale/invalidated descriptor.
-    if (invalidate_remote_primary(fd))
+    if (invalidate_remote_primary(fd)) {
       return;
+    }
     // Local primary? Let invalidate_primary_fd() decide under the driver's own
     // lock rather than pre-filtering on an unlocked fd() load: fd() can change
     // between the check and the lock (a concurrent open()/re-mint), which could
@@ -1226,8 +1287,9 @@ public:
     // freed there when this was the last reference.
     LinuxKfd::PrimaryInvalidation invalidation = LinuxKfd::PrimaryInvalidation::kNotPrimary;
     {
-      if (auto d = driver())
+      if (auto d = driver()) {
         invalidation = d->invalidate_primary_fd(fd);
+      }
     }
     switch (invalidation) {
     case LinuxKfd::PrimaryInvalidation::kClearedDropRef:
@@ -1254,8 +1316,9 @@ public:
     {
       std::lock_guard lock(remote_mutex_);
       int expected = fd;
-      if (!remote_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel))
+      if (!remote_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel)) {
         return false; // not the remote primary
+      }
       // The number is being reused; it no longer names the synthetic remote KFD
       // fd. Drop the primary's open reference (inlined from release_remote_open()
       // because we already hold remote_mutex_). If other refs keep the connection
@@ -1265,12 +1328,14 @@ public:
       int prev = remote_open_refs_.load(std::memory_order_acquire);
       if (prev > 0) {
         remote_open_refs_.store(prev - 1, std::memory_order_release);
-        if (prev == 1)
+        if (prev == 1) {
           dead = teardown_remote_locked();
+        }
       }
     }
-    if (dead)
+    if (dead) {
       dead->close();
+    }
     return true;
   }
 
@@ -1279,16 +1344,18 @@ public:
     {
       std::lock_guard lock(fd_mutex_);
       released.reserve(kfd_dup_fds_.size());
-      for (auto &[fd, backend] : kfd_dup_fds_)
+      for (auto &[fd, backend] : kfd_dup_fds_) {
         released.push_back(backend);
+      }
       kfd_dup_fds_.clear();
     }
     // Drop the references the cleared dups were holding, each on the backend it
     // was tracked against. Used when a fresh open() rebinds the local process;
     // the just-opened reference is preserved because clear_dups runs before any
     // new dups are tracked.
-    for (DupBackend backend : released)
+    for (DupBackend backend : released) {
       release_backend(backend);
+    }
   }
 
   /// @brief Tear down the remote connection state. Caller MUST hold remote_mutex_.
@@ -1303,8 +1370,9 @@ public:
   /// RPC_CLOSE shutdown OUTSIDE remote_mutex_; the shared_ptr keeps it alive.
   [[nodiscard]] std::shared_ptr<RemoteDriver> teardown_remote_locked() {
     auto active_remote = remote();
-    if (!active_remote)
+    if (!active_remote) {
       return nullptr;
+    }
     // Clear the published pointer first so no new reader can pick this driver up.
     // The RemoteDriver is destroyed by the last shared_ptr: if a racing reader
     // still holds a snapshot mid-ioctl/mmap, destruction (and socket close in
@@ -1316,8 +1384,9 @@ public:
     // torn-down connection.
     remote_open_refs_.store(0, std::memory_order_release);
     int fd = remote_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
-    if (fd >= 0)
+    if (fd >= 0) {
       InterposerContext::real().close(fd);
+    }
     // Erase ONLY the Remote-tagged dups. kfd_dup_fds_ can hold Local entries too
     // (local + daemon mode simultaneously active); clearing the whole map would
     // drop a live local dup's tracking without releasing its local open
@@ -1354,8 +1423,9 @@ public:
     // Merged sync files retain immutable snapshots of the original fences.
     std::vector<std::shared_ptr<SyncobjFence>> dependencies;
     bool is_signaled() const {
-      if (signaled.load(std::memory_order_acquire))
+      if (signaled.load(std::memory_order_acquire)) {
         return true;
+      }
       // Merges and timeline transfers form a DAG. Visit each payload once,
       // without recursive calls or repeated walks through shared predecessors.
       std::vector<const SyncobjFence *> pending{this};
@@ -1363,18 +1433,22 @@ public:
       while (!pending.empty()) {
         const auto *fence = pending.back();
         pending.pop_back();
-        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second)
+        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second) {
           continue;
-        if (fence->dependencies.empty())
+        }
+        if (fence->dependencies.empty()) {
           return false;
+        }
         // Check the newly appended work before revisiting its predecessors.
-        for (auto it = fence->dependencies.rbegin(); it != fence->dependencies.rend(); ++it)
+        for (auto it = fence->dependencies.rbegin(); it != fence->dependencies.rend(); ++it) {
           pending.push_back(it->get());
+        }
       }
       // Successful completion is permanent; subsequent queries need not revisit
       // an immutable subtree whose leaves have all completed successfully.
-      for (const auto *fence : visited)
+      for (const auto *fence : visited) {
         fence->signaled.store(true, std::memory_order_release);
+      }
       return true;
     }
     bool is_failed() const {
@@ -1383,12 +1457,15 @@ public:
       while (!pending.empty()) {
         const auto *fence = pending.back();
         pending.pop_back();
-        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second)
+        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second) {
           continue;
-        if (fence->failed.load(std::memory_order_acquire))
+        }
+        if (fence->failed.load(std::memory_order_acquire)) {
           return true;
-        for (const auto &dependency : fence->dependencies)
+        }
+        for (const auto &dependency : fence->dependencies) {
           pending.push_back(dependency.get());
+        }
       }
       return false;
     }
@@ -1420,15 +1497,18 @@ public:
       if (require_readwrite &&
           (rocjitsu::fcntl_memory_backing(source, F_GETFL, 0) & O_ACCMODE) != O_RDWR) {
         reopened = rocjitsu::reopen_memory_backing(source, O_RDWR | O_CLOEXEC);
-        if (reopened < 0)
+        if (reopened < 0) {
           return {};
+        }
         source = reopened;
       }
       const int fd = duplicate_backing(source);
-      if (reopened >= 0)
+      if (reopened >= 0) {
         real().close(reopened);
-      if (fd < 0)
+      }
+      if (fd < 0) {
         return {};
+      }
       result->fd_ = fd;
       owned_.emplace(fd, result.get());
       return result;
@@ -1436,8 +1516,9 @@ public:
 
     ~PrivateDrmFd() {
       std::lock_guard lock(mutex_);
-      if (fd_ < 0)
+      if (fd_ < 0) {
         return;
+      }
       owned_.erase(fd_);
       real().close(fd_);
     }
@@ -1455,11 +1536,13 @@ public:
     template <typename F> static int replace(int target, F &&operation) {
       std::lock_guard lock(mutex_);
       const auto it = owned_.find(target);
-      if (it == owned_.end())
+      if (it == owned_.end()) {
         return operation();
+      }
       const int relocated = duplicate_backing(target);
-      if (relocated < 0)
+      if (relocated < 0) {
         return -1;
+      }
       auto *owner = it->second;
       const int result = operation();
       if (result < 0) {
@@ -1478,8 +1561,9 @@ public:
   private:
     static int duplicate_backing(int source) {
       int fd = real().fcntl(source, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
-      if (fd < 0 && errno == EINVAL)
+      if (fd < 0 && errno == EINVAL) {
         fd = real().fcntl(source, F_DUPFD_CLOEXEC, 0);
+      }
       return fd;
     }
 
@@ -1493,12 +1577,14 @@ public:
     std::shared_ptr<PrivateDrmFd> event_fd;
     bool notified = false;
     void refresh() {
-      if (notified || !fence || (!fence->is_signaled() && !fence->is_failed()))
+      if (notified || !fence || (!fence->is_signaled() && !fence->is_failed())) {
         return;
+      }
       uint64_t value = 1;
       if (event_fd->use([&](int fd) { return syscall(SYS_write, fd, &value, sizeof(value)); }) ==
-          sizeof(value))
+          sizeof(value)) {
         notified = true;
+      }
     }
   };
 
@@ -1552,14 +1638,16 @@ public:
     /// @brief Drop the reference. MUST NOT run with an interposer lock held: the
     /// local path takes init_mutex_ and can complete a pending teardown.
     int release() {
-      if (!context_)
+      if (!context_) {
         return 0;
+      }
       auto *context = std::exchange(context_, nullptr);
       const bool was_remote = remote_ != nullptr;
       local_.reset();
       remote_.reset();
-      if (was_remote)
+      if (was_remote) {
         return context->release_remote_open();
+      }
       return context->release_local_open();
     }
 
@@ -1578,8 +1666,9 @@ public:
     {
       std::lock_guard lock(init_mutex_);
       auto drv = driver();
-      if (drv && drv->handles_drm_render_minor(render_minor) && drv->retain_local_open())
+      if (drv && drv->handles_drm_render_minor(render_minor) && drv->retain_local_open()) {
         return DrmBackendLease(this, std::move(drv));
+      }
     }
     {
       std::lock_guard lock(remote_mutex_);
@@ -1664,15 +1753,17 @@ public:
   /// @brief Drop one fd or reservation reference while fd_mutex_ is held.
   /// @returns The identity and lease of the file when its final reference went.
   [[nodiscard]] DrmFinalRelease release_drm_file_locked(const DrmFileToken &state) {
-    if (!state)
+    if (!state) {
       return {};
+    }
     if (state->open_fds == 0) {
       util::Logger::warn("DRM file refcount underflow, id=", state->id);
       return {};
     }
     --state->open_fds;
-    if (state->open_fds != 0)
+    if (state->open_fds != 0) {
       return {};
+    }
     return {state->id, std::move(state->backend_lease), std::move(state->pm4_queues)};
   }
 
@@ -1684,11 +1775,14 @@ public:
   /// @brief Cancel the file's PM4 queues, reap GEM, then drop the backend lease.
   /// @details Must run with NO interposer lock held.
   int complete_drm_release(DrmFinalRelease release) {
-    if (auto *driver = dynamic_cast<SimulatedKfd *>(release.lease.local().get()))
-      for (const auto &[context_ring, queue] : release.queues)
+    if (auto *driver = dynamic_cast<SimulatedKfd *>(release.lease.local().get())) {
+      for (const auto &[context_ring, queue] : release.queues) {
         driver->retire_pm4_queue(queue.key);
-    if (release.file_id)
+      }
+    }
+    if (release.file_id) {
       reap_gem_for_drm_file(*release.file_id);
+    }
     release.queues.clear();
     // Release explicitly so the interposed close can report a final KFD or RPC
     // error. Implicit RAII callers may ignore the result after cleanup.
@@ -1730,8 +1824,9 @@ public:
   /// than the mutable published driver. GEM/VM work belongs to the page table of the
   /// backend that owns the file.
   bool drm_file_is_simulated(const DrmFileToken &file) {
-    if (!file)
+    if (!file) {
       return false;
+    }
     const auto &local = file->backend_lease.local();
     return dynamic_cast<SimulatedKfd *>(local.get()) != nullptr;
   }
@@ -1742,8 +1837,9 @@ public:
 
   /// @brief The SimulatedKfd serving @p file, or null.
   SimulatedKfd *drm_file_simulated(const DrmFileToken &file) {
-    if (!file)
+    if (!file) {
       return nullptr;
+    }
     return dynamic_cast<SimulatedKfd *>(file->backend_lease.local().get());
   }
 
@@ -1755,8 +1851,9 @@ public:
   DrmFileToken reserve_drm_file(int fd) {
     std::lock_guard lock(fd_mutex_);
     auto it = drm_fds_.find(fd);
-    if (it == drm_fds_.end())
+    if (it == drm_fds_.end()) {
       return nullptr;
+    }
     ++it->second->open_fds;
     return it->second;
   }
@@ -1764,8 +1861,9 @@ public:
   /// @brief Release a token obtained from reserve_drm_file().
   /// @details Final GEM cleanup runs outside fd_mutex_ and any lifecycle lock.
   void release_drm_file_reservation(const DrmFileToken &state) {
-    if (!state)
+    if (!state) {
       return;
+    }
     DrmFinalRelease release;
     {
       std::lock_guard lock(fd_mutex_);
@@ -1788,8 +1886,9 @@ public:
         : context_(std::exchange(other.context_, nullptr)), file_(std::move(other.file_)) {}
     DrmFileReservation &operator=(DrmFileReservation &&) = delete;
     ~DrmFileReservation() {
-      if (!context_)
+      if (!context_) {
         return;
+      }
       const int saved_errno = errno;
       context_->release_drm_file_reservation(file_);
       errno = saved_errno;
@@ -1815,17 +1914,19 @@ public:
   /// removed, if any. The caller performs GEM cleanup after releasing the
   /// lifecycle lock.
   [[nodiscard]] DrmFinalRelease commit_drm_dup(int fd, const DrmFileToken &state) {
-    if (fd < 0)
+    if (fd < 0) {
       return {};
+    }
     DrmFinalRelease displaced_release;
     {
       std::lock_guard lock(fd_mutex_);
       if (auto stale = drm_fds_.find(fd); stale != drm_fds_.end()) {
         auto displaced = std::move(stale->second);
-        if (state)
+        if (state) {
           stale->second = state;
-        else
+        } else {
           drm_fds_.erase(stale);
+        }
         displaced_release = release_drm_file_locked(displaced);
       } else if (state) {
         drm_fds_.emplace(fd, state);
@@ -1853,8 +1954,9 @@ public:
   DrmUntrackResult untrack_drm(int fd) {
     std::lock_guard lock(fd_mutex_);
     auto it = drm_fds_.find(fd);
-    if (it == drm_fds_.end())
+    if (it == drm_fds_.end()) {
       return {};
+    }
     auto state = std::move(it->second);
     drm_fds_.erase(it);
     return {.tracked = true, .release = release_drm_file_locked(state)};
@@ -1862,17 +1964,21 @@ public:
 
   /// @brief Allocate a syncobj handle in @p file's private namespace.
   int create_syncobj(const DrmFileToken &file, uint32_t flags, uint32_t *handle) {
-    if (!handle || (flags & ~DRM_SYNCOBJ_CREATE_SIGNALED) != 0)
+    if (!handle || (flags & ~DRM_SYNCOBJ_CREATE_SIGNALED) != 0) {
       return -EINVAL;
-    if (!file)
+    }
+    if (!file) {
       return -EBADF;
+    }
     std::lock_guard lock(fd_mutex_);
     auto &state = *file;
-    if (state.syncobj_entries.size() == std::numeric_limits<uint32_t>::max())
+    if (state.syncobj_entries.size() == std::numeric_limits<uint32_t>::max()) {
       return -ENOSPC;
+    }
     uint32_t candidate = state.next_syncobj_handle++;
-    while (candidate == 0 || state.syncobj_entries.count(candidate) != 0)
+    while (candidate == 0 || state.syncobj_entries.count(candidate) != 0) {
       candidate = state.next_syncobj_handle++;
+    }
     try {
       auto entry = std::make_shared<SyncobjEntry>();
       entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
@@ -1893,18 +1999,21 @@ public:
 
   /// @brief Remove a syncobj handle from @p file's private namespace.
   int destroy_syncobj(const DrmFileToken &file, uint32_t handle) {
-    if (!file)
+    if (!file) {
       return -EBADF;
+    }
     std::lock_guard lock(fd_mutex_);
-    if (file->syncobj_entries.erase(handle) == 0)
+    if (file->syncobj_entries.erase(handle) == 0) {
       return -EINVAL;
+    }
     return 0;
   }
 
   /// @brief Allocate nonzero context IDs or query/remove one in this DRM file.
   int drm_context(const DrmFileToken &file, drm_amdgpu_ctx *argument) {
-    if (!file)
+    if (!file) {
       return -EBADF;
+    }
     const auto request = argument->in;
     // Serialize with CS acceptance; callbacks run only after dropping fd_mutex_.
     std::lock_guard submission_lock(file->submission_mutex);
@@ -1912,34 +2021,40 @@ public:
       std::vector<uint64_t> retired;
       {
         std::lock_guard lock(fd_mutex_);
-        if (!file->contexts.erase(request.ctx_id))
+        if (!file->contexts.erase(request.ctx_id)) {
           return -EINVAL;
+        }
         std::erase_if(file->pm4_queues, [&](const auto &entry) {
-          if ((entry.first >> 32) != request.ctx_id)
+          if ((entry.first >> 32) != request.ctx_id) {
             return false;
+          }
           retired.push_back(entry.second.key);
           return true;
         });
       }
-      if (auto *driver = dynamic_cast<SimulatedKfd *>(file->backend_lease.local().get()))
-        for (uint64_t key : retired)
+      if (auto *driver = dynamic_cast<SimulatedKfd *>(file->backend_lease.local().get())) {
+        for (uint64_t key : retired) {
           driver->retire_pm4_queue(key);
+        }
+      }
       return 0;
     }
     std::lock_guard lock(fd_mutex_);
     switch (request.op) {
     case AMDGPU_CTX_OP_ALLOC_CTX: {
       uint32_t id = file->next_context_id++;
-      while (!id || file->contexts.count(id))
+      while (!id || file->contexts.count(id)) {
         id = file->next_context_id++;
+      }
       file->contexts.insert(id);
       argument->out.alloc.ctx_id = id;
       return 0;
     }
     case AMDGPU_CTX_OP_QUERY_STATE:
     case AMDGPU_CTX_OP_QUERY_STATE2:
-      if (!file->contexts.count(request.ctx_id))
+      if (!file->contexts.count(request.ctx_id)) {
         return -EINVAL;
+      }
       std::memset(&argument->out, 0, sizeof(argument->out));
       return 0;
     default:
@@ -1949,8 +2064,9 @@ public:
 
   /// @brief Track the DRM file's compute VMID reservation.
   int drm_vm(const DrmFileToken &file, uint32_t operation) {
-    if (!file)
+    if (!file) {
       return -EBADF;
+    }
     std::lock_guard lock(fd_mutex_);
     if (operation == AMDGPU_VM_OP_RESERVE_VMID) {
       file->vmid_reserved = true;
@@ -1967,25 +2083,31 @@ public:
                       uint32_t count, bool reset) {
     std::vector<uint32_t> handles;
     std::vector<uint64_t> points(count, 0);
-    if (int result = snapshot_user_array(handles_address, count, handles); result != 0)
+    if (int result = snapshot_user_array(handles_address, count, handles); result != 0) {
       return result;
-    if (points_address) {
-      if (int result = snapshot_user_array(points_address, count, points); result != 0)
-        return result;
     }
-    if (!file)
+    if (points_address) {
+      if (int result = snapshot_user_array(points_address, count, points); result != 0) {
+        return result;
+      }
+    }
+    if (!file) {
       return -EBADF;
+    }
     {
       std::lock_guard lock(fd_mutex_);
-      for (uint32_t handle : handles)
-        if (!lookup_syncobj_locked(file, handle))
+      for (uint32_t handle : handles) {
+        if (!lookup_syncobj_locked(file, handle)) {
           return -ENOENT;
+        }
+      }
       for (size_t i = 0; i < handles.size(); ++i) {
         auto entry = lookup_syncobj_locked(file, handles[i]);
-        if (reset)
+        if (reset) {
           *entry = {};
-        else
+        } else {
           signal_syncobj_locked(entry, points[i]);
+        }
       }
     }
     notify_syncobj_waiters(file);
@@ -1993,21 +2115,25 @@ public:
   }
 
   int query_syncobjs(const DrmFileToken &file, const drm_syncobj_timeline_array &request) {
-    if (request.flags & ~DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED)
+    if (request.flags & ~DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED) {
       return -EINVAL;
+    }
     std::vector<uint32_t> handles;
     if (int result = snapshot_user_array(request.handles, request.count_handles, handles);
-        result != 0)
+        result != 0) {
       return result;
-    if (!file)
+    }
+    if (!file) {
       return -EBADF;
+    }
     std::vector<uint64_t> points;
     {
       std::lock_guard lock(fd_mutex_);
       for (uint32_t handle : handles) {
         auto entry = lookup_syncobj_locked(file, handle);
-        if (!entry)
+        if (!entry) {
           return -ENOENT;
+        }
         refresh_syncobj_locked(*entry);
         points.push_back(request.flags & DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED
                              ? entry->submitted_point
@@ -2024,8 +2150,9 @@ public:
 
   static std::shared_ptr<SyncobjFence> syncobj_fence_locked(const SyncobjEntry &entry,
                                                             uint64_t point) {
-    if (!point)
+    if (!point) {
       return entry.binary_fence;
+    }
     auto it = entry.timeline_fences.lower_bound(point);
     return it == entry.timeline_fences.end() ? nullptr : it->second;
   }
@@ -2033,8 +2160,9 @@ public:
   static void refresh_syncobj_locked(SyncobjEntry &entry) {
     entry.signaled = entry.binary_fence && entry.binary_fence->is_signaled();
     for (auto it = entry.timeline_fences.rbegin(); it != entry.timeline_fences.rend(); ++it) {
-      if (!it->second->is_signaled())
+      if (!it->second->is_signaled()) {
         continue;
+      }
       entry.signaled_point = std::max(entry.signaled_point, it->first);
       // Keep the completed boundary so waits on earlier points still resolve.
       // Exported fence snapshots retain their own references to old payloads.
@@ -2059,37 +2187,44 @@ public:
   }
 
   int transfer_syncobj(const DrmFileToken &file, const drm_syncobj_transfer request) {
-    if (!file)
+    if (!file) {
       return -EBADF;
-    if ((request.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) || request.pad)
+    }
+    if ((request.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) || request.pad) {
       return -EINVAL;
+    }
     {
       std::unique_lock lock(fd_mutex_);
       auto source = lookup_syncobj_locked(file, request.src_handle);
       auto target = lookup_syncobj_locked(file, request.dst_handle);
-      if (!source || !target)
+      if (!source || !target) {
         return -ENOENT;
+      }
       // Linux bounds WAIT_FOR_SUBMIT transfer waits to five seconds. Wait for
       // the payload to exist, not for its GPU work to finish; retain the source
       // and destination objects across handle deletion and replacement.
       timespec deadline{};
-      if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0)
+      if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0) {
         return -errno;
+      }
       deadline.tv_sec += 5;
       std::shared_ptr<SyncobjFence> fence;
       while (true) {
         const uint32_t generation = file->syncobj_generation.load(std::memory_order_acquire);
         fence = syncobj_fence_locked(*source, request.src_point);
-        if (fence)
+        if (fence) {
           break;
-        if (!(request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+        }
+        if (!(request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT)) {
           return -EINVAL;
+        }
         lock.unlock();
         const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
         const int wait_errno = errno;
         lock.lock();
-        if (rc == 0 || wait_errno == EAGAIN)
+        if (rc == 0 || wait_errno == EAGAIN) {
           continue;
+        }
         return wait_errno == ETIMEDOUT ? -ETIME : -wait_errno;
       }
       if (request.dst_point) {
@@ -2112,8 +2247,9 @@ public:
     auto object = std::make_shared<SyncFile>();
     object->fence = fence;
     const int fd = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
-    if (fd < 0)
+    if (fd < 0) {
       return -errno;
+    }
     object->event_fd = PrivateDrmFd::duplicate(fd);
     if (!object->event_fd) {
       const int error = errno;
@@ -2131,17 +2267,21 @@ public:
   }
 
   int export_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
-    if (request.pad || request.flags != DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE)
+    if (request.pad || request.flags != DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE) {
       return -EINVAL;
+    }
     std::lock_guard lock(fd_mutex_);
     auto entry = lookup_syncobj_locked(file, request.handle);
-    if (!entry)
+    if (!entry) {
       return -ENOENT;
-    if (!entry->binary_fence)
+    }
+    if (!entry->binary_fence) {
       return -EINVAL;
+    }
     const int fd = create_sync_file_locked(entry->binary_fence);
-    if (fd < 0)
+    if (fd < 0) {
       return fd;
+    }
     request.fd = fd;
     return 0;
   } catch (const std::bad_alloc &) {
@@ -2149,17 +2289,20 @@ public:
   }
 
   int import_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
-    if (request.pad || request.flags != DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE)
+    if (request.pad || request.flags != DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE) {
       return -EINVAL;
+    }
     {
       std::lock_guard lock(fd_mutex_);
       auto it = sync_file_fds_.find(request.fd);
-      if (it == sync_file_fds_.end())
+      if (it == sync_file_fds_.end()) {
         return -EINVAL;
+      }
       const auto &object = it->second;
       auto entry = lookup_syncobj_locked(file, request.handle);
-      if (!entry)
+      if (!entry) {
         return -ENOENT;
+      }
       entry->timeline_fences.clear();
       entry->submitted_point = entry->signaled_point = 0;
       entry->binary_fence = object->fence;
@@ -2176,27 +2319,32 @@ public:
   std::optional<int> merge_sync_files(int fd, sync_merge_data &request) try {
     std::lock_guard lock(fd_mutex_);
     auto first = sync_file_fds_.find(fd);
-    if (first == sync_file_fds_.end())
+    if (first == sync_file_fds_.end()) {
       return std::nullopt;
-    if (request.flags || request.pad)
+    }
+    if (request.flags || request.pad) {
       return -EINVAL;
+    }
     auto second = sync_file_fds_.find(request.fd2);
-    if (second == sync_file_fds_.end())
+    if (second == sync_file_fds_.end()) {
       return -EINVAL;
+    }
     auto merged = std::make_shared<SyncobjFence>();
     for (const auto &fence : {first->second->fence, second->second->fence}) {
-      if (fence->dependencies.empty())
+      if (fence->dependencies.empty()) {
         merged->dependencies.push_back(fence);
-      else
+      } else {
         merged->dependencies.insert(merged->dependencies.end(), fence->dependencies.begin(),
                                     fence->dependencies.end());
+      }
     }
     std::ranges::sort(merged->dependencies);
     merged->dependencies.erase(std::ranges::unique(merged->dependencies).begin(),
                                merged->dependencies.end());
     const int result = create_sync_file_locked(merged);
-    if (result < 0)
+    if (result < 0) {
       return result;
+    }
     request.fence = result;
     return 0;
   } catch (const std::bad_alloc &) {
@@ -2209,14 +2357,16 @@ public:
     auto it = sync_file_fds_.find(source);
     auto object = it == sync_file_fds_.end() ? nullptr : it->second;
     sync_file_fds_.erase(target);
-    if (object)
+    if (object) {
       sync_file_fds_.emplace(target, std::move(object));
+    }
   }
 
   bool close_sync_file(int fd) {
     std::lock_guard lock(fd_mutex_);
-    if (!sync_file_fds_.erase(fd))
+    if (!sync_file_fds_.erase(fd)) {
       return false;
+    }
     real().close(fd);
     return true;
   }
@@ -2246,24 +2396,30 @@ public:
   /// points under fd_mutex_, increment the generation with release ordering, and
   /// wake all sleepers; waiters recheck state under the same mutex after waking.
   int wait_syncobj_timeline(const DrmFileToken &file, drm_syncobj_timeline_wait *wait) {
-    if (!wait)
+    if (!wait) {
       return -EINVAL;
+    }
     const drm_syncobj_timeline_wait request = *wait;
     constexpr uint32_t kSupportedFlags =
         DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
         DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
-    if ((request.flags & ~kSupportedFlags) != 0)
+    if ((request.flags & ~kSupportedFlags) != 0) {
       return -EINVAL;
-    if (request.count_handles == 0)
+    }
+    if (request.count_handles == 0) {
       return 0;
+    }
     std::vector<uint32_t> handles;
     std::vector<uint64_t> points;
-    if (int rc = snapshot_user_array(request.handles, request.count_handles, handles); rc != 0)
+    if (int rc = snapshot_user_array(request.handles, request.count_handles, handles); rc != 0) {
       return rc;
-    if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0)
+    }
+    if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0) {
       return rc;
-    if (!file)
+    }
+    if (!file) {
       return -EBADF;
+    }
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
     std::vector<std::shared_ptr<SyncobjFence>> fences;
     try {
@@ -2277,8 +2433,9 @@ public:
     std::unique_lock lock(fd_mutex_);
     for (uint32_t i = 0; i < request.count_handles; ++i) {
       auto it = file->syncobj_entries.find(handles[i]);
-      if (it == file->syncobj_entries.end())
+      if (it == file->syncobj_entries.end()) {
         return -ENOENT;
+      }
       entries.push_back(it->second);
     }
     const bool wait_all = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) != 0;
@@ -2290,8 +2447,9 @@ public:
       for (uint32_t i = 0; i < request.count_handles; ++i) {
         fences[i] = syncobj_fence_locked(*entries[i], points[i]);
         const bool submitted = fences[i] != nullptr;
-        if (!submitted)
+        if (!submitted) {
           return -EINVAL;
+        }
       }
     }
     const auto evaluate = [&]() -> std::pair<int, uint32_t> {
@@ -2299,11 +2457,13 @@ public:
       bool any_ready = false;
       uint32_t first_ready = 0;
       for (uint32_t i = 0; i < request.count_handles; ++i) {
-        if (!fences[i])
+        if (!fences[i]) {
           fences[i] = syncobj_fence_locked(*entries[i], points[i]);
+        }
         const bool submitted = fences[i] != nullptr;
-        if (submitted && !wait_available && fences[i]->is_failed())
+        if (submitted && !wait_available && fences[i]->is_failed()) {
           return {-EIO, 0};
+        }
         const bool ready = submitted && (wait_available || fences[i]->is_signaled());
         all_ready = all_ready && ready;
         if (!wait_all && ready && !any_ready) {
@@ -2319,19 +2479,22 @@ public:
           file->imported_sync_fence ? imported_syncobj_generation_ : file->syncobj_generation;
       const uint32_t generation = generation_word.load(std::memory_order_acquire);
       auto [state, first_ready] = evaluate();
-      if (state < 0)
+      if (state < 0) {
         return state;
+      }
       if (state > 0) {
         wait->first_signaled = wait_all ? std::numeric_limits<uint32_t>::max() : first_ready;
         return 0;
       }
 
       timespec now{};
-      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
         return -errno;
+      }
       const int64_t now_ns = static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec;
-      if (request.timeout_nsec <= now_ns)
+      if (request.timeout_nsec <= now_ns) {
         return -ETIME;
+      }
       lock.unlock();
       const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
                               static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
@@ -2342,20 +2505,24 @@ public:
       const long rc = futex_wait_until(generation_word, generation, &deadline);
       const int wait_errno = errno;
       lock.lock();
-      if (rc == 0 || wait_errno == EAGAIN)
+      if (rc == 0 || wait_errno == EAGAIN) {
         continue;
-      if (wait_errno == ETIMEDOUT)
+      }
+      if (wait_errno == ETIMEDOUT) {
         return -ETIME;
-      if (wait_errno == EINTR)
+      }
+      if (wait_errno == EINTR) {
         return -EINTR;
+      }
       return -wait_errno;
     }
   }
 
   /// @brief Publish a completed binary or timeline fence under fd_mutex_.
   static void signal_syncobj_locked(const std::shared_ptr<SyncobjEntry> &entry, uint64_t point) {
-    if (!entry)
+    if (!entry) {
       return;
+    }
     entry->has_fence = true;
     entry->signaled = true;
     if (point == 0) {
@@ -2376,29 +2543,33 @@ public:
   /// @brief Resolve one handle while fd_mutex_ is held.
   static std::shared_ptr<SyncobjEntry> lookup_syncobj_locked(const DrmFileToken &file,
                                                              uint32_t handle) {
-    if (!file || handle == 0)
+    if (!file || handle == 0) {
       return nullptr;
+    }
     auto entry = file->syncobj_entries.find(handle);
     return entry != file->syncobj_entries.end() ? entry->second : nullptr;
   }
 
   /// @brief Advance the per-file generation and wake every futex waiter.
   void notify_syncobj_waiters(const DrmFileToken &file) {
-    if (!file)
+    if (!file) {
       return;
+    }
     file->syncobj_generation.fetch_add(1, std::memory_order_release);
     futex_wake_all(file->syncobj_generation);
     imported_syncobj_generation_.fetch_add(1, std::memory_order_release);
     futex_wake_all(imported_syncobj_generation_);
     std::lock_guard lock(fd_mutex_);
-    for (const auto &[fd, object] : sync_file_fds_)
+    for (const auto &[fd, object] : sync_file_fds_) {
       object->refresh();
+    }
   }
 
   bool create_local_vm(const std::string &config_path) {
     util::FailureOr<std::string> config_json = read_file_passthrough(config_path.c_str());
-    if (config_json.failed())
+    if (config_json.failed()) {
       return false;
+    }
     rj_vm_t *created_vm = nullptr;
     if (rj_vm_create_from_string(config_json.value().c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
         ROCJITSU_STATUS_SUCCESS) {
@@ -2415,8 +2586,9 @@ public:
     local_vm_close_status_ = close_status;
     local_vm_ =
         std::shared_ptr<rj_vm_t>(created_vm, [this, owner = getpid(), close_status](rj_vm_t *vm) {
-          if (!vm)
+          if (!vm) {
             return;
+          }
           if (getpid() != owner) {
             // A forked child inherited this reference. The engine thread does not exist
             // here, so joining it would hang, and the VM belongs to the parent, so
@@ -2639,16 +2811,18 @@ public:
     bool active = false;
     ~GemSubmissionLease() { release(); }
     void release(SimulatedKfd *executing_driver = nullptr) {
-      if (!active && !fence_view)
+      if (!active && !fence_view) {
         return;
+      }
       std::lock_guard lock(context->fd_mutex_);
       if (fence_view) {
         auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
         InterposerContext::real().munmap(fence_view, fence_view_size);
         fence_view = nullptr;
       }
-      if (!active)
+      if (!active) {
         return;
+      }
       for (auto handle : handles) {
         auto it = context->gem_entries_.find(handle);
         assert(it != context->gem_entries_.end() && it->second.submission_refs);
@@ -2667,17 +2841,20 @@ public:
   /// @brief Allocate shared BO backing and an offset in the GEM mmap namespace.
   int create_gem(const DrmFileToken &file, const drm_amdgpu_gem_create_in &request,
                  uint32_t *handle) {
-    if (!file || !drm_file_simulated(file))
+    if (!file || !drm_file_simulated(file)) {
       return -ENODEV;
+    }
     constexpr uint64_t domains =
         AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
     if (!request.bo_size || request.bo_size > (uint64_t{1} << 47) || !(request.domains & domains) ||
-        (request.domains & ~domains))
+        (request.domains & ~domains)) {
       return -EINVAL;
+    }
     uint64_t size = (request.bo_size + 4095) & ~uint64_t{4095};
     int fd = rocjitsu::create_memory_backing(size);
-    if (fd < 0)
+    if (fd < 0) {
       return -errno;
+    }
     auto object = std::make_shared<GemObject>();
     if (struct stat st{}; rocjitsu::stat_memory_backing(fd, &st) == 0) {
       object->device = st.st_dev;
@@ -2688,14 +2865,17 @@ public:
     auto backing = PrivateDrmFd::duplicate(fd);
     const int error = errno;
     real().close(fd);
-    if (!backing)
+    if (!backing) {
       return -error;
+    }
     std::lock_guard lock(fd_mutex_);
-    if (next_gem_mmap_offset_ > uint64_t{INT64_MAX} - size)
+    if (next_gem_mmap_offset_ > uint64_t{INT64_MAX} - size) {
       return -ENOSPC;
+    }
     uint32_t candidate = next_gem_handle_++;
-    while (candidate == 0 || gem_entries_.count(candidate))
+    while (candidate == 0 || gem_entries_.count(candidate)) {
       candidate = next_gem_handle_++;
+    }
     GemEntry entry{};
     entry.dmabuf_fd = std::move(backing);
     entry.sealed_ram = true;
@@ -2714,8 +2894,9 @@ public:
   /// @brief Retain BOs, enqueue IBs, and publish syncobj and userspace completion fences.
   int submit_drm_cs(const DrmFileToken &file, drm_amdgpu_cs *argument) {
     auto *driver = drm_file_simulated(file);
-    if (!driver)
+    if (!driver) {
       return -ENODEV;
+    }
     std::shared_ptr<SyncobjFence> finished;
     // Keep queue identity stable through acceptance and exception cleanup.
     std::lock_guard submission_lock(file->submission_mutex);
@@ -2724,11 +2905,13 @@ public:
     try {
       const auto request = argument->in;
       if (request.flags || request.bo_list_handle || !request.num_chunks ||
-          request.num_chunks > 1024)
+          request.num_chunks > 1024) {
         return -EINVAL;
+      }
       std::vector<uint64_t> pointers;
-      if (int rc = snapshot_user_array(request.chunks, request.num_chunks, pointers); rc)
+      if (int rc = snapshot_user_array(request.chunks, request.num_chunks, pointers); rc) {
         return rc;
+      }
       rocjitsu::amdgpu::Pm4Submission submission;
       std::vector<drm_amdgpu_cs_chunk_syncobj> inputs, outputs;
       std::vector<drm_amdgpu_bo_list_entry> buffers;
@@ -2736,19 +2919,23 @@ public:
       uint32_t engine = UINT32_MAX, ring = UINT32_MAX;
       for (uint64_t pointer : pointers) {
         std::vector<drm_amdgpu_cs_chunk> chunks;
-        if (int rc = snapshot_user_array(pointer, 1, chunks); rc)
+        if (int rc = snapshot_user_array(pointer, 1, chunks); rc) {
           return rc;
+        }
         const auto chunk = chunks[0];
-        if (chunk.length_dw > (1u << 20))
+        if (chunk.length_dw > (1u << 20)) {
           return -EINVAL;
+        }
         std::vector<uint32_t> words;
-        if (int rc = snapshot_user_array(chunk.chunk_data, chunk.length_dw, words); rc)
+        if (int rc = snapshot_user_array(chunk.chunk_data, chunk.length_dw, words); rc) {
           return rc;
+        }
         const size_t bytes = words.size() * 4;
         switch (chunk.chunk_id) {
         case AMDGPU_CHUNK_ID_IB: {
-          if (bytes != sizeof(drm_amdgpu_cs_chunk_ib))
+          if (bytes != sizeof(drm_amdgpu_cs_chunk_ib)) {
             return -EINVAL;
+          }
           drm_amdgpu_cs_chunk_ib ib;
           std::memcpy(&ib, words.data(), sizeof(ib));
           if ((ib.ip_type != AMDGPU_HW_IP_COMPUTE && ib.ip_type != AMDGPU_HW_IP_GFX) ||
@@ -2756,13 +2943,16 @@ public:
               !ib.ib_bytes || (ib.ib_bytes & 3) ||
               (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
                             AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC |
-                            AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID)))
+                            AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID))) {
             return -EINVAL;
+          }
           if ((ib.flags & AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID) &&
-              !driver->supports_pm4_gds_wave_id_reset(file->render_minor))
+              !driver->supports_pm4_gds_wave_id_reset(file->render_minor)) {
             return -EINVAL;
-          if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
+          }
+          if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring)) {
             return -EINVAL;
+          }
           submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
           engine = ib.ip_type;
           ring = ib.ring;
@@ -2773,41 +2963,48 @@ public:
           break;
         }
         case AMDGPU_CHUNK_ID_FENCE: {
-          if (bytes != sizeof(drm_amdgpu_cs_chunk_fence) || user_fence)
+          if (bytes != sizeof(drm_amdgpu_cs_chunk_fence) || user_fence) {
             return -EINVAL;
+          }
           user_fence.emplace();
           std::memcpy(&*user_fence, words.data(), sizeof(*user_fence));
           break;
         }
         case AMDGPU_CHUNK_ID_BO_HANDLES: {
-          if (bytes != sizeof(drm_amdgpu_bo_list_in))
+          if (bytes != sizeof(drm_amdgpu_bo_list_in)) {
             return -EINVAL;
+          }
           drm_amdgpu_bo_list_in list;
           std::memcpy(&list, words.data(), sizeof(list));
-          if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
+          if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry)) {
             return -EINVAL;
-          if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc)
+          }
+          if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc) {
             return rc;
+          }
           break;
         }
         case AMDGPU_CHUNK_ID_SYNCOBJ_IN:
         case AMDGPU_CHUNK_ID_SYNCOBJ_OUT: {
           auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_IN ? inputs : outputs;
-          for (uint32_t handle : words)
+          for (uint32_t handle : words) {
             target.push_back({handle, 0, 0});
+          }
           break;
         }
         case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT:
         case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL: {
-          if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj))
+          if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj)) {
             return -EINVAL;
+          }
           auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ? inputs : outputs;
           for (size_t offset = 0; offset < bytes; offset += sizeof(drm_amdgpu_cs_chunk_syncobj)) {
             drm_amdgpu_cs_chunk_syncobj object;
             std::memcpy(&object, reinterpret_cast<uint8_t *>(words.data()) + offset,
                         sizeof(object));
-            if (object.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT)
+            if (object.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) {
               return -EINVAL;
+            }
             target.push_back(object);
           }
           break;
@@ -2816,8 +3013,9 @@ public:
           return -ENOTSUP;
         }
       }
-      if (submission.buffers.empty())
+      if (submission.buffers.empty()) {
         return -EINVAL;
+      }
       struct Dependency {
         std::shared_ptr<SyncobjEntry> entry;
         std::shared_ptr<SyncobjFence> fence;
@@ -2827,10 +3025,12 @@ public:
       finished = std::make_shared<SyncobjFence>();
       auto retained = std::make_shared<GemSubmissionLease>();
       retained->context = this;
-      for (const auto &buffer : buffers)
+      for (const auto &buffer : buffers) {
         retained->handles.push_back(buffer.bo_handle);
-      if (user_fence)
+      }
+      if (user_fence) {
         retained->handles.push_back(user_fence->handle);
+      }
       std::ranges::sort(retained->handles);
       retained->handles.erase(std::ranges::unique(retained->handles).begin(),
                               retained->handles.end());
@@ -2838,32 +3038,39 @@ public:
       uint64_t queue_key;
       {
         std::lock_guard lock(fd_mutex_);
-        if (!file->contexts.count(request.ctx_id))
+        if (!file->contexts.count(request.ctx_id)) {
           return -EINVAL;
+        }
         for (auto handle : retained->handles) {
           auto it = gem_entries_.find(handle);
           if (it == gem_entries_.end() || it->second.handle_closed ||
-              it->second.drm_file_id != file->id)
+              it->second.drm_file_id != file->id) {
             return -ENOENT;
+          }
         }
         for (const auto &input : inputs) {
           auto entry = lookup_syncobj_locked(file, input.handle);
-          if (!entry)
+          if (!entry) {
             return -ENOENT;
+          }
           auto fence = syncobj_fence_locked(*entry, input.point);
-          if (!fence && !(input.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+          if (!fence && !(input.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT)) {
             return -EINVAL;
+          }
           dependencies.push_back({entry, fence, input.point});
         }
-        for (const auto &output : outputs)
-          if (!lookup_syncobj_locked(file, output.handle))
+        for (const auto &output : outputs) {
+          if (!lookup_syncobj_locked(file, output.handle)) {
             return -ENOENT;
+          }
+        }
         if (user_fence) {
           auto it = gem_entries_.find(user_fence->handle);
           if (it == gem_entries_.end() || it->second.handle_closed ||
               it->second.drm_file_id != file->id || user_fence->offset % 8 || it->second.size < 8 ||
-              user_fence->offset > it->second.size - 8)
+              user_fence->offset > it->second.size - 8) {
             return -EINVAL;
+          }
           auto &gem = it->second;
           if (gem.cpu_ptr) {
             fence_address = static_cast<uint8_t *>(gem.cpu_ptr) + user_fence->offset;
@@ -2877,15 +3084,17 @@ public:
               return rocjitsu::map_memory_backing(nullptr, page, PROT_READ | PROT_WRITE, MAP_SHARED,
                                                   fd, offset);
             });
-            if (mapping == MAP_FAILED)
+            if (mapping == MAP_FAILED) {
               return -errno;
+            }
             retained->fence_view = mapping;
             retained->fence_view_size = page;
             fence_address = static_cast<uint8_t *>(mapping) + (user_fence->offset - offset);
           }
         }
-        for (auto handle : retained->handles)
+        for (auto handle : retained->handles) {
           ++gem_entries_.at(handle).submission_refs;
+        }
         retained->active = true;
         for (const auto &output : outputs) {
           auto entry = lookup_syncobj_locked(file, output.handle);
@@ -2903,8 +3112,9 @@ public:
         static std::atomic<uint64_t> next_queue_key{1};
         auto [it, inserted] = file->pm4_queues.try_emplace(key);
         auto &queue = it->second;
-        if (inserted)
+        if (inserted) {
           queue.key = next_queue_key.fetch_add(1, std::memory_order_relaxed);
+        }
         queue_key = queue.key;
         // Reserve storage before acceptance, but publish the sequence and
         // retire history only after the command processor accepts the job.
@@ -2916,12 +3126,15 @@ public:
                              util::DiagnosticEmitter emit_error) mutable -> util::FailureOr<bool> {
         std::lock_guard lock(fd_mutex_);
         for (auto &dependency : dependencies) {
-          if (!dependency.fence)
+          if (!dependency.fence) {
             dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
-          if (dependency.fence && dependency.fence->is_failed())
+          }
+          if (dependency.fence && dependency.fence->is_failed()) {
             return emit_error.emit() << "PM4 submission dependency failed";
-          if (!dependency.fence || !dependency.fence->is_signaled())
+          }
+          if (!dependency.fence || !dependency.fence->is_signaled()) {
             return false;
+          }
         }
         return true;
       };
@@ -2935,10 +3148,11 @@ public:
         // The executing CP keeps its driver alive. Do not acquire a VM ownership
         // snapshot here: its last release must never join the engine from itself.
         retained->release(driver);
-        if (success)
+        if (success) {
           finished->signaled.store(true, std::memory_order_release);
-        else
+        } else {
           finished->failed.store(true, std::memory_order_release);
+        }
         notify_syncobj_waiters(file);
       };
       int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission));
@@ -2955,8 +3169,9 @@ public:
           // the bounded history or change WAIT_CS's latest sequence.
           while (queue.fences.size() > 64) {
             const auto &oldest = queue.fences.begin()->second;
-            if (!oldest->is_signaled() && !oldest->is_failed())
+            if (!oldest->is_signaled() && !oldest->is_failed()) {
               break;
+            }
             queue.fences.erase(queue.fences.begin());
           }
         }
@@ -2973,8 +3188,9 @@ public:
     } catch (const std::exception &error) {
       if (pending_queue) {
         std::lock_guard lock(fd_mutex_);
-        if (auto it = file->pm4_queues.find(*pending_queue); it != file->pm4_queues.end())
+        if (auto it = file->pm4_queues.find(*pending_queue); it != file->pm4_queues.end()) {
           it->second.fences.erase(sequence);
+        }
       }
       if (finished) {
         finished->failed.store(true, std::memory_order_release);
@@ -2987,26 +3203,31 @@ public:
 
   /// @brief Query a context/engine/ring submission fence using an absolute deadline.
   int wait_drm_cs(const DrmFileToken &file, drm_amdgpu_wait_cs *argument) {
-    if (!file || !argument)
+    if (!file || !argument) {
       return -EINVAL;
+    }
     const auto request = argument->in;
     if ((request.ip_type != AMDGPU_HW_IP_GFX && request.ip_type != AMDGPU_HW_IP_COMPUTE) ||
-        request.ip_instance || request.ring >= (request.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u))
+        request.ip_instance || request.ring >= (request.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u)) {
       return -EINVAL;
+    }
     std::unique_lock lock(fd_mutex_);
-    if (!file->contexts.count(request.ctx_id))
+    if (!file->contexts.count(request.ctx_id)) {
       return -EINVAL;
+    }
     const uint64_t key = (uint64_t{request.ctx_id} << 32) | (request.ip_type << 16) | request.ring;
     const auto queue = file->pm4_queues.find(key);
     const uint64_t next = queue == file->pm4_queues.end() ? 1 : queue->second.next_sequence;
     const uint64_t sequence = request.handle == UINT64_MAX ? next - 1 : request.handle;
-    if (sequence >= next)
+    if (sequence >= next) {
       return -EINVAL;
+    }
     std::shared_ptr<SyncobjFence> fence;
     if (sequence && queue != file->pm4_queues.end()) {
       const auto it = queue->second.fences.find(sequence);
-      if (it != queue->second.fences.end())
+      if (it != queue->second.fences.end()) {
         fence = it->second;
+      }
     }
     const auto finish = [&](bool busy) {
       std::memset(argument, 0, sizeof(*argument));
@@ -3015,16 +3236,20 @@ public:
     };
     while (true) {
       const uint32_t generation = file->syncobj_generation.load(std::memory_order_acquire);
-      if (fence && fence->is_failed())
+      if (fence && fence->is_failed()) {
         return -EIO;
-      if (!fence || fence->is_signaled())
+      }
+      if (!fence || fence->is_signaled()) {
         return finish(false);
+      }
       timespec now{};
-      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
         return -errno;
+      }
       const uint64_t now_ns = static_cast<uint64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
-      if (request.timeout <= now_ns)
+      if (request.timeout <= now_ns) {
         return finish(true);
+      }
       const timespec deadline{static_cast<time_t>(request.timeout / 1'000'000'000),
                               static_cast<long>(request.timeout % 1'000'000'000)};
       lock.unlock();
@@ -3032,8 +3257,9 @@ public:
                                        request.timeout == UINT64_MAX ? nullptr : &deadline);
       const int wait_errno = errno;
       lock.lock();
-      if (rc == 0 || wait_errno == EAGAIN || wait_errno == ETIMEDOUT)
+      if (rc == 0 || wait_errno == EAGAIN || wait_errno == ETIMEDOUT) {
         continue;
+      }
       return -wait_errno;
     }
   }
@@ -3042,10 +3268,12 @@ public:
     std::lock_guard lock(fd_mutex_);
     auto it = gem_entries_.find(handle);
     if (it == gem_entries_.end() || !file || it->second.handle_closed ||
-        it->second.drm_file_id != file->id)
+        it->second.drm_file_id != file->id) {
       return -ENOENT;
-    if (it->second.mmap_offset == 0)
+    }
+    if (it->second.mmap_offset == 0) {
       return -EINVAL;
+    }
     *offset = it->second.mmap_offset;
     return 0;
   }
@@ -3056,32 +3284,38 @@ public:
   /// memory. The record belongs to the BO, so a PRIME import reads what the
   /// exporter set. A fresh buffer has an empty one.
   int gem_metadata(const DrmFileToken &file, drm_amdgpu_gem_metadata *args) {
-    if (!args)
+    if (!args) {
       return -EINVAL;
+    }
     std::lock_guard lock(fd_mutex_);
     auto it = gem_entries_.find(args->handle);
     if (it == gem_entries_.end() || !file || it->second.handle_closed ||
-        it->second.drm_file_id != file->id)
+        it->second.drm_file_id != file->id) {
       return -ENOENT;
+    }
     auto &gem = *it->second.object;
     if (args->op == AMDGPU_GEM_METADATA_OP_GET_METADATA) {
       args->data.flags = gem.metadata_flags;
       args->data.tiling_info = gem.tiling_info;
       args->data.data_size_bytes = gem.metadata_size;
-      if (gem.metadata_size != 0)
+      if (gem.metadata_size != 0) {
         std::memcpy(args->data.data, gem.metadata, gem.metadata_size);
+      }
       return 0;
     }
-    if (args->op != AMDGPU_GEM_METADATA_OP_SET_METADATA)
+    if (args->op != AMDGPU_GEM_METADATA_OP_SET_METADATA) {
       return -EINVAL;
-    if (args->data.data_size_bytes > sizeof(args->data.data))
+    }
+    if (args->data.data_size_bytes > sizeof(args->data.data)) {
       return -EINVAL;
+    }
     gem.metadata_flags = args->data.flags;
     gem.tiling_info = args->data.tiling_info;
     gem.metadata_size = args->data.data_size_bytes;
     std::memset(gem.metadata, 0, sizeof(gem.metadata));
-    if (gem.metadata_size != 0)
+    if (gem.metadata_size != 0) {
       std::memcpy(gem.metadata, args->data.data, gem.metadata_size);
+    }
     return 0;
   }
 
@@ -3090,26 +3324,30 @@ public:
   /// value. hipIpcGetMemHandle imports the exported dmabuf and fails the whole
   /// call when this ioctl is rejected.
   int gem_op(const DrmFileToken &file, drm_amdgpu_gem_op *args) {
-    if (!args)
+    if (!args) {
       return -EINVAL;
+    }
     drm_amdgpu_gem_create_in info{};
     uint64_t user_pointer = 0;
     {
       std::lock_guard lock(fd_mutex_);
       auto it = gem_entries_.find(args->handle);
       if (it == gem_entries_.end() || !file || it->second.handle_closed ||
-          it->second.drm_file_id != file->id)
+          it->second.drm_file_id != file->id) {
         return -ENOENT;
+      }
       if (args->op == AMDGPU_GEM_OP_GET_GEM_CREATE_INFO) {
-        if (args->value == 0)
+        if (args->value == 0) {
           return -EINVAL;
+        }
         info = it->second.object->create_info;
         user_pointer = args->value;
       } else if (args->op == AMDGPU_GEM_OP_SET_PLACEMENT) {
         constexpr uint64_t domains =
             AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
-        if (args->value & ~domains)
+        if (args->value & ~domains) {
           return -EINVAL;
+        }
         // The backing stays in host memory; the preferred domains are what
         // GET_GEM_CREATE_INFO reports.
         it->second.object->create_info.domains = args->value;
@@ -3137,11 +3375,13 @@ public:
       std::lock_guard lock(fd_mutex_);
       for (const auto &[handle, entry] : gem_entries_) {
         if (!file || entry.handle_closed || entry.drm_file_id != file->id || !entry.mmap_offset ||
-            offset < entry.mmap_offset || offset - entry.mmap_offset >= entry.size)
+            offset < entry.mmap_offset || offset - entry.mmap_offset >= entry.size) {
           continue;
+        }
         relative = offset - entry.mmap_offset;
-        if (!size || size > entry.size - relative)
+        if (!size || size > entry.size - relative) {
           break;
+        }
         backing = entry.dmabuf_fd;
         break;
       }
@@ -3159,8 +3399,9 @@ public:
         // so a concurrent replacement cannot receive advice for this BO.
         void *mapped = rocjitsu::map_memory_backing(address, size, prot, flags, fd, relative);
         const int mmap_errno = errno;
-        if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(fd))
+        if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(fd)) {
           real().madvise(mapped, size, MADV_DONTDUMP);
+        }
         errno = mmap_errno;
         return mapped;
       });
@@ -3170,8 +3411,9 @@ public:
   /// @brief Attach existing BO metadata to a newly created KFD dma-buf import.
   void retain_kfd_import_state(int dmabuf_fd, SimulatedKfd &driver) {
     struct stat st {};
-    if (rocjitsu::stat_memory_backing(dmabuf_fd, &st) != 0)
+    if (rocjitsu::stat_memory_backing(dmabuf_fd, &st) != 0) {
       return;
+    }
     std::lock_guard lock(fd_mutex_);
     (void)driver.retain_bo_state(st, shared_gem_object_locked(st));
   }
@@ -3210,8 +3452,9 @@ public:
   /// @brief Whether @p fd is a descriptor the interposer serves itself (a KFD, DRM or
   /// sync-file descriptor, or one of its private backing fds) and so cannot be a dma-buf.
   bool is_interposer_fd(int fd) {
-    if (lookup(fd) || owns_fd(fd) || PrivateDrmFd::owns(fd))
+    if (lookup(fd) || owns_fd(fd) || PrivateDrmFd::owns(fd)) {
       return true;
+    }
     std::lock_guard lock(fd_mutex_);
     return drm_fds_.count(fd) != 0 || sync_file_fds_.count(fd) != 0 || kfd_dup_fds_.count(fd) != 0;
   }
@@ -3238,8 +3481,9 @@ public:
       pending_gem_flags_[target] = alloc_flags;
     }
     const auto it = exported_gem_objects_.find(source);
-    if (it == exported_gem_objects_.end())
+    if (it == exported_gem_objects_.end()) {
       return;
+    }
     std::shared_ptr<GemObject> object = it->second;
     exported_gem_objects_[target] = std::move(object);
   }
@@ -3253,15 +3497,18 @@ public:
   /// @returns The stable GEM handle (>= 1).
   uint32_t prime_import(int dmabuf_fd, const DrmFileToken &drm_file, uint64_t size) {
     std::lock_guard lock(fd_mutex_);
-    if (!drm_file)
+    if (!drm_file) {
       return 0;
-    if (gem_entries_.size() == std::numeric_limits<uint32_t>::max())
+    }
+    if (gem_entries_.size() == std::numeric_limits<uint32_t>::max()) {
       return 0;
+    }
     uint32_t alloc_flags = 0;
     bool flags_exported = false;
     const int backing_policy = rocjitsu::get_memory_backing_alloc_flags(dmabuf_fd, &alloc_flags);
-    if (backing_policy < 0)
+    if (backing_policy < 0) {
       return 0;
+    }
     flags_exported = backing_policy == 1;
     if (auto it = pending_gem_flags_.find(dmabuf_fd); it != pending_gem_flags_.end()) {
       if (!flags_exported) {
@@ -3278,14 +3525,16 @@ public:
     // file. The dup keeps the same dmabuf open under a private fd until the handle is
     // torn down. Reject an import if its backing cannot be retained.
     auto backing_fd = PrivateDrmFd::duplicate(dmabuf_fd, /*require_readwrite=*/true);
-    if (!backing_fd)
+    if (!backing_fd) {
       return 0;
+    }
     // Mint the next free handle. Skip 0 ("no handle") and any handle still live, so a
     // uint32 wrap after a very long-lived process cannot silently overwrite an
     // in-use entry (which would detach its PTEs from a future GEM_CLOSE).
     uint32_t handle = next_gem_handle_++;
-    while (handle == 0 || gem_entries_.count(handle) != 0)
+    while (handle == 0 || gem_entries_.count(handle) != 0) {
       handle = next_gem_handle_++;
+    }
     GemEntry &gem = gem_entries_[handle];
     gem = {};
     gem.dmabuf_fd = std::move(backing_fd);
@@ -3295,8 +3544,9 @@ public:
     gem.size = size;
     struct stat st {};
     const bool identified = rocjitsu::stat_memory_backing(dmabuf_fd, &st) == 0;
-    if (identified)
+    if (identified) {
       gem.object = shared_gem_object_locked(st);
+    }
     if (!gem.object) {
       // A buffer no GEM handle has seen, such as a KFD export, has no GEM_CREATE
       // request. Synthesize one from its size and domain.
@@ -3313,15 +3563,18 @@ public:
     }
     // ROCr's IPC export sets metadata through a handle it closes at once, with
     // its dmabuf fd, and the importer checks that metadata later.
-    if (auto *drv = identified ? drm_file_simulated(drm_file) : nullptr)
+    if (auto *drv = identified ? drm_file_simulated(drm_file) : nullptr) {
       gem.object = drv->retain_bo_state(st, gem.object);
+    }
     // The dmabuf fd is a reference to the buffer too: a KFD export has none of the
     // state a PRIME export retains, and the allocation may be freed while the fd lives.
-    if (identified)
+    if (identified) {
       exported_gem_objects_[dmabuf_fd] = gem.object;
-    if (gem.object->prime_access_mode < 0)
+    }
+    if (gem.object->prime_access_mode < 0) {
       gem.object->prime_access_mode =
           rocjitsu::fcntl_memory_backing(dmabuf_fd, F_GETFL, 0) & O_ACCMODE;
+    }
     // The first export or import fixes the buffer's flags; later imports of any
     // descriptor to it map with the same cache policy.
     if (flags_exported && !gem.object->has_alloc_flags) {
@@ -3349,12 +3602,16 @@ public:
       return object && object->inode != 0 && object->device == st.st_dev &&
              object->inode == st.st_ino;
     };
-    for (const auto &[handle, entry] : gem_entries_)
-      if (matches(entry.object))
+    for (const auto &[handle, entry] : gem_entries_) {
+      if (matches(entry.object)) {
         return entry.object;
-    for (const auto &[fd, object] : exported_gem_objects_)
-      if (matches(object))
+      }
+    }
+    for (const auto &[fd, object] : exported_gem_objects_) {
+      if (matches(object)) {
         return object;
+      }
+    }
     return {};
   }
 
@@ -3364,13 +3621,15 @@ public:
   /// mode, including across import. The private BO alias remains read-write.
   /// The caller owns the returned fd.
   int prime_export(const DrmFileToken &file, uint32_t handle, uint32_t flags) {
-    if (flags & ~(DRM_CLOEXEC | DRM_RDWR))
+    if (flags & ~(DRM_CLOEXEC | DRM_RDWR)) {
       return -EINVAL;
+    }
     std::lock_guard lock(fd_mutex_);
     auto it = gem_entries_.find(handle);
     if (it == gem_entries_.end() || !file || it->second.handle_closed ||
-        it->second.drm_file_id != file->id || !it->second.dmabuf_fd)
+        it->second.drm_file_id != file->id || !it->second.dmabuf_fd) {
       return -ENOENT;
+    }
     const auto &entry = it->second;
     const auto &object = entry.object;
     const int access_mode = object->prime_access_mode >= 0
@@ -3384,8 +3643,9 @@ public:
       error = errno;
       return exported;
     });
-    if (exported < 0)
+    if (exported < 0) {
       return error ? -error : -EBADF;
+    }
     if (rocjitsu::retain_memory_backing_export_policy(exported, entry.alloc_flags) != 0) {
       error = errno;
       real().close(exported);
@@ -3421,30 +3681,39 @@ public:
                             bool publish_timeline = true, uint32_t timeline_handle = 0,
                             uint64_t timeline_point = 0, bool prt = false) {
     std::unique_lock lock(fd_mutex_);
-    if (!file)
+    if (!file) {
       return -EBADF;
+    }
     auto timeline = lookup_syncobj_locked(file, timeline_handle);
-    if (timeline_handle != 0 && !timeline)
+    if (timeline_handle != 0 && !timeline) {
       return -ENOENT;
+    }
     auto *drv = drm_file_simulated(file);
     auto remote = file->backend_lease.remote();
-    if (!drv && !remote)
+    if (!drv && !remote) {
       return -ENODEV;
+    }
     // The daemon RPC does not publish nonresident PRT ranges. Refuse before
     // a sparse update changes client intervals or evicts resident daemon PTEs.
-    if (prt && remote)
+    if (prt && remote) {
       return -EOPNOTSUPP;
+    }
     auto it = gem_entries_.find(handle);
     if (!prt && (it == gem_entries_.end() || it->second.handle_closed ||
-                 it->second.drm_file_id != file->id))
+                 it->second.drm_file_id != file->id)) {
       return -ENOENT;
-    if (map_size == 0 || va_address > UINT64_MAX - map_size || offset_in_bo > UINT64_MAX - map_size)
+    }
+    if (map_size == 0 || va_address > UINT64_MAX - map_size ||
+        offset_in_bo > UINT64_MAX - map_size) {
       return -EINVAL;
-    if ((va_address | offset_in_bo | map_size) & 4095)
+    }
+    if ((va_address | offset_in_bo | map_size) & 4095) {
       return -EINVAL;
+    }
     GemEntry &gem = prt ? prt_entries_[file->id] : it->second;
-    if (!prt && (gem.size == 0 || offset_in_bo > gem.size || map_size > gem.size - offset_in_bo))
+    if (!prt && (gem.size == 0 || offset_in_bo > gem.size || map_size > gem.size - offset_in_bo)) {
       return -EINVAL;
+    }
     const GemMapping range{va_address, map_size};
     // Handle the target VA range's current occupant. Independent DRM files have
     // private handle namespaces but currently share one simulated GPU page table,
@@ -3471,20 +3740,23 @@ public:
         return rocjitsu::map_memory_backing(nullptr, gem.size, PROT_READ | PROT_WRITE, MAP_SHARED,
                                             fd, 0);
       });
-      if (p == MAP_FAILED)
+      if (p == MAP_FAILED) {
         return -EINVAL;
+      }
       gem.cpu_ptr = p;
     }
     auto va_transaction = drv ? drv->begin_gem_va_transaction() : nullptr;
-    if (drv && !va_transaction)
+    if (drv && !va_transaction) {
       return -ENODEV;
+    }
     // Preflight before REPLACE evicts any old PTE or GEM interval. KFD may own
     // a resident translation or an active grant without a PTE at this VA.
     if (!prt) {
       if (const int preflight = drv ? va_transaction->preflight_map(va_address, map_size, file->id)
                                     : remote->gem_va_preflight(file->id, va_address, map_size);
-          preflight != 0)
+          preflight != 0) {
         return preflight;
+      }
     }
     const auto unmap = [&](uint64_t va, uint64_t size, uint64_t file_id) {
       return drv ? va_transaction->unmap(va, size, file_id)
@@ -3495,8 +3767,9 @@ public:
     const bool remote_replace = remote && replace && !prt;
     if (replace && !remote_replace &&
         !evict_range_locked(unmap, file->id, range,
-                            /*allow_missing=*/true))
+                            /*allow_missing=*/true)) {
       return -EINVAL;
+    }
     // Record which SimulatedKfd's page table receives these PTEs so GEM_CLOSE (or a
     // DRM-file-close reap) unmaps through the driver that installed them, never a
     // replacement one. Set the owner on the first mapping and keep it: all ranges of
@@ -3524,21 +3797,26 @@ public:
               : remote->gem_va_map(
                     [backing = gem.dmabuf_fd](const auto &send) { return backing->use(send); },
                     file->id, va_address, offset_in_bo, map_size, gem.alloc_flags, replace);
-      if (result != 0)
+      if (result != 0) {
         return result;
+      }
     }
     if (remote_replace && !evict_range_locked([](uint64_t, uint64_t, uint64_t) { return true; },
-                                              file->id, range, /*allow_missing=*/true))
+                                              file->id, range, /*allow_missing=*/true)) {
       return -EINVAL;
+    }
     gem.installed_vas.push_back(range);
     va_transaction.reset();
-    if (prt)
+    if (prt) {
       publish_prt_locked(drv);
-    if (publish_timeline)
+    }
+    if (publish_timeline) {
       signal_syncobj_locked(timeline, timeline_point);
+    }
     lock.unlock();
-    if (publish_timeline && timeline)
+    if (publish_timeline && timeline) {
       notify_syncobj_waiters(file);
+    }
     return 0;
   }
 
@@ -3553,44 +3831,55 @@ public:
                               uint32_t timeline_handle = 0, uint64_t timeline_point = 0,
                               bool prt = false) {
     std::unique_lock lock(fd_mutex_);
-    if (!file)
+    if (!file) {
       return -EBADF;
+    }
     auto timeline = lookup_syncobj_locked(file, timeline_handle);
-    if (timeline_handle != 0 && !timeline)
+    if (timeline_handle != 0 && !timeline) {
       return -ENOENT;
+    }
     auto *drv = drm_file_simulated(file);
     auto remote = file->backend_lease.remote();
-    if (!drv && !remote)
+    if (!drv && !remote) {
       return -ENODEV;
+    }
     // The daemon RPC does not publish nonresident PRT ranges. Refuse before
     // a sparse update changes client intervals or evicts resident daemon PTEs.
-    if (prt && remote)
+    if (prt && remote) {
       return -EOPNOTSUPP;
+    }
     auto it = gem_entries_.find(handle);
     auto prt_it = prt_entries_.find(file->id);
     if (prt ? prt_it == prt_entries_.end()
             : it == gem_entries_.end() || it->second.handle_closed ||
-                  it->second.drm_file_id != file->id)
+                  it->second.drm_file_id != file->id) {
       return -ENOENT;
+    }
     GemEntry &gem = prt ? prt_it->second : it->second;
     const GemMapping range{va_address, map_size};
-    if (std::ranges::find(gem.installed_vas, range) == gem.installed_vas.end())
+    if (std::ranges::find(gem.installed_vas, range) == gem.installed_vas.end()) {
       return -EINVAL; // This handle does not own the exact range — do not touch PTEs.
+    }
     auto va_transaction = drv ? drv->begin_gem_va_transaction() : nullptr;
-    if (drv && !va_transaction)
+    if (drv && !va_transaction) {
       return -ENODEV;
+    }
     if (!prt && !(drv ? va_transaction->unmap(va_address, map_size, file->id)
-                      : remote->gem_va_unmap(file->id, va_address, map_size) == 0))
+                      : remote->gem_va_unmap(file->id, va_address, map_size) == 0)) {
       return -EINVAL;
+    }
     std::erase(gem.installed_vas, range);
     va_transaction.reset();
-    if (prt)
+    if (prt) {
       publish_prt_locked(drv);
-    if (publish_timeline)
+    }
+    if (publish_timeline) {
       signal_syncobj_locked(timeline, timeline_point);
+    }
     lock.unlock();
-    if (publish_timeline && timeline)
+    if (publish_timeline && timeline) {
       notify_syncobj_waiters(file);
+    }
     return 0;
   }
 
@@ -3607,33 +3896,41 @@ public:
                               bool publish_timeline = true, uint32_t timeline_handle = 0,
                               uint64_t timeline_point = 0) {
     std::unique_lock lock(fd_mutex_);
-    if (!file)
+    if (!file) {
       return -EBADF;
-    if (map_size == 0 || va_address > UINT64_MAX - map_size || ((va_address | map_size) & 4095))
+    }
+    if (map_size == 0 || va_address > UINT64_MAX - map_size || ((va_address | map_size) & 4095)) {
       return -EINVAL;
+    }
     auto timeline = lookup_syncobj_locked(file, timeline_handle);
-    if (timeline_handle != 0 && !timeline)
+    if (timeline_handle != 0 && !timeline) {
       return -ENOENT;
+    }
     auto *drv = drm_file_simulated(file);
     auto remote = file->backend_lease.remote();
-    if (!drv && !remote)
+    if (!drv && !remote) {
       return -ENODEV;
+    }
     auto va_transaction = drv ? drv->begin_gem_va_transaction() : nullptr;
-    if (drv && !va_transaction)
+    if (drv && !va_transaction) {
       return -ENODEV;
+    }
     const auto unmap = [&](uint64_t va, uint64_t size, uint64_t file_id) {
       return drv ? va_transaction->unmap(va, size, file_id)
                  : remote->gem_va_unmap(file_id, va, size) == 0;
     };
     if (!evict_range_locked(unmap, file->id, GemMapping{va_address, map_size},
-                            /*allow_missing=*/false))
+                            /*allow_missing=*/false)) {
       return -EINVAL;
+    }
     va_transaction.reset();
-    if (publish_timeline)
+    if (publish_timeline) {
       signal_syncobj_locked(timeline, timeline_point);
+    }
     lock.unlock();
-    if (publish_timeline && timeline)
+    if (publish_timeline && timeline) {
       notify_syncobj_waiters(file);
+    }
     return 0;
   }
 
@@ -3649,12 +3946,14 @@ public:
       auto *active = dynamic_cast<SimulatedKfd *>(snapshot.get());
       bool publish = active && active == prt->second.owner;
       prt_entries_.erase(prt);
-      if (publish)
+      if (publish) {
         publish_prt_locked(active);
+      }
     }
     for (auto it = gem_entries_.begin(); it != gem_entries_.end();) {
-      if (it->second.drm_file_id == drm_file_id)
+      if (it->second.drm_file_id == drm_file_id) {
         it->second.handle_closed = true;
+      }
       if (it->second.handle_closed && !it->second.submission_refs) {
         teardown_gem_entry_locked(it->second);
         it = gem_entries_.erase(it);
@@ -3670,11 +3969,14 @@ public:
   /// under fd_mutex_, before freeing their host mapping.
   int untrack_gem(const DrmFileToken &file, uint32_t handle) {
     std::lock_guard lock(fd_mutex_);
-    if (!file)
+    if (!file) {
       return -EBADF;
+    }
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.handle_closed || it->second.drm_file_id != file->id)
+    if (it == gem_entries_.end() || it->second.handle_closed ||
+        it->second.drm_file_id != file->id) {
       return -ENOENT;
+    }
     it->second.handle_closed = true;
     if (!it->second.submission_refs) {
       teardown_gem_entry_locked(it->second);
@@ -3728,12 +4030,14 @@ public:
       std::optional<rocjitsu::config::DbtRuntimeConfigHandoff> handoff;
       std::string tried_last;
       for (const auto &candidate : cfg_candidates) {
-        if (candidate == tried_last)
+        if (candidate == tried_last) {
           continue; // Skip a duplicate tier (e.g. env unset collapses 1 and 2).
+        }
         tried_last = candidate;
         handoff = child_config_handoff(candidate);
-        if (handoff)
+        if (handoff) {
           break;
+        }
       }
       if (!handoff) {
         util::Logger::debug_print("rocjitsu: no child config path");
@@ -3850,14 +4154,16 @@ public:
     for (;;) {
       ssize_t n = real().read(fd, buf, sizeof(buf));
       if (n < 0) {
-        if (errno == EINTR)
+        if (errno == EINTR) {
           continue;
+        }
         util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
         real().close(fd);
         return util::Result::failure();
       }
-      if (n == 0)
+      if (n == 0) {
         break; // EOF.
+      }
       out.append(buf, static_cast<size_t>(n));
     }
     real().close(fd);
@@ -3901,8 +4207,9 @@ private:
   /// driver reports 0 and is idle.
   bool local_driver_is_idle_locked() {
     auto active_driver = driver();
-    if (!active_driver)
+    if (!active_driver) {
       return true;
+    }
     // Synthetic DRM files are counted here too: each holds a real open reference on
     // the backend (DrmBackendLease), the same one a KFD descriptor holds, so this
     // single comparison covers both and needs no DRM-specific term.
@@ -3928,16 +4235,19 @@ private:
     DoomedLocalVm doomed;
     // Hardware DBT mode leaves local_vm_ == nullptr but still publishes
     // guest_driver_, so a guest-only backend must not be skipped here.
-    if (!local_vm_ && !guest_driver_)
+    if (!local_vm_ && !guest_driver_) {
       return doomed;
-    if (!local_driver_is_idle_locked())
+    }
+    if (!local_driver_is_idle_locked()) {
       return doomed;
+    }
 
     // Release any parked blocking call so its caller returns and drops the driver
     // snapshot that would otherwise keep the object alive past this point. Only the
     // driver can do this; closing an fd does not cancel an in-flight kernel wait.
-    if (auto active_driver = driver())
+    if (auto active_driver = driver()) {
       active_driver->begin_local_shutdown();
+    }
 
     // Unpublish here, but hand the OWNERS back so they die after the caller drops
     // init_mutex_. Destroying them runs the VM deleter -- engine exit, thread join,
@@ -4095,13 +4405,16 @@ private:
       // and there is nothing to remove — either way the range must not remain
       // recorded, so the return value is intentionally not actionable here.
       auto va_transaction = gem.owner->begin_gem_va_transaction();
-      if (va_transaction)
-        for (const auto &r : gem.installed_vas)
+      if (va_transaction) {
+        for (const auto &r : gem.installed_vas) {
           (void)va_transaction->unmap(r.va_address, r.map_size, gem.drm_file_id);
+        }
+      }
     }
     if (gem.remote_owner) {
-      for (const auto &range : gem.installed_vas)
+      for (const auto &range : gem.installed_vas) {
         (void)gem.remote_owner->gem_va_unmap(gem.drm_file_id, range.va_address, range.map_size);
+      }
       gem.remote_owner.reset();
     }
     if (gem.cpu_ptr && gem.size) {
@@ -4117,13 +4430,16 @@ private:
   }
 
   void publish_prt_locked(SimulatedKfd *drv) {
-    if (!drv)
+    if (!drv) {
       return;
+    }
     rocjitsu::amdgpu::PrtRanges ranges;
     for (const auto &[file, gem] : prt_entries_) {
-      if (gem.owner == drv)
-        for (const auto &r : gem.installed_vas)
+      if (gem.owner == drv) {
+        for (const auto &r : gem.installed_vas) {
           ranges.push_back({r.va_address, r.va_address + r.map_size});
+        }
+      }
     }
     drv->publish_prt_ranges(std::move(ranges));
   }
@@ -4147,26 +4463,33 @@ private:
         const uint64_t begin = std::max(old.va_address, range.va_address);
         const uint64_t end =
             std::min(old.va_address + old.map_size, range.va_address + range.map_size);
-        if (resident && !unmap(begin, end - begin, drm_file_id))
+        if (resident && !unmap(begin, end - begin, drm_file_id)) {
           return false;
+        }
         ranges.erase(ranges.begin() + i);
-        if (old.va_address < begin)
+        if (old.va_address < begin) {
           ranges.push_back({old.va_address, begin - old.va_address});
-        if (end < old.va_address + old.map_size)
+        }
+        if (end < old.va_address + old.map_size) {
           ranges.push_back({end, old.va_address + old.map_size - end});
+        }
         evicted_any = true;
       }
       return true;
     };
-    for (auto &[handle, gem] : gem_entries_)
-      if (gem.drm_file_id == drm_file_id && !evict(gem.installed_vas, true))
+    for (auto &[handle, gem] : gem_entries_) {
+      if (gem.drm_file_id == drm_file_id && !evict(gem.installed_vas, true)) {
         return false;
+      }
+    }
     auto prt = prt_entries_.find(drm_file_id);
     if (prt != prt_entries_.end()) {
-      if (!evict(prt->second.installed_vas, false))
+      if (!evict(prt->second.installed_vas, false)) {
         return false;
-      if (auto *owner = prt->second.owner)
+      }
+      if (auto *owner = prt->second.owner) {
         publish_prt_locked(owner);
+      }
     }
     return evicted_any || allow_missing;
   }
@@ -4177,14 +4500,19 @@ private:
   /// DRM file owns it.
   [[nodiscard]] bool range_is_mapped_locked(const GemMapping &range) const {
     for (const auto &[handle, gem] : gem_entries_) {
-      for (const auto &existing : gem.installed_vas)
-        if (existing.overlaps(range))
+      for (const auto &existing : gem.installed_vas) {
+        if (existing.overlaps(range)) {
           return true;
+        }
+      }
     }
-    for (const auto &[file_id, gem] : prt_entries_)
-      for (const auto &existing : gem.installed_vas)
-        if (existing.overlaps(range))
+    for (const auto &[file_id, gem] : prt_entries_) {
+      for (const auto &existing : gem.installed_vas) {
+        if (existing.overlaps(range)) {
           return true;
+        }
+      }
+    }
     return false;
   }
 
@@ -4195,17 +4523,24 @@ private:
   [[nodiscard]] bool range_is_mapped_by_other_drm_file_locked(uint64_t drm_file_id,
                                                               const GemMapping &range) const {
     for (const auto &[handle, gem] : gem_entries_) {
-      if (gem.drm_file_id == drm_file_id)
+      if (gem.drm_file_id == drm_file_id) {
         continue;
-      for (const auto &existing : gem.installed_vas)
-        if (existing.overlaps(range))
+      }
+      for (const auto &existing : gem.installed_vas) {
+        if (existing.overlaps(range)) {
           return true;
+        }
+      }
     }
-    for (const auto &[file_id, gem] : prt_entries_)
-      if (file_id != drm_file_id)
-        for (const auto &existing : gem.installed_vas)
-          if (existing.overlaps(range))
+    for (const auto &[file_id, gem] : prt_entries_) {
+      if (file_id != drm_file_id) {
+        for (const auto &existing : gem.installed_vas) {
+          if (existing.overlaps(range)) {
             return true;
+          }
+        }
+      }
+    }
     return false;
   }
 
@@ -4287,11 +4622,13 @@ Result with_svm_host_vma_update(std::span<const std::pair<uint64_t, uint64_t>> r
 
 void *mmap_local_driver(const std::shared_ptr<LinuxKfd> &driver, void *addr, size_t length,
                         int prot, int flags, off_t offset) {
-  if (!(flags & MAP_FIXED) || !addr)
+  if (!(flags & MAP_FIXED) || !addr) {
     return driver->mmap(addr, length, prot, flags, offset);
+  }
   auto remote = InterposerContext::ctx.remote();
-  if (!remote)
+  if (!remote) {
     return driver->mmap(addr, length, prot, flags, offset);
+  }
   const std::array replaced{
       std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
   void *mapped = MAP_FAILED;
@@ -4306,8 +4643,9 @@ void *mmap_local_driver(const std::shared_ptr<LinuxKfd> &driver, void *addr, siz
 
 int munmap_local_driver(const std::shared_ptr<LinuxKfd> &driver, void *addr, size_t length,
                         const std::shared_ptr<RemoteDriver> &remote) {
-  if (!remote)
+  if (!remote) {
     return driver->munmap(addr, length);
+  }
   const std::array replaced{
       std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
   int result = -ENOENT;
@@ -4321,8 +4659,9 @@ int munmap_local_driver(const std::shared_ptr<LinuxKfd> &driver, void *addr, siz
 } // namespace
 
 template <typename Stat> static void finish_backing_stat(int fd, Stat *buf) {
-  if (!S_ISSOCK(buf->st_mode))
+  if (!S_ISSOCK(buf->st_mode)) {
     return;
+  }
   struct stat backing {};
   if (rocjitsu::stat_memory_backing_token(fd, &backing)) {
     buf->st_dev = backing.st_dev;
@@ -4336,23 +4675,26 @@ extern "C" {
 
 RJ_INTERPOSER_EXPORT off_t lseek(int fd, off_t offset, int whence) {
   auto real = rocjitsu::libc_passthrough().lseek_fn;
-  if (!real)
+  if (!real) {
     real = util::lookup_symbol<decltype(real)>(RTLD_NEXT, "lseek");
+  }
   if (!real) {
     errno = ENOSYS;
     return -1;
   }
   off_t result = real(fd, offset, whence);
   if (result == -1 && errno == ESPIPE &&
-      !rocjitsu::seek_memory_backing_token(fd, offset, whence, result))
+      !rocjitsu::seek_memory_backing_token(fd, offset, whence, result)) {
     errno = ESPIPE;
+  }
   return result;
 }
 
 RJ_INTERPOSER_EXPORT off64_t lseek64(int fd, off64_t offset, int whence) {
   auto real = rocjitsu::libc_passthrough().lseek64_fn;
-  if (!real)
+  if (!real) {
     real = util::lookup_symbol<decltype(real)>(RTLD_NEXT, "lseek64");
+  }
   if (!real) {
     errno = ENOSYS;
     return -1;
@@ -4360,8 +4702,9 @@ RJ_INTERPOSER_EXPORT off64_t lseek64(int fd, off64_t offset, int whence) {
   const off64_t result = real(fd, offset, whence);
   if (result == -1 && errno == ESPIPE) {
     off_t token_result;
-    if (rocjitsu::seek_memory_backing_token(fd, offset, whence, token_result))
+    if (rocjitsu::seek_memory_backing_token(fd, offset, whence, token_result)) {
       return token_result;
+    }
     errno = ESPIPE;
   }
   return result;
@@ -4369,19 +4712,22 @@ RJ_INTERPOSER_EXPORT off64_t lseek64(int fd, off64_t offset, int whence) {
 
 #ifdef RJ_INTERPOSER_TEST_HOOKS
 RJ_INTERPOSER_EXPORT int rj_interposer_test_fail_next_alias_close_writeback() {
-  if (!InterposerContext::ctx.owned_by_current_process())
+  if (!InterposerContext::ctx.owned_by_current_process()) {
     return -ECHILD;
+  }
   auto driver = InterposerContext::ctx.driver();
   auto *simulated = dynamic_cast<SimulatedKfd *>(driver.get());
-  if (!simulated)
+  if (!simulated) {
     return -ENODEV;
+  }
   simulated->fail_next_alias_close_writeback_for_testing();
   return 0;
 }
 
 RJ_INTERPOSER_EXPORT void rj_interposer_test_request_local_shutdown() {
-  if (InterposerContext::ctx.owned_by_current_process())
+  if (InterposerContext::ctx.owned_by_current_process()) {
     InterposerContext::ctx.request_local_vm_shutdown();
+  }
 }
 
 RJ_INTERPOSER_EXPORT int rj_interposer_test_has_pending_vm() {
@@ -4391,8 +4737,9 @@ RJ_INTERPOSER_EXPORT int rj_interposer_test_has_pending_vm() {
 RJ_INTERPOSER_EXPORT int rj_interposer_test_canonical_alias_count() {
   auto driver = InterposerContext::ctx.driver();
   auto *simulated = dynamic_cast<SimulatedKfd *>(driver.get());
-  if (!simulated)
+  if (!simulated) {
     return -ENODEV;
+  }
   auto process = simulated->find_process(simulated->local_process_id());
   return process ? static_cast<int>(process->gpu_canonical_alias_snapshot()->size()) : -ESRCH;
 }
@@ -4401,8 +4748,9 @@ RJ_INTERPOSER_EXPORT int rj_interposer_test_gpu_access(uint32_t gpu_id, uint64_t
                                                        size_t size) {
   auto driver = InterposerContext::ctx.driver();
   auto *simulated = dynamic_cast<SimulatedKfd *>(driver.get());
-  if (!simulated)
+  if (!simulated) {
     return -ENODEV;
+  }
   auto process = simulated->find_process(simulated->local_process_id());
   return process ? static_cast<int>(process->gpu_access_grant(gpu_id, address, size).allowed)
                  : -ESRCH;
@@ -4419,8 +4767,9 @@ RJ_INTERPOSER_EXPORT int rj_interposer_test_local_ref_count() {
 }
 
 RJ_INTERPOSER_EXPORT void *rj_interposer_test_hold_local_driver_snapshot() {
-  if (!InterposerContext::ctx.owned_by_current_process())
+  if (!InterposerContext::ctx.owned_by_current_process()) {
     return nullptr;
+  }
   auto driver = InterposerContext::ctx.driver();
   return driver ? new (std::nothrow) std::shared_ptr<LinuxKfd>(std::move(driver)) : nullptr;
 }
@@ -4449,8 +4798,9 @@ struct SyntheticDrmOpenResult {
 bool parse_render_minor_suffix(const char *first, const char *last, uint32_t *render_minor) {
   uint32_t parsed = 0;
   auto result = std::from_chars(first, last, parsed);
-  if (result.ec != std::errc{} || result.ptr != last)
+  if (result.ec != std::errc{} || result.ptr != last) {
     return false;
+  }
   *render_minor = parsed;
   return true;
 }
@@ -4459,31 +4809,37 @@ bool render_minor_from_drm_node_path(const char *raw_path, const char *drm_base,
                                      uint32_t *render_minor) {
   std::string_view path(raw_path);
   static constexpr std::string_view kRealRenderPrefix = "/dev/dri/renderD";
-  if (path.starts_with(kRealRenderPrefix))
+  if (path.starts_with(kRealRenderPrefix)) {
     return parse_render_minor_suffix(path.data() + kRealRenderPrefix.size(),
                                      path.data() + path.size(), render_minor);
+  }
 
-  if (!drm_base || drm_base[0] == '\0')
+  if (!drm_base || drm_base[0] == '\0') {
     return false;
+  }
 
   std::string redirected_render_prefix = std::string(drm_base) + "/dev_dri/renderD";
-  if (!path.starts_with(redirected_render_prefix))
+  if (!path.starts_with(redirected_render_prefix)) {
     return false;
+  }
   return parse_render_minor_suffix(path.data() + redirected_render_prefix.size(),
                                    path.data() + path.size(), render_minor);
 }
 
 static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
-  if (!path)
+  if (!path) {
     return {};
+  }
 
   std::string_view path_view(path);
   if (!path_view.starts_with("/dev/dri/renderD") &&
-      path_view.find("/dev_dri/renderD") == std::string_view::npos)
+      path_view.find("/dev_dri/renderD") == std::string_view::npos) {
     return {};
+  }
 
-  if (!InterposerContext::ctx.initialized())
+  if (!InterposerContext::ctx.initialized()) {
     InterposerContext::ctx.get_or_create();
+  }
 
   // Snapshot the remote once; a live snapshot (not remote_kfd_fd() >= 0) is the
   // stable signal that a daemon connection can service this render node, even if
@@ -4494,20 +4850,23 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   // reads below.
   uint32_t render_minor = 0;
   {
-    if (InterposerContext::ctx.driver_fd() < 0 && !remote)
+    if (InterposerContext::ctx.driver_fd() < 0 && !remote) {
       return {};
+    }
 
     std::string drm_base;
-    if (auto drv = InterposerContext::ctx.driver())
+    if (auto drv = InterposerContext::ctx.driver()) {
       drm_base = drv->drm_path();
-    else
+    } else {
       drm_base = InterposerContext::ctx.remote_drm_path();
+    }
 
     // HIP/libdrm may open the generated dev_dri node after following redirected
     // sysfs metadata instead of opening the literal /dev/dri/renderD* path.
     // Treat both path forms as the same synthetic DRM render node.
-    if (!render_minor_from_drm_node_path(path, drm_base.c_str(), &render_minor))
+    if (!render_minor_from_drm_node_path(path, drm_base.c_str(), &render_minor)) {
       return {};
+    }
   }
 
   // Acquire the operational lease BEFORE creating the fd. The retain and the
@@ -4515,14 +4874,16 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   // "who serves this node?" and the reference that answers it — the window the raw
   // snapshot left open.
   auto backend_lease = InterposerContext::ctx.acquire_drm_backend_lease(render_minor);
-  if (!backend_lease)
+  if (!backend_lease) {
     return {};
+  }
 
   // Descriptor identity is tracked explicitly; moving it to a high number only
   // forces the host to grow its descriptor table after threads have started.
   const int drm_fd = rocjitsu::create_scratch_fd("rocjitsu_drm");
-  if (drm_fd < 0)
+  if (drm_fd < 0) {
     return {true, -1};
+  }
 
   InterposerContext::DrmFinalRelease displaced;
   try {
@@ -4555,8 +4916,9 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
 /// @returns False if the result would not fit, leaving @p out unusable.
 [[nodiscard]] inline bool rj_path_append(char *out, size_t out_size, size_t *len, const char *src,
                                          size_t src_len) {
-  if (*len + src_len + 1 > out_size)
+  if (*len + src_len + 1 > out_size) {
     return false;
+  }
   std::memcpy(out + *len, src, src_len);
   *len += src_len;
   out[*len] = '\0';
@@ -4571,15 +4933,17 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
 /// @returns False when the pair cannot be resolved into @p out_size bytes.
 [[nodiscard]] inline bool rj_child_absolute_path(int dirfd, const char *path, char *out,
                                                  size_t out_size) {
-  if (out_size == 0)
+  if (out_size == 0) {
     return false;
+  }
   out[0] = '\0';
   size_t len = 0;
 
   if (path[0] != '/') {
     if (dirfd == AT_FDCWD) {
-      if (!::getcwd(out, out_size))
+      if (!::getcwd(out, out_size)) {
         return false;
+      }
       len = std::strlen(out);
     } else if (dirfd >= 0) {
       char link[sizeof("/proc/self/fd/") + 20];
@@ -4593,23 +4957,27 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
         digits[d++] = static_cast<char>('0' + v % 10);
         v /= 10;
       } while (v > 0 && d < sizeof(digits));
-      while (d > 0)
+      while (d > 0) {
         link[n++] = digits[--d];
+      }
       link[n] = '\0';
 
       auto &real = InterposerContext::real();
-      if (!real.readlink_fn)
+      if (!real.readlink_fn) {
         return false;
+      }
       const ssize_t got = real.readlink_fn(link, out, out_size - 1);
-      if (got <= 0)
+      if (got <= 0) {
         return false;
+      }
       out[got] = '\0';
       len = static_cast<size_t>(got);
     } else {
       return false;
     }
-    if (!rj_path_append(out, out_size, &len, "/", 1))
+    if (!rj_path_append(out, out_size, &len, "/", 1)) {
       return false;
+    }
   }
   return rj_path_append(out, out_size, &len, path, std::strlen(path));
 }
@@ -4622,33 +4990,39 @@ inline void rj_path_normalize(char *p) {
   p[0] = '/';
   char *out = p + 1;
   const char *in = p + 1;
-  while (*in == '/')
+  while (*in == '/') {
     ++in;
+  }
   while (*in) {
     const char *start = in;
-    while (*in && *in != '/')
+    while (*in && *in != '/') {
       ++in;
+    }
     const size_t seg = static_cast<size_t>(in - start);
     if (seg == 1 && start[0] == '.') {
       // "." names the directory already written.
     } else if (seg == 2 && start[0] == '.' && start[1] == '.') {
       if (out > p + 1) {
-        while (out > p + 1 && out[-1] != '/')
+        while (out > p + 1 && out[-1] != '/') {
           --out;
-        if (out > p + 1)
+        }
+        if (out > p + 1) {
           --out; // and off the separator that preceded it
+        }
       }
     } else {
       // The separator goes BEFORE the segment, never after it. Writing a trailing
       // one would land on the NUL the read cursor is about to reach, and the
       // separator skip below would then walk `in` off the end of the string.
-      if (out > p + 1)
+      if (out > p + 1) {
         *out++ = '/';
+      }
       std::memmove(out, start, seg);
       out += seg;
     }
-    while (*in == '/')
+    while (*in == '/') {
       ++in;
+    }
   }
   *out = '\0';
 }
@@ -4659,15 +5033,19 @@ inline void rj_path_normalize(char *p) {
 /// spellings, not device identities, so both hold whether or not the host has a
 /// matching node. @p p must already be normalized.
 [[nodiscard]] inline bool rj_path_names_emulated_endpoint(const char *p) {
-  if (std::strcmp(p, "/dev/kfd") == 0)
+  if (std::strcmp(p, "/dev/kfd") == 0) {
     return true;
+  }
   static constexpr char kRenderPrefix[] = "/dev/dri/renderD";
   constexpr size_t kRenderPrefixLen = sizeof(kRenderPrefix) - 1;
-  if (std::strncmp(p, kRenderPrefix, kRenderPrefixLen) != 0 || p[kRenderPrefixLen] == '\0')
+  if (std::strncmp(p, kRenderPrefix, kRenderPrefixLen) != 0 || p[kRenderPrefixLen] == '\0') {
     return false;
-  for (const char *d = p + kRenderPrefixLen; *d; ++d)
-    if (*d < '0' || *d > '9')
+  }
+  for (const char *d = p + kRenderPrefixLen; *d; ++d) {
+    if (*d < '0' || *d > '9') {
       return false;
+    }
+  }
   return true;
 }
 
@@ -4695,15 +5073,17 @@ inline void rj_path_normalize(char *p) {
   // Not a classification failure: there is no target to classify. open(nullptr) is
   // the caller's own bug and libc answers it with EFAULT, which this path has to
   // reproduce rather than convert into ENODEV.
-  if (!path)
+  if (!path) {
     return false;
+  }
   auto &real = InterposerContext::real();
   // Unresolved pass-through table: nothing here can classify anything, so this IS
   // the "cannot be classified" case and fails closed like the rest. Refusing is
   // also the only safe answer available -- the non-refused path forwards through
   // real.openat, which is one of the symbols missing here.
-  if (!real.fstat_fn || !real.openat || !real.close)
+  if (!real.fstat_fn || !real.openat || !real.close) {
     return true;
+  }
 
   // O_PATH resolves symlink chains and relative components against dirfd WITHOUT
   // opening the device, so classification has no side effects on real hardware.
@@ -4721,16 +5101,18 @@ inline void rj_path_normalize(char *p) {
     // Unresolvable pair (readlink failed, or the joined path exceeds PATH_MAX):
     // the spelling cannot be compared either, so both classifiers have now come up
     // empty and the documented fail-closed rule applies.
-    if (!rj_child_absolute_path(dirfd, path, resolved, sizeof(resolved)))
+    if (!rj_child_absolute_path(dirfd, path, resolved, sizeof(resolved))) {
       return true;
+    }
     rj_path_normalize(resolved);
     return rj_path_names_emulated_endpoint(resolved);
   }
   struct stat st {};
   const int rc = real.fstat_fn(probe, &st);
   real.close(probe);
-  if (rc != 0)
+  if (rc != 0) {
     return true; // Unclassifiable: fail closed.
+  }
   return rj_is_gpu_device_stat(st);
 }
 
@@ -4739,14 +5121,17 @@ inline void rj_path_normalize(char *p) {
 /// container or pointer. That is what makes it usable from a forked child, where
 /// every inherited lock is suspect.
 [[nodiscard]] inline bool rj_fd_is_real_gpu(int fd) {
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
   auto &real = InterposerContext::real();
-  if (!real.fstat_fn)
+  if (!real.fstat_fn) {
     return false;
+  }
   struct stat st {};
-  if (real.fstat_fn(fd, &st) != 0)
+  if (real.fstat_fn(fd, &st) != 0) {
     return false;
+  }
   return rj_is_gpu_device_stat(st);
 }
 
@@ -4763,8 +5148,9 @@ inline void rj_path_normalize(char *p) {
 /// receives a descriptor over a unix socket. A hard guarantee requires hardware KFD
 /// ownership to live outside the process (daemon mode), which is tracked separately.
 [[nodiscard]] inline bool rj_child_refuses_fd(int fd) {
-  if (!rj_fd_is_real_gpu(fd))
+  if (!rj_fd_is_real_gpu(fd)) {
     return false;
+  }
   errno = ENODEV;
   return true;
 }
@@ -4780,8 +5166,9 @@ inline void rj_path_normalize(char *p) {
                                                 mode_t mode) {
   auto &real = InterposerContext::real();
   int fd = real.openat(dirfd, path, flags, mode);
-  if (fd < 0)
+  if (fd < 0) {
     return fd;
+  }
   struct stat st {};
   if (real.fstat_fn && real.fstat_fn(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
     real.close(fd);
@@ -4798,8 +5185,9 @@ inline void rj_path_normalize(char *p) {
 /// than an error, and one that could corrupt real GPU state. ENODEV matches what the
 /// interposer already returns when no backend can serve a request.
 [[nodiscard]] inline bool rj_child_must_refuse_open(int dirfd, const char *path, int *out_errno) {
-  if (!rj_child_open_hits_gpu_device(dirfd, path))
+  if (!rj_child_open_hits_gpu_device(dirfd, path)) {
     return false;
+  }
   *out_errno = ENODEV;
   return true;
 }
@@ -4843,42 +5231,50 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
     return rj_child_open_verified(AT_FDCWD, path, flags, mode);
   }
   auto *volatile p = path;
-  if (!p || InterposerContext::in_construction)
+  if (!p || InterposerContext::in_construction) {
     return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
+  }
 
-  if (auto snapshot = open_proc_maps_snapshot(path, flags))
+  if (auto snapshot = open_proc_maps_snapshot(path, flags)) {
     return *snapshot;
+  }
 
-  if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
+  if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled) {
     return drm_fd.fd;
+  }
 
   if (std::strcmp(path, "/dev/kfd") == 0) {
     // Use the fd captured under remote_mutex_ (not a fresh remote_kfd_fd() read),
     // so a concurrent dup2/dup3 that invalidates the primary fd cannot make this
     // return -1 or a reused non-KFD descriptor.
-    if (auto remote = InterposerContext::ctx.get_or_create_remote())
+    if (auto remote = InterposerContext::ctx.get_or_create_remote()) {
       return remote.fd;
+    }
 
     // ONE combined operation under init_mutex_: creating the backend and taking the
     // application's reference on it must not be separable, or the shutdown policy
     // can retire the backend in between and hand back a dead fd.
     auto opened = InterposerContext::ctx.open_local();
-    if (opened.fd < 0)
+    if (opened.fd < 0) {
       return opened.fd;
+    }
     // clear_dups() routes through release_local_open() (init_mutex_), so it must run
     // after open_local() has released it.
-    if (opened.clear_dups_needed)
+    if (opened.clear_dups_needed) {
       InterposerContext::ctx.clear_dups();
+    }
     return opened.fd;
   }
 
   std::string redirected = InterposerContext::ctx.redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
+  }
   if (!redirected.empty()) {
     int fd = InterposerContext::real().openat(AT_FDCWD, redirected.c_str(), flags, mode);
-    if (fd >= 0)
+    if (fd >= 0) {
       InterposerContext::ctx.track_sysfs(fd, redirected);
+    }
     return fd;
   }
 
@@ -4926,25 +5322,31 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     return rj_child_open_verified(dirfd, path, flags, mode);
   }
   auto *volatile p_at = path;
-  if (!p_at)
+  if (!p_at) {
     return InterposerContext::real().openat(dirfd, path, flags, mode);
-  if (InterposerContext::in_construction)
+  }
+  if (InterposerContext::in_construction) {
     return InterposerContext::real().openat(dirfd, path, flags, mode);
+  }
 
   if (path[0] == '/') {
-    if (auto snapshot = open_proc_maps_snapshot(path, flags))
+    if (auto snapshot = open_proc_maps_snapshot(path, flags)) {
       return *snapshot;
+    }
 
-    if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
+    if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled) {
       return drm_fd.fd;
+    }
 
     std::string redirected = InterposerContext::ctx.redirect_sysfs_path(path);
-    if (redirected.empty())
+    if (redirected.empty()) {
       redirected = redirect_sys_dev_char(path);
+    }
     if (!redirected.empty()) {
       int fd = InterposerContext::real().openat(AT_FDCWD, redirected.c_str(), flags, mode);
-      if (fd >= 0)
+      if (fd >= 0) {
         InterposerContext::ctx.track_sysfs(fd, redirected);
+      }
       return fd;
     }
   } else if (dirfd != AT_FDCWD) {
@@ -4952,8 +5354,9 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     if (!dir_path.empty()) {
       std::string full = dir_path + "/" + path;
       int fd = InterposerContext::real().openat(AT_FDCWD, full.c_str(), flags, mode);
-      if (fd >= 0)
+      if (fd >= 0) {
         InterposerContext::ctx.track_sysfs(fd, full);
+      }
       return fd;
     }
   }
@@ -4977,8 +5380,9 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // A vfork child shares the parent's address space until exec/_exit but has a
   // separate descriptor table. Descriptor cleanup in that window must close the
   // child's fd without clearing the parent's KFD/DRM bookkeeping.
-  if (!InterposerContext::ctx.owned_by_current_process())
+  if (!InterposerContext::ctx.owned_by_current_process()) {
     return static_cast<int>(InterposerContext::real().close(fd));
+  }
   if (InterposerContext::ctx.remote_lookup(fd)) {
     // Closing the primary remote KFD fd drops one open reference; the synthetic
     // fd and RPC connection are torn down only when the last reference is
@@ -5012,13 +5416,15 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     // from its syscall to duplicate_gem_export, so that dup sees both or neither.
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     dropped_export = InterposerContext::ctx.drop_gem_export(fd);
-    if (InterposerContext::ctx.close_sync_file(fd))
+    if (InterposerContext::ctx.close_sync_file(fd)) {
       return 0;
+    }
     drm_close = InterposerContext::ctx.untrack_drm(fd);
-    if (drm_close.tracked)
+    if (drm_close.tracked) {
       InterposerContext::real().close(fd);
-    else if (dropped_export && !tracked_elsewhere && !InterposerContext::ctx.is_kfd_dup(fd))
+    } else if (dropped_export && !tracked_elsewhere && !InterposerContext::ctx.is_kfd_dup(fd)) {
       return static_cast<int>(InterposerContext::real().close(fd));
+    }
   }
   // NOTE: a GEM/dmabuf mapping is NOT torn down when a transient dmabuf EXPORT fd
   // closes. ROCr closes that fd immediately after VMemorySetAccessPerHandle()
@@ -5054,8 +5460,9 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   bool is_owned_fd = false;
   {
     is_primary_local_fd = InterposerContext::ctx.lookup(fd) != nullptr;
-    if (!is_primary_local_fd)
+    if (!is_primary_local_fd) {
       is_owned_fd = InterposerContext::ctx.owns_fd(fd);
+    }
   }
   if (is_primary_local_fd) {
     // Route through release_local_open() (not a bare driver close) so the last
@@ -5068,8 +5475,9 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     }
     return 0;
   }
-  if (is_owned_fd || InterposerContext::PrivateDrmFd::owns(fd))
+  if (is_owned_fd || InterposerContext::PrivateDrmFd::owns(fd)) {
     return 0;
+  }
   return static_cast<int>(InterposerContext::real().close(fd));
 }
 
@@ -5093,8 +5501,9 @@ __attribute__((destructor)) void rj_interposer_shutdown() {
   // of exec() runs this finalizer too, and request_local_vm_shutdown() takes
   // init_mutex_ -- inherited, possibly locked by a parent thread that does not exist
   // here. The parent owns this VM's teardown; a child must never attempt it.
-  if (!InterposerContext::ctx.owned_by_current_process())
+  if (!InterposerContext::ctx.owned_by_current_process()) {
     return;
+  }
   InterposerContext::ctx.request_local_vm_shutdown();
 }
 
@@ -5108,16 +5517,18 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   void *arg = va_arg(ap, void *);
   va_end(ap);
   if (!rj_owns_interposer_state()) {
-    if (rj_child_refuses_fd(fd))
+    if (rj_child_refuses_fd(fd)) {
       return -1;
+    }
     return InterposerContext::real().ioctl(fd, request, arg);
   }
 
   if (request == SYNC_IOC_MERGE && arg) {
     auto lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     if (auto result =
-            InterposerContext::ctx.merge_sync_files(fd, *static_cast<sync_merge_data *>(arg)))
+            InterposerContext::ctx.merge_sync_files(fd, *static_cast<sync_merge_data *>(arg))) {
       return kfd_ioctl_ret(*result);
+    }
     return InterposerContext::real().ioctl(fd, request, arg);
   }
 
@@ -5137,34 +5548,40 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   if (drm_file) {
     unsigned nr = _IOC_NR(request);
     unsigned type = _IOC_TYPE(request);
-    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CS && arg)
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CS && arg) {
       return kfd_ioctl_ret(
           InterposerContext::ctx.submit_drm_cs(drm_file, static_cast<drm_amdgpu_cs *>(arg)));
-    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_WAIT_CS && arg)
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_WAIT_CS && arg) {
       return kfd_ioctl_ret(
           InterposerContext::ctx.wait_drm_cs(drm_file, static_cast<drm_amdgpu_wait_cs *>(arg)));
+    }
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_GET_CAP) && arg) {
       auto *cap = static_cast<drm_get_cap *>(arg);
       cap->value = 0;
-      if (cap->capability == DRM_CAP_SYNCOBJ || cap->capability == DRM_CAP_SYNCOBJ_TIMELINE)
+      if (cap->capability == DRM_CAP_SYNCOBJ || cap->capability == DRM_CAP_SYNCOBJ_TIMELINE) {
         cap->value = 1;
-      else if (cap->capability == DRM_CAP_PRIME)
+      } else if (cap->capability == DRM_CAP_PRIME) {
         cap->value = DRM_PRIME_CAP_IMPORT;
+      }
       return 0;
     }
-    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CTX && arg)
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CTX && arg) {
       return kfd_ioctl_ret(
           InterposerContext::ctx.drm_context(drm_file, static_cast<drm_amdgpu_ctx *>(arg)));
-    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_VM && arg)
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_VM && arg) {
       return kfd_ioctl_ret(
           InterposerContext::ctx.drm_vm(drm_file, static_cast<drm_amdgpu_vm *>(arg)->in.op));
+    }
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_WAIT) && arg) {
       auto *wait = static_cast<drm_syncobj_wait *>(arg);
       constexpr uint32_t kSupportedFlags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL |
                                            DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
                                            DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
-      if ((wait->flags & ~kSupportedFlags) != 0)
+      if ((wait->flags & ~kSupportedFlags) != 0) {
         return kfd_ioctl_ret(-EINVAL);
+      }
       std::vector<uint64_t> points;
       try {
         points.resize(wait->count_handles, 0);
@@ -5187,33 +5604,38 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         (nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_SIGNAL) || nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_RESET)) &&
         arg) {
       auto *array = static_cast<drm_syncobj_array *>(arg);
-      if (array->pad)
+      if (array->pad) {
         return kfd_ioctl_ret(-EINVAL);
+      }
       return kfd_ioctl_ret(
           InterposerContext::ctx.update_syncobjs(drm_file, array->handles, 0, array->count_handles,
                                                  nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_RESET)));
     }
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL) && arg) {
       auto *array = static_cast<drm_syncobj_timeline_array *>(arg);
-      if (array->flags)
+      if (array->flags) {
         return kfd_ioctl_ret(-EINVAL);
+      }
       return kfd_ioctl_ret(InterposerContext::ctx.update_syncobjs(
           drm_file, array->handles, array->points, array->count_handles, false));
     }
-    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD) && arg)
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD) && arg) {
       return kfd_ioctl_ret(
           InterposerContext::ctx.export_syncobj(drm_file, *static_cast<drm_syncobj_handle *>(arg)));
+    }
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE) && arg) {
       auto lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
       return kfd_ioctl_ret(
           InterposerContext::ctx.import_syncobj(drm_file, *static_cast<drm_syncobj_handle *>(arg)));
     }
-    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_QUERY) && arg)
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_QUERY) && arg) {
       return kfd_ioctl_ret(InterposerContext::ctx.query_syncobjs(
           drm_file, *static_cast<drm_syncobj_timeline_array *>(arg)));
-    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TRANSFER) && arg)
+    }
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TRANSFER) && arg) {
       return kfd_ioctl_ret(InterposerContext::ctx.transfer_syncobj(
           drm_file, *static_cast<drm_syncobj_transfer *>(arg)));
+    }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
       auto *ver = static_cast<drm_version *>(arg);
       ver->version_major = 3;
@@ -5228,23 +5650,27 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       if (ver->name && ver->name_len > 0) {
         size_t copy = ver->name_len < kNameStrLen ? ver->name_len : kNameStrLen;
         std::memcpy(ver->name, drv_name, copy);
-        if (ver->name_len > kNameStrLen)
+        if (ver->name_len > kNameStrLen) {
           ver->name[kNameStrLen] = '\0';
+        }
       }
       ver->name_len = kNameStrLen;
-      if (ver->date && ver->date_len > 0)
+      if (ver->date && ver->date_len > 0) {
         ver->date[0] = '\0';
+      }
       ver->date_len = 1;
-      if (ver->desc && ver->desc_len > 0)
+      if (ver->desc && ver->desc_len > 0) {
         ver->desc[0] = '\0';
+      }
       ver->desc_len = 1;
       return 0;
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeHandleToFd && arg) {
       auto *prime = static_cast<drm_prime_handle *>(arg);
       int exported = InterposerContext::ctx.prime_export(drm_file, prime->handle, prime->flags);
-      if (exported < 0)
+      if (exported < 0) {
         return kfd_ioctl_ret(exported);
+      }
       prime->fd = exported;
       return 0;
     }
@@ -5300,8 +5726,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       const uint32_t handle = map->in.handle;
       uint64_t offset = 0;
       int result = InterposerContext::ctx.gem_mmap_offset(drm_file, handle, &offset);
-      if (result != 0)
+      if (result != 0) {
         return kfd_ioctl_ret(result);
+      }
       map->out.addr_ptr = offset;
       return 0;
     }
@@ -5357,8 +5784,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       }
       const Sysfs::GpuInfo *gpu = &*gpu_info;
       auto *out = info->return_pointer ? reinterpret_cast<void *>(info->return_pointer) : nullptr;
-      if (!out || info->return_size == 0)
+      if (!out || info->return_size == 0) {
         return 0;
+      }
       std::memset(out, 0, info->return_size);
       const uint32_t major = gpu->gfx_target_version / 10000;
       const bool rdna_compute = gpu->gfx_target_version == 100100 ||
@@ -5397,15 +5825,18 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         return 0;
       }
       case AMDGPU_INFO_MAX_IBS: {
-        if (info->return_size >= (AMDGPU_HW_IP_COMPUTE + 1) * sizeof(uint32_t))
+        if (info->return_size >= (AMDGPU_HW_IP_COMPUTE + 1) * sizeof(uint32_t)) {
           static_cast<uint32_t *>(out)[AMDGPU_HW_IP_COMPUTE] = 125;
-        if (info->return_size >= sizeof(uint32_t))
+        }
+        if (info->return_size >= sizeof(uint32_t)) {
           static_cast<uint32_t *>(out)[AMDGPU_HW_IP_GFX] = 192;
+        }
         return 0;
       }
       case AMDGPU_INFO_ACCEL_WORKING: {
-        if (info->return_size >= sizeof(uint32_t))
+        if (info->return_size >= sizeof(uint32_t)) {
           *static_cast<uint32_t *>(out) = 1u;
+        }
         return 0;
       }
       case AMDGPU_INFO_READ_MMR_REG: {
@@ -5469,10 +5900,12 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         dev.cu_active_number =
             rocjitsu::kmd::drm_cu_active_number(gpu->simd_count, gpu->simd_per_cu);
         if (rdna_compute) {
-          for (uint32_t se = 0; se < std::min(dev.num_shader_engines, 8u); ++se)
-            for (uint32_t sa = 0; sa < std::min(dev.num_shader_arrays_per_engine, 2u); ++sa)
+          for (uint32_t se = 0; se < std::min(dev.num_shader_engines, 8u); ++se) {
+            for (uint32_t sa = 0; sa < std::min(dev.num_shader_arrays_per_engine, 2u); ++sa) {
               dev.cu_bitmap[se % 4][sa + (se / 4) * 2] =
                   util::mask<uint32_t>(std::min(dev.num_cu_per_sh, 32u));
+            }
+          }
           dev.num_shader_visible_vgprs = major == 10 ? 1024 : 1536;
           dev.num_tcc_blocks = gpu->mem_width / (major <= 11 ? 16 : 8);
           // Cache sizes in this ioctl are KiB, except MALL which is bytes.
@@ -5543,8 +5976,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       }
       const bool publish_timeline = (va->flags & AMDGPU_VM_DELAY_UPDATE) == 0;
       const bool prt = (va->flags & AMDGPU_VM_PAGE_PRT) != 0;
-      if (prt && (va->flags & ~(AMDGPU_VM_PAGE_PRT | AMDGPU_VM_DELAY_UPDATE)))
+      if (prt && (va->flags & ~(AMDGPU_VM_PAGE_PRT | AMDGPU_VM_DELAY_UPDATE))) {
         return kfd_ioctl_ret(-EINVAL);
+      }
       int result = 0;
       switch (va->operation) {
       case AMDGPU_VA_OP_MAP:
@@ -5574,8 +6008,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         errno = EINVAL;
         return -1;
       }
-      if (result != 0)
+      if (result != 0) {
         return kfd_ioctl_ret(result);
+      }
       return 0;
     }
     // The AMDGPU command range starts at DRM_COMMAND_BASE, while generic DRM
@@ -5603,8 +6038,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     return kfd_ioctl_ret(result);
   };
-  if (auto remote = InterposerContext::ctx.remote_lookup(fd))
+  if (auto remote = InterposerContext::ctx.remote_lookup(fd)) {
     return dispatch_remote_ioctl(remote);
+  }
   // Dispatch a tracked KFD fd by its RECORDED backend, not by "remote if any
   // remote is live". In mixed local+daemon mode a Local-tagged dup must route to
   // the local driver and a Remote-tagged dup to the remote connection; guessing
@@ -5663,8 +6099,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     // Classification done and no local snapshot held: dispatch the remote op on the
     // lifetime-extending snapshot captured above.
-    if (remote_dispatch)
+    if (remote_dispatch) {
       return dispatch_remote_ioctl(remote_dispatch);
+    }
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
   // whose primary remote handle changed underneath it (e.g. a close/dup race in
@@ -5688,8 +6125,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       }
     }
     if (have_backend && backend == InterposerContext::DupBackend::Remote) {
-      if (auto remote = InterposerContext::ctx.remote())
+      if (auto remote = InterposerContext::ctx.remote()) {
         return dispatch_remote_ioctl(remote);
+      }
     }
   }
 
@@ -5716,8 +6154,9 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
 RJ_INTERPOSER_EXPORT int dup(int oldfd) {
   assert(InterposerContext::real().ready());
   if (!rj_owns_interposer_state()) {
-    if (rj_child_refuses_fd(oldfd))
+    if (rj_child_refuses_fd(oldfd)) {
       return -1;
+    }
     return InterposerContext::real().dup(oldfd);
   }
   std::optional<InterposerContext::DupBackend> reserved;
@@ -5745,16 +6184,18 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
   }
   if (rc < 0) {
     const int saved_errno = errno;
-    if (reserved)
+    if (reserved) {
       InterposerContext::ctx.release_backend(*reserved);
+    }
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
     errno = saved_errno;
     return rc;
   }
-  if (reserved)
+  if (reserved) {
     InterposerContext::ctx.commit_dup(rc, *reserved);
-  else
+  } else {
     InterposerContext::ctx.untrack_dup(rc);
+  }
   InterposerContext::ctx.complete_drm_release(std::move(drm_release));
   return rc;
 }
@@ -5786,22 +6227,25 @@ void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend
   InterposerContext::ctx.complete_drm_release(std::move(overwritten_release));
   InterposerContext::ctx.complete_drm_release(std::move(displaced_release));
   InterposerContext::ctx.invalidate_overwritten_kfd_fd(newfd);
-  if (reserved)
+  if (reserved) {
     InterposerContext::ctx.commit_dup(newfd, *reserved);
+  }
 }
 } // namespace
 
 RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   assert(InterposerContext::real().ready());
   if (!rj_owns_interposer_state()) {
-    if (rj_child_refuses_fd(oldfd))
+    if (rj_child_refuses_fd(oldfd)) {
       return -1;
+    }
     return static_cast<int>(syscall(SYS_dup2, oldfd, newfd));
   }
   // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
   // tracking would drop a still-open ref. Forward without touching tracking.
-  if (oldfd == newfd)
+  if (oldfd == newfd) {
     return InterposerContext::real().dup2(oldfd, newfd);
+  }
   std::optional<InterposerContext::DupBackend> reserved;
   InterposerContext::DrmFileToken drm_file;
   InterposerContext::DrmFinalRelease overwritten_release;
@@ -5831,8 +6275,9 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   }
   if (rc < 0) {
     const int saved_errno = errno;
-    if (reserved)
+    if (reserved) {
       InterposerContext::ctx.release_backend(*reserved);
+    }
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
     errno = saved_errno;
     return rc;
@@ -5845,8 +6290,9 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
 RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   assert(InterposerContext::real().ready());
   if (!rj_owns_interposer_state()) {
-    if (rj_child_refuses_fd(oldfd))
+    if (rj_child_refuses_fd(oldfd)) {
       return -1;
+    }
     return static_cast<int>(syscall(SYS_dup3, oldfd, newfd, flags));
   }
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
@@ -5880,8 +6326,9 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   }
   if (rc < 0) {
     const int saved_errno = errno;
-    if (reserved)
+    if (reserved) {
       InterposerContext::ctx.release_backend(*reserved);
+    }
     InterposerContext::ctx.release_drm_file_reservation(drm_file);
     errno = saved_errno;
     return rc;
@@ -5966,8 +6413,9 @@ namespace {
 int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
   if (cmd == F_GETFL || cmd == F_GET_SEALS || cmd == F_ADD_SEALS) {
-    if (rocjitsu::is_memory_backing_token(fd))
+    if (rocjitsu::is_memory_backing_token(fd)) {
       return rocjitsu::fcntl_memory_backing(fd, cmd, int_arg);
+    }
   }
   // Gate here rather than in fcntl()/fcntl64(): both funnel through this, and the
   // F_DUPFD paths below touch inherited dup and DRM tracking.
@@ -5978,12 +6426,15 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
     // and must keep working, so only these are gated.
     const bool duplicates = (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC);
     const bool launders_across_exec = (cmd == F_SETFD && (int_arg & FD_CLOEXEC) == 0);
-    if ((duplicates || launders_across_exec) && rj_child_refuses_fd(fd))
+    if ((duplicates || launders_across_exec) && rj_child_refuses_fd(fd)) {
       return -1;
-    if (kind == FcntlArgKind::Ptr)
+    }
+    if (kind == FcntlArgKind::Ptr) {
       return InterposerContext::real().fcntl(fd, cmd, ptr_arg);
-    if (kind == FcntlArgKind::Int)
+    }
+    if (kind == FcntlArgKind::Int) {
       return InterposerContext::real().fcntl(fd, cmd, int_arg);
+    }
     return InterposerContext::real().fcntl(fd, cmd);
   }
   // F_DUPFD/F_DUPFD_CLOEXEC create a new fd like dup(); reserve the source
@@ -6013,8 +6464,9 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   // acquiring them in the other order here would close an ABBA cycle between a dup
   // and a close. Only "reserve before the syscall" is load-bearing, and it still
   // holds; the failure path below releases the reservation outside the lock too.
-  if (is_dupfd)
+  if (is_dupfd) {
     reserved = InterposerContext::ctx.reserve_dup_backend(fd);
+  }
   if (is_dupfd) {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     drm_file = InterposerContext::ctx.reserve_drm_file(fd);
@@ -6031,15 +6483,17 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   if (is_dupfd) {
     if (rc < 0) {
       const int saved_errno = errno;
-      if (reserved)
+      if (reserved) {
         InterposerContext::ctx.release_backend(*reserved);
+      }
       InterposerContext::ctx.release_drm_file_reservation(drm_file);
       errno = saved_errno;
     } else {
-      if (reserved)
+      if (reserved) {
         InterposerContext::ctx.commit_dup(static_cast<int>(rc), *reserved);
-      else
+      } else {
         InterposerContext::ctx.untrack_dup(static_cast<int>(rc));
+      }
       InterposerContext::ctx.complete_drm_release(std::move(drm_release));
     }
   }
@@ -6054,10 +6508,11 @@ RJ_INTERPOSER_EXPORT int fcntl(int fd, int cmd, ...) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
   void *ptr_arg = nullptr;
   int int_arg = 0;
-  if (kind == FcntlArgKind::Ptr)
+  if (kind == FcntlArgKind::Ptr) {
     ptr_arg = va_arg(ap, void *);
-  else if (kind == FcntlArgKind::Int)
+  } else if (kind == FcntlArgKind::Int) {
     int_arg = va_arg(ap, int);
+  }
   va_end(ap);
   return fcntl_impl(fd, cmd, ptr_arg, int_arg);
 }
@@ -6072,10 +6527,11 @@ RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
   void *ptr_arg = nullptr;
   int int_arg = 0;
-  if (kind == FcntlArgKind::Ptr)
+  if (kind == FcntlArgKind::Ptr) {
     ptr_arg = va_arg(ap, void *);
-  else if (kind == FcntlArgKind::Int)
+  } else if (kind == FcntlArgKind::Int) {
     int_arg = va_arg(ap, int);
+  }
   va_end(ap);
   return fcntl_impl(fd, cmd, ptr_arg, int_arg);
 }
@@ -6106,19 +6562,22 @@ RJ_INTERPOSER_EXPORT void *mmap64(void *addr, size_t length, int prot, int flags
 }
 
 static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap)
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap) {
     return raw_mmap_syscall(addr, length, prot, flags, fd, offset);
+  }
   if (!rj_owns_interposer_state()) {
-    if (rj_child_refuses_fd(fd))
+    if (rj_child_refuses_fd(fd)) {
       return MAP_FAILED;
+    }
     // A forked child owns none of this state, and the mapping lock is inherited
     // like any other: its holder may not exist here. Straight to libc.
     return rocjitsu::map_memory_backing(addr, length, prot, flags, fd, offset);
   }
 
   assert(InterposerContext::real().ready());
-  if (auto remote = InterposerContext::ctx.remote_lookup(fd))
+  if (auto remote = InterposerContext::ctx.remote_lookup(fd)) {
     return remote->mmap(addr, length, prot, flags, offset, snapshot_local_driver);
+  }
 
   // Classify and dispatch the LOCAL branches on a driver snapshot, which keeps the
   // VM/GuestKfd alive for the duration. For a Remote-backed fd, capture a
@@ -6126,8 +6585,9 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
   std::shared_ptr<RemoteDriver> remote_mmap;
   {
 
-    if (auto drv = InterposerContext::ctx.lookup(fd))
+    if (auto drv = InterposerContext::ctx.lookup(fd)) {
       return mmap_local_driver(drv, addr, length, prot, flags, offset);
+    }
 
     // Dispatch a tracked KFD dup by its RECORDED backend (as ioctl() does), not by
     // "remote if any remote is live", so routing follows the reference the dup
@@ -6149,15 +6609,17 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
     if (!remote_mmap) {
       if (auto drm_file = InterposerContext::ctx.reserve_drm_file(fd)) {
         InterposerContext::DrmFileReservation held(InterposerContext::ctx, drm_file);
-        if (static_cast<uint64_t>(offset) >= InterposerContext::kGemMmapOffsetBase)
+        if (static_cast<uint64_t>(offset) >= InterposerContext::kGemMmapOffsetBase) {
           return InterposerContext::ctx.mmap_gem(
               drm_file, addr, length, prot, flags, offset, [&](auto &&bare_mapping_change) {
-                if (!(flags & MAP_FIXED) || !addr)
+                if (!(flags & MAP_FIXED) || !addr) {
                   return with_host_mapping_held(bare_mapping_change);
+                }
                 const std::array replaced{
                     std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
                 return with_svm_host_vma_update(replaced, MAP_FAILED, bare_mapping_change);
               });
+        }
         const auto &lease = drm_file->backend_lease;
         // BOTH branches dispatch inside the reservation. Holding a shared_ptr keeps
         // the object allocated but not OPERATIONAL: if the reservation were released
@@ -6165,17 +6627,20 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         // run release_remote_open(), RemoteDriver::close() would drop the RPC
         // socket, and this mmap would then execute against a closed connection.
         // Keeping the lease alive across the call is the whole point of it.
-        if (const auto &local = lease.local())
+        if (const auto &local = lease.local()) {
           return mmap_local_driver(local, addr, length, prot, flags, offset);
-        if (const auto &remote = lease.remote())
+        }
+        if (const auto &remote = lease.remote()) {
           return remote->mmap(addr, length, prot, flags, offset, snapshot_local_driver);
+        }
       }
     }
   }
   // Pin dropped: dispatch the remote op on the lifetime-extending snapshot so a
   // stalled daemon cannot block local-VM teardown.
-  if (remote_mmap)
+  if (remote_mmap) {
     return remote_mmap->mmap(addr, length, prot, flags, offset, snapshot_local_driver);
+  }
 
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
     int backing_out = -1;
@@ -6217,8 +6682,9 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
 #ifdef MADV_POPULATE_WRITE
           InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);
 #endif
-          if (gpu_mapping)
+          if (gpu_mapping) {
             InterposerContext::real().madvise(raw, length, MADV_DONTDUMP);
+          }
           return raw;
         }
         // A daemon-shared range matched but the shared mapping failed. Fail
@@ -6246,9 +6712,10 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       return driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
     }
   }
-  if (!(flags & MAP_FIXED))
+  if (!(flags & MAP_FIXED)) {
     return with_host_mapping_held(
         [&] { return rocjitsu::map_memory_backing(addr, length, prot, flags, fd, offset); });
+  }
   const std::array replaced{
       std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
   return with_svm_host_vma_update(replaced, MAP_FAILED, [&] {
@@ -6259,8 +6726,9 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
 static void *mmap_with_dump_policy(void *addr, size_t length, int prot, int flags, int fd,
                                    off_t offset) {
   if (fd < 0 || (flags & MAP_ANONYMOUS) || !InterposerContext::real().ready() ||
-      !rj_owns_interposer_state())
+      !rj_owns_interposer_state()) {
     return mmap_impl(addr, length, prot, flags, fd, offset);
+  }
 
   // Pin both the file object and its simulated-driver metadata for the whole
   // operation. The caller may close and reuse its descriptor as soon as mmap
@@ -6286,8 +6754,9 @@ static void *mmap_with_dump_policy(void *addr, size_t length, int prot, int flag
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
   assert(InterposerContext::real().ready());
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().mprotect(addr, length, prot);
+  }
   {
     auto drv = InterposerContext::ctx.driver();
     if (drv && drv->is_doorbell_range(addr, length)) {
@@ -6301,14 +6770,17 @@ RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
 
 RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
   assert(InterposerContext::real().ready());
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().madvise(addr, length, advice);
+  }
   const bool high_gpu_address = reinterpret_cast<uintptr_t>(addr) >= 0x1000000000ULL;
-  if (advice == MADV_HUGEPAGE && high_gpu_address)
+  if (advice == MADV_HUGEPAGE && high_gpu_address) {
     return 0;
+  }
   if (advice == MADV_DONTFORK && high_gpu_address) {
-    if (InterposerContext::ctx.driver_is_simulated())
+    if (InterposerContext::ctx.driver_is_simulated()) {
       return 0;
+    }
   }
   return InterposerContext::real().madvise(addr, length, advice);
 }
@@ -6326,10 +6798,12 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
     new_address = va_arg(ap, void *);
     va_end(ap);
   }
-  if (!InterposerContext::real().ready() || !InterposerContext::real().mremap)
+  if (!InterposerContext::real().ready() || !InterposerContext::real().mremap) {
     return raw_mremap_syscall(old_address, old_size, new_size, flags, new_address);
-  if (!rj_owns_interposer_state())
+  }
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().mremap(old_address, old_size, new_size, flags, new_address);
+  }
   std::array<std::pair<uint64_t, uint64_t>, 2> replaced{};
   return with_svm_host_vma_update(replaced, MAP_FAILED, [&] {
     void *mapped =
@@ -6342,12 +6816,14 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
         const size_t old_rounded = ((old_size + page - 1) / page) * page;
         const size_t new_rounded = ((new_size + page - 1) / page) * page;
         const auto old_va = reinterpret_cast<uint64_t>(old_address);
-        if (mapped != old_address && !(flags & kMremapDontunmapFlag))
+        if (mapped != old_address && !(flags & kMremapDontunmapFlag)) {
           replaced[0] = {old_va, old_rounded};
-        else if (mapped == old_address && new_rounded < old_rounded)
+        } else if (mapped == old_address && new_rounded < old_rounded) {
           replaced[0] = {old_va + new_rounded, old_rounded - new_rounded};
-        if (mapped != old_address)
+        }
+        if (mapped != old_address) {
           replaced[1] = {reinterpret_cast<uint64_t>(mapped), new_rounded};
+        }
       }
     }
     return mapped;
@@ -6355,27 +6831,33 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
 }
 
 RJ_INTERPOSER_EXPORT void *shmat(int shmid, const void *addr, int flags) noexcept {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().shmat)
+  if (!InterposerContext::real().ready() || !InterposerContext::real().shmat) {
     return reinterpret_cast<void *>(syscall(SYS_shmat, shmid, addr, flags));
-  if (!rj_owns_interposer_state())
+  }
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().shmat(shmid, addr, flags);
+  }
   return with_host_mapping_held(
       [&] { return InterposerContext::real().shmat(shmid, addr, flags); });
 }
 
 RJ_INTERPOSER_EXPORT int shmdt(const void *addr) noexcept {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().shmdt)
+  if (!InterposerContext::real().ready() || !InterposerContext::real().shmdt) {
     return static_cast<int>(syscall(SYS_shmdt, addr));
-  if (!rj_owns_interposer_state())
+  }
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().shmdt(addr);
+  }
   return with_host_mapping_held([&] { return InterposerContext::real().shmdt(addr); });
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap)
+  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap) {
     return raw_munmap_syscall(addr, length);
-  if (!rj_owns_interposer_state())
+  }
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().munmap(addr, length);
+  }
 
   assert(InterposerContext::real().ready());
   auto libc_result = [](int result) {
@@ -6390,14 +6872,16 @@ RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
   // the connection stays alive via other refs).
   if (auto remote = InterposerContext::ctx.remote()) {
     int ret = remote->munmap(addr, length, snapshot_local_driver);
-    if (ret != -ENOENT)
+    if (ret != -ENOENT) {
       return libc_result(ret);
+    }
   }
   {
     if (auto drv = InterposerContext::ctx.driver()) {
       int ret = munmap_local_driver(drv, addr, length, InterposerContext::ctx.remote());
-      if (ret != -ENOENT)
+      if (ret != -ENOENT) {
         return libc_result(ret);
+      }
     }
   }
   const std::array replaced{
@@ -6429,8 +6913,9 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
     // truncate), and "e" (FD_CLOEXEC). Validating the descriptor afterwards closes
     // the same path-swap window without reimplementing any of that.
     FILE *stream = InterposerContext::real().fopen(path, mode);
-    if (!stream)
+    if (!stream) {
       return nullptr;
+    }
     struct stat st {};
     const int fd = fileno(stream);
     if (fd >= 0 && InterposerContext::real().fstat_fn &&
@@ -6441,13 +6926,15 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
     }
     return stream;
   }
-  if (!path || !mode)
+  if (!path || !mode) {
     return nullptr;
+  }
 
   int open_flags = InterposerContext::fopen_flags_from_mode(mode);
   if (auto snapshot = open_proc_maps_snapshot(path, open_flags)) {
-    if (*snapshot < 0)
+    if (*snapshot < 0) {
       return nullptr;
+    }
     FILE *stream = fdopen(*snapshot, mode);
     if (!stream) {
       const int error = errno;
@@ -6461,10 +6948,12 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
   std::string redirected;
   if (!InterposerContext::in_construction) {
     redirected = InterposerContext::ctx.redirect_sysfs_path(path);
-    if (redirected.empty())
+    if (redirected.empty()) {
       redirected = redirect_sys_dev_char(path);
-    if (!redirected.empty())
+    }
+    if (!redirected.empty()) {
       actual = redirected.c_str();
+    }
   }
 
   // Preserve libc's creation permissions and mode extensions (x/e) after redirection.
@@ -6474,8 +6963,9 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
 RJ_INTERPOSER_EXPORT FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
 
 RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *stream) {
-  if (!path || !mode)
+  if (!path || !mode) {
     return nullptr;
+  }
   if (InterposerContext::real().ready() && !rj_owns_interposer_state()) {
     int refuse_errno = 0;
     if (rj_child_must_refuse_open(AT_FDCWD, path, &refuse_errno)) {
@@ -6486,8 +6976,9 @@ RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *str
       // because the owner path below treats a null stream as reachable too.
       RJ_DIAGNOSTIC_PUSH
       RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE
-      if (stream)
+      if (stream) {
         fclose(stream);
+      }
       RJ_DIAGNOSTIC_POP
       errno = refuse_errno;
       return nullptr;
@@ -6497,8 +6988,9 @@ RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *str
     // classify/reopen window from the other side. A swapped symlink that lands a GPU
     // device here is closed before the stream is returned.
     FILE *reopened = InterposerContext::real().freopen(path, mode, stream);
-    if (!reopened)
+    if (!reopened) {
       return nullptr;
+    }
     struct stat st {};
     const int fd = fileno(reopened);
     if (fd >= 0 && InterposerContext::real().fstat_fn &&
@@ -6511,8 +7003,9 @@ RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *str
   }
   RJ_DIAGNOSTIC_PUSH
   RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE
-  if (stream)
+  if (stream) {
     ::fclose(stream);
+  }
   RJ_DIAGNOSTIC_POP
   return fopen(path, mode);
 }
@@ -6524,56 +7017,65 @@ RJ_INTERPOSER_EXPORT FILE *freopen64(const char *path, const char *mode, FILE *s
 // -- stat/lstat/access interposition --
 
 static std::string redirect_sysfs_path(const char *path) {
-  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction) {
     return {};
+  }
   return InterposerContext::ctx.redirect_sysfs_path(path);
 }
 
 static std::string redirect_sys_dev_char(const char *path) {
-  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction) {
     return {};
+  }
   std::string_view sv(path);
   constexpr std::string_view prefix = "/sys/dev/char/";
-  if (!sv.starts_with(prefix))
+  if (!sv.starts_with(prefix)) {
     return {};
+  }
 
   auto rest = sv.substr(prefix.size());
   auto colon = rest.find(':');
-  if (colon == std::string_view::npos)
+  if (colon == std::string_view::npos) {
     return {};
+  }
 
   uint32_t major_num = 0, minor_num = 0;
   if (std::from_chars(rest.data(), rest.data() + colon, major_num).ec != std::errc{} ||
-      major_num != 226)
+      major_num != 226) {
     return {};
+  }
 
   auto after_colon = rest.substr(colon + 1);
   auto slash_pos = after_colon.find('/');
   auto minor_end = (slash_pos != std::string_view::npos) ? after_colon.data() + slash_pos
                                                          : after_colon.data() + after_colon.size();
-  if (std::from_chars(after_colon.data(), minor_end, minor_num).ec != std::errc{})
+  if (std::from_chars(after_colon.data(), minor_end, minor_num).ec != std::errc{}) {
     return {};
+  }
 
   std::string drm_base;
   {
     auto drv = InterposerContext::ctx.driver();
     if (drv) {
       auto direct = drv->redirect_sysfs_path(path);
-      if (!direct.empty())
+      if (!direct.empty()) {
         return direct;
+      }
       drm_base = drv->drm_path();
     } else {
       drm_base = InterposerContext::ctx.remote_drm_path();
     }
   }
-  if (drm_base.empty())
+  if (drm_base.empty()) {
     return {};
+  }
 
   std::string entry = (minor_num >= 128) ? "renderD" + std::to_string(minor_num)
                                          : "card" + std::to_string(minor_num);
   std::string suffix;
-  if (slash_pos != std::string_view::npos)
+  if (slash_pos != std::string_view::npos) {
     suffix = std::string(after_colon.substr(slash_pos));
+  }
 
   return drm_base + "/" + entry + suffix;
 }
@@ -6590,18 +7092,21 @@ static std::string redirect_sys_dev_char(const char *path) {
 /// keeps this total).
 static std::optional<Sysfs::GpuInfo>
 interposer_gpu_info_for(const InterposerContext::DrmFileToken &file) {
-  if (!file)
+  if (!file) {
     return std::nullopt;
+  }
   const uint32_t render_minor = InterposerContext::ctx.drm_render_minor(file);
   const auto &lease = file->backend_lease;
   if (const auto &local = lease.local()) {
-    if (const Sysfs::GpuInfo *info = local->gpu_info_for_render_minor(render_minor))
+    if (const Sysfs::GpuInfo *info = local->gpu_info_for_render_minor(render_minor)) {
       return *info;
+    }
     return std::nullopt;
   }
   if (const auto &remote = lease.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor)) {
       return *info;
+    }
     return std::nullopt;
   }
   return interposer_gpu_info(render_minor);
@@ -6610,21 +7115,24 @@ interposer_gpu_info_for(const InterposerContext::DrmFileToken &file) {
 static std::optional<Sysfs::GpuInfo> interposer_gpu_info(uint32_t render_minor) {
   {
     if (auto drv = InterposerContext::ctx.driver()) {
-      if (const Sysfs::GpuInfo *info = drv->gpu_info_for_render_minor(render_minor))
+      if (const Sysfs::GpuInfo *info = drv->gpu_info_for_render_minor(render_minor)) {
         return *info;
+      }
       return std::nullopt;
     }
   }
   if (auto remote = InterposerContext::ctx.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor)) {
       return *info;
+    }
   }
   return std::nullopt;
 }
 
 static std::string redirect_dev_dri(const char *path) {
-  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction) {
     return {};
+  }
   std::string_view sv(path);
   // Redirect both the /dev/dri directory and individual node files
   // (/dev/dri/renderD<minor>, /dev/dri/card<n>) into our synthetic dev_dri
@@ -6636,44 +7144,53 @@ static std::string redirect_dev_dri(const char *path) {
   bool is_dir = (sv == "/dev/dri" || sv == "/dev/dri/");
   bool is_node = sv.starts_with(kDevDri) && (sv.substr(kDevDri.size()).starts_with("renderD") ||
                                              sv.substr(kDevDri.size()).starts_with("card"));
-  if (!is_dir && !is_node)
+  if (!is_dir && !is_node) {
     return {};
-  if (!InterposerContext::ctx.initialized())
+  }
+  if (!InterposerContext::ctx.initialized()) {
     InterposerContext::ctx.get_or_create();
+  }
   std::string drm_base;
   {
     auto drv = InterposerContext::ctx.driver();
     if (drv) {
       auto direct = drv->redirect_sysfs_path(path);
-      if (!direct.empty())
+      if (!direct.empty()) {
         return direct;
+      }
       drm_base = drv->drm_path();
     } else {
       drm_base = InterposerContext::ctx.remote_drm_path();
     }
   }
-  if (drm_base.empty())
+  if (drm_base.empty()) {
     return {};
-  if (is_dir)
+  }
+  if (is_dir) {
     return drm_base + "/dev_dri";
+  }
   return drm_base + "/dev_dri/" + std::string(sv.substr(kDevDri.size()));
 }
 
 static int finish_drm_node_stat(const char *path, int result, mode_t *mode, dev_t *device) {
-  if (result != 0 || !path || !S_ISREG(*mode))
+  if (result != 0 || !path || !S_ISREG(*mode)) {
     return result;
+  }
   std::string_view view(path);
   if (!view.starts_with("/dev/dri/renderD") &&
       view.find("/dev_dri/renderD") == std::string_view::npos &&
-      view.find("/dev_dri/card") == std::string_view::npos)
+      view.find("/dev_dri/card") == std::string_view::npos) {
     return result;
+  }
   std::string drm_base;
-  if (auto driver = InterposerContext::ctx.driver())
+  if (auto driver = InterposerContext::ctx.driver()) {
     drm_base = driver->drm_path();
-  else
+  } else {
     drm_base = InterposerContext::ctx.remote_drm_path();
-  if (drm_base.empty())
+  }
+  if (drm_base.empty()) {
     return result;
+  }
 
   uint32_t node_minor = 0;
   bool synthetic_node = render_minor_from_drm_node_path(path, drm_base.c_str(), &node_minor) &&
@@ -6699,13 +7216,16 @@ RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
     return fn ? fn(path, buf) : -1;
   }
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().stat(path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = InterposerContext::real().stat(actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
@@ -6716,13 +7236,16 @@ RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "lstat");
     return fn ? fn(path, buf) : -1;
   }
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().lstat(path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = InterposerContext::real().lstat(actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
@@ -6733,15 +7256,19 @@ RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
     auto fn = util::lookup_symbol<int (*)(const char *, int)>(RTLD_NEXT, "access");
     return fn ? fn(path, mode) : -1;
   }
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().access(path, mode);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
-  if (!redirected.empty())
+  }
+  if (!redirected.empty()) {
     return InterposerContext::real().access(redirected.c_str(), mode);
+  }
   return InterposerContext::real().access(path, mode);
 }
 
@@ -6752,8 +7279,9 @@ RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
     auto fn = util::lookup_symbol<DIR *(*)(const char *)>(RTLD_NEXT, "opendir");
     return fn ? fn(name) : nullptr;
   }
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().opendir(name);
+  }
   auto *volatile p_od = name;
   if (!p_od) {
     errno = EINVAL;
@@ -6761,12 +7289,15 @@ RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
   }
   if (!InterposerContext::in_construction) {
     std::string redirected = InterposerContext::ctx.redirect_sysfs_path(name);
-    if (redirected.empty())
+    if (redirected.empty()) {
       redirected = redirect_sys_dev_char(name);
-    if (redirected.empty())
+    }
+    if (redirected.empty()) {
       redirected = redirect_dev_dri(name);
-    if (!redirected.empty())
+    }
+    if (!redirected.empty()) {
       return InterposerContext::real().opendir(redirected.c_str());
+    }
   }
   return InterposerContext::real().opendir(name);
 }
@@ -6779,22 +7310,27 @@ RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
 // Primary nodes retain their real identity for host display control, as do
 // hardware-backed guests, which have no synthetic DRM enumeration tree.
 static std::optional<dev_t> synthetic_alias_for_host_drm(dev_t device) {
-  if (major(device) != 226 || minor(device) < 128 || InterposerContext::in_construction)
+  if (major(device) != 226 || minor(device) < 128 || InterposerContext::in_construction) {
     return std::nullopt;
-  if (!InterposerContext::ctx.initialized())
+  }
+  if (!InterposerContext::ctx.initialized()) {
     InterposerContext::ctx.get_or_create();
+  }
   std::string drm_base;
-  if (auto driver = InterposerContext::ctx.driver())
+  if (auto driver = InterposerContext::ctx.driver()) {
     drm_base = driver->drm_path();
-  else
+  } else {
     drm_base = InterposerContext::ctx.remote_drm_path();
-  if (drm_base.empty())
+  }
+  if (drm_base.empty()) {
     return std::nullopt;
+  }
   // Use the render node published for card0, independently of host numbering
   // and of which simulated GPU the caller will eventually use for rendering.
   DIR *nodes = InterposerContext::real().opendir((drm_base + "/card0/device/drm").c_str());
-  if (!nodes)
+  if (!nodes) {
     return std::nullopt;
+  }
   std::optional<uint32_t> render_minor;
   while (const dirent *entry = InterposerContext::real().readdir(nodes)) {
     const std::string_view name(entry->d_name);
@@ -6806,11 +7342,13 @@ static std::optional<dev_t> synthetic_alias_for_host_drm(dev_t device) {
     }
   }
   InterposerContext::real().closedir(nodes);
-  if (!render_minor)
+  if (!render_minor) {
     return std::nullopt;
+  }
   const std::string node = drm_base + "/dev_dri/renderD" + std::to_string(*render_minor);
-  if (InterposerContext::real().access(node.c_str(), F_OK) != 0)
+  if (InterposerContext::real().access(node.c_str(), F_OK) != 0) {
     return std::nullopt;
+  }
   return makedev(226, *render_minor);
 }
 
@@ -6819,8 +7357,9 @@ static void finish_drm_fd_stat(int fd, mode_t *mode, dev_t *device) {
     *device = makedev(226, InterposerContext::ctx.drm_render_minor(fd));
     *mode = (*mode & ~S_IFMT) | S_IFCHR;
   } else if (S_ISCHR(*mode)) {
-    if (auto alias = synthetic_alias_for_host_drm(*device))
+    if (auto alias = synthetic_alias_for_host_drm(*device)) {
       *device = *alias;
+    }
   }
 }
 
@@ -6829,11 +7368,13 @@ RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
     auto fn = util::lookup_symbol<int (*)(int, struct stat *)>(RTLD_NEXT, "fstat");
     return fn ? fn(fd, buf) : -1;
   }
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return rocjitsu::stat_memory_backing(fd, buf);
+  }
   int rc = rocjitsu::stat_memory_backing(fd, buf);
-  if (rc == 0)
+  if (rc == 0) {
     finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
+  }
   return rc;
 }
 
@@ -6847,12 +7388,14 @@ RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
     return -1;
   }
   int rc = real.fstat64_fn(fd, buf);
-  if (rc == 0)
+  if (rc == 0) {
     finish_backing_stat(fd, buf);
+  }
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
-  if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
+  if (rc != 0 || !real.ready() || !rj_owns_interposer_state()) {
     return rc;
+  }
   finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
 }
@@ -6867,12 +7410,14 @@ RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
     return -1;
   }
   int rc = real.fxstat_fn(ver, fd, buf);
-  if (rc == 0)
+  if (rc == 0) {
     finish_backing_stat(fd, buf);
+  }
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
-  if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
+  if (rc != 0 || !real.ready() || !rj_owns_interposer_state()) {
     return rc;
+  }
   finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
 }
@@ -6887,12 +7432,14 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
     return -1;
   }
   int rc = real.fxstat64_fn(ver, fd, buf);
-  if (rc == 0)
+  if (rc == 0) {
     finish_backing_stat(fd, buf);
+  }
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
-  if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
+  if (rc != 0 || !real.ready() || !rj_owns_interposer_state()) {
     return rc;
+  }
   finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
 }
@@ -6902,10 +7449,12 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
 // cannot escape from a simulated node to the host GPU's PCI sysfs directory.
 static std::string redirect_canonical_path(const char *path) {
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   return redirected;
 }
 
@@ -6915,8 +7464,9 @@ RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
     auto fn = rocjitsu::resolve_host_realpath();
     return fn ? fn(path, resolved_path) : nullptr;
   }
-  if (!rj_owns_interposer_state() || InterposerContext::in_construction)
+  if (!rj_owns_interposer_state() || InterposerContext::in_construction) {
     return real.realpath_fn(path, resolved_path);
+  }
   auto redirected = redirect_canonical_path(path);
   return real.realpath_fn(redirected.empty() ? path : redirected.c_str(), resolved_path);
 }
@@ -6932,8 +7482,9 @@ RJ_INTERPOSER_EXPORT char *__realpath_chk(const char *path, char *resolved_path,
     errno = ENOSYS;
     return nullptr;
   }
-  if (!rj_owns_interposer_state() || InterposerContext::in_construction)
+  if (!rj_owns_interposer_state() || InterposerContext::in_construction) {
     return real.realpath_chk_fn(path, resolved_path, size);
+  }
   auto redirected = redirect_canonical_path(path);
   return real.realpath_chk_fn(redirected.empty() ? path : redirected.c_str(), resolved_path, size);
 }
@@ -6945,11 +7496,13 @@ RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz
     auto fn = util::lookup_symbol<ssize_t (*)(const char *, char *, size_t)>(RTLD_NEXT, "readlink");
     return fn ? fn(path, buf, bufsiz) : -1;
   }
-  if (!rj_owns_interposer_state())
+  if (!rj_owns_interposer_state()) {
     return InterposerContext::real().readlink_fn(path, buf, bufsiz);
+  }
   auto redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sysfs_path(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   return InterposerContext::real().readlink_fn(actual, buf, bufsiz);
 }
@@ -6967,13 +7520,16 @@ RJ_INTERPOSER_EXPORT int stat64(const char *path, struct stat64 *buf) {
   }
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
-  if (!real.ready() || !rj_owns_interposer_state())
+  if (!real.ready() || !rj_owns_interposer_state()) {
     return real.stat64_fn(path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = real.stat64_fn(actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
@@ -6990,13 +7546,16 @@ RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
   }
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
-  if (!real.ready() || !rj_owns_interposer_state())
+  if (!real.ready() || !rj_owns_interposer_state()) {
     return real.lstat64_fn(path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = real.lstat64_fn(actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
@@ -7013,13 +7572,16 @@ RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
   }
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
-  if (!real.ready() || !rj_owns_interposer_state())
+  if (!real.ready() || !rj_owns_interposer_state()) {
     return real.xstat_fn(ver, path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = real.xstat_fn(ver, actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
@@ -7036,13 +7598,16 @@ RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf
   }
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
-  if (!real.ready() || !rj_owns_interposer_state())
+  if (!real.ready() || !rj_owns_interposer_state()) {
     return real.xstat64_fn(ver, path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = real.xstat64_fn(ver, actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
@@ -7059,13 +7624,16 @@ RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
   }
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
-  if (!real.ready() || !rj_owns_interposer_state())
+  if (!real.ready() || !rj_owns_interposer_state()) {
     return real.lxstat_fn(ver, path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = real.lxstat_fn(ver, actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
@@ -7082,13 +7650,16 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
   }
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
-  if (!real.ready() || !rj_owns_interposer_state())
+  if (!real.ready() || !rj_owns_interposer_state()) {
     return real.lxstat64_fn(ver, path, buf);
+  }
   auto redirected = redirect_sysfs_path(path);
-  if (redirected.empty())
+  if (redirected.empty()) {
     redirected = redirect_sys_dev_char(path);
-  if (redirected.empty())
+  }
+  if (redirected.empty()) {
     redirected = redirect_dev_dri(path);
+  }
   const char *actual = redirected.empty() ? path : redirected.c_str();
   int result = real.lxstat64_fn(ver, actual, buf);
   return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;

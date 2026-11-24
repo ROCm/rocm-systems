@@ -302,8 +302,9 @@ bool has_expected_v8_native_bitfield_layout() {
 void trace(const std::string &line) noexcept {
   std::lock_guard<std::mutex> lock(trace_mutex);
   const char *path = std::getenv("ROCJITSU_PERFSIM_FAKE_TRACE");
-  if (!path || !*path)
+  if (!path || !*path) {
     return;
+  }
   std::ofstream output(path, std::ios::app);
   output << line << '\n';
 }
@@ -321,10 +322,12 @@ void on_init(const FfmHostApi *host) {
     return;
   }
   host_log = host->log;
-  if (mode_is("v12_only") || mode_is("v11_only"))
+  if (mode_is("v12_only") || mode_is("v11_only")) {
     trace(host_log ? "host_log present" : "host_log absent");
-  if ((mode_is("host_log") || mode_is("v12_only")) && host_log)
+  }
+  if ((mode_is("host_log") || mode_is("v12_only")) && host_log) {
     host_log(FFM_LOG_WARN, "fake backend initialized");
+  }
   if (mode_is("async_host_log") && host_log) {
     auto logger = host_log;
     host_log_worker =
@@ -341,10 +344,12 @@ void append_dispatch(std::ostringstream &out, const FfmDispatchMetadata *dispatc
   out << ' ' << dispatch->dispatch_info.dispatch_id << ' ' << dispatch->vgpr_count << ' '
       << dispatch->sgpr_count << ' ' << dispatch->lds_size_bytes << ' ' << dispatch->wave_size
       << ' ' << dispatch->num_waves_per_wg;
-  for (uint32_t value : dispatch->grid_size)
+  for (uint32_t value : dispatch->grid_size) {
     out << ' ' << value;
-  for (uint32_t value : dispatch->workgroup_size)
+  }
+  for (uint32_t value : dispatch->workgroup_size) {
     out << ' ' << value;
+  }
   out << ' ' << (dispatch->dispatch_name ? dispatch->dispatch_name : "<null>");
 }
 
@@ -381,10 +386,12 @@ void append_dispatch_v8(std::ostringstream &out,
   out << ' ' << dispatch->dispatch_info.dispatch_id << ' ' << dispatch->vgpr_count << ' '
       << dispatch->sgpr_count << ' ' << dispatch->lds_size_bytes << ' ' << dispatch->wave_size
       << ' ' << dispatch->num_waves_per_wg;
-  for (uint32_t value : dispatch->grid_size)
+  for (uint32_t value : dispatch->grid_size) {
     out << ' ' << value;
-  for (uint32_t value : dispatch->workgroup_size)
+  }
+  for (uint32_t value : dispatch->workgroup_size) {
     out << ' ' << value;
+  }
 }
 
 void on_dispatch_begin_v8(const foreign_ffm_v8::FfmDispatchMetadata *dispatch) {
@@ -417,8 +424,9 @@ void on_instruction(const FfmInstructionInfo *instruction) {
   }
   append_wave(out, instruction->wave_info);
   out << ' ' << instruction->instruction_id << ' ' << instruction->instruction.pc << std::hex;
-  for (uint32_t word : instruction->instruction.raw_isa)
+  for (uint32_t word : instruction->instruction.raw_isa) {
     out << ' ' << word;
+  }
   out << std::dec << ' ' << instruction->instruction_counters.valu_count << ' '
       << instruction->instruction_counters.salu_count << ' '
       << instruction->instruction_counters.smem_count << ' '
@@ -446,8 +454,9 @@ void on_memory_access(const FfmMemoryAccess *access) {
       << ' ' << access->data_size_bytes << ' ' << static_cast<int>(access->resource_type) << ' '
       << static_cast<int>(access->is_atomic) << ' ' << static_cast<int>(access->is_read) << ' '
       << static_cast<int>(access->is_write);
-  for (uint32_t lane = 0; lane < access->wave_size; ++lane)
+  for (uint32_t lane = 0; lane < access->wave_size; ++lane) {
     out << ' ' << access->addresses[lane];
+  }
   trace(out.str());
 }
 
@@ -465,8 +474,9 @@ void on_tdm_memory_access(const FfmTdmMemoryAccess *access) {
       << static_cast<int>(access->is_write) << ' ' << access->tile_dim0 << ' ' << access->tile_dim1
       << ' ' << access->data_size << ' ' << access->tensor_dim0_stride << ' '
       << access->tensor_dim1_stride;
-  for (uint32_t i = 0; i < access->num_addresses; ++i)
+  for (uint32_t i = 0; i < access->num_addresses; ++i) {
     out << ' ' << access->addresses[i];
+  }
   trace(out.str());
 }
 
@@ -482,16 +492,19 @@ void on_tdm_memory_access_v8(const foreign_ffm_v8::FfmTdmMemoryAccess *access) {
   out << ' ' << access->instruction_id << ' ' << access->num_addresses << ' '
       << access->data_size_bytes << ' ' << static_cast<int>(access->is_read) << ' '
       << static_cast<int>(access->is_write);
-  for (uint32_t i = 0; i < access->num_addresses; ++i)
+  for (uint32_t i = 0; i < access->num_addresses; ++i) {
     out << ' ' << access->addresses[i];
+  }
   trace(out.str());
 }
 
 void on_shutdown() {
-  if (host_log_worker.joinable())
+  if (host_log_worker.joinable()) {
     host_log_worker.join();
-  if (mode_is("host_log") && host_log)
+  }
+  if (mode_is("host_log") && host_log) {
     host_log(FFM_LOG_ERROR, "fake backend shutting down");
+  }
   host_log = nullptr;
   trace("shutdown");
 }
@@ -500,8 +513,9 @@ FfmObserverPluginApi api{};
 foreign_ffm_v8::FfmObserverPluginApi api_v8{};
 
 template <typename Callback> void maybe_remove(Callback &callback, const char *name) {
-  if (mode_is(name))
+  if (mode_is(name)) {
     callback = nullptr;
+  }
 }
 
 } // namespace
@@ -509,12 +523,14 @@ template <typename Callback> void maybe_remove(Callback &callback, const char *n
 extern "C" __attribute__((visibility("default"))) foreign_ffm_v13::FfmObserverPluginApi *
 ffm_observer_plugin_get_api(uint32_t host_api_version) {
   trace("get_api " + std::to_string(host_api_version));
-  if (mode_is("reject_all") || !has_expected_native_bitfield_layout())
+  if (mode_is("reject_all") || !has_expected_native_bitfield_layout()) {
     return nullptr;
+  }
 
   if (mode_is("v8_only")) {
-    if (host_api_version != 8 || !has_expected_v8_native_bitfield_layout())
+    if (host_api_version != 8 || !has_expected_v8_native_bitfield_layout()) {
       return nullptr;
+    }
     api_v8 = {};
     api_v8.api_version = 8;
     api_v8.name = "rocjitsu-perfsim-fake-v8";
@@ -529,8 +545,9 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
   }
 
   const std::uint32_t accepted_request = mode_is("v12_only") ? 12 : mode_is("v11_only") ? 11 : 13;
-  if (host_api_version != accepted_request)
+  if (host_api_version != accepted_request) {
     return nullptr;
+  }
 
   api = {};
   api.api_version = mode_is("v12_only")          ? 12
@@ -559,7 +576,8 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
 }
 
 __attribute__((destructor)) static void on_unload() {
-  if (host_log_worker.joinable())
+  if (host_log_worker.joinable()) {
     host_log_worker.join();
+  }
   trace("unload");
 }

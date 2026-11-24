@@ -36,11 +36,13 @@ PciPhysicalMemoryAccess::PciPhysicalMemoryAccess(PciMemoryAccess &memory)
 }
 
 amdgpu::MemoryIngressAdmission PciPhysicalMemoryAccess::admit_pt_rewalk() const {
-  if (session_ == nullptr)
+  if (session_ == nullptr) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable, .permit = {}};
+  }
   simdojo::PciTransportSession::OperationLease session_lease = session_->acquire();
-  if (!session_lease)
+  if (!session_lease) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable, .permit = {}};
+  }
   const amdgpu::MemoryPtEpoch epoch{.generation = session_->generation(),
                                     .session_identity = session_};
   // MemoryIngressPermit uses a copyable release callback. Retain the move-only
@@ -53,11 +55,13 @@ amdgpu::MemoryIngressAdmission PciPhysicalMemoryAccess::admit_pt_rewalk() const 
 amdgpu::MemoryIngressAdmission
 PciPhysicalMemoryAccess::admit_pt_rewalk(const amdgpu::MemoryPtEpoch &expected) const {
   if (session_ == nullptr || expected.generation != session_->generation() ||
-      expected.session_identity != session_)
+      expected.session_identity != session_) {
     return {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}};
+  }
   simdojo::PciTransportSession::OperationLease session_lease = session_->acquire();
-  if (!session_lease)
+  if (!session_lease) {
     return {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}};
+  }
   auto retained =
       std::make_shared<simdojo::PciTransportSession::OperationLease>(std::move(session_lease));
   return {.permit = amdgpu::MemoryIngressPermit([retained = std::move(retained)] {}, expected)};
@@ -94,11 +98,13 @@ std::optional<amdgpu::VmTransferToken> PciPhysicalMemoryAccess::prepare_peer_rea
     const amdgpu::GpuVmAccess *executing_access, uint64_t gpu_va,
     const amdgpu::VmTranslation *selected_translation,
     const std::optional<amdgpu::MemoryPtEpoch> &pt_epoch) {
-  if (!peer_enabled_ || access != amdgpu::VmAccessKind::Read || session_ == nullptr)
+  if (!peer_enabled_ || access != amdgpu::VmAccessKind::Read || session_ == nullptr) {
     return std::nullopt;
+  }
   auto lease = session_->acquire();
-  if (!lease)
+  if (!lease) {
     return std::nullopt;
+  }
   auto *provider = dynamic_cast<PciPeerDataProvider *>(lease.dma());
   return provider != nullptr
              ? provider->prepare_peer_read(session_->generation(), address, length, gate,
@@ -137,11 +143,13 @@ std::optional<amdgpu::VmTransferToken> PciPhysicalMemoryAccess::prepare_peer_wri
     const amdgpu::GpuVmAccess *executing_access, uint64_t gpu_va,
     const amdgpu::VmTranslation *selected_translation,
     const std::optional<amdgpu::MemoryPtEpoch> &pt_epoch) {
-  if (!peer_enabled_ || session_ == nullptr)
+  if (!peer_enabled_ || session_ == nullptr) {
     return std::nullopt;
+  }
   auto lease = session_->acquire();
-  if (!lease)
+  if (!lease) {
     return std::nullopt;
+  }
   auto *provider = dynamic_cast<PciPeerDataProvider *>(lease.dma());
   return provider != nullptr ? provider->prepare_peer_write(session_->generation(), address, bytes,
                                                             gate, executing_access, gpu_va,
@@ -152,11 +160,13 @@ std::optional<amdgpu::VmTransferToken> PciPhysicalMemoryAccess::prepare_peer_wri
 amdgpu::VmAccessOutcome PciPhysicalMemoryAccess::read(amdgpu::VmMemoryDomain domain,
                                                       uint64_t address,
                                                       std::span<std::byte> bytes) {
-  if (session_ == nullptr)
+  if (session_ == nullptr) {
     return amdgpu::VmAccessOutcome::Unavailable;
+  }
   simdojo::PciTransportSession::OperationLease lease = session_->acquire();
-  if (!lease)
+  if (!lease) {
     return amdgpu::VmAccessOutcome::Unavailable;
+  }
 
   switch (domain) {
   case amdgpu::VmMemoryDomain::System:
@@ -173,11 +183,13 @@ amdgpu::VmAccessOutcome PciPhysicalMemoryAccess::read(amdgpu::VmMemoryDomain dom
 amdgpu::VmAccessOutcome PciPhysicalMemoryAccess::write(amdgpu::VmMemoryDomain domain,
                                                        uint64_t address,
                                                        std::span<const std::byte> bytes) {
-  if (session_ == nullptr)
+  if (session_ == nullptr) {
     return amdgpu::VmAccessOutcome::Unavailable;
+  }
   simdojo::PciTransportSession::OperationLease lease = session_->acquire();
-  if (!lease)
+  if (!lease) {
     return amdgpu::VmAccessOutcome::Unavailable;
+  }
 
   switch (domain) {
   case amdgpu::VmMemoryDomain::System:
@@ -193,18 +205,21 @@ amdgpu::VmAccessOutcome PciPhysicalMemoryAccess::write(amdgpu::VmMemoryDomain do
 
 amdgpu::AtomicLoadResult PciPhysicalMemoryAccess::atomic_load(amdgpu::VmMemoryDomain domain,
                                                               uint64_t address, uint32_t width) {
-  if (session_ == nullptr)
+  if (session_ == nullptr) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  }
   simdojo::PciTransportSession::OperationLease lease = session_->acquire();
-  if (!lease)
+  if (!lease) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  }
   if (domain == amdgpu::VmMemoryDomain::Compatibility ||
       (width != sizeof(uint16_t) && width != sizeof(uint32_t) && width != sizeof(uint64_t)) ||
       address % width != 0) {
     return {.outcome = amdgpu::VmAccessOutcome::Malformed};
   }
-  if (domain == amdgpu::VmMemoryDomain::Local)
+  if (domain == amdgpu::VmMemoryDomain::Local) {
     return memory_->atomic_load_vram(address, width);
+  }
 
   const simdojo::DmaAtomicLoadResult result = lease.atomic_load(address, width);
   return {.outcome = to_vm_outcome(result.outcome), .value = result.value};
@@ -213,38 +228,47 @@ amdgpu::AtomicLoadResult PciPhysicalMemoryAccess::atomic_load(amdgpu::VmMemoryDo
 amdgpu::VmAccessOutcome PciPhysicalMemoryAccess::atomic_store(amdgpu::VmMemoryDomain domain,
                                                               uint64_t address, uint32_t width,
                                                               uint64_t value) {
-  if (session_ == nullptr)
+  if (session_ == nullptr) {
     return amdgpu::VmAccessOutcome::Unavailable;
+  }
   simdojo::PciTransportSession::OperationLease lease = session_->acquire();
-  if (!lease)
+  if (!lease) {
     return amdgpu::VmAccessOutcome::Unavailable;
+  }
   if (domain == amdgpu::VmMemoryDomain::Compatibility ||
       (width != sizeof(uint32_t) && width != sizeof(uint64_t)) || address % width != 0) {
     return amdgpu::VmAccessOutcome::Malformed;
   }
-  if (domain == amdgpu::VmMemoryDomain::Local)
+  if (domain == amdgpu::VmMemoryDomain::Local) {
     return memory_->atomic_store_vram(address, width, value);
+  }
   return to_vm_outcome(lease.atomic_store(address, width, value));
 }
 
 amdgpu::AtomicCompareExchangeResult
 PciPhysicalMemoryAccess::compare_exchange(amdgpu::VmMemoryDomain domain, uint64_t address,
                                           uint32_t width, uint64_t expected, uint64_t desired) {
-  if (session_ == nullptr)
+  if (session_ == nullptr) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  }
   simdojo::PciTransportSession::OperationLease lease = session_->acquire();
-  if (!lease)
+  if (!lease) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  }
 
-  if (domain == amdgpu::VmMemoryDomain::Compatibility)
+  if (domain == amdgpu::VmMemoryDomain::Compatibility) {
     return {.outcome = amdgpu::VmAccessOutcome::Malformed};
-  if (width != sizeof(uint32_t) && width != sizeof(uint64_t))
+  }
+  if (width != sizeof(uint32_t) && width != sizeof(uint64_t)) {
     return {.outcome = amdgpu::VmAccessOutcome::Malformed};
-  if (address % width != 0)
+  }
+  if (address % width != 0) {
     return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+  }
 
-  if (domain == amdgpu::VmMemoryDomain::Local)
+  if (domain == amdgpu::VmMemoryDomain::Local) {
     return memory_->compare_exchange_vram(address, width, expected, desired);
+  }
 
   const simdojo::DmaAtomicCompareExchangeResult result =
       lease.compare_exchange(address, width, expected, desired);

@@ -27,8 +27,9 @@ __device__ __forceinline__ uint32_t cacheable_owner_load(const uint32_t *owner) 
 
 __global__ void owner_read_wait_refetch(const uint32_t *owner, volatile uint32_t *ready,
                                         volatile uint32_t *done, uint32_t *observed) {
-  if (blockIdx.x != 0 || threadIdx.x != 0)
+  if (blockIdx.x != 0 || threadIdx.x != 0) {
     return;
+  }
 
   const uint32_t first = cacheable_owner_load(owner);
   const uint32_t second = cacheable_owner_load(owner);
@@ -43,8 +44,9 @@ __global__ void owner_read_wait_refetch(const uint32_t *owner, volatile uint32_t
 
 __global__ void requester_write_signal(volatile uint32_t *owner, volatile uint32_t *ready,
                                        volatile uint32_t *done) {
-  if (blockIdx.x != 0 || threadIdx.x != 0)
+  if (blockIdx.x != 0 || threadIdx.x != 0) {
     return;
+  }
 
   while (*ready == 0) {
   }
@@ -64,14 +66,16 @@ bool step(const char *name, hipError_t status) {
 
 int main() {
   int count = 0;
-  if (!step("hipGetDeviceCount", hipGetDeviceCount(&count)) || count != 2)
+  if (!step("hipGetDeviceCount", hipGetDeviceCount(&count)) || count != 2) {
     return 1;
+  }
 
   uint8_t *allocation = nullptr;
   if (!step("hipSetDevice owner", hipSetDevice(0)) ||
       !step("hipMalloc owner pages", hipMalloc(&allocation, 2 * kPageBytes)) ||
-      !step("hipMemset owner pages", hipMemset(allocation, 0, 2 * kPageBytes)))
+      !step("hipMemset owner pages", hipMemset(allocation, 0, 2 * kPageBytes))) {
     return 2;
+  }
   auto *owner = reinterpret_cast<uint32_t *>(allocation);
   auto *observed = reinterpret_cast<uint32_t *>(allocation + kPageBytes);
   void *host_control = nullptr;
@@ -80,21 +84,24 @@ int main() {
   if (!step("hipHostMalloc control", hipHostMalloc(&host_control, 2 * sizeof(uint32_t),
                                                    hipHostMallocMapped | hipHostMallocPortable)) ||
       !step("hipHostGetDevicePointer owner",
-            hipHostGetDevicePointer(&owner_control, host_control, 0)))
+            hipHostGetDevicePointer(&owner_control, host_control, 0))) {
     return 3;
+  }
   auto *flags = static_cast<uint32_t *>(host_control);
   flags[0] = 0;
   flags[1] = 0;
-  if (!step("seed owner", hipMemcpy(owner, &kInitial, sizeof(kInitial), hipMemcpyHostToDevice)))
+  if (!step("seed owner", hipMemcpy(owner, &kInitial, sizeof(kInitial), hipMemcpyHostToDevice))) {
     return 3;
+  }
 
   int can_access = 0;
   if (!step("hipDeviceCanAccessPeer requester,owner", hipDeviceCanAccessPeer(&can_access, 1, 0)) ||
       !can_access || !step("hipSetDevice requester", hipSetDevice(1)) ||
       !step("hipDeviceEnablePeerAccess owner", hipDeviceEnablePeerAccess(0, 0)) ||
       !step("hipHostGetDevicePointer requester",
-            hipHostGetDevicePointer(&requester_control, host_control, 0)))
+            hipHostGetDevicePointer(&requester_control, host_control, 0))) {
     return 4;
+  }
 
   auto *ready = static_cast<uint32_t *>(owner_control);
   auto *done = ready + 1;
@@ -105,24 +112,28 @@ int main() {
               static_cast<void *>(observed));
   std::fflush(stdout);
 
-  if (!step("hipSetDevice owner for launch", hipSetDevice(0)))
+  if (!step("hipSetDevice owner for launch", hipSetDevice(0))) {
     return 5;
+  }
   hipLaunchKernelGGL(owner_read_wait_refetch, dim3(1), dim3(1), 0, 0, owner, ready, done, observed);
   if (!step("owner kernel launch", hipGetLastError()) ||
-      !step("hipSetDevice requester for launch", hipSetDevice(1)))
+      !step("hipSetDevice requester for launch", hipSetDevice(1))) {
     return 6;
+  }
   hipLaunchKernelGGL(requester_write_signal, dim3(1), dim3(1), 0, 0, owner, requester_ready,
                      requester_done);
   if (!step("requester kernel launch", hipGetLastError()) ||
       !step("requester kernel synchronize", hipDeviceSynchronize()) ||
       !step("hipSetDevice owner for synchronize", hipSetDevice(0)) ||
-      !step("owner kernel synchronize", hipDeviceSynchronize()))
+      !step("owner kernel synchronize", hipDeviceSynchronize())) {
     return 7;
+  }
 
   uint32_t values[3] = {};
   if (!step("copy observations",
-            hipMemcpy(values, observed, sizeof(values), hipMemcpyDeviceToHost)))
+            hipMemcpy(values, observed, sizeof(values), hipMemcpyDeviceToHost))) {
     return 8;
+  }
   const bool pass = values[0] == kInitial && values[1] == kInitial && values[2] == kUpdated;
   std::printf("owner-peer-refetch: first=0x%08x hit=0x%08x fresh=0x%08x "
               "expected_old=0x%08x expected_new=0x%08x result=%s\n",

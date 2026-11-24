@@ -26,12 +26,14 @@ inline constexpr bool kVectorizedStrideCheck = RJ_HOST_HAS_GNU_X86_64_AVX2_OR_AV
 /// use kVectorizedStrideCheck to avoid adding a second scalar scan.
 inline bool is_strided_lane_addresses(const uint64_t *addrs, uint32_t count, uint32_t stride) {
   assert(addrs && count >= 1 && count <= 64 && stride != 0);
-  if (count == 1)
+  if (count == 1) {
     return true;
+  }
   const uint64_t step = stride;
   const uint64_t extent = (count - 1) * step;
-  if (addrs[0] > std::numeric_limits<uint64_t>::max() - extent)
+  if (addrs[0] > std::numeric_limits<uint64_t>::max() - extent) {
     return false;
+  }
 
   uint32_t index = 0;
 #if RJ_HOST_HAS_GNU_X86_64_AVX512F
@@ -43,8 +45,9 @@ inline bool is_strided_lane_addresses(const uint64_t *addrs, uint32_t count, uin
                         static_cast<int64_t>(step * 5), static_cast<int64_t>(step * 6),
                         static_cast<int64_t>(step * 7)));
   for (; index + 8 <= count; index += 8) {
-    if (_mm512_cmpeq_epi64_mask(_mm512_loadu_si512(addrs + index), expected) != 0xff)
+    if (_mm512_cmpeq_epi64_mask(_mm512_loadu_si512(addrs + index), expected) != 0xff) {
       return false;
+    }
     expected = _mm512_add_epi64(expected, advance);
   }
 #elif RJ_HOST_HAS_GNU_X86_64_AVX2
@@ -56,16 +59,18 @@ inline bool is_strided_lane_addresses(const uint64_t *addrs, uint32_t count, uin
   for (; index + 4 <= count; index += 4) {
     const __m256i equal = _mm256_cmpeq_epi64(
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(addrs + index)), expected);
-    if (_mm256_movemask_pd(_mm256_castsi256_pd(equal)) != 15)
+    if (_mm256_movemask_pd(_mm256_castsi256_pd(equal)) != 15) {
       return false;
+    }
     expected = _mm256_add_epi64(expected, advance);
   }
 #else
   index = 1;
 #endif
   for (; index < count; ++index) {
-    if (addrs[index] != addrs[0] + index * step)
+    if (addrs[index] != addrs[0] + index * step) {
       return false;
+    }
   }
   return true;
 }

@@ -21,16 +21,18 @@ std::string link_endpoints(const Link &link) {
 } // namespace
 
 void PartitionContext::drain_incoming() {
-  for (auto &queue : incoming)
+  for (auto &queue : incoming) {
     queue->drain_into(event_queue);
+  }
 }
 
 SimulationEngine::SimulationEngine(Config config)
     : config_(config), pacer_(PacingController::Config{.ratio = config.wall_clock_ratio}) {}
 
 SimulationEngine::~SimulationEngine() {
-  if (created_)
+  if (created_) {
     shutdown();
+  }
 }
 
 util::Result SimulationEngine::create(util::DiagnosticEmitter emit_error) {
@@ -44,11 +46,13 @@ util::Result SimulationEngine::create(util::DiagnosticEmitter emit_error) {
       return emit_error.emit()
              << "multi-threaded SimulationEngine requires an explicit topology partition policy";
     }
-    if (topology_.partition_balanced(1, emit_error).failed())
+    if (topology_.partition_balanced(1, emit_error).failed()) {
       return util::Result::failure();
+    }
   }
-  if (setup_partitions(emit_error).failed())
+  if (setup_partitions(emit_error).failed()) {
     return util::Result::failure();
+  }
 
   done_.store(false, std::memory_order_release);
   startup_complete_.store(false, std::memory_order_release);
@@ -73,8 +77,9 @@ util::Result SimulationEngine::create(util::DiagnosticEmitter emit_error) {
 }
 
 void SimulationEngine::shutdown() {
-  if (!created_)
+  if (!created_) {
     return;
+  }
 
   // Lifecycle cleanup requires run() to have returned. A foreign thread stops
   // an active engine through request_exit(), then joins its runner first.
@@ -122,17 +127,20 @@ util::Result SimulationEngine::setup_partitions(util::DiagnosticEmitter emit_err
   }
 
   contexts_.reserve(num_threads);
-  for (uint32_t i = 0; i < num_threads; ++i)
+  for (uint32_t i = 0; i < num_threads; ++i) {
     contexts_.push_back(std::make_unique<PartitionContext>(i, num_threads));
+  }
 
   async_queues_.reserve(num_threads);
-  for (uint32_t i = 0; i < num_threads; ++i)
+  for (uint32_t i = 0; i < num_threads; ++i) {
     async_queues_.push_back(std::make_unique<AsyncQueue>());
+  }
 
   // Set engine pointer on all components.
   for (auto &part : topology_.partitions()) {
-    for (auto *comp : part.components)
+    for (auto *comp : part.components) {
       comp->set_engine(this);
+    }
   }
   return util::Result::success();
 }
@@ -170,8 +178,9 @@ ExitStatus SimulationEngine::run() {
         static_cast<std::ptrdiff_t>(num_threads),
         std::function<void()>([this]() { barrier_completion(); }));
 
-    for (uint32_t i = 0; i < num_threads; ++i)
+    for (uint32_t i = 0; i < num_threads; ++i) {
       workers_.emplace_back([this, i]() { worker_loop(i); });
+    }
     workers_.clear();
     barrier_.reset();
   }
@@ -184,8 +193,9 @@ ExitStatus SimulationEngine::run() {
 }
 
 void SimulationEngine::latch_startup_if_unlatched(bool failed) {
-  if (startup_complete_.load(std::memory_order_acquire))
+  if (startup_complete_.load(std::memory_order_acquire)) {
     return;
+  }
   if (failed) {
     // The terminal guard needs a status recorded together with done_.
     set_terminal_exit(ExitReason::INTERRUPTED, current_time_.load(std::memory_order_acquire),
@@ -196,8 +206,9 @@ void SimulationEngine::latch_startup_if_unlatched(bool failed) {
 }
 
 bool SimulationEngine::wait_until_started() const {
-  while (!startup_complete_.load(std::memory_order_acquire))
+  while (!startup_complete_.load(std::memory_order_acquire)) {
     startup_complete_.wait(false, std::memory_order_acquire);
+  }
   return !startup_failed_.load(std::memory_order_acquire);
 }
 
@@ -206,8 +217,9 @@ bool SimulationEngine::step() {
   assert(config_.num_threads == 1 && "step() requires single-threaded mode");
 
   if (!running_) {
-    if (startup_failed())
+    if (startup_failed()) {
       return false;
+    }
     startup_components();
     running_ = true;
     latch_startup(/*failed=*/false);
@@ -222,8 +234,9 @@ bool SimulationEngine::step() {
     }
   }
 
-  if (done_.load(std::memory_order_acquire))
+  if (done_.load(std::memory_order_acquire)) {
     return false;
+  }
 
   drain_async_events();
 
@@ -249,8 +262,9 @@ bool SimulationEngine::step() {
       return false;
     }
     drain_async_events();
-    if (ctx.event_queue.contains_only(&max_ticks_event_))
+    if (ctx.event_queue.contains_only(&max_ticks_event_)) {
       return true;
+    }
   }
 
   Tick step_tick = ctx.event_queue.next_event_time();
@@ -262,8 +276,9 @@ bool SimulationEngine::step() {
       running_ = false;
       return false;
     }
-    if (async_queues_[0]->pending.load(std::memory_order_acquire))
+    if (async_queues_[0]->pending.load(std::memory_order_acquire)) {
       drain_async_events();
+    }
   }
 
   current_time_.store(step_tick, std::memory_order_release);
@@ -275,8 +290,9 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
   uint32_t num_threads = config_.num_threads;
 
   while (true) {
-    if (done_.load(std::memory_order_acquire) && num_threads == 1)
+    if (done_.load(std::memory_order_acquire) && num_threads == 1) {
       break; // Single-threaded: safe to exit immediately.
+    }
 
     if (num_threads == 1) {
       // Drain async events first (doorbells, external stimuli).
@@ -299,15 +315,17 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
         if (config_.max_ticks > 0 && ctx.event_queue.current_tick() < config_.max_ticks &&
             ctx.event_queue.contains_only(&max_ticks_event_)) {
           current_time_.store(ctx.event_queue.current_tick(), std::memory_order_release);
-          if (check_termination(TICK_MAX))
+          if (check_termination(TICK_MAX)) {
             return;
+          }
           drain_async_events();
           if (ctx.event_queue.contains_only(&max_ticks_event_)) {
             pacer_.pause();
             idle_wait_quiescent();
             pacer_.resume();
-            if (done_.load(std::memory_order_acquire))
+            if (done_.load(std::memory_order_acquire)) {
               return;
+            }
           }
           continue;
         }
@@ -317,10 +335,12 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
         }
         auto entry = ctx.event_queue.pop();
         process_event(ctx, entry);
-        if (done_.load(std::memory_order_acquire))
+        if (done_.load(std::memory_order_acquire)) {
           return;
-        if (async_queues_[0]->pending.load(std::memory_order_acquire))
+        }
+        if (async_queues_[0]->pending.load(std::memory_order_acquire)) {
           drain_async_events();
+        }
       }
 
       // Queue drained now update global time for external observers.
@@ -332,12 +352,14 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_events();
 
       // If async events added new work, continue processing.
-      if (!ctx.event_queue.empty())
+      if (!ctx.event_queue.empty()) {
         continue;
+      }
 
       // Quiescent, check termination.
-      if (check_termination(TICK_MAX))
+      if (check_termination(TICK_MAX)) {
         break;
+      }
 
       // Primaries still active so wait for an async event. With wall-clock
       // sync, use a timed sleep+check loop so we can advance sim time
@@ -363,8 +385,9 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
           }
         }
       }
-      if (done_.load(std::memory_order_acquire))
+      if (done_.load(std::memory_order_acquire)) {
         break;
+      }
       // Consume the notification atomically with respect to producers. A plain
       // store can overwrite a concurrent wake without acquiring the producer's
       // preceding writes (async work or a primary-count decrement), leaving the
@@ -456,8 +479,9 @@ void SimulationEngine::barrier_completion() {
   if (config_.max_ticks > 0 && new_lbts >= config_.max_ticks &&
       (new_lbts != TICK_MAX || !is_fully_quiescent())) {
     // A producer can still post work after its partition's drain.
-    if (any_async_pending())
+    if (any_async_pending()) {
       return;
+    }
     current_time_.store(config_.max_ticks, std::memory_order_release);
     set_exit(ExitCause::MAX_TICKS, config_.max_ticks, "max ticks reached");
     done_.store(true, std::memory_order_release);
@@ -466,14 +490,17 @@ void SimulationEngine::barrier_completion() {
 
   // Update global LBTS and current time.
   global_lbts_.store(new_lbts, std::memory_order_release);
-  if (new_lbts != TICK_MAX)
+  if (new_lbts != TICK_MAX) {
     current_time_.store(new_lbts, std::memory_order_release);
+  }
 
-  if (check_termination(new_lbts))
+  if (check_termination(new_lbts)) {
     return;
+  }
 
-  if (new_lbts == TICK_MAX)
+  if (new_lbts == TICK_MAX) {
     idle_wait_quiescent();
+  }
 }
 
 void SimulationEngine::idle_wait_quiescent() {
@@ -498,27 +525,31 @@ void SimulationEngine::idle_wait_quiescent() {
   // without those checks could strand a last-primary release.
   auto &wakeup = contexts_[0]->idle_wakeup_;
   while (!done_.load(std::memory_order_acquire) && !any_async_pending()) {
-    if (wakeup.exchange(false, std::memory_order_acq_rel))
+    if (wakeup.exchange(false, std::memory_order_acq_rel)) {
       return;
+    }
     wakeup.wait(false, std::memory_order_acquire);
   }
 }
 
 bool SimulationEngine::any_async_pending() const {
   for (const auto &aq : async_queues_) {
-    if (aq->pending.load(std::memory_order_acquire))
+    if (aq->pending.load(std::memory_order_acquire)) {
       return true;
+    }
   }
   return false;
 }
 
 void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &entry) {
   ctx.event_queue.set_current_tick(entry.timestamp);
-  if (config_.num_threads == 1)
+  if (config_.num_threads == 1) {
     current_time_.store(entry.timestamp, std::memory_order_release);
+  }
 
-  if (entry.event->has_handler())
+  if (entry.event->has_handler()) {
     entry.event->execute(entry.timestamp, entry.message.get());
+  }
 }
 
 void SimulationEngine::schedule_event(Event *event, Tick timestamp,
@@ -543,8 +574,9 @@ void SimulationEngine::send_cross_partition(PartitionID src_partition, Partition
   dst_ctx.incoming[src_partition]->push(EventQueueEntry{timestamp, 0, event, std::move(message)});
 
   // Update the source partition's min_outgoing (accessed only by owning thread).
-  if (timestamp < src_ctx.local_min_outgoing)
+  if (timestamp < src_ctx.local_min_outgoing) {
     src_ctx.local_min_outgoing = timestamp;
+  }
 }
 
 void SimulationEngine::register_as_primary() {
@@ -556,8 +588,9 @@ void SimulationEngine::primary_release() {
   [[maybe_unused]] uint32_t prev = active_primaries_.fetch_sub(1, std::memory_order_release);
   assert(prev > 0 && "primary_release called without matching register_as_primary or retain");
   // Wake idle engine so it can check termination (e.g., doorbell monitor releasing primary).
-  if (prev == 1)
+  if (prev == 1) {
     wake_partition(0);
+  }
 }
 
 void SimulationEngine::primary_retain() {
@@ -568,30 +601,34 @@ bool SimulationEngine::is_fully_quiescent() const {
   for (auto &ctx : contexts_) {
     // Check incoming queues for undelivered cross-partition messages.
     for (auto &q : ctx->incoming) {
-      if (!q->empty())
+      if (!q->empty()) {
         return false;
+      }
     }
     // A lone max-ticks sentinel is only a finite horizon. Before reaching it,
     // it does not prevent an otherwise drained simulation from terminating.
     const bool only_pre_horizon_sentinel = config_.max_ticks > 0 &&
                                            ctx->event_queue.current_tick() < config_.max_ticks &&
                                            ctx->event_queue.contains_only(&max_ticks_event_);
-    if (!ctx->event_queue.empty() && !only_pre_horizon_sentinel)
+    if (!ctx->event_queue.empty() && !only_pre_horizon_sentinel) {
       return false;
+    }
   }
   return true;
 }
 
 bool SimulationEngine::check_termination(Tick lbts) {
-  if (any_async_pending())
+  if (any_async_pending()) {
     return false;
+  }
   const bool has_primaries = has_primaries_.load(std::memory_order_acquire);
   const uint32_t active_primaries = active_primaries_.load(std::memory_order_acquire);
   if (has_primaries && active_primaries == 0) {
     // The last primary may have posted a callback after the first pending
     // check. Recheck after acquiring its release before declaring completion.
-    if (!is_fully_quiescent() || any_async_pending())
+    if (!is_fully_quiescent() || any_async_pending()) {
       return false;
+    }
     const Tick completion_tick =
         lbts == TICK_MAX ? current_time_.load(std::memory_order_acquire) : lbts;
     set_exit(ExitCause::ALL_PRIMARIES_COMPLETED, completion_tick, "all primaries completed");
@@ -609,13 +646,15 @@ bool SimulationEngine::check_termination(Tick lbts) {
   if (lbts == TICK_MAX) {
     // If primaries are still active, they are promising future work
     // (via async events). Don't terminate.
-    if (active_primaries > 0)
+    if (active_primaries > 0) {
       return false;
+    }
     // If await_primaries is set (e.g., KFD driver mode), don't terminate on
     // quiescence until at least one primary has registered. This keeps the
     // engine alive while waiting for external stimuli (doorbells).
-    if (config_.await_primaries && !has_primaries)
+    if (config_.await_primaries && !has_primaries) {
       return false;
+    }
     set_exit(ExitCause::QUIESCENCE, current_time_.load(std::memory_order_acquire),
              "all partitions quiescent");
     done_.store(true, std::memory_order_release);
@@ -625,8 +664,9 @@ bool SimulationEngine::check_termination(Tick lbts) {
 }
 
 void SimulationEngine::wake_partition_locked(PartitionID pid) {
-  if (pid >= contexts_.size())
+  if (pid >= contexts_.size()) {
     return;
+  }
   // Multi-threaded quiescence has one waiter: the barrier completion, which may
   // run on any partition. Route all async/exit/primary publications to one flag.
   PartitionContext &ctx = *contexts_[0];
@@ -699,21 +739,24 @@ void SimulationEngine::schedule_event_now(Event *event, std::unique_ptr<Message>
 void SimulationEngine::schedule_event_next_tick(Event *event, std::unique_ptr<Message> message) {
   Tick timestamp =
       pacer_.enabled() ? pacer_.sim_tick_now() : current_time_.load(std::memory_order_acquire);
-  if (timestamp != TICK_MAX)
+  if (timestamp != TICK_MAX) {
     ++timestamp;
+  }
   schedule_event_async(event, timestamp, std::move(message));
 }
 
 void SimulationEngine::drain_async_events() {
   for (uint32_t i = 0; i < async_queues_.size(); ++i) {
     auto &aq = *async_queues_[i];
-    if (!aq.pending.load(std::memory_order_acquire))
+    if (!aq.pending.load(std::memory_order_acquire)) {
       continue;
+    }
     std::lock_guard<std::mutex> lock(aq.mutex);
     const Tick floor = contexts_[i]->event_queue.current_tick();
     for (auto &e : aq.events) {
-      if (e.timestamp < floor)
+      if (e.timestamp < floor) {
         e.timestamp = floor;
+      }
       contexts_[i]->event_queue.push(std::move(e));
     }
     aq.events.clear();
@@ -753,8 +796,9 @@ util::Result SimulationEngine::initialize_components(util::DiagnosticEmitter emi
     for (auto *comp : part.components) {
       // Include the failing hook so shutdown releases its partial resources too.
       ++initialized_components_count_;
-      if (comp->initialize(emit_error).failed())
+      if (comp->initialize(emit_error).failed()) {
         return util::Result::failure();
+      }
     }
   }
   return util::Result::success();
@@ -762,8 +806,9 @@ util::Result SimulationEngine::initialize_components(util::DiagnosticEmitter emi
 
 void SimulationEngine::startup_components() {
   for (auto &part : topology_.partitions()) {
-    for (auto *comp : part.components)
+    for (auto *comp : part.components) {
       comp->startup();
+    }
   }
 }
 
@@ -772,20 +817,23 @@ void SimulationEngine::shutdown_components() {
   // component after that prefix, then release the prefix in reverse order.
   auto &partitions = topology_.partitions();
   size_t component_index = 0;
-  for (const auto &partition : partitions)
+  for (const auto &partition : partitions) {
     component_index += partition.components.size();
+  }
   const size_t initialized_count = std::exchange(initialized_components_count_, 0);
   for (auto part = partitions.rbegin(); part != partitions.rend(); ++part) {
     for (auto comp = part->components.rbegin(); comp != part->components.rend(); ++comp) {
-      if (--component_index < initialized_count)
+      if (--component_index < initialized_count) {
         (*comp)->shutdown();
+      }
     }
   }
 }
 
 Tick SimulationEngine::compute_async_floor(const PartitionContext &ctx) const {
-  if (config_.num_threads == 1)
+  if (config_.num_threads == 1) {
     return 0;
+  }
   // Keep the last committed simulation tick as the floor even when the
   // global LBTS is TICK_MAX because the partitions have gone idle.
   return std::max(ctx.event_queue.current_tick(), current_time_.load(std::memory_order_acquire));
@@ -793,13 +841,15 @@ Tick SimulationEngine::compute_async_floor(const PartitionContext &ctx) const {
 
 void SimulationEngine::drain_async_for_partition(PartitionContext &ctx) {
   auto &aq = *async_queues_[ctx.partition_id];
-  if (!aq.pending.load(std::memory_order_acquire))
+  if (!aq.pending.load(std::memory_order_acquire)) {
     return;
+  }
   std::lock_guard<std::mutex> lock(aq.mutex);
   Tick floor = compute_async_floor(ctx);
   for (auto &e : aq.events) {
-    if (e.timestamp < floor)
+    if (e.timestamp < floor) {
       e.timestamp = floor;
+    }
     ctx.event_queue.push(std::move(e));
   }
   aq.events.clear();

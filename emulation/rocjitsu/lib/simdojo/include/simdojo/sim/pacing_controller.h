@@ -85,8 +85,9 @@ public:
 
   /// @brief Pause the wall-clock mapping before an idle wait.
   void pause() {
-    if (!enabled())
+    if (!enabled()) {
       return;
+    }
     std::unique_lock lock(anchor_mutex_);
     if (!paused_) {
       pause_start_ = clock::now();
@@ -100,8 +101,9 @@ public:
   /// chrono integer arithmetic (no floating-point rounding). The PI integral
   /// is preserved across idle periods to retain the frequency estimate.
   void resume() {
-    if (!enabled())
+    if (!enabled()) {
       return;
+    }
     std::unique_lock lock(anchor_mutex_);
     if (paused_) {
       auto idle = clock::now() - pause_start_;
@@ -115,8 +117,9 @@ public:
   /// @details Thread-safe via seqlock. External threads calling this never
   /// block — they retry if a write was in progress.
   Tick sim_tick_now() const {
-    if (!enabled())
+    if (!enabled()) {
       return 0;
+    }
     clock::time_point anchor_wall;
     Tick anchor_sim;
     {
@@ -126,8 +129,9 @@ public:
     }
     auto elapsed = clock::now() - anchor_wall;
     auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
-    if (ns <= 0)
+    if (ns <= 0) {
       return anchor_sim;
+    }
     return anchor_sim + static_cast<Tick>(static_cast<double>(ns) * config_.ratio * TICKS_PER_NS);
   }
 
@@ -138,8 +142,9 @@ public:
   /// correcting. In TRACKING/STABLE, applies PI correction. Sleeps if
   /// the offset exceeds the burst buffer. Large offsets trigger a step.
   void throttle(Tick sim_time) {
-    if (!enabled())
+    if (!enabled()) {
       return;
+    }
 
     Tick target = sim_tick_now();
     double offset = static_cast<double>(sim_time) - static_cast<double>(target);
@@ -152,8 +157,9 @@ public:
         sim_anchor_ = sim_time;
       }
       integral_ = 0.0;
-      if (state_ == State::STABLE)
+      if (state_ == State::STABLE) {
         state_ = State::TRACKING;
+      }
       stable_streak_ = 0;
       return;
     }
@@ -161,8 +167,9 @@ public:
     // INIT state: just count samples.
     if (state_ == State::INIT) {
       ++init_count_;
-      if (init_count_ >= config_.init_samples)
+      if (init_count_ >= config_.init_samples) {
         state_ = State::TRACKING;
+      }
       return;
     }
 
@@ -176,19 +183,22 @@ public:
     // of whether the burst buffer absorbs or the PI loop throttles).
     if (std::abs(offset) < static_cast<double>(stable_offset_ticks_)) {
       ++stable_streak_;
-      if (state_ == State::TRACKING && stable_streak_ >= config_.stable_count)
+      if (state_ == State::TRACKING && stable_streak_ >= config_.stable_count) {
         state_ = State::STABLE;
+      }
     } else {
       stable_streak_ = 0;
-      if (state_ == State::STABLE)
+      if (state_ == State::STABLE) {
         state_ = State::TRACKING;
+      }
     }
 
     // Token bucket: absorb bursts within the buffer. When the burst buffer
     // absorbs the offset, do NOT update the integral — this prevents integral
     // windup from accumulating during burst-absorbed periods.
-    if (offset < static_cast<double>(burst_ticks_))
+    if (offset < static_cast<double>(burst_ticks_)) {
       return;
+    }
 
     // PI correction (only reached when actually throttling).
     double proportional_gain = (state_ == State::STABLE) ? config_.proportional_gain_stable
@@ -206,13 +216,15 @@ public:
     // Convert adjustment to wall-nanoseconds and sleep.
     double sleep_ns = adj / (config_.ratio * TICKS_PER_NS);
     auto sleep_ns_int = static_cast<int64_t>(sleep_ns);
-    if (sleep_ns_int <= 0)
+    if (sleep_ns_int <= 0) {
       return;
+    }
 
     // Hybrid sleep + spin: coarse sleep minus 500us, then spin.
     static constexpr int64_t SPIN_THRESHOLD_NS = 500'000;
-    if (sleep_ns_int > SPIN_THRESHOLD_NS)
+    if (sleep_ns_int > SPIN_THRESHOLD_NS) {
       std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns_int - SPIN_THRESHOLD_NS));
+    }
 
     // Tight busy-wait for the final spin portion. The clock::now() call in the
     // while condition provides a sufficient memory barrier; no yield needed.
@@ -225,8 +237,9 @@ public:
   /// @brief Maximum duration to block during a quiescent wait.
   /// @returns Wait duration, or 0ms if pacing is disabled (use unbounded wait).
   std::chrono::milliseconds idle_wait_duration() const {
-    if (!enabled())
+    if (!enabled()) {
       return std::chrono::milliseconds(0);
+    }
     return std::chrono::milliseconds(10);
   }
 

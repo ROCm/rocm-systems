@@ -71,16 +71,18 @@ struct WaveDebugFixture {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.functional_quantum = quantum;
-    if (async_helpers)
+    if (async_helpers) {
       cfg.async_resources =
           std::make_shared<amdgpu::matrix_coexecution::ExecutionResources>(async_helpers);
+    }
     cfg.num_wf_slots = num_wf_slots;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_wave_debug", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     l2.set_gpu_vm(&gpu_mem.gpu_vm());
     cu->set_gpu_vm(&gpu_mem.gpu_vm());
   }
@@ -193,8 +195,9 @@ TEST(WaveDebugTest, Gfx10TracePriorityAndOrderedEndReportTheIssuingWave) {
       0xbf960000, // s_ttracedata
       0xbf9e0000, // s_endpgm_ordered_ps_done
   };
-  for (unsigned i = 0; i < std::size(program); ++i)
+  for (unsigned i = 0; i < std::size(program); ++i) {
     f.gpu_mem.write32(kKernelAddr + i * 4, program[i]);
+  }
   std::vector<uint32_t> trace;
   f.cu->set_shader_trace_handler(
       [&](const amdgpu::Wavefront &, uint32_t value) { trace.push_back(value); });
@@ -210,8 +213,9 @@ TEST(WaveDebugTest, Gfx10TracePriorityAndOrderedEndReportTheIssuingWave) {
   ASSERT_NE(wave, nullptr);
   wave->set_status_raw((1u << 19) | (1u << 7)); // PERF_EN, TTRACE_EN.
   wave->set_m0(0x1234u);
-  for (unsigned i = 0; i < 4; ++i)
+  for (unsigned i = 0; i < 4; ++i) {
     f.cu->step();
+  }
   EXPECT_EQ((wave->status_raw() >> 3) & 3u, 3u);
   EXPECT_EQ(f.cu->shader_perf_level(5), 1u);
   EXPECT_EQ(f.cu->shader_perf_level(6), 0u);
@@ -253,19 +257,21 @@ TEST(WaveDebugTest, Gfx10SethaltStopsIssueAndCodeEndRaisesIllegalInstruction) {
 }
 
 TEST(WaveDebugTest, SingleStepWaitsForGfx10ClauseAdmission) {
-  for (bool internal_nop : {false, true})
+  for (bool internal_nop : {false, true}) {
     for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
       SCOPED_TRACE(testing::Message() << arch << " internal_nop=" << internal_nop);
       WaveDebugFixture fixture(arch, 2, 1);
       ASSERT_TRUE(fixture.cu);
       constexpr uint32_t owner_pc = 0x1000, peer_pc = 0x3000;
       fixture.gpu_mem.write32(owner_pc, 0xbfa10002); // s_clause 2 (three VALU instructions)
-      for (unsigned i = 1; i <= 3; ++i)
+      for (unsigned i = 1; i <= 3; ++i) {
         fixture.gpu_mem.write32(owner_pc + 4 * i, 0x7e020281); // v_mov_b32 v1, 1
-      if (internal_nop)
+      }
+      if (internal_nop) {
         fixture.gpu_mem.write32(owner_pc + 8, 0xbf800000); // Internal s_nop counts as one member.
-      fixture.gpu_mem.write32(owner_pc + 16, 0xbf800000);  // s_nop 0
-      fixture.gpu_mem.write32(peer_pc, 0x7e020282);        // v_mov_b32 v1, 2
+      }
+      fixture.gpu_mem.write32(owner_pc + 16, 0xbf800000); // s_nop 0
+      fixture.gpu_mem.write32(peer_pc, 0x7e020282);       // v_mov_b32 v1, 2
       auto *owner = fixture.cu->dispatch_wf(0, owner_pc, 32, 16);
       ASSERT_NE(owner, nullptr);
       fixture.cu->step();
@@ -290,6 +296,7 @@ TEST(WaveDebugTest, SingleStepWaitsForGfx10ClauseAdmission) {
       EXPECT_EQ(peer->pc, peer_pc + 4);
       EXPECT_EQ(fixture.cu->read_vgpr(peer->vgpr_alloc().base + 1, 0), 2u);
     }
+  }
 }
 
 TEST(WaveDebugTest, SingleStepWaitsForTheExportGrant) {
@@ -493,11 +500,13 @@ TEST(WaveDebugTest, Gfx11PixelParametersWaitAndSelectPrimitivePerQuad) {
     wf->set_m0(128 | (1u << 17)); // primitive 1 begins in quad 2
     wf->set_exec((1u << 1) | (1u << 7) | (1u << 10));
     // Attribute 1 follows two 12-DWORD primitive blocks for attribute 0.
-    for (uint32_t word = 0; word < 24; ++word)
+    for (uint32_t word = 0; word < 24; ++word) {
       wf->lds().write32(1024 + 128 + 4 * (24 + word), 100 + word);
+    }
     const uint32_t dest = wf->vgpr_alloc().base + 6;
-    for (unsigned lane = 0; lane < 16; ++lane)
+    for (unsigned lane = 0; lane < 16; ++lane) {
       fx.cu->write_vgpr(dest, lane, 0xdeadbeef);
+    }
     wf->set_status_raw(wf->status_raw() & ~(1u << 25));
     fx.cu->step();
     EXPECT_EQ(wf->pc, kKernelAddr);
@@ -527,8 +536,9 @@ TEST(WaveDebugTest, Gfx1151PrivilegedDestinationsAndPerformanceTrace) {
       0xbfbb003c, // s_ttracedata_imm 0x3c
       0xbfb90005, // s_decperflevel 5
   };
-  for (size_t i = 0; i < std::size(words); ++i)
+  for (size_t i = 0; i < std::size(words); ++i) {
     fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i]);
+  }
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
   wf->set_status_raw(wf->status_raw() | (1u << 19)); // STATUS.PERF_EN
@@ -541,8 +551,9 @@ TEST(WaveDebugTest, Gfx1151PrivilegedDestinationsAndPerformanceTrace) {
     EXPECT_EQ(&source, wf);
     trace.push_back(value);
   });
-  for (unsigned i = 0; i < 6; ++i)
+  for (unsigned i = 0; i < 6; ++i) {
     fx.cu->step();
+  }
   EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 2), 0u);
   EXPECT_EQ(wf->ttmp(0), 0x12345678u);
   EXPECT_FALSE(wf->read_scc());
@@ -707,13 +718,15 @@ TEST(WaveDebugTest, Gfx1151ControlFlowPriorityAndHalt) {
       0xbf820001, // s_sethalt 1
       0xbfb50001, // s_setprio 1 (cannot issue while halted)
   };
-  for (size_t i = 0; i < std::size(words); ++i)
+  for (size_t i = 0; i < std::size(words); ++i) {
     fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i]);
+  }
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
   wf->set_status_raw(wf->status_raw() | (1u << 20));
-  for (int i = 0; i < 5; ++i)
+  for (int i = 0; i < 5; ++i) {
     fx.cu->step();
+  }
   EXPECT_EQ((wf->status_raw() >> 3) & 3u, 3u);
   EXPECT_EQ(wf->pc, kKernelAddr + 16);
   EXPECT_TRUE(wf->status_halt());
@@ -811,14 +824,16 @@ TEST(WaveDebugTest, Rdna4ProtectsTrapWritesAndExposesUserPriority) {
       0xbf820005u, // s_sethalt 5 (privileged fatal halt)
       0xbf820001u, // s_sethalt 1
   };
-  for (size_t i = 0; i < std::size(program); ++i)
+  for (size_t i = 0; i < std::size(program); ++i) {
     fx.gpu_mem.write32(kKernelAddr + 4 * i, program[i]);
+  }
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
   wf->set_ttmp(0, 0x1234u);
   wf->write_scc(false);
-  for (size_t i = 0; i < std::size(program); ++i)
+  for (size_t i = 0; i < std::size(program); ++i) {
     fx.cu->step();
+  }
   EXPECT_FALSE(wf->read_scc());
   EXPECT_EQ(wf->ttmp(0), 0x1234u);
   EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 4), 0x1234u);
@@ -843,12 +858,14 @@ TEST(WaveDebugTest, Gfx12WakesSleepingPeersInTheSameWorkgroup) {
     auto *unrelated = fx.cu->dispatch_wf(1, kKernelAddr, SGPRS_PER_WF, VGPRS_PER_WF);
     ASSERT_NE(peer, nullptr);
     ASSERT_NE(unrelated, nullptr);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 4; ++i) {
       fx.cu->step();
+    }
     EXPECT_EQ(peer->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
     ASSERT_NE(fx.dispatch(kKernelAddr + 8), nullptr);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 4; ++i) {
       fx.cu->step();
+    }
     EXPECT_TRUE(peer->is_halted());
     EXPECT_FALSE(peer->sleep_wakeup());
     EXPECT_EQ(unrelated->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
@@ -961,8 +978,9 @@ TEST(WaveDebugTest, Gfx1250NamedBarrierWakeTargetsMembersWithoutReleasingWaiters
   constexpr uint32_t join_one = 0xbe805281u; // s_barrier_join 1
   constexpr uint32_t wake_one = 0xbe805781u; // s_wakeup_barrier 1
   constexpr uint32_t sleep_forever = 0xbf838000u;
-  for (auto *member : {peer, waiter, foreign})
+  for (auto *member : {peer, waiter, foreign}) {
     issue(*member, join_one);
+  }
   // ID 0 selects other waves in the group that have not joined a named barrier.
   issue(*other, sleep_forever);
   issue(*sender, 0xbe805780u); // s_wakeup_barrier 0
@@ -974,8 +992,9 @@ TEST(WaveDebugTest, Gfx1250NamedBarrierWakeTargetsMembersWithoutReleasingWaiters
   issue(*waiter, 0xbf940001u); // s_barrier_wait 1
   ASSERT_EQ(waiter->state(), amdgpu::WfState::BARRIER);
   const auto state_before = waiter->barrier_state(1);
-  for (auto *wave : {peer, other, foreign})
+  for (auto *wave : {peer, other, foreign}) {
     issue(*wave, sleep_forever);
+  }
 
   for (const uint32_t invalid : {0xbe8057c1u, 0xbe805783u}) {
     issue(*sender, invalid); // Workgroup and unallocated named barrier IDs.
@@ -1229,8 +1248,9 @@ TEST(WaveDebugTest, Gfx1250TrapMessagesAgreeWithTrapEnable) {
     fixture.gpu_mem.write32(kKernelAddr + 8, 0xbe864d82u); // s_sendmsg_rtn_b64 s[6:7], GET_TMA
     auto *wave = fixture.dispatch(kKernelAddr);
     ASSERT_NE(wave, nullptr);
-    for (unsigned i = 0; i < 3; ++i)
+    for (unsigned i = 0; i < 3; ++i) {
       fixture.cu->step();
+    }
     EXPECT_EQ(wave->debug_read_sgpr(2), address != 0);
     EXPECT_EQ(wave->debug_read_sgpr(4), address);
     EXPECT_EQ(wave->debug_read_sgpr(5), uint32_t(address != 0) << 31);
@@ -1290,8 +1310,9 @@ TEST(WaveDebugTest, ReturnMessagesUseTheIssuingQueueAndDispatch) {
     fixture.gpu_mem.write32(kKernelAddr + 8, 0xbe884d82u); // s_sendmsg_rtn_b64 s[8:9], GET_TMA
     fixture.gpu_mem.write32(kKernelAddr + 12, 0xbe8a4d85u); // s_sendmsg_rtn_b64 s[10:11], GET_TBA
     fixture.gpu_mem.write32(kKernelAddr + 16, 0xbe8c4c80u); // s_sendmsg_rtn_b32 s12, GET_DOORBELL
-    for (unsigned i = 0; i < 4; ++i)
+    for (unsigned i = 0; i < 4; ++i) {
       fixture.cu->step();
+    }
     EXPECT_EQ(wave->debug_read_sgpr(4), 0x345u);
     EXPECT_EQ(wave->debug_read_sgpr(5), 0u);
     EXPECT_EQ(wave->debug_read_sgpr(6), 0x12345678u);
@@ -1335,8 +1356,9 @@ TEST(WaveDebugTest, TrapReturnPreservesTheHandlersExec) {
       wave->set_exec(0x15);
       fixture.cu->step();
       ASSERT_TRUE(wave->in_trap_handler());
-      for (unsigned i = 0; i < 3; ++i)
+      for (unsigned i = 0; i < 3; ++i) {
         fixture.cu->step();
+      }
       EXPECT_FALSE(wave->in_trap_handler());
       ASSERT_EQ(wave->pc, kKernelAddr + 4);
       fixture.cu->step();
@@ -1366,8 +1388,9 @@ TEST(WaveDebugTest, Gfx11StatusReflectsMultiwaveMembershipAndTrapBasePresence) {
         ASSERT_NE(wave, nullptr);
         waves.push_back(wave);
       }
-      for (unsigned step = 0; step < 12; ++step)
+      for (unsigned step = 0; step < 12; ++step) {
         fx.cu->step();
+      }
       for (const auto *wave : waves) {
         const auto base = wave->sgpr_alloc().base;
         EXPECT_EQ(fx.cu->read_sgpr(base + 2), members == 2);
@@ -1432,8 +1455,9 @@ TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
     for (bool private_lane : {false, true}) {
       for (const auto &[global_mapped, shader] : {std::pair{false, false}, std::pair{true, false},
                                                   std::pair{false, true}, std::pair{true, true}}) {
-        if (shader && (!private_memviol || !private_lane))
+        if (shader && (!private_memviol || !private_lane)) {
           continue;
+        }
         SCOPED_TRACE(testing::Message()
                      << "arch=" << arch << " private_lane=" << private_lane
                      << " global_mapped=" << global_mapped << " shader=" << shader);
@@ -1446,14 +1470,17 @@ TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
         std::vector<uint8_t> code(size), scratch_page(size), global_page(size);
         pages[kKernelAddr >> shift] = {code.data(), amdgpu::Mtype::RW};
         pages[scratch >> shift] = {scratch_page.data(), amdgpu::Mtype::RW};
-        if (global_mapped)
+        if (global_mapped) {
           pages[global >> shift] = {global_page.data(), amdgpu::Mtype::RW};
+        }
         fx.gpu_mem.register_process(pid, &pages, &mutex);
-        for (unsigned i = 0; i < words.size(); ++i)
+        for (unsigned i = 0; i < words.size(); ++i) {
           fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i], pid);
+        }
         fx.gpu_mem.write32(scratch, 41, pid);
-        if (global_mapped)
+        if (global_mapped) {
           fx.gpu_mem.write32(global, 37, pid);
+        }
         auto *wf = fx.dispatch(kKernelAddr);
         ASSERT_NE(wf, nullptr);
         const uint64_t second_dword = scratch + wf->wf_size() * sizeof(uint32_t);
@@ -1502,10 +1529,11 @@ TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
           wave.debug_trap(0);
           return true;
         });
-        if (shader)
+        if (shader) {
           fx.cu->set_trap_handler_resolver([](const auto &) {
             return amdgpu::ComputeUnitCore::TrapHandlerConfig{.tba = kTrapHandlerAddr};
           });
+        }
         fx.cu->step();
         EXPECT_EQ(step_stops, unsigned(global_mapped && !private_lane));
         if (private_lane && private_memviol) {
@@ -1556,8 +1584,9 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
     const std::array code =
         gfx11 ? std::array{0xdcd44000u, 0x007c0402u, 0u} : std::array{0xec0d407cu, 0x02100000u, 2u};
     for (unsigned offset : {4u, 5u, 0x80000004u}) {
-      if (offset >= 0x80000000u && arch != rocjitsu::IsaFamily::Cdna5)
+      if (offset >= 0x80000000u && arch != rocjitsu::IsaFamily::Cdna5) {
         continue;
+      }
       for (bool mapped : {false, true}) {
         SCOPED_TRACE(testing::Message()
                      << arch << " LDS offset=" << offset << " mapped=" << mapped);
@@ -1569,13 +1598,16 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
         KfdProcess::PageTable pages;
         util::DistributedSharedMutex mutex;
         pages[kKernelAddr >> shift] = {kernel.data(), amdgpu::Mtype::RW};
-        if (mapped)
+        if (mapped) {
           pages[global >> shift] = {data.data(), amdgpu::Mtype::RW};
+        }
         fx.gpu_mem.register_process(pid, &pages, &mutex);
-        for (unsigned i = 0; i < code.size(); ++i)
+        for (unsigned i = 0; i < code.size(); ++i) {
           fx.gpu_mem.write32(kKernelAddr + 4 * i, code[i], pid);
-        if (mapped)
+        }
+        if (mapped) {
           fx.gpu_mem.write32(global, 37, pid);
+        }
         auto *wf = fx.dispatch(kKernelAddr);
         ASSERT_NE(wf, nullptr);
         wf->set_process_id(pid);
@@ -1615,8 +1647,9 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
         fx.cu->step();
         // MEMVIOL is delivered before the next instruction issues. Other offsets
         // retire on the first step; another would decode the padding after it.
-        if (offset == 5)
+        if (offset == 5) {
           fx.cu->step();
+        }
         // Misaligned LDS MEMVIOL stops at the aperture-violation owner, which
         // does not wait for a VM fault event. Beyond the LDS allocation the
         // lane is DDS, which fails before any VM fault report and aborts the
@@ -1669,8 +1702,9 @@ TEST(WaveDebugTest, ScalarBufferProbesOnlyInBoundsDwords) {
       wf->set_process_id(pid);
       const uint32_t sb = wf->sgpr_alloc().base;
       const std::array<uint32_t, 6> registers{uint32_t{addr}, 0, bound, 0, sentinel, sentinel};
-      for (size_t i = 0; i < registers.size(); ++i)
+      for (size_t i = 0; i < registers.size(); ++i) {
         fx.cu->write_sgpr(sb + i, registers[i]);
+      }
       unsigned faults = 0;
       fx.cu->set_debug_active(true);
       fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &w, uint64_t, bool, uint64_t) {
@@ -1819,8 +1853,9 @@ TEST(WaveDebugTest, Cdna2TrapDrainsMemoryAndExposesPrivilegeAndHandlerAddresses)
       0x806c846cu, // s_add_u32 ttmp0, ttmp0, 4
       0x9580806cu, // s_rfe_restore_b64 ttmp[0:1], 0
   };
-  for (uint32_t i = 0; i < handler.size(); ++i)
+  for (uint32_t i = 0; i < handler.size(); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, false};
   });
@@ -1834,8 +1869,9 @@ TEST(WaveDebugTest, Cdna2TrapDrainsMemoryAndExposesPrivilegeAndHandlerAddresses)
   fx.cu->step();
   ASSERT_TRUE(wf->in_trap_handler());
   EXPECT_EQ(wf->pc, kTrapHandlerAddr);
-  for (size_t i = 0; i < handler.size(); ++i)
+  for (size_t i = 0; i < handler.size(); ++i) {
     fx.cu->step();
+  }
   EXPECT_FALSE(wf->in_trap_handler());
   EXPECT_EQ(wf->status_raw() & amdgpu::Wavefront::kStatusPrivMask, 0u);
   EXPECT_EQ(wf->pc, kKernelAddr + 4);
@@ -1859,8 +1895,9 @@ TEST(WaveDebugTest, Cdna2FlatBoundsReportOnCompletionAndEnterEnabledHandlerAtNex
     const std::array code = {0xdc500000u, 0x08000002u, // flat_load_dword v8, v[2:3]
                              0xdc700000u, 0x00000402u, // flat_store_dword v[2:3], v4
                              kSEndpgm};
-    for (size_t i = 0; i < code.size(); ++i)
+    for (size_t i = 0; i < code.size(); ++i) {
       fx.gpu_mem.write32(kKernelAddr + 4 * i, code[i]);
+    }
     fx.gpu_mem.write32(kTrapHandlerAddr, 0x9580806cu); // s_rfe_restore_b64 ttmp[0:1], 0
     fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
       return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, false};
@@ -1972,10 +2009,11 @@ TEST(WaveDebugTest, Cdna2TakenTrapRetiresDependenciesBeforeHandlerReads) {
     fx.gpu_mem.write32(kKernelAddr + 8, kSTrapSeven);
     fx.gpu_mem.write32(kKernelAddr + 12, kReadLoadedRegister);
     fx.gpu_mem.write32(kTrapHandlerAddr, kReadLoadedRegister);
-    if (handler_installed)
+    if (handler_installed) {
       fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
         return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, false};
       });
+    }
     auto *wave = fx.dispatch(kKernelAddr);
     ASSERT_NE(wave, nullptr);
     const uint32_t base = wave->sgpr_alloc().base;
@@ -2008,8 +2046,9 @@ TEST(WaveDebugTest, Cdna2ConditionalBranchAndScalarSourcesUseLiveWaveState) {
       0xbf8d0001u, // s_sethalt 1
       kSEndpgm,
   };
-  for (uint32_t i = 0; i < program.size(); ++i)
+  for (uint32_t i = 0; i < program.size(); ++i) {
     fx.gpu_mem.write32(kKernelAddr + i * 4, program[i]);
+  }
   auto *wf = fx.cu->dispatch_wf(0, kKernelAddr, 16, 16);
   ASSERT_NE(wf, nullptr);
   wf->set_status_raw(1u << 21);
@@ -2018,8 +2057,9 @@ TEST(WaveDebugTest, Cdna2ConditionalBranchAndScalarSourcesUseLiveWaveState) {
   const auto base = wf->sgpr_alloc().base;
   fx.cu->write_sgpr(base, 0x11223344);
   fx.cu->write_sgpr(base + 1, 0x55667788);
-  for (unsigned i = 0; i < 7; ++i)
+  for (unsigned i = 0; i < 7; ++i) {
     fx.cu->step();
+  }
   EXPECT_EQ(wf->ttmp(0), 0u);
   EXPECT_EQ(wf->ttmp(1), 0u);
   EXPECT_EQ(fx.cu->read_sgpr(base + 2), 0x11223344u);
@@ -2051,8 +2091,9 @@ TEST(WaveDebugTest, Cdna2DeferredScalarLoadsHonorTtmpWritePermission) {
     wave->set_ttmp(4, 0x55667788);
     fx.cu->write_sgpr(wave->sgpr_alloc().base, 0x4000);
     fx.cu->write_sgpr(wave->sgpr_alloc().base + 1, 0);
-    for (unsigned i = 0; i < 32 && wave->pc != kKernelAddr + 16; ++i)
+    for (unsigned i = 0; i < 32 && wave->pc != kKernelAddr + 16; ++i) {
       fx.cu->step();
+    }
     EXPECT_EQ(wave->pc, kKernelAddr + 16);
     EXPECT_EQ(wave->ttmp(4), privileged ? 0x11223344u : 0x55667788u);
     wave->halt();
@@ -2091,12 +2132,14 @@ TEST(WaveDebugTest, Cdna4GetregReadsConfiguredTrapAddressWords) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{0xabcd12345678ULL, 0x9876fedcba00ULL, true};
   });
   // s_getreg_b32 sN, hwreg(16+N) for the four address words.
-  for (unsigned i = 0; i < 4; ++i)
+  for (unsigned i = 0; i < 4; ++i) {
     fx.gpu_mem.write32(kKernelAddr + i * 4, 0xb880f810u + (i << 16) + i);
+  }
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
-  for (unsigned i = 0; i < 4; ++i)
+  for (unsigned i = 0; i < 4; ++i) {
     fx.cu->step();
+  }
   const auto byte_address = [&](unsigned lo, unsigned hi) {
     return (uint64_t{wave->debug_read_sgpr(hi)} << 40) | (uint64_t{wave->debug_read_sgpr(lo)} << 8);
   };
@@ -2119,16 +2162,18 @@ TEST(WaveDebugTest, Cdna4UserShaderReadsLiveStateAndHalts) {
       0xbf8d0001, // s_sethalt 1
       0xbf82ffff, // s_branch -1
   };
-  for (size_t i = 0; i < std::size(program); ++i)
+  for (size_t i = 0; i < std::size(program); ++i) {
     fx.gpu_mem.write32(kKernelAddr + 4 * i, program[i]);
+  }
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0);
   wave->set_vcc(0);
   wave->set_status_raw(3u << 20);
   wave->set_ttmp(2, 0xa5);
-  for (size_t i = 0; i < std::size(program); ++i)
+  for (size_t i = 0; i < std::size(program); ++i) {
     fx.cu->step();
+  }
   EXPECT_EQ(wave->debug_read_sgpr(0), 3u);
   EXPECT_EQ(wave->debug_read_sgpr(2), 1u);
   EXPECT_EQ(wave->debug_read_sgpr(3), 0u);
@@ -2146,8 +2191,9 @@ TEST(WaveDebugTest, SingleStepCompletesAfterTheFrontendGrant) {
        {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     for (const auto op : {Operation::Export, Operation::ParameterLoad, Operation::DirectLoad}) {
       const bool lds = op != Operation::Export;
-      if (lds && arch == rocjitsu::IsaFamily::Rdna4)
+      if (lds && arch == rocjitsu::IsaFamily::Rdna4) {
         continue;
+      }
       SCOPED_TRACE(testing::Message() << "arch=" << arch << " op=" << static_cast<unsigned>(op));
       WaveDebugFixture fx(arch);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -2215,8 +2261,9 @@ TEST(WaveDebugTest, Cdna4TrapWaitsAndReturnsThroughCompatibilityOpcode) {
         0x826d806d, // s_addc_u32 ttmp1, ttmp1, 0
         0x9580046c, // s_rfe_restore_b64 ttmp[0:1], s4
     };
-    for (size_t i = 0; i < std::size(handler); ++i)
+    for (size_t i = 0; i < std::size(handler); ++i) {
       fx.gpu_mem.write32(kTrapHandlerAddr + 4 * i, handler[i]);
+    }
     fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
       return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, true};
     });
@@ -2245,8 +2292,9 @@ TEST(WaveDebugTest, Cdna4TrapWaitsAndReturnsThroughCompatibilityOpcode) {
     fx.cu->step();
     ASSERT_TRUE(wave->in_trap_handler());
     EXPECT_TRUE(scoreboard.empty());
-    for (unsigned step = 0; step < 8 && wave->pc != kKernelAddr + 4; ++step)
+    for (unsigned step = 0; step < 8 && wave->pc != kKernelAddr + 4; ++step) {
       fx.cu->step();
+    }
     EXPECT_EQ(step_count, 1u);
     EXPECT_TRUE(wave->debug_halted());
     EXPECT_EQ(wave->debug_read_sgpr(0), 1u);
@@ -2274,16 +2322,18 @@ TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
       0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
       0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, true};
   });
   uint32_t interrupt_count = 0;
   fx.cu->set_sendmsg_handler([&](amdgpu::Wavefront &, uint32_t message) {
-    if (message == 1)
+    if (message == 1) {
       ++interrupt_count;
+    }
     return message == 1;
   });
   uint32_t completion_count = 0;
@@ -2299,8 +2349,9 @@ TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   EXPECT_EQ(wf->ttmp(1), 1u << 16);
   EXPECT_EQ(wf->ttmp(14), 0x3000u);
 
-  for (int i = 0; i < 7; ++i)
+  for (int i = 0; i < 7; ++i) {
     fx.cu->step();
+  }
 
   EXPECT_FALSE(wf->in_trap_handler());
   EXPECT_TRUE(wf->debug_halted());
@@ -2331,15 +2382,17 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecBeforeReporting) {
       0xBEFE016Eu,              // s_mov_b64 exec, ttmp[2:3]
       0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
   });
   fx.cu->set_sendmsg_handler([](amdgpu::Wavefront &wave, uint32_t message) {
-    if (message == 10)
+    if (message == 10) {
       wave.set_exec((wave.exec() & 0xFFFFFFFF00000000ULL) | 7u);
+    }
     return message == 1 || message == 10;
   });
 
@@ -2348,8 +2401,9 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecBeforeReporting) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(kInterruptedExec);
 
-  for (int i = 0; i < 11 && !wf->debug_halted(); ++i)
+  for (int i = 0; i < 11 && !wf->debug_halted(); ++i) {
     fx.cu->step();
+  }
 
   ASSERT_TRUE(wf->debug_halted());
   EXPECT_EQ(wf->exec(), kInterruptedExec);
@@ -2378,15 +2432,17 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStoppi
       0xBEFE016Eu,              // s_mov_b64 exec, ttmp[2:3]
       0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
   });
   fx.cu->set_sendmsg_handler([](amdgpu::Wavefront &wave, uint32_t message) {
-    if (message == 10)
+    if (message == 10) {
       wave.set_exec((wave.exec() & 0xFFFFFFFF00000000ULL) | 7u);
+    }
     return message == 1 || message == 10;
   });
 
@@ -2396,15 +2452,17 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStoppi
   ASSERT_NE(wf, nullptr);
   wf->set_exec(kInterruptedExec);
 
-  for (int i = 0; i < 6 && wf->pc == kKernelAddr; ++i)
+  for (int i = 0; i < 6 && wf->pc == kKernelAddr; ++i) {
     fx.cu->step();
+  }
   // Every assertion below is satisfied by a wave that never entered the handler
   // at all -- EXEC is unmodified, nothing halts it for the debugger, and
   // s_endpgm ends it. Anchor on the handler actually running, or a regression
   // that stops dispatching into it passes this test.
   ASSERT_TRUE(wf->in_trap_handler());
-  for (int i = 0; i < 8 && wf->in_trap_handler(); ++i)
+  for (int i = 0; i < 8 && wf->in_trap_handler(); ++i) {
     fx.cu->step();
+  }
 
   ASSERT_FALSE(wf->in_trap_handler());
   EXPECT_FALSE(wf->debug_halted());
@@ -2413,8 +2471,9 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStoppi
   // Run the wave off the end. Leaving one resident past the fixture is not
   // inert: the CU pool-allocates decoded instructions and frees the pool with
   // the decoder.
-  for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+  for (int i = 0; i < 4 && !wf->is_halted(); ++i) {
     fx.cu->step();
+  }
   EXPECT_TRUE(wf->is_halted());
 }
 
@@ -2446,8 +2505,9 @@ TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
           0xBEFE00FFu, 0x80000000u, // s_mov_b32 exec_lo, 0x80000000
       };
       handler.insert(handler.end(), form.words.begin(), form.words.end());
-      for (uint32_t i = 0; i < handler.size(); ++i)
+      for (uint32_t i = 0; i < handler.size(); ++i) {
         fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+      }
 
       fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
         return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
@@ -2462,8 +2522,9 @@ TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
       fx.cu->step();
       ASSERT_TRUE(wf->in_trap_handler());
       ASSERT_EQ(wf->pc, kTrapHandlerAddr);
-      for (int i = 0; i < 4 && wf->in_trap_handler(); ++i)
+      for (int i = 0; i < 4 && wf->in_trap_handler(); ++i) {
         fx.cu->step();
+      }
 
       ASSERT_FALSE(wf->in_trap_handler());
       EXPECT_FALSE(wf->debug_halted());
@@ -2471,8 +2532,9 @@ TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
       EXPECT_EQ(wf->exec(), 0x80000000u);
       EXPECT_FALSE(wf->instruction_execution_failed());
 
-      for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+      for (int i = 0; i < 4 && !wf->is_halted(); ++i) {
         fx.cu->step();
+      }
       EXPECT_TRUE(wf->is_halted());
     }
   }
@@ -2489,14 +2551,16 @@ TEST(WaveDebugTest, RfeRestoreDoesNotWaitOnItsIgnoredOperand) {
       SCOPED_TRACE(resumed_wait);
       WaveDebugFixture fx(arch);
       std::vector<uint32_t> kernel = {kSTrapBreakpoint};
-      if (resumed_wait)
+      if (resumed_wait) {
         kernel.push_back(0xBF8C0000u); // s_waitcnt 0
+      }
       kernel.insert(kernel.end(), {
                                       0xBE850001u, // s_mov_b32 s5, s1
                                       kSEndpgm,
                                   });
-      for (uint32_t i = 0; i < kernel.size(); ++i)
+      for (uint32_t i = 0; i < kernel.size(); ++i) {
         fx.gpu_mem.write32(kKernelAddr + i * 4, kernel[i]);
+      }
 
       const uint32_t handler[] = {
           0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
@@ -2504,8 +2568,9 @@ TEST(WaveDebugTest, RfeRestoreDoesNotWaitOnItsIgnoredOperand) {
           0xC0020041u, 0x00000000u, // s_load_dword s1, s[2:3], 0
           0x9580016Cu,              // s_rfe_restore_b64 ttmp[0:1], s1
       };
-      for (uint32_t i = 0; i < std::size(handler); ++i)
+      for (uint32_t i = 0; i < std::size(handler); ++i) {
         fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+      }
 
       fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
         return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
@@ -2522,14 +2587,16 @@ TEST(WaveDebugTest, RfeRestoreDoesNotWaitOnItsIgnoredOperand) {
 
       fx.cu->step();
       ASSERT_TRUE(wf->in_trap_handler());
-      for (int i = 0; i < 4 && wf->in_trap_handler(); ++i)
+      for (int i = 0; i < 4 && wf->in_trap_handler(); ++i) {
         fx.cu->step();
+      }
       ASSERT_FALSE(wf->in_trap_handler());
       EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), 0u);
 
       const uint64_t endpgm = kKernelAddr + (kernel.size() - 1) * 4;
-      for (int i = 0; i < 4 && wf->pc != endpgm; ++i)
+      for (int i = 0; i < 4 && wf->pc != endpgm; ++i) {
         fx.cu->step();
+      }
       ASSERT_EQ(wf->pc, endpgm);
       EXPECT_FALSE(wf->instruction_execution_failed());
       EXPECT_EQ(fx.cu->read_sgpr(sbase + 5), kSTrapBreakpoint);
@@ -2555,8 +2622,9 @@ TEST(WaveDebugTest, RfeRestoreWaitsOnItsReturnAddress) {
         0xC0060001u, 0x00000000u, // s_load_dwordx2 s[0:1], s[2:3], 0
         0x95800500u,              // s_rfe_restore_b64 s[0:1], s5
     };
-    for (uint32_t i = 0; i < std::size(handler); ++i)
+    for (uint32_t i = 0; i < std::size(handler); ++i) {
       fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+    }
 
     fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
       return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
@@ -2572,8 +2640,9 @@ TEST(WaveDebugTest, RfeRestoreWaitsOnItsReturnAddress) {
 
     fx.cu->step();
     ASSERT_TRUE(wf->in_trap_handler());
-    for (int i = 0; i < 2 && wf->in_trap_handler(); ++i)
+    for (int i = 0; i < 2 && wf->in_trap_handler(); ++i) {
       fx.cu->step();
+    }
     ASSERT_FALSE(wf->in_trap_handler());
     EXPECT_EQ(wf->pc, kKernelAddr + 4);
     EXPECT_FALSE(wf->instruction_execution_failed());
@@ -2635,8 +2704,9 @@ TEST(WaveDebugTest, Rdna4SuppressedReturningAtomicSkipsUnmappedDebuggerProbe) {
 
   // global_atomic_add_u32 v64/v0, v[2:3], v4, off th:TH_ATOMIC_RETURN.
   constexpr std::array<uint32_t, 6> program{0xee0d407c, 0x02100040, 2, 0xee0d407c, 0x02100000, 2};
-  for (size_t i = 0; i < program.size(); ++i)
+  for (size_t i = 0; i < program.size(); ++i) {
     fx.gpu_mem.write32(kKernelAddr + 4 * i, program[i], process);
+  }
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
   ASSERT_EQ(wave->vgpr_alloc().count, 64u);
@@ -2794,8 +2864,9 @@ TEST(WaveDebugTest, SendmsghaltPublishesArchitecturalStatusHalt) {
       kSSendmsghaltInterrupt, // s_sendmsghalt sendmsg(MSG_INTERRUPT)
       0xBE801F6Cu,            // s_rfe_b64 ttmp[0:1]
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
@@ -2810,8 +2881,9 @@ TEST(WaveDebugTest, SendmsghaltPublishesArchitecturalStatusHalt) {
   ASSERT_TRUE(wf->in_trap_handler());
   ASSERT_EQ(wf->status_raw() & kStatusHalt, 0u) << "STATUS.HALT set before s_sendmsghalt";
 
-  for (int i = 0; i < 3 && !wf->debug_halted(); ++i)
+  for (int i = 0; i < 3 && !wf->debug_halted(); ++i) {
     fx.cu->step();
+  }
 
   EXPECT_TRUE(wf->debug_halted());
   EXPECT_NE(wf->status_raw() & kStatusHalt, 0u)
@@ -2844,8 +2916,9 @@ TEST(WaveDebugTest, HandlerSetregHaltIsNotAttributedToSendmsghalt) {
       0xBA000342u, 0x00000001u, // s_setreg_imm32_b32 hwreg(STATUS, 13, 1), 1
       0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
@@ -2857,8 +2930,9 @@ TEST(WaveDebugTest, HandlerSetregHaltIsNotAttributedToSendmsghalt) {
   fx.cu->step(); // s_trap -> handler
   ASSERT_TRUE(wf->in_trap_handler());
 
-  for (int i = 0; i < 4 && !wf->debug_halted(); ++i)
+  for (int i = 0; i < 4 && !wf->debug_halted(); ++i) {
     fx.cu->step();
+  }
 
   ASSERT_NE(wf->status_raw() & kStatusHalt, 0u) << "the handler's s_setreg did not raise HALT";
   EXPECT_FALSE(wf->self_halted())
@@ -2884,8 +2958,9 @@ TEST(WaveDebugTest, SelfHaltedMarkerDoesNotSurviveTheStopThatSetIt) {
       kSSendmsghaltInterrupt, // s_sendmsghalt sendmsg(MSG_INTERRUPT)
       0xBE801F6Cu,            // s_rfe_b64 ttmp[0:1]
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
@@ -2896,8 +2971,9 @@ TEST(WaveDebugTest, SelfHaltedMarkerDoesNotSurviveTheStopThatSetIt) {
   ASSERT_NE(wf, nullptr);
 
   fx.cu->step(); // s_trap -> handler
-  for (int i = 0; i < 3 && !wf->self_halted(); ++i)
+  for (int i = 0; i < 3 && !wf->self_halted(); ++i) {
     fx.cu->step();
+  }
   ASSERT_TRUE(wf->self_halted());
 
   // What a debugger resume does: drop both halves of the stop, then let the
@@ -2905,13 +2981,15 @@ TEST(WaveDebugTest, SelfHaltedMarkerDoesNotSurviveTheStopThatSetIt) {
   wf->set_status_halt(false);
   wf->set_self_halted(false);
   wf->set_debug_halted(false);
-  for (int i = 0; i < 3 && wf->in_trap_handler(); ++i)
+  for (int i = 0; i < 3 && wf->in_trap_handler(); ++i) {
     fx.cu->step();
+  }
   ASSERT_FALSE(wf->in_trap_handler()) << "the handler never returned";
   EXPECT_FALSE(wf->self_halted());
 
-  for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+  for (int i = 0; i < 4 && !wf->is_halted(); ++i) {
     fx.cu->step();
+  }
   EXPECT_TRUE(wf->is_halted());
 }
 
@@ -2945,8 +3023,9 @@ TEST(WaveDebugTest, SendmsghaltWithoutADebugSessionHaltsAndStaysReleasable) {
       0xBEFE016Eu,            // s_mov_b64 exec, ttmp[2:3]
       0xBE801F6Cu,            // s_rfe_b64 ttmp[0:1]
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   // debug_enabled clear: no debugger, so TTMP13 bit 23 stays 0 and nothing in
   // the driver is watching this wave.
@@ -2962,8 +3041,9 @@ TEST(WaveDebugTest, SendmsghaltWithoutADebugSessionHaltsAndStaysReleasable) {
   fx.cu->step(); // s_trap -> handler
   ASSERT_TRUE(wf->in_trap_handler());
 
-  for (int i = 0; i < 6 && !wf->debug_halted(); ++i)
+  for (int i = 0; i < 6 && !wf->debug_halted(); ++i) {
     fx.cu->step();
+  }
 
   EXPECT_TRUE(wf->debug_halted()) << "s_sendmsghalt did not halt an undebugged wave";
   EXPECT_NE(wf->status_raw() & kStatusHalt, 0u);
@@ -2982,14 +3062,16 @@ TEST(WaveDebugTest, SendmsghaltWithoutADebugSessionHaltsAndStaysReleasable) {
   wf->set_status_halt(false);
   wf->set_self_halted(false);
   wf->set_debug_halted(false);
-  for (int i = 0; i < 4 && wf->in_trap_handler(); ++i)
+  for (int i = 0; i < 4 && wf->in_trap_handler(); ++i) {
     fx.cu->step();
+  }
   ASSERT_FALSE(wf->in_trap_handler()) << "the handler never returned";
   EXPECT_EQ(wf->exec(), kApplicationExec)
       << "the application resumed under the handler's EXEC mask";
 
-  for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+  for (int i = 0; i < 4 && !wf->is_halted(); ++i) {
     fx.cu->step();
+  }
   EXPECT_TRUE(wf->is_halted()) << "the wave never retired, so its dispatch cannot complete";
 }
 
@@ -3013,9 +3095,10 @@ TEST(WaveDebugTest, CwsrLayoutIsModelledForGfx94AndGfx1250) {
   // RDNA layouts remain outside this codec.
   for (rocjitsu::IsaFamily arch :
        {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
-        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4})
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     EXPECT_EQ(kmd::cwsr_layout_kind(arch), kmd::CwsrLayoutKind::Unsupported)
         << "arch " << static_cast<int>(arch);
+  }
 }
 
 // TRAPSTS.EXCP is architecturally sticky, so "the bit changed" is not the same
@@ -3251,8 +3334,9 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
     page_table[kUnmappedAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {data_page.data(),
                                                                   amdgpu::Mtype::RW};
   }
-  for (int step = 0; step < 8 && fx.cu->read_sgpr(sbase + 0) != kExpectedValue; ++step)
+  for (int step = 0; step < 8 && fx.cu->read_sgpr(sbase + 0) != kExpectedValue; ++step) {
     fx.cu->step();
+  }
 
   EXPECT_EQ(fx.cu->read_sgpr(sbase + 0), kExpectedValue);
 
@@ -3275,8 +3359,9 @@ TEST(WaveDebugTest, FlatFaultUsesTheOriginalSegmentAtAnApertureBoundary) {
     pages[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {code.data(), amdgpu::Mtype::RW};
     fx.gpu_mem.register_process(process, &pages, &mutex);
     const std::array words{0xec05007cu, 0u, 0x402u}; // flat_load_b32 v0, v[2:3] offset:4
-    for (unsigned i = 0; i < words.size(); ++i)
+    for (unsigned i = 0; i < words.size(); ++i) {
       fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i], process);
+    }
     fx.cu->set_apertures(shared, shared + UINT32_MAX, 0, 0);
     auto *wave = fx.dispatch(kKernelAddr);
     ASSERT_NE(wave, nullptr);
@@ -3412,8 +3497,9 @@ TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
   EXPECT_EQ(wave->pc, kKernelAddr + 8);
 
   // The atomic completes: memory decrements and GLC returns the old qword.
-  for (int step = 0; step < 8 && fx.cu->read_sgpr(sbase + 2) != initial; ++step)
+  for (int step = 0; step < 8 && fx.cu->read_sgpr(sbase + 2) != initial; ++step) {
     fx.cu->step();
+  }
   uint64_t updated = 0;
   std::memcpy(&updated, data_page.data() + kPageSize - 8, sizeof(updated));
   EXPECT_EQ(updated, initial - 1);
@@ -3668,8 +3754,9 @@ TEST(WaveDebugTest, Rdna4TrapEntryAndReturnUseTheGfx12WaveStateLayout) {
   const uint32_t handler[] = {
       0x806C846Cu, 0x826D806Du, 0xB9800384u, 0x00000001u, 0xBE804A6Cu,
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
@@ -3681,8 +3768,9 @@ TEST(WaveDebugTest, Rdna4TrapEntryAndReturnUseTheGfx12WaveStateLayout) {
   wf->set_sleep_wakeup(true);
   wf->set_workgroup_barrier_complete(true);
   wf->set_wave_sched_mode_raw(kSchedMode);
-  for (uint32_t i = 6; i <= 9; ++i)
+  for (uint32_t i = 6; i <= 9; ++i) {
     wf->set_ttmp(i, 0xB6000000u + i);
+  }
 
   fx.cu->step();
   ASSERT_TRUE(wf->in_trap_handler());
@@ -3690,14 +3778,16 @@ TEST(WaveDebugTest, Rdna4TrapEntryAndReturnUseTheGfx12WaveStateLayout) {
   EXPECT_EQ(wf->pc, kTrapHandlerAddr);
   EXPECT_EQ(wf->ttmp(0), static_cast<uint32_t>(kHighKernelAddr));
   EXPECT_EQ(wf->ttmp(1), 0x38001234u);
-  for (uint32_t i = 6; i <= 9; ++i)
+  for (uint32_t i = 6; i <= 9; ++i) {
     EXPECT_EQ(wf->ttmp(i), 0xB6000000u + i) << "TTMP" << i << " was not preserved";
+  }
   EXPECT_EQ(wf->ttmp(11), 1u << 23);
   EXPECT_EQ(wf->ttmp(12), (1u << 1) | (1u << 2) | (1u << 9) | (0xAu << 10));
   EXPECT_NE(wf->status_raw() & (1u << 5), 0u) << "trap entry did not enter privileged mode";
 
-  for (int i = 0; i < 4; ++i)
+  for (int i = 0; i < 4; ++i) {
     fx.cu->step();
+  }
 
   EXPECT_FALSE(wf->in_trap_handler());
   EXPECT_TRUE(wf->sleep_wakeup());
@@ -3728,8 +3818,9 @@ TEST(WaveDebugTest, Gfx1250TrapEntryAndReturnFollowTheGfx12Abi) {
   const uint32_t handler[] = {
       0x806C846Cu, 0x826D806Du, 0xB9800384u, 0x00000001u, 0xBE804A6Cu,
   };
-  for (uint32_t i = 0; i < std::size(handler); ++i)
+  for (uint32_t i = 0; i < std::size(handler); ++i) {
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+  }
 
   fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
     return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x123456789ABCuLL, true};
@@ -3741,24 +3832,27 @@ TEST(WaveDebugTest, Gfx1250TrapEntryAndReturnFollowTheGfx12Abi) {
   wf->set_sleep_wakeup(true);
   wf->set_workgroup_barrier_complete(true);
   wf->set_scratch_base(kScratchBase);
-  for (uint32_t i = 6; i <= 9; ++i)
+  for (uint32_t i = 6; i <= 9; ++i) {
     wf->set_ttmp(i, 0xA5000000u + i);
+  }
 
   fx.cu->step();
   ASSERT_TRUE(wf->in_trap_handler());
   EXPECT_EQ(wf->pc, kTrapHandlerAddr);
   EXPECT_EQ(wf->ttmp(0), static_cast<uint32_t>(kHighKernelAddr));
   EXPECT_EQ(wf->ttmp(1), 0x31000000u);
-  for (uint32_t i = 6; i <= 9; ++i)
+  for (uint32_t i = 6; i <= 9; ++i) {
     EXPECT_EQ(wf->ttmp(i), 0xA5000000u + i) << "TTMP" << i << " was not preserved";
+  }
   EXPECT_EQ(wf->ttmp(11), 1u << 23);
   EXPECT_EQ(wf->ttmp(12), (1u << 1) | (1u << 2) | (1u << 9) | (0xAu << 10) | (1u << 18));
   EXPECT_EQ(wf->ttmp(14), 0x56789ABCu);
   EXPECT_EQ(wf->ttmp(15), 0x00001234u);
   EXPECT_NE(wf->status_raw() & (1u << 5), 0u) << "trap entry did not enter privileged mode";
 
-  for (int i = 0; i < 4; ++i)
+  for (int i = 0; i < 4; ++i) {
     fx.cu->step();
+  }
 
   EXPECT_FALSE(wf->in_trap_handler());
   EXPECT_TRUE(wf->sleep_wakeup());
@@ -3777,10 +3871,12 @@ TEST(WaveDebugTest, TrapRegistersRoundTripAndReset) {
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
 
-  for (uint32_t i = 0; i < 16; ++i)
+  for (uint32_t i = 0; i < 16; ++i) {
     wf->set_ttmp(i, 0x1000 + i);
-  for (uint32_t i = 0; i < 16; ++i)
+  }
+  for (uint32_t i = 0; i < 16; ++i) {
     EXPECT_EQ(wf->ttmp(i), 0x1000 + i);
+  }
   EXPECT_EQ(wf->ttmp(16), 0u); // out of range reads zero
 
   wf->set_trapsts(0xDEAD);
@@ -3798,8 +3894,9 @@ TEST(WaveDebugTest, TrapRegistersRoundTripAndReset) {
   EXPECT_EQ(wf->trap_id(), 0u);
   EXPECT_EQ(wf->trapsts(), 0u);
   EXPECT_EQ(wf->queue_id(), 0u);
-  for (uint32_t i = 0; i < 16; ++i)
+  for (uint32_t i = 0; i < 16; ++i) {
     EXPECT_EQ(wf->ttmp(i), 0u);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -3845,8 +3942,9 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
   const uint32_t words = cs_size / 4;
   for (uint32_t i = 2; i < words; ++i) {
     uint32_t rl = rd(base + cs_off + i * 4);
-    if (rl & (1u << 30))
+    if (rl & (1u << 30)) {
       continue; // event
+    }
     if (rl & (1u << 31)) {
       state = rl;
       continue;
@@ -3886,17 +3984,21 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
     const uint32_t vcc_lo_slot = std::min<uint32_t>(108, sgpr_count) - 2;
     pw.vcc = rd64(sgprs_addr + vcc_lo_slot * 4);
     pw.sgprs.resize(sgpr_count);
-    for (uint32_t s = 0; s < sgpr_count; ++s)
+    for (uint32_t s = 0; s < sgpr_count; ++s) {
       pw.sgprs[s] = rd(sgprs_addr + s * 4);
+    }
     pw.vgprs.resize(static_cast<size_t>(vgpr_count) * 64);
-    for (uint32_t r = 0; r < vgpr_count; ++r)
-      for (uint32_t l = 0; l < 64; ++l)
+    for (uint32_t r = 0; r < vgpr_count; ++r) {
+      for (uint32_t l = 0; l < 64; ++l) {
         pw.vgprs[r * 64 + l] = rd(vgprs_addr + r * 256 + l * 4);
+      }
+    }
     if (pw.first) {
       pw.lds.resize(lds_size);
-      for (uint32_t byte = 0; byte < lds_size; ++byte)
+      for (uint32_t byte = 0; byte < lds_size; ++byte) {
         pw.lds[byte] =
             static_cast<uint8_t>(rd(register_area_end + (byte & ~3u)) >> ((byte & 3u) * 8));
+      }
     }
     out.push_back(std::move(pw));
     last_wave_area = vgprs_addr;
@@ -3924,12 +4026,15 @@ kmd::CwsrWaveState make_wave(uint64_t id, uint64_t pc) {
   w.num_sgprs = 16;
   w.num_vgprs = 4;
   w.sgprs.resize(w.num_sgprs);
-  for (uint32_t s = 0; s < w.num_sgprs; ++s)
+  for (uint32_t s = 0; s < w.num_sgprs; ++s) {
     w.sgprs[s] = 0x1000 + s;
+  }
   w.vgprs.resize(static_cast<size_t>(w.num_vgprs) * 64);
-  for (uint32_t r = 0; r < w.num_vgprs; ++r)
-    for (uint32_t l = 0; l < 64; ++l)
+  for (uint32_t r = 0; r < w.num_vgprs; ++r) {
+    for (uint32_t l = 0; l < 64; ++l) {
       w.vgprs[r * 64 + l] = (r << 16) | l;
+    }
+  }
   return w;
 }
 
@@ -3992,8 +4097,9 @@ TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
   wave.spi_ttmps_setup = true;
   wave.num_sgprs = 112;
   wave.sgprs.resize(wave.num_sgprs);
-  for (uint32_t s = 0; s < wave.num_sgprs; ++s)
+  for (uint32_t s = 0; s < wave.num_sgprs; ++s) {
     wave.sgprs[s] = 0x51000000u + s;
+  }
   wave.lds = {0x11, 0x22, 0x33, 0x44};
 
   std::map<uint64_t, uint32_t> mem;
@@ -4059,9 +4165,11 @@ TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
   EXPECT_EQ(restored.queue_packet_id, wave.queue_packet_id);
   EXPECT_EQ(restored.trap_id, wave.trap_id);
   EXPECT_EQ(restored.lds, wave.lds);
-  for (uint32_t r = 0; r < wave.num_vgprs; ++r)
-    for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t r = 0; r < wave.num_vgprs; ++r) {
+    for (uint32_t lane = 0; lane < 32; ++lane) {
       EXPECT_EQ(restored.vgprs[r * 64 + lane], wave.vgprs[r * 64 + lane]);
+    }
+  }
 }
 
 TEST(WaveDebugTest, Gfx1250CwsrAcceptsTheFullAddressableVgprFile) {
@@ -4218,11 +4326,14 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
     EXPECT_TRUE(out.ttmp11 & (1u << 31));
     EXPECT_EQ((out.ttmp11 >> 6) & 0x1FFFFFF, in.queue_packet_id);
     // Meaningful scalars and vectors round-trip.
-    for (uint32_t s = 0; s < in.num_sgprs; ++s)
+    for (uint32_t s = 0; s < in.num_sgprs; ++s) {
       EXPECT_EQ(out.sgprs[s], in.sgprs[s]) << "sgpr " << s;
-    for (uint32_t r = 0; r < in.num_vgprs; ++r)
-      for (uint32_t l = 0; l < 64; ++l)
+    }
+    for (uint32_t r = 0; r < in.num_vgprs; ++r) {
+      for (uint32_t l = 0; l < 64; ++l) {
         EXPECT_EQ(out.vgprs[r * 64 + l], in.vgprs[r * 64 + l]) << "vgpr " << r << " lane " << l;
+      }
+    }
     if (in.is_first_in_group) {
       ASSERT_GE(out.lds.size(), in.lds.size());
       EXPECT_TRUE(std::ranges::equal(in.lds, std::span(out.lds).first(in.lds.size())));
@@ -4298,8 +4409,9 @@ TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
     SCOPED_TRACE(static_cast<int>(arch));
     std::vector<kmd::CwsrWaveState> waves = {make_wave(1, 0x1000), make_wave(2, 0x2000),
                                              make_wave(3, 0x3000)};
-    for (size_t i = 0; i < waves.size(); ++i)
+    for (size_t i = 0; i < waves.size(); ++i) {
       waves[i].group_ids[0] = static_cast<uint32_t>(i + 1);
+    }
     waves[0].lds.resize(4096, 0x5a);
 
     std::map<uint64_t, uint32_t> mem;
@@ -4338,14 +4450,16 @@ TEST(WaveDebugTest, GroupLdsChangesPreserveRuntimeContextBoundaries) {
     SCOPED_TRACE(static_cast<int>(arch));
     std::vector<kmd::CwsrWaveState> waves = {make_wave(1, 0x1000), make_wave(2, 0x2000),
                                              make_wave(3, 0x3000)};
-    for (size_t i = 0; i < waves.size(); ++i)
+    for (size_t i = 0; i < waves.size(); ++i) {
       waves[i].group_ids[0] = static_cast<uint32_t>(i + 1);
+    }
     waves[0].lds.assign(5121, 0x5A);
     waves[1].lds.clear();
     waves[2].lds.assign(129, 0x7C);
     std::map<uint64_t, uint32_t> mem;
-    for (size_t i = 0; i < runtime_fields.size(); ++i)
+    for (size_t i = 0; i < runtime_fields.size(); ++i) {
       mem[kCtxBase + 16 + i * sizeof(uint32_t)] = runtime_fields[i];
+    }
     auto write32 = [&](uint64_t address, uint32_t value) { mem[address] = value; };
     auto read32 = [&](uint64_t address) { return mem.at(address); };
     const auto layout =
@@ -4356,14 +4470,16 @@ TEST(WaveDebugTest, GroupLdsChangesPreserveRuntimeContextBoundaries) {
     EXPECT_EQ(layout.control_stack_size, (2 + waves.size() * (state_words + 1)) * sizeof(uint32_t));
     EXPECT_EQ(layout.control_stack_offset + layout.control_stack_size, kControlStackCapacity);
     EXPECT_EQ(layout.wave_state_offset - layout.wave_state_size, kControlStackCapacity);
-    for (size_t i = 0; i < runtime_fields.size(); ++i)
+    for (size_t i = 0; i < runtime_fields.size(); ++i) {
       EXPECT_EQ(read32(kCtxBase + 16 + i * sizeof(uint32_t)), runtime_fields[i]);
+    }
     if (arch != rocjitsu::IsaFamily::Cdna5) {
       const uint32_t granule = arch == rocjitsu::IsaFamily::Cdna3 ? 512 : 1280;
       const auto parsed = parse_cwsr(mem, kCtxBase, granule);
       ASSERT_EQ(parsed.size(), waves.size());
-      for (size_t i = 0; i < waves.size(); ++i)
+      for (size_t i = 0; i < waves.size(); ++i) {
         EXPECT_EQ(parsed[i].lds.size(), (waves[i].lds.size() + granule - 1) / granule * granule);
+      }
     }
     auto restored = waves;
     for (auto &wave : restored) {
@@ -4443,8 +4559,9 @@ TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
   std::vector<kmd::CwsrWaveState> in = {make_wave(0xCC01, 0x3000)};
   in[0].num_sgprs = kMaxAcceptedSgprs;
   in[0].sgprs.resize(kMaxAcceptedSgprs);
-  for (uint32_t s = 0; s < kMaxAcceptedSgprs; ++s)
+  for (uint32_t s = 0; s < kMaxAcceptedSgprs; ++s) {
     in[0].sgprs[s] = 0xA5A50000u + s;
+  }
   in[0].flat_scratch = kFlatScratch;
   in[0].vcc = 0x0123456789ABCDEFULL;
 
@@ -4466,10 +4583,11 @@ TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
   // pairs and are ordinary registers. That is why the predicate is an explicit
   // slot test and not a bound.
   for (uint32_t s = 0; s < kMaxAcceptedSgprs; ++s) {
-    if (kmd::cwsr_sgpr_slot_is_aliased(s, rocjitsu::IsaFamily::Cdna4))
+    if (kmd::cwsr_sgpr_slot_is_aliased(s, rocjitsu::IsaFamily::Cdna4)) {
       EXPECT_EQ(out[0].sgprs[s], 0u) << "aliased slot " << s << " decoded as an SGPR";
-    else
+    } else {
       EXPECT_EQ(out[0].sgprs[s], in[0].sgprs[s]) << "sgpr " << s << " did not survive";
+    }
   }
   // Pin the two slots the "everything at or above 102 is an alias" shortcut
   // would silently drop, so a future simplification back to a bound fails here.
@@ -4554,12 +4672,15 @@ TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
     EXPECT_EQ(out[i].group_ids, in[i].group_ids);
     EXPECT_EQ(out[i].wave_in_group, in[i].wave_in_group);
     EXPECT_EQ(out[i].queue_packet_id, in[i].queue_packet_id);
-    for (uint32_t s = 0; s < in[i].num_sgprs; ++s)
+    for (uint32_t s = 0; s < in[i].num_sgprs; ++s) {
       EXPECT_EQ(out[i].sgprs[s], in[i].sgprs[s]) << "wave " << i << " sgpr " << s;
-    for (uint32_t r = 0; r < in[i].num_vgprs; ++r)
-      for (uint32_t l = 0; l < 64; ++l)
+    }
+    for (uint32_t r = 0; r < in[i].num_vgprs; ++r) {
+      for (uint32_t l = 0; l < 64; ++l) {
         EXPECT_EQ(out[i].vgprs[r * 64 + l], in[i].vgprs[r * 64 + l])
             << "wave " << i << " vgpr " << r << " lane " << l;
+      }
+    }
   }
 }
 

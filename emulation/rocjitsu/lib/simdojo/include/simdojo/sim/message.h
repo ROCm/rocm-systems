@@ -134,8 +134,9 @@ public:
   /// @retval true Message was enqueued successfully.
   /// @retval false Queue is full; message was not enqueued.
   bool push(std::unique_ptr<Message> msg) {
-    if (entries_.size() >= capacity_)
+    if (entries_.size() >= capacity_) {
       return false;
+    }
     entries_.push_back(std::move(msg));
     std::ranges::push_heap(entries_, ptr_greater);
     return true;

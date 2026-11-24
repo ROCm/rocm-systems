@@ -22,8 +22,9 @@ using rocjitsu::amdgpu::XcdShard;
 /// Enumerate every grid-wide chunk ordinal owned by @p shard.
 std::vector<uint32_t> owned_ordinals(XcdShard shard, uint32_t total_chunks) {
   std::vector<uint32_t> ordinals;
-  for (uint32_t i = 0; i < shard.owned_chunks(total_chunks); ++i)
+  for (uint32_t i = 0; i < shard.owned_chunks(total_chunks); ++i) {
     ordinals.push_back(shard.nth_owned_chunk(i));
+  }
   return ordinals;
 }
 
@@ -63,8 +64,9 @@ TEST(XcdShardTest, ChunkOrdinalMapsToRankModuloStride) {
 
   for (uint32_t rank = 0; rank < kStride; ++rank) {
     XcdShard shard{rank, kStride};
-    for (uint32_t ordinal : owned_ordinals(shard, kTotalChunks))
+    for (uint32_t ordinal : owned_ordinals(shard, kTotalChunks)) {
       ASSERT_EQ(ordinal % kStride, rank) << "rank " << rank << " ordinal " << ordinal;
+    }
   }
 }
 
@@ -78,14 +80,16 @@ TEST(XcdShardTest, ShardsPartitionTheGridExactly) {
     for (uint32_t rank = 0; rank < kStride; ++rank) {
       XcdShard shard{rank, kStride};
       summed += shard.owned_chunks(total_chunks);
-      for (uint32_t ordinal : owned_ordinals(shard, total_chunks))
+      for (uint32_t ordinal : owned_ordinals(shard, total_chunks)) {
         seen.insert(ordinal);
+      }
     }
 
     EXPECT_EQ(summed, total_chunks) << "total_chunks " << total_chunks;
     ASSERT_EQ(seen.size(), total_chunks) << "total_chunks " << total_chunks;
-    for (uint32_t ordinal = 0; ordinal < total_chunks; ++ordinal)
+    for (uint32_t ordinal = 0; ordinal < total_chunks; ++ordinal) {
       EXPECT_EQ(seen.count(ordinal), 1u) << "ordinal " << ordinal << " of " << total_chunks;
+    }
   }
 }
 
@@ -96,20 +100,24 @@ TEST(XcdShardTest, ShardSmallerThanStrideLeavesHighRanksEmpty) {
   constexpr uint32_t kStride = 8;
   constexpr uint32_t kTotalChunks = 3;
 
-  for (uint32_t rank = 0; rank < kTotalChunks; ++rank)
+  for (uint32_t rank = 0; rank < kTotalChunks; ++rank) {
     EXPECT_EQ(XcdShard(rank, kStride).owned_chunks(kTotalChunks), 1u) << "rank " << rank;
-  for (uint32_t rank = kTotalChunks; rank < kStride; ++rank)
+  }
+  for (uint32_t rank = kTotalChunks; rank < kStride; ++rank) {
     EXPECT_EQ(XcdShard(rank, kStride).owned_chunks(kTotalChunks), 0u) << "rank " << rank;
+  }
 }
 
 TEST(XcdShardTest, UnevenGridDistributesRemainderToLowRanks) {
   constexpr uint32_t kStride = 8;
   constexpr uint32_t kTotalChunks = 100; // 12 each, remainder 4
 
-  for (uint32_t rank = 0; rank < 4; ++rank)
+  for (uint32_t rank = 0; rank < 4; ++rank) {
     EXPECT_EQ(XcdShard(rank, kStride).owned_chunks(kTotalChunks), 13u) << "rank " << rank;
-  for (uint32_t rank = 4; rank < kStride; ++rank)
+  }
+  for (uint32_t rank = 4; rank < kStride; ++rank) {
     EXPECT_EQ(XcdShard(rank, kStride).owned_chunks(kTotalChunks), 12u) << "rank " << rank;
+  }
 }
 
 // A maximal grid must not wrap. The usual (n + stride - 1) / stride ceiling
@@ -123,8 +131,9 @@ TEST(XcdShardTest, MaximalGridDoesNotOverflow) {
 
   // The shares of a maximal grid still partition it exactly.
   uint64_t summed = 0;
-  for (uint32_t rank = 0; rank < kStride; ++rank)
+  for (uint32_t rank = 0; rank < kStride; ++rank) {
     summed += XcdShard(rank, kStride).owned_chunks(kMax);
+  }
   EXPECT_EQ(summed, static_cast<uint64_t>(kMax));
 
   // Counting correctly is only half of it: the mapper multiplies the shard-local
@@ -171,9 +180,10 @@ TEST(XcdShardTest, NonPowerOfTwoStridePartitionsExactly) {
 
       EXPECT_EQ(summed, total) << "stride " << stride << " total " << total;
       ASSERT_EQ(seen.size(), total) << "stride " << stride << " total " << total;
-      for (uint32_t ordinal = 0; ordinal < total; ++ordinal)
+      for (uint32_t ordinal = 0; ordinal < total; ++ordinal) {
         EXPECT_EQ(seen.count(ordinal), 1u)
             << "ordinal " << ordinal << " stride " << stride << " total " << total;
+      }
     }
   }
 }
@@ -202,8 +212,9 @@ TEST(XcdShardTest, EntryWalksItsOwnShareOfTheGrid) {
   // missing, since the insert count is fixed at kStride * share. Require every
   // ordinal of the grid exactly once.
   ASSERT_EQ(seen.size(), kGridWgs);
-  for (uint32_t wg = 0; wg < kGridWgs; ++wg)
+  for (uint32_t wg = 0; wg < kGridWgs; ++wg) {
     EXPECT_EQ(seen.count(wg), 1u) << "workgroup " << wg << " not covered exactly once";
+  }
 }
 
 // A clustered dispatch shards by whole clusters so cluster peers stay
@@ -231,8 +242,9 @@ TEST(XcdShardTest, ClusteredEntryShardsByWholeClusters) {
 
   // Every owned cluster ordinal belongs to this rank, and the workgroups of a
   // cluster are never split across ranks.
-  for (uint32_t i = 0; i < entry.total_wgs / kClusterSize; ++i)
+  for (uint32_t i = 0; i < entry.total_wgs / kClusterSize; ++i) {
     EXPECT_EQ(entry.chunk_ordinal_for(i) % kStride, 3u);
+  }
 }
 
 // An unsharded entry must walk the grid exactly as it did before sharding
@@ -241,8 +253,9 @@ TEST(XcdShardTest, UnshardedEntryWalksTheGridUnchanged) {
   DispatchEntry entry;
   entry.grid_wgs_x = 100;
   entry.total_wgs = 100;
-  for (uint32_t i = 0; i < entry.total_wgs; ++i)
+  for (uint32_t i = 0; i < entry.total_wgs; ++i) {
     EXPECT_EQ(entry.chunk_ordinal_for(i), i);
+  }
 }
 
 // The reason the packet kind is stored rather than inferred. A grid smaller

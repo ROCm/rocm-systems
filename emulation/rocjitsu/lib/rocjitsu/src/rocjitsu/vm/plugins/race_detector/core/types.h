@@ -129,8 +129,9 @@ struct WaitCounterUpdate {
 /// or more counters; counters absent from this list retain their prior state.
 struct PendingWaitCount {
   void add(amdgpu::WaitCounterType type, int threshold) {
-    if (threshold >= 0)
+    if (threshold >= 0) {
       updates.push_back({type, threshold});
+    }
   }
 
   [[nodiscard]] bool empty() const { return updates.empty(); }

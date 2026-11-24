@@ -425,10 +425,12 @@ public:
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
-    if (!wf || reg.cls != RegClass::SGPR)
+    if (!wf || reg.cls != RegClass::SGPR) {
       return;
-    for (uint32_t offset = 0; offset < reg.width; ++offset)
+    }
+    for (uint32_t offset = 0; offset < reg.width; ++offset) {
       onAmdgpuReadSgpr(wf, wf->sgpr_alloc().base + reg.index + offset);
+    }
   }
 
   /// Called when an architectural scalar register is written during instruction execution.

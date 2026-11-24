@@ -81,8 +81,9 @@ TEST_P(CacheAllocationFailureTest, ReturningHandlerRetriesWithZeroContents) {
     evicted.valid = true;
     TestCache::Allocation allocation = store.allocate_with_data(addr, /*vmid=*/0, &evicted);
     EXPECT_FALSE(evicted.valid);
-    for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+    for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i) {
       EXPECT_EQ(allocation.data[i], 0);
+    }
   }
 }
 
@@ -142,8 +143,9 @@ TEST_P(CacheAllocationFailureTest, LazyCleanVictimAllocationMaterializesOnFirstF
   ASSERT_NE(line.tag, nullptr);
   ASSERT_NE(line.data, nullptr);
   EXPECT_TRUE(store.lookup(0, nullptr, /*vmid=*/7));
-  for (uint32_t byte = 0; byte < LazyCache::LINE_SIZE; ++byte)
+  for (uint32_t byte = 0; byte < LazyCache::LINE_SIZE; ++byte) {
     EXPECT_EQ(line.data[byte], 0);
+  }
 }
 
 TEST_P(CacheAllocationFailureTest, LazyReturningHandlerRetriesWithZeroContents) {
@@ -153,8 +155,9 @@ TEST_P(CacheAllocationFailureTest, LazyReturningHandlerRetriesWithZeroContents) 
   auto line = store.allocate_with_data(0, /*vmid=*/7);
   EXPECT_EQ(handler_calls, 2u);
   EXPECT_EQ(failures_remaining, 0u);
-  for (uint32_t byte = 0; byte < LazyCache::LINE_SIZE; ++byte)
+  for (uint32_t byte = 0; byte < LazyCache::LINE_SIZE; ++byte) {
     EXPECT_EQ(line.data[byte], 0);
+  }
 }
 
 TEST_P(CacheAllocationFailureTest, LazyResidentCopyAndInvalidationPreserveIndependentContents) {

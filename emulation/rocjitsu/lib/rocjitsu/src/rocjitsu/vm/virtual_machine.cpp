@@ -21,8 +21,9 @@ VirtualMachine::VirtualMachine() : simdojo::CompositeComponent("vm") { set_weigh
 std::unique_ptr<VirtualMachine> VirtualMachine::create(const Config &config,
                                                        util::DiagnosticEmitter emit_error) {
   auto soc = SoC::create("gpu_soc", config.soc, emit_error);
-  if (!soc)
+  if (!soc) {
     return nullptr;
+  }
   auto vm = std::unique_ptr<VirtualMachine>(new VirtualMachine());
   vm->config_ = config;
   vm->soc_ = soc.get();
@@ -50,8 +51,9 @@ VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
     auto *p = socs[i].get();
     ptrs.push_back(p);
     socs_.push_back(p);
-    if (i == 0)
+    if (i == 0) {
       soc_ = p;
+    }
     auto wrapper = std::make_unique<simdojo::CompositeComponent>("gpu" + std::to_string(i));
     wrapper->set_weight(0);
     socs[i]->move_components_to(*wrapper);
@@ -69,42 +71,48 @@ VirtualMachine::~VirtualMachine() {
   // Drain frontend-owned processes, queues, and debugger state before the core
   // queue services close their registries and detach command processors.
   driver_.reset();
-  for (SoC *soc : socs_)
+  for (SoC *soc : socs_) {
     soc->release_vm_resources();
+  }
 }
 
 void VirtualMachine::install_peer_routes(config::SystemPeerRouteProjection routes,
                                          simdojo::Topology &topology, simdojo::ExecMode mode) {
   peer_routes_ = std::move(routes);
-  if (peer_routes_.routes().empty() && !driver_)
+  if (peer_routes_.routes().empty() && !driver_) {
     return;
+  }
   std::vector<config::SystemPeerRoute> route_copy(peer_routes_.routes().begin(),
                                                   peer_routes_.routes().end());
   std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains;
   std::vector<amdgpu::DeviceCacheDomain> prepared_domains;
   coherence_domains.reserve(socs_.size());
-  if (driver_ && driver_->gpus_.size() != socs_.size())
+  if (driver_ && driver_->gpus_.size() != socs_.size()) {
     throw util::ConfigError("fabric GPU and coherence domain counts differ");
+  }
   prepared_domains.reserve(socs_.size());
   for (size_t i = 0; i < socs_.size(); ++i) {
     auto domain = socs_[i]->cache_coherence();
     coherence_domains.push_back(domain);
     if (driver_) {
-      if (driver_->gpus_[i].soc != socs_[i])
+      if (driver_->gpus_[i].soc != socs_[i]) {
         throw util::ConfigError("fabric GPU and coherence domain order differs");
+      }
       prepared_domains.push_back({std::move(domain), driver_->gpus_[i].gpu_id});
     }
   }
   auto fabric =
       std::make_unique<FabricEndpoint>(std::move(route_copy), std::move(coherence_domains));
-  if (driver_)
+  if (driver_) {
     fabric->configure_cache_writeback(std::move(prepared_domains),
                                       driver_->cache_writeback_resolver());
+  }
   fabric_endpoint_ = fabric.get();
   add_child(std::move(fabric));
   fabric_endpoint_->wire(topology, mode);
-  if (driver_)
+  if (driver_) {
     driver_->attach_fabric_endpoint(fabric_endpoint_);
+  }
 }
 
 } // namespace rocjitsu

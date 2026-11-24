@@ -23,8 +23,9 @@ namespace {
 uint32_t total_xcds(std::span<SoC *> socs) {
   uint32_t num_xcds = 0;
   for (SoC *soc : socs) {
-    if (soc)
+    if (soc) {
       num_xcds += soc->num_xcds();
+    }
   }
   return num_xcds;
 }
@@ -36,8 +37,9 @@ uint32_t available_host_threads() {
   cpu_set_t affinity;
   if (sched_getaffinity(0, sizeof(affinity), &affinity) == 0) {
     const int usable = CPU_COUNT(&affinity);
-    if (usable > 0)
+    if (usable > 0) {
       return static_cast<uint32_t>(usable);
+    }
   }
 #endif
   return std::thread::hardware_concurrency();
@@ -76,8 +78,9 @@ uint32_t clamp_xcd_partition_count(SoC *soc, uint32_t requested_partitions) {
 
 bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> socs,
                                 uint32_t num_partitions) {
-  if (num_partitions == 0)
+  if (num_partitions == 0) {
     return false;
+  }
 
   const std::vector<simdojo::Component *> components = topology.collect_all_components();
   const std::unordered_set<simdojo::Component *> topology_components(components.begin(),
@@ -85,25 +88,29 @@ bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> so
   std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_partitions;
   uint32_t global_xcd_index = 0;
   for (SoC *soc : socs) {
-    if (!soc)
+    if (!soc) {
       continue;
+    }
     for (uint32_t xcd_index = 0; xcd_index < soc->num_xcds(); ++xcd_index) {
       simdojo::Component *xcd = soc->xcd(xcd_index);
-      if (!topology_components.contains(xcd))
+      if (!topology_components.contains(xcd)) {
         return false;
+      }
       xcd_partitions[xcd] = global_xcd_index % num_partitions;
       ++global_xcd_index;
     }
   }
 
-  if (xcd_partitions.empty())
+  if (xcd_partitions.empty()) {
     return false;
+  }
 
   auto partitioned = topology.partition_manual(num_partitions, [&](simdojo::Component *component) {
     for (auto *candidate = component; candidate != nullptr;) {
       auto it = xcd_partitions.find(candidate);
-      if (it != xcd_partitions.end())
+      if (it != xcd_partitions.end()) {
         return it->second;
+      }
 
       auto *parent = candidate->parent();
       candidate = dynamic_cast<simdojo::Component *>(parent);

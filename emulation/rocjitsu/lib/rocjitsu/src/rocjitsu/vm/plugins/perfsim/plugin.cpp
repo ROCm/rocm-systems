@@ -53,8 +53,9 @@ public:
   InstanceClaim() = default;
 
   util::Result acquire(util::DiagnosticEmitter diagnostic) {
-    if (claimed().test_and_set(std::memory_order_acq_rel))
+    if (claimed().test_and_set(std::memory_order_acq_rel)) {
       return diagnostic.emit() << "only one Perfsim plugin instance may be active in a process";
+    }
     owns_claim_ = true;
     return util::Result::success();
   }
@@ -98,13 +99,15 @@ util::FailureOr<util::LibraryHandle> retain_backend_library(const std::string &p
   BackendLibraryRegistry &registry = backend_libraries();
   std::lock_guard lock(registry.mutex);
 
-  if (const auto iter = registry.by_path.find(path); iter != registry.by_path.end())
+  if (const auto iter = registry.by_path.find(path); iter != registry.by_path.end()) {
     return iter->second;
+  }
 
   util::LibraryHandle handle = util::open_library(path.c_str());
-  if (!handle)
+  if (!handle) {
     return diagnostic.emit() << "cannot load Perfsim backend '" << path
                              << "': " << util::last_library_error();
+  }
   registry.by_path.emplace(path, handle);
   return handle;
 }
@@ -115,8 +118,9 @@ public:
 
   util::Result open(const std::string &path, util::DiagnosticEmitter diagnostic) {
     const util::FailureOr<util::LibraryHandle> handle = retain_backend_library(path, diagnostic);
-    if (handle.failed())
+    if (handle.failed()) {
       return util::Result::failure();
+    }
     handle_ = handle.value();
     return util::Result::success();
   }
@@ -139,25 +143,30 @@ struct AdapterConfig {
 
 util::FailureOr<AdapterConfig> parse_config(const char *config_json,
                                             util::DiagnosticEmitter diagnostic) {
-  if (!config_json)
+  if (!config_json) {
     return diagnostic.emit() << "Perfsim plugin configuration is null";
+  }
 
   flexbuffers::Builder builder;
   flatbuffers::Parser parser;
-  if (!parser.ParseFlexBuffer(config_json, nullptr, &builder))
+  if (!parser.ParseFlexBuffer(config_json, nullptr, &builder)) {
     return diagnostic.emit() << "Perfsim plugin configuration is not valid JSON";
+  }
 
   const auto root = flexbuffers::GetRoot(builder.GetBuffer());
-  if (!root.IsMap())
+  if (!root.IsMap()) {
     return diagnostic.emit() << "Perfsim plugin configuration must be an object";
+  }
   const auto config = root.AsMap();
   const auto path = config["library_path"];
-  if (!path.IsString() || path.AsString().size() == 0)
+  if (!path.IsString() || path.AsString().size() == 0) {
     return diagnostic.emit() << "Perfsim plugin requires a non-empty string 'library_path'";
+  }
   AdapterConfig result;
   result.library_path.assign(path.AsString().c_str(), path.AsString().size());
-  if (!std::filesystem::path(result.library_path).is_absolute())
+  if (!std::filesystem::path(result.library_path).is_absolute()) {
     return diagnostic.emit() << "Perfsim plugin 'library_path' must be absolute";
+  }
 
   const auto dispatch_name = config["dispatch_name"];
   if (!dispatch_name.IsNull()) {
@@ -174,10 +183,12 @@ util::FailureOr<AdapterConfig> parse_config(const char *config_json,
       return diagnostic.emit() << "Perfsim plugin 'max_staged_bytes' must be a positive integer";
     }
     const uint64_t value = max_staged_bytes.AsUInt64();
-    if (value == 0)
+    if (value == 0) {
       return diagnostic.emit() << "Perfsim plugin 'max_staged_bytes' must be a positive integer";
-    if (value > std::numeric_limits<size_t>::max())
+    }
+    if (value > std::numeric_limits<size_t>::max()) {
       return diagnostic.emit() << "Perfsim plugin 'max_staged_bytes' is too large";
+    }
     result.max_staged_bytes = static_cast<size_t>(value);
   }
 
@@ -189,11 +200,13 @@ util::FailureOr<AdapterConfig> parse_config(const char *config_json,
              << "Perfsim plugin 'max_observed_workgroups' must be a positive integer";
     }
     const uint64_t value = max_observed_workgroups.AsUInt64();
-    if (value == 0)
+    if (value == 0) {
       return diagnostic.emit()
              << "Perfsim plugin 'max_observed_workgroups' must be a positive integer";
-    if (value > std::numeric_limits<size_t>::max())
+    }
+    if (value > std::numeric_limits<size_t>::max()) {
       return diagnostic.emit() << "Perfsim plugin 'max_observed_workgroups' is too large";
+    }
     result.max_observed_workgroups = static_cast<size_t>(value);
   }
   return result;
@@ -253,10 +266,11 @@ FfmInstructionCounters instruction_counters(const Instruction &inst) {
     if (addressing == amdgpu::MemoryAddressing::Global ||
         addressing == amdgpu::MemoryAddressing::Scratch ||
         addressing == amdgpu::MemoryAddressing::Cluster) {
-      if (inst.amdgpu_memory_kind() == amdgpu::MemoryKind::Store)
+      if (inst.amdgpu_memory_kind() == amdgpu::MemoryKind::Store) {
         counters.global_scratch_store = 1;
-      else
+      } else {
         counters.global_scratch_load = 1;
+      }
     }
   } else if (is_cdna5_smem(inst)) {
     counters.smem_count = 1;
@@ -271,28 +285,39 @@ FfmInstructionCounters instruction_counters(const Instruction &inst) {
 
 FfmWaitInfo wait_info(const Instruction &inst) {
   const amdgpu::Operation operation = inst.amdgpu_operation();
-  if (operation == amdgpu::Operation::S_WAIT_LOADCNT)
+  if (operation == amdgpu::Operation::S_WAIT_LOADCNT) {
     return {FFM_WAIT_TYPE_LOAD, FFM_WAIT_NAME_S_WAIT_LOADCNT};
-  if (operation == amdgpu::Operation::S_WAIT_XCNT)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_XCNT) {
     return {FFM_WAIT_TYPE_LOAD, FFM_WAIT_NAME_S_WAIT_XCNT};
-  if (operation == amdgpu::Operation::S_WAIT_LOADCNT_DSCNT)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_LOADCNT_DSCNT) {
     return {FFM_WAIT_TYPE_LOAD, FFM_WAIT_NAME_S_WAIT_LOADCNT_DSCNT};
-  if (operation == amdgpu::Operation::S_WAIT_SAMPLECNT)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_SAMPLECNT) {
     return {FFM_WAIT_TYPE_SAMPLE, FFM_WAIT_NAME_S_WAIT_SAMPLECNT};
-  if (operation == amdgpu::Operation::S_WAIT_DSCNT)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_DSCNT) {
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_DSCNT};
-  if (operation == amdgpu::Operation::S_WAIT_STORECNT_DSCNT)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_STORECNT_DSCNT) {
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_STORECNT_DSCNT};
-  if (operation == amdgpu::Operation::S_WAIT_KMCNT)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_KMCNT) {
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_KMCNT};
-  if (operation == amdgpu::Operation::S_WAIT_TENSORCNT)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_TENSORCNT) {
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_TENSORCNT};
-  if (operation == amdgpu::Operation::S_WAIT_IDLE)
+  }
+  if (operation == amdgpu::Operation::S_WAIT_IDLE) {
     return {FFM_WAIT_TYPE_VM, FFM_WAIT_NAME_S_WAIT_IDLE};
-  if (operation == amdgpu::Operation::S_WAITCNT)
+  }
+  if (operation == amdgpu::Operation::S_WAITCNT) {
     return {FFM_WAIT_TYPE_VM, FFM_WAIT_NAME_S_WAITCNT};
-  if (operation == amdgpu::Operation::S_BARRIER_WAIT)
+  }
+  if (operation == amdgpu::Operation::S_BARRIER_WAIT) {
     return {FFM_WAIT_TYPE_BARRIER, FFM_WAIT_NAME_S_BARRIER_WAIT};
+  }
   return {FFM_WAIT_TYPE_NONE, FFM_WAIT_NAME_NONE};
 }
 
@@ -310,11 +335,13 @@ bool ffm_omits_memory_access(amdgpu::Operation operation) {
 uint32_t ffm_memory_data_size(const amdgpu::MemoryAccessObservation &access) {
   const uint64_t bytes = access.bytes_per_lane();
   if (access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL ||
-      access.addressing == amdgpu::MemoryAddressing::Global)
+      access.addressing == amdgpu::MemoryAddressing::Global) {
     return static_cast<uint32_t>(std::max<uint64_t>(4, bytes));
+  }
   if (access.addressing == amdgpu::MemoryAddressing::Buffer ||
-      access.addressing == amdgpu::MemoryAddressing::TypedBuffer)
+      access.addressing == amdgpu::MemoryAddressing::TypedBuffer) {
     return static_cast<uint32_t>(std::max<uint64_t>(1, bytes / 4) * 4);
+  }
   return static_cast<uint32_t>(bytes);
 }
 
@@ -378,8 +405,9 @@ size_t staged_dynamic_size(const OrderedEvent &event) {
   if (const auto *tdm = std::get_if<TdmEvent>(&event.payload)) {
     const uint64_t bytes = static_cast<uint64_t>(tdm->num_addresses) * sizeof(uint64_t);
     if constexpr (sizeof(size_t) < sizeof(uint64_t)) {
-      if (bytes > std::numeric_limits<size_t>::max())
+      if (bytes > std::numeric_limits<size_t>::max()) {
         return std::numeric_limits<size_t>::max();
+      }
     }
     return static_cast<size_t>(bytes);
   }
@@ -435,8 +463,9 @@ public:
                                         uint32_t encoding_dwords) {
     StaticInstructionInfo &cached = entries_[index(pc, encoding, encoding_dwords)];
     if (cached.valid && cached.pc == pc && cached.encoding_dwords == encoding_dwords &&
-        cached.encoding == encoding)
+        cached.encoding == encoding) {
       return cached;
+    }
 
     cached.pc = pc;
     cached.encoding = encoding;
@@ -476,8 +505,9 @@ const StaticInstructionInfo &classify_instruction(uint64_t pc, const Instruction
   // The cache is 448 KiB; glibc carves static TLS out of every thread's stack,
   // so it lives on the heap rather than in a binary that links this plugin.
   static thread_local std::unique_ptr<StaticInstructionCache> cache;
-  if (!cache)
+  if (!cache) {
     cache = std::make_unique<StaticInstructionCache>();
+  }
   return cache->classify(pc, inst, encoding, encoding_dwords);
 }
 
@@ -497,18 +527,23 @@ struct DispatchState {
 };
 
 std::optional<std::string> validate_dispatch(const KernelDispatchInfo &info) {
-  if (info.code_target != ROCJITSU_CODE_TARGET_GFX1250)
+  if (info.code_target != ROCJITSU_CODE_TARGET_GFX1250) {
     return std::format("code target is not gfx1250 ({})", static_cast<int>(info.code_target));
-  if (info.wave_size != 32)
+  }
+  if (info.wave_size != 32) {
     return std::format("gfx1250 dispatch has unsupported wave size {}", info.wave_size);
-  if (info.cluster_size_x != 1 || info.cluster_size_y != 1 || info.cluster_size_z != 1)
+  }
+  if (info.cluster_size_x != 1 || info.cluster_size_y != 1 || info.cluster_size_z != 1) {
     return std::format("multi-workgroup cluster [{},{},{}] is unsupported", info.cluster_size_x,
                        info.cluster_size_y, info.cluster_size_z);
+  }
   if (info.workgroup_size_x == 0 || info.workgroup_size_y == 0 || info.workgroup_size_z == 0 ||
-      info.grid_size_x == 0 || info.grid_size_y == 0 || info.grid_size_z == 0)
+      info.grid_size_x == 0 || info.grid_size_y == 0 || info.grid_size_z == 0) {
     return "grid and workgroup dimensions must be nonzero";
-  if (info.wfs_per_workgroup == 0)
+  }
+  if (info.wfs_per_workgroup == 0) {
     return "dispatch has no waves per workgroup";
+  }
   return std::nullopt;
 }
 
@@ -537,20 +572,24 @@ struct PerfsimPlugin::Impl {
   explicit Impl(PerfsimPlugin &owner) : owner(owner) {}
 
   util::Result initialize(const char *config_json, util::DiagnosticEmitter diagnostic) {
-    if (instance_claim.acquire(diagnostic).failed())
+    if (instance_claim.acquire(diagnostic).failed()) {
       return util::Result::failure();
+    }
     util::FailureOr<AdapterConfig> parsed = parse_config(config_json, diagnostic);
-    if (parsed.failed())
+    if (parsed.failed()) {
       return util::Result::failure();
+    }
     config = std::move(parsed).value();
-    if (library.open(config.library_path, diagnostic).failed())
+    if (library.open(config.library_path, diagnostic).failed()) {
       return util::Result::failure();
+    }
     const auto get_api = util::lookup_symbol<FfmObserverPluginGetApiFn>(
         library.get(), "ffm_observer_plugin_get_api");
-    if (!get_api)
+    if (!get_api) {
       return diagnostic.emit() << "Perfsim backend '" << config.library_path
                                << "' is missing ffm_observer_plugin_get_api: "
                                << util::last_library_error();
+    }
 
     FfmObserverPluginApi *raw_api = nullptr;
     for (uint32_t requested_version = FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION;;
@@ -571,28 +610,37 @@ struct PerfsimPlugin::Impl {
         std::memcpy(&api, raw_api, sizeof(api));
         break;
       }
-      if (requested_version == kOldestCompatibleApiVersion)
+      if (requested_version == kOldestCompatibleApiVersion) {
         break;
+      }
     }
-    if (!raw_api)
+    if (!raw_api) {
       return diagnostic.emit() << std::format(
                  "Perfsim backend rejected supported FFM API versions {} through {}",
                  kOldestCompatibleApiVersion, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
+    }
 
-    if (require_callback(api.on_init, "on_init", diagnostic).failed())
+    if (require_callback(api.on_init, "on_init", diagnostic).failed()) {
       return util::Result::failure();
-    if (require_callback(api.on_dispatch_begin, "on_dispatch_begin", diagnostic).failed())
+    }
+    if (require_callback(api.on_dispatch_begin, "on_dispatch_begin", diagnostic).failed()) {
       return util::Result::failure();
-    if (require_callback(api.on_dispatch_end, "on_dispatch_end", diagnostic).failed())
+    }
+    if (require_callback(api.on_dispatch_end, "on_dispatch_end", diagnostic).failed()) {
       return util::Result::failure();
-    if (require_callback(api.on_instruction, "on_instruction", diagnostic).failed())
+    }
+    if (require_callback(api.on_instruction, "on_instruction", diagnostic).failed()) {
       return util::Result::failure();
-    if (require_callback(api.on_memory_access, "on_memory_access", diagnostic).failed())
+    }
+    if (require_callback(api.on_memory_access, "on_memory_access", diagnostic).failed()) {
       return util::Result::failure();
-    if (require_callback(api.on_tdm_memory_access, "on_tdm_memory_access", diagnostic).failed())
+    }
+    if (require_callback(api.on_tdm_memory_access, "on_tdm_memory_access", diagnostic).failed()) {
       return util::Result::failure();
-    if (require_callback(api.on_shutdown, "on_shutdown", diagnostic).failed())
+    }
+    if (require_callback(api.on_shutdown, "on_shutdown", diagnostic).failed()) {
       return util::Result::failure();
+    }
     shutdown_called = false;
     return util::Result::success();
   }
@@ -606,8 +654,9 @@ struct PerfsimPlugin::Impl {
   template <typename Callback>
   util::Result require_callback(Callback callback, const char *name,
                                 util::DiagnosticEmitter diagnostic) {
-    if (!callback)
+    if (!callback) {
       return diagnostic.emit() << "Perfsim backend is missing required callback " << name;
+    }
     return util::Result::success();
   }
 
@@ -641,8 +690,9 @@ struct PerfsimPlugin::Impl {
   static void host_log(FfmLogLevel level, const char *message) noexcept {
     std::lock_guard lock(host_log_mutex());
     Impl *instance = host_log_instance();
-    if (!instance)
+    if (!instance) {
       return;
+    }
     instance->owner.sink().write(
         std::format("[perfsim:{}] {}\n", host_log_level_name(level), message ? message : ""));
   }
@@ -655,8 +705,9 @@ struct PerfsimPlugin::Impl {
 
   void deactivate_host_log() {
     std::lock_guard lock(host_log_mutex());
-    if (host_log_instance() == this)
+    if (host_log_instance() == this) {
       host_log_instance() = nullptr;
+    }
   }
 
   void write_sink(std::string_view message) {
@@ -665,26 +716,32 @@ struct PerfsimPlugin::Impl {
   }
 
   void init() {
-    if (initialized || shutdown_called)
+    if (initialized || shutdown_called) {
       return;
+    }
     const bool supports_host_log = negotiated_api_version >= 12;
-    if (supports_host_log)
+    if (supports_host_log) {
       activate_host_log();
+    }
     const FfmHostApi host{negotiated_api_version, supports_host_log ? &host_log : nullptr};
     invoke_foreign_abi(api.on_init, &host);
     initialized = true;
   }
 
   void shutdown() {
-    if (shutdown_called)
+    if (shutdown_called) {
       return;
+    }
 
     std::vector<uint32_t> incomplete_dispatches;
-    for (const auto &[dispatch_id, state] : dispatches)
-      if (state.selected && state.begun && !state.ended)
+    for (const auto &[dispatch_id, state] : dispatches) {
+      if (state.selected && state.begun && !state.ended) {
         incomplete_dispatches.push_back(dispatch_id);
-    for (uint32_t dispatch_id : incomplete_dispatches)
+      }
+    }
+    for (uint32_t dispatch_id : incomplete_dispatches) {
       reject(dispatch_id, "dispatch was incomplete at plugin shutdown");
+    }
     replay_blockers.clear();
     drain_epoch(/*shutdown=*/true);
     physical_waves.clear();
@@ -695,8 +752,9 @@ struct PerfsimPlugin::Impl {
                              *config.dispatch_name));
     }
 
-    if (initialized)
+    if (initialized) {
       invoke_foreign_abi(api.on_shutdown);
+    }
     deactivate_host_log();
     shutdown_called = true;
   }
@@ -707,8 +765,9 @@ struct PerfsimPlugin::Impl {
 
   static bool mark_rejected(DispatchState &state, std::string reason) {
     std::lock_guard lock(state.rejection_mutex);
-    if (!state.supported.load(std::memory_order_relaxed))
+    if (!state.supported.load(std::memory_order_relaxed)) {
       return false;
+    }
     state.rejection_reason = std::move(reason);
     state.supported.store(false, std::memory_order_release);
     return true;
@@ -716,8 +775,9 @@ struct PerfsimPlugin::Impl {
 
   void reject(uint32_t dispatch_id, std::string reason) {
     auto &state = dispatches[dispatch_id];
-    if (!mark_rejected(state, std::move(reason)))
+    if (!mark_rejected(state, std::move(reason))) {
       return;
+    }
     replay_blockers.erase(dispatch_id);
     purge_events(dispatch_id);
     drain_epoch(/*shutdown=*/false);
@@ -731,8 +791,9 @@ struct PerfsimPlugin::Impl {
   DispatchState *active_dispatch(uint32_t dispatch_id) {
     auto iter = dispatches.find(dispatch_id);
     if (iter == dispatches.end() || !iter->second.selected || !supported(iter->second) ||
-        !iter->second.begun || iter->second.ended)
+        !iter->second.begun || iter->second.ended) {
       return nullptr;
+    }
     return &iter->second;
   }
 
@@ -742,19 +803,23 @@ struct PerfsimPlugin::Impl {
   }
 
   bool observe_workgroup(DispatchState &dispatch, uint32_t workgroup_id) const {
-    if (!config.max_observed_workgroups)
+    if (!config.max_observed_workgroups) {
       return true;
-    if (dispatch.observed_workgroups.contains(workgroup_id))
+    }
+    if (dispatch.observed_workgroups.contains(workgroup_id)) {
       return true;
-    if (dispatch.observed_workgroups.size() >= *config.max_observed_workgroups)
+    }
+    if (dispatch.observed_workgroups.size() >= *config.max_observed_workgroups) {
       return false;
+    }
     dispatch.observed_workgroups.insert(workgroup_id);
     return true;
   }
 
   bool intentionally_unobserved(uint32_t dispatch_id, uint32_t workgroup_id) const {
-    if (!config.max_observed_workgroups)
+    if (!config.max_observed_workgroups) {
       return false;
+    }
     const auto iter = dispatches.find(dispatch_id);
     return iter != dispatches.end() && iter->second.metadata_seen && iter->second.selected &&
            !iter->second.observed_workgroups.contains(workgroup_id);
@@ -803,8 +868,9 @@ struct PerfsimPlugin::Impl {
 
   bool can_stage(uint32_t dispatch_id, size_t bytes) {
     const auto iter = dispatches.find(dispatch_id);
-    if (iter == dispatches.end() || !iter->second.selected || !supported(iter->second))
+    if (iter == dispatches.end() || !iter->second.selected || !supported(iter->second)) {
       return false;
+    }
     if (bytes > config.max_staged_bytes || staged_bytes > config.max_staged_bytes - bytes) {
       reject(dispatch_id,
              std::format("staging budget of {} bytes exceeded", config.max_staged_bytes));
@@ -830,11 +896,13 @@ struct PerfsimPlugin::Impl {
   }
 
   bool record_event(OrderedEvent event) {
-    if (!initialized)
+    if (!initialized) {
       return false;
+    }
     const size_t dynamic_bytes = staged_dynamic_size(event);
-    if (!can_stage_event(event.dispatch_id, dynamic_bytes))
+    if (!can_stage_event(event.dispatch_id, dynamic_bytes)) {
       return false;
+    }
 
     if (has_staging_slot()) {
       event_chunks.back().events.push_back({std::move(event), dynamic_bytes});
@@ -898,8 +966,9 @@ struct PerfsimPlugin::Impl {
     size_t removed_dynamic_bytes = 0;
     for (EventChunk &chunk : event_chunks) {
       std::erase_if(chunk.events, [&](const StagedEvent &staged) {
-        if (staged.event.dispatch_id != dispatch_id)
+        if (staged.event.dispatch_id != dispatch_id) {
           return false;
+        }
         removed_dynamic_bytes += staged.dynamic_bytes;
         return true;
       });
@@ -910,10 +979,12 @@ struct PerfsimPlugin::Impl {
   }
 
   void drain_epoch(bool shutdown) {
-    if (!initialized)
+    if (!initialized) {
       return;
-    if (!replay_blockers.empty())
+    }
+    if (!replay_blockers.empty()) {
       return;
+    }
 
     while (!event_chunks.empty()) {
       EventChunk chunk = std::move(event_chunks.front());
@@ -926,8 +997,9 @@ struct PerfsimPlugin::Impl {
         OrderedEvent &event = staged.event;
         const auto iter = dispatches.find(event.dispatch_id);
         if (iter != dispatches.end() && iter->second.selected && supported(iter->second) &&
-            iter->second.ended)
+            iter->second.ended) {
           replay(event);
+        }
       }
     }
     assert(staged_bytes == 0);
@@ -943,27 +1015,31 @@ struct PerfsimPlugin::Impl {
       // Subscribed wave state caches a pointer to its dispatch entry. A
       // malformed execution-end callback can arrive while waves are still
       // live, so retain that entry until every such wave has been retired.
-      if (shutdown || (iter->second.ended && iter->second.live_waves == 0))
+      if (shutdown || (iter->second.ended && iter->second.live_waves == 0)) {
         iter = dispatches.erase(iter);
-      else
+      } else {
         ++iter;
+      }
     }
   }
 
   void record_memory(PerfsimWavefrontState &wave, const amdgpu::MemoryAccessObservation &access,
                      uint64_t lane_mask, FfmResourceType resource,
                      std::span<const uint64_t> addresses) {
-    if (lane_mask == 0)
+    if (lane_mask == 0) {
       return;
+    }
 
     FfmMemoryAccess event{};
     event.instruction_id = wave.current_instruction_id;
     event.wave_info = wave.wave_info;
     event.exec_mask = lane_mask;
     event.wave_size = access.wavefront_size;
-    for (uint32_t lane = 0; lane < access.wavefront_size; ++lane)
-      if ((lane_mask & (uint64_t{1} << lane)) != 0)
+    for (uint32_t lane = 0; lane < access.wavefront_size; ++lane) {
+      if ((lane_mask & (uint64_t{1} << lane)) != 0) {
         event.addresses[lane] = addresses[lane];
+      }
+    }
     event.data_size_bytes = ffm_memory_data_size(access);
     event.resource_type = resource;
     const bool is_atomic = access.atomic_op != amdgpu::AtomicOp::NONE;
@@ -977,8 +1053,9 @@ struct PerfsimPlugin::Impl {
                            std::span<const uint64_t> addresses) {
     std::array<uint64_t, FFM_MAX_WAVE_SIZE> local_addresses{};
     for (uint32_t lane = 0; lane < access.wavefront_size; ++lane) {
-      if ((lane_mask & (uint64_t{1} << lane)) == 0)
+      if ((lane_mask & (uint64_t{1} << lane)) == 0) {
         continue;
+      }
       if (addresses[lane] < wave.lds_base) {
         reject_wave(&wave, access.dispatch_id,
                     "LDS address precedes the workgroup allocation base");
@@ -993,26 +1070,31 @@ struct PerfsimPlugin::Impl {
   void memory_access(const amdgpu::MemoryAccessObservation &access,
                      PerfsimWavefrontState *wave_hint = nullptr) {
     if (!wave_hint) {
-      if (intentionally_unselected(access.dispatch_id))
+      if (intentionally_unselected(access.dispatch_id)) {
         return;
-      if (intentionally_unobserved(access.dispatch_id, access.workgroup_id))
+      }
+      if (intentionally_unobserved(access.dispatch_id, access.workgroup_id)) {
         return;
+      }
     }
     // Current FFM does not emit ON_MEMORY_ACCESS for scalar memory.
-    if (access.route == amdgpu::MemoryRoute::SCALAR)
+    if (access.route == amdgpu::MemoryRoute::SCALAR) {
       return;
+    }
     // FFM executes these LDS operations without recording a regular-memory
     // event. Preserve the instruction callback but suppress RocJITsu's routing
     // observation.
-    if (ffm_omits_memory_access(access.operation))
+    if (ffm_omits_memory_access(access.operation)) {
       return;
+    }
 
     PerfsimWavefrontState *wave =
         wave_hint ? wave_hint : find_wave(access.compute_unit_id, access.wavefront_id);
     DispatchState *dispatch = wave ? wave->dispatch_state : active_dispatch(access.dispatch_id);
     if (!dispatch || !supported(*dispatch)) {
-      if (!dispatch)
+      if (!dispatch) {
         reject(access.dispatch_id, "memory callback arrived outside an active dispatch");
+      }
       return;
     }
     if (!wave ||
@@ -1098,15 +1180,17 @@ struct PerfsimPlugin::Impl {
           reject_wave(wave, access.dispatch_id, "image sample has an invalid footprint");
           return;
         }
-        if (footprint.lane_mask)
+        if (footprint.lane_mask) {
           record_memory(*wave, access, footprint.lane_mask, FFM_RESOURCE_GLOBAL,
                         footprint.addresses);
+        }
       }
       return;
     }
     const uint64_t requests = access.request_lane_mask;
-    if (requests == 0)
+    if (requests == 0) {
       return;
+    }
 
     switch (access.decoded_space) {
     case amdgpu::DecodedMemorySpace::LOCAL:
@@ -1126,11 +1210,13 @@ struct PerfsimPlugin::Impl {
             return;
           }
         }
-        if (!record_local_memory(*wave, access, callback_requests, access.addresses))
+        if (!record_local_memory(*wave, access, callback_requests, access.addresses)) {
           return;
+        }
         if (!access.secondary_addresses.empty() &&
-            !record_local_memory(*wave, access, callback_requests, access.secondary_addresses))
+            !record_local_memory(*wave, access, callback_requests, access.secondary_addresses)) {
           return;
+        }
       }
       return;
 
@@ -1199,25 +1285,29 @@ struct PerfsimPlugin::Impl {
         std::array<ResourceRecord, 3> records{};
         size_t record_count = 0;
         const auto add_record = [&](uint64_t lane_mask, FfmResourceType resource) {
-          if (lane_mask != 0)
+          if (lane_mask != 0) {
             records[record_count++] = {lane_mask, resource};
+          }
         };
         add_record(global_requests, FFM_RESOURCE_GLOBAL);
         add_record(scratch_requests, FFM_RESOURCE_SCRATCH);
         add_record(local_requests, FFM_RESOURCE_LDS);
         const auto swap_if_out_of_order = [&](size_t lhs, size_t rhs) {
-          if (std::countr_zero(records[lhs].lane_mask) > std::countr_zero(records[rhs].lane_mask))
+          if (std::countr_zero(records[lhs].lane_mask) > std::countr_zero(records[rhs].lane_mask)) {
             std::swap(records[lhs], records[rhs]);
+          }
         };
-        if (record_count >= 2)
+        if (record_count >= 2) {
           swap_if_out_of_order(0, 1);
+        }
         if (record_count == 3) {
           swap_if_out_of_order(1, 2);
           swap_if_out_of_order(0, 1);
         }
-        for (size_t i = 0; i < record_count; ++i)
+        for (size_t i = 0; i < record_count; ++i) {
           record_memory(*wave, access, records[i].lane_mask, records[i].resource,
                         callback_addresses);
+        }
       }
       return;
 
@@ -1233,17 +1323,20 @@ struct PerfsimPlugin::Impl {
   void tensor_dma_memory_access(const amdgpu::TensorDmaMemoryAccessObservation &access,
                                 PerfsimWavefrontState *wave_hint = nullptr) {
     if (!wave_hint) {
-      if (intentionally_unselected(access.dispatch_id))
+      if (intentionally_unselected(access.dispatch_id)) {
         return;
-      if (intentionally_unobserved(access.dispatch_id, access.workgroup_id))
+      }
+      if (intentionally_unobserved(access.dispatch_id, access.workgroup_id)) {
         return;
+      }
     }
     PerfsimWavefrontState *wave =
         wave_hint ? wave_hint : find_wave(access.compute_unit_id, access.wavefront_id);
     DispatchState *dispatch = wave ? wave->dispatch_state : active_dispatch(access.dispatch_id);
     if (!dispatch || !supported(*dispatch)) {
-      if (!dispatch)
+      if (!dispatch) {
         reject(access.dispatch_id, "tensor-DMA callback arrived outside an active dispatch");
+      }
       return;
     }
 
@@ -1321,11 +1414,13 @@ PerfsimPlugin::PerfsimPlugin() : ExecutionPlugin("perfsim") {}
 
 util::Result PerfsimPlugin::initialize(const char *config_json,
                                        util::DiagnosticEmitter diagnostic) {
-  if (impl_)
+  if (impl_) {
     return diagnostic.emit() << "Perfsim plugin is already configured";
+  }
   auto impl = std::make_unique<Impl>(*this);
-  if (impl->initialize(config_json, diagnostic).failed())
+  if (impl->initialize(config_json, diagnostic).failed()) {
     return util::Result::failure();
+  }
   impl_ = std::move(impl);
   return util::Result::success();
 }
@@ -1338,8 +1433,9 @@ void PerfsimPlugin::onInit() {
 }
 
 void PerfsimPlugin::onShutdown() {
-  if (impl_)
+  if (impl_) {
     impl_->shutdown();
+  }
 }
 
 bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
@@ -1361,25 +1457,29 @@ void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &in
   state.metadata_seen = true;
   state.selected =
       !impl_->config.dispatch_name || state.dispatch_name == *impl_->config.dispatch_name;
-  if (!state.selected)
+  if (!state.selected) {
     return;
+  }
   impl_->dispatch_name_matched = true;
-  if (const auto reason = validate_dispatch(info))
+  if (const auto reason = validate_dispatch(info)) {
     impl_->reject(info.dispatch_id, *reason);
+  }
 }
 
 void PerfsimPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
   DispatchState &state = impl_->dispatches[dispatch_id];
-  if (!state.metadata_seen)
+  if (!state.metadata_seen) {
     impl_->reject(dispatch_id, "dispatch began without metadata");
+  }
   if (state.begun && !state.ended) {
     impl_->reject(dispatch_id, "dispatch began more than once");
     return;
   }
   state.begun = true;
   state.ended = false;
-  if (!state.selected || !Impl::supported(state))
+  if (!state.selected || !Impl::supported(state)) {
     return;
+  }
   impl_->replay_blockers.insert(dispatch_id);
   impl_->record_event({dispatch_id, BeginEvent{state.metadata}});
 }
@@ -1395,12 +1495,14 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
     impl_->reject(dispatch_id, "dispatch ended more than once");
     return;
   }
-  if (state.selected && state.live_waves != 0)
+  if (state.selected && state.live_waves != 0) {
     impl_->reject(dispatch_id, "dispatch ended with live wavefronts");
+  }
   state.ended = true;
   impl_->replay_blockers.erase(dispatch_id);
-  if (state.selected && Impl::supported(state))
+  if (state.selected && Impl::supported(state)) {
     impl_->record_event({dispatch_id, EndEvent{state.metadata}});
+  }
   impl_->drain_epoch(/*shutdown=*/false);
 }
 
@@ -1422,12 +1524,14 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
       impl_->reject(wf.dispatch_id(), "physical wavefront slot retained mismatched state");
       return;
     }
-    if (existing != impl_->physical_waves.end())
+    if (existing != impl_->physical_waves.end()) {
       impl_->physical_waves.erase(existing);
+    }
     if (const auto dispatch = impl_->dispatches.find(previous_dispatch);
         dispatch != impl_->dispatches.end()) {
-      if (dispatch->second.live_waves != 0)
+      if (dispatch->second.live_waves != 0) {
         --dispatch->second.live_waves;
+      }
       impl_->reject(previous_dispatch, "wavefront slot was reset without a terminal callback");
     }
     wf.clear_plugin_state(slot_index());
@@ -1439,8 +1543,9 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
     return;
   }
 
-  if (impl_->intentionally_unselected(wf.dispatch_id()))
+  if (impl_->intentionally_unselected(wf.dispatch_id())) {
     return;
+  }
   DispatchState *dispatch = impl_->active_dispatch(wf.dispatch_id());
   if (!dispatch) {
     impl_->reject(wf.dispatch_id(), "wavefront dispatched outside an active dispatch");
@@ -1454,8 +1559,9 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   auto state = std::make_unique<PerfsimWavefrontState>();
   state->dispatch_state = dispatch;
   state->wave_info = make_wave_info(wf.dispatch_id(), wf.wg_coord(), wf.wave_in_group());
-  if (!impl_->observe_workgroup(*dispatch, wf.wg_id()))
+  if (!impl_->observe_workgroup(*dispatch, wf.wg_id())) {
     return;
+  }
   state->compute_unit_id = compute_unit_id;
   state->physical_wavefront_id = wf.wf_id();
   state->rocjitsu_workgroup_id = wf.wg_id();
@@ -1478,10 +1584,12 @@ void PerfsimPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
 }
 
 void PerfsimPlugin::retire_wavefront(amdgpu::Wavefront &wf, bool cancelled) {
-  if (impl_->intentionally_unselected(wf.dispatch_id()))
+  if (impl_->intentionally_unselected(wf.dispatch_id())) {
     return;
-  if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
+  }
+  if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id())) {
     return;
+  }
   const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
   const auto wave_iter = impl_->physical_waves.find(physical_key);
@@ -1498,24 +1606,28 @@ void PerfsimPlugin::retire_wavefront(amdgpu::Wavefront &wf, bool cancelled) {
   auto dispatch_iter = impl_->dispatches.find(dispatch_id);
   if (dispatch_iter != impl_->dispatches.end()) {
     DispatchState &dispatch = dispatch_iter->second;
-    if (wf.instruction_execution_failed())
+    if (wf.instruction_execution_failed()) {
       impl_->reject(dispatch_id, cancelled
                                      ? "wavefront cancelled after an instruction failure"
                                      : "wavefront halted after an instruction execution failure");
+    }
     // A committed setup rollback has no recorded instructions to discard.
     // Retire its physical identity so a retry can observe the same logical wave.
-    if (cancelled && wave.saw_instruction)
+    if (cancelled && wave.saw_instruction) {
       impl_->reject(dispatch_id, "wavefront cancelled before dispatch completion");
-    else if (!cancelled && (!wave.saw_instruction || !wave.last_instruction_terminates))
+    } else if (!cancelled && (!wave.saw_instruction || !wave.last_instruction_terminates)) {
       impl_->reject(dispatch_id, "wavefront halted without a terminating instruction");
-    if (dispatch.live_waves != 0)
+    }
+    if (dispatch.live_waves != 0) {
       --dispatch.live_waves;
+    }
     retired_ended_dispatch = dispatch.ended && dispatch.live_waves == 0;
   }
   impl_->physical_waves.erase(wave_iter);
   wf.clear_plugin_state(slot_index());
-  if (retired_ended_dispatch)
+  if (retired_ended_dispatch) {
     impl_->drain_epoch(/*shutdown=*/false);
+  }
 }
 
 void PerfsimPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
@@ -1538,15 +1650,18 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   if (!wave) {
     const auto dispatch_iter = impl_->dispatches.find(wf.dispatch_id());
     if (dispatch_iter != impl_->dispatches.end() &&
-        (!dispatch_iter->second.selected || !Impl::supported(dispatch_iter->second)))
+        (!dispatch_iter->second.selected || !Impl::supported(dispatch_iter->second))) {
       return;
-    if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
+    }
+    if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id())) {
       return;
+    }
     const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
     wave = impl_->find_wave(compute_unit_id, wf.wf_id());
   }
-  if (wave && wave->dispatch_state && !Impl::supported(*wave->dispatch_state))
+  if (wave && wave->dispatch_state && !Impl::supported(*wave->dispatch_state)) {
     return;
+  }
   if (!wave ||
       wave->wave_info.workgroup_info.cluster_info.dispatch_info.dispatch_id != wf.dispatch_id() ||
       wave->rocjitsu_workgroup_id != wf.wg_id()) {
@@ -1582,10 +1697,11 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
                        "dedicated SCRATCH instructions are not FFM-compatible");
     return;
   }
-  if (fetch_window.empty())
+  if (fetch_window.empty()) {
     event.raw_isa = instruction_encoding;
-  else
+  } else {
     std::ranges::copy(fetch_window, event.raw_isa.begin());
+  }
   event.counters = static_info.counters;
   event.wait = static_info.wait;
 

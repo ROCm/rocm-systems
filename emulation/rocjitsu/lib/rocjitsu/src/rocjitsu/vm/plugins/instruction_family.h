@@ -49,8 +49,9 @@ inline constexpr size_t kInstructionFamilyCount = static_cast<size_t>(Instructio
 /// precede the decoded-memory fallback. This ordering is shared by both reporting
 /// plugins and preserves their exclusive JSONL family contract.
 inline InstructionFamily classify_instruction(const Instruction &inst) {
-  if (inst.is_mfma() || inst.is_matrix())
+  if (inst.is_mfma() || inst.is_matrix()) {
     return InstructionFamily::Matrix;
+  }
 
   switch (inst.amdgpu_operation()) {
   case amdgpu::Operation::DS_GWS_BARRIER:
@@ -83,26 +84,32 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
     case amdgpu::MemoryAddressing::None:
       break;
     }
-    if ((inst.flags() & LDS) != 0)
+    if ((inst.flags() & LDS) != 0) {
       return InstructionFamily::Lds;
-    if ((inst.flags() & (VMEM | SMEM)) != 0)
+    }
+    if ((inst.flags() & (VMEM | SMEM)) != 0) {
       return InstructionFamily::Global;
+    }
     const amdgpu::MemoryIssueInfo *issue = inst.amdgpu_memory_issue_info();
-    if (issue == nullptr)
+    if (issue == nullptr) {
       return InstructionFamily::Other;
+    }
     for (const amdgpu::MemoryCounterObligation obligation : issue->counter_obligations()) {
-      if (obligation.completion_class() == amdgpu::MemoryCompletionClass::LDS)
+      if (obligation.completion_class() == amdgpu::MemoryCompletionClass::LDS) {
         return InstructionFamily::Lds;
+      }
     }
     return InstructionFamily::Global;
   };
 
   if (inst.is_memory_op()) {
     if (const DynamicInstState *state = inst.data()) {
-      if (state->tag() == amdgpu::LOCAL_MEM)
+      if (state->tag() == amdgpu::LOCAL_MEM) {
         return InstructionFamily::Lds;
-      if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::SCALAR_MEM)
+      }
+      if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::SCALAR_MEM) {
         return InstructionFamily::Global;
+      }
     }
     const InstructionFamily family = decoded_memory_family();
     return family != InstructionFamily::Other ? family : InstructionFamily::Global;
@@ -110,8 +117,9 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
 
   constexpr uint64_t kControlFlags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
                                      PROGRAM_TERMINATOR | WAITCNT | BARRIER;
-  if ((inst.flags() & kControlFlags) != 0)
+  if ((inst.flags() & kControlFlags) != 0) {
     return InstructionFamily::Control;
+  }
   switch (inst.amdgpu_operation()) {
   case amdgpu::Operation::S_NOP:
   case amdgpu::Operation::S_SLEEP:
@@ -134,12 +142,16 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
     break;
   }
 
-  if (const InstructionFamily family = decoded_memory_family(); family != InstructionFamily::Other)
+  if (const InstructionFamily family = decoded_memory_family();
+      family != InstructionFamily::Other) {
     return family;
-  if ((inst.flags() & SALU) != 0)
+  }
+  if ((inst.flags() & SALU) != 0) {
     return InstructionFamily::Scalar;
-  if ((inst.flags() & VALU) != 0)
+  }
+  if ((inst.flags() & VALU) != 0) {
     return InstructionFamily::Vector;
+  }
   return InstructionFamily::Other;
 }
 

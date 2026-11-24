@@ -37,8 +37,9 @@ public:
   enum class Operation { Read, Write, AtomicStore, CompareExchange };
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -49,10 +50,12 @@ public:
   }
 
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
-    if (fail_once(Operation::Read, address))
+    if (fail_once(Operation::Read, address)) {
       return failure_outcome_;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     ++successful_reads_[address];
@@ -61,17 +64,20 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
-    if (fail_once(Operation::Write, address))
+    if (fail_once(Operation::Write, address)) {
       return failure_outcome_;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .value = 0};
+    }
     uint64_t value = 0;
     std::memcpy(&value, bytes_.data() + address, width);
     return {.outcome = VmAccessOutcome::Complete, .value = value};
@@ -79,10 +85,12 @@ public:
 
   VmAccessOutcome atomic_store(VmMemoryDomain, uint64_t address, uint32_t width,
                                uint64_t value) override {
-    if (fail_once(Operation::AtomicStore, address))
+    if (fail_once(Operation::AtomicStore, address)) {
       return failure_outcome_;
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    }
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::memcpy(bytes_.data() + address, &value, width);
     ++successful_stores_[address];
     return VmAccessOutcome::Complete;
@@ -90,10 +98,12 @@ public:
 
   AtomicCompareExchangeResult compare_exchange(VmMemoryDomain, uint64_t address, uint32_t width,
                                                uint64_t expected, uint64_t desired) override {
-    if (fail_once(Operation::CompareExchange, address))
+    if (fail_once(Operation::CompareExchange, address)) {
       return {.outcome = failure_outcome_, .observed = 0, .exchanged = false};
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    }
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .observed = 0, .exchanged = false};
+    }
     uint64_t observed = 0;
     std::memcpy(&observed, bytes_.data() + address, width);
     const bool exchanged = observed == expected;
@@ -132,8 +142,9 @@ public:
 
 private:
   bool fail_once(Operation operation, uint64_t address) {
-    if (!failure_armed_ || operation != failure_operation_ || address != failure_address_)
+    if (!failure_armed_ || operation != failure_operation_ || address != failure_address_) {
       return false;
+    }
     failure_armed_ = false;
     return true;
   }
@@ -199,12 +210,15 @@ public:
     entry.address_space = address_space;
     const std::optional<GpuVmAccess> access = vm.snapshot_pinned(address_space);
     EXPECT_TRUE(access);
-    if (access)
+    if (access) {
       entry.execution_access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(*access);
-    if (access)
+    }
+    if (access) {
       entry.execution_translation_epoch = access->info().translation_epoch;
-    if (access)
+    }
+    if (access) {
       entry.execution_cache_write_sequence = access->cache_write_sequence();
+    }
     entry.interrupt_sink = subscription.sink();
     entry.process_id = kProcessId;
     entry.total_wgs = 1;

@@ -110,8 +110,9 @@ void expect_same_info(const rj_vm_gpu_info_t &actual, const rj_vm_gpu_info_t &ex
 
 std::set<std::string> directory_entries(const std::filesystem::path &path) {
   std::set<std::string> entries;
-  for (const auto &entry : std::filesystem::directory_iterator(path))
+  for (const auto &entry : std::filesystem::directory_iterator(path)) {
     entries.insert(entry.path().filename().string());
+  }
   return entries;
 }
 
@@ -191,8 +192,9 @@ TEST(VmConfigApi, MetadataMatchesIndependentLocalAndDaemonVms) {
         rj_vm_t *raw_vm = nullptr;
         ASSERT_EQ(rj_vm_create_from_config(config.get(), mode, &raw_vm), ROCJITSU_STATUS_SUCCESS);
         Vm vm(raw_vm, rj_vm_destroy);
-        if (destroy_config_first)
+        if (destroy_config_first) {
           config.reset();
+        }
         uint32_t active_count = 0;
         ASSERT_EQ(rj_vm_gpu_count(vm.get(), &active_count), ROCJITSU_STATUS_SUCCESS);
         ASSERT_EQ(active_count, count);

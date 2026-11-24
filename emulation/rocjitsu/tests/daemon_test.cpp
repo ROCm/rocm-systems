@@ -51,8 +51,9 @@ struct ProcessResult {
 
 bool daemon_ready(const std::string &path) {
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
   path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
@@ -64,8 +65,9 @@ bool daemon_ready(const std::string &path) {
 /// Call only in a forked child before exec.
 void redirect_output_or_exit(const std::string &path) {
   const int output = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-  if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0)
+  if (output < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(output, STDERR_FILENO) < 0) {
     _exit(127);
+  }
   close(output);
 }
 
@@ -73,10 +75,12 @@ bool wait_for_exit(pid_t pid, int &status, std::chrono::seconds timeout) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   do {
     const pid_t exited = waitpid(pid, &status, WNOHANG);
-    if (exited == pid)
+    if (exited == pid) {
       return true;
-    if (exited < 0 && errno != EINTR)
+    }
+    if (exited < 0 && errno != EINTR) {
       return false;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   } while (std::chrono::steady_clock::now() < deadline);
   return false;
@@ -104,16 +108,18 @@ struct TestPaths {
 std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
                                               const char *path) {
   std::filesystem::path candidate(path);
-  if (!candidate.is_absolute())
+  if (!candidate.is_absolute()) {
     candidate = exe_dir / candidate;
+  }
   return candidate.lexically_normal();
 }
 
 std::filesystem::path current_exe_dir() {
   std::error_code ec;
   std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-  if (ec)
+  if (ec) {
     return {};
+  }
   return exe.parent_path();
 }
 
@@ -154,8 +160,9 @@ TestPaths &test_paths() {
     std::filesystem::path exe_dir = current_exe_dir();
     if (!exe_dir.empty()) {
       TestPaths installed = installed_paths(exe_dir);
-      if (installed_paths_exist(installed))
+      if (installed_paths_exist(installed)) {
         return installed;
+      }
     }
     return TestPaths{};
   }();
@@ -210,8 +217,9 @@ TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
   EXPECT_EQ(WEXITSTATUS(status), 0);
 
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (std::filesystem::exists(socket_path) && std::chrono::steady_clock::now() < deadline)
+  while (std::filesystem::exists(socket_path) && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
   EXPECT_FALSE(std::filesystem::exists(socket_path));
 }
 
@@ -244,8 +252,9 @@ protected:
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
-      if (daemon_ready(sock_path_))
+      if (daemon_ready(sock_path_)) {
         return;
+      }
       int status = 0;
       if (waitpid(daemon_pid_, &status, WNOHANG) > 0) {
         daemon_pid_ = -1;
@@ -278,8 +287,9 @@ protected:
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
-    if (tmp_dir_.path().empty())
+    if (tmp_dir_.path().empty()) {
       return;
+    }
     const std::string output = read_file(tmp_dir_.path() + "/daemon.log");
     EXPECT_FALSE(rocjitsu::test::has_unexpected_failure_diagnostic(output))
         << "daemon output contains " << rocjitsu::test::kUnexpectedFailureDiagnostics;
@@ -289,8 +299,9 @@ protected:
       EXPECT_TRUE(diagnostic.Matches(output))
           << "expected daemon diagnostic: " << expected_daemon_diagnostic_;
     }
-    if (HasFailure())
+    if (HasFailure()) {
       std::fputs(output.c_str(), stderr);
+    }
   }
 
   ProcessResult run_hip_test(const char *binary, const char *gtest_filter) {
@@ -306,8 +317,9 @@ protected:
     cmd += preload_lib();
     // Apply HIP runtime suppressions only to this client, leaving the daemon
     // and its simulator threads subject to full TSan checking.
-    if (std::getenv("ROCJITSU_TEST_HIP_TSAN_OPTIONS"))
+    if (std::getenv("ROCJITSU_TEST_HIP_TSAN_OPTIONS")) {
       cmd += " TSAN_OPTIONS=\"$ROCJITSU_TEST_HIP_TSAN_OPTIONS\"";
+    }
     cmd += " HSA_ENABLE_SDMA=1 ";
     cmd += binary;
     if (gtest_filter && gtest_filter[0]) {
@@ -323,8 +335,9 @@ protected:
       result.exit_code = -1;
       return result;
     }
-    while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+    while (fgets(buf.data(), buf.size(), pipe) != nullptr) {
       result.output += buf.data();
+    }
     int status = pclose(pipe);
     result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     return result;
@@ -361,8 +374,9 @@ protected:
       result.exit_code = -1;
       return result;
     }
-    while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+    while (fgets(buf.data(), buf.size(), pipe) != nullptr) {
       result.output += buf.data();
+    }
     int status = pclose(pipe);
     result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     return result;
@@ -376,14 +390,17 @@ protected:
     std::vector<std::thread> threads(world_size);
     std::vector<ProcessResult> results(world_size);
 
-    for (int r = 0; r < world_size; ++r)
+    for (int r = 0; r < world_size; ++r) {
       threads[r] =
           std::thread([&, r] { results[r] = run_rccl_rank(r, world_size, shared_dir, filter); });
-    for (auto &t : threads)
+    }
+    for (auto &t : threads) {
       t.join();
+    }
 
-    for (int r = 0; r < world_size; ++r)
+    for (int r = 0; r < world_size; ++r) {
       EXPECT_EQ(results[r].exit_code, 0) << "Rank " << r << " failed:\n" << results[r].output;
+    }
   }
 
   pid_t daemon_pid_ = -1;
@@ -426,14 +443,16 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
   ASSERT_GE(valid_client, 0);
   if (valid_client == 0) {
     // Kill the death-test child along with its launcher if the test hangs.
-    if (setpgid(0, 0) != 0)
+    if (setpgid(0, 0) != 0) {
       _exit(127);
+    }
     redirect_output_or_exit(output_path);
     setenv("XDG_RUNTIME_DIR", tmp_dir_.path().c_str(), 1);
     setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
     setenv("ROCJITSU_TEST_CLIENT_READY", ready_path.c_str(), 1);
-    if (const char *tsan_options = std::getenv("ROCJITSU_TEST_HIP_TSAN_OPTIONS"))
+    if (const char *tsan_options = std::getenv("ROCJITSU_TEST_HIP_TSAN_OPTIONS")) {
       setenv("TSAN_OPTIONS", tsan_options, 1);
+    }
     const std::string preload = std::string(sanitizer_preload()) + preload_lib();
     setenv("LD_PRELOAD", preload.c_str(), 1);
     execl(hip_instruction_failure_bin(), hip_instruction_failure_bin(),
@@ -456,8 +475,10 @@ TEST_F(DaemonTest, HipFatalDecodeDisconnectsValidClient) {
     pid_t pid_;
   } guard(valid_client);
   const auto ready_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  while (!std::filesystem::exists(ready_path) && std::chrono::steady_clock::now() < ready_deadline)
+  while (!std::filesystem::exists(ready_path) &&
+         std::chrono::steady_clock::now() < ready_deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
   ASSERT_TRUE(std::filesystem::exists(ready_path)) << "valid client did not complete its kernel";
 
   expected_daemon_exit_ = EXIT_FAILURE;
@@ -693,10 +714,11 @@ protected:
 
   void TearDown() override {
     DaemonTest::TearDown();
-    if (had_previous_)
+    if (had_previous_) {
       EXPECT_EQ(setenv("RJ_TEST_FORCE_TOKEN_BACKING", previous_.c_str(), 1), 0);
-    else
+    } else {
       EXPECT_EQ(unsetenv("RJ_TEST_FORCE_TOKEN_BACKING"), 0);
+    }
   }
 
 private:
@@ -749,8 +771,9 @@ protected:
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
-      if (daemon_ready(sock_path_))
+      if (daemon_ready(sock_path_)) {
         return;
+      }
       int status = 0;
       if (waitpid(daemon_pid_, &status, WNOHANG) > 0) {
         daemon_pid_ = -1;
@@ -809,8 +832,9 @@ protected:
       result.exit_code = -1;
       return result;
     }
-    while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+    while (fgets(buf.data(), buf.size(), pipe) != nullptr) {
       result.output += buf.data();
+    }
     int status = pclose(pipe);
     result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     return result;
@@ -824,14 +848,17 @@ protected:
     std::vector<std::thread> threads(world_size);
     std::vector<ProcessResult> results(world_size);
 
-    for (int r = 0; r < world_size; ++r)
+    for (int r = 0; r < world_size; ++r) {
       threads[r] =
           std::thread([&, r] { results[r] = run_rccl_rank(r, world_size, shared_dir, filter); });
-    for (auto &t : threads)
+    }
+    for (auto &t : threads) {
       t.join();
+    }
 
-    for (int r = 0; r < world_size; ++r)
+    for (int r = 0; r < world_size; ++r) {
       EXPECT_EQ(results[r].exit_code, 0) << "Rank " << r << " failed:\n" << results[r].output;
+    }
   }
 
   pid_t daemon_pid_ = -1;

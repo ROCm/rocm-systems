@@ -30,15 +30,18 @@ bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
     const auto *op = inst.dst_operand(i);
     const auto ref = op->to_register_ref();
     if (ref && ref->cls == RegClass::SGPR && inst.num_dst_operands() > 1 &&
-        exceeds_rounded_sgpr_allocation(ref->index, ref->width))
+        exceeds_rounded_sgpr_allocation(ref->index, ref->width)) {
       return false;
-    if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
+    }
+    if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR)) {
       continue;
+    }
     const bool acc = ref->cls == RegClass::ACC_VGPR;
     const uint32_t start =
         acc ? ACC_VGPR_OFFSET + ref->index : apply_gpr_idx(*this, ref->index, op->vgpr_msb_role());
-    if (!vgpr_bank(acc).contains(start, ref->width))
+    if (!vgpr_bank(acc).contains(start, ref->width)) {
       return false;
+    }
   }
   return true;
 }
@@ -46,28 +49,32 @@ bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
 bool Wavefront::memory_destination_out_of_range(const Instruction &inst) const {
   const auto arch = cu_.arch();
   if (arch != rocjitsu::IsaFamily::Cdna2 && arch != rocjitsu::IsaFamily::Cdna3 &&
-      arch != rocjitsu::IsaFamily::Cdna4)
+      arch != rocjitsu::IsaFamily::Cdna4) {
     return false;
+  }
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto reg = inst.dst_operand(i)->decoded_vgpr();
-    if (reg && !unified_vgpr_range_is_allocated(reg->index, reg->width))
+    if (reg && !unified_vgpr_range_is_allocated(reg->index, reg->width)) {
       return true;
+    }
   }
   return false;
 }
 
 void Wavefront::set_process_id(uint32_t id, ProcessIdentityKind kind) {
   process_id_ = id;
-  if (const auto apertures = cu_.resolve_shader_apertures(id, kind))
+  if (const auto apertures = cu_.resolve_shader_apertures(id, kind)) {
     set_apertures(apertures->shared_base, apertures->shared_limit, apertures->private_base,
                   apertures->private_limit, /*override_launch=*/true);
-  else
+  } else {
     cu_.report_unresolved_apertures(id, kind);
+  }
 }
 
 void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
-  if (!activity_tracked_)
+  if (!activity_tracked_) {
     return;
+  }
   const bool active = !is_halted();
   const bool runnable = active && !debug_paused();
   if (active != was_active) {
@@ -76,8 +83,9 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
     } else if (wf_id_ + 1 == cu_.active_slot_limit_) {
       while (cu_.active_slot_limit_ != 0) {
         const auto &last = cu_.wfs_[cu_.active_slot_limit_ - 1];
-        if (last && !last->is_halted())
+        if (last && !last->is_halted()) {
           break;
+        }
         --cu_.active_slot_limit_;
       }
     }
@@ -93,8 +101,9 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
 
 ShaderExportIssue Wavefront::shader_export_issue(const ShaderExportOperands &operands) const {
   // GFX11.5 section 3.2.3: only DONE or POS0 can issue at zero EXEC.
-  if ((status_raw() & (1u << 18)) || (!exec() && !operands.done && operands.target != 12))
+  if ((status_raw() & (1u << 18)) || (!exec() && !operands.done && operands.target != 12)) {
     return ShaderExportIssue::Skip;
+  }
   return export_ready() ? ShaderExportIssue::Accept : ShaderExportIssue::WaitForReady;
 }
 
@@ -123,23 +132,27 @@ bool Wavefront::export_shader_data(const ShaderExportOperands &operands) {
       output.values[lane][channel] = regs.read_vgpr(vgpr_alloc().base + source, lane);
     }
   });
-  if (operands.done)
+  if (operands.done) {
     set_status_raw(status_raw() & ~(1u << 27)); // MUST_EXPORT
+  }
   return true;
 }
 
 void Wavefront::set_in_trap_handler(bool value) {
-  if (in_trap_handler_ == value)
+  if (in_trap_handler_ == value) {
     return;
+  }
   const bool was_runnable = !is_halted() && !debug_paused();
-  if (!value && trap_resume_exec_edited_)
+  if (!value && trap_resume_exec_edited_) {
     set_exec(trap_saved_exec_);
+  }
   trap_resume_exec_edited_ = false;
   in_trap_handler_ = value;
   status_raw_ = value ? status_raw_ | kStatusPrivMask
                       : (status_raw_ & ~kStatusPrivMask) | (trap_saved_status_ & kStatusPrivMask);
-  if (was_runnable != (!is_halted() && !debug_paused()))
+  if (was_runnable != (!is_halted() && !debug_paused())) {
     update_activity_counts(!is_halted(), was_runnable);
+  }
 }
 
 void Wavefront::return_from_trap() {
@@ -152,8 +165,9 @@ bool Wavefront::uses_separate_trap_ctrl() const {
 }
 
 bool Wavefront::discards_valu_result(const Instruction &inst) const {
-  if (!(inst.flags() & VALU))
+  if (!(inst.flags() & VALU)) {
     return false;
+  }
   switch (cu_.arch()) {
   case rocjitsu::IsaFamily::Cdna1:
   case rocjitsu::IsaFamily::Cdna3:
@@ -174,14 +188,16 @@ bool Wavefront::vgpr_destinations_allocated(const Instruction &inst) const {
 
 uint64_t Wavefront::memory_exec(const Instruction &inst) const {
   if (inst.flags() & FIRST_ACTIVE_MEMORY_LANE) {
-    if (cu_.arch() == rocjitsu::IsaFamily::Rdna3_5 && !vgpr_destinations_allocated(inst))
+    if (cu_.arch() == rocjitsu::IsaFamily::Rdna3_5 && !vgpr_destinations_allocated(inst)) {
       return 0;
+    }
     const uint64_t active = exec();
     return active & -active;
   }
   if ((cu_.arch() == rocjitsu::IsaFamily::Rdna1 || cu_.arch() == rocjitsu::IsaFamily::Rdna2) &&
-      (inst.flags() & (VMEM | LDS)) && !vgpr_destinations_allocated(inst))
+      (inst.flags() & (VMEM | LDS)) && !vgpr_destinations_allocated(inst)) {
     return 0;
+  }
   return exec();
 }
 
@@ -199,17 +215,20 @@ uint64_t Wavefront::realtime_clock() const {
 }
 
 uint64_t Wavefront::realtime_timestamp() const {
-  if (use_system_clock_)
+  if (use_system_clock_) {
     return hsa_system_timestamp();
+  }
   return cu_.model_realtime_timestamp() / (simdojo::TICKS_PER_SECOND / 1'000'000'000);
 }
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
-  if (vm_access_)
+  if (vm_access_) {
     return vm_access_->value;
+  }
   GpuVm *gpu_vm = cu_.gpu_vm();
-  if (gpu_vm == nullptr)
+  if (gpu_vm == nullptr) {
     return std::nullopt;
+  }
   std::optional<GpuVmAccess> access =
       address_space_ ? gpu_vm->snapshot(address_space_) : gpu_vm->snapshot_vmid(process_id_);
   return access && same_execution_root(*access) ? std::move(access) : std::nullopt;
@@ -218,12 +237,14 @@ std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
 VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
-    if (vm_access_)
+    if (vm_access_) {
       return vm_access_->value.read(
           addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
+    }
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
-    if (!access)
+    if (!access) {
       return VmAccessOutcome::Faulted;
+    }
     return access->read(
         addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
   }
@@ -234,13 +255,15 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
 VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
-    if (vm_access_)
+    if (vm_access_) {
       return vm_access_->value.write(
           addr,
           std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
+    }
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
-    if (!access)
+    if (!access) {
       return VmAccessOutcome::Faulted;
+    }
     return access->write(addr, std::span<const std::byte>(
                                    reinterpret_cast<const std::byte *>(src.data()), src.size()));
   }
@@ -302,8 +325,9 @@ void Wavefront::gws_sema_br(uint32_t rid, uint32_t count) { cu_.gws_sema_br(*thi
 void Wavefront::gws_sema_release_all(uint32_t rid) { cu_.gws_sema_release_all(*this, rid); }
 
 bool Wavefront::fail_pm4_submission() {
-  if (!pm4_failure_)
+  if (!pm4_failure_) {
     return false;
+  }
   pm4_failure_->fail();
   return true;
 }
@@ -342,10 +366,12 @@ void Wavefront::halt(CpCompletionNotice notice) {
 
 void Wavefront::release_wait_counter(WaitCounterType type) {
   wait_counters_.decrement(type);
-  if (state_ == WfState::WAITCNT && wait_satisfied())
+  if (state_ == WfState::WAITCNT && wait_satisfied()) {
     set_state(WfState::RUNNING);
-  if (state_ == WfState::ENDING && wait_counters_.empty())
+  }
+  if (state_ == WfState::ENDING && wait_counters_.empty()) {
     halt();
+  }
 }
 
 } // namespace amdgpu

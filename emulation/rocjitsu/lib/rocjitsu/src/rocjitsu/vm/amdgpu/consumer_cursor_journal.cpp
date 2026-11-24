@@ -17,8 +17,9 @@ ConsumerCursorJournal::ConsumerCursorJournal(uint64_t address,
 }
 
 VmAccessOutcome ConsumerCursorJournal::initialize(const GpuVmAccess &access) {
-  if (initialized_)
+  if (initialized_) {
     return VmAccessOutcome::Complete;
+  }
   const AtomicLoadResult loaded = access.atomic_load(address_, width_);
   if (loaded.outcome == VmAccessOutcome::Complete) {
     cursor_ = loaded.value;
@@ -36,12 +37,14 @@ void ConsumerCursorJournal::retire(uint64_t cursor, uint64_t published_cursor, G
 }
 
 VmAccessOutcome ConsumerCursorJournal::publish() {
-  if (!publication_access_)
+  if (!publication_access_) {
     return VmAccessOutcome::Complete;
+  }
   const VmAccessOutcome outcome =
       publication_access_->atomic_store(address_, width_, publication_cursor_);
-  if (outcome == VmAccessOutcome::Complete)
+  if (outcome == VmAccessOutcome::Complete) {
     publication_access_.reset();
+  }
   return outcome;
 }
 

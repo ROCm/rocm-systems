@@ -10,8 +10,9 @@ class ThreadContext;
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3)
+  if (argc != 3) {
     return 2;
+  }
   // The interposer owns process-lifetime state. Keep it mapped through exit,
   // as it is during normal preloaded execution.
   void *core = ::dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);

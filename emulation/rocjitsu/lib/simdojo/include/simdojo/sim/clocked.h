@@ -41,8 +41,9 @@ public:
   /// No-op if already running.
   /// @param after Earliest tick from which to resume clocking.
   void resume_clock(Tick after) {
-    if (running_)
+    if (running_) {
       return;
+    }
     running_ = true;
     Tick first = domain_.first_edge();
     if (after < first) {

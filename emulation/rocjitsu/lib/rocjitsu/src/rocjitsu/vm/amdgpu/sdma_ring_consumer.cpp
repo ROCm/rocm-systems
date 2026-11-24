@@ -94,8 +94,9 @@ SdmaRingStatus SdmaRingConsumer::latch(SdmaRingStatus outcome,
       }
     }
     terminal_ = outcome;
-    if (!cursor_journal_.publication_pending())
+    if (!cursor_journal_.publication_pending()) {
       clear_in_flight();
+    }
   }
   return outcome;
 }
@@ -103,13 +104,16 @@ SdmaRingStatus SdmaRingConsumer::latch(SdmaRingStatus outcome,
 SdmaRingStatus SdmaRingConsumer::initialize_cursor() {
   MemoryIngressAdmission admitted =
       admit_control(config_.read_pointer_address, sizeof(uint64_t), VmAccessKind::Read);
-  if (admitted.outcome != VmAccessOutcome::Complete)
+  if (admitted.outcome != VmAccessOutcome::Complete) {
     return map(admitted.outcome);
+  }
   const VmAccessOutcome outcome = cursor_journal_.initialize(*access_);
-  if (outcome != VmAccessOutcome::Complete)
+  if (outcome != VmAccessOutcome::Complete) {
     return map(outcome);
-  if ((cursor_journal_.cursor() % sizeof(uint32_t)) != 0)
+  }
+  if ((cursor_journal_.cursor() % sizeof(uint32_t)) != 0) {
     return SdmaRingStatus::Malformed;
+  }
   return SdmaRingStatus::Idle;
 }
 
@@ -120,11 +124,13 @@ SdmaRingStatus SdmaRingConsumer::ensure_packet_bytes(uint64_t producer,
       required_bytes > producer - cursor()) {
     return SdmaRingStatus::Malformed;
   }
-  if (required_bytes < packet_bytes_.size())
+  if (required_bytes < packet_bytes_.size()) {
     return SdmaRingStatus::Malformed;
+  }
 
-  if (packet_bytes_.empty())
+  if (packet_bytes_.empty()) {
     packet_start_cursor_ = cursor();
+  }
   packet_bytes_.resize(required_bytes);
   VmTransferIngress ingress;
   if (ingress_handler_) {
@@ -134,8 +140,9 @@ SdmaRingStatus SdmaRingConsumer::ensure_packet_bytes(uint64_t producer,
   }
   const VmAccessOutcome outcome =
       ring_reader_.read(*access_, cursor(), packet_bytes_, packet_fetch_progress_, ingress);
-  if (outcome != VmAccessOutcome::Complete)
+  if (outcome != VmAccessOutcome::Complete) {
     return map(outcome);
+  }
 
   packet_words_.resize(packet_bytes_.size() / sizeof(uint32_t));
   std::memcpy(packet_words_.data(), packet_bytes_.data(), packet_bytes_.size());
@@ -145,15 +152,17 @@ SdmaRingStatus SdmaRingConsumer::ensure_packet_bytes(uint64_t producer,
 SdmaRingStatus SdmaRingConsumer::publish_cursor() {
   MemoryIngressAdmission admitted =
       admit_control(config_.read_pointer_address, sizeof(uint64_t), VmAccessKind::Write);
-  if (admitted.outcome != VmAccessOutcome::Complete)
+  if (admitted.outcome != VmAccessOutcome::Complete) {
     return map(admitted.outcome);
+  }
   return map(cursor_journal_.publish());
 }
 
 MemoryIngressAdmission SdmaRingConsumer::admit_control(uint64_t address, std::size_t size,
                                                        VmAccessKind access) const {
-  if (!ingress_handler_)
+  if (!ingress_handler_) {
     return {};
+  }
   const std::array spans{MemoryIngressSpan{address, size, access}};
   return ingress_handler_(*access_, spans);
 }
@@ -175,44 +184,55 @@ void SdmaRingConsumer::clear_in_flight() {
 }
 
 SdmaRingStatus SdmaRingConsumer::service(uint64_t producer, std::size_t packet_budget) {
-  if (terminal_)
+  if (terminal_) {
     return *terminal_;
-  if (packet_budget == 0)
+  }
+  if (packet_budget == 0) {
     return SdmaRingStatus::Runnable;
-  if (!valid_sdma_ring_config(config_))
+  }
+  if (!valid_sdma_ring_config(config_)) {
     return latch(SdmaRingStatus::Malformed);
+  }
   if (!access_) {
     access_ = gpu_vm_->snapshot_pinned(config_.address_space);
-    if (!access_)
+    if (!access_) {
       return latch(SdmaRingStatus::Faulted);
+    }
   }
 
   const SdmaRingStatus initialized = initialize_cursor();
-  if (initialized != SdmaRingStatus::Idle)
+  if (initialized != SdmaRingStatus::Idle) {
     return initialized == SdmaRingStatus::Blocked ? initialized : latch(initialized);
+  }
 
   if ((producer % sizeof(uint32_t)) != 0 || producer < cursor() ||
-      producer - cursor() > config_.ring_bytes)
+      producer - cursor() > config_.ring_bytes) {
     return latch(SdmaRingStatus::Malformed);
+  }
   const std::size_t published_bytes = static_cast<std::size_t>(producer - cursor());
-  if (!cursor_journal_.publication_pending() && packet_bytes_.size() > published_bytes)
+  if (!cursor_journal_.publication_pending() && packet_bytes_.size() > published_bytes) {
     return latch(SdmaRingStatus::Malformed);
+  }
 
   if (cursor_journal_.publication_pending()) {
     const SdmaRingStatus published = publish_cursor();
-    if (published != SdmaRingStatus::Idle)
+    if (published != SdmaRingStatus::Idle) {
       return published == SdmaRingStatus::Blocked ? published
                                                   : latch(published, terminal_packet_header_);
+    }
     const std::optional<SdmaRingStatus> terminal = terminal_after_publication_;
-    if (terminal)
+    if (terminal) {
       return latch(*terminal, terminal_packet_header_);
+    }
     clear_packet();
     access_.reset();
-    if (cursor() == producer)
+    if (cursor() == producer) {
       return SdmaRingStatus::Idle;
+    }
     access_ = gpu_vm_->snapshot_pinned(config_.address_space);
-    if (!access_)
+    if (!access_) {
       return latch(SdmaRingStatus::Faulted);
+    }
   }
 
   std::size_t retired_packets = 0;
@@ -233,13 +253,15 @@ SdmaRingStatus SdmaRingConsumer::service(uint64_t producer, std::size_t packet_b
       const PacketProcessResult &continued = result.packet_result();
       const std::size_t validation_bytes =
           continued.status == PacketProcessStatus::NeedInput ? 0 : available_bytes;
-      if (!valid_packet_process_result(continued, validation_bytes, sizeof(uint32_t)))
+      if (!valid_packet_process_result(continued, validation_bytes, sizeof(uint32_t))) {
         return latch(SdmaRingStatus::Malformed);
+      }
     } else {
       const SdmaRingStatus fetched =
           ensure_packet_bytes(producer, std::max(packet_bytes_.size(), sizeof(uint32_t)));
-      if (fetched != SdmaRingStatus::Idle)
+      if (fetched != SdmaRingStatus::Idle) {
         return fetched == SdmaRingStatus::Blocked ? fetched : latch(fetched);
+      }
 
       for (;;) {
         result = packet_processor_.process(
@@ -248,20 +270,25 @@ SdmaRingStatus SdmaRingConsumer::service(uint64_t producer, std::size_t packet_b
         const std::size_t validation_bytes = probe_result.status == PacketProcessStatus::NeedInput
                                                  ? packet_bytes_.size()
                                                  : available_bytes;
-        if (!valid_packet_process_result(probe_result, validation_bytes, sizeof(uint32_t)))
+        if (!valid_packet_process_result(probe_result, validation_bytes, sizeof(uint32_t))) {
           return latch(SdmaRingStatus::Malformed);
-        if (probe_result.status != PacketProcessStatus::NeedInput)
+        }
+        if (probe_result.status != PacketProcessStatus::NeedInput) {
           break;
+        }
         const SdmaRingStatus expanded = ensure_packet_bytes(producer, probe_result.required_bytes);
-        if (expanded != SdmaRingStatus::Idle)
+        if (expanded != SdmaRingStatus::Idle) {
           return expanded == SdmaRingStatus::Blocked ? expanded : latch(expanded);
+        }
       }
     }
     const PacketProcessResult &packet_result = result.packet_result();
-    if (packet_result.status == PacketProcessStatus::NeedInput)
+    if (packet_result.status == PacketProcessStatus::NeedInput) {
       return latch(SdmaRingStatus::Malformed);
-    if (packet_result.status == PacketProcessStatus::Blocked)
+    }
+    if (packet_result.status == PacketProcessStatus::Blocked) {
       return SdmaRingStatus::Blocked;
+    }
 
     const SdmaRingStatus processing_status = map(packet_result.status);
     if (packet_result.retirement == PacketRetirement::Retire) {
@@ -269,8 +296,9 @@ SdmaRingStatus SdmaRingConsumer::service(uint64_t producer, std::size_t packet_b
       // alone. Preserve that completed decision, but do not advance beyond the
       // producer-visible ring extent. Retrying must not re-read the condition
       // after the producer publishes the skipped dwords.
-      if (packet_result.retirement_bytes > config_.ring_bytes)
+      if (packet_result.retirement_bytes > config_.ring_bytes) {
         return latch(SdmaRingStatus::Malformed);
+      }
       if (packet_result.retirement_bytes > available_bytes) {
         pending_retirement_ = result;
         return SdmaRingStatus::Blocked;
@@ -282,12 +310,14 @@ SdmaRingStatus SdmaRingConsumer::service(uint64_t producer, std::size_t packet_b
         terminal_packet_header_ = result.malformed_header;
       }
       const SdmaRingStatus published = publish_cursor();
-      if (published != SdmaRingStatus::Idle)
+      if (published != SdmaRingStatus::Idle) {
         return published == SdmaRingStatus::Blocked ? published
                                                     : latch(published, terminal_packet_header_);
+      }
       const std::optional<SdmaRingStatus> terminal = terminal_after_publication_;
-      if (terminal)
+      if (terminal) {
         return latch(*terminal, terminal_packet_header_);
+      }
       clear_packet();
       access_.reset();
       ++retired_packets;
@@ -297,13 +327,16 @@ SdmaRingStatus SdmaRingConsumer::service(uint64_t producer, std::size_t packet_b
       return latch(SdmaRingStatus::Malformed);
     }
 
-    if (cursor() == producer)
+    if (cursor() == producer) {
       return SdmaRingStatus::Idle;
-    if (retired_packets >= packet_budget)
+    }
+    if (retired_packets >= packet_budget) {
       return SdmaRingStatus::Runnable;
+    }
     access_ = gpu_vm_->snapshot_pinned(config_.address_space);
-    if (!access_)
+    if (!access_) {
       return latch(SdmaRingStatus::Faulted);
+    }
   }
 }
 
@@ -313,8 +346,9 @@ bool SdmaRingConsumer::in_flight() const {
 }
 
 bool SdmaRingConsumer::reconfigure(SdmaRingConfig config) {
-  if (in_flight())
+  if (in_flight()) {
     return false;
+  }
   config_ = std::move(config);
   ring_reader_ = CircularRingReader(config_.ring_base, config_.ring_bytes);
   cursor_journal_ = ConsumerCursorJournal(config_.read_pointer_address, config_.initial_cursor);

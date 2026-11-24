@@ -26,21 +26,25 @@ class PrivateGttCopySourceGate final
 public:
   [[nodiscard]] std::optional<amdgpu::VmAccessOutcome> closed_outcome() const noexcept {
     std::lock_guard lock(mutex_);
-    if (revoked_)
+    if (revoked_) {
       return amdgpu::VmAccessOutcome::Revoked;
-    if (closed_count_ != 0)
+    }
+    if (closed_count_ != 0) {
       return amdgpu::VmAccessOutcome::Unavailable;
+    }
     return std::nullopt;
   }
 
   [[nodiscard]] amdgpu::VmPrivateUcGttCopySourceAdmission admit(uint64_t map_generation,
                                                                 uint64_t host_view_generation) {
     std::lock_guard lock(mutex_);
-    if (revoked_)
+    if (revoked_) {
       return {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}};
+    }
     if (closed_count_ != 0 || map_generation == 0 || host_view_generation == 0 ||
-        map_generation != map_generation_ || host_view_generation != host_view_generation_)
+        map_generation != map_generation_ || host_view_generation != host_view_generation_) {
       return {.outcome = amdgpu::VmAccessOutcome::Unavailable, .permit = {}};
+    }
     auto owner = shared_from_this();
     amdgpu::MemoryIngressPermit permit([owner = std::move(owner)] { owner->release(); });
     ++active_;
@@ -61,8 +65,9 @@ public:
     std::lock_guard lock(mutex_);
     map_generation_ = map_generation;
     host_view_generation_ = host_view_generation;
-    if (closed_count_ != 0)
+    if (closed_count_ != 0) {
       --closed_count_;
+    }
   }
 
   void revoke() noexcept {
@@ -73,8 +78,9 @@ public:
 private:
   void release() noexcept {
     std::lock_guard lock(mutex_);
-    if (--active_ == 0)
+    if (--active_ == 0) {
       drained_.notify_all();
+    }
   }
 
   mutable std::mutex mutex_;

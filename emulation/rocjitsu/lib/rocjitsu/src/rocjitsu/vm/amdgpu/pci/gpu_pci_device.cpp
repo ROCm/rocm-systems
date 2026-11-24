@@ -360,8 +360,9 @@ GpuPciDevice::~GpuPciDevice() { (void)shutdown_frontend(); }
 
 bool GpuPciDevice::shutdown_frontend() {
   const std::lock_guard reset_lock(doorbell_reset_mutex_);
-  if (frontend_shutdown_)
+  if (frontend_shutdown_) {
     return frontend_shutdown_complete_;
+  }
 
   // Doorbell closure may wait for admitted frontend work; PT effects must
   // stop entering before that drain begins.
@@ -383,12 +384,14 @@ bool GpuPciDevice::shutdown_frontend() {
     if (auto *hub = dynamic_cast<MemoryHubBlockModel *>(owned.model_.get()); hub != nullptr) {
       hub->attach_soc(nullptr);
     }
-    if (auto *hdp = dynamic_cast<NbifHdpBlockModel *>(owned.model_.get()); hdp != nullptr)
+    if (auto *hdp = dynamic_cast<NbifHdpBlockModel *>(owned.model_.get()); hdp != nullptr) {
       hdp->attach_soc(nullptr);
+    }
   }
   if (mes_ != nullptr) {
-    if (!mes_->detach_engine())
+    if (!mes_->detach_engine()) {
       util::Logger::warn(std::format("{}: MES frontend callbacks could not be detached", name()));
+    }
   }
   if (sdma_ != nullptr) {
     sdma_->attach_queue_binding_factory(nullptr);
@@ -590,8 +593,9 @@ bool GpuPciDevice::teardown_frontend_queues() {
   // down register-backed SDMA queues even if MES could not release every
   // process binding; either adapter may retain callbacks into this frontend.
   const bool mes_complete = mes_ == nullptr || mes_->teardown_queues();
-  if (sdma_ != nullptr)
+  if (sdma_ != nullptr) {
     sdma_->teardown_queues();
+  }
   return mes_complete;
 }
 
@@ -599,20 +603,24 @@ GpuPciDevice::SdmaPciEffectResult
 GpuPciDevice::SdmaPciCallbackState::request(const std::shared_ptr<SdmaPciCallbackState> &self,
                                             const SdmaPciEffect &effect) {
   const std::lock_guard lock(mutex_);
-  if (cancelled_)
+  if (cancelled_) {
     return {};
+  }
   if (pending_) {
-    if (*pending_ != effect)
+    if (*pending_ != effect) {
       return {.outcome = amdgpu::VmAccessOutcome::Malformed};
-    if (!result_)
+    }
+    if (!result_) {
       return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+    }
     const SdmaPciEffectResult result = *result_;
     pending_.reset();
     result_.reset();
     return result;
   }
-  if (!enqueue_)
+  if (!enqueue_) {
     return {};
+  }
   pending_ = effect;
   if (!enqueue_(self, effect)) {
     pending_.reset();
@@ -624,8 +632,9 @@ GpuPciDevice::SdmaPciCallbackState::request(const std::shared_ptr<SdmaPciCallbac
 void GpuPciDevice::SdmaPciCallbackState::complete(const SdmaPciEffect &effect,
                                                   SdmaPciEffectResult result) {
   const std::lock_guard lock(mutex_);
-  if (!cancelled_ && pending_ && *pending_ == effect && !result_)
+  if (!cancelled_ && pending_ && *pending_ == effect && !result_) {
     result_ = result;
+  }
 }
 
 void GpuPciDevice::SdmaPciCallbackState::cancel() {
@@ -640,39 +649,45 @@ bool GpuPciDevice::enqueue_sdma_pci_effect(const std::shared_ptr<SdmaPciCallback
                                            const SdmaPciEffect &effect) {
   {
     const std::lock_guard lock(sdma_effect_mutex_);
-    if (!sdma_effect_admission_open_)
+    if (!sdma_effect_admission_open_) {
       return false;
+    }
     sdma_effect_inbox_.emplace_back(state, effect, state->reset_epoch_);
   }
-  if (engine() != nullptr)
+  if (engine() != nullptr) {
     engine()->schedule_event_now(&doorbell_event_);
+  }
   return true;
 }
 
 bool GpuPciDevice::enqueue_interrupt(const InterruptEntry &entry, InterruptRequestKind kind) {
   const std::shared_ptr<simdojo::PciTransportSession> session = transport_session();
-  if (session == nullptr)
+  if (session == nullptr) {
     return false;
+  }
 
   uint64_t reset_epoch = 0;
   {
     const std::lock_guard lock(doorbell_inbox_mutex_);
-    if (!doorbell_admission_open_)
+    if (!doorbell_admission_open_) {
       return false;
+    }
     reset_epoch = doorbell_reset_epoch_;
   }
   {
     const std::lock_guard lock(sdma_effect_mutex_);
-    if (!sdma_effect_admission_open_)
+    if (!sdma_effect_admission_open_) {
       return false;
+    }
     interrupt_inbox_.push_back({.session = session,
                                 .generation = session->generation(),
                                 .reset_epoch = reset_epoch,
                                 .entry = entry,
                                 .kind = kind});
   }
-  if (engine() != nullptr)
+  if (engine() != nullptr) {
     engine()->schedule_event_now(&doorbell_event_);
+  }
   return true;
 }
 
@@ -729,12 +744,14 @@ void GpuPciDevice::drain_interrupts() {
   }
   for (const InterruptRequest &request : requests) {
     const std::shared_ptr<simdojo::PciTransportSession> session = request.session.lock();
-    if (session == nullptr || session->generation() != request.generation)
+    if (session == nullptr || session->generation() != request.generation) {
       continue;
+    }
     simdojo::PciTransportSession::OperationLease lease = session->acquire();
     FrontendOperationLease frontend = acquire_frontend_operation(request.reset_epoch);
-    if (!lease || transport_session() != session || !frontend)
+    if (!lease || transport_session() != session || !frontend) {
       continue;
+    }
     if (request.kind == InterruptRequestKind::Completion) {
       const std::lock_guard lock(sdma_effect_mutex_);
       last_cp_interrupt_thread_ = std::this_thread::get_id();
@@ -752,9 +769,10 @@ void GpuPciDevice::drain_interrupts() {
                           uint64_t{request.entry.data[0]} |
                               (uint64_t{request.entry.data[1] & 0xf} << 32));
       });
-      if (!delivered)
+      if (!delivered) {
         util::Logger::warn(std::format("{}: could not deliver VM fault for PASID {}", name(),
                                        request.entry.pasid));
+      }
     } else if (delivered) {
       util::Logger::warn(interrupt_ring().raises_messages
                              ? "vfu: delivered an interrupt on request"
@@ -779,8 +797,9 @@ void GpuPciDevice::drain_sdma_pci_effects() {
 
   for (const SdmaPciEffectRequest &request : requests) {
     const std::shared_ptr<SdmaPciCallbackState> state = request.state_.lock();
-    if (state == nullptr)
+    if (state == nullptr) {
       continue;
+    }
     {
       const std::lock_guard lock(sdma_effect_mutex_);
       last_sdma_effect_thread_ = std::this_thread::get_id();
@@ -809,8 +828,9 @@ void GpuPciDevice::drain_sdma_pci_effects() {
         const std::lock_guard lock(sdma_effect_mutex_);
         admitted_hook = sdma_effect_admitted_hook_for_test_;
       }
-      if (admitted_hook)
+      if (admitted_hook) {
         admitted_hook();
+      }
       {
         const std::lock_guard state_lock(state->mutex_);
         if (state->cancelled_ || !state->pending_ || *state->pending_ != request.effect_ ||
@@ -859,14 +879,17 @@ void GpuPciDevice::drain_sdma_pci_effects() {
 
   for (const SdmaQueueProgressRequest &progress : progress_updates) {
     const std::shared_ptr<simdojo::PciTransportSession> session = progress.session.lock();
-    if (session == nullptr || session->generation() != progress.generation)
+    if (session == nullptr || session->generation() != progress.generation) {
       continue;
+    }
     simdojo::PciTransportSession::OperationLease lease = session->acquire();
     FrontendOperationLease frontend = acquire_frontend_operation(progress.reset_epoch);
-    if (!lease || transport_session() != session || !frontend || sdma_ == nullptr)
+    if (!lease || transport_session() != session || !frontend || sdma_ == nullptr) {
       continue;
-    if (progress.queue_id != (0xffff0000u | progress.engine_id))
+    }
+    if (progress.queue_id != (0xffff0000u | progress.engine_id)) {
       continue;
+    }
     sdma_->update_queue_progress(progress.engine_id, progress.consumer_cursor, progress.terminal);
   }
 }
@@ -908,13 +931,16 @@ void GpuPciDevice::cancel_sdma_pci_effects() {
     interrupt_inbox_.clear();
     sdma_effect_inbox_.clear();
     sdma_progress_inbox_.clear();
-    for (const std::weak_ptr<SdmaPciCallbackState> &weak_state : sdma_callback_states_)
-      if (std::shared_ptr<SdmaPciCallbackState> state = weak_state.lock())
+    for (const std::weak_ptr<SdmaPciCallbackState> &weak_state : sdma_callback_states_) {
+      if (std::shared_ptr<SdmaPciCallbackState> state = weak_state.lock()) {
         states.push_back(std::move(state));
+      }
+    }
     sdma_callback_states_.clear();
   }
-  for (const std::shared_ptr<SdmaPciCallbackState> &state : states)
+  for (const std::shared_ptr<SdmaPciCallbackState> &state : states) {
     state->cancel();
+  }
 }
 
 amdgpu::SdmaPacketCallbacks
@@ -933,8 +959,9 @@ GpuPciDevice::make_sdma_callbacks(const amdgpu::SdmaQueueContext &context) {
   };
   {
     const std::lock_guard lock(sdma_effect_mutex_);
-    if (!sdma_effect_admission_open_)
+    if (!sdma_effect_admission_open_) {
       state->cancelled_ = true;
+    }
     std::erase_if(sdma_callback_states_, [](const std::weak_ptr<SdmaPciCallbackState> &candidate) {
       return candidate.expired();
     });
@@ -972,8 +999,9 @@ std::function<void(const amdgpu::SdmaQueueProgress &)>
 GpuPciDevice::make_sdma_progress_observer(const amdgpu::SdmaQueueContext &context) {
   // MES-created queues share this binding factory but do not have an SDMA register
   // shadow. Their consumer pointer is already published through GPU memory.
-  if (context.queue_id != (0xffff0000u | context.engine_id))
+  if (context.queue_id != (0xffff0000u | context.engine_id)) {
     return {};
+  }
   const std::shared_ptr<simdojo::PciTransportSession> session = transport_session();
   const uint64_t generation = session != nullptr ? session->generation() : 0;
   uint64_t reset_epoch = 0;
@@ -986,8 +1014,9 @@ GpuPciDevice::make_sdma_progress_observer(const amdgpu::SdmaQueueContext &contex
           engine_id = context.engine_id](const amdgpu::SdmaQueueProgress &progress) {
     {
       const std::lock_guard lock(sdma_effect_mutex_);
-      if (!sdma_effect_admission_open_)
+      if (!sdma_effect_admission_open_) {
         return;
+      }
       sdma_progress_inbox_.push_back({.session = weak_session,
                                       .generation = generation,
                                       .reset_epoch = reset_epoch,
@@ -996,8 +1025,9 @@ GpuPciDevice::make_sdma_progress_observer(const amdgpu::SdmaQueueContext &contex
                                       .consumer_cursor = progress.consumer_cursor,
                                       .terminal = progress.terminal});
     }
-    if (engine() != nullptr)
+    if (engine() != nullptr) {
       engine()->schedule_event_now(&doorbell_event_);
+    }
   };
 }
 
@@ -1066,8 +1096,9 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
     uint32_t value = 0;
     if (write) {
       std::memcpy(&value, buf.data(), sizeof(value));
-      if (vram_->write(indirect_address(), value) && soc_ != nullptr)
+      if (vram_->write(indirect_address(), value) && soc_ != nullptr) {
         soc_->cache_coherence()->publish_local_backing_write(indirect_address(), sizeof(value));
+      }
     } else {
       (void)vram_->read(indirect_address(), value);
       std::memcpy(buf.data(), &value, sizeof(value));
@@ -1090,8 +1121,9 @@ int64_t GpuPciDevice::access_registers(std::span<std::byte> buf, uint64_t offset
       // that was handed the value would be deciding what a field means twice --
       // once here and once when it reads the register back.
       if (stored) {
-        for (const OwnedBlockModel &owned : models_)
+        for (const OwnedBlockModel &owned : models_) {
           owned.model_->observe_register_write(offset, *this);
+        }
       }
     }
     return 4;
@@ -1177,8 +1209,9 @@ void GpuPciDevice::enqueue_doorbell_notification(uint64_t byte_offset, uint64_t 
   bool wake = false;
   {
     const std::lock_guard lock(doorbell_inbox_mutex_);
-    if (!doorbell_admission_open_)
+    if (!doorbell_admission_open_) {
       return;
+    }
     doorbell_inbox_.emplace_back(session, session != nullptr ? session->generation() : 0,
                                  doorbell_reset_epoch_, byte_offset, value, width);
     if (engine() != nullptr && !doorbell_wake_pending_) {
@@ -1186,13 +1219,15 @@ void GpuPciDevice::enqueue_doorbell_notification(uint64_t byte_offset, uint64_t 
       wake = true;
     }
   }
-  if (wake)
+  if (wake) {
     engine()->schedule_event_now(&doorbell_event_);
+  }
 }
 
 GpuPciDevice::FrontendOperationLease::~FrontendOperationLease() {
-  if (device_ != nullptr)
+  if (device_ != nullptr) {
     device_->finish_frontend_operation();
+  }
 }
 
 GpuPciDevice::FrontendOperationLease::FrontendOperationLease(
@@ -1201,10 +1236,12 @@ GpuPciDevice::FrontendOperationLease::FrontendOperationLease(
 
 GpuPciDevice::FrontendOperationLease &
 GpuPciDevice::FrontendOperationLease::operator=(FrontendOperationLease &&other) noexcept {
-  if (this == &other)
+  if (this == &other) {
     return *this;
-  if (device_ != nullptr)
+  }
+  if (device_ != nullptr) {
     device_->finish_frontend_operation();
+  }
   device_ = std::exchange(other.device_, nullptr);
   return *this;
 }
@@ -1212,19 +1249,22 @@ GpuPciDevice::FrontendOperationLease::operator=(FrontendOperationLease &&other) 
 GpuPciDevice::FrontendOperationLease
 GpuPciDevice::acquire_frontend_operation(uint64_t reset_epoch) {
   const std::lock_guard lock(doorbell_inbox_mutex_);
-  if (!doorbell_admission_open_ || reset_epoch != doorbell_reset_epoch_)
+  if (!doorbell_admission_open_ || reset_epoch != doorbell_reset_epoch_) {
     return {};
+  }
   ++active_frontend_operations_;
   return FrontendOperationLease(this);
 }
 
 void GpuPciDevice::finish_frontend_operation() {
   const std::lock_guard lock(doorbell_inbox_mutex_);
-  if (active_frontend_operations_ == 0)
+  if (active_frontend_operations_ == 0) {
     return;
+  }
   --active_frontend_operations_;
-  if (active_frontend_operations_ == 0)
+  if (active_frontend_operations_ == 0) {
     doorbell_idle_.notify_all();
+  }
 }
 
 bool GpuPciDevice::same_doorbell_retry_target(const DoorbellRetry &retry,
@@ -1238,18 +1278,21 @@ bool GpuPciDevice::same_doorbell_retry_target(const DoorbellRetry &retry,
 void GpuPciDevice::enqueue_doorbell_retry(const DoorbellNotification &notification,
                                           IpBlockModel *model, simdojo::Tick now,
                                           simdojo::Tick backoff) {
-  if (model == nullptr)
+  if (model == nullptr) {
     return;
-  if (now == simdojo::TICK_MAX)
+  }
+  if (now == simdojo::TICK_MAX) {
     return;
+  }
   const simdojo::Tick bounded_backoff = std::min(backoff, kMaximumDoorbellRetryBackoff);
   const simdojo::Tick ready_tick = add_ticks_saturated(now, bounded_backoff);
   simdojo::Tick scheduled_tick = ready_tick;
   bool wake = false;
   {
     const std::lock_guard lock(doorbell_inbox_mutex_);
-    if (!doorbell_admission_open_ || notification.reset_epoch_ != doorbell_reset_epoch_)
+    if (!doorbell_admission_open_ || notification.reset_epoch_ != doorbell_reset_epoch_) {
       return;
+    }
     const std::deque<DoorbellRetry>::iterator duplicate =
         std::ranges::find_if(doorbell_retry_inbox_, [&](const DoorbellRetry &retry) {
           return same_doorbell_retry_target(retry, notification, model);
@@ -1272,8 +1315,9 @@ void GpuPciDevice::enqueue_doorbell_retry(const DoorbellNotification &notificati
       wake = true;
     }
   }
-  if (wake)
+  if (wake) {
     schedule_event(&doorbell_retry_event_, scheduled_tick);
+  }
 }
 
 void GpuPciDevice::discard_doorbell_retry(const DoorbellNotification &notification,
@@ -1295,12 +1339,14 @@ void GpuPciDevice::drain_doorbell_inbox(simdojo::Tick now) {
 
   for (const DoorbellNotification &notification : notifications) {
     const std::shared_ptr<simdojo::PciTransportSession> session = notification.session_.lock();
-    if (session == nullptr || session->generation() != notification.generation_)
+    if (session == nullptr || session->generation() != notification.generation_) {
       continue;
+    }
     simdojo::PciTransportSession::OperationLease lease = session->acquire();
     FrontendOperationLease frontend = acquire_frontend_operation(notification.reset_epoch_);
-    if (!lease || transport_session() != session || !frontend)
+    if (!lease || transport_session() != session || !frontend) {
       continue;
+    }
 
     for (const OwnedBlockModel &owned : models_) {
       const DoorbellDisposition disposition = owned.model_->observe_doorbell_write(
@@ -1319,8 +1365,9 @@ void GpuPciDevice::drain_doorbell_retry_inbox(simdojo::Tick now, bool ignore_rea
   std::deque<DoorbellRetry> retries;
   {
     const std::lock_guard lock(doorbell_inbox_mutex_);
-    if (doorbell_retry_wake_tick_ && *doorbell_retry_wake_tick_ <= now)
+    if (doorbell_retry_wake_tick_ && *doorbell_retry_wake_tick_ <= now) {
       doorbell_retry_wake_tick_.reset();
+    }
     retries.swap(doorbell_retry_inbox_);
   }
 
@@ -1333,36 +1380,42 @@ void GpuPciDevice::drain_doorbell_retry_inbox(simdojo::Tick now, bool ignore_rea
 
     const DoorbellNotification &notification = retry.notification_;
     const std::shared_ptr<simdojo::PciTransportSession> session = notification.session_.lock();
-    if (session == nullptr || session->generation() != notification.generation_)
+    if (session == nullptr || session->generation() != notification.generation_) {
       continue;
+    }
     simdojo::PciTransportSession::OperationLease lease = session->acquire();
     FrontendOperationLease frontend = acquire_frontend_operation(notification.reset_epoch_);
-    if (!lease || transport_session() != session || !frontend)
+    if (!lease || transport_session() != session || !frontend) {
       continue;
+    }
 
     const DoorbellDisposition disposition = retry.model_->observe_doorbell_write(
         notification.byte_offset_, notification.value_, notification.width_, *this);
     if (disposition == DoorbellDisposition::Retry) {
-      if (now == simdojo::TICK_MAX)
+      if (now == simdojo::TICK_MAX) {
         continue;
+      }
       retry.backoff_ = std::min(retry.backoff_ * 2, kMaximumDoorbellRetryBackoff);
       retry.ready_tick_ = add_ticks_saturated(now, retry.backoff_);
       deferred.push_back(std::move(retry));
     }
   }
 
-  if (deferred.empty())
+  if (deferred.empty()) {
     return;
+  }
 
   simdojo::Tick next_tick = simdojo::TICK_MAX;
   bool wake = false;
   {
     const std::lock_guard lock(doorbell_inbox_mutex_);
-    if (!doorbell_admission_open_)
+    if (!doorbell_admission_open_) {
       return;
+    }
     for (DoorbellRetry &retry : deferred) {
-      if (retry.notification_.reset_epoch_ != doorbell_reset_epoch_)
+      if (retry.notification_.reset_epoch_ != doorbell_reset_epoch_) {
         continue;
+      }
       const std::deque<DoorbellRetry>::iterator duplicate =
           std::ranges::find_if(doorbell_retry_inbox_, [&](const DoorbellRetry &candidate) {
             return same_doorbell_retry_target(candidate, retry.notification_, retry.model_);
@@ -1385,28 +1438,32 @@ void GpuPciDevice::drain_doorbell_retry_inbox(simdojo::Tick now, bool ignore_rea
       wake = true;
     }
   }
-  if (wake)
+  if (wake) {
     schedule_event(&doorbell_retry_event_, next_tick);
+  }
 }
 
 void GpuPciDevice::drain_doorbell_inbox_for_test() {
-  if (engine() != nullptr)
+  if (engine() != nullptr) {
     return;
+  }
   bool normal_work = false;
   {
     const std::lock_guard lock(doorbell_inbox_mutex_);
     normal_work = !doorbell_inbox_.empty();
   }
-  if (normal_work)
+  if (normal_work) {
     drain_doorbell_inbox(0);
-  else
+  } else {
     drain_doorbell_retry_inbox(0, true);
+  }
 
   // Shutdown may begin once the admitted doorbell observer returns. Keep the
   // frontend attached while this test-only owner drain inspects SDMA state.
   const std::lock_guard reset_lock(doorbell_reset_mutex_);
-  if (soc_ == nullptr || soc_->sdma_queue_scheduler().active_queues() == 0)
+  if (soc_ == nullptr || soc_->sdma_queue_scheduler().active_queues() == 0) {
     return;
+  }
 
   // Let the asynchronous SDMA owner post packet side effects and final queue
   // progress, then apply both on this owner thread. The scheduler, not this
@@ -1426,15 +1483,17 @@ void GpuPciDevice::drain_doorbell_inbox_for_test() {
       drain_sdma_pci_effects();
       continue;
     }
-    if (observed_sdma_message && ++idle_rounds >= 20)
+    if (observed_sdma_message && ++idle_rounds >= 20) {
       break;
+    }
     std::this_thread::sleep_for(std::chrono::microseconds(50));
   }
 }
 
 bool GpuPciDevice::synchronize_sdma_queue_for_test(uint32_t engine) {
-  if (engine >= 2 || soc_ == nullptr)
+  if (engine >= 2 || soc_ == nullptr) {
     return false;
+  }
   return soc_->sdma_queue_scheduler().synchronize_queue_for_test(
       0, 0xffff0000u | engine, [this]() { drain_sdma_pci_effects(); });
 }
@@ -1443,8 +1502,9 @@ void GpuPciDevice::close_doorbell_admission_for_reset() {
   std::unique_lock lock(doorbell_inbox_mutex_);
   doorbell_admission_open_ = false;
   ++doorbell_reset_epoch_;
-  if (doorbell_reset_epoch_ == 0)
+  if (doorbell_reset_epoch_ == 0) {
     ++doorbell_reset_epoch_;
+  }
   doorbell_inbox_.clear();
   doorbell_retry_inbox_.clear();
   doorbell_retry_wake_tick_.reset();
@@ -1472,30 +1532,37 @@ bool GpuPciDevice::read_vram(uint64_t offset, std::span<std::byte> bytes) {
 }
 
 bool GpuPciDevice::write_vram(uint64_t offset, std::span<const std::byte> bytes) {
-  if (!vram_.has_value() || !vram_->write_all(bytes, offset))
+  if (!vram_.has_value() || !vram_->write_all(bytes, offset)) {
     return false;
-  if (soc_ != nullptr)
+  }
+  if (soc_ != nullptr) {
     soc_->cache_coherence()->publish_local_backing_write(offset, bytes.size());
+  }
   return true;
 }
 
 amdgpu::AtomicLoadResult GpuPciDevice::atomic_load_vram(uint64_t offset, uint32_t width) {
-  if (!vram_.has_value())
+  if (!vram_.has_value()) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  }
   const std::optional<VramAtomicLoadResult> result = vram_->atomic_load(offset, width);
-  if (!result.has_value())
+  if (!result.has_value()) {
     return {.outcome = amdgpu::VmAccessOutcome::Faulted};
+  }
   return {.outcome = amdgpu::VmAccessOutcome::Complete, .value = result->value};
 }
 
 amdgpu::VmAccessOutcome GpuPciDevice::atomic_store_vram(uint64_t offset, uint32_t width,
                                                         uint64_t value) {
-  if (!vram_.has_value())
+  if (!vram_.has_value()) {
     return amdgpu::VmAccessOutcome::Unavailable;
-  if (!vram_->atomic_store(offset, width, value))
+  }
+  if (!vram_->atomic_store(offset, width, value)) {
     return amdgpu::VmAccessOutcome::Faulted;
-  if (soc_ != nullptr)
+  }
+  if (soc_ != nullptr) {
     soc_->cache_coherence()->publish_local_backing_write(offset, width);
+  }
   return amdgpu::VmAccessOutcome::Complete;
 }
 
@@ -1503,14 +1570,17 @@ amdgpu::AtomicCompareExchangeResult GpuPciDevice::compare_exchange_vram(uint64_t
                                                                         uint32_t width,
                                                                         uint64_t expected,
                                                                         uint64_t desired) {
-  if (!vram_.has_value())
+  if (!vram_.has_value()) {
     return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
+  }
   const std::optional<VramAtomicCompareExchangeResult> result =
       vram_->compare_exchange(offset, width, expected, desired);
-  if (!result.has_value())
+  if (!result.has_value()) {
     return {.outcome = amdgpu::VmAccessOutcome::Faulted};
-  if (result->exchanged && soc_ != nullptr)
+  }
+  if (result->exchanged && soc_ != nullptr) {
     soc_->cache_coherence()->publish_local_backing_write(offset, width);
+  }
   return {.outcome = amdgpu::VmAccessOutcome::Complete,
           .observed = result->observed,
           .exchanged = result->exchanged};
@@ -1531,8 +1601,9 @@ bool GpuPciDevice::write_register(uint64_t byte_offset, uint32_t value) {
     return false;
   }
   if (registers_.modelled(byte_offset) && !registers_.read_only(byte_offset)) {
-    if (!registers_.store(byte_offset, value))
+    if (!registers_.store(byte_offset, value)) {
       return false;
+    }
     for (const OwnedBlockModel &owned : models_) {
       owned.model_->observe_register_write(byte_offset, *this);
     }
@@ -1543,8 +1614,9 @@ bool GpuPciDevice::write_register(uint64_t byte_offset, uint32_t value) {
 bool GpuPciDevice::program_shader_apertures(uint32_t vmid, uint64_t shared_base,
                                             uint64_t shared_limit, uint64_t private_base,
                                             uint64_t private_limit) {
-  if (soc_ == nullptr)
+  if (soc_ == nullptr) {
     return false;
+  }
   soc_->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
   return true;
 }
@@ -1556,8 +1628,9 @@ util::Result GpuPciDevice::reset(simdojo::ResetKind kind, util::DiagnosticEmitte
   util::Logger::warn(std::format("{}: reset requested, kind {}", name(), static_cast<int>(kind)));
   const bool queues_released = teardown_frontend_queues();
   if (!queues_released) {
-    if (restart_transport && kind != simdojo::ResetKind::LostConnection)
+    if (restart_transport && kind != simdojo::ResetKind::LostConnection) {
       (void)restart_transport_session_after_reset();
+    }
     reopen_doorbell_admission_after_reset();
     return diag.emit() << "PCI queue state could not be cleared";
   }
@@ -1566,8 +1639,9 @@ util::Result GpuPciDevice::reset(simdojo::ResetKind kind, util::DiagnosticEmitte
     // and its retained transport backing. A later hub invalidation publishes
     // the replacement frontend's coherent GART configuration.
     if (!soc_->gpu_vm().clear_gart_binding()) {
-      if (restart_transport && kind != simdojo::ResetKind::LostConnection)
+      if (restart_transport && kind != simdojo::ResetKind::LostConnection) {
         (void)restart_transport_session_after_reset();
+      }
       reopen_doorbell_admission_after_reset();
       return diag.emit() << "VMID-0 GART binding could not be cleared";
     }

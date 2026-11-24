@@ -58,8 +58,9 @@ inline constexpr Coefficient coefficients[2][16] = {{{0, 3294200, 0, -1322},
                                                      {49724388, -2212244, -59922, 912}}};
 
 inline uint64_t round_even(U128 value, unsigned shift) {
-  if (!shift)
+  if (!shift) {
     return static_cast<uint64_t>(value);
+  }
   U128 whole = value >> shift;
   U128 rest = value & ((U128{1} << shift) - 1);
   U128 midpoint = U128{1} << (shift - 1);
@@ -68,8 +69,9 @@ inline uint64_t round_even(U128 value, unsigned shift) {
 }
 // Convert a positive fixed-point result to FP32 with truncation.
 inline uint32_t fixed_to_float(uint64_t value, unsigned fractional) {
-  if (!value)
+  if (!value) {
     return 0;
+  }
   const unsigned leading = static_cast<unsigned>(std::bit_width(value)) - 1;
   const uint32_t mantissa =
       static_cast<uint32_t>(leading >= 23 ? value >> (leading - 23) : value << (23 - leading));
@@ -94,15 +96,17 @@ inline uint32_t small_sine(uint32_t bits, unsigned denorm) {
   const uint32_t mantissa = (magnitude & 0x7fffff) | (exponent_bits ? 0x800000 : 0);
   const int exponent = exponent_bits ? static_cast<int>(exponent_bits) - 127 : -126;
   const uint64_t product = uint64_t{mantissa} * 0xc90fd5u;
-  if (!product)
+  if (!product) {
     return bits & 0x80000000u;
+  }
   const unsigned leading = static_cast<unsigned>(std::bit_width(product)) - 1;
   int result_exponent = exponent - 44 + static_cast<int>(leading);
   uint32_t result;
   if (result_exponent < -126) {
     result = static_cast<uint32_t>(round_even(product, 21));
-    if (!(denorm & 2) && result < 0x800000)
+    if (!(denorm & 2) && result < 0x800000) {
       result = 0;
+    }
   } else {
     uint32_t rounded = static_cast<uint32_t>(round_even(product, leading - 23));
     if (rounded == 0x1000000) {
@@ -116,20 +120,24 @@ inline uint32_t small_sine(uint32_t bits, unsigned denorm) {
 inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool quiet_snan = true) {
   uint32_t magnitude = bits & 0x7fffffff;
   if (magnitude >= 0x7f800000) {
-    if (magnitude == 0x7f800000)
+    if (magnitude == 0x7f800000) {
       return 0xffc00000;
+    }
     return bits | (quiet_snan ? 0x00400000u : 0);
   }
-  if (!magnitude || (magnitude < 0x00800000 && !(denorm & 1)))
+  if (!magnitude || (magnitude < 0x00800000 && !(denorm & 1))) {
     return cosine ? 0x3f800000 : bits & 0x80000000u;
-  if (!cosine && magnitude < 0x39c00000)
+  }
+  if (!cosine && magnitude < 0x39c00000) {
     return small_sine(bits, denorm);
+  }
   // Reduce finite inputs in turns before polynomial evaluation. Every FP32
   // value with exponent >= 23 is integral, so no large float-to-int cast is
   // needed. The phase retains 31 fractional bits.
   int exponent = static_cast<int>(magnitude >> 23) - 127;
-  if (exponent >= 23)
+  if (exponent >= 23) {
     return cosine ? 0x3f800000 : 0;
+  }
   uint64_t mantissa = (magnitude & 0x7fffff) | 0x800000;
   int shift = exponent + 8;
   uint32_t phase = static_cast<uint32_t>(shift >= 0     ? (mantissa << shift) & 0x7fffffff
@@ -144,11 +152,11 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
   uint32_t fraction = reduced - (index << 24);
   const auto c = coefficients[table][index];
   uint32_t result;
-  if (table && reduced - unsigned(reflected) < 46592)
+  if (table && reduced - unsigned(reflected) < 46592) {
     result = 0x3f800000;
-  else if (!table && !reduced)
+  } else if (!table && !reduced) {
     result = 0;
-  else {
+  } else {
     uint32_t square_input = (fraction - unsigned(reflected)) >> 7;
     // Every interval has a nonpositive quadratic correction. Keep its
     // magnitude unsigned so the wide-integer fallback follows the same path.
@@ -174,8 +182,9 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
                                     : uint64_t{fraction} << offset_shift;
       // Saturation follows the normalized field, even when the linear
       // input uses an additional four offset bits.
-      if (!index && reflected && ((uint64_t{fraction} << normalization) & 0xfffff) == 0)
+      if (!index && reflected && ((uint64_t{fraction} << normalization) & 0xfffff) == 0) {
         --linear_input;
+      }
       unsigned linear_precision = index ? 30 : 32 + normalization;
       unsigned quadratic_precision = 34 + normalization;
       int64_t linear =
@@ -209,8 +218,9 @@ inline uint32_t evaluate(uint32_t bits, bool cosine, unsigned denorm = 3, bool q
       result = fixed_to_float(static_cast<uint64_t>(sum), 29);
     }
   }
-  if (!result)
+  if (!result) {
     return 0;
+  }
   bool negative = (quadrant >> 1) ^ (unsigned(cosine) & quadrant & 1) ^ (!cosine && (bits >> 31));
   return result | (uint32_t{negative} << 31);
 }

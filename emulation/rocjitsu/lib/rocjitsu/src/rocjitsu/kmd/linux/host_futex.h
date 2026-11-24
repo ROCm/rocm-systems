@@ -44,9 +44,10 @@ template <typename Syscalls = detail::HostFutexSyscallProvider> struct HostFutex
   }
 
   static void wake(uint32_t *word) {
-    if (auto native_syscall = Syscalls::get())
+    if (auto native_syscall = Syscalls::get()) {
       static_cast<void>(
           native_syscall(SYS_futex, word, FUTEX_WAKE_PRIVATE, 1, nullptr, nullptr, 0));
+    }
   }
 };
 

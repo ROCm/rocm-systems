@@ -93,8 +93,9 @@ FfmMemoryAccess make_memory_access(EntityId instruction_id, FfmWaveInfo wave_inf
   access.flags = encode_memory_flags(is_atomic, is_read, is_write);
   if (addresses) {
     for (uint32_t lane = 0; lane < bounded_wave_size; ++lane) {
-      if (((access.exec_mask >> lane) & uint64_t{1}) != 0)
+      if (((access.exec_mask >> lane) & uint64_t{1}) != 0) {
         access.addresses[lane] = addresses[lane];
+      }
     }
   }
   return access;
@@ -115,31 +116,39 @@ bool runtime_symbol_version_not_found(std::string_view text) {
     const std::size_t token = pos + marker.size();
     pos = token;
     for (const std::string_view family : families) {
-      if (!text.substr(token).starts_with(family))
+      if (!text.substr(token).starts_with(family)) {
         continue;
+      }
       std::size_t end = token + family.size();
-      if (end >= text.size() || !std::isdigit(static_cast<unsigned char>(text[end])))
+      if (end >= text.size() || !std::isdigit(static_cast<unsigned char>(text[end]))) {
         continue;
+      }
       while (end < text.size() &&
-             (std::isdigit(static_cast<unsigned char>(text[end])) || text[end] == '.'))
+             (std::isdigit(static_cast<unsigned char>(text[end])) || text[end] == '.')) {
         ++end;
-      if (!text.substr(end).starts_with(tail))
+      }
+      if (!text.substr(end).starts_with(tail)) {
         continue;
+      }
       const std::size_t after = end + tail.size();
-      if (after == text.size() || text[after] == ' ' || text[after] == '(')
+      if (after == text.size() || text[after] == ' ' || text[after] == '(') {
         return true;
+      }
     }
   }
   return false;
 }
 
 std::string_view loader_reason(std::string_view error, std::string_view opened_path) {
-  if (opened_path.empty() || error.size() < opened_path.size() + 2)
+  if (opened_path.empty() || error.size() < opened_path.size() + 2) {
     return error;
-  if (!error.starts_with(opened_path))
+  }
+  if (!error.starts_with(opened_path)) {
     return error;
-  if (error[opened_path.size()] != ':' || error[opened_path.size() + 1] != ' ')
+  }
+  if (error[opened_path.size()] != ':' || error[opened_path.size() + 1] != ' ') {
     return error;
+  }
   return error.substr(opened_path.size() + 2);
 }
 
@@ -151,8 +160,9 @@ class ScopedStderrCapture {
 public:
   ScopedStderrCapture() { testing::internal::CaptureStderr(); }
   ~ScopedStderrCapture() {
-    if (active_)
+    if (active_) {
       testing::internal::GetCapturedStderr();
+    }
   }
 
   ScopedStderrCapture(const ScopedStderrCapture &) = delete;
@@ -203,16 +213,18 @@ struct WaveFixture {
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "perfsim_test_cu", config, memory.get(), l2.get());
-    if (!cu)
+    if (!cu) {
       return;
+    }
   }
 
   Wavefront *wave(uint32_t dispatch_id, uint32_t rocjitsu_workgroup_id,
                   std::array<uint32_t, 3> coordinate, uint32_t wave_in_group, uint32_t queue_id = 3,
                   uint32_t process_id = 4) {
     Wavefront *wf = cu->dispatch_wf(rocjitsu_workgroup_id, 0x1000, 64, 64);
-    if (!wf)
+    if (!wf) {
       return nullptr;
+    }
     wf->set_dispatch_id(dispatch_id);
     wf->set_wg_coord(coordinate[0], coordinate[1], coordinate[2]);
     wf->set_wave_in_group(wave_in_group);
@@ -341,16 +353,19 @@ std::string read_file(const std::string &path) {
 std::vector<std::string> lines(const std::string &contents) {
   std::vector<std::string> result;
   std::istringstream input(contents);
-  for (std::string line; std::getline(input, line);)
+  for (std::string line; std::getline(input, line);) {
     result.push_back(std::move(line));
+  }
   return result;
 }
 
 size_t line_with_prefix(const std::vector<std::string> &trace, std::string_view prefix,
                         size_t start = 0) {
-  for (size_t i = start; i < trace.size(); ++i)
-    if (std::string_view(trace[i]).starts_with(prefix))
+  for (size_t i = start; i < trace.size(); ++i) {
+    if (std::string_view(trace[i]).starts_with(prefix)) {
       return i;
+    }
+  }
   return trace.size();
 }
 
@@ -430,8 +445,9 @@ public:
       write_started_ = true;
       cv_.notify_all();
     }
-    if (backend_write_entered)
+    if (backend_write_entered) {
       sink().write("peer plugin initialized\n");
+    }
   }
 
   bool wait_for_write_start(std::chrono::milliseconds timeout) {
@@ -1255,8 +1271,9 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
   }
 
   const auto trace = lines(read_file(trace_.path()));
-  for (uint32_t version = 13; version >= 8; --version)
+  for (uint32_t version = 13; version >= 8; --version) {
     EXPECT_EQ(std::ranges::count(trace, "get_api " + std::to_string(version)), 1);
+  }
   EXPECT_EQ(std::ranges::count(trace, "init 8"), 1);
   EXPECT_EQ(std::ranges::count(trace, "shutdown"), 1);
 
@@ -1508,10 +1525,12 @@ TEST_F(PerfsimPluginTest, FilteredImageRecordsAllTexelsUnderOneInstruction) {
   const auto trace = lines(read_file(trace_.path()));
   unsigned memory_records = 0, instruction_records = 0;
   for (const auto &line : trace) {
-    if (line.starts_with("instruction 19 "))
+    if (line.starts_with("instruction 19 ")) {
       ++instruction_records;
-    if (!line.starts_with("memory 19 "))
+    }
+    if (!line.starts_with("memory 19 ")) {
       continue;
+    }
     ASSERT_LT(memory_records, 3u);
     // All three real texels belong to instruction 0 and active lane 0.
     EXPECT_TRUE(line.starts_with("memory 19 0 0 0 0 0 1 32 4 5 0 1 0 " +
@@ -2376,8 +2395,9 @@ TEST_F(PerfsimPluginTest, ReplaysLargeEpochInOrder) {
   const std::array<uint32_t, 1> add_words{0x7E000200};
   SyntheticInstruction add("v_add_f32", add_words, VALU, Operation::V_ADD_F32,
                            MemoryAddressing::None, MemoryKind::None);
-  for (uint32_t i = 0; i < kAddCount; ++i)
+  for (uint32_t i = 0; i < kAddCount; ++i) {
     plugin.onAmdgpuBeforeExecuteInstruction(kFirstPc + i * 4, add, wave);
+  }
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR | SALU, Operation::S_ENDPGM,
@@ -2503,8 +2523,9 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words, VALU, Operation::V_ADD_F32,
                              MemoryAddressing::None, MemoryKind::None);
-    for (uint32_t i = 0; i < 512; ++i)
+    for (uint32_t i = 0; i < 512; ++i) {
       plugin.onAmdgpuBeforeExecuteInstruction(0x9000 + i * 4, add, rejected_wave);
+    }
 
     plugin.onAmdgpuWavefrontHalted(rejected_wave);
     plugin.onAmdgpuDispatchExecutionEnd(rejected_info.dispatch_id);
@@ -2563,8 +2584,9 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
   SyntheticInstruction add("v_add_f32", add_words, VALU, Operation::V_ADD_F32,
                            MemoryAddressing::None, MemoryKind::None);
   ScopedStderrCapture stderr_capture;
-  for (uint32_t i = 0; i < 128; ++i)
+  for (uint32_t i = 0; i < 128; ++i) {
     plugin.onAmdgpuBeforeExecuteInstruction(0xB000 + i * 4, add, rejected_wave);
+  }
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR | SALU, Operation::S_ENDPGM,
@@ -2618,8 +2640,9 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words, VALU, Operation::V_ADD_F32,
                              MemoryAddressing::None, MemoryKind::None);
-    for (uint32_t i = 0; i < 512; ++i)
+    for (uint32_t i = 0; i < 512; ++i) {
       plugin.onAmdgpuBeforeExecuteInstruction(0xD000 + i * 4, add, rejected_wave);
+    }
 
     const KernelDispatchInfo supported_info = dispatch_info(30);
     plugin.onAmdgpuDispatchPacketProcessed(supported_info);
@@ -3041,8 +3064,9 @@ TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
 
 TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   const char *backend_path_env = std::getenv("ROCJITSU_PERFSIM_REAL_BACKEND");
-  if (!backend_path_env || backend_path_env[0] == '\0')
+  if (!backend_path_env || backend_path_env[0] == '\0') {
     GTEST_SKIP() << "set ROCJITSU_PERFSIM_REAL_BACKEND to libgpucsim_ffm_plugin.so";
+  }
   const std::string backend_path{backend_path_env};
 
   static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 13);
@@ -3070,9 +3094,10 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   const util::LibraryHandle direct_backend = util::open_library(backend_path.c_str());
   if (!direct_backend) {
     const std::string error = util::last_library_error();
-    if (is_loader_symbol_version_error(error, backend_path))
+    if (is_loader_symbol_version_error(error, backend_path)) {
       GTEST_SKIP() << "Perfsim backend needs a newer C/C++ runtime than this host: " << error
                    << " (runtime library version mismatch, not an observer ABI rejection)";
+    }
     FAIL() << "Perfsim backend failed to load: " << error;
   }
   const auto get_api =
@@ -3083,8 +3108,9 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   uint32_t requested_version = FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION;
   for (;; --requested_version) {
     raw_api = invoke_foreign_abi(get_api, requested_version);
-    if (raw_api || requested_version == kOldestCompatibleApiVersion)
+    if (raw_api || requested_version == kOldestCompatibleApiVersion) {
       break;
+    }
   }
   ASSERT_NE(raw_api, nullptr);
   uint32_t negotiated_version = 0;
@@ -3207,9 +3233,10 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
 
   const std::string direct_json = read_file(direct_report.path());
   ASSERT_FALSE(direct_json.empty());
-  for (uint32_t dispatch_id : {kDispatchId, kAdditionalDispatchIds[0], kAdditionalDispatchIds[1]})
+  for (uint32_t dispatch_id : {kDispatchId, kAdditionalDispatchIds[0], kAdditionalDispatchIds[1]}) {
     ASSERT_NE(direct_json.find("\"dispatch_id\": " + std::to_string(dispatch_id)),
               std::string::npos);
+  }
   ASSERT_EQ(setenv("GPUCSIM_REPORT_PATH", bridge_report.path().c_str(), 1), 0);
 
   WaveFixture fixture(3);
@@ -3315,9 +3342,10 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
 
   const std::string bridge_json = read_file(bridge_report.path());
   ASSERT_FALSE(bridge_json.empty());
-  for (uint32_t dispatch_id : {kDispatchId, kAdditionalDispatchIds[0], kAdditionalDispatchIds[1]})
+  for (uint32_t dispatch_id : {kDispatchId, kAdditionalDispatchIds[0], kAdditionalDispatchIds[1]}) {
     ASSERT_NE(bridge_json.find("\"dispatch_id\": " + std::to_string(dispatch_id)),
               std::string::npos);
+  }
   EXPECT_EQ(bridge_json, direct_json);
 }
 

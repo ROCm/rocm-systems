@@ -32,16 +32,18 @@ struct TestPaths {
 std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
                                               const char *path) {
   std::filesystem::path candidate(path);
-  if (!candidate.is_absolute())
+  if (!candidate.is_absolute()) {
     candidate = exe_dir / candidate;
+  }
   return candidate.lexically_normal();
 }
 
 std::filesystem::path current_exe_dir() {
   std::error_code ec;
   std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-  if (ec)
+  if (ec) {
     return {};
+  }
   return exe.parent_path();
 }
 
@@ -61,8 +63,9 @@ const TestPaths &test_paths() {
     std::filesystem::path exe_dir = current_exe_dir();
     if (!exe_dir.empty()) {
       TestPaths installed = installed_paths(exe_dir);
-      if (installed_paths_exist(installed))
+      if (installed_paths_exist(installed)) {
         return installed;
+      }
     }
     return TestPaths{};
   }();
@@ -80,8 +83,9 @@ ProcessResult run_command(const std::string &cmd) {
     return result;
   }
 
-  while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+  while (fgets(buf.data(), buf.size(), pipe) != nullptr) {
     result.output += buf.data();
+  }
 
   int status = pclose(pipe);
   result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -100,8 +104,9 @@ const ProcessResult &rocminfo_output() {
 // Removes surrounding horizontal whitespace from a rocminfo field or line.
 std::string_view trim(std::string_view value) {
   const size_t first = value.find_first_not_of(" \t\r");
-  if (first == std::string_view::npos)
+  if (first == std::string_view::npos) {
     return {};
+  }
   const size_t last = value.find_last_not_of(" \t\r");
   return value.substr(first, last - first + 1);
 }
@@ -116,8 +121,9 @@ std::optional<std::string_view> agent_field(std::string_view agent, std::string_
         line[label.size()] == ':') {
       return trim(line.substr(label.size() + 1));
     }
-    if (line_end == std::string_view::npos)
+    if (line_end == std::string_view::npos) {
       break;
+    }
     line_start = line_end + 1;
   }
   return std::nullopt;
@@ -143,13 +149,15 @@ std::optional<std::string_view> gfx950_gpu_agent(std::string_view output) {
 // Parses an entire rocminfo agent field as an unsigned decimal integer.
 std::optional<uint64_t> decimal_agent_field(std::string_view agent, std::string_view label) {
   const auto text = agent_field(agent, label);
-  if (!text)
+  if (!text) {
     return std::nullopt;
+  }
 
   uint64_t value = 0;
   const auto [end, error] = std::from_chars(text->data(), text->data() + text->size(), value);
-  if (error != std::errc{} || end != text->data() + text->size())
+  if (error != std::errc{} || end != text->data() + text->size()) {
     return std::nullopt;
+  }
   return value;
 }
 

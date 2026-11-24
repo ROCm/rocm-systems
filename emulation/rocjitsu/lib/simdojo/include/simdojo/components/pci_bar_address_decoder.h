@@ -49,8 +49,9 @@ public:
   [[nodiscard]] bool publish(Window window) {
     if (window.base == 0 || window.size == 0 || window.generation == 0 ||
         window.rights == DmaAccess::None ||
-        window.base > std::numeric_limits<uint64_t>::max() - window.size)
+        window.base > std::numeric_limits<uint64_t>::max() - window.size) {
       return false;
+    }
     windows_.insert_or_assign({window.function, window.bar}, window);
     return true;
   }
@@ -59,27 +60,31 @@ public:
 
   [[nodiscard]] std::optional<Window> window(uint32_t function, uint32_t bar) const {
     const auto found = windows_.find({function, bar});
-    if (found == windows_.end())
+    if (found == windows_.end()) {
       return std::nullopt;
+    }
     return found->second;
   }
 
   [[nodiscard]] std::optional<Match> resolve(uint32_t requester, uint64_t address, uint64_t length,
                                              DmaAccess wanted) const {
     if (length == 0 || wanted == DmaAccess::None ||
-        address > std::numeric_limits<uint64_t>::max() - length)
+        address > std::numeric_limits<uint64_t>::max() - length) {
       return std::nullopt;
+    }
 
     const uint64_t end = address + length;
     std::optional<Match> match;
     for (const auto &entry : windows_) {
       const Window &window = entry.second;
       const uint64_t window_end = window.base + window.size;
-      if (address >= window_end || end <= window.base)
+      if (address >= window_end || end <= window.base) {
         continue;
+      }
       if (match || address < window.base || end > window_end || window.function == requester ||
-          !contains(window.rights, wanted))
+          !contains(window.rights, wanted)) {
         return std::nullopt;
+      }
       match = Match{.function = window.function,
                     .bar = window.bar,
                     .offset = address - window.base,
