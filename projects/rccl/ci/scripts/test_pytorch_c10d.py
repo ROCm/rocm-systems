@@ -90,13 +90,15 @@ SMOKE_TESTS = [
 ]
 
 # Fewest tests that must run (pass or fail) in each file in the all scope, so
-# a file upstream empties, renames or stops importing fails the job.
+# a file upstream empties, renames or stops importing fails the job. Set a
+# little under the counts that ran on torch 20261123 (MI300X): 5, 30 (the two
+# float8 tests are skipped upstream), 18, 10, 15.
 ALL_MIN_RAN = {
     "test_c10d_nccl.py": 5,
-    "test_c10d_ops_nccl.py": 29,
+    "test_c10d_ops_nccl.py": 28,
     "test_c10d_functional_native.py": 16,
     "test_c10d_spawn_nccl.py": 9,
-    "test_c10d_object_collectives.py": 9,
+    "test_c10d_object_collectives.py": 13,
 }
 
 REPORT_SUBJECT = "RCCL PyTorch c10d Test"
