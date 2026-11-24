@@ -60,7 +60,7 @@ subtrees:
           title: Command processor (CP)
         - file: conceptual/cdna/references.rst
       - file: conceptual/rdna/rdna-performance-model.rst
-        title: RDNA3
+        title: RDNA3-RDNA4
         entries:
         - file: conceptual/rdna/system-speed-of-light.rst
           title: System Speed-of-Light
@@ -78,7 +78,7 @@ subtrees:
         - file: conceptual/rdna/gl2-cache.rst
           title: GL2
         - file: conceptual/rdna/gcea.rst
-          title: GCEA
+          title: Efficiency Arbiter (EA)
         - file: conceptual/rdna/command-processor.rst
           title: Command processor (CP)
         - file: conceptual/rdna/grbm.rst

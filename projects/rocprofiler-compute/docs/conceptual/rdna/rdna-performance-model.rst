@@ -1,89 +1,120 @@
 .. meta::
-   :description: Understand the AMD RDNA architectures and hardware blocks with ROCm Compute Profiler to analyze and optimize performance on AMD Ryzen APUs.
-   :keywords: ROCm Compute Profiler, RDNA, RDNA3, gfx115x, Radeon, ROCm, Ryzen
+   :description: Understand AMD RDNA architectures and hardware blocks with ROCm Compute Profiler on AMD Ryzen APUs and Radeon GPUs.
+   :keywords: ROCm Compute Profiler, RDNA, RDNA3.5, RDNA4, gfx115x, gfx1201, Radeon, ROCm, Ryzen
 
 .. _rdna-performance-model:
 
-********
-RDNA3
-********
+***********************************
+AMD RDNA architecture (RDNA3-RDNA4)
+***********************************
 
-ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture-based AMD Ryzen™ APUs like AMD Ryzen AI Max / Ryzen AI Max+ Series (gfx115x).
+ROCm Compute Profiler makes available an extensive list of metrics to better understand the
+achieved application performance on AMD RDNA™ GPUs including:
 
-To best use the profiling data, it's important to understand the role of various hardware blocks of AMD RDNA3 architecture. Refer to the following top-level block diagram to understand the hardware blocks of RDNA3 architecture.
+* RDNA3.5 architecture based APUs: AMD Ryzen AI Max / Ryzen AI Max+ (gfx115x)
+* RDNA4 architecture based GPUs: AMD Radeon RX 9070 and RX 9070 XT, Navi 48 (gfx1201)
 
-.. figure:: ../../data/conceptual/RDNA3_Block_Diagram.png
-   :alt: AMD RDNA3 generation series block diagram - host CPU, system and device memory, memory controller, L2/L1 caches, global data share, command processors, ultra-threaded dispatch, and processor array of WGPs with CUs, LDS, instruction and constant caches
-   :align: center
+Navi 44 (gfx1200) is not supported. For gfx1201 profiling
+prerequisites, see :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
 
-For more details on AMD RDNA3 architecture, see page 5 of `RDNA3 shader instruction set architecture <https://docs.amd.com/v/u/en-US/rdna3-shader-instruction-set-architecture-feb-2023_0#page=5>`__.
+.. warning::
 
-.. Note::
+   gfx1201 support is experimental. Add ``--experimental`` to each
+   ``rocprof-compute`` command on gfx1201, for example
+   ``rocprof-compute --experimental profile -n <name> -- <app>`` and
+   ``rocprof-compute --experimental analyze -p <workload>``.
 
-   * For top-level metrics details on CDNA and RDNA architecture, see :doc:`../performance-model`.
+.. note::
 
-   * For details on metrics available for CDNA-CDNA4 architecture-based Instinct GPUs, see :doc:`../cdna/cdna-performance-model`.
+  * For AMD Instinct™ GPUs (CDNA-CDNA4), see :doc:`../cdna/cdna-performance-model`.
 
-   * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU hardware specifications <rocm:reference/gpu-arch-specs>` and the public architecture summaries.
+  * For top-level metrics details on CDNA and RDNA architecture, see :doc:`../performance-model`.
 
-ROCm Compute Profiler includes analysis panels targeting RDNA3.5 parts reporting as
-gfx115x, such as,  integrated graphics on AMD Ryzen AI Max Series processors.
+The table provides key details for the RDNA architectures covered by these chapters.
 
-Memory hierarchy in the tool
-==============================
+**Architecture details**
 
-For gfx115x, the Memory Chart panel walks the path from instruction and scalar
-paths, GL0 (TCP), LDS, interfaces to GL1 Cache, GL2 Cache, and GCEA toward
-system memory.
+.. list-table::
+   :header-rows: 1
+   :widths: 24 38 38
 
-Workgroups and execution
-==============================
+   * - Architecture
+     - RDNA3.5
+     - RDNA4
+   * - Products
+     - AMD Ryzen AI Max / Ryzen AI Max+ (gfx115x)
+     - AMD Radeon RX 9070 and RX 9070 XT, Navi 48 (gfx1201)
+   * - Chip packaging
+     - APU with shared system memory
+     - Discrete GPU with dedicated VRAM
+   * - Device memory in the tool
+     - System memory through GCEA
+     - VRAM. The Infinity Cache (MALL) has no counters and no roofline roof
+   * - Compute organization
+     - Each WGP pairs two CUs. Wave32 is the primary mode, and wave64 is supported
+     - The full Navi 48 die (Radeon RX 9070 XT) has 4 shader engines, 64 CUs, and 32 WGPs. The Radeon RX 9070 has 56 CUs. Wave32 is the primary mode, and wave64 is supported
+   * - Matrix operations
+     - WMMA. This profiler has limited WMMA support on gfx115x
+     - WMMA, including FP8, BF8, FP16, and BF16. RDNA4 has no MFMA
 
-RDNA3 architecture-based APUs organize compute around Workgroup Processors (WGPs) and Compute Units (CUs). On gfx115x, each WGP pairs two CUs that share resources.
-Wavefronts are typically wave32 oriented in this configuration.
-The WGP, Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx115x expose dispatch, occupancy, and command-processor metrics for this RDNA execution model (see the sub-sections under :doc:`shader-engine` and :doc:`command-processor`).
+To best use profiling data, it's important to understand the role of various
+hardware blocks. Refer to the following top-level block diagram for each architecture.
+
+.. tab-set::
+
+   .. tab-item:: RDNA3.5 (gfx115x)
+
+      .. image:: ../../data/conceptual/RDNA3_Block_Diagram.png
+         :alt: AMD RDNA3 generation series block diagram - host CPU, system and device memory, memory controller, L2/L1 caches, global data share, command processors, ultra-threaded dispatch, and processor array of WGPs with CUs, LDS, instruction and constant caches
+         :align: center
+
+      For more details on AMD RDNA3 architecture, see page 5 of the `RDNA3 shader instruction set architecture <https://docs.amd.com/v/u/en-US/rdna3-shader-instruction-set-architecture-feb-2023_0#page=5>`__.
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      .. image:: ../../data/conceptual/RDNA4_Block_Diagram.png
+         :alt: AMD RDNA4 generation series block diagram - host CPU, system and device memory, memory controller with DMAs, L2 read/write cache, L1 read-only cache, command processors, ultra-threaded dispatch processor, and WGPs with local data share, vector and scalar ALUs, instruction cache, and constant cache
+         :align: center
+
+      .. image:: ../../data/conceptual/RDNA4_Shared_Memory_Hierarchy.png
+         :alt: RDNA4 shared memory hierarchy - L2 read/write cache per memory channel, crossbar, GL1 write-combining cache, and two workgroup processors, each with constant cache, two L0 texture read/write caches, instruction cache, two CUs with SIMDs, and a 128 KB LDS per WGP
+         :align: center
+
+      For more details on AMD RDNA4 architecture, see section 1.2 of the `RDNA4 instruction set architecture <https://gpuopen.com/download/rdna4-instruction-set-architecture.pdf#page=16>`__.
+      GL1 is the write-combining buffer between the WGPs and GL2.
 
 Hardware blocks
-========================
+================
 
-The ROCm Compute Profiler documentation follows the RDNA3 gfx115x block hierarchy below:
+The chapters below cover RDNA3.5 (gfx115x) and RDNA4 (gfx1201).
+Each metric table has a tab for each generation.
 
-Shader engine
--------------
+* :doc:`system-speed-of-light`: The top-level metrics and how they count FLOPs and bandwidth.
 
-Within each shader engine, gfx115x metric tables are grouped under:
+* :doc:`shader-engine`: The shader engine and its blocks.
 
-* :doc:`spi`: Schedules wavefronts onto WGPs after the command processor dispatches work. Tracks SPI utilization and wave-dispatch statistics.
+  * :doc:`spi`: The workgroup manager and wave dispatch.
 
-* :doc:`wgp`: CU-pair execution (occupancy, waves, instruction mix, and WGP instruction/data caches).
+  * :doc:`wgp`: The roofline, waves, instruction mix, and local caches of the workgroup processor.
 
-* :doc:`gl0-cache`: Vector L0 immediately before GL1; TCP-named counters through the TCP-GL1 boundary.
+  * :doc:`gl0-cache`: The vector L0 cache.
 
-* :doc:`gl1-cache`: Shared L1 utilization, requests, cache performance, and the GL1-GL2 interface.
+  * :doc:`gl1-cache`: The GL1 stage between GL0 and GL2.
 
-For more details, see :doc:`shader-engine`.
+* :doc:`gl2-cache`: The L2 cache.
 
-Last-level cache and memory paths
-----------------------------------
+* :doc:`gcea`: The Efficiency Arbiter, where traffic leaves the cache hierarchy.
 
-* :doc:`gl2-cache`: Last-level GFX on-chip cache performance, requests, and bandwidth.
+* :doc:`command-processor`: The command processor.
 
-* :doc:`gcea`: DRAM read/write interfaces, system arbiter (SARB), and return traffic after GL2.
+* :doc:`grbm`: The graphics register bus manager.
 
-Host-side control and coarse utilization
------------------------------------------
+* :doc:`references`: Further reading.
 
-* :doc:`command-processor`: CPC/MEC panels from packet handling through dispatch toward SPI.
+.. note::
 
-* :doc:`grbm`: GPU-wide and per-shader-engine utilization from GRBM-derived counters.
-
-Additional reference material
------------------------------
-
-* :doc:`system-speed-of-light`: System Speed-of-Light table using the same gfx115x metric keys as the analysis panel.
-
-* :doc:`references`: Public references and links to complementary Instinct documentation.
-
-.. Note::
-
-   ROCm Compute Profiler currently has limited support for WMMA on gfx115x.
+   * The System Speed-of-Light, WGP, GL0, GL1, GL2, SPI, and GRBM chapters have gfx1201 tables.
+   * The roofline is in the WGP chapter. The Memory Chart tables are in the WGP, GL0, GL2, and Efficiency Arbiter chapters.
+   * The Command Processor chapter says that gfx1201 has no CPC panel.
+   * ROCm Compute Profiler currently has limited support for WMMA on gfx115x.

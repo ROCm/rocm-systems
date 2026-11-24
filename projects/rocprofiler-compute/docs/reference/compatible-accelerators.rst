@@ -63,4 +63,7 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
         - Status
 
       * - AMD Radeon Navi48
-        - Supported ✅ (experimental)
+        - Supported ✅ (experimental, see :doc:`/conceptual/rdna/rdna-performance-model`)
+
+      * - Navi44 (gfx1200)
+        - No support ❌
