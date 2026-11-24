@@ -183,6 +183,25 @@ jobs:
             exit 1
           fi
 
+      # The SPUR CLI finds its controller only through SPUR_CONTROLLER_ADDR, and
+      # Crusoe sets that in /etc/environment and /etc/profile.d -- neither of
+      # which a runner started as a systemd service reads. Without it salloc
+      # dials a default address and fails with "failed to connect to spurctld".
+      # Take the host's value rather than a copy, so a moved controller needs
+      # no change here.
+      - name: Load SPUR client environment
+        if: inputs.cluster == 'crusoe'
+        run: |
+          if [ -z "${SPUR_CONTROLLER_ADDR:-}" ] && [ -r /etc/profile.d/spur.sh ]; then
+            . /etc/profile.d/spur.sh
+          fi
+          if [ -z "${SPUR_CONTROLLER_ADDR:-}" ]; then
+            echo "::error::SPUR_CONTROLLER_ADDR is unset and /etc/profile.d/spur.sh does not set it"
+            exit 1
+          fi
+          echo "SPUR_CONTROLLER_ADDR=${SPUR_CONTROLLER_ADDR}" >> "$GITHUB_ENV"
+          squeue -h -u "$(id -un)" > /dev/null
+
       # The runner account's home is a separate, much smaller allotment than
       # the CI tree, and exhausting it fails the conda step below with a bare
       # "[Errno 122] Disk quota exceeded" that names no path -- which reads as

@@ -88,6 +88,18 @@ class WorkflowsMatchConfigs(unittest.TestCase):
             self.assertIn(f"'{tree}'", results_dir, name)
             self.assertTrue(results_dir.endswith(f"/madengine/{tail}"), name)
 
+    def test_spur_clusters_load_the_controller_address_first(self):
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        steps = callee["jobs"]["test_madengine"]["steps"]
+        names = [s.get("name") for s in steps]
+        i = names.index("Load SPUR client environment")
+        self.assertLess(i, names.index("Run MADEngine workload"))
+        self.assertIn('SPUR_CONTROLLER_ADDR=${SPUR_CONTROLLER_ADDR}" >> "$GITHUB_ENV"',
+                      steps[i]["run"])
+        for name, config in tm.CLUSTER_CONFIGS.items():
+            if config.get("scheduler") == "spur":
+                self.assertIn(f"inputs.cluster == '{name}'", steps[i]["if"], name)
+
     def test_scheduled_workloads_exist(self):
         legs = madengine_legs()
         self.assertGreater(len(legs), 1)
