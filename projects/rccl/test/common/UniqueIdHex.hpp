@@ -3,8 +3,10 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-#pragma once
+#ifndef UNIQUE_ID_HEX_HPP
+#define UNIQUE_ID_HEX_HPP
 
+#include <charconv>
 #include <cstddef>
 #include <cstdio>
 #include <string>
@@ -26,16 +28,23 @@ inline std::string uniqueIdToHex(const ncclUniqueId& id) {
   return out;
 }
 
-// Decodes the output of uniqueIdToHex(). Returns false if the length is wrong or a byte does not parse.
+// Decodes the output of uniqueIdToHex(). Returns false if the length is wrong or a byte is not exactly two hex
+// digits.
 inline bool uniqueIdFromHex(const std::string& hex, ncclUniqueId& id) {
   if (hex.size() != sizeof(ncclUniqueId) * 2) return false;
   unsigned char* bytes = reinterpret_cast<unsigned char*>(&id);
   for (size_t i = 0; i < sizeof(ncclUniqueId); ++i) {
+    const char* pair = hex.data() + i * 2;
     unsigned int v = 0;
-    if (sscanf(hex.c_str() + i * 2, "%02x", &v) != 1) return false;
+    const auto [end, ec] = std::from_chars(pair, pair + 2, v, 16);
+    if (ec != std::errc() || end != pair + 2) {
+      return false;
+    }
     bytes[i] = static_cast<unsigned char>(v);
   }
   return true;
 }
 
 }  // namespace RcclUnitTesting
+
+#endif  // UNIQUE_ID_HEX_HPP

@@ -3,7 +3,8 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-#pragma once
+#ifndef RAS_CLIENT_HELPERS_HPP
+#define RAS_CLIENT_HELPERS_HPP
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -89,3 +90,5 @@ inline std::string rasRequest(int port, const std::string& command, const std::s
 }
 
 }  // namespace RcclUnitTesting
+
+#endif  // RAS_CLIENT_HELPERS_HPP
