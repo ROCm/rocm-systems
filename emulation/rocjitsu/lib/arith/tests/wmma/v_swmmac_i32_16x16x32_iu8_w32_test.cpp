@@ -141,3 +141,44 @@ TEST(SwmmacI32Iu8K32W32, Arithmetic) {
     }
   }
 }
+
+// Non-ascending 2-bit selector pairs (duplicate or reversed indices in a group of four)
+// must match the baseline scalar selection across all SIMD backends.
+TEST(SwmmacI32Iu8K32W32, NonAscendingMetadataPairs) {
+  std::minstd_rand random(12345);
+  Registers input;
+  for (int reg = 0; reg < 14; ++reg) {
+    for (int lane = 0; lane < 32; ++lane) {
+      input.v[reg][lane] = uint32_t(random());
+    }
+  }
+  // Cover all 16 metadata nibbles (0..15) across rows and selector slots.
+  for (int lane = 0; lane < 32; ++lane) {
+    uint32_t word = 0;
+    for (int slot = 0; slot < 8; ++slot) {
+      word |= uint32_t((lane + slot) & 15) << (4 * slot);
+    }
+    input.v[14][lane] = word;
+  }
+  for (uint64_t mode : {uint64_t{0}, uint64_t{RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B |
+                                              RJ_ARITH_WMMA_CLAMP | RJ_ARITH_SWMMAC_INDEX_KEY_1}}) {
+    Registers expected = input;
+    ASSERT_EQ(rj_arith_v_swmmac_i32_16x16x32_iu8_w32(
+                  RJ_ARITH_CPU_BASELINE | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, mode,
+                  expected.v + 6, expected.v, expected.v + 2, expected.v + 14),
+              RJ_ARITH_SUCCESS);
+    for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+      SCOPED_TRACE(::testing::Message() << cpu << '/' << mode);
+      Registers actual = input;
+      ASSERT_EQ(rj_arith_v_swmmac_i32_16x16x32_iu8_w32(
+                    cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, mode, actual.v + 6,
+                    actual.v, actual.v + 2, actual.v + 14),
+                RJ_ARITH_SUCCESS);
+      for (int reg = 6; reg < 14; ++reg) {
+        for (int lane = 0; lane < 32; ++lane) {
+          EXPECT_EQ(actual.v[reg][lane], expected.v[reg][lane]);
+        }
+      }
+    }
+  }
+}

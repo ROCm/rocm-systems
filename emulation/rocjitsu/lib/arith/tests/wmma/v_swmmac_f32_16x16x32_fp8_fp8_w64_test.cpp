@@ -176,3 +176,45 @@ TEST(SwmmacF32FP8FP8K32W64, LoosePairOrderAndSubnormalAccumulator) {
     }
   }
 }
+
+// Non-ascending metadata pairs (e.g. duplicate or reversed 2-bit indices) must match
+// the baseline scalar selection on the Zen 4 DPBF16 loose path as well as exact/AVX2.
+TEST(SwmmacF32FP8FP8K32W64, NonAscendingMetadataPairs) {
+  // Small exact FP8 integers: 1.0=0x38, 2.0=0x40, 3.0=0x44, 4.0=0x48.
+  constexpr uint8_t kFp8Vals[4] = {0x38u, 0x40u, 0x44u, 0x48u};
+  Registers input;
+  for (int lane = 0; lane < 64; ++lane) {
+    input.v[0][lane] = uint32_t(kFp8Vals[lane & 3]) | (uint32_t(kFp8Vals[(lane + 1) & 3]) << 8) |
+                       (uint32_t(kFp8Vals[(lane + 2) & 3]) << 16) |
+                       (uint32_t(kFp8Vals[(lane + 3) & 3]) << 24);
+    input.v[1][lane] = 0x48444038u;
+    input.v[2][lane] = 0x38484440u;
+    for (int reg = 3; reg < 7; ++reg) {
+      input.v[reg][lane] = 0u;
+    }
+    // Cover all 16 nibbles (including lo == hi and lo > hi).
+    uint32_t word = 0;
+    for (int slot = 0; slot < 8; ++slot) {
+      word |= uint32_t((lane + slot) & 15) << (4 * slot);
+    }
+    input.v[7][lane] = word;
+  }
+  Registers expected = input;
+  ASSERT_EQ(rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w64(
+                RJ_ARITH_CPU_BASELINE | RJ_ARITH_SEMANTICS_LOOSE, 0, expected.v + 3, expected.v,
+                expected.v + 1, expected.v + 7),
+            RJ_ARITH_SUCCESS);
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    SCOPED_TRACE(cpu);
+    Registers actual = input;
+    ASSERT_EQ(rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w64(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0,
+                                                         actual.v + 3, actual.v, actual.v + 1,
+                                                         actual.v + 7),
+              RJ_ARITH_SUCCESS);
+    for (int reg = 3; reg < 7; ++reg) {
+      for (int lane = 0; lane < 64; ++lane) {
+        EXPECT_EQ(actual.v[reg][lane], expected.v[reg][lane]);
+      }
+    }
+  }
+}
