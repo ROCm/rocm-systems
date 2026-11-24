@@ -5,6 +5,7 @@
 /// @brief Handwritten gfx1250 B0-to-A0 legalization classification.
 
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
@@ -28,15 +29,16 @@ namespace {
 
 // gfx1250 is Wave32-only.
 constexpr uint8_t kGfx1250WaveSize =
-    static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
+    static_cast<uint8_t>(isa_properties(rocjitsu::IsaFamily::Cdna5).wave_size_max);
 
 /// @brief Instructions that require a B0-to-A0 expansion or rejection.
 /// @details These operation groups are intentionally broader than the implemented
 /// rewrite table. Unimplemented siblings must fail closed. Opcode-keyed spacing
 /// rewrites need no entry here because they retain the ordinary copy fallback.
 [[nodiscard]] bool requires_b0_to_a0_expansion(const Instruction &inst) {
-  if (inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Cluster)
+  if (inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Cluster) {
     return true;
+  }
   switch (inst.amdgpu_operation()) {
   // Relocation changes clause membership and placement constraints.
   case amdgpu::Operation::S_CLAUSE:
@@ -106,8 +108,9 @@ constexpr uint8_t kGfx1250WaveSize =
   const bool is_vop3 = inst.encoding_id() >= cdna5::encoding::kVop3 &&
                        inst.encoding_id() <= cdna5::encoding::kVop3OpHi6;
   if (!affected || !is_vop3 || inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst)) ||
-      inst.raw_encoding() == nullptr)
+      inst.raw_encoding() == nullptr) {
     return false;
+  }
 
   cdna5::Vop3MachineInst encoding{};
   std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
@@ -116,8 +119,9 @@ constexpr uint8_t kGfx1250WaveSize =
 
 [[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
   if (inst.size() != static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr ||
-      inst.amdgpu_operation() != amdgpu::Operation::S_WAIT_ALU)
+      inst.amdgpu_operation() != amdgpu::Operation::S_WAIT_ALU) {
     return false;
+  }
 
   // S_WAIT_ALU SIMM16[15:12] is VA_VDST. Zero waits for all outstanding
   // destination writes, regardless of any additional counters the source
@@ -136,16 +140,19 @@ constexpr uint8_t kGfx1250WaveSize =
   uint64_t next_offset = inst.src_loc() + inst.size();
   while (true) {
     const auto next_it = source_instruction_by_offset.find(next_offset);
-    if (next_it == source_instruction_by_offset.end())
+    if (next_it == source_instruction_by_offset.end()) {
       return false;
+    }
 
     const Instruction &next = *next_it->second;
     constexpr uint64_t kControlTransferOrTerminator =
         BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
-    if ((next.flags() & kControlTransferOrTerminator) != 0)
+    if ((next.flags() & kControlTransferOrTerminator) != 0) {
       return false;
-    if (is_wmma_completion_wait(next))
+    }
+    if (is_wmma_completion_wait(next)) {
       return true;
+    }
 
     // Bound the scan to affected WMMA and the exact scalar instructions that
     // generated split forms may place before their trailing completion wait.
@@ -154,16 +161,19 @@ constexpr uint8_t kGfx1250WaveSize =
     const amdgpu::Operation operation = next.amdgpu_operation();
     const bool canonical_split_scaffolding = operation == amdgpu::Operation::S_WAIT_XCNT ||
                                              operation == amdgpu::Operation::S_SET_VGPR_MSB;
-    if (!canonical_split_scaffolding && !gfx1250_b0_to_a0_requires_wmma_completion_wait(next))
+    if (!canonical_split_scaffolding && !gfx1250_b0_to_a0_requires_wmma_completion_wait(next)) {
       return false;
+    }
 
     const InstDefUse access(next, kGfx1250WaveSize, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
-    if (access.uses.intersects(pending_defs))
+    if (access.uses.intersects(pending_defs)) {
       return false;
+    }
     pending_defs |= access.defs.ordinary_only();
 
-    if (next.size() <= 0)
+    if (next.size() <= 0) {
       return false;
+    }
     next_offset += static_cast<uint64_t>(next.size());
   }
 }
@@ -243,8 +253,9 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   const bool fp8_clamp_family = operation == amdgpu::Operation::V_CVT_PK_FP8_F32 ||
                                 operation == amdgpu::Operation::V_CVT_SR_FP8_F32 ||
                                 operation == amdgpu::Operation::V_CVT_F32_FP8;
-  if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
+  if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst)) {
     return nullptr;
+  }
 
   if (!requires_b0_to_a0_expansion(inst)) {
     return nullptr;

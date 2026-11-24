@@ -1712,6 +1712,11 @@ extern rocDecStatus ROCDECAPI rocDecDestroyDecoder(rocDecDecoderHandle decoder_h
 //! 1. Application fills IN parameters codec_type, chroma_format and BitDepthMinus8 of RocdecDecodeCaps structure
 //! 2. On calling rocdecGetDecoderCaps, driver fills OUT parameters (for GPU device) if the IN parameters are supported
 //!    If IN parameters passed to the driver are not supported by AMD-VCN-HW, then all OUT params are set to 0.
+//! Returns ROCDEC_SUCCESS with is_supported = 0 when the VA driver stack is usable but does not report support for the
+//! requested configuration. That reflects what the installed driver and libva expose, not necessarily a hardware
+//! limitation. If no decode profile could be probed at all -- an unusable VA driver stack -- ROCDEC_NOT_INITIALIZED is
+//! returned instead, so a wholly broken stack is not reported as "unsupported". Callers that treat "unsupported" as a
+//! reason to skip should check the status first and treat a failure as an error.
 /**********************************************************************************************************************/
 extern rocDecStatus ROCDECAPI rocDecGetDecoderCaps(RocdecDecodeCaps *decode_caps);
 

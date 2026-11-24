@@ -5,6 +5,7 @@
 /// @brief Wave64 MFMA register-snapshot paths against the forced-scalar reference.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 
@@ -49,7 +50,7 @@ struct Shape {
 void expect_matches_scalar(
     const char *label, const Shape &shape, Overlap overlap, bool cross_chunks, uint32_t seed,
     const std::function<void(ExactFixture &, uint32_t, uint32_t, uint32_t, uint32_t)> &kernel) {
-  ExactFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+  ExactFixture fixture(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
   ASSERT_NE(fixture.wf, nullptr);
   const uint32_t offset = cross_chunks ? MfmaLazyStorage::registers_per_chunk() - 1 : 0;
   const uint32_t source_a = kSourceA + offset;
@@ -73,10 +74,11 @@ void expect_matches_scalar(
   // scalar result; the sources are seeded last, so an overlapping one keeps its data.
   auto reseed = [&] {
     fixture.seed_words(destination, shape.d_regs, seed + 1000);
-    if (shape.accumulator_format == Fmt::I8)
+    if (shape.accumulator_format == Fmt::I8) {
       fixture.seed_words(accumulator, shape.d_regs, seed + 3);
-    else
+    } else {
       fixture.seed(accumulator, shape.d_regs, shape.accumulator_format, Mode::RandomInt, seed + 3);
+    }
     fixture.seed(source_b, shape.b_regs, shape.b_format.value_or(shape.input_format),
                  Mode::RandomInt, seed + 2);
     fixture.seed(source_a, shape.a_regs, shape.input_format, Mode::RandomInt, seed + 1);
@@ -95,23 +97,29 @@ TEST(MfmaRegisterPathsTest, RoutedShapesFitTheSnapshotPath) {
   struct Mfma {
     uint32_t m, n, k, batch, bits;
   };
-  for (const Mfma s : {Mfma{4, 4, 1, 16, 32}, Mfma{4, 4, 2, 16, 16}, Mfma{4, 4, 4, 16, 16}})
+  for (const Mfma s : {Mfma{4, 4, 1, 16, 32}, Mfma{4, 4, 2, 16, 16}, Mfma{4, 4, 4, 16, 16}}) {
     EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<float>(s.m, s.n, s.k, s.batch, s.bits, s.bits))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
+  }
   // f8f6f4 selects the A and B widths independently.
-  for (const Mfma s : {Mfma{16, 16, 128, 1, 0}, Mfma{32, 32, 64, 1, 0}})
-    for (uint32_t a_bits : {8u, 6u, 4u})
-      for (uint32_t b_bits : {8u, 6u, 4u})
+  for (const Mfma s : {Mfma{16, 16, 128, 1, 0}, Mfma{32, 32, 64, 1, 0}}) {
+    for (uint32_t a_bits : {8u, 6u, 4u}) {
+      for (uint32_t b_bits : {8u, 6u, 4u}) {
         EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<float>(s.m, s.n, s.k, s.batch, a_bits, b_bits))
             << s.m << "x" << s.n << "x" << s.k << " a_bits=" << a_bits << " b_bits=" << b_bits;
+      }
+    }
+  }
   for (const Mfma s : {Mfma{16, 16, 64, 1, 8}, Mfma{32, 32, 32, 1, 8}, Mfma{32, 32, 16, 1, 8},
                        Mfma{16, 16, 32, 1, 8}, Mfma{16, 16, 16, 1, 8}, Mfma{32, 32, 8, 1, 8},
-                       Mfma{16, 16, 4, 4, 8}, Mfma{4, 4, 4, 16, 8}})
+                       Mfma{16, 16, 4, 4, 8}, Mfma{4, 4, 4, 16, 8}}) {
     EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<int32_t>(s.m, s.n, s.k, s.batch, 8, 8))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
-  for (const Mfma s : {Mfma{16, 16, 4, 1, 64}, Mfma{4, 4, 4, 4, 64}})
+  }
+  for (const Mfma s : {Mfma{16, 16, 4, 1, 64}, Mfma{4, 4, 4, 4, 64}}) {
     EXPECT_TRUE(amdgpu::mfma_snapshot_shape_fits<double>(s.m, s.n, s.k, s.batch, 64, 64))
         << s.m << "x" << s.n << "x" << s.k << "x" << s.batch;
+  }
   // 32 result registers exceed the snapshot; this shape keeps the generic path.
   EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<int32_t>(32, 32, 4, 2, 8, 8));
 }
@@ -122,43 +130,51 @@ TEST(MfmaRegisterPathsTest, LayoutPredicatesAcceptOnlyDenseLayouts) {
   constexpr uint32_t kDims[] = {1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64};
   constexpr uint32_t kBatches[] = {1, 2, 3, 4, 8, 16, 32, 64};
   uint32_t accepted = 0;
-  for (uint32_t dim : kDims)
-    for (uint32_t k : {1u, 2u, 3u, 4u, 8u, 12u, 16u, 32u, 48u, 64u, 128u, 256u})
-      for (uint32_t batch : kBatches)
+  for (uint32_t dim : kDims) {
+    for (uint32_t k : {1u, 2u, 3u, 4u, 8u, 12u, 16u, 32u, 48u, 64u, 128u, 256u}) {
+      for (uint32_t batch : kBatches) {
         for (uint32_t bits : {4u, 6u, 8u, 16u, 32u, 64u}) {
-          if (!amdgpu::mfma_input_layout_is_dense(dim, k, batch, bits))
+          if (!amdgpu::mfma_input_layout_is_dense(dim, k, batch, bits)) {
             continue;
+          }
           ++accepted;
           SCOPED_TRACE(std::format("input {}x{}x{} bits={}", dim, k, batch, bits));
           const uint32_t regs = amdgpu::mfma_dense_reg_count(uint64_t{dim} * k * batch, bits, 64);
           std::vector<bool> used(size_t{regs} * 64);
-          for (uint32_t b = 0; b < batch; ++b)
-            for (uint32_t i = 0; i < dim; ++i)
+          for (uint32_t b = 0; b < batch; ++b) {
+            for (uint32_t i = 0; i < dim; ++i) {
               for (uint32_t kk = 0; kk < k; ++kk) {
                 const auto loc = amdgpu::input_loc(dim, k, batch, i, kk, b, bits);
                 const uint32_t last_reg = loc.vgpr_offset + (loc.bit_offset + bits + 31) / 32 - 1;
                 ASSERT_LT(loc.lane, 64u);
                 ASSERT_LT(last_reg, regs);
-                for (uint32_t reg = loc.vgpr_offset; reg <= last_reg; ++reg)
+                for (uint32_t reg = loc.vgpr_offset; reg <= last_reg; ++reg) {
                   used[size_t{reg} * 64 + loc.lane] = true;
+                }
               }
+            }
+          }
           EXPECT_EQ(std::ranges::count(used, false), 0);
         }
+      }
+    }
+  }
   EXPECT_GT(accepted, 0u);
   accepted = 0;
-  for (uint32_t m : kDims)
-    for (uint32_t n : kDims)
-      for (uint32_t batch : kBatches)
+  for (uint32_t m : kDims) {
+    for (uint32_t n : kDims) {
+      for (uint32_t batch : kBatches) {
         for (uint32_t words_per_element : {1u, 2u}) {
-          if (!amdgpu::mfma_output_layout_is_dense(m, n, batch, words_per_element))
+          if (!amdgpu::mfma_output_layout_is_dense(m, n, batch, words_per_element)) {
             continue;
+          }
           ++accepted;
           SCOPED_TRACE(std::format("output {}x{}x{} words={}", m, n, batch, words_per_element));
           const uint64_t words = uint64_t{m} * n * batch * words_per_element;
           ASSERT_EQ(words % 64, 0u);
           std::vector<bool> written(words);
-          for (uint32_t b = 0; b < batch; ++b)
-            for (uint32_t i = 0; i < m; ++i)
+          for (uint32_t b = 0; b < batch; ++b) {
+            for (uint32_t i = 0; i < m; ++i) {
               for (uint32_t j = 0; j < n; ++j) {
                 const auto out = words_per_element == 1 ? amdgpu::output_loc_32(m, n, i, j, b)
                                                         : amdgpu::output_loc_64(m, n, i, j, b);
@@ -170,7 +186,12 @@ TEST(MfmaRegisterPathsTest, LayoutPredicatesAcceptOnlyDenseLayouts) {
                   written[word] = true;
                 }
               }
+            }
+          }
         }
+      }
+    }
+  }
   EXPECT_GT(accepted, 0u);
 }
 
@@ -180,7 +201,8 @@ TEST(MfmaRegisterPathsTest, SparseOutputLayoutMatchesScalar) {
   SKIP_IF_NO_SIMD();
   EXPECT_FALSE(amdgpu::mfma_snapshot_shape_fits<float>(4, 4, 4, 4, 32, 32));
   const Shape shape{Fmt::F32, Fmt::F32, 1, 1, 4};
-  for (Overlap overlap : {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
+  for (Overlap overlap :
+       {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB}) {
     for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
       expect_matches_scalar(
           "f32 4x4x4x4", shape, overlap, /*cross_chunks=*/false, 71,
@@ -188,9 +210,11 @@ TEST(MfmaRegisterPathsTest, SparseOutputLayoutMatchesScalar) {
             amdgpu::exec_f32<4, 4, 4, 4>(*fx.cu, 32, dst, a, b, c, amdgpu::extract_f32,
                                          amdgpu::extract_f32, const_acc);
           });
-      if (::testing::Test::HasFatalFailure())
+      if (::testing::Test::HasFatalFailure()) {
         return;
+      }
     }
+  }
 }
 
 // An operand or destination that runs past the end of the wave's VGPR allocation reads zero
@@ -198,7 +222,7 @@ TEST(MfmaRegisterPathsTest, SparseOutputLayoutMatchesScalar) {
 TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
   SKIP_IF_NO_SIMD();
   ForceScalarGuard guard;
-  ExactFixture fx(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+  ExactFixture fx(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
   ASSERT_NE(fx.wf, nullptr);
   const uint32_t end = fx.cu->vgpr_allocation_block_size();
   ASSERT_GE(end, 48u);
@@ -209,7 +233,7 @@ TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
   // i8 16x16x64 has four registers in each operand and in the result.
   for (const Case c :
        {Case{"A", end - 2, 4, 8, 16}, Case{"B", 0, end - 2, 8, 16},
-        Case{"accumulator", 0, 4, end - 2, 16}, Case{"destination", 0, 4, 8, end - 2}})
+        Case{"accumulator", 0, 4, end - 2, 16}, Case{"destination", 0, 4, 8, end - 2}}) {
     for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 5u}) {
       SCOPED_TRACE(std::format("{} const_acc={}", c.name, const_acc));
       std::vector<uint32_t> results[2];
@@ -225,6 +249,7 @@ TEST(MfmaRegisterPathsTest, OperandsCrossingTheAllocationEndMatchScalar) {
       }
       EXPECT_EQ(results[false], results[true]);
     }
+  }
 }
 
 // Integer accumulation wraps. On a host with eight int32 lanes the four-column shape also runs
@@ -234,19 +259,21 @@ TEST(MfmaRegisterPathsTest, I8AccumulationWrapsOnBothPaths) {
   ForceScalarGuard guard;
   for (bool force_scalar : {true, false}) {
     SCOPED_TRACE(force_scalar);
-    ExactFixture fx(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+    ExactFixture fx(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
     ASSERT_NE(fx.wf, nullptr);
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(fx.vbase + kSourceA, lane, 0x01010101u);
       fx.cu->write_vgpr(fx.vbase + kSourceB, lane, 0x01010101u);
-      for (uint32_t reg = 0; reg < 4; ++reg)
+      for (uint32_t reg = 0; reg < 4; ++reg) {
         fx.cu->write_vgpr(fx.vbase + kAccumulator + reg, lane, 0x7ffffffeu);
+      }
     }
     util::set_force_scalar_for_testing(force_scalar);
     amdgpu::exec_i32_i8(*fx.cu, 4, 4, 4, 16, fx.vbase + kDestination, fx.vbase + kSourceA,
                         fx.vbase + kSourceB, fx.vbase + kAccumulator);
-    for (uint32_t word : fx.snapshot(kDestination, 4))
+    for (uint32_t word : fx.snapshot(kDestination, 4)) {
       ASSERT_EQ(word, 0x80000002u);
+    }
   }
 }
 
@@ -255,11 +282,11 @@ TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestination
   struct Mfma {
     uint32_t m, n, k, batch, d_regs;
   };
-  for (const Mfma mfma : {Mfma{16, 16, 4, 1, 8}, Mfma{4, 4, 4, 4, 2}})
-    for (bool cross_chunks : {false, true})
+  for (const Mfma mfma : {Mfma{16, 16, 4, 1, 8}, Mfma{4, 4, 4, 4, 2}}) {
+    for (bool cross_chunks : {false, true}) {
       for (Overlap overlap :
-           {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
-        for (uint32_t neg : {0u, 1u, 2u, 4u, 7u})
+           {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB}) {
+        for (uint32_t neg : {0u, 1u, 2u, 4u, 7u}) {
           for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x40000000u}) {
             const Shape shape{Fmt::F64, Fmt::F64, 2, 2, mfma.d_regs};
             expect_matches_scalar(
@@ -268,9 +295,14 @@ TEST(MfmaRegisterPathsTest, F64MatchesScalarForSeparateAndOverlappingDestination
                   amdgpu::exec_f64(*fx.cu, mfma.m, mfma.n, mfma.k, mfma.batch, dst, a, b, c,
                                    const_acc, neg);
                 });
-            if (::testing::Test::HasFatalFailure())
+            if (::testing::Test::HasFatalFailure()) {
               return;
+            }
           }
+        }
+      }
+    }
+  }
 }
 
 TEST(MfmaRegisterPathsTest, Fp8ChunkedLayoutMatchesScalarWithLanePermutations) {
@@ -280,10 +312,11 @@ TEST(MfmaRegisterPathsTest, Fp8ChunkedLayoutMatchesScalarWithLanePermutations) {
   };
   // 16x16x128 uses the chunked 16-element lane layout, which the specialized paths exclude.
   const Shape shape{Fmt::FP8, Fmt::F32, 8, 8, 4};
-  for (bool cross_chunks : {false, true})
+  for (bool cross_chunks : {false, true}) {
     for (Overlap overlap :
-         {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
-      for (const Permutation p : {Permutation{0, 0, 0}, Permutation{2, 1, 0}, Permutation{0, 0, 3}})
+         {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB}) {
+      for (const Permutation p :
+           {Permutation{0, 0, 0}, Permutation{2, 1, 0}, Permutation{0, 0, 3}}) {
         for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
           expect_matches_scalar(
               "fp8 16x16x128", shape, overlap, cross_chunks, 21 + p.cbsz,
@@ -292,9 +325,13 @@ TEST(MfmaRegisterPathsTest, Fp8ChunkedLayoutMatchesScalarWithLanePermutations) {
                                                  amdgpu::extract_fp8, const_acc, p.cbsz, p.abid,
                                                  p.blgp);
               });
-          if (::testing::Test::HasFatalFailure())
+          if (::testing::Test::HasFatalFailure()) {
             return;
+          }
         }
+      }
+    }
+  }
 }
 
 TEST(MfmaRegisterPathsTest, I8MatchesScalarForBothShapesAndLanePermutations) {
@@ -305,11 +342,11 @@ TEST(MfmaRegisterPathsTest, I8MatchesScalarForBothShapesAndLanePermutations) {
   struct Permutation {
     uint32_t cbsz, abid, blgp;
   };
-  for (const Mfma mfma : {Mfma{16, 16, 64, 4}, Mfma{32, 32, 32, 16}})
-    for (bool cross_chunks : {false, true})
+  for (const Mfma mfma : {Mfma{16, 16, 64, 4}, Mfma{32, 32, 32, 16}}) {
+    for (bool cross_chunks : {false, true}) {
       for (Overlap overlap :
-           {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
-        for (const Permutation p : {Permutation{0, 0, 0}, Permutation{0, 0, 3}})
+           {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB}) {
+        for (const Permutation p : {Permutation{0, 0, 0}, Permutation{0, 0, 3}}) {
           for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 7u}) {
             const Shape shape{Fmt::I8, Fmt::I8, 4, 4, mfma.d_regs};
             expect_matches_scalar(
@@ -318,9 +355,14 @@ TEST(MfmaRegisterPathsTest, I8MatchesScalarForBothShapesAndLanePermutations) {
                   amdgpu::exec_i32_i8(*fx.cu, mfma.m, mfma.n, mfma.k, 1, dst, a, b, c, const_acc,
                                       p.cbsz, p.abid, p.blgp);
                 });
-            if (::testing::Test::HasFatalFailure())
+            if (::testing::Test::HasFatalFailure()) {
               return;
+            }
           }
+        }
+      }
+    }
+  }
 }
 
 TEST(MfmaRegisterPathsTest, F8F6F4MatchesScalarForEveryFormatPair) {
@@ -331,12 +373,12 @@ TEST(MfmaRegisterPathsTest, F8F6F4MatchesScalarForEveryFormatPair) {
   struct Mfma {
     uint32_t m, n, k, d_regs;
   };
-  for (const Mfma mfma : {Mfma{16, 16, 128, 4}, Mfma{32, 32, 64, 16}})
-    for (uint32_t a_fmt = 0; a_fmt < 5; ++a_fmt)
-      for (uint32_t b_fmt = 0; b_fmt < 5; ++b_fmt)
-        for (bool cross_chunks : {false, true})
+  for (const Mfma mfma : {Mfma{16, 16, 128, 4}, Mfma{32, 32, 64, 16}}) {
+    for (uint32_t a_fmt = 0; a_fmt < 5; ++a_fmt) {
+      for (uint32_t b_fmt = 0; b_fmt < 5; ++b_fmt) {
+        for (bool cross_chunks : {false, true}) {
           for (Overlap overlap :
-               {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
+               {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB}) {
             for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
               const std::string label =
                   std::format("f8f6f4 {}x{}x{} a={} b={}", mfma.m, mfma.n, mfma.k, a_fmt, b_fmt);
@@ -347,17 +389,24 @@ TEST(MfmaRegisterPathsTest, F8F6F4MatchesScalarForEveryFormatPair) {
                   [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
                     ASSERT_TRUE(amdgpu::dispatch_matrix_fmt_pair(
                         a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-                          if (mfma.m == 16)
+                          if (mfma.m == 16) {
                             amdgpu::exec_f32_mixed<16, 16, 128, 1>(*fx.cu, a_bits, b_bits, dst, a,
                                                                    b, c, ea, eb, const_acc);
-                          else
+                          } else {
                             amdgpu::exec_f32_mixed<32, 32, 64, 1>(*fx.cu, a_bits, b_bits, dst, a, b,
                                                                   c, ea, eb, const_acc);
+                          }
                         }));
                   });
-              if (::testing::Test::HasFatalFailure())
+              if (::testing::Test::HasFatalFailure()) {
                 return;
+              }
             }
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(MfmaRegisterPathsTest, Bf16FourByFourMatchesScalarWithLanePermutations) {
@@ -367,8 +416,9 @@ TEST(MfmaRegisterPathsTest, Bf16FourByFourMatchesScalarWithLanePermutations) {
   };
   // 4x4x2 with 16 blocks has one A and one B register.
   const Shape shape{Fmt::BF16, Fmt::F32, 1, 1, 4};
-  for (Overlap overlap : {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
-    for (const Permutation p : {Permutation{0, 0, 0}, Permutation{2, 3, 0}, Permutation{4, 9, 5}})
+  for (Overlap overlap :
+       {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB}) {
+    for (const Permutation p : {Permutation{0, 0, 0}, Permutation{2, 3, 0}, Permutation{4, 9, 5}}) {
       for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
         expect_matches_scalar(
             "bf16 4x4x2x16", shape, overlap, /*cross_chunks=*/false, 51 + p.cbsz,
@@ -377,9 +427,12 @@ TEST(MfmaRegisterPathsTest, Bf16FourByFourMatchesScalarWithLanePermutations) {
                                             amdgpu::extract_bf16, const_acc, p.cbsz, p.abid,
                                             p.blgp);
             });
-        if (::testing::Test::HasFatalFailure())
+        if (::testing::Test::HasFatalFailure()) {
           return;
+        }
       }
+    }
+  }
 }
 
 TEST(MfmaRegisterPathsTest, I8SingleRegisterShapesMatchScalarWithLanePermutations) {
@@ -391,9 +444,9 @@ TEST(MfmaRegisterPathsTest, I8SingleRegisterShapesMatchScalarWithLanePermutation
   for (const Case c : {Case{32, 32, 8, 1, 16, 0, 0, 3}, Case{16, 16, 16, 1, 4, 0, 0, 5},
                        Case{16, 16, 4, 4, 16, 0, 0, 0}, Case{16, 16, 4, 4, 16, 2, 3, 7},
                        Case{4, 4, 4, 16, 4, 0, 0, 0}, Case{4, 4, 4, 16, 4, 4, 9, 2},
-                       Case{4, 4, 4, 16, 4, 1, 1, 6}})
+                       Case{4, 4, 4, 16, 4, 1, 1, 6}}) {
     for (Overlap overlap :
-         {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
+         {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB}) {
       for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 7u}) {
         const std::string label = std::format("i8 {}x{}x{}x{} cbsz={} abid={} blgp={}", c.m, c.n,
                                               c.k, c.batch, c.cbsz, c.abid, c.blgp);
@@ -404,9 +457,12 @@ TEST(MfmaRegisterPathsTest, I8SingleRegisterShapesMatchScalarWithLanePermutation
               amdgpu::exec_i32_i8(*fx.cu, c.m, c.n, c.k, c.batch, dst, a, b, acc, const_acc, c.cbsz,
                                   c.abid, c.blgp);
             });
-        if (::testing::Test::HasFatalFailure())
+        if (::testing::Test::HasFatalFailure()) {
           return;
+        }
       }
+    }
+  }
 }
 
 } // namespace

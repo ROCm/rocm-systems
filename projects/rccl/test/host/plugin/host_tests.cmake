@@ -80,7 +80,7 @@ rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginRmaPluginInit rma-plugin-i
   SOURCES
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc
-    fakes/plugin_stubs.cc)
+    fakes/transport_stubs.cc)            # rcclUseAinic, for the internal backend choice
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginEnvV1 env/env-v1-test.cc
   SOURCES

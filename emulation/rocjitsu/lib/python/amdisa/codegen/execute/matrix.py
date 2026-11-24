@@ -106,12 +106,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         name,
     )
 
+    unimplemented = (
+        '  wf.report_instruction_execution_error(\n'
+        '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+        '  return;'
+    )
     if not m:
-        return (
-            f'  // MFMA stub: {name}\n'
-            f'  (void)wf;\n'
-            f'  throw util::UnimplementedInst(mnemonic());'
-        )
+        return unimplemented
 
     result_type = m.group(1)  # F32, I32, F64, BF16F32
     M, N, K = int(m.group(2)), int(m.group(3)), int(m.group(4))
@@ -303,8 +304,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     )
     if uses_runtime_wave_swmmac_layout and not uses_rdna_swmmac_arithmetic:
         # Reject unsupported sparse shapes before resolving operands or index keys.
-        L = ['  throw util::UnimplementedInst(mnemonic());']
-        return '\n'.join(L)
+        return unimplemented
     # Fixed-wave bit zero is rejected below; the other bits are reuse hints.
     swmmac_index_key_expr = (
         '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x3u'
@@ -572,7 +572,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         )
     ):
         api = 'rj_arith_' + name.lower() + '_w64'
-        if input_type in _F8_FIXED and arch == 'cdna4':
+        if arch == 'cdna4' and (
+            input_type in _F8_FIXED
+            or input_type == 'XF32'
+            or input_type in ('F16', 'BF16')
+            and (M, K, B) not in {(16, 32, 1), (32, 16, 1)}
+        ):
             api += '_gfx950'
         L.append(
             '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << RJ_ARITH_MFMA_ABID_SHIFT)'
@@ -593,7 +598,11 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         # CDNA4 §7.1.2 specifies finite F32 overflow saturation. MI300's table
         # also lists it, but gfx942 retains its existing floating-point behavior
         # pending a physical mode-toggle measurement on that target.
-        if arch == 'cdna4' and input_type in ('F32', 'BF16'):
+        # gfx942 also forwards the bit to enforce exact-model qualification;
+        # its approximate paths continue to ignore it.
+        if (arch == 'cdna3' and input_type != 'F32') or (
+            arch == 'cdna4' and input_type in ('F32', 'BF16')
+        ):
             flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
         L.append(f'      wf, {api}, {flags}, controls,')
         L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')

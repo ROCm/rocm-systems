@@ -78,7 +78,6 @@ extern "C" {
 #include <limits>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -86,14 +85,17 @@ extern "C" {
 
 namespace {
 
+using rocjitsu::test::initialize_runtime_directory;
+
 enum class RunCtxFaultState { Idle, Armed, Fired };
 std::atomic<RunCtxFaultState> run_ctx_fault_state = RunCtxFaultState::Idle;
 std::atomic<uint32_t> completed_run_ctx_calls = 0;
 
 rocjitsu::test::ScopedTempDirectory make_runtime_directory(const char *prefix) {
   rocjitsu::test::ScopedTempDirectory directory;
-  if (testing::AssertionResult initialized = directory.initialize(prefix); !initialized)
+  if (const auto initialized = initialize_runtime_directory(directory, prefix); !initialized) {
     throw std::runtime_error(initialized.message());
+  }
   return directory;
 }
 
@@ -111,8 +113,9 @@ extern "C" int __wrap_vfu_run_ctx(vfu_ctx_t *ctx) {
     errno = ENOTCONN;
     return -1;
   }
-  if (result >= 0)
+  if (result >= 0) {
     completed_run_ctx_calls.fetch_add(1, std::memory_order_release);
+  }
   return result;
 }
 
@@ -122,8 +125,9 @@ class ChildProcessGuard {
 public:
   explicit ChildProcessGuard(pid_t pid) : pid_(pid) {}
   ~ChildProcessGuard() {
-    if (pid_ <= 0)
+    if (pid_ <= 0) {
       return;
+    }
     (void)::kill(pid_, SIGKILL);
     int status = 0;
     while (::waitpid(pid_, &status, 0) == -1 && errno == EINTR) {
@@ -149,8 +153,9 @@ public:
 
   [[nodiscard]] int get() const { return fd_; }
   void reset(int fd = -1) {
-    if (fd_ >= 0)
+    if (fd_ >= 0) {
       ::close(fd_);
+    }
     fd_ = fd;
   }
 
@@ -170,6 +175,14 @@ constexpr simdojo::PciId kTestId = {.vendor = 0x1002,
 // Older Linux PCI headers lack this Link Capabilities 2 field mask.
 constexpr uint32_t kSupportedLinkSpeedsVectorMask = 0x000000feu;
 
+// Replies precede the serving loop's quiesce and BAR-publication epilogue.
+// A subsequent nonquiescing request fences that epilogue before direct access.
+bool finish_protocol_request(rocjitsu::test::VfioUserClient &client) {
+  uint32_t regions = 0;
+  uint32_t irqs = 0;
+  return client.device_info(regions, irqs);
+}
+
 bool program_peer_bar0(rocjitsu::test::VfioUserClient &owner, uint64_t base,
                        bool is_64bit = false) {
   const auto low = std::bit_cast<std::array<std::byte, 4>>(static_cast<uint32_t>(base) |
@@ -178,11 +191,13 @@ bool program_peer_bar0(rocjitsu::test::VfioUserClient &owner, uint64_t base,
   const auto enable = std::bit_cast<std::array<std::byte, 2>>(uint16_t{2});
   if (!owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, low) ||
       (is_64bit && !owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x14, high)) ||
-      !owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x04, enable))
+      !owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x04, enable)) {
     return false;
+  }
   std::array<std::byte, 4> observed{};
   return owner.region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, observed) &&
-         (std::to_integer<uint32_t>(observed[0]) & 0xf) == (is_64bit ? uint32_t{4} : uint32_t{0});
+         (std::to_integer<uint32_t>(observed[0]) & 0xf) == (is_64bit ? uint32_t{4} : uint32_t{0}) &&
+         finish_protocol_request(owner);
 }
 
 /// @brief A served device plus the client attached to it.
@@ -202,26 +217,18 @@ bool program_peer_bar0(rocjitsu::test::VfioUserClient &owner, uint64_t base,
 /// stopped does not itself provide that ordering.
 class ServedDevice {
 public:
-  ServedDevice()
-      : socket_path_(std::format("/tmp/rj-vfu-test-{}-{}.sock", ::getpid(), ++instance_counter_)),
-        device_("test-device", kTestId, &trace_) {
-    std::filesystem::remove(socket_path_);
-    built_ = host_.build();
-    if (built_) {
-      serving_ = std::jthread([this](std::stop_token stop) { (void)host_.run(stop); });
+  [[nodiscard]] testing::AssertionResult start() {
+    if (const auto result = initialize_runtime_directory(runtime_, "rj-v-"); !result) {
+      return result;
     }
-  }
-
-  ~ServedDevice() {
-    serving_.request_stop();
-    if (serving_.joinable()) {
-      serving_.join();
+    socket_path_ = runtime_.path() + "/v.sock";
+    host_.emplace(socket_path_, device_);
+    if (!host_->build()) {
+      return testing::AssertionFailure() << "Failed to serve " << socket_path_;
     }
-    host_.detach();
-    std::filesystem::remove(socket_path_);
+    serving_ = std::jthread([this](std::stop_token stop) { (void)host_->run(stop); });
+    return testing::AssertionSuccess();
   }
-
-  [[nodiscard]] bool built() const { return built_; }
 
   /// @brief Connect a client, retrying while the server reaches its accept loop.
   [[nodiscard]] bool attach(rocjitsu::test::VfioUserClient &client) {
@@ -236,7 +243,7 @@ public:
 
   rocjitsu::ScratchPciDevice &device() { return device_; }
 
-  rocjitsu::VfioDeviceHost &host() { return host_; }
+  rocjitsu::VfioDeviceHost &host() { return *host_; }
 
   /// @brief Identify the serving thread, so work can assert it ran there.
   [[nodiscard]] std::thread::id serving_thread_id() const { return serving_.get_id(); }
@@ -250,15 +257,14 @@ public:
   }
 
 private:
-  static inline std::atomic<int> instance_counter_ = 0;
-
+  rocjitsu::test::ScopedTempDirectory runtime_;
   rocjitsu::RegisterSymbols symbols_;
   rocjitsu::BarAccessTrace trace_{symbols_};
   std::string socket_path_;
-  rocjitsu::ScratchPciDevice device_;
-  rocjitsu::VfioDeviceHost host_{socket_path_, device_};
+  rocjitsu::ScratchPciDevice device_{"test-device", kTestId, &trace_};
+  // Destroy in this order: join the serving thread, tear down the host, remove its directory.
+  std::optional<rocjitsu::VfioDeviceHost> host_;
   std::jthread serving_;
-  bool built_ = false;
 };
 
 /// A mappable BAR whose callback would fail on the second chunk of an
@@ -285,8 +291,9 @@ public:
 
   [[nodiscard]] bool seal() {
     if (!usable_ ||
-        ::fcntl(backing_.get(), F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0)
+        ::fcntl(backing_.get(), F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
       return false;
+    }
     backing_id_ = rocjitsu::allocate_canonical_backing_id();
     return true;
   }
@@ -317,15 +324,18 @@ public:
                                    bool write) override {
     ++bar_calls_;
     if (bar != 0 || offset >= kLateFailureOffset || offset > kBarSize ||
-        bytes.size() > kBarSize - offset)
+        bytes.size() > kBarSize - offset) {
       return -1;
+    }
     return write ? ::pwrite(backing_.get(), bytes.data(), bytes.size(), fd_offset_ + offset)
                  : ::pread(backing_.get(), bytes.data(), bytes.size(), fd_offset_ + offset);
   }
 
   void dma_map(const simdojo::DmaRegion &) override {}
   void dma_unmap(const simdojo::DmaRegion &) override {}
-  void reset(simdojo::ResetKind) override {}
+  util::Result reset(simdojo::ResetKind, util::DiagnosticEmitter = {}) override {
+    return util::Result::success();
+  }
 
 private:
   ScopedFd backing_;
@@ -343,12 +353,13 @@ public:
                            uint32_t requester_gpu_id = 0, uint32_t owner_gpu_id = 0,
                            bool owner_msix = false, uint64_t owner_fd_offset = 0,
                            bool owner_64bit = false)
-      : runtime_(make_runtime_directory("rj-target-mapped-")),
-        requester_("requester", kTestId, nullptr), owner_(owner_msix, owner_fd_offset, owner_64bit),
+      : runtime_(make_runtime_directory("rj-v-")), requester_("requester", kTestId, nullptr),
+        owner_(owner_msix, owner_fd_offset, owner_64bit),
         requester_host_(runtime_.path() + "/requester.sock", requester_),
         owner_host_(runtime_.path() + "/owner.sock", owner_) {
-    if (!owner_.usable() || (seal_owner && !owner_.seal()))
+    if (!owner_.usable() || (seal_owner && !owner_.seal())) {
       return;
+    }
     built_ = requester_host_.enable_target_grants(grants_, 0, requester_gpu_id, fabric) &&
              owner_host_.enable_target_grants(grants_, 1, owner_gpu_id, fabric) &&
              requester_host_.build() && owner_host_.build();
@@ -368,10 +379,12 @@ public:
   void stop_serving() {
     requester_thread_.request_stop();
     owner_thread_.request_stop();
-    if (requester_thread_.joinable())
+    if (requester_thread_.joinable()) {
       requester_thread_.join();
-    if (owner_thread_.joinable())
+    }
+    if (owner_thread_.joinable()) {
       owner_thread_.join();
+    }
   }
 
   [[nodiscard]] bool built() const { return built_; }
@@ -380,8 +393,9 @@ public:
                             rocjitsu::test::VfioUserClient &owner) const {
     const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
       for (int attempt = 0; attempt < 200; ++attempt) {
-        if (client.connect(path))
+        if (client.connect(path)) {
           return true;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
       return false;
@@ -413,14 +427,14 @@ private:
 class MappedGrantTrio {
 public:
   MappedGrantTrio()
-      : runtime_(make_runtime_directory("rj-target-cohort-")),
-        requester_a_("requester-a", kTestId, nullptr),
+      : runtime_(make_runtime_directory("rj-v-")), requester_a_("requester-a", kTestId, nullptr),
         requester_b_("requester-b", kTestId, nullptr), owner_(),
         requester_a_host_(runtime_.path() + "/requester-a.sock", requester_a_),
         requester_b_host_(runtime_.path() + "/requester-b.sock", requester_b_),
         owner_host_(runtime_.path() + "/owner.sock", owner_) {
-    if (!owner_.usable() || !owner_.seal())
+    if (!owner_.usable() || !owner_.seal()) {
       return;
+    }
     built_ = requester_a_host_.enable_target_grants(grants_, 0, 100) &&
              requester_b_host_.enable_target_grants(grants_, 1, 101) &&
              owner_host_.enable_target_grants(grants_, 2, 102) && requester_a_host_.build() &&
@@ -438,12 +452,15 @@ public:
     requester_a_thread_.request_stop();
     requester_b_thread_.request_stop();
     owner_thread_.request_stop();
-    if (requester_a_thread_.joinable())
+    if (requester_a_thread_.joinable()) {
       requester_a_thread_.join();
-    if (requester_b_thread_.joinable())
+    }
+    if (requester_b_thread_.joinable()) {
       requester_b_thread_.join();
-    if (owner_thread_.joinable())
+    }
+    if (owner_thread_.joinable()) {
       owner_thread_.join();
+    }
     requester_a_host_.detach();
     requester_b_host_.detach();
     owner_host_.detach();
@@ -456,8 +473,9 @@ public:
                             rocjitsu::test::VfioUserClient &owner) const {
     const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
       for (int attempt = 0; attempt < 200; ++attempt) {
-        if (client.connect(path))
+        if (client.connect(path)) {
           return true;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
       return false;
@@ -495,14 +513,16 @@ public:
     return host_.target_session_snapshot();
   }
   [[nodiscard]] bool read_vram(uint64_t offset, std::span<std::byte> bytes) override {
-    if (offset > local_.size() || bytes.size() > local_.size() - offset)
+    if (offset > local_.size() || bytes.size() > local_.size() - offset) {
       return false;
+    }
     std::copy_n(local_.begin() + offset, bytes.size(), bytes.begin());
     return true;
   }
   [[nodiscard]] bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override {
-    if (offset > local_.size() || bytes.size() > local_.size() - offset)
+    if (offset > local_.size() || bytes.size() > local_.size() - offset) {
       return false;
+    }
     std::copy(bytes.begin(), bytes.end(), local_.begin() + offset);
     return true;
   }
@@ -529,7 +549,7 @@ private:
 
 TEST(VfioDeviceHost, ServesAClientAndReportsItsBusShape) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -548,7 +568,7 @@ TEST(VfioDeviceHost, ServesAClientAndReportsItsBusShape) {
 // space, which is what a guest driver matches on when it decides to bind.
 TEST(VfioDeviceHost, PresentsTheDeclaredIdentityInConfigSpace) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -568,7 +588,7 @@ TEST(VfioDeviceHost, PresentsTheDeclaredIdentityInConfigSpace) {
 
 TEST(VfioDeviceHost, PublishesASecondGenerationPcieEndpointCapability) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -596,9 +616,9 @@ TEST(VfioDeviceHost, PublishesASecondGenerationPcieEndpointCapability) {
 }
 
 TEST(VfioDeviceHost, DoesNotAdvertiseUnimplementedGpuPeerAtomicCompletion) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-atomics-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.local_mem_size = 64 * 1024 * 1024;
@@ -649,7 +669,7 @@ TEST(VfioDeviceHost, DoesNotAdvertiseUnimplementedGpuPeerAtomicCompletion) {
 
 TEST(VfioDeviceHost, CarriesABarWriteAndReadBackToTheDevice) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -666,7 +686,7 @@ TEST(VfioDeviceHost, CarriesABarWriteAndReadBackToTheDevice) {
 // as an error rather than as a successful read of stale bytes.
 TEST(VfioDeviceHost, ReportsADeviceRejectionAsAnError) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -678,7 +698,7 @@ TEST(VfioDeviceHost, ReportsADeviceRejectionAsAnError) {
 
 TEST(VfioDeviceHost, AnnouncesAWindowTheClientSharesMappably) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -697,7 +717,7 @@ TEST(VfioDeviceHost, AnnouncesAWindowTheClientSharesMappably) {
 
 TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   constexpr uint64_t kGuestAddress = 0x180000;
   constexpr uint64_t kWindowSize = 0x1000;
@@ -755,7 +775,7 @@ TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
 // every access would fail.
 TEST(VfioDeviceHost, WithholdsAWindowSharedWithoutADescriptor) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -772,8 +792,9 @@ TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
   rocjitsu::test::VfioUserClient owner;
   const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
     for (int attempt = 0; attempt < 200; ++attempt) {
-      if (client.connect(path))
+      if (client.connect(path)) {
         return true;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     return false;
@@ -782,10 +803,7 @@ TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
   ASSERT_TRUE(connect(owner, pair.owner_socket()));
 
   constexpr uint32_t kBarBase = 0x30000000;
-  const auto bar = std::bit_cast<std::array<std::byte, 4>>(kBarBase);
-  const auto enable = std::bit_cast<std::array<std::byte, 2>>(uint16_t{0x0002});
-  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, bar));
-  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x04, enable));
+  ASSERT_TRUE(program_peer_bar0(owner, kBarBase));
 
   constexpr uint64_t kOwnerOffset = 0x1000;
   constexpr uint64_t kIova = kBarBase + kOwnerOffset;
@@ -795,6 +813,7 @@ TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
                                                   std::byte{0x21}};
   ASSERT_EQ(::pwrite(pair.owner().fd(), kInitial.data(), kInitial.size(), kOwnerOffset), 4);
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   std::array<std::byte, 4> read{};
   ASSERT_EQ(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
@@ -804,6 +823,7 @@ TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
   ASSERT_EQ(::pread(pair.owner().fd(), read.data(), read.size(), kOwnerOffset), 4);
   EXPECT_EQ(read, kReplacement);
   ASSERT_TRUE(requester.dma_unmap(kIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_NE(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
 }
 
@@ -815,8 +835,9 @@ TEST(VfioTargetGrants, StandardMapResolves64BitPeerBarAbove4GiB) {
   rocjitsu::test::VfioUserClient owner;
   const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
     for (int attempt = 0; attempt < 200; ++attempt) {
-      if (client.connect(path))
+      if (client.connect(path)) {
         return true;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     return false;
@@ -841,6 +862,7 @@ TEST(VfioTargetGrants, StandardMapResolves64BitPeerBarAbove4GiB) {
                                               std::byte{0x78}};
   ASSERT_EQ(::pwrite(pair.owner().fd(), kInitial.data(), kInitial.size(), kOwnerOffset), 4);
   ASSERT_TRUE(requester.dma_map(kBarBase, MappedBarTestDevice::kBarSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 4> read{};
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(read, kInitial);
@@ -860,6 +882,7 @@ TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreacha
   ASSERT_EQ(::pwrite(pair.owner().fd(), kOwnerBytes.data(), kOwnerBytes.size(), 0), 4);
   // The VFIO-user DMA_MAP completes, but no peer backing is published.
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   EXPECT_EQ(pair.grants().prepare_peer(0, session->generation(), kIova, 4, false).kind,
@@ -883,6 +906,7 @@ TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreacha
                                                     std::byte{8}};
   ASSERT_EQ(::pwrite(ordinary.get(), kOrdinaryBytes.data(), kOrdinaryBytes.size(), 0xffc), 4);
   ASSERT_TRUE(requester.dma_map(kIova - 0x1000, 0x1000, ordinary.get(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 8> mixed;
   mixed.fill(std::byte{0xee});
   const auto mixed_unchanged = mixed;
@@ -896,6 +920,7 @@ TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreacha
   ASSERT_EQ(::pread(pair.owner().fd(), bytes.data(), bytes.size(), 0), 4);
   EXPECT_EQ(bytes, kOwnerBytes);
   ASSERT_TRUE(requester.dma_unmap(kIova - 0x1000, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_TRUE(requester.dma_unmap(kIova, 0x1000));
   EXPECT_EQ(pair.grants().prepare_peer(0, session->generation(), kIova, 4, false).kind,
             rocjitsu::VfioTargetGrants::PeerKind::Rejected);
@@ -915,6 +940,7 @@ TEST(VfioTargetGrants, BarReprogramAndOwnerResetRevokeStandardPeerMaps) {
   constexpr uint32_t kValue = 0x13579bdf;
   ASSERT_EQ(::pwrite(pair.owner().fd(), &kValue, sizeof(kValue), kOffset), sizeof(kValue));
   ASSERT_TRUE(requester.dma_map(kOldIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 4> read{};
   EXPECT_EQ(pair.requester_host().read_outcome(kOldIova, read),
             simdojo::DmaAccessOutcome::Complete);
@@ -923,7 +949,9 @@ TEST(VfioTargetGrants, BarReprogramAndOwnerResetRevokeStandardPeerMaps) {
   EXPECT_NE(pair.requester_host().read_outcome(kOldIova, read),
             simdojo::DmaAccessOutcome::Complete);
   ASSERT_TRUE(requester.dma_unmap(kOldIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   ASSERT_TRUE(requester.dma_map(kNewIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.requester_host().read_outcome(kNewIova, read),
             simdojo::DmaAccessOutcome::Complete);
   uint32_t observed = 0;
@@ -949,19 +977,23 @@ TEST(VfioTargetGrants, StandardPeerMapsValidateWholeMixedTransfer) {
   ASSERT_EQ(::pwrite(pair.owner().fd(), kValue.data(), 4, 0x1ffc), 4);
   ASSERT_EQ(::pwrite(pair.owner().fd(), kValue.data() + 4, 4, 0x2000), 4);
   ASSERT_TRUE(requester.dma_map(kFirstIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   ASSERT_TRUE(requester.dma_map(kSecondIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 8> read{};
   EXPECT_EQ(pair.requester_host().read_outcome(kSecondIova - 4, read),
             simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(read, kValue);
 
   ASSERT_TRUE(requester.dma_unmap(kSecondIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   read.fill(std::byte{0xee});
   const auto unchanged = read;
   EXPECT_NE(pair.requester_host().read_outcome(kSecondIova - 4, read),
             simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(read, unchanged);
   ASSERT_TRUE(requester.dma_map(kSecondIova, 0x1000, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_NE(pair.requester_host().write_outcome(kSecondIova - 4, kValue),
             simdojo::DmaAccessOutcome::Complete);
   std::array<std::byte, 4> owner_tail{};
@@ -997,6 +1029,7 @@ TEST(VfioTargetGrants, CopiesSealedBackingWithoutCallingFallibleBarAccess) {
   ASSERT_EQ(::pwrite(pair.owner().fd(), seeded.data(), seeded.size(), kOwnerOffset),
             static_cast<ssize_t>(seeded.size()));
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   std::array<std::byte, 11> copied{};
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
@@ -1023,6 +1056,7 @@ TEST(VfioTargetGrants, RefusesPeerAtomicsWhileEndpointCompleterIsUnadvertised) {
   ASSERT_EQ(::pwrite(pair.owner().fd(), &kInitial, sizeof(kInitial), kOffset),
             static_cast<ssize_t>(sizeof(kInitial)));
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   std::array<std::byte, sizeof(kInitial)> bytes{};
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, bytes), simdojo::DmaAccessOutcome::Complete);
@@ -1055,6 +1089,7 @@ TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
   constexpr uint64_t kSize = 0x1000;
   constexpr uint64_t kOffset = 0x100;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   const uint64_t generation = session->generation();
@@ -1075,6 +1110,7 @@ TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
             rocjitsu::VfioTargetGrants::PeerKind::OrdinaryRam);
 
   ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.grants().admit_peer(read.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
   EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + 8, 16, false).kind,
@@ -1084,10 +1120,13 @@ TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
   ASSERT_GE(reused_ram.get(), 0);
   ASSERT_EQ(::ftruncate(reused_ram.get(), kSize), 0);
   ASSERT_TRUE(requester.dma_map(kIova, kSize, reused_ram.get(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + 8, 16, false).kind,
             rocjitsu::VfioTargetGrants::PeerKind::Rejected);
   ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   auto replacement = pair.grants().prepare_peer(0, generation, kIova + 8, 16, false);
   ASSERT_EQ(replacement.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
   EXPECT_EQ(replacement.snapshot.map_id, 2u);
@@ -1108,6 +1147,7 @@ TEST(VfioTargetGrants, RejectsPeerSnapshotWithChangedCanonicalBacking) {
 
   constexpr uint64_t kIova = 0x3000'0100;
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova + 8, 16, false);
@@ -1141,7 +1181,9 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
   constexpr uint64_t kIovaB = 0x3400'0120;
   constexpr uint64_t kMapSize = 0x1000;
   ASSERT_TRUE(requester_a.dma_map(kIovaA, kMapSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester_a));
   ASSERT_TRUE(requester_b.dma_map(kIovaB, kMapSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester_b));
   const auto session_a = trio.requester_a_host().target_session_snapshot();
   const auto session_b = trio.requester_b_host().target_session_snapshot();
   ASSERT_NE(session_a, nullptr);
@@ -1161,8 +1203,10 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
     auto probe = trio.grants().admit_peer(peer_b.snapshot);
     quiescing_b = probe.outcome == rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
     probe.permit.reset();
-    if (quiescing_b || unmap_b.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+    if (quiescing_b ||
+        unmap_b.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
       break;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
   EXPECT_TRUE(quiescing_b) << "UNMAP must enter quiesce while the cohort holds B's grant";
@@ -1170,6 +1214,7 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
   admitted_a.permit.reset();
   ASSERT_EQ(unmap_b.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   EXPECT_TRUE(unmap_b.get());
+  ASSERT_TRUE(finish_protocol_request(requester_b));
 
   EXPECT_EQ(trio.grants().admit_peer(peer_b.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
@@ -1179,6 +1224,7 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
 
   constexpr uint64_t kDisjointIova = 0x3400'2000;
   ASSERT_TRUE(requester_b.dma_map(kDisjointIova, kMapSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester_b));
   auto disjoint =
       trio.grants().prepare_peer(1, session_b->generation(), kDisjointIova + 8, 16, false);
   ASSERT_EQ(disjoint.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
@@ -1190,6 +1236,7 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
   held_a.permit.reset();
   EXPECT_EQ(disjoint_result, std::future_status::ready);
   EXPECT_TRUE(unmap_disjoint.get());
+  ASSERT_TRUE(finish_protocol_request(requester_b));
 }
 
 TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap) {
@@ -1203,6 +1250,7 @@ TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap)
   constexpr uint64_t kIova = 0x3000'0100;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, true);
@@ -1219,10 +1267,12 @@ TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap)
   admitted.permit.reset();
   ASSERT_EQ(map.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   ASSERT_TRUE(map.get());
+  ASSERT_TRUE(finish_protocol_request(requester));
   auto after_map = pair.grants().admit_peer(peer.snapshot);
   EXPECT_EQ(after_map.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
   after_map.permit.reset();
   ASSERT_TRUE(requester.dma_unmap(0x1200'0000, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   auto entered = pair.grants().admit_peer(peer.snapshot);
   ASSERT_EQ(entered.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
@@ -1231,6 +1281,7 @@ TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap)
   entered.permit.reset();
   ASSERT_EQ(unmap.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   EXPECT_TRUE(unmap.get());
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.grants().admit_peer(peer.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
 }
@@ -1249,6 +1300,7 @@ TEST(VfioTargetGrants, OwnerResetDrainsIncomingPeerEffectBeforeReply) {
   constexpr uint64_t kIova = 0x3000'0100;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, false);
@@ -1262,8 +1314,9 @@ TEST(VfioTargetGrants, OwnerResetDrainsIncomingPeerEffectBeforeReply) {
     auto probe = pair.grants().admit_peer(peer.snapshot);
     paused = probe.outcome == rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
     probe.permit.reset();
-    if (!paused)
+    if (!paused) {
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
   }
   EXPECT_TRUE(paused) << "reset must enter quiesce before completion is signalled";
   // An admitted effect may signal completion while reset waits for its permit.
@@ -1271,12 +1324,16 @@ TEST(VfioTargetGrants, OwnerResetDrainsIncomingPeerEffectBeforeReply) {
   uint64_t irq_count = 0;
   const auto irq_bytes = ::read(signalled.get(), &irq_count, sizeof(irq_count));
   EXPECT_EQ(irq_bytes, static_cast<ssize_t>(sizeof(irq_count)));
-  if (irq_bytes == static_cast<ssize_t>(sizeof(irq_count)))
+  if (irq_bytes == static_cast<ssize_t>(sizeof(irq_count))) {
     EXPECT_EQ(irq_count, 1u);
+  }
   EXPECT_EQ(reset.wait_for(std::chrono::milliseconds(0)), std::future_status::timeout);
   admitted.permit.reset();
   ASSERT_EQ(reset.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   EXPECT_TRUE(reset.get());
+  EXPECT_NE(pair.grants().admit_peer(peer.snapshot).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_TRUE(finish_protocol_request(owner));
   EXPECT_EQ(pair.grants().admit_peer(peer.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
   EXPECT_EQ(pair.grants().prepare_peer(0, session->generation(), kIova, 4, false).kind,
@@ -1294,6 +1351,7 @@ TEST(VfioTargetGrants, ConcurrentHostDetachDrainsSharedAdmittedEffect) {
   constexpr uint64_t kIova = 0x3000'0100;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, false);
@@ -1375,12 +1433,14 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
                                               std::byte{0x44}};
   ASSERT_EQ(::pwrite(page_table.get(), ram_data.data(), ram_data.size(), 0x1000), 4);
   ASSERT_TRUE(requester.dma_map(kPageTableIova, 0x3000, page_table.get(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   constexpr std::array<std::byte, 4> peer_data{std::byte{0xa1}, std::byte{0xb2}, std::byte{0xc3},
                                                std::byte{0xd4}};
   ASSERT_EQ(
       ::pwrite(pair.owner().fd(), peer_data.data(), peer_data.size(), kFdOffset + kOwnerOffset), 4);
   ASSERT_TRUE(requester.dma_map(kPeerIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto requester_session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(requester_session, nullptr);
   EXPECT_EQ(
@@ -1410,8 +1470,9 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
   for (int step = 0; step < 16 && completed == 0; ++step) {
     ASSERT_TRUE(engine.step());
     const auto outcome = access->read(kAperture, read, completed, token);
-    if (outcome != VmAccessOutcome::Unavailable)
+    if (outcome != VmAccessOutcome::Unavailable) {
       EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+    }
   }
   ASSERT_EQ(completed, read.size());
   EXPECT_EQ(read, peer_data);
@@ -1428,8 +1489,9 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
   for (int step = 0; step < 16 && completed == 0; ++step) {
     ASSERT_TRUE(engine.step());
     const auto outcome = access->write(kAperture, replacement, completed, token);
-    if (outcome != VmAccessOutcome::Unavailable)
+    if (outcome != VmAccessOutcome::Unavailable) {
       EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+    }
   }
   ASSERT_EQ(completed, replacement.size());
   ASSERT_EQ(::pread(pair.owner().fd(), read.data(), read.size(), kFdOffset + kOwnerOffset), 4);
@@ -1492,13 +1554,15 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
   for (int step = 0; step < 16 && completed == 0; ++step) {
     ASSERT_TRUE(engine.step());
     const auto outcome = process->read(kAperture, read, completed, token);
-    if (outcome != VmAccessOutcome::Unavailable)
+    if (outcome != VmAccessOutcome::Unavailable) {
       EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+    }
   }
   ASSERT_EQ(completed, read.size());
   EXPECT_EQ(read, replacement);
   EXPECT_EQ(endpoint->diagnostics().effects, 3u);
   ASSERT_TRUE(requester.dma_unmap(kPeerIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   completed = 0;
   EXPECT_NE(process->read(kAperture, read, completed, token), VmAccessOutcome::Complete);
   EXPECT_EQ(completed, 0u);
@@ -1515,19 +1579,22 @@ TEST(VfioTargetGrants, RejectsUnsealedBackingWithoutLeavingAGrant) {
   constexpr uint64_t kIova = 0x3000'0123;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 4> copied{};
   EXPECT_NE(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
   ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   ASSERT_TRUE(pair.owner().seal());
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(pair.owner().bar_calls(), 0u);
 }
 
 TEST(VfioDeviceHost, FailedReadAcrossAnUnreachableWindowLeavesTheDestinationUnchanged) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1559,7 +1626,7 @@ TEST(VfioDeviceHost, FailedReadAcrossAnUnreachableWindowLeavesTheDestinationUnch
 
 TEST(VfioDeviceHost, FailedWriteAcrossAnUnreachableWindowLeavesGuestMemoryUnchanged) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1595,7 +1662,7 @@ TEST(VfioDeviceHost, FailedWriteAcrossAnUnreachableWindowLeavesGuestMemoryUnchan
 
 TEST(VfioDeviceHost, ReadsAcrossHundredsOfMappedWindows) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1629,7 +1696,7 @@ TEST(VfioDeviceHost, ReadsAcrossHundredsOfMappedWindows) {
 
 TEST(VfioDeviceHost, KeepsCountWhenTheSameWindowIsSharedTwice) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1650,7 +1717,7 @@ TEST(VfioDeviceHost, KeepsCountWhenTheSameWindowIsSharedTwice) {
 // connection, so a VMM may be restarted against a running server.
 TEST(VfioDeviceHostLifecycle, ServesAnotherClientWhenNothingWasShared) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   uint64_t first_generation = 0;
   {
@@ -1672,7 +1739,7 @@ TEST(VfioDeviceHostLifecycle, ServesAnotherClientWhenNothingWasShared) {
 
 TEST(VfioDeviceHostLifecycle, PublishesCompletedDisconnectsAfterTrappedClientSessions) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   EXPECT_EQ(served.host().client_snapshot().completed_disconnects, 0u);
   EXPECT_FALSE(served.host().client_snapshot().attached);
   EXPECT_FALSE(served.host().client_snapshot().disconnect_in_progress);
@@ -1715,8 +1782,10 @@ public:
     simdojo::PciTransportSession::State old_session_state;
   };
 
-  explicit ResetObservingDevice(std::shared_future<void> reset_release = {})
-      : simdojo::PciDevice("reset-observer", kTestId), reset_release_(std::move(reset_release)) {}
+  explicit ResetObservingDevice(std::shared_future<void> reset_release = {},
+                                bool fail_reset = false)
+      : simdojo::PciDevice("reset-observer", kTestId), reset_release_(std::move(reset_release)),
+        fail_reset_(fail_reset) {}
 
   [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override {
     simdojo::BarSpec bar;
@@ -1727,25 +1796,32 @@ public:
   }
 
   [[nodiscard]] int64_t bar_access(int, std::span<std::byte> bytes, uint64_t, bool write) override {
-    if (!write)
+    if (!write) {
       std::ranges::fill(bytes, std::byte{0});
+    }
     return static_cast<int64_t>(bytes.size());
   }
 
   void dma_map(const simdojo::DmaRegion &) override {}
   void dma_unmap(const simdojo::DmaRegion &) override {}
 
-  void reset(simdojo::ResetKind kind) override {
-    if (recorded_.exchange(true))
-      return;
+  util::Result reset(simdojo::ResetKind kind, util::DiagnosticEmitter diag = {}) override {
+    if (recorded_.exchange(true)) {
+      return util::Result::success();
+    }
     // Cleanup may reset after a failed setup, before the test has captured a session.
     first_reset_.set_value({.kind = kind,
                             .active_generation = transport_session_generation(),
                             .old_session_state = watched_session_ != nullptr
                                                      ? watched_session_->state()
                                                      : simdojo::PciTransportSession::State::Open});
-    if (reset_release_.valid())
+    if (reset_release_.valid()) {
       reset_release_.wait();
+    }
+    if (fail_reset_) {
+      return diag.emit() << "injected reset failure";
+    }
+    return util::Result::success();
   }
 
   [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession> current_session() const {
@@ -1763,6 +1839,7 @@ private:
   std::promise<Observation> first_reset_;
   std::atomic<bool> recorded_ = false;
   std::shared_future<void> reset_release_;
+  bool fail_reset_;
 };
 
 class ScopedResetRelease {
@@ -1774,8 +1851,9 @@ public:
   ScopedResetRelease &operator=(const ScopedResetRelease &) = delete;
 
   void release() {
-    if (released_)
+    if (released_) {
       return;
+    }
     promise_.set_value();
     released_ = true;
   }
@@ -1785,9 +1863,46 @@ private:
   bool released_ = false;
 };
 
+TEST(VfioDeviceHostLifecycle, FailedDisconnectResetStopsServingWithoutReportingCompletion) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-vfu-failed-reset-"));
+  const std::string socket_path = std::format("{}/gpu.sock", runtime.path());
+  ResetObservingDevice device({}, /*fail_reset=*/true);
+  rocjitsu::VfioDeviceHost host(socket_path, device);
+  ASSERT_TRUE(host.build());
+  std::promise<rocjitsu::VfioDeviceHost::ServeResult> result;
+  std::future<rocjitsu::VfioDeviceHost::ServeResult> finished = result.get_future();
+  std::jthread serving([&](std::stop_token stop) { result.set_value(host.run(stop)); });
+  std::shared_ptr<simdojo::PciTransportSession> old_session;
+  {
+    rocjitsu::test::VfioUserClient client;
+    bool connected = false;
+    for (int attempt = 0; attempt < 200 && !connected; ++attempt) {
+      connected = client.connect(socket_path);
+      if (!connected) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+    }
+    ASSERT_TRUE(connected);
+    uint32_t regions = 0;
+    uint32_t irqs = 0;
+    ASSERT_TRUE(client.device_info(regions, irqs));
+    old_session = device.current_session();
+    ASSERT_NE(old_session, nullptr);
+  }
+  ASSERT_EQ(finished.wait_for(std::chrono::seconds(3)), std::future_status::ready);
+  EXPECT_EQ(finished.get(), rocjitsu::VfioDeviceHost::ServeResult::Failed);
+  serving.join();
+  const rocjitsu::VfioDeviceHost::ClientSnapshot snapshot = host.client_snapshot();
+  EXPECT_FALSE(snapshot.attached);
+  EXPECT_EQ(snapshot.completed_disconnects, 0u);
+  EXPECT_EQ(device.current_session(), nullptr);
+  EXPECT_FALSE(old_session->acquire());
+}
+
 TEST(VfioDeviceHostLifecycle, KeepsClosedSnapshotWhileDisconnectResetIsSlow) {
   rocjitsu::test::ScopedTempDirectory runtime;
-  ASSERT_TRUE(runtime.initialize("rj-vfu-slow-reset-"));
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
   const std::string socket_path = std::format("{}/gpu.sock", runtime.path());
   std::promise<void> reset_release;
   ResetObservingDevice device(reset_release.get_future().share());
@@ -1804,8 +1919,9 @@ TEST(VfioDeviceHostLifecycle, KeepsClosedSnapshotWhileDisconnectResetIsSlow) {
     bool connected = false;
     for (int attempt = 0; attempt < 200 && !connected; ++attempt) {
       connected = client.connect(socket_path);
-      if (!connected)
+      if (!connected) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
     }
     ASSERT_TRUE(connected);
     uint32_t regions = 0;
@@ -1852,8 +1968,9 @@ int exercise_raw_enotconn(const std::string &socket_path) {
   ResetObservingDevice device;
   std::future<ResetObservingDevice::Observation> first_reset = device.first_reset();
   rocjitsu::VfioDeviceHost host(socket_path, device);
-  if (!host.build())
+  if (!host.build()) {
     return 1;
+  }
   rocjitsu::VfioDeviceHost::ServeResult serve_result =
       rocjitsu::VfioDeviceHost::ServeResult::Failed;
   std::jthread serving([&](std::stop_token stop) { serve_result = host.run(stop); });
@@ -1862,53 +1979,68 @@ int exercise_raw_enotconn(const std::string &socket_path) {
     bool attached = false;
     for (int attempt = 0; attempt < 200 && !attached; ++attempt) {
       attached = client.connect(socket_path);
-      if (!attached)
+      if (!attached) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
     }
-    if (!attached)
+    if (!attached) {
       return 2;
+    }
 
     uint32_t regions = 0;
     uint32_t irqs = 0;
     const uint32_t before_info = completed_run_ctx_calls.load(std::memory_order_acquire);
-    if (!client.device_info(regions, irqs))
+    if (!client.device_info(regions, irqs)) {
       return 3;
+    }
     // The client can receive the reply before the serving wrapper returns.
     // Retire that first call before arming the fault for the next request.
     for (int attempt = 0;
          attempt < 200 && completed_run_ctx_calls.load(std::memory_order_acquire) == before_info;
-         ++attempt)
+         ++attempt) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    if (completed_run_ctx_calls.load(std::memory_order_acquire) == before_info)
+    }
+    if (completed_run_ctx_calls.load(std::memory_order_acquire) == before_info) {
       return 13;
+    }
     std::shared_ptr<simdojo::PciTransportSession> old_session = device.current_session();
-    if (old_session == nullptr || old_session->state() != simdojo::PciTransportSession::State::Open)
+    if (old_session == nullptr ||
+        old_session->state() != simdojo::PciTransportSession::State::Open) {
       return 4;
+    }
     device.watch_session(old_session);
 
     run_ctx_fault_state.store(RunCtxFaultState::Armed);
     const bool request_answered = client.device_info(regions, irqs);
-    if (!request_answered)
+    if (!request_answered) {
       return 5;
-    if (first_reset.wait_for(std::chrono::seconds(3)) != std::future_status::ready)
+    }
+    if (first_reset.wait_for(std::chrono::seconds(3)) != std::future_status::ready) {
       return 6;
+    }
     const ResetObservingDevice::Observation observed = first_reset.get();
-    if (run_ctx_fault_state.load() != RunCtxFaultState::Fired)
+    if (run_ctx_fault_state.load() != RunCtxFaultState::Fired) {
       return 7;
-    if (observed.kind != simdojo::ResetKind::LostConnection)
+    }
+    if (observed.kind != simdojo::ResetKind::LostConnection) {
       return 8;
+    }
     if (observed.active_generation != 0 ||
-        observed.old_session_state != simdojo::PciTransportSession::State::Revoked)
+        observed.old_session_state != simdojo::PciTransportSession::State::Revoked) {
       return 9;
-    if (device.transport_session_generation() != 0 || old_session->acquire())
+    }
+    if (device.transport_session_generation() != 0 || old_session->acquire()) {
       return 10;
+    }
     rocjitsu::VfioDeviceHost::ClientSnapshot snapshot = host.client_snapshot();
     for (int attempt = 0; attempt < 200 && snapshot.completed_disconnects == 0; ++attempt) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       snapshot = host.client_snapshot();
     }
-    if (snapshot.attached || snapshot.disconnect_in_progress || snapshot.completed_disconnects != 1)
+    if (snapshot.attached || snapshot.disconnect_in_progress ||
+        snapshot.completed_disconnects != 1) {
       return 12;
+    }
     return 0;
   }();
 
@@ -1917,20 +2049,22 @@ int exercise_raw_enotconn(const std::string &socket_path) {
   serving.request_stop();
   serving.join();
   host.detach();
-  if (scenario_status != 0)
+  if (scenario_status != 0) {
     return scenario_status;
+  }
   return serve_result == rocjitsu::VfioDeviceHost::ServeResult::Stopped ? 0 : 11;
 }
 
 TEST(VfioDeviceHostLifecycle, RawEnotconnRevokesAndResetsBeforeDetach) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-enotconn-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   const pid_t child = ::fork();
   ASSERT_GE(child, 0);
-  if (child == 0)
+  if (child == 0) {
     ::_exit(exercise_raw_enotconn(socket_path));
+  }
 
   ChildProcessGuard child_guard(child);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -1957,9 +2091,9 @@ TEST(VfioDeviceHostLifecycle, RawEnotconnRevokesAndResetsBeforeDetach) {
 // when the client goes away, so serving ends rather than handing a second
 // client memory the first can still reach.
 TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-gpu-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.vendor_id = 0x1002;
@@ -2030,9 +2164,9 @@ TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
 // agree on what is acceptable, or a device reports itself fine and then fails
 // while the transport is being built around it.
 TEST(VfioDeviceHostLifecycle, BuildsTheSmallestBusShapeTheDeviceAccepts) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-floor-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.local_mem_size = 64 * 1024 * 1024;
@@ -2085,7 +2219,9 @@ public:
 
   void dma_map(const simdojo::DmaRegion &) override {}
   void dma_unmap(const simdojo::DmaRegion &) override {}
-  void reset(simdojo::ResetKind) override {}
+  util::Result reset(simdojo::ResetKind, util::DiagnosticEmitter = {}) override {
+    return util::Result::success();
+  }
 
   /// @brief Raise vector zero, as an interrupt source eventually will.
   [[nodiscard]] bool raise() {
@@ -2100,9 +2236,9 @@ public:
 // above still passes if vfu_setup_device_nr_irqs() and VfioDeviceHost::trigger()
 // stop being connected to each other.
 TEST(VfioDeviceHostLifecycle, DeliversAMessageToTheVectorTheClientArmed) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-raise-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   RaisingDevice device;
   rocjitsu::VfioDeviceHost host(socket_path, device);
@@ -2151,37 +2287,43 @@ TEST(VfioDeviceHostLifecycle, DeliversAMessageToTheVectorTheClientArmed) {
 // recursive-lock guarantee becomes a bounded test failure instead of wedging
 // the test process during serving-thread destruction.
 TEST(VfioDeviceHostLifecycle, ServingThreadRequestCanReenterTransportForInterrupt) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-request-raise-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   const pid_t child = ::fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
     RaisingDevice device;
     rocjitsu::VfioDeviceHost host(socket_path, device);
-    if (!host.build())
+    if (!host.build()) {
       ::_exit(2);
+    }
     std::jthread serving([&host](std::stop_token stop) { (void)host.run(stop); });
 
     rocjitsu::test::VfioUserClient client;
     bool attached = false;
     for (int attempt = 0; attempt < 200 && !attached; ++attempt) {
       attached = client.connect(socket_path);
-      if (!attached)
+      if (!attached) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
     }
-    if (!attached)
+    if (!attached) {
       ::_exit(3);
+    }
 
     const int signalled = ::eventfd(0, EFD_NONBLOCK);
-    if (signalled < 0)
+    if (signalled < 0) {
       ::_exit(4);
-    if (!client.arm_irq(VFIO_PCI_MSIX_IRQ_INDEX, signalled))
+    }
+    if (!client.arm_irq(VFIO_PCI_MSIX_IRQ_INDEX, signalled)) {
       ::_exit(5);
+    }
     if (!host.ask_serving_thread([&device] {
-          if (!device.raise())
+          if (!device.raise()) {
             ::_exit(6);
+          }
         })) {
       ::_exit(7);
     }
@@ -2191,12 +2333,14 @@ TEST(VfioDeviceHostLifecycle, ServingThreadRequestCanReenterTransportForInterrup
     do {
       ready = ::poll(&wait, 1, 5'000);
     } while (ready < 0 && errno == EINTR);
-    if (ready != 1)
+    if (ready != 1) {
       ::_exit(8);
+    }
 
     uint64_t count = 0;
-    if (::read(signalled, &count, sizeof(count)) != sizeof(count) || count != 1)
+    if (::read(signalled, &count, sizeof(count)) != sizeof(count) || count != 1) {
       ::_exit(9);
+    }
     ::close(signalled);
     serving.request_stop();
     serving.join();
@@ -2232,9 +2376,9 @@ TEST(VfioDeviceHostLifecycle, ServingThreadRequestCanReenterTransportForInterrup
 // looks for its table at whatever address comes out -- so the encoding is
 // checked here rather than by booting one and reading dmesg.
 TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-msix-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.gfx_target_version = 120500;
@@ -2257,15 +2401,17 @@ TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
 
   const auto read_byte = [&client](uint64_t at, uint8_t &value) {
     std::array<std::byte, 1> one{};
-    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, one))
+    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, one)) {
       return testing::AssertionFailure() << std::format("cannot read config byte at {:#x}", at);
+    }
     value = std::to_integer<uint8_t>(one[0]);
     return testing::AssertionSuccess();
   };
   const auto read_dword = [&client](uint64_t at, uint32_t &value) {
     std::array<std::byte, 4> four{};
-    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, four))
+    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, four)) {
       return testing::AssertionFailure() << std::format("cannot read config dword at {:#x}", at);
+    }
     value = std::bit_cast<uint32_t>(four);
     return testing::AssertionSuccess();
   };
@@ -2385,8 +2531,9 @@ std::string compact_vfio_server_config(uint32_t gpu_count) {
   config = compact_vfio_server_config(2);
   const std::string replication = R"("num_gpus":2,)";
   const auto replication_at = config.find(replication);
-  if (replication_at == std::string::npos)
+  if (replication_at == std::string::npos) {
     return testing::AssertionFailure() << "compact VFIO fixture lost its legacy replication field";
+  }
   config.erase(replication_at, replication.size());
   config.insert(1, R"("local_node":"selected","system":{"nodes":[
     {"id":"other","gpus":[
@@ -2406,15 +2553,18 @@ compact_vfio_config_has_usable_functions(const std::string &path, uint32_t count
   util::StringDiagnostic diagnostic;
   auto loaded =
       rocjitsu::config::load_config(path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
-  if (loaded.failed())
+  if (loaded.failed()) {
     return testing::AssertionFailure() << diagnostic.message();
-  if (loaded.value().num_gpus != count || loaded.value().devices.size() != count)
+  }
+  if (loaded.value().num_gpus != count || loaded.value().devices.size() != count) {
     return testing::AssertionFailure() << "Compact VFIO configuration has unusable functions";
+  }
   for (const auto &identity : loaded.value().devices) {
     rocjitsu::GpuPciDevice device(
         "probe", rocjitsu::gpu_pci_spec_from_config(identity, loaded.value().pci), nullptr);
-    if (!device.usable())
+    if (!device.usable()) {
       return testing::AssertionFailure() << "Compact VFIO configuration has unusable functions";
+    }
   }
   return testing::AssertionSuccess();
 }
@@ -2424,10 +2574,12 @@ std::optional<int> wait_for_child_bounded(pid_t child, std::chrono::seconds time
   int status = 0;
   while (std::chrono::steady_clock::now() < deadline) {
     const pid_t waited = ::waitpid(child, &status, WNOHANG);
-    if (waited == child)
+    if (waited == child) {
       return status;
-    if (waited < 0 && errno != EINTR)
+    }
+    if (waited < 0 && errno != EINTR) {
       return std::nullopt;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   return std::nullopt;
@@ -2443,11 +2595,13 @@ int poll_for_pipe_event(int fd, int timeout_ms) {
 }
 
 bool receive_one_ready_byte(int fd) {
-  if (poll_for_pipe_event(fd, 30'000) != 1)
+  if (poll_for_pipe_event(fd, 30'000) != 1) {
     return false;
+  }
   std::array<uint8_t, 2> bytes{};
-  if (::read(fd, bytes.data(), bytes.size()) != 1 || bytes[0] != 1)
+  if (::read(fd, bytes.data(), bytes.size()) != 1 || bytes[0] != 1) {
     return false;
+  }
   // Readiness is one event for the node, then EOF.
   return poll_for_pipe_event(fd, 2'000) == 1 && ::read(fd, bytes.data(), bytes.size()) == 0;
 }
@@ -2469,20 +2623,24 @@ int exercise_multi_function_clients(const std::vector<std::string> &socket_paths
       socket_paths.size() - (departure == MultiClientDeparture::DisconnectWithMissingPeer);
   for (std::size_t i = 0; i < clients_to_connect; ++i) {
     auto client = std::make_unique<rocjitsu::test::VfioUserClient>();
-    if (!client->connect(socket_paths[i]))
+    if (!client->connect(socket_paths[i])) {
       return static_cast<int>(10 + i);
+    }
     uint32_t regions = 0;
     uint32_t irqs = 0;
-    if (!client->device_info(regions, irqs) || regions != VFU_PCI_DEV_NUM_REGIONS)
+    if (!client->device_info(regions, irqs) || regions != VFU_PCI_DEV_NUM_REGIONS) {
       return static_cast<int>(20 + i);
+    }
     std::array<std::byte, 4> pci_id{};
-    if (!client->region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0, pci_id))
+    if (!client->region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0, pci_id)) {
       return static_cast<int>(30 + i);
+    }
     const auto byte_at = [&pci_id](std::size_t index) {
       return std::to_integer<uint8_t>(pci_id[index]);
     };
-    if ((byte_at(0) | (byte_at(1) << 8)) != 0x1002 || (byte_at(2) | (byte_at(3) << 8)) != 30145)
+    if ((byte_at(0) | (byte_at(1) << 8)) != 0x1002 || (byte_at(2) | (byte_at(3) << 8)) != 30145) {
       return static_cast<int>(40 + i);
+    }
     clients.push_back(std::move(client));
   }
 
@@ -2492,20 +2650,24 @@ int exercise_multi_function_clients(const std::vector<std::string> &socket_paths
   for (std::size_t i = 0; i < clients.size(); ++i) {
     const uint32_t marker = 0x5a125000u + static_cast<uint32_t>(i);
     const auto bytes = std::bit_cast<std::array<std::byte, 4>>(marker);
-    if (!clients[i]->region_write(register_region, index_offset, bytes))
+    if (!clients[i]->region_write(register_region, index_offset, bytes)) {
       return static_cast<int>(50 + i);
+    }
   }
   for (std::size_t i = 0; i < clients.size(); ++i) {
     std::array<std::byte, 4> read{};
     if (!clients[i]->region_read(register_region, index_offset, read) ||
-        std::bit_cast<uint32_t>(read) != 0x5a125000u + i)
+        std::bit_cast<uint32_t>(read) != 0x5a125000u + i) {
       return static_cast<int>(60 + i);
+    }
   }
 
-  if (departure == MultiClientDeparture::DisconnectLast)
+  if (departure == MultiClientDeparture::DisconnectLast) {
     clients.back().reset();
-  if (departure == MultiClientDeparture::DisconnectWithMissingPeer)
+  }
+  if (departure == MultiClientDeparture::DisconnectWithMissingPeer) {
     clients.front().reset();
+  }
   if (departure == MultiClientDeparture::DisconnectAll) {
     for (std::unique_ptr<rocjitsu::test::VfioUserClient> &client : clients) {
       client.reset();
@@ -2514,13 +2676,16 @@ int exercise_multi_function_clients(const std::vector<std::string> &socket_paths
     }
   }
   const uint8_t checked = 1;
-  if (::write(checked_fd, &checked, sizeof(checked)) != sizeof(checked))
+  if (::write(checked_fd, &checked, sizeof(checked)) != sizeof(checked)) {
     return 70;
-  if (poll_for_pipe_event(release_fd, 60'000) != 1)
+  }
+  if (poll_for_pipe_event(release_fd, 60'000) != 1) {
     return 71;
+  }
   uint8_t release = 0;
-  if (::read(release_fd, &release, sizeof(release)) != 0)
+  if (::read(release_fd, &release, sizeof(release)) != 0) {
     return 72;
+  }
   return 0;
 }
 
@@ -2533,10 +2698,11 @@ void run_multi_function_server_scenario(uint32_t gpu_count, MultiClientDeparture
   ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), gpu_count));
 
   rocjitsu::test::ScopedTempDirectory runtime;
-  ASSERT_TRUE(runtime.initialize("rj-vfu-multi-"));
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
   std::vector<std::string> socket_paths;
-  for (uint32_t i = 0; i < gpu_count; ++i)
+  for (uint32_t i = 0; i < gpu_count; ++i) {
     socket_paths.push_back(std::format("{}/gpu{}.sock", runtime.path(), i));
+  }
 
   int ready_pipe[2];
   ASSERT_EQ(::pipe(ready_pipe), 0) << strerror(errno);
@@ -2553,8 +2719,9 @@ void run_multi_function_server_scenario(uint32_t gpu_count, MultiClientDeparture
   ASSERT_TRUE(receive_one_ready_byte(ready_read.get()))
       << "the multi-function server did not publish one readiness byte after binding every socket";
   ready_read.reset();
-  for (const auto &path : socket_paths)
+  for (const auto &path : socket_paths) {
     ASSERT_TRUE(std::filesystem::is_socket(path)) << path;
+  }
 
   int checked_pipe[2];
   ASSERT_EQ(::pipe(checked_pipe), 0) << strerror(errno);
@@ -2580,8 +2747,9 @@ void run_multi_function_server_scenario(uint32_t gpu_count, MultiClientDeparture
   uint8_t checked = 0;
   if (::read(checked_read.get(), &checked, sizeof(checked)) != sizeof(checked) || checked != 1) {
     const auto status = wait_for_child_bounded(client, std::chrono::seconds(5));
-    if (status.has_value())
+    if (status.has_value()) {
       client_guard.release();
+    }
     FAIL() << "a client failed before every function answered, child status "
            << (status.has_value() && WIFEXITED(*status) ? WEXITSTATUS(*status) : -1);
   }
@@ -2598,8 +2766,9 @@ void run_multi_function_server_scenario(uint32_t gpu_count, MultiClientDeparture
     ASSERT_EQ(::kill(server, 0), 0) << "the server did not remain alive for launcher shutdown";
   }
   if (departure != MultiClientDeparture::DisconnectLast &&
-      departure != MultiClientDeparture::DisconnectWithMissingPeer)
+      departure != MultiClientDeparture::DisconnectWithMissingPeer) {
     ASSERT_EQ(::kill(server, SIGTERM), 0) << strerror(errno);
+  }
   const auto server_status = wait_for_child_bounded(server, std::chrono::seconds(15));
   ASSERT_TRUE(server_status.has_value())
       << "the function group did not stop within fifteen seconds";
@@ -2612,8 +2781,9 @@ void run_multi_function_server_scenario(uint32_t gpu_count, MultiClientDeparture
   } else {
     EXPECT_EQ(WEXITSTATUS(*server_status), 0) << "SIGTERM must cleanly stop all four functions";
   }
-  for (const auto &path : socket_paths)
+  for (const auto &path : socket_paths) {
     EXPECT_FALSE(std::filesystem::exists(path)) << path << " remained after group teardown";
+  }
 
   release_write.reset();
   const auto client_status = wait_for_child_bounded(client, std::chrono::seconds(5));
@@ -2671,7 +2841,7 @@ TEST(VfioServer, CleansTheFirstListenerWhenTheSecondBindFails) {
   ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), 2));
 
   rocjitsu::test::ScopedTempDirectory runtime;
-  ASSERT_TRUE(runtime.initialize("rj-vfu-multi-fail-"));
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
   const std::string first_socket = runtime.path() + "/gpu0.sock";
   // An existing directory cannot become a socket. It reaches host.build()
   // after the first host has already bound, unlike duplicate-path preflight.
@@ -2704,6 +2874,100 @@ TEST(VfioServer, CleansTheFirstListenerWhenTheSecondBindFails) {
       << "the first listener survived the failure to bind the second";
 }
 
+TEST(VfioServer, CleansListenersWhenServingThreadStartupFails) {
+  for (std::size_t successful_threads : {0u, 1u}) {
+    SCOPED_TRACE(successful_threads);
+    rocjitsu::test::ScopedTempFile config;
+    ASSERT_TRUE(config.initialize("rj-vfu-thread-fail-config-"));
+    ASSERT_TRUE(config.write(compact_vfio_server_config(2)));
+    ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), 2));
+    rocjitsu::test::ScopedTempDirectory runtime;
+    ASSERT_TRUE(runtime.initialize("rj-vfu-thread-fail-"));
+    const std::vector<std::string> socket_paths = {runtime.path() + "/gpu0.sock",
+                                                   runtime.path() + "/gpu1.sock"};
+    int ready_pipe[2];
+    ASSERT_EQ(::pipe(ready_pipe), 0);
+    ScopedFd ready_read(ready_pipe[0]);
+    ScopedFd ready_write(ready_pipe[1]);
+    testing::internal::CaptureStderr();
+    const pid_t server = ::fork();
+    if (server < 0) {
+      (void)testing::internal::GetCapturedStderr();
+      FAIL() << "fork failed: " << std::strerror(errno);
+    }
+    if (server == 0) {
+      ready_read.reset();
+      ::_exit(rocjitsu::run_vfio_server_with_serving_thread_failure_for_test(
+          config.path(), socket_paths, ready_write.get(), successful_threads));
+    }
+    ChildProcessGuard server_guard(server);
+    ready_write.reset();
+    const int ready_event = poll_for_pipe_event(ready_read.get(), 30'000);
+    uint8_t ready = 0;
+    const ssize_t ready_bytes = ready_event == 1 ? ::read(ready_read.get(), &ready, 1) : -1;
+    const auto status = wait_for_child_bounded(server, std::chrono::seconds(15));
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(ready_event, 1);
+    EXPECT_EQ(ready_bytes, 0) << "failed startup must not publish readiness";
+    ASSERT_TRUE(status) << "failed thread startup did not stop the server";
+    server_guard.release();
+    ASSERT_TRUE(WIFEXITED(*status));
+    EXPECT_EQ(WEXITSTATUS(*status), 1);
+    EXPECT_NE(diagnostic.find(std::format("cannot start serving thread for PCI function {}: {}",
+                                          successful_threads, std::strerror(EAGAIN))),
+              std::string::npos)
+        << diagnostic;
+    for (const auto &path : socket_paths) {
+      EXPECT_FALSE(std::filesystem::exists(path)) << path;
+    }
+    ready_read.reset();
+
+    ASSERT_EQ(::pipe(ready_pipe), 0);
+    ready_read.reset(ready_pipe[0]);
+    ready_write.reset(ready_pipe[1]);
+    const pid_t retry = ::fork();
+    ASSERT_GE(retry, 0);
+    if (retry == 0) {
+      ready_read.reset();
+      ::_exit(rocjitsu::run_vfio_server(config.path(), socket_paths, ready_write.get()));
+    }
+    ChildProcessGuard retry_guard(retry);
+    ready_write.reset();
+    ASSERT_TRUE(receive_one_ready_byte(ready_read.get())) << "retry could not reuse the sockets";
+    ASSERT_EQ(::kill(retry, SIGTERM), 0);
+    const auto retry_status = wait_for_child_bounded(retry, std::chrono::seconds(15));
+    ASSERT_TRUE(retry_status);
+    retry_guard.release();
+    ASSERT_TRUE(WIFEXITED(*retry_status));
+    EXPECT_EQ(WEXITSTATUS(*retry_status), 0);
+  }
+}
+
+TEST(VfioServer, ReturnsFailureWhenRelativeSocketPathCannotBeNormalized) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-vfu-missing-cwd-"));
+  testing::internal::CaptureStderr();
+  const pid_t child = ::fork();
+  if (child < 0) {
+    (void)testing::internal::GetCapturedStderr();
+    FAIL() << "fork failed: " << std::strerror(errno);
+  }
+  if (child == 0) {
+    if (::chdir(runtime.path().c_str()) != 0 || ::rmdir(runtime.path().c_str()) != 0) {
+      ::_exit(2);
+    }
+    ::_exit(rocjitsu::run_vfio_server(RJ_VFU_TEST_CONFIG_PATH, "gpu.sock"));
+  }
+  ChildProcessGuard child_guard(child);
+  const std::optional<int> status = wait_for_child_bounded(child, std::chrono::seconds(15));
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  ASSERT_TRUE(status);
+  child_guard.release();
+  ASSERT_TRUE(WIFEXITED(*status));
+  EXPECT_EQ(WEXITSTATUS(*status), 1);
+  EXPECT_NE(diagnostic.find("cannot normalize socket path gpu.sock"), std::string::npos);
+}
+
 // A server that cannot serve must say so and exit, not hang. The engine runs on
 // its own thread and finishes only when asked to, so any early return that
 // forgets to ask joins a thread that never ends -- and the process then sits
@@ -2717,13 +2981,15 @@ TEST(VfioServer, ReturnsRatherThanHangingWhenTheSocketCannotBeBound) {
   const std::string config = RJ_VFU_TEST_CONFIG_PATH;
   ASSERT_TRUE(std::filesystem::exists(config)) << "no config to build a machine from: " << config;
 
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+
   // A child can be killed and reaped if the server hangs. A timed-out
   // std::launch::async future would block in its destructor and wedge the test.
   const pid_t child = ::fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
-    const int result =
-        rocjitsu::run_vfio_server(config, std::filesystem::temp_directory_path().string());
+    const int result = rocjitsu::run_vfio_server(config, runtime.path());
     ::_exit(result == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
   }
 
@@ -2749,8 +3015,9 @@ TEST(VfioServer, ReturnsRatherThanHangingWhenTheSocketCannotBeBound) {
 TEST(VfioServer, ReportsReadinessAfterTheSocketIsListening) {
   const std::string config = RJ_VFU_TEST_CONFIG_PATH;
   ASSERT_TRUE(std::filesystem::exists(config)) << "no config to build a machine from: " << config;
-  const std::string socket_path = std::format("/tmp/rj-vfu-server-ready-{}.sock", ::getpid());
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   int ready_pipe[2];
   ASSERT_EQ(::pipe(ready_pipe), 0) << strerror(errno);
@@ -2797,8 +3064,9 @@ TEST(VfioServer, ReportsReadinessAfterTheSocketIsListening) {
 TEST(VfioServer, PropagatesAnEngineFailureAfterReadiness) {
   const std::string config = RJ_VFU_TEST_CONFIG_PATH;
   ASSERT_TRUE(std::filesystem::exists(config)) << "no config to build a machine from: " << config;
-  const std::string socket_path = std::format("/tmp/rj-vfu-engine-failure-{}.sock", ::getpid());
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   int ready_pipe[2];
   ASSERT_EQ(::pipe(ready_pipe), 0) << strerror(errno);
@@ -2847,13 +3115,10 @@ TEST(VfioServer, PropagatesAnEngineFailureAfterReadiness) {
   FAIL() << "the server remained alive after its simulation engine failed";
 }
 
-// An empty target is a caller's mistake, and the serving thread is the wrong
-// place to discover it: invoking one throws bad_function_call there, which is
-// reported as work that ran and failed -- indistinguishable from work that
-// could not be done -- while the single slot is spent on nothing.
+// An empty target must be refused before it consumes the single request slot.
 TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
 
@@ -2872,7 +3137,7 @@ TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
   // after the test body has ended.
   std::promise<std::thread::id> ran_on;
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   std::future<std::thread::id> where = ran_on.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread(
@@ -2900,7 +3165,7 @@ TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
   bool second_ran = false;
 
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   // Block the first request inside the serving thread so it stays outstanding
   // while the second is offered.
@@ -2919,47 +3184,11 @@ TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
   EXPECT_FALSE(second_ran) << "a refused request must not run";
 }
 
-// A request that throws must not take the process with it: it runs on the serving
-// thread, where an escaping exception would terminate rather than propagate.
-TEST(VfioDeviceHost, SurvivesAThrowingRequest) {
-  // Both promises are declared before the fixture so they outlive the join
-  // in its destructor: on a timed-out wait, or a rejected retry loop, the
-  // test returns with a request still pending, and the serving thread may
-  // call set_value() after the test body has ended.
-  std::promise<void> threw;
-  std::promise<void> ran_after;
-  ServedDevice served;
-  ASSERT_TRUE(served.built());
-
-  std::future<void> did_throw = threw.get_future();
-  ASSERT_TRUE(served.host().ask_serving_thread([&threw] {
-    threw.set_value();
-    throw std::runtime_error("request failed");
-  }));
-  ASSERT_EQ(did_throw.wait_for(std::chrono::seconds(10)), std::future_status::ready);
-
-  // Still serving afterwards, which is the point: the request failed, the device
-  // did not. Retried because the throwing request signalled before it threw, so
-  // it is legitimately still outstanding -- and therefore still refusing -- for
-  // the moment it takes the serving thread to unwind and clear it.
-  std::future<void> after = ran_after.get_future();
-  bool accepted = false;
-  for (int attempt = 0; attempt < 200 && !accepted; ++attempt) {
-    accepted = served.host().ask_serving_thread([&ran_after] { ran_after.set_value(); });
-    if (!accepted) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-  }
-  ASSERT_TRUE(accepted) << "the host never accepted a request again after one threw";
-  EXPECT_EQ(after.wait_for(std::chrono::seconds(10)), std::future_status::ready)
-      << "serving stopped after a request threw";
-}
-
 // Documented: a request may never run. Accepting one after serving has stopped
 // must not leave a caller waiting for work that has nothing left to run it.
 TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   served.stop_serving();
 
   bool ran = false;

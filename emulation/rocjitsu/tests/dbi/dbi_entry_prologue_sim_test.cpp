@@ -109,6 +109,7 @@
 #include "../dbi_test_util.h"
 #include "../instrumentor_test_access.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -160,17 +161,17 @@ constexpr uint16_t kInlineMinus1 = 193;
 
 struct PrologueSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
   bool wave32;
 };
 
-constexpr PrologueSimArch kCdna3{"cdna3", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942,
+constexpr PrologueSimArch kCdna3{"cdna3", rocjitsu::IsaFamily::Cdna3, EF_AMDGPU_MACH_AMDGCN_GFX942,
                                  64, false};
-constexpr PrologueSimArch kCdna4{"cdna4", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950,
+constexpr PrologueSimArch kCdna4{"cdna4", rocjitsu::IsaFamily::Cdna4, EF_AMDGPU_MACH_AMDGCN_GFX950,
                                  64, false};
-constexpr PrologueSimArch kRdna4{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+constexpr PrologueSimArch kRdna4{"rdna4", rocjitsu::IsaFamily::Rdna4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
                                  32, true};
 
 // The kernarg image the CP delivers: the guest's own kernargs, then its
@@ -179,15 +180,17 @@ constexpr PrologueSimArch kRdna4{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MA
 std::vector<uint8_t> make_wrapper_image() {
   const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
   const auto layout = make_kernarg_extension_layout(kGuestKernargSize, payloads);
-  if (!layout)
+  if (!layout) {
     return {};
+  }
 
   const std::vector<uint8_t> guest_kernargs(kGuestKernargSize, 0x5A);
   const KernargExtensionPayloadWrite payload{&kLogBufferSentinel, sizeof(kLogBufferSentinel)};
   std::vector<uint8_t> wrapper(layout->wrapper_size, 0);
   if (!write_kernarg_extension_wrapper(wrapper, *layout, guest_kernargs.data(),
-                                       kGuestKernargSentinel, std::span{&payload, 1}))
+                                       kGuestKernargSentinel, std::span{&payload, 1})) {
     return {};
+  }
   return wrapper;
 }
 
@@ -469,8 +472,9 @@ protected:
                                       uint32_t scratch) {
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(text, scratch, {/*v2=*/2, /*v3=*/3});
-    if (regs[0].size() != a_.wave_size)
+    if (regs[0].size() != a_.wave_size) {
       return 0;
+    }
     return (static_cast<uint64_t>(regs[1][0]) << 32) | static_cast<uint64_t>(regs[0][0]);
   }
 
@@ -587,8 +591,9 @@ protected:
       ASSERT_TRUE(load_result.succeeded());
       const auto load = load_result.value();
       for (size_t i = 0; i + 1 < words.size(); ++i) {
-        if (words[i] != load[0] || words[i + 1] != load[1])
+        if (words[i] != load[0] || words[i + 1] != load[1]) {
           continue;
+        }
         words[i] = nop;
         words[i + 1] = nop;
         return;
@@ -800,7 +805,7 @@ TEST_F(DbiRdna4EntryPrologueSim, DispatchAtTheOriginalEntrySkipsThePrologue) {
   expect_dispatch_at_the_original_entry_skips_the_prologue();
 }
 
-void replace_entry_vgpr_capture_with_v1(std::vector<uint32_t> &words, rj_code_arch_t arch) {
+void replace_entry_vgpr_capture_with_v1(std::vector<uint32_t> &words, rocjitsu::IsaFamily arch) {
   // The prologue chooses the destination SGPR. Match the full capture and
   // rebuild it with only the source VGPR changed.
   size_t matches = 0;
@@ -811,8 +816,9 @@ void replace_entry_vgpr_capture_with_v1(std::vector<uint32_t> &words, rj_code_ar
         build_v_readlane_b32(destination, 1, 0, arch);
     ASSERT_TRUE(capture.succeeded() && wrong_capture.succeeded());
     for (size_t offset = 0; offset + 1 < words.size(); ++offset) {
-      if (words[offset] != capture.value()[0] || words[offset + 1] != capture.value()[1])
+      if (words[offset] != capture.value()[0] || words[offset + 1] != capture.value()[1]) {
         continue;
+      }
       words[offset] = wrong_capture.value()[0];
       words[offset + 1] = wrong_capture.value()[1];
       ++matches;
@@ -870,8 +876,9 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch,
   }
   test::DbiSim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
-  if (arch.wave32)
+  if (arch.wave32) {
     sim.set_wave32_dispatch();
+  }
   sim.set_kernarg(make_wrapper_image());
   sim.set_entry_offset(*entry);
   // Wave one's lane zero has workitem ID wave_size, distinct from both v1's
@@ -879,8 +886,9 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch,
   const std::vector<std::vector<uint32_t>> values = sim.run_and_read_workgroup_vgprs(
       words, test::patched_private_segment_size(patched), {2, 3, 4, 0}, 2 * arch.wave_size);
   ASSERT_EQ(values.size(), 4u);
-  for (const std::vector<uint32_t> &reg : values)
+  for (const std::vector<uint32_t> &reg : values) {
     ASSERT_EQ(reg.size(), 2 * arch.wave_size);
+  }
   std::array<uint32_t, 2> vector_snapshots = {values[1][0], values[1][arch.wave_size]};
   std::ranges::sort(vector_snapshots);
   const std::array<uint32_t, 2> expected_snapshots = {0, capture_wrong_vgpr ? 0 : arch.wave_size};
@@ -898,15 +906,17 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch,
 }
 
 TEST(DbiEntrySnapshotSim, ScalarAndVectorInputsSurviveGuestOverwrites) {
-  for (const PrologueSimArch arch : {kCdna3, kCdna4, kRdna4})
+  for (const PrologueSimArch arch : {kCdna3, kCdna4, kRdna4}) {
     ASSERT_NO_FATAL_FAILURE(
         expect_scalar_and_vector_entry_snapshots(arch, /*capture_wrong_vgpr=*/false));
+  }
 }
 
 TEST(DbiEntrySnapshotSim, WrongVectorCaptureSourceLosesTheNonzeroEntryValue) {
-  for (const PrologueSimArch arch : {kCdna3, kCdna4, kRdna4})
+  for (const PrologueSimArch arch : {kCdna3, kCdna4, kRdna4}) {
     ASSERT_NO_FATAL_FAILURE(
         expect_scalar_and_vector_entry_snapshots(arch, /*capture_wrong_vgpr=*/true));
+  }
 }
 
 // The dispatch stub captures TTMP9 before branching to the original entry.
@@ -918,8 +928,9 @@ public:
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
                                         amdgpu::Wavefront &wave) override {
-    if (pc != original_entry_pc_ || wave.wg_id() != 1)
+    if (pc != original_entry_pc_ || wave.wg_id() != 1) {
       return;
+    }
     ++mutations_;
     launch_value_ = wave.ttmp(9);
     wave.set_ttmp(9, 99);
@@ -1003,8 +1014,9 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch, Probe
   }
   test::DbiSim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
-  if (arch.wave32)
+  if (arch.wave32) {
     sim.set_wave32_dispatch();
+  }
   // Workgroup one receives TTMP9 = 1, distinct from TTMP8's queue packet ID
   // and the zero-valued trap temporaries of a dispatch at the origin.
   EntryTtmpMutationPlugin *mutation_plugin = nullptr;
@@ -1024,8 +1036,9 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch, Probe
     EXPECT_EQ(mutation_plugin->launch_value(), 1u);
   }
   ASSERT_EQ(values.size(), 4u);
-  for (const std::vector<uint32_t> &value : values)
+  for (const std::vector<uint32_t> &value : values) {
     ASSERT_EQ(value.size(), arch.wave_size);
+  }
   for (uint32_t lane = 0; lane < arch.wave_size; ++lane) {
     EXPECT_EQ(values[0][lane], trap_temporary ? (read_live_ttmp ? 99u : 1u)
                                               : static_cast<uint32_t>(kGuestKernargSentinel));
@@ -1036,15 +1049,15 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch, Probe
 }
 
 TEST(DbiEntrySnapshotSim, TrapTemporaryLaunchValueAndVectorSnapshotReachProbe) {
-  const PrologueSimArch cdna5{"cdna5", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 32,
-                              true};
+  const PrologueSimArch cdna5{"cdna5", rocjitsu::IsaFamily::Cdna5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                              32, true};
   ASSERT_NO_FATAL_FAILURE(
       expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp));
 }
 
 TEST(DbiEntrySnapshotSim, ReadingLiveTrapTemporaryInsteadOfSnapshotReturnsTheChangedValue) {
-  const PrologueSimArch cdna5{"cdna5", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 32,
-                              true};
+  const PrologueSimArch cdna5{"cdna5", rocjitsu::IsaFamily::Cdna5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                              32, true};
   ASSERT_NO_FATAL_FAILURE(expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp,
                                                                    /*read_live_ttmp=*/true));
 }
@@ -1054,8 +1067,9 @@ public:
   DistinctEntryScalarInputsPlugin() : ExecutionPlugin("distinct_entry_scalar_inputs") {}
 
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wave) override {
-    if (wave.wg_id() != 1)
+    if (wave.wg_id() != 1) {
       return;
+    }
     EXPECT_EQ(wave.ttmp(9), 1u);
     const amdgpu::RegisterAccess registers(wave);
     ASSERT_TRUE(registers.write_sgpr(wave.sgpr_alloc().base + 9, 23).succeeded());
@@ -1069,7 +1083,7 @@ private:
 };
 
 TEST(DbiEntrySnapshotSim, SameIndexScalarAndTrapTemporarySnapshotsRemainDistinct) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
   const util::FailureOr<uint32_t> overwrite = build_s_mov_b32(9, 128, kArch);
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   const util::FailureOr<uint32_t> live_output = build_v_mov_b32_src(4, 9, kArch);
@@ -1120,8 +1134,9 @@ TEST(DbiEntrySnapshotSim, SameIndexScalarAndTrapTemporarySnapshotsRemainDistinct
                              test::patched_private_segment_size(patched), {2, 3, 4}, 1);
   ASSERT_EQ(inputs->seeded_waves(), 1u);
   ASSERT_EQ(values.size(), 3u);
-  for (const std::vector<uint32_t> &value : values)
+  for (const std::vector<uint32_t> &value : values) {
     ASSERT_EQ(value.size(), 32u);
+  }
   for (uint32_t lane = 0; lane < 32; ++lane) {
     EXPECT_EQ(values[0][lane], 1u);
     EXPECT_EQ(values[1][lane], 23u);

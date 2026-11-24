@@ -35,7 +35,7 @@ template <typename Fn>
 void resolve(void *handle, const char *name, Fn &slot, bool &ok) {
   slot = reinterpret_cast<Fn>(dlsym(handle, name));
   if (!slot) {
-    LOG_ERROR("verbs conduit: missing symbol '%s'", name);
+    LOG_ERROR("verbs backend: missing symbol '%s'", name);
     ok = false;
   }
 }
@@ -51,7 +51,7 @@ bool Ibv::load() {
     handle_ = dlopen("libibverbs.so", RTLD_NOW | RTLD_GLOBAL);
   }
   if (!handle_) {
-    LOG_ERROR("verbs conduit: cannot dlopen libibverbs (%s)", dlerror());
+    LOG_ERROR("verbs backend: cannot dlopen libibverbs (%s)", dlerror());
     return false;
   }
 
@@ -75,7 +75,7 @@ bool Ibv::load() {
   resolve(handle_, "ibv_destroy_qp", t_.destroy_qp, ok);
 
   // Optional: dma-buf registration for GPU pointers (rdma-core >= 1.12).
-  // Absence is not fatal; the conduit falls back to ibv_reg_mr.
+  // Absence is not fatal; the backend falls back to ibv_reg_mr.
   t_.reg_dmabuf_mr = reinterpret_cast<decltype(t_.reg_dmabuf_mr)>(
       dlsym(handle_, "ibv_reg_dmabuf_mr"));
 

@@ -7,7 +7,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_GENERATED_SHARED_ISA_PROPERTIES_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_GENERATED_SHARED_ISA_PROPERTIES_H_
 
-#include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 #include <optional>
@@ -48,9 +48,9 @@ struct IsaProperties {
 
 inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
 
-[[nodiscard]] constexpr IsaProperties isa_properties(rj_code_arch_t arch) {
+[[nodiscard]] constexpr IsaProperties isa_properties(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return {
         .supports_wgp_mode = false,
         .mode_has_gpr_idx_en = true,
@@ -70,7 +70,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return {
         .supports_wgp_mode = false,
         .mode_has_gpr_idx_en = true,
@@ -90,7 +90,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
     };
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return {
         .supports_wgp_mode = false,
         .mode_has_gpr_idx_en = true,
@@ -110,7 +110,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
     };
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return {
         .supports_wgp_mode = false,
         .mode_has_gpr_idx_en = true,
@@ -130,7 +130,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
     };
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return {
         .supports_wgp_mode = true,
         .mode_has_gpr_idx_en = false,
@@ -150,7 +150,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return {
         .supports_wgp_mode = true,
         .mode_has_gpr_idx_en = false,
@@ -170,7 +170,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return {
         .supports_wgp_mode = true,
         .mode_has_gpr_idx_en = false,
@@ -190,7 +190,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return {
         .supports_wgp_mode = true,
         .mode_has_gpr_idx_en = false,
@@ -210,7 +210,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return {
         .supports_wgp_mode = true,
         .mode_has_gpr_idx_en = false,
@@ -230,7 +230,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return {
         .supports_wgp_mode = false,
         .mode_has_gpr_idx_en = false,
@@ -256,12 +256,14 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
 }
 
 [[nodiscard]] constexpr std::optional<uint32_t>
-descriptor_vgpr_count_granule_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+descriptor_vgpr_count_granule_for_wavefront(rocjitsu::IsaFamily arch, uint32_t wavefront_size) {
   const auto properties = isa_properties(arch);
-  if (wavefront_size == 32 && properties.descriptor_vgpr_count_granule_wave32 != 0)
+  if (wavefront_size == 32 && properties.descriptor_vgpr_count_granule_wave32 != 0) {
     return properties.descriptor_vgpr_count_granule_wave32;
-  if (wavefront_size == 64 && properties.descriptor_vgpr_count_granule_wave64 != 0)
+  }
+  if (wavefront_size == 64 && properties.descriptor_vgpr_count_granule_wave64 != 0) {
     return properties.descriptor_vgpr_count_granule_wave64;
+  }
   return std::nullopt;
 }
 

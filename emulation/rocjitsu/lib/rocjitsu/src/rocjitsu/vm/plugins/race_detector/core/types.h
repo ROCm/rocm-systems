@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include <algorithm>
+#include <compare>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -40,6 +41,37 @@ struct EventId {
   bool operator==(EventId o) const { return value == o.value; }
   bool operator!=(EventId o) const { return value != o.value; }
   bool operator<(EventId o) const { return value < o.value; }
+};
+
+/// Identifies one round of one barrier within a workgroup: the signals counted
+/// between two completions. Waves release into a round when they signal it and
+/// acquire it when they pass the wait it released.
+struct BarrierRoundId {
+  uint8_t barrier = 0;     ///< The simulator's completion bit for the barrier.
+  uint32_t namedId = 0;    ///< Named barrier ID, or 0.
+  uint64_t generation = 0; ///< Distinguishes successive rounds of one barrier.
+
+  auto operator<=>(const BarrierRoundId &) const = default;
+};
+
+/// An LDS barrier cell is one 64-bit LDS word (CDNA5 ISA 11.2.2, Table 70).
+inline constexpr int kBarrierCellBytes = 8;
+
+/// How a wave arrived at an LDS barrier cell (CDNA5 ISA 11.2.2), which
+/// determines the pending operations the arrival is ordered after. Mirrors
+/// amdgpu::LdsBarrierArrivalObservation::Source.
+enum class BarrierCellArrival {
+  /// ds_atomic_barrier_arrive_rtn_b64: in order with the wave's DS operations
+  /// and the LDS lanes of its FLAT operations (CDNA5 ISA 5.7.1.3, 5.7.1.4). It
+  /// returns the cell as it was before the arrival (CDNA5 ISA 11.2.2, "returns
+  /// pre-op barrier value"), so it also reads it.
+  Ds,
+  /// ds_atomic_async_barrier_arrive_b64: in order with the wave's async loads
+  /// to LDS (CDNA5 ISA 10.8).
+  Async,
+  /// The arrival a tensor DMA descriptor requests, sent when the transfer
+  /// completes (CDNA5 ISA 10.11.3).
+  Tensor,
 };
 
 /// A contiguous run of LDS bytes, for events described by byte ranges rather
@@ -79,6 +111,8 @@ struct RaceViolation {
   // Wave-local source locks own their instruction outside the event registry.
   std::optional<InstructionSnapshot> sourceInstruction;
   bool conflictsWithSrc2Read = false; ///< The conflicting bytes are the LDS source operand.
+  /// The conflicting bytes are the barrier cell a tensor transfer arrives at.
+  bool conflictsWithBarrierArrive = false;
 
   RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
                 EventId conflictingEvent)
@@ -95,8 +129,9 @@ struct WaitCounterUpdate {
 /// or more counters; counters absent from this list retain their prior state.
 struct PendingWaitCount {
   void add(amdgpu::WaitCounterType type, int threshold) {
-    if (threshold >= 0)
+    if (threshold >= 0) {
       updates.push_back({type, threshold});
+    }
   }
 
   [[nodiscard]] bool empty() const { return updates.empty(); }

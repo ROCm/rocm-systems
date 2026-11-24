@@ -66,6 +66,18 @@ int floating(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
     return error;
   }
   if (rocjitsu::arith::is_exact(flags)) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::fp8_wmma_exact_x86_64_v4(Bf8A, Bf8B, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::fp8_wmma_exact_x86_64_v3(Bf8A, Bf8B, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
     uint32_t result[8][32];
     for (int row = 0; row < 16; ++row) {
       for (int col = 0; col < 16; ++col) {
@@ -85,6 +97,18 @@ int floating(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
     store(d, result);
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+      rocjitsu::arith::fp8_wmma_x86_64_v4_bf16<Bf8A, Bf8B>(d, a, b, c)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::fp8_wmma_x86_64_v4<Bf8A, Bf8B>(d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp8_wmma_x86_64_v3<Bf8A, Bf8B>(d, a, b, c);

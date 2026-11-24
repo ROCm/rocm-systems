@@ -107,9 +107,8 @@ if(HIP_PLATFORM MATCHES "amd")
     # For windows build error occurs undefined symbol: hipPointerSetAttribute
     set(TEST_SRC ${TEST_SRC} hipPointerSetAttribute.cc)
   endif()
-else()
-  set(TEST_SRC ${TEST_SRC} hipGetSymbolSizeAddress.cc)
 endif()
+set(TEST_SRC ${TEST_SRC} hipGetSymbolSizeAddress.cc)
 
 hip_add_exe_to_target(NAME MemoryTest1
   TEST_SRC ${TEST_SRC}

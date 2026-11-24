@@ -33,6 +33,7 @@ fn scripted_driver() -> LinuxKfdDriver {
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
         host_aliases: Mutex::new(Vec::new()),
+        svm_registrations: Mutex::new(super::registered_svm::Registry::default()),
         lost: AtomicBool::new(false),
     })
     .unwrap();

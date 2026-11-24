@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -49,14 +50,16 @@ public:
 
   StagedOperand(const Operand &base, const uint32_t *data, int lane_count)
       : StagedOperand(base, lane_count) {
-    for (int lane = 0; lane < lane_count && lane < MAX_LANES; ++lane)
+    for (int lane = 0; lane < lane_count && lane < MAX_LANES; ++lane) {
       set_lane(lane, data[lane]);
+    }
   }
 
   StagedOperand(const Operand &base, const uint64_t *data, int lane_count)
       : StagedOperand(base, lane_count) {
-    for (int lane = 0; lane < lane_count && lane < MAX_LANES; ++lane)
+    for (int lane = 0; lane < lane_count && lane < MAX_LANES; ++lane) {
       set_lane64(lane, data[lane]);
+    }
   }
 
   std::string name() const override { return "staged_src"; }
@@ -86,8 +89,9 @@ private:
   }
 
   uint64_t read_lane64(const amdgpu::Wavefront &, uint32_t lane) const override {
-    if (lane >= static_cast<uint32_t>(lane_count_))
+    if (lane >= static_cast<uint32_t>(lane_count_)) {
       return 0;
+    }
     return uint64_t{lo_[lane]} | (uint64_t{hi_[lane]} << 32);
   }
 
@@ -134,8 +138,9 @@ private:
   ScopedOperandDelegate binding_;
 
   Operand *capture(amdgpu::Wavefront &wf, const Operand &source, uint8_t bytes, uint64_t active) {
-    if (!active)
+    if (!active) {
       return &values_;
+    }
     amdgpu::RegisterAccess regs(wf);
     if (source.simd_capable()) {
       const auto view = regs.read_operand(source, active, bytes);
@@ -219,8 +224,9 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
   if (dpp_ctrl == WF_SHL1) {
     // Wave shift left 1: lane K reads from lane K+1.
     int src = lane + 1;
-    if (src >= wf_size)
+    if (src >= wf_size) {
       out_of_bounds = true;
+    }
     return src < wf_size ? src : lane;
   }
 
@@ -232,8 +238,9 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
   if (dpp_ctrl == WF_SRL1) {
     // Wave shift right 1: lane K reads from lane K-1.
     int src = lane - 1;
-    if (src < 0)
+    if (src < 0) {
       out_of_bounds = true;
+    }
     return src >= 0 ? src : lane;
   }
 
@@ -255,15 +262,17 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
   if (dpp_ctrl == ROW_BCAST15) {
     // Broadcast lane 15 of each row to the following row. The first row
     // retains each lane's source.
-    if (lane < ROW_SIZE)
+    if (lane < ROW_SIZE) {
       return lane;
+    }
     return row_num * ROW_SIZE - 1;
   }
 
   if (dpp_ctrl == ROW_BCAST31) {
     // Broadcast lane 31 to lanes 32-63. The first half retains its sources.
-    if (lane < 32 || wf_size <= 32)
+    if (lane < 32 || wf_size <= 32) {
       return lane;
+    }
     return 31;
   }
 
@@ -310,8 +319,9 @@ inline bool dpp_lane_masked(int lane, uint32_t row_mask, uint32_t bank_mask) {
 /// zero source value.
 inline bool dpp_lane_write_enabled(int lane, int wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
                                    uint32_t bank_mask, uint32_t bound_ctrl) {
-  if (dpp_lane_masked(lane, row_mask, bank_mask))
+  if (dpp_lane_masked(lane, row_mask, bank_mask)) {
     return false;
+  }
 
   bool oob = false;
   (void)dpp_permute(dpp_ctrl, lane, wf_size, oob);
@@ -335,9 +345,11 @@ struct DppPlan {
 
 inline uint64_t dpp_row_bank_mask(uint32_t wf_size, uint32_t row_mask, uint32_t bank_mask) {
   uint64_t mask = 0;
-  for (uint32_t lane = 0; lane < wf_size; ++lane)
-    if (!dpp_lane_masked(static_cast<int>(lane), row_mask, bank_mask))
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    if (!dpp_lane_masked(static_cast<int>(lane), row_mask, bank_mask)) {
       mask |= uint64_t{1} << lane;
+    }
+  }
   return mask;
 }
 
@@ -355,14 +367,17 @@ inline DppPlan compute_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t ro
     // are governed by BOUND_CTRL alone, irrespective of FI.
     const bool inactive = !out_of_bounds && !fi && (exec_mask & (uint64_t{1} << source_lane)) == 0;
     const uint64_t lane_bit = uint64_t{1} << lane;
-    if (!out_of_bounds)
+    if (!out_of_bounds) {
       plan.source_lanes[lane] = static_cast<uint8_t>(source_lane);
-    if (!out_of_bounds && !inactive)
+    }
+    if (!out_of_bounds && !inactive) {
       plan.physical_read_dest_mask |= lane_bit;
-    else if (bound_ctrl || (inactive && !inactive_uses_bound_ctrl))
+    } else if (bound_ctrl || (inactive && !inactive_uses_bound_ctrl)) {
       plan.zero_source_mask |= lane_bit;
-    if (bound_ctrl || (!out_of_bounds && !(inactive && inactive_uses_bound_ctrl)))
+    }
+    if (bound_ctrl || (!out_of_bounds && !(inactive && inactive_uses_bound_ctrl))) {
       plan.source_write_mask |= lane_bit;
+    }
   }
   return plan;
 }
@@ -371,9 +386,10 @@ inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_m
                              uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
                              uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
   const uint64_t full_wave = util::mask<uint64_t>(wf_size);
-  if ((exec_mask & full_wave) != full_wave || row_mask != 0xf || bank_mask != 0xf)
+  if ((exec_mask & full_wave) != full_wave || row_mask != 0xf || bank_mask != 0xf) {
     return compute_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, exec_mask,
                             inactive_uses_bound_ctrl);
+  }
 
   // With every source active, only the permutation, the wave width and
   // BOUND_CTRL affect the plan. Lane values are still read for each issue.
@@ -395,9 +411,11 @@ inline uint64_t dpp_physical_source_mask(const DppPlan &plan, uint64_t destinati
                                          uint32_t wf_size) {
   uint64_t source_mask = 0;
   const uint64_t read_destinations = destination_mask & plan.physical_read_dest_mask;
-  for (uint32_t lane = 0; lane < wf_size; ++lane)
-    if (read_destinations & (uint64_t{1} << lane))
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    if (read_destinations & (uint64_t{1} << lane)) {
       source_mask |= uint64_t{1} << plan.source_lanes[lane];
+    }
+  }
   return source_mask;
 }
 
@@ -463,8 +481,9 @@ public:
 
   /// @brief Restore the mask saved by bind(), if this scope is bound.
   void restore() {
-    if (!wf_)
+    if (!wf_) {
       return;
+    }
     wf_->set_vgpr_write_mask(previous_);
     wf_ = nullptr;
   }
@@ -484,12 +503,14 @@ inline DppPlan make_dpp8_plan(uint32_t wf_size, uint32_t lane_sel, uint32_t fi,
   for (uint32_t lane = 0; lane < wf_size; ++lane) {
     const uint32_t source_lane = dpp8_src_lane(lane, lane_sel);
     const uint64_t lane_bit = uint64_t{1} << lane;
-    if (source_lane < wf_size)
+    if (source_lane < wf_size) {
       plan.source_lanes[lane] = static_cast<uint8_t>(source_lane);
-    if (source_lane < wf_size && (fi || (exec_mask & (uint64_t{1} << source_lane))))
+    }
+    if (source_lane < wf_size && (fi || (exec_mask & (uint64_t{1} << source_lane)))) {
       plan.physical_read_dest_mask |= lane_bit;
-    else
+    } else {
       plan.zero_source_mask |= lane_bit;
+    }
     plan.source_write_mask |= lane_bit;
   }
   return plan;
@@ -505,34 +526,41 @@ inline void stage_dpp_operand(const Operand &source, const DppPlan &plan,
     auto src_view = regs.read_operand64(source, source_lane_mask);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       const uint64_t lane_bit = uint64_t{1} << lane;
-      if (plan.physical_read_dest_mask & lane_bit)
+      if (plan.physical_read_dest_mask & lane_bit) {
         storage->set_lane64(lane, src_view.lane(plan.source_lanes[lane]));
-      else if ((plan.zero_source_mask & lane_bit) == 0)
+      } else if ((plan.zero_source_mask & lane_bit) == 0) {
         storage->set_lane64(lane, src_view.lane(lane));
+      }
     }
   } else if (!source.simd_capable()) {
     // Packed half selectors return logical, right-aligned values. Gather only
     // physical reads, once per lane, before applying the permutation.
     assert(source_byte_mask == 0);
     std::array<uint32_t, StagedOperand::MAX_LANES> values{};
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-      if (source_lane_mask & (uint64_t{1} << lane))
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (source_lane_mask & (uint64_t{1} << lane)) {
         values[lane] = regs.read_lane(source, lane);
+      }
+    }
     const uint64_t reads = read_destinations & plan.physical_read_dest_mask;
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-      if (reads & (uint64_t{1} << lane))
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (reads & (uint64_t{1} << lane)) {
         storage->set_lane(lane, values[plan.source_lanes[lane]]);
+      }
+    }
   } else {
-    if (source_byte_mask == 0)
+    if (source_byte_mask == 0) {
       source_byte_mask = source.size_bits_ == 16 ? rocjitsu::ExecutionPlugin::kLowHalfByteMask
                                                  : rocjitsu::ExecutionPlugin::kFullByteMask;
+    }
     auto src_view = regs.read_operand(source, source_lane_mask, source_byte_mask);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       const uint64_t lane_bit = uint64_t{1} << lane;
-      if (plan.physical_read_dest_mask & lane_bit)
+      if (plan.physical_read_dest_mask & lane_bit) {
         storage->set_lane(lane, src_view.lane(plan.source_lanes[lane]));
-      else if ((plan.zero_source_mask & lane_bit) == 0)
+      } else if ((plan.zero_source_mask & lane_bit) == 0) {
         storage->set_lane(lane, src_view.lane(lane));
+      }
     }
   }
 }
@@ -565,25 +593,30 @@ inline void apply_source_modifiers(const Operand &source, std::optional<StagedOp
   source_lanes &= wf.exec();
   const bool absolute = modifiers.absolute & (1u << source_index);
   const bool negate = modifiers.negate & (1u << source_index);
-  if (!absolute && !negate)
+  if (!absolute && !negate) {
     return;
+  }
   if (!storage) {
     RegisterAccess regs(wf);
     storage.emplace(source, static_cast<int>(wf.wf_size()));
     if (source.size_bits_ > 32) {
       const auto values = regs.read_operand64(source, source_lanes);
-      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         storage->set_lane64(lane, values.lane(lane));
+      }
     } else if (!source.simd_capable()) {
-      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-        if (source_lanes & (uint64_t{1} << lane))
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        if (source_lanes & (uint64_t{1} << lane)) {
           storage->set_lane(lane, regs.read_lane(source, lane));
+        }
+      }
     } else {
       const uint8_t bytes = source.size_bits_ == 16 ? ExecutionPlugin::kLowHalfByteMask
                                                     : ExecutionPlugin::kFullByteMask;
       const auto values = regs.read_operand(source, source_lanes, bytes);
-      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         storage->set_lane(lane, values.lane(lane));
+      }
     }
   }
   storage->apply_float_sign_modifiers(sign, absolute, negate);
@@ -620,12 +653,15 @@ enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, ROUNDED, ARITHMETIC };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
 inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
-  if (sel <= BYTE_3)
+  if (sel <= BYTE_3) {
     return uint8_t{1} << sel;
-  if (sel == WORD_0)
+  }
+  if (sel == WORD_0) {
     return 0b0011;
-  if (sel == WORD_1)
+  }
+  if (sel == WORD_1) {
     return 0b1100;
+  }
   return rocjitsu::ExecutionPlugin::kFullByteMask;
 }
 
@@ -636,22 +672,25 @@ inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
 /// @param sign_ext If true, sign-extend the extracted value to 32 bits.
 /// @returns The extracted (and optionally sign-extended) value.
 inline uint32_t sdwa_src_select(uint32_t val, uint32_t sel, bool sign_ext) {
-  if (sel == DWORD)
+  if (sel == DWORD) {
     return val;
+  }
 
   if (sel <= BYTE_3) {
     uint32_t shift = sel * 8;
     uint32_t byte_val = (val >> shift) & 0xFF;
-    if (sign_ext && (byte_val & 0x80))
+    if (sign_ext && (byte_val & 0x80)) {
       return byte_val | 0xFFFFFF00u;
+    }
     return byte_val;
   }
 
   // WORD_0 or WORD_1
   uint32_t shift = (sel & 1) * 16;
   uint32_t word_val = (val >> shift) & 0xFFFF;
-  if (sign_ext && (word_val & 0x8000))
+  if (sign_ext && (word_val & 0x8000)) {
     return word_val | 0xFFFF0000u;
+  }
   return word_val;
 }
 
@@ -670,10 +709,12 @@ inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat form
     return value;
   }
 
-  if (absolute)
+  if (absolute) {
     value &= ~sign_bit;
-  if (negate)
+  }
+  if (negate) {
     value ^= sign_bit;
+  }
   return value;
 }
 
@@ -691,8 +732,9 @@ inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, 
   storage.reset();
   const bool has_float_modifier =
       modifier_format != SourceModifierFormat::NONE && (absolute || negate);
-  if (selection == DWORD && !has_float_modifier)
+  if (selection == DWORD && !has_float_modifier) {
     return;
+  }
 
   // Conditional selection only consumes its chosen source on each lane.
   const uint64_t exec = wf.exec() & source_lanes;
@@ -700,8 +742,9 @@ inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, 
       RegisterAccess(wf).read_operand(source, exec, sdwa_src_byte_mask(selection));
   storage.emplace(source, static_cast<int>(wf.wf_size()));
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if ((exec & (uint64_t{1} << lane)) == 0)
+    if ((exec & (uint64_t{1} << lane)) == 0) {
       continue;
+    }
 
     uint32_t value = sdwa_src_select(source_view.lane(lane), selection, sign_extend);
     value = apply_source_modifiers(value, modifier_format, negate, absolute);
@@ -718,8 +761,9 @@ inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, 
 /// @returns The merged 32-bit destination value.
 inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_sel,
                                uint32_t dst_unused) {
-  if (dst_sel == DWORD)
+  if (dst_sel == DWORD) {
     return result;
+  }
 
   if (dst_sel <= BYTE_3) {
     uint32_t shift = dst_sel * 8;
@@ -727,12 +771,13 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
     uint32_t merged = (result & 0xFF) << shift;
     uint32_t upper_mask = static_cast<uint32_t>(~((uint64_t{1} << (shift + 8)) - 1));
     uint32_t fill;
-    if (dst_unused == UNUSED_PRESERVE)
+    if (dst_unused == UNUSED_PRESERVE) {
       fill = old_dst & ~mask;
-    else if (dst_unused == UNUSED_SEXT && (result & 0x80))
+    } else if (dst_unused == UNUSED_SEXT && (result & 0x80)) {
       fill = upper_mask;
-    else
+    } else {
       fill = 0;
+    }
     return fill | merged;
   }
 
@@ -742,18 +787,20 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
   uint32_t merged = (result & 0xFFFF) << shift;
   uint32_t upper_mask = static_cast<uint32_t>(~((uint64_t{1} << (shift + 16)) - 1));
   uint32_t fill;
-  if (dst_unused == UNUSED_PRESERVE)
+  if (dst_unused == UNUSED_PRESERVE) {
     fill = old_dst & ~mask;
-  else if (dst_unused == UNUSED_SEXT && (result & 0x8000))
+  } else if (dst_unused == UNUSED_SEXT && (result & 0x8000)) {
     fill = upper_mask;
-  else
+  } else {
     fill = 0;
+  }
   return fill | merged;
 }
 
 inline uint8_t sdwa_dst_byte_mask(uint32_t dst_sel, uint32_t dst_unused) {
-  if (dst_sel == DWORD || dst_unused != UNUSED_PRESERVE)
+  if (dst_sel == DWORD || dst_unused != UNUSED_PRESERVE) {
     return rocjitsu::ExecutionPlugin::kFullByteMask;
+  }
   return sdwa_src_byte_mask(dst_sel);
 }
 
@@ -774,10 +821,12 @@ template <ResultFormat Format> inline uint32_t clamp_result(uint32_t result, con
     constexpr uint32_t kInfinity = Format == ResultFormat::F16 ? 0x7C00u : 0x7F800000u;
     constexpr uint32_t kOne = Format == ResultFormat::F16 ? 0x3C00u : 0x3F800000u;
     const uint32_t magnitude = result & (kSign - 1);
-    if (magnitude > kInfinity)
+    if (magnitude > kInfinity) {
       return wf.dx10_clamp() ? 0u : result;
-    if (result & kSign)
+    }
+    if (result & kSign) {
       return 0u;
+    }
     return magnitude > kOne ? kOne : result;
   }
 }
@@ -790,14 +839,16 @@ inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
                   inst.sdwa_omod_;
                   inst.inst_.src0;
                 }) {
-    if (inst.inst_.src0 != SRC_SDWA)
+    if (inst.inst_.src0 != SRC_SDWA) {
       return 0;
+    }
     const uint32_t denorm_mode = (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16)
                                      ? wf.fp_denorm_mode_f16_f64()
                                      : wf.fp_denorm_mode_f32();
-    if constexpr (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16)
+    if constexpr (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16) {
       return fp_mode::effective_f16_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(),
                                          Format == ResultFormat::PK_F16, inst.sdwa_omod_);
+    }
     return fp_mode::effective_omod(wf.cu().arch(),
                                    Policy == OutputPolicy::FLUSH_NEAREST ? 0u : denorm_mode,
                                    wf.ieee_mode(), inst.sdwa_omod_);
@@ -812,8 +863,9 @@ template <typename Inst>
 inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
                                  bool fp16_ovfl) {
   const uint32_t omod = output_modifier<ResultFormat::F16>(inst, wf);
-  if (omod == 0)
+  if (omod == 0) {
     return util::f32_to_f16_mode(value, fp16_ovfl);
+  }
   return fp_mode::finalize_omod_f16(pseudo_scalar::round_f16_result(value,
                                                                     wf.fp_round_mode_f16_f64(),
                                                                     omod, false, fp16_ovfl, false),
@@ -832,7 +884,8 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
 
 /// GFX10 SDWA ADD/MUL captures scale a rounded half, as VOP3 does.
 inline bool arithmetic_scales_rounded_half(const Wavefront &wf) {
-  return wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  return wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
 }
 
 /// Round the arithmetic result, deferring GFX10 SDWA scaling to destination placement.
@@ -848,16 +901,19 @@ inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, dou
 /// @details Powers of two only change the exponent, except at the format limits.
 /// Integer arithmetic keeps rounding and denormal handling independent of the host.
 inline uint32_t scale_f32(uint32_t value, uint32_t omod, uint32_t round_mode) {
-  if (omod == 0)
+  if (omod == 0) {
     return value;
+  }
   const uint32_t sign = value & 0x80000000u;
   int exponent = static_cast<int>((value >> 23) & 0xffu);
   uint32_t significand = value & 0x007fffffu;
-  if (exponent == 255)
+  if (exponent == 255) {
     return significand == 0 ? value : value | 0x00400000u;
+  }
   if (exponent == 0) {
-    if (significand == 0)
+    if (significand == 0) {
       return 0;
+    }
     exponent = 1;
     while ((significand & 0x00800000u) == 0) {
       significand <<= 1;
@@ -896,12 +952,15 @@ inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t val
   static_assert(!half_policy || Format == ResultFormat::F16);
   constexpr OutputPolicy kOmodPolicy = half_policy ? OutputPolicy::MODE : Policy;
   const uint32_t omod = output_modifier<Format, kOmodPolicy>(inst, wf);
-  if (omod == 0)
+  if (omod == 0) {
     return value;
+  }
   if constexpr (half_policy) {
-    if constexpr (Policy == OutputPolicy::ARITHMETIC)
-      if (!arithmetic_scales_rounded_half(wf))
+    if constexpr (Policy == OutputPolicy::ARITHMETIC) {
+      if (!arithmetic_scales_rounded_half(wf)) {
         return value; // finish_arithmetic_f16 already applied and finalized OMOD.
+      }
+    }
     // The producer rounded without OMOD; scale the half as VOP3 does.
     output_modifier::Policy policy;
     policy.omod = omod;
@@ -958,8 +1017,9 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
     if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
         inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
       value = scale_result<Format, Policy>(inst, wf, value);
-      if (inst.sdwa_clamp_)
+      if (inst.sdwa_clamp_) {
         value = clamp_result<Format>(value, wf);
+      }
       const uint8_t byte_mask = sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
       const uint32_t placed = sdwa_dst_merge(value, 0, inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
       amdgpu::RegisterAccess(wf).write_lane_masked(op, lane, placed, byte_mask);

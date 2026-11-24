@@ -26,24 +26,17 @@ inline void swmmac_integer_prepare(SwmmacIntegerInputs &input, uint32_t mode, ui
   int key = rocjitsu::arith::SwmmacIndex<Bits, K, WaveSize>::shift(mode);
   for (int row = 0; row < 16; ++row) {
     for (int ck = 0; ck < K / 2; ++ck) {
-      // Keep the accumulator kernels' stage ordering. Wave64 K=64 places
-      // consecutive compressed halves in stages 0 and 1, unlike Wave32.
-      int position = WaveSize == 64 && K == 64 ? 16 * ((ck / 8) & 1) + 8 * (ck / 16) + ck % 8 : ck;
       if constexpr (Bits == 8) {
         auto field = swmmac_a_field<8, WaveSize>(row, ck);
         input.a[row][ck] = extend(uint8_t(field.read(a)), mode & RJ_ARITH_WMMA_SIGNED_A);
         input.selected[row][ck] = uint8_t(swmmac_selected_k<8, WaveSize>(index, row, ck, key));
       } else {
-        int lane = row + 16 * ((ck / 8) & 1), local = 8 * (ck / 16) + ck % 8;
-        if constexpr (WaveSize == 64) {
-          int block = position / 8;
-          lane = row + 16 * (K == 32 ? block : 2 * (block & 1) + block / 2);
-          local = position % 8;
-        }
-        uint32_t raw = (a[local * Bits / 32][lane] >> (local * Bits % 32)) & ((1u << Bits) - 1);
-        input.a[row][ck] = extend(raw, mode & RJ_ARITH_WMMA_SIGNED_A);
+        auto field = swmmac4_a_field<K, WaveSize>(row, ck);
+        input.a[row][ck] = extend(field.read(a) & 15, mode & RJ_ARITH_WMMA_SIGNED_A);
+        int position = swmmac4_position<K, WaveSize>(ck);
+        int local = swmmac4_index_slot<K, WaveSize>(ck);
         input.selected[row][ck] =
-            uint8_t(4 * (position / 2) + ((index[0][lane] >> (key + 2 * local)) & 3));
+            uint8_t(4 * (position / 2) + ((index[0][field.lane] >> (key + 2 * local)) & 3));
       }
     }
   }
@@ -55,14 +48,8 @@ inline void swmmac_integer_prepare(SwmmacIntegerInputs &input, uint32_t mode, ui
         input.b[k][col] =
             extend(swmmac_b_bits<8, WaveSize>(b, col, k), mode & RJ_ARITH_WMMA_SIGNED_B);
       } else {
-        int lane = col + 16 * ((k / 16) & 1), local = 16 * (k / 32) + k % 16;
-        if constexpr (WaveSize == 64) {
-          int block = k / (K / 4);
-          lane = col + 32 * (block & 1) + 16 * (block / 2);
-          local = k % (K / 4);
-        }
-        uint32_t raw = (b[local * Bits / 32][lane] >> (local * Bits % 32)) & ((1u << Bits) - 1);
-        input.b[k][col] = extend(raw, mode & RJ_ARITH_WMMA_SIGNED_B);
+        input.b[k][col] = extend(swmmac4_b_field<K, WaveSize>(col, k).read(b) & 15,
+                                 mode & RJ_ARITH_WMMA_SIGNED_B);
       }
     }
   }

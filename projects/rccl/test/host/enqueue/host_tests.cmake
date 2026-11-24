@@ -70,7 +70,20 @@ set(_enq_sources
   ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc)
+# enqueue-test.cc includes every enqueue-test.d/*.inc, in name order, through this generated list.
+# CONFIGURE_DEPENDS re-runs the glob at build time, so adding a file needs no edit here.
+# configure_file() rewrites the list only when it changes, so unrelated reconfigures do not rebuild.
+file(GLOB _enq_cases CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/enqueue-test.d/*.inc")
+list(SORT _enq_cases)
+set(_enq_cases_text "")
+foreach(_enq_case IN LISTS _enq_cases)
+  string(APPEND _enq_cases_text "#include \"${_enq_case}\"\n")
+endforeach()
+set(_enq_cases_inc "${CMAKE_CURRENT_BINARY_DIR}/enqueue-test-cases.inc")
+file(WRITE "${_enq_cases_inc}.in" "${_enq_cases_text}")
+configure_file("${_enq_cases_inc}.in" "${_enq_cases_inc}" COPYONLY)
 set(_enq_defs
+  ENQUEUE_TEST_CASES_INC="${_enq_cases_inc}"
   RCCL_TEST_ENQUEUE_HOOKS
   # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
   # supplies both, so neither needs a replacement definition.

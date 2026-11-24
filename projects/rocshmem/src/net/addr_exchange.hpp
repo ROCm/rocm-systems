@@ -38,9 +38,9 @@ namespace net {
  * @p inout is a contiguous array of num_pes slots each @p bytes_per_pe long,
  * with the calling PE's slot pre-filled. Because Backend::symm_allgather is
  * protected and already spans both the MPI and TCP-socket bootstraps, the
- * conduit (an object the backend owns) supplies a lambda over it. Keeping this
- * a callback leaves net/ free of Backend / MPI coupling and gives every conduit
- * both bootstrap modes for free.
+ * net backend (an object the Backend owns) supplies a lambda over it. Keeping
+ * this a callback leaves net/ free of Backend / MPI coupling and gives every
+ * net backend both bootstrap modes for free.
  */
 using AllgatherFn = std::function<void(void *inout, size_t bytes_per_pe)>;
 
