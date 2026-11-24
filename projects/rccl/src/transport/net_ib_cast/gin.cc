@@ -819,6 +819,7 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
           WARN("Failed to allocate AINIC signal counter array (%zu slots)", slots);
           return ncclSystemError;
         }
+        INFO(NCCL_NET, "AINIC: allocated %zu signal slots for rank %u", slots, rank);
       }
 
       uint64_t signalIndex = signalOff / sizeof(uint64_t);
@@ -828,8 +829,11 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
         return ncclInvalidArgument;
       }
 
+      uint64_t prevValue = comm->ainicSignalCounters[signalIndex];
       comm->ainicSignalCounters[signalIndex] += increment;
       cumulativeValue = comm->ainicSignalCounters[signalIndex];
+      INFO(NCCL_NET, "AINIC IPutSignal: localRank=%u -> peerRank=%u signalIndex=%lu signalOff=%lu prev=%lu inc=%lu cum=%lu remoteAddr=%p size=%zu",
+           ginProxyCtx->rank, rank, signalIndex, signalOff, prevValue, increment, cumulativeValue, signalPtr, size);
     } else {
       // Method 1: Map-based (for comparison benchmarking)
       if (comm->ainicSignalMap == nullptr) {
