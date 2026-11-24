@@ -55,6 +55,9 @@ SignalExhaustionErrorHandlerTest::~SignalExhaustionErrorHandlerTest() {}
 void SignalExhaustionErrorHandlerTest::SetUp(void) {
   hsa_status_t err;
 
+  // Interrupt signals need HSA_ENABLE_INTERRUPT, which TestBase::SetUp sets from this. Without
+  // it the runtime does not register the system event handler and the signals take no KFD event.
+  set_enable_interrupt(true);
   TestBase::SetUp();
   if (test_skipped_) return;
 
@@ -152,8 +155,12 @@ void SignalExhaustionErrorHandlerTest::RunOnAgent(hsa_agent_t gpu_agent) {
     clear_code_object();
   });
 
-  ASSERT_GE(signals.size(), kMinSignalCount)
-      << "Not enough signals could be created to run out of KFD events";
+  // A system that cannot create this many signals cannot run out of KFD events, so there is
+  // nothing to test. Skip instead of failing.
+  if (signals.size() < kMinSignalCount) {
+    rocrtst::SkipCurrentTest("Not enough signals could be created to run out of KFD events");
+    return;
+  }
 
   // 2) Subscribe to the system event handler. It cannot be unregistered, so do it once.
   if (!system_handler_registered_) {
