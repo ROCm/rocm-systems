@@ -60,8 +60,8 @@ struct IndirectCallFixup {
   /// translation's relocation lattice reads as a code address naming no body at all.
   uint16_t source_builder_sreg = 0;
   bool source_is_call = false; ///< Whether the consumer is a call-like swappc.
-  /// @brief True when the recovered fact for this consumer was incomplete: at least
-  /// one predecessor path left the PC pair at an unconstrained value. The concrete
+  /// @brief True when recovery cannot represent every target of this consumer,
+  /// including unconstrained paths or targets outside the analyzed text. The concrete
   /// targets are still valid for relocation and liveness, but the consumer must NOT
   /// be replaced with a direct transfer window — an unconstrained path would be
   /// redirected to a concrete target it never dynamically reaches.

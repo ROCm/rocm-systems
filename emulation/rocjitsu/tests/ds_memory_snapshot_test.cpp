@@ -91,8 +91,9 @@ struct SnapshotFixture {
     config.vgprs_per_wf = register_count;
     config.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "ds_snapshot_cu", config, &memory, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     wf = cu->dispatch_wf(0, 0, 104, register_count, wave_size);
     group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<SnapshotObserver>(*cu);
@@ -103,9 +104,11 @@ struct SnapshotFixture {
     return (reg * 0x170109u) ^ (lane * 0x40203u);
   }
   void seed() {
-    for (uint32_t reg = 0; reg < register_count; ++reg)
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t reg = 0; reg < register_count; ++reg) {
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         cu->write_vgpr(wf->vgpr_alloc().base + reg, lane, word(reg, lane));
+      }
+    }
   }
   std::unique_ptr<Instruction> issue(uint16_t opcode, uint8_t data, uint8_t address, bool acc) {
     const auto words = cdna4::build_ds(opcode, {.offset0 = kOffset & 0xff,
@@ -343,10 +346,11 @@ TEST(DsMemorySnapshot, Cdna1Src2OutOfRangeReadContributesZeroToValidDestination)
       const uint16_t imm = static_cast<uint16_t>(displacement) & 0x7fff;
       fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 0, first);
       fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 1, second);
-      if (wide)
+      if (wide) {
         lds.write64(512 + first, 9);
-      else
+      } else {
         lds.write32(512 + first, 9);
+      }
       lds.write64(512 + second, 9);
       lds.write64(512 + second + displacement * 4, 5);
       auto inst = fx.issue_encoded(
@@ -705,10 +709,10 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
   ASSERT_NE(fx.wf, nullptr);
   fx.seed();
   fx.cu->set_plugin_group(fx.group);
-  for (uint32_t width = 1; width <= opcodes.size(); ++width)
-    for (uint8_t data : {uint8_t{0}, uint8_t{254}, uint8_t{255}})
-      for (bool acc : {false, true})
-        for (bool alias : {false, true})
+  for (uint32_t width = 1; width <= opcodes.size(); ++width) {
+    for (uint8_t data : {uint8_t{0}, uint8_t{254}, uint8_t{255}}) {
+      for (bool acc : {false, true}) {
+        for (bool alias : {false, true}) {
           for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a}, ~uint64_t{0}}) {
             SCOPED_TRACE(testing::Message()
                          << "wave=" << wave_size << " width=" << width << " data=" << unsigned(data)
@@ -728,9 +732,10 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
             std::set<Read> expected_reads;
             for (uint32_t lane = 0; lane < wave_size; ++lane) {
               const bool active = (exec >> lane) & 1;
-              if (active)
+              if (active) {
                 expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
                                        SnapshotFixture::word(address, lane));
+              }
               const uint32_t expected_address =
                   active ? SnapshotFixture::word(address, lane) + kOffset + fx.wf->lds_base() : 0u;
               EXPECT_EQ(state->per_lane_addr[lane], expected_address);
@@ -741,8 +746,9 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
                 uint32_t actual;
                 std::memcpy(&actual, state->store_data.data() + (lane * width + element) * 4, 4);
                 EXPECT_EQ(actual, expected);
-                if (active && reg < 512)
+                if (active && reg < 512) {
                   expected_reads.emplace(reg, lane, ExecutionPlugin::kFullByteMask, expected);
+                }
               }
             }
             EXPECT_EQ(fx.observer->reads, expected_reads);
@@ -751,20 +757,29 @@ TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
               expected_callbacks.emplace_back(address, exec, ExecutionPlugin::kFullByteMask);
               const uint32_t data_base = data + (acc ? 256u : 0u);
               if (data_base + width <= fx.register_count) {
-                for (uint32_t element = 0; element < width; ++element)
+                for (uint32_t element = 0; element < width; ++element) {
                   expected_callbacks.emplace_back(data_base + element, exec,
                                                   ExecutionPlugin::kFullByteMask);
+                }
               } else {
-                for (uint32_t lane = 0; lane < wave_size; ++lane)
-                  if ((exec >> lane) & 1)
-                    for (uint32_t element = 0; element < width; ++element)
-                      if (data_base + element < fx.register_count)
+                for (uint32_t lane = 0; lane < wave_size; ++lane) {
+                  if ((exec >> lane) & 1) {
+                    for (uint32_t element = 0; element < width; ++element) {
+                      if (data_base + element < fx.register_count) {
                         expected_callbacks.emplace_back(data_base + element, uint64_t{1} << lane,
                                                         ExecutionPlugin::kFullByteMask);
+                      }
+                    }
+                  }
+                }
               }
             }
             EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
           }
+        }
+      }
+    }
+  }
 }
 
 TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
@@ -782,8 +797,8 @@ TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
     const uint64_t wave_mask = wave_size == 64 ? ~uint64_t{0} : 0xffffffffull;
     for (bool observed : {false, true}) {
       fx.cu->set_plugin_group(observed ? fx.group : nullptr);
-      for (uint32_t kind = 0; kind < opcodes.size(); ++kind)
-        for (uint8_t address : {uint8_t{3}, uint8_t{15}, uint8_t{16}})
+      for (uint32_t kind = 0; kind < opcodes.size(); ++kind) {
+        for (uint8_t address : {uint8_t{3}, uint8_t{15}, uint8_t{16}}) {
           for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a} & wave_mask, wave_mask}) {
             SCOPED_TRACE(testing::Message()
                          << "arch=" << arch << " kind=" << kind << " address=" << unsigned(address)
@@ -791,12 +806,13 @@ TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
             fx.wf->set_exec(exec);
             fx.observer->callbacks.clear();
             std::array<uint32_t, 2> words;
-            if (arch == rocjitsu::IsaFamily::Cdna4)
+            if (arch == rocjitsu::IsaFamily::Cdna4) {
               words = cdna4::build_ds(opcodes[kind],
                                       {.offset0 = 1, .offset1 = 3, .addr = address, .vdst = 4});
-            else
+            } else {
               words = cdna5::build_vds(opcodes[kind],
                                        {.offset0 = 1, .offset1 = 3, .addr = address, .vdst = 4});
+            }
             auto inst = fx.issue_encoded(words);
             ASSERT_NE(inst, nullptr);
             const auto *state = inst->data_as<VectorMemState>();
@@ -814,12 +830,15 @@ TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
               // CDNA4 owns a full physical block including its accumulator
               // bank; v16 is an unseeded zero register there. CDNA5's block
               // ends at v15 in this fixture.
-              if (observed && active && (arch == rocjitsu::IsaFamily::Cdna4 || address < 16))
+              if (observed && active && (arch == rocjitsu::IsaFamily::Cdna4 || address < 16)) {
                 expected_callbacks.emplace_back(address, uint64_t{1} << lane,
                                                 ExecutionPlugin::kFullByteMask);
+              }
             }
             EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
           }
+        }
+      }
     }
   }
 }
@@ -827,8 +846,9 @@ TEST(DsMemorySnapshot, DualLoadsPreserveAddressesAndPerLaneObservations) {
 TEST(DsMemorySnapshot, OutstandingLogicalZeroPayloadSurvivesLaterIssue) {
   for (const auto &target : kStoreTargets) {
     for (uint32_t wave_size : target.wave_sizes) {
-      if (wave_size == 0)
+      if (wave_size == 0) {
         continue;
+      }
       SCOPED_TRACE(testing::Message() << "arch=" << target.arch << " wave=" << wave_size);
       SnapshotFixture fx(wave_size, target.arch, 256);
       ASSERT_NE(fx.wf, nullptr);
@@ -853,8 +873,9 @@ TEST(DsMemorySnapshot, DwordStoresCoverEveryGeneratedTarget) {
   constexpr uint8_t data = 11, address = 7;
   for (const auto &target : kStoreTargets) {
     for (uint32_t wave_size : target.wave_sizes) {
-      if (wave_size == 0)
+      if (wave_size == 0) {
         continue;
+      }
       SnapshotFixture fx(wave_size, target.arch, 256);
       ASSERT_NE(fx.wf, nullptr);
       fx.seed();
@@ -862,8 +883,9 @@ TEST(DsMemorySnapshot, DwordStoresCoverEveryGeneratedTarget) {
       for (size_t store = 0; store <= target.opcodes.size(); ++store) {
         const bool addtid = store == target.opcodes.size();
         // CDNA5 ADDTID uses a separate generator unchanged by this optimization.
-        if (addtid && !target.addtid_opcode)
+        if (addtid && !target.addtid_opcode) {
           continue;
+        }
         const uint32_t width = addtid ? 1 : store + 1;
         const uint16_t opcode = addtid ? *target.addtid_opcode : target.opcodes[store];
         for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a}, ~uint64_t{0}}) {
@@ -884,9 +906,10 @@ TEST(DsMemorySnapshot, DwordStoresCoverEveryGeneratedTarget) {
           std::set<Read> expected_reads;
           for (uint32_t lane = 0; lane < wave_size; ++lane) {
             const bool active = (exec >> lane) & 1;
-            if (active && !addtid)
+            if (active && !addtid) {
               expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
                                      SnapshotFixture::word(address, lane));
+            }
             if (!addtid) {
               EXPECT_EQ(state->per_lane_addr[lane],
                         active ? SnapshotFixture::word(address, lane) + kOffset + fx.wf->lds_base()
@@ -897,9 +920,10 @@ TEST(DsMemorySnapshot, DwordStoresCoverEveryGeneratedTarget) {
               uint32_t actual;
               std::memcpy(&actual, state->store_data.data() + (lane * width + element) * 4, 4);
               EXPECT_EQ(actual, expected);
-              if (active)
+              if (active) {
                 expected_reads.emplace(data + element, lane, ExecutionPlugin::kFullByteMask,
                                        expected);
+              }
             }
           }
           if (addtid) {
@@ -914,10 +938,12 @@ TEST(DsMemorySnapshot, DwordStoresCoverEveryGeneratedTarget) {
           EXPECT_EQ(fx.observer->reads, expected_reads);
           std::vector<ReadCallback> expected_callbacks;
           if (exec) {
-            if (!addtid)
+            if (!addtid) {
               expected_callbacks.emplace_back(address, exec, ExecutionPlugin::kFullByteMask);
-            for (uint32_t element = 0; element < width; ++element)
+            }
+            for (uint32_t element = 0; element < width; ++element) {
               expected_callbacks.emplace_back(data + element, exec, ExecutionPlugin::kFullByteMask);
+            }
           }
           EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
         }
@@ -935,8 +961,9 @@ TEST(DsMemorySnapshot, BoundaryFallbackDoesNotReadNeighborWave) {
     ASSERT_EQ(neighbor->vgpr_alloc().base, fx.wf->vgpr_alloc().base + 512);
     fx.wf->set_exec(1);
     fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 511, 0, 0x11223344);
-    for (uint32_t reg = 0; reg < 3; ++reg)
+    for (uint32_t reg = 0; reg < 3; ++reg) {
       fx.cu->write_vgpr(neighbor->vgpr_alloc().base + reg, 0, 0xaabbcc00 + reg);
+    }
     fx.cu->set_plugin_group(fx.group);
     auto inst = fx.issue(opcode, 255, 7, true);
     ASSERT_NE(inst, nullptr);
@@ -967,9 +994,11 @@ TEST(DsMemorySnapshot, Rdna4Wave32BoundaryFallbackPreservesPayloadAndCallbacks) 
     ASSERT_NE(neighbor, nullptr);
     ASSERT_EQ(neighbor->vgpr_alloc().base, fx.wf->vgpr_alloc().base + 256);
     fx.seed();
-    for (uint32_t reg = 0; reg < 3; ++reg)
-      for (uint32_t lane = 0; lane < wave_size; ++lane)
+    for (uint32_t reg = 0; reg < 3; ++reg) {
+      for (uint32_t lane = 0; lane < wave_size; ++lane) {
         fx.cu->write_vgpr(neighbor->vgpr_alloc().base + reg, lane, 0xaabbcc00 + reg);
+      }
+    }
     fx.wf->set_exec(exec);
     fx.cu->set_plugin_group(fx.group);
     auto inst = fx.issue_encoded(

@@ -97,11 +97,11 @@ constexpr std::array kSubmissionKinds{SubmissionKind::NativeRing, SubmissionKind
                                       SubmissionKind::VendorIb};
 
 TEST(Pm4DataTransferTest, DmaSelectorsResumeLocalAndDeferredReadWritePrefixes) {
-  for (auto kind : kSubmissionKinds)
-    for (uint32_t source_select : {0u, 2u, 3u})
-      for (uint32_t destination_select : {0u, 3u})
-        for (uint32_t source : {0x800u, 0x1100u})
-          for (uint32_t destination : {0x900u, 0x1200u})
+  for (auto kind : kSubmissionKinds) {
+    for (uint32_t source_select : {0u, 2u, 3u}) {
+      for (uint32_t destination_select : {0u, 3u}) {
+        for (uint32_t source : {0x800u, 0x1100u}) {
+          for (uint32_t destination : {0x900u, 0x1200u}) {
             for (uint32_t bytes : {1u, 4u, 7u, 16u}) {
               SCOPED_TRACE(::testing::Message()
                            << int(kind) << ':' << source_select << ':' << destination_select << ':'
@@ -109,9 +109,10 @@ TEST(Pm4DataTransferTest, DmaSelectorsResumeLocalAndDeferredReadWritePrefixes) {
               DeferredPm4Fixture fixture;
               constexpr uint32_t kFill = 0x78563412;
               std::vector<std::byte> expected(bytes);
-              for (uint32_t i = 0; i < bytes; ++i)
+              for (uint32_t i = 0; i < bytes; ++i) {
                 expected[i] =
                     source_select == 2 ? std::byte(kFill >> ((i % 4) * 8)) : std::byte(i + 1);
+              }
               fixture.memory->store(source, expected);
               const std::array packet{0xc0055000u,
                                       (source_select << 29) | (destination_select << 20),
@@ -132,12 +133,17 @@ TEST(Pm4DataTransferTest, DmaSelectorsResumeLocalAndDeferredReadWritePrefixes) {
                           DeferredPm4Fixture::kInitialCursor + packet.size());
               }
             }
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(Pm4DataTransferTest, CopyDataCapturesEverySourceAndWidthOnce) {
-  for (auto kind : kSubmissionKinds)
-    for (uint32_t source_select : {0u, 1u, 2u, 5u, 9u})
-      for (uint32_t destination_select : {1u, 2u, 5u})
+  for (auto kind : kSubmissionKinds) {
+    for (uint32_t source_select : {0u, 1u, 2u, 5u, 9u}) {
+      for (uint32_t destination_select : {1u, 2u, 5u}) {
         for (uint32_t bytes : {4u, 8u}) {
           SCOPED_TRACE(::testing::Message() << int(kind) << ':' << source_select << ':'
                                             << destination_select << ':' << bytes);
@@ -185,10 +191,13 @@ TEST(Pm4DataTransferTest, CopyDataCapturesEverySourceAndWidthOnce) {
                     source_select == 1 || source_select == 2 ? bytes / 4 : 0u);
           EXPECT_EQ(fixture.memory->backing->write_effects, bytes / 4);
         }
+      }
+    }
+  }
 }
 
 TEST(Pm4DataTransferTest, WriteDataOwnsPayloadAndRetiresAfterTheLastChunk) {
-  for (auto kind : kSubmissionKinds)
+  for (auto kind : kSubmissionKinds) {
     for (uint32_t destination_select : {1u, 2u, 5u}) {
       DeferredPm4Fixture fixture;
       const std::array packet{
@@ -206,6 +215,7 @@ TEST(Pm4DataTransferTest, WriteDataOwnsPayloadAndRetiresAfterTheLastChunk) {
                 std::vector<std::byte>(expected.begin(), expected.end()));
       EXPECT_EQ(fixture.memory->backing->write_effects, 3u);
     }
+  }
 }
 
 TEST(Pm4DataTransferTest, RevocationRetainsTheWrittenPrefixWithoutRetiringThePacket) {

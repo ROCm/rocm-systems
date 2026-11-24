@@ -55,8 +55,9 @@ namespace {
 [[nodiscard]] std::array<uint32_t, 2> build_rdna_vop3(rocjitsu::IsaFamily host_arch, uint16_t op,
                                                       uint8_t vdst, uint16_t src0,
                                                       uint16_t src1 = 0, uint16_t src2 = 0) {
-  if (host_arch == rocjitsu::IsaFamily::Rdna3)
+  if (host_arch == rocjitsu::IsaFamily::Rdna3) {
     return rdna3::build_vop3(op, {.vdst = vdst, .src0 = src0, .src1 = src1, .src2 = src2});
+  }
   return rdna4::build_vop3(op, {.vdst = vdst, .src0 = src0, .src1 = src1, .src2 = src2});
 }
 
@@ -78,8 +79,9 @@ bool has_no_rdna_count_selector(uint16_t selector) {
 
 bool cdna4_reverse_shift_needs_rewrite(const Instruction &inst) {
   // CDNA4 VOP2 encoding IDs incorporate the opcode and the high VDST bits.
-  if (inst.encoding_id() >= cdna4::encoding::kVopc || !inst.raw_encoding())
+  if (inst.encoding_id() >= cdna4::encoding::kVopc || !inst.raw_encoding()) {
     return false;
+  }
   switch (inst.opcode()) {
   case cdna4::kVLshlrevB16Vop2:
   case cdna4::kVLshrrevB16Vop2:
@@ -99,27 +101,31 @@ ExpandResult lower_cdna4_reverse_shift(const Instruction &inst, uint64_t, std::s
                                        const LivenessAnalysis &, TranslationContext &) {
   cdna4::Vop2MachineInst src{};
   std::memcpy(&src, inst.raw_encoding(), sizeof(src));
-  if (src.src0 == amdgpu::SRC_DPP)
+  if (src.src0 == amdgpu::SRC_DPP) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
         " DPP permutes the shifted value on CDNA4 and the count on RDNA3/4");
-  if (src.src0 == amdgpu::SRC_SDWA)
+  }
+  if (src.src0 == amdgpu::SRC_SDWA) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " SDWA halfword shift has no equivalent RDNA3/4 encoding");
-  if (has_no_rdna_count_selector(src.src0))
+  }
+  if (has_no_rdna_count_selector(src.src0)) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " shift count has no equivalent RDNA source selector");
+  }
 
   // VOP2 selects the low 16 bits and produces a zero-extended DWORD on CDNA4.
   // RDNA's VOP3 shift preserves the upper half, so explicitly clear it afterwards.
   constexpr uint16_t inline_zero = 128;
   uint16_t count = src.src0;
-  if (const auto bits = inst.src_operand(0)->const_value())
+  if (const auto bits = inst.src_operand(0)->const_value()) {
     count = inline_zero + (*bits & 15u);
-  else if (count == cdna4::OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_EXECZ)
+  } else if (count == cdna4::OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_EXECZ) {
     count = inline_zero;
-  else if (count == amdgpu::kLegacyM0Selector)
+  } else if (count == amdgpu::kLegacyM0Selector) {
     count = amdgpu::kModernM0Selector;
+  }
 
   uint16_t opcode;
   switch (inst.opcode()) {
@@ -151,10 +157,11 @@ constexpr RegisteredInstructionRewrite kReverseShiftRules[] = {{"CDNA4 VOP2 reve
 ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily host_arch,
                                   const LivenessAnalysis &liveness, TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || inst.size() < 8)
+  if (!raw || inst.size() < 8) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " cannot lower v_lshl_add_u64 without a complete 64-bit raw "
                                 "encoding");
+  }
 
   cdna4::Vop3MachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
@@ -163,24 +170,28 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
   const uint16_t src1 = src.src1;
   const uint16_t src2 = src.src2;
 
-  if (host_arch != rocjitsu::IsaFamily::Rdna3 && host_arch != rocjitsu::IsaFamily::Rdna4)
+  if (host_arch != rocjitsu::IsaFamily::Rdna3 && host_arch != rocjitsu::IsaFamily::Rdna4) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " v_lshl_add_u64 lowering only supports RDNA3/RDNA4 hosts");
-  if (vdst == 255)
+  }
+  if (vdst == 255) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " v_lshl_add_u64 lowering needs two destination VGPRs but vdst "
                                 "is v255");
+  }
 
   // A two-word literal shift count would require carrying the literal dword
   // through the emitted v_lshlrev_b64; that operand form is not decoded here.
-  if (src1 == 254 || src1 == 255)
+  if (src1 == 254 || src1 == 255) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " v_lshl_add_u64 lowering does not support a literal shift count");
+  }
 
   using CdnaSrc = cdna4::OpSelSrcSimple;
-  if (has_no_rdna_count_selector(src1))
+  if (has_no_rdna_count_selector(src1)) {
     return ExpandResult::failed(
         "v_lshl_add_u64 shift count has no equivalent RDNA source selector");
+  }
 
   // The 64-bit addend S2 is added as two 32-bit halves read from src2 and
   // src2 + 1. That +1 high-half derivation is only valid when src2 names a real
@@ -197,18 +208,21 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
   const bool src2_is_vgpr_pair = src2 >= kVgprBase && src2 <= 510;
   const bool src2_is_sgpr_pair = src2 <= 104 && (src2 % 2) == 0;
   const bool src2_is_vcc = src2 == kVccLo;
-  if (!src2_is_vgpr_pair && !src2_is_sgpr_pair && !src2_is_vcc)
+  if (!src2_is_vgpr_pair && !src2_is_sgpr_pair && !src2_is_vcc) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
         " v_lshl_add_u64 lowering does not support a non-register 64-bit "
         "addend (inline constant, literal, or v255 whose high half cannot "
         "encode a VGPR); the high-half derivation requires a register pair");
+  }
 
   // CDNA4 ISA section 3.6.4 requires even VGPR bases for 64-bit operands. S1 is a 32-bit count.
-  if (vdst % 2 != 0 || (src0 >= kVgprBase && src0 % 2 != 0) || (src2_is_vgpr_pair && src2 % 2 != 0))
+  if (vdst % 2 != 0 || (src0 >= kVgprBase && src0 % 2 != 0) ||
+      (src2_is_vgpr_pair && src2 % 2 != 0)) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
         " requires even VGPR bases for the 64-bit destination, value and addend");
+  }
 
   // Lower the CDNA shift into a 64-bit temporary followed by a carry-add of S2.
   // Preserve the addend until both halves are consumed. Choosing the shift
@@ -227,11 +241,13 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
                                uint16_t alignment) -> FailureOr<std::optional<uint16_t>> {
     FailureOr<std::optional<uint16_t>> unused =
         liveness.find_globally_unused_vgpr_run(&inst, count, 0, alignment);
-    if (unused.failed() || unused.value())
+    if (unused.failed() || unused.value()) {
       return unused;
+    }
     FailureOr<bool> complete = liveness.global_vgpr_usage_is_complete();
-    if (complete.failed())
+    if (complete.failed()) {
       return Result::failure();
+    }
     // Relative operands can hide a live value anywhere in the source allocation.
     const uint16_t start = complete.value() ? 0 : static_cast<uint16_t>(context.num_vgprs);
     wait_for_scratch = true;
@@ -243,14 +259,16 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
     // Need a dead, even-aligned VGPR pair that overlaps neither S0/S2 nor vdst.
     FailureOr<std::optional<uint16_t>> maybe_scratch =
         find_vgpr_scratch(/*count=*/2, /*alignment=*/2);
-    if (maybe_scratch.failed())
+    if (maybe_scratch.failed()) {
       return ExpandResult::liveness_unavailable();
+    }
     const std::optional<uint16_t> scratch = maybe_scratch.value();
-    if (!scratch)
+    if (!scratch) {
       return ExpandResult::failed(
           std::string(inst.mnemonic()) +
           " v_lshl_add_u64 lowering needs a scratch VGPR pair when the destination overlaps the "
           "addend, but no dead pair is available");
+    }
     shift_dst = *scratch;
     // Scratch above the source allocation must be included in the target descriptor.
     context.require_vgprs(static_cast<uint32_t>(shift_dst) + 2u);
@@ -265,19 +283,22 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
       liveness.find_globally_unused_sgpr_pair(&inst);
   if (maybe_carry_sgpr_opt.succeeded() && !maybe_carry_sgpr_opt.value()) {
     FailureOr<bool> complete = liveness.global_sgpr_usage_is_complete();
-    if (complete.failed())
+    if (complete.failed()) {
       return ExpandResult::liveness_unavailable();
+    }
     const uint16_t start = complete.value() ? 0 : static_cast<uint16_t>(context.num_sgprs);
     maybe_carry_sgpr_opt = liveness.find_free_sgpr_pair(&inst, start);
     wait_for_scratch = true;
   }
-  if (maybe_carry_sgpr_opt.failed())
+  if (maybe_carry_sgpr_opt.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const std::optional<uint16_t> carry_sgpr_opt = maybe_carry_sgpr_opt.value();
-  if (!carry_sgpr_opt)
+  if (!carry_sgpr_opt) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
         " v_lshl_add_u64 lowering could not find a free SGPR pair for the add carry");
+  }
   const uint8_t carry_sgpr = static_cast<uint8_t>(*carry_sgpr_opt);
   context.require_sgprs(static_cast<uint32_t>(carry_sgpr) + 2u);
 
@@ -309,11 +330,13 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
     uint16_t count_dst = shift_dst;
     if (src0 >= kVgprBase && kVgprBase + count_dst >= src0 && kVgprBase + count_dst <= src0 + 1) {
       FailureOr<std::optional<uint16_t>> scratch = find_vgpr_scratch(/*count=*/1, /*alignment=*/1);
-      if (scratch.failed())
+      if (scratch.failed()) {
         return ExpandResult::liveness_unavailable();
-      if (!scratch.value())
+      }
+      if (!scratch.value()) {
         return ExpandResult::failed(
             "v_lshl_add_u64 needs a dead VGPR to normalize the shift count");
+      }
       count_dst = *scratch.value();
       context.require_vgprs(count_dst + 1u);
     }
@@ -343,8 +366,9 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
   }
 
   // If S2 is VCC, wait for a previous VALU write before reading the addend.
-  if (host_arch == rocjitsu::IsaFamily::Rdna4 && src2_is_vcc)
+  if (host_arch == rocjitsu::IsaFamily::Rdna4 && src2_is_vcc) {
     words.push_back(rdna4::build_sopp(rdna4::kSWaitAlu, {.simm16 = 0xFFFD})[0]);
+  }
 
   // vdst = shift_dst + S2. v_add_co_u32 writes the carry into the dead SGPR pair,
   // then v_add_co_ci_u32 consumes it as carry-in. The low add reads the freshly
@@ -358,10 +382,11 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
 
   // VA_SDST=0 waits for the low add's scalar write before the high add reads the carry.
   // On GFX11 wave64, an earlier high add may have read the same pair as a lane mask.
-  if (host_arch == rocjitsu::IsaFamily::Rdna3)
+  if (host_arch == rocjitsu::IsaFamily::Rdna3) {
     words.push_back(rdna3::build_sopp(rdna3::kSWaitcntDepctrSopp, {.simm16 = 0xF19F})[0]);
-  else
+  } else {
     words.push_back(rdna4::build_sopp(rdna4::kSWaitAlu, {.simm16 = 0xF1FF})[0]);
+  }
 
   {
     auto [w0, w1] = build_rdna_vop3_sdst(
@@ -384,8 +409,9 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily h
 
 std::span<const RegisteredInstructionRewrite>
 cdna4_reverse_shift_rules_for_rdna(rocjitsu::IsaFamily host_arch) {
-  if (host_arch == rocjitsu::IsaFamily::Rdna3)
+  if (host_arch == rocjitsu::IsaFamily::Rdna3) {
     return kReverseShiftRules<rocjitsu::IsaFamily::Rdna3>;
+  }
   return kReverseShiftRules<rocjitsu::IsaFamily::Rdna4>;
 }
 

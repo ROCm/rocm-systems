@@ -28,8 +28,9 @@ replace_ds_address_field(rj_code_target_id_t target, std::span<const uint32_t> s
   if ((target != ROCJITSU_CODE_TARGET_GFX942 && target != ROCJITSU_CODE_TARGET_GFX950 &&
        target != ROCJITSU_CODE_TARGET_GFX1200 && target != ROCJITSU_CODE_TARGET_GFX1201 &&
        target != ROCJITSU_CODE_TARGET_GFX1250) ||
-      source.size() != 2 || encoded_vgpr > 255 || (source[0] & kFormatMask) != kDsFormat)
+      source.size() != 2 || encoded_vgpr > 255 || (source[0] & kFormatMask) != kDsFormat) {
     return std::nullopt;
+  }
   return std::array<uint32_t, 2>{source[0], (source[1] & ~0xffu) | encoded_vgpr};
 }
 

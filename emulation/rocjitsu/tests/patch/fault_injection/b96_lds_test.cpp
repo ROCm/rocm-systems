@@ -11,8 +11,9 @@ class B96Lds : public ::testing::TestWithParam<test::B96Target> {};
 
 TEST_P(B96Lds, LoadStoreAndDestinationAliasHaveIndependentExactMutants) {
   for (bool wave32 : {false, true}) {
-    if (wave32 && GetParam().arch != IsaFamily::Rdna4)
+    if (wave32 && GetParam().arch != IsaFamily::Rdna4) {
       continue;
+    }
     SCOPED_TRACE(wave32);
     const test::B96Target &target = GetParam();
     const std::vector<uint8_t> image = test::make_b96_elf(target, 3, 3, false, false, {}, wave32);
@@ -72,8 +73,9 @@ TEST_P(B96Lds, RejectsInvalidRegisterAndForeignOrExpiredSource) {
   ASSERT_TRUE(selected.succeeded()) << error.message;
   const uint32_t bound = target.target == ROCJITSU_CODE_TARGET_GFX1250 ? 64u : 16u;
   for (std::optional<uint32_t> value :
-       std::array<std::optional<uint32_t>, 4>{std::nullopt, 2u, bound, 256u})
+       std::array<std::optional<uint32_t>, 4>{std::nullopt, 2u, bound, 256u}) {
     EXPECT_TRUE(apply_lds_wrong_address(source, selected.value(), value, error).failed());
+  }
   EXPECT_TRUE(apply_lds_wrong_address(foreign, selected.value(), 6, error).failed());
   EXPECT_TRUE(
       select_lds_wrong_address(inventory.value(), {.exact = LdsSelection{}, .ordinal = 0}, error)
@@ -145,8 +147,9 @@ TEST_P(B96Lds, EmissionFailureRollsBack) {
 
 TEST(B96LdsControls, Wave32DescriptorAdmissionMatchesTarget) {
   for (const test::B96Target &target : test::kB96Targets) {
-    if (target.target == ROCJITSU_CODE_TARGET_GFX1250)
+    if (target.target == ROCJITSU_CODE_TARGET_GFX1250) {
       continue;
+    }
     SCOPED_TRACE(target.name);
     const FaultMutationContext source(test::make_b96_elf(target, 3, 3, false, false, {}, true));
     FaultMutationError error;
@@ -171,8 +174,9 @@ TEST(B96LdsControls, Wave32DescriptorAdmissionMatchesTarget) {
 
 TEST(B96LdsControls, CdnaAccumulatorAndGdsAndOrdinaryBound) {
   for (const test::B96Target &target : test::kB96Targets) {
-    if (!target.cdna)
+    if (!target.cdna) {
       continue;
+    }
     SCOPED_TRACE(target.name);
     const std::vector<uint8_t> image = test::make_b96_elf(target, 1, 0, false, true);
     const FaultMutationContext source(image);

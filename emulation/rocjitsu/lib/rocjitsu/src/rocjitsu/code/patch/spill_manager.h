@@ -39,12 +39,14 @@ public:
   [[nodiscard]] std::optional<uint32_t>
   preview(uint32_t byte_count, uint32_t alignment,
           uint32_t limit = std::numeric_limits<uint32_t>::max()) const {
-    if (byte_count == 0 || alignment == 0)
+    if (byte_count == 0 || alignment == 0) {
       return std::nullopt;
+    }
     const uint64_t base =
         util::align_up(static_cast<uint64_t>(cursor_), static_cast<uint64_t>(alignment));
-    if (base + byte_count > limit)
+    if (base + byte_count > limit) {
       return std::nullopt;
+    }
     return static_cast<uint32_t>(base);
   }
 
@@ -53,8 +55,9 @@ public:
   allocate(uint32_t byte_count, uint32_t alignment,
            uint32_t limit = std::numeric_limits<uint32_t>::max()) {
     auto base = preview(byte_count, alignment, limit);
-    if (!base)
+    if (!base) {
       return std::nullopt;
+    }
     cursor_ = *base + byte_count;
     return base;
   }

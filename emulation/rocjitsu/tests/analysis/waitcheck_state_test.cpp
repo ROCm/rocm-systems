@@ -226,8 +226,9 @@ TEST(WaitcheckState, JoinedPartialLoadWaitCannotInventACommittedGeneration) {
                   .succeeded());
   ASSERT_EQ(joined.pending[kLoad].size(), 2u);
   EXPECT_FALSE(joined.ready_regs.contains(reg));
-  for (const auto &event : joined.pending[kLoad])
+  for (const auto &event : joined.pending[kLoad]) {
     EXPECT_FALSE(event.old_value_regs.contains(reg));
+  }
 
   ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
@@ -249,8 +250,9 @@ TEST(WaitcheckState, JoinedCommonProducerEstablishesACommittedGeneration) {
                   .succeeded());
   ASSERT_EQ(left.pending[kLoad].size(), 2u);
   EXPECT_TRUE(left.ready_regs.contains(reg));
-  for (const auto &event : left.pending[kLoad])
+  for (const auto &event : left.pending[kLoad]) {
     EXPECT_TRUE(event.old_value_regs.contains(reg));
+  }
 }
 
 TEST(WaitcheckState, PendingAndCompletedProducerBecomesReadyAfterJoinedWait) {
@@ -717,8 +719,8 @@ TEST(WaitcheckState, PrimaryKindCompletionDoesNotRequireMaterializedEvents) {
 
 TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
   for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
-                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5})
-    for (bool store : {false, true})
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    for (bool store : {false, true}) {
       for (bool ds_first : {false, true}) {
         SCOPED_TRACE(arch);
         SCOPED_TRACE(store);
@@ -748,6 +750,8 @@ TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
         EXPECT_TRUE(state.pending[vm].empty());
         EXPECT_EQ(state.pending_event_ages[vm], PendingEventAges{});
       }
+    }
+  }
 }
 
 TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
@@ -762,8 +766,9 @@ TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
     source.kind = kind;
     source.produces_regs = false;
     left.pending[vm] = {source};
-    for (auto counter : {vmem, WaitCounterKind::Ds, WaitCounterKind::VmVsrc})
+    for (auto counter : {vmem, WaitCounterKind::Ds, WaitCounterKind::VmVsrc}) {
       left.pending_event_ages[Ops::counter_index(counter)].values[static_cast<size_t>(kind)] = 0;
+    }
     auto right = left;
     ASSERT_TRUE(Ops::apply_memory_wait(left, vmem, 0, rocjitsu::IsaFamily::Rdna4).succeeded());
     ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Ds, 0, rocjitsu::IsaFamily::Rdna4)

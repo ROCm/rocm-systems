@@ -23,8 +23,9 @@ LanePermutation compute_lane_permutation(const LaneLayout &guest, const LaneLayo
     uint8_t h_lane = lane_for_row(host, row);
     if (g_lane != h_lane) {
       uint8_t xor_val = g_lane ^ h_lane;
-      if (xor_lane_mask == 0)
+      if (xor_lane_mask == 0) {
         xor_lane_mask = xor_val;
+      }
       assert(xor_val == xor_lane_mask && "non-uniform XOR across row groups");
       range_start = std::min(range_start, std::min(g_lane, h_lane));
       range_end =
@@ -32,8 +33,9 @@ LanePermutation compute_lane_permutation(const LaneLayout &guest, const LaneLayo
     }
   }
 
-  if (xor_lane_mask == 0)
+  if (xor_lane_mask == 0) {
     return {};
+  }
 
   return {static_cast<uint32_t>(xor_lane_mask) * 4, range_start, range_end};
 }

@@ -127,8 +127,9 @@ struct XcdDistributionFixture {
     ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
     if (loaded.engine_config.num_threads > 1 &&
         !amdgpu::partition_topology_by_xcds(engine->topology(), soc,
-                                            loaded.engine_config.num_threads))
+                                            loaded.engine_config.num_threads)) {
       ADD_FAILURE() << "multi-threaded topology requires per-XCD partitioning";
+    }
     ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
         << admission_diagnostic.message();
 
@@ -212,8 +213,9 @@ constexpr uint8_t kCountVgpr = 4;
 void issue(amdgpu::ComputeUnitCore &cu, Decoder &decoder, test::GwsOp op, amdgpu::Wavefront &wf,
            uint32_t count = 0) {
   const bool has_count = test::gws_has_addr(op);
-  if (has_count)
+  if (has_count) {
     cu.write_vgpr(wf.vgpr_alloc().base + kCountVgpr, /*lane=*/0, count);
+  }
   const auto words = cdna3::build_ds(test::gws_opcode(rocjitsu::IsaFamily::Cdna3, op),
                                      {.gds = 1, .addr = has_count ? kCountVgpr : uint8_t{0}});
   std::unique_ptr<Instruction> inst(decode_valid(decoder, words.data()));
@@ -224,9 +226,11 @@ void issue(amdgpu::ComputeUnitCore &cu, Decoder &decoder, test::GwsOp op, amdgpu
 
 /// Index of the XCD whose command processor is @p cp.
 uint32_t assigned_xcd_index(const SoC &soc, const amdgpu::CommandProcessor *cp) {
-  for (uint32_t xi = 0; xi < soc.num_xcds(); ++xi)
-    if (soc.xcd(xi)->command_processor() == cp)
+  for (uint32_t xi = 0; xi < soc.num_xcds(); ++xi) {
+    if (soc.xcd(xi)->command_processor() == cp) {
       return xi;
+    }
+  }
   ADD_FAILURE() << "command processor does not belong to this SoC";
   return 0;
 }
@@ -238,14 +242,16 @@ public:
       : ExecutionPlugin("xcd-wg-order"), on_first_dispatch_(std::move(on_first_dispatch)) {}
 
   void onAmdgpuDispatchExecutionBegin(uint32_t) override {
-    if (auto callback = std::exchange(on_first_dispatch_, {}))
+    if (auto callback = std::exchange(on_first_dispatch_, {})) {
       callback();
+    }
   }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *>) override {
-    if (first_dispatched_.find(dispatch_id) == first_dispatched_.end())
+    if (first_dispatched_.find(dispatch_id) == first_dispatched_.end()) {
       first_dispatched_[dispatch_id] = step_;
+    }
     ++step_;
   }
 
@@ -268,8 +274,9 @@ public:
   /// Dispatch ids in the order their first workgroup was placed.
   std::vector<uint32_t> dispatch_ids() const {
     std::vector<uint32_t> ids;
-    for (const auto &[id, step] : first_dispatched_)
+    for (const auto &[id, step] : first_dispatched_) {
       ids.push_back(id);
+    }
     std::ranges::sort(
         ids, [&](uint32_t a, uint32_t b) { return first_dispatched(a) < first_dispatched(b); });
     return ids;
@@ -350,8 +357,9 @@ public:
                                    std::span<amdgpu::Wavefront *> waves) override {
     std::lock_guard<std::mutex> lock(mutex_);
     ++workgroups_;
-    for (const auto *wave : waves)
+    for (const auto *wave : waves) {
       retained_ = retained_ && wave->address_space() == expected_;
+    }
   }
 
   bool retained() const {
@@ -379,8 +387,9 @@ public:
   void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *> waves) override {
     ASSERT_EQ(waves.size(), 1u);
-    if (!waves.empty())
+    if (!waves.empty()) {
       scratch_bases_[wg_id] = waves.front()->scratch_base();
+    }
   }
 
   const std::map<uint32_t, uint64_t> &scratch_bases() const { return scratch_bases_; }
@@ -738,8 +747,9 @@ public:
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *> waves) override {
     ASSERT_EQ(waves.size(), 1u);
-    if (waves.empty())
+    if (waves.empty()) {
       return;
+    }
     auto &stats = stats_[dispatch_id];
     ++stats.dispatched;
     stats.max_slot = std::max(stats.max_slot, waves.front()->wf_id());
@@ -772,8 +782,9 @@ public:
         host_bytes_(host_window ? host_window->size : 0) {}
 
   bool provision_host_window(size_t size) {
-    if (!host_window_ || size > host_window_->extent)
+    if (!host_window_ || size > host_window_->extent) {
       return false;
+    }
     host_window_->size = size;
     host_bytes_.resize(size);
     return true;
@@ -796,13 +807,15 @@ public:
 
   amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                         amdgpu::VmAccessKind) const override {
-    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address) {
       return {.outcome = amdgpu::VmAccessOutcome::Malformed, .translation = {}};
+    }
     if (host_window_ && address >= host_window_->base &&
         address - host_window_->base < host_window_->extent) {
       const uint64_t offset = address - host_window_->base;
-      if (offset > host_window_->size || size > host_window_->size - static_cast<size_t>(offset))
+      if (offset > host_window_->size || size > host_window_->size - static_cast<size_t>(offset)) {
         return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+      }
     }
     return {
         .outcome = amdgpu::VmAccessOutcome::Complete,
@@ -816,8 +829,9 @@ public:
 
   amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
                                std::span<std::byte> bytes) override {
-    if (domain != amdgpu::VmMemoryDomain::Local)
+    if (domain != amdgpu::VmMemoryDomain::Local) {
       return amdgpu::VmAccessOutcome::Malformed;
+    }
     memory_->read_block(
         address, std::span<uint8_t>(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()));
     return amdgpu::VmAccessOutcome::Complete;
@@ -825,8 +839,9 @@ public:
 
   amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain domain, uint64_t address,
                                 std::span<const std::byte> bytes) override {
-    if (domain != amdgpu::VmMemoryDomain::Local)
+    if (domain != amdgpu::VmMemoryDomain::Local) {
       return amdgpu::VmAccessOutcome::Malformed;
+    }
     memory_->write_block(
         address,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
@@ -835,10 +850,12 @@ public:
 
   amdgpu::AtomicLoadResult atomic_load(amdgpu::VmMemoryDomain domain, uint64_t address,
                                        uint32_t width) override {
-    if (domain != amdgpu::VmMemoryDomain::Local)
+    if (domain != amdgpu::VmMemoryDomain::Local) {
       return {.outcome = amdgpu::VmAccessOutcome::Malformed};
-    if (!valid_atomic(address, width))
+    }
+    if (!valid_atomic(address, width)) {
       return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    }
     uint64_t observed = 0;
     const bool complete = memory_->atomic_modify(
         address, width, [&](const uint8_t *bytes) { std::memcpy(&observed, bytes, width); });
@@ -849,10 +866,12 @@ public:
 
   amdgpu::VmAccessOutcome atomic_store(amdgpu::VmMemoryDomain domain, uint64_t address,
                                        uint32_t width, uint64_t value) override {
-    if (domain != amdgpu::VmMemoryDomain::Local)
+    if (domain != amdgpu::VmMemoryDomain::Local) {
       return amdgpu::VmAccessOutcome::Malformed;
-    if (!valid_atomic(address, width))
+    }
+    if (!valid_atomic(address, width)) {
       return amdgpu::VmAccessOutcome::Malformed;
+    }
     const bool complete = memory_->atomic_modify(
         address, width, [&](uint8_t *bytes) { std::memcpy(bytes, &value, width); });
     return complete ? amdgpu::VmAccessOutcome::Complete : amdgpu::VmAccessOutcome::Faulted;
@@ -862,17 +881,20 @@ public:
                                                        uint64_t address, uint32_t width,
                                                        uint64_t expected,
                                                        uint64_t desired) override {
-    if (domain != amdgpu::VmMemoryDomain::Local)
+    if (domain != amdgpu::VmMemoryDomain::Local) {
       return {.outcome = amdgpu::VmAccessOutcome::Malformed};
-    if (!valid_atomic(address, width))
+    }
+    if (!valid_atomic(address, width)) {
       return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    }
     uint64_t observed = 0;
     bool exchanged = false;
     const bool complete = memory_->atomic_modify(address, width, [&](uint8_t *bytes) {
       std::memcpy(&observed, bytes, width);
       exchanged = observed == expected;
-      if (exchanged)
+      if (exchanged) {
         std::memcpy(bytes, &desired, width);
+      }
     });
     return {.outcome =
                 complete ? amdgpu::VmAccessOutcome::Complete : amdgpu::VmAccessOutcome::Faulted,
@@ -882,11 +904,13 @@ public:
 
   std::byte *resolve_host_pointer(amdgpu::VmMemoryDomain domain, uint64_t address,
                                   std::size_t size) const override {
-    if (domain != amdgpu::VmMemoryDomain::Local || !host_window_ || address < host_window_->base)
+    if (domain != amdgpu::VmMemoryDomain::Local || !host_window_ || address < host_window_->base) {
       return nullptr;
+    }
     const uint64_t offset = address - host_window_->base;
-    if (offset > host_window_->size || size > host_window_->size - static_cast<size_t>(offset))
+    if (offset > host_window_->size || size > host_window_->size - static_cast<size_t>(offset)) {
       return nullptr;
+    }
     return const_cast<std::byte *>(host_bytes_.data()) + offset;
   }
 
@@ -926,8 +950,9 @@ TEST(XcdDistributionTest, QueueWithoutFanoutKeepsGridOnOneXcd) {
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kTotalCus);
 
   size_t xcds_used = 0;
-  for (auto count : counts)
+  for (auto count : counts) {
     xcds_used += count > 0 ? 1 : 0;
+  }
   EXPECT_EQ(xcds_used, 1u) << "expected the whole grid confined to one XCD";
 
   // ...and it must be the XCD the queue was actually assigned to. Cardinality
@@ -954,8 +979,9 @@ TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kTotalCus);
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+  }
 }
 
 TEST(XcdDistributionTest, CuMaskRoutesGridAwayFromOwningXcd) {
@@ -973,8 +999,9 @@ TEST(XcdDistributionTest, CuMaskRoutesGridAwayFromOwningXcd) {
     queue->dispatch_with_barrier(kKdAddr, 6 * kWavefrontSize, kWavefrontSize);
     fx.engine->run();
     const auto counts = fx.soc->dispatched_workgroups_per_xcd();
-    for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+    for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
       EXPECT_EQ(counts[xi], xi == 0 || xi == 7 ? 8u : 0u) << "xcd" << xi;
+    }
   }
 }
 
@@ -1126,8 +1153,9 @@ TEST(XcdDistributionTest, FanoutIsIndependentOfOwningXcd) {
   fx.engine->run();
 
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+  }
 }
 
 // A grid with fewer workgroups than XCDs still reaches one workgroup per XCD for
@@ -1148,8 +1176,9 @@ TEST(XcdDistributionTest, GridSmallerThanXcdCountSpreadsOnePerXcd) {
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kWgs);
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], xi < kWgs ? 1u : 0u) << "xcd" << xi;
+  }
 }
 
 // A dispatch too small to reach every XCD still has to hold up a following
@@ -1227,8 +1256,9 @@ TEST(XcdDistributionTest, EmptyOwnerShardCompletesAndOrdersBarrieredFollower) {
   const auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
   EXPECT_EQ(counts[0], 2u);
-  for (uint32_t xi = 1; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 1; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], 0u) << "xcd" << xi << " unexpectedly received a workgroup";
+  }
 
   const auto ids = order->dispatch_ids();
   ASSERT_EQ(ids.size(), 2u);
@@ -1454,8 +1484,9 @@ TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShare) {
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), uint64_t{2} * kTotalCus);
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], 2 * (kTotalCus / kTotalXcds)) << "xcd" << xi;
+  }
 
   // Fan-out shares one dispatch id per dispatch, so exactly two ids appear.
   auto ids = order->dispatch_ids();
@@ -1487,8 +1518,9 @@ TEST(XcdDistributionTest, QueuesRotateAcrossXcds) {
 
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], kWgsPerQueue) << "xcd" << xi;
+  }
 }
 
 // The counter is documented as a lifetime running total, so a second dispatch on
@@ -1610,8 +1642,9 @@ void run_fanout_completion_signal(Threading threading, uint32_t dispatch_threads
   // The grid really was spread, or this would prove nothing about fan-out.
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kTotalCus);
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     ASSERT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+  }
 
   EXPECT_EQ(fx.memory->read64(kSignalAddr + kSignalValueOffset), kInitialValue - 1)
       << "the dispatch must decrement its completion signal once, not once per XCD";
@@ -1699,8 +1732,9 @@ void run_threaded_fanout_barrier(uint32_t dispatch_threads) {
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), uint64_t{2} * kTotalCus);
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], 2 * (kTotalCus / kTotalXcds)) << "xcd" << xi;
+  }
 
   auto ids = order->dispatch_ids();
   ASSERT_EQ(ids.size(), 2u) << "expected exactly two distinct dispatch ids";
@@ -1868,8 +1902,9 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
   EXPECT_EQ(queue_desc.read_dispatch_id, 1u);
   EXPECT_EQ(allocations.load(std::memory_order_relaxed), 0u);
   EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
-  for (uint64_t count : fx.soc->dispatched_workgroups_per_xcd())
+  for (uint64_t count : fx.soc->dispatched_workgroups_per_xcd()) {
     EXPECT_EQ(count, kTotalCus / kTotalXcds);
+  }
   cp->unregister_queue(1, process.process_id());
   EXPECT_TRUE(legacy_vm.set_fault_reporter(address_space, nullptr));
   EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
@@ -1932,8 +1967,9 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
 
   // The grid really was spread, or the sizing claim below is untested.
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     ASSERT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+  }
 
   ASSERT_FALSE(requests.empty()) << "the scratch path was never reached";
 
@@ -1976,8 +2012,9 @@ TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
 
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
-  for (uint32_t xcc = 0; xcc < kTotalXcds; ++xcc)
+  for (uint32_t xcc = 0; xcc < kTotalXcds; ++xcc) {
     EXPECT_EQ(counts[xcc], 1u) << "xcd" << xcc;
+  }
 
   ASSERT_EQ(addresses->scratch_bases().size(), kTotalXcds);
   const auto *xcd = fx.soc->xcd(0);
@@ -2033,8 +2070,9 @@ TEST(XcdDistributionTest, Cdna5ScratchCapacityKeepsEveryCuAddressable) {
                                        /*num_vgprs=*/1, kCdna5WavefrontSize);
   ASSERT_NE(general_wave, nullptr)
       << "the scratch limit incorrectly removed a general execution slot";
-  for (auto *wave : scratch_waves)
+  for (auto *wave : scratch_waves) {
     cu->free_wavefront_resources(*wave);
+  }
   cu->free_wavefront_resources(*general_wave);
 }
 
@@ -2090,8 +2128,9 @@ TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
     size_t scratch_slots = total_cus;
     if (cdna5) {
       scratch_slots = 0;
-      for (const auto *cu : cus)
+      for (const auto *cu : cus) {
         scratch_slots += cu->scratch_slots_per_cu();
+      }
     }
     const size_t pool_bytes = per_wave * scratch_slots;
     ASSERT_NO_FATAL_FAILURE(
@@ -2113,8 +2152,9 @@ TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
       cp->set_scratch_backing_allocator([&](uint32_t, uint64_t gpu_va, size_t size) {
         EXPECT_EQ(gpu_va, kDefaultScratchPool);
         EXPECT_EQ(size, pool_bytes);
-        if (allocations != 0)
+        if (allocations != 0) {
           return true;
+        }
         ++allocations;
         std::vector<uint8_t> tail(size - per_wave);
         fx.memory->write_block(gpu_va + per_wave, tail);
@@ -2251,9 +2291,10 @@ TEST(XcdDistributionTest, ConfigLoaderSharesOneGwsStoreAcrossXcds) {
     stores.insert(xcd->gws_device().get());
     const auto &cus = xcd->command_processor()->compute_units();
     EXPECT_FALSE(cus.empty());
-    for (auto *cu : cus)
+    for (auto *cu : cus) {
       EXPECT_EQ(&cu->gws_device(), device_store)
           << "xcd " << xi << " CU does not share the device-global GWS store";
+    }
   }
   // One device-global store is shared across every XCD.
   EXPECT_EQ(stores.size(), 1u);
@@ -2299,12 +2340,14 @@ TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
   // stepped, so it stays RUNNING at pc 0.
   gws_cdna3::issue(*cu1, *decoder, test::GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
-  for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
+  for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i) {
     cu0->step();
+  }
   EXPECT_NE(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
-  if (!wf0->is_halted())
+  if (!wf0->is_halted()) {
     wf0->halt();
+  }
   wf1->halt();
 }
 
@@ -2343,19 +2386,22 @@ TEST(XcdDistributionTest, CrossXcdGwsPWaitsForProducerSignal) {
   gws_cdna3::issue(*cu0, *decoder, test::GwsOp::kSemaP, *consumer);
   ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
 
-  for (int i = 0; i < 8; ++i)
+  for (int i = 0; i < 8; ++i) {
     cu0->step();
+  }
   EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT)
       << "parked P resumed before the producer signaled";
 
   gws_cdna3::issue(*cu1, *decoder, test::GwsOp::kSemaV, *producer);
-  for (int i = 0; i < 4 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
+  for (int i = 0; i < 4 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i) {
     cu0->step();
+  }
   EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT);
 
   producer->halt();
-  if (!consumer->is_halted())
+  if (!consumer->is_halted()) {
     consumer->halt();
+  }
 }
 
 TEST(XcdDistributionTest, CrossXcdGwsPWaitsForLaterProducerDispatch) {
@@ -2385,8 +2431,9 @@ TEST(XcdDistributionTest, CrossXcdGwsPWaitsForLaterProducerDispatch) {
   consumer->set_m0(0);
   gws_cdna3::issue(*peer_cu, *decoder, test::GwsOp::kSemaP, *consumer);
   ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
-  for (int i = 0; i < 16; ++i)
+  for (int i = 0; i < 16; ++i) {
     peer_cu->step();
+  }
   EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT)
       << "consumer resumed before the producer was dispatched";
 
@@ -2398,12 +2445,14 @@ TEST(XcdDistributionTest, CrossXcdGwsPWaitsForLaterProducerDispatch) {
   producer->set_exec(0x1);
   producer->set_m0(0);
   gws_cdna3::issue(*owner_cu, *decoder, test::GwsOp::kSemaV, *producer);
-  for (int i = 0; i < 8 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
+  for (int i = 0; i < 8 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i) {
     peer_cu->step();
+  }
   EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT)
       << "consumer not released by the owner's producer V";
 
   producer->halt();
-  if (!consumer->is_halted())
+  if (!consumer->is_halted()) {
     consumer->halt();
+  }
 }
