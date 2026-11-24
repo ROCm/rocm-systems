@@ -148,8 +148,8 @@ TEST(track_file_store_test, interning_from_several_threads_returns_stable_string
     ASSERT_TRUE(store.open(fixture.config.string(), sources, 1, 2, 0, 0));
     ASSERT_TRUE(store.begin_write());
 
-    constexpr size_t thread_count = 8;
-    constexpr size_t string_count = 20000;
+    constexpr size_t                      thread_count = 8;
+    constexpr size_t                      string_count = 20000;
     std::vector<std::vector<const char*>> interned(thread_count);
     {
         std::vector<std::thread> workers;
