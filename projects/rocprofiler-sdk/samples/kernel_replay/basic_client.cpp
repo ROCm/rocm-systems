@@ -58,6 +58,14 @@ expected_passes()
     return placement_is("unknown-flag") ? 0 : kPasses;
 }
 
+// KR_REPLAYS: how many times the application dispatches the replayed kernel (default 1)
+int
+expected_replays()
+{
+    const char* replays = std::getenv("KR_REPLAYS");
+    return replays != nullptr ? std::atoi(replays) : 1;
+}
+
 // An older SDK's record ends before replay_options.
 bool
 has_replay_options(const rocprofiler_callback_tracing_kernel_replay_data_t* p)
@@ -129,19 +137,21 @@ tool_init(rocprofiler_client_finalize_t, void*)
 void
 tool_fini(void*)
 {
+    const int replays = expected_replays();
     fprintf(stderr,
-            "[basic] replayed=%d config_exits=%d passes_seen=%d expected_passes=%lu "
-            "pass_options_seen=%d bad_options=%d\n",
+            "[basic] replayed=%d config_exits=%d passes_seen=%d expected_replays=%d "
+            "expected_passes=%lu pass_options_seen=%d bad_options=%d\n",
             g_replayed.load(),
             g_config_exits.load(),
             g_passes_seen.load(),
+            replays,
             static_cast<unsigned long>(expected_passes()),
             g_pass_options_seen.load(),
             g_bad_options.load());
     // An abort would make ctest report a failure even when SKIP_REGULAR_EXPRESSION matches, and
     // _Exit skips the flush of the application's buffered output.
-    if(g_replayed.load() != 1 || g_config_exits.load() != 1 ||
-       g_passes_seen.load() != static_cast<int>(expected_passes()) ||
+    if(g_replayed.load() != replays || g_config_exits.load() != replays ||
+       g_passes_seen.load() != replays * static_cast<int>(expected_passes()) ||
        g_pass_options_seen.load() != 0 || g_bad_options.load() != 0)
     {
         std::fflush(nullptr);

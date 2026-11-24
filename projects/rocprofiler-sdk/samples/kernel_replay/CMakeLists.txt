@@ -136,11 +136,14 @@ add_kernel_replay_sample(kernel-replay-opt-out opt_out_client.cpp)
 add_kernel_replay_sample(kernel-replay-early-exit early_exit_client.cpp)
 
 # The same samples with hashed restores forced: their snapshots are far too small for the
-# automatic choice to hash.
-add_kernel_replay_sample(kernel-replay-basic-hash-once basic_client.cpp ENVIRONMENT
-                         "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")
-add_kernel_replay_sample(kernel-replay-basic-hash-every-pass basic_client.cpp ENVIRONMENT
-                         "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-every-pass")
+# automatic choice to hash. The basic ones dispatch their kernel three times, so the
+# replays after the first, which reuse the blit state it set up, are covered too.
+add_kernel_replay_sample(
+    kernel-replay-basic-hash-once basic_client.cpp ENVIRONMENT
+    "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once" "KR_REPLAYS=3")
+add_kernel_replay_sample(
+    kernel-replay-basic-hash-every-pass basic_client.cpp ENVIRONMENT
+    "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-every-pass" "KR_REPLAYS=3")
 add_kernel_replay_sample(kernel-replay-basic-host-pinned-snapshot basic_client.cpp
                          ENVIRONMENT "KR_SNAPSHOT=host-pinned")
 add_kernel_replay_sample(kernel-replay-basic-device-snapshot basic_client.cpp ENVIRONMENT

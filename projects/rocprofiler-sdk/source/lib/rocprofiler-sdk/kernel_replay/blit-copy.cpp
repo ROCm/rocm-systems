@@ -633,7 +633,10 @@ struct packet_builder
 
     // Writes `image` to the argument buffer and the chain's packets. Each dispatch waits for the
     // one before it. The first acquires at system scope because the CPU wrote the arguments; the
-    // last releases at system scope, signals completion, and is followed by a barrier on it.
+    // last releases at system scope and signals completion. The barrier after it holds back the
+    // packets that follow until the chain is done. It must not wait on the completion signal: the
+    // next chain sets that back to 1 as soon as the CPU sees this one finish, possibly before the
+    // queue reaches the barrier, which would then wait for a chain queued behind it.
     static packet_info finish(std::unique_ptr<packet_info::implementation> impl,
                               const chain_t&                               chain,
                               const std::vector<std::byte>&                image)
@@ -676,7 +679,6 @@ struct packet_builder
         barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
         barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
         barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
-        barrier.dep_signal[0]         = impl->completion;
         impl->packets.at(chain.count) = hsa::rocprofiler_packet{barrier};
         impl->packet_count            = chain.count + 1;
         return packet_info{std::move(impl)};
