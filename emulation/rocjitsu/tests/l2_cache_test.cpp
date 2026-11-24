@@ -1890,6 +1890,56 @@ TEST(DeviceCacheCoherenceTest, GroupMaintenanceDistinguishesSeparateBackingMemor
   EXPECT_EQ(second_memory.read8(kAddress), 0x66u);
 }
 
+TEST(DeviceCacheCoherenceTest, CheckedLegacyGroupRejectsInvalidDomains) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  auto domain = std::make_shared<DeviceCacheCoherence>();
+  util::StringDiagnostic diagnostic;
+  const std::array<std::shared_ptr<DeviceCacheCoherence>, 1> null_domains{nullptr};
+  EXPECT_TRUE(DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
+                  null_domains, DeviceCacheOperation::WritebackInvalidate, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "cache maintenance domains must be non-null");
+  const std::array repeated_domains{domain, domain};
+  EXPECT_TRUE(DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
+                  repeated_domains, DeviceCacheOperation::WritebackInvalidate, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "cache maintenance domains must be distinct");
+}
+
+TEST(DeviceCacheCoherenceTest, CheckedLegacyGroupReportsMissingBackingAfterReleasingLocks) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  auto domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", domain);
+  const std::array domains{domain};
+  const uint64_t data_epoch = domain->current_epoch();
+  const uint64_t instruction_epoch = domain->current_instruction_epoch();
+  bool reported = false;
+  auto report = [&](std::string_view message) {
+    reported = true;
+    EXPECT_EQ(message, "cache hierarchy lacks legacy maintenance backing");
+    EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+    EXPECT_EQ(domain->current_epoch(), data_epoch);
+    EXPECT_EQ(domain->current_instruction_epoch(), instruction_epoch);
+    // Reenter the domain from the diagnostic sink: the failed acquisition
+    // must release its coordinator locks before reporting the configuration.
+    auto nested = DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
+        domains, DeviceCacheOperation::Invalidate, {});
+    EXPECT_TRUE(nested.succeeded());
+  };
+  EXPECT_TRUE(
+      DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
+          domains, DeviceCacheOperation::WritebackInvalidate, util::DiagnosticEmitter(report))
+          .failed());
+  EXPECT_TRUE(reported);
+  // The nested invalidate lease advances epochs, but failed writeback itself
+  // must not publish an additional epoch.
+  EXPECT_EQ(domain->current_epoch(), data_epoch + 1);
+  EXPECT_EQ(domain->current_instruction_epoch(), instruction_epoch + 1);
+}
+
 TEST(DeviceCacheCoherenceTest, GroupPreflightRetriesDirtyNonzeroVmidBeforeAnyWrite) {
   using rocjitsu::amdgpu::L2CacheTestAccess;
   using rocjitsu::amdgpu::MemorySideCacheTestAccess;

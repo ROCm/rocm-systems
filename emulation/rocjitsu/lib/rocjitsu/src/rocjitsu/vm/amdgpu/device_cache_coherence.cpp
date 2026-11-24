@@ -257,7 +257,7 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
   std::vector<std::shared_ptr<DeviceCacheCoherence>> ordered_domains(domains.begin(),
                                                                      domains.end());
   if (std::ranges::any_of(ordered_domains, [](const auto &domain) { return !domain; })) {
-    throw util::ConfigError("cache maintenance domains must be non-null");
+    return emit_error.emit() << "cache maintenance domains must be non-null";
   }
   std::ranges::sort(ordered_domains, [](const auto &lhs, const auto &rhs) {
     return std::less<DeviceCacheCoherence *>{}(lhs.get(), rhs.get());
@@ -265,7 +265,7 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
   if (std::ranges::adjacent_find(ordered_domains, [](const auto &lhs, const auto &rhs) {
         return lhs.get() == rhs.get();
       }) != ordered_domains.end()) {
-    throw util::ConfigError("cache maintenance domains must be distinct");
+    return emit_error.emit() << "cache maintenance domains must be distinct";
   }
 
   struct DomainLocks {
@@ -293,6 +293,11 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
       }
     }
   };
+  std::string_view failure_message;
+  const auto fail = [&failure_message](std::string_view message) {
+    failure_message = message;
+    return util::Result::failure();
+  };
   const auto acquire = [&]() -> util::FailureOr<CacheMaintenanceGroupResult> {
     // Use one total domain order for every group so concurrent fabric effects
     // cannot acquire the same coordinator locks in opposite orders.
@@ -315,7 +320,7 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
               return !cache->has_legacy_maintenance_backing();
             });
         if (missing_l2_backing || missing_memory_side_backing) {
-          throw util::ConfigError("cache hierarchy lacks legacy maintenance backing");
+          return fail("cache hierarchy lacks legacy maintenance backing");
         }
       }
     }
@@ -395,16 +400,17 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
         const DirtyBackingLine &current = dirty_lines[i];
         if (previous.memory == current.memory && previous.address == current.address &&
             previous.domain != current.domain) {
-          return emit_error.emit() << "group maintenance has overlapping dirty backing lines";
+          return fail("group maintenance has overlapping dirty backing lines");
         }
       }
 
       // SparseMemory allocates on first write. Reserve all target pages while
       // every cache is quiesced, before the first dirty-byte publication. A
       // failed allocation leaves at most newly allocated zero pages.
-      const auto reserve_line = [](GpuMemory *memory, uint64_t line_addr, size_t size) {
-        if (!memory->reserve_write_pages(line_addr, size)) {
-          throw util::Exception(std::string_view("cache maintenance backing span overflows"));
+      bool reserved = true;
+      const auto reserve_line = [&reserved](GpuMemory *memory, uint64_t line_addr, size_t size) {
+        if (reserved) {
+          reserved = memory->reserve_write_pages(line_addr, size);
         }
       };
       for (const DomainLocks &entry : locked) {
@@ -426,6 +432,9 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
           }
         }
       }
+      if (!reserved) {
+        return fail("cache maintenance backing span overflows");
+      }
     }
 
     // A later domain's whole MSC line may be older than another domain's L2
@@ -438,7 +447,7 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
             return CacheMaintenanceGroupResult{.outcome = CacheMaintenanceOutcome::Retry};
           }
           if (outcome != VmAccessOutcome::Complete) {
-            return emit_error.emit() << "memory-side cache maintenance backing write failed";
+            return fail("memory-side cache maintenance backing write failed");
           }
         }
       }
@@ -449,7 +458,7 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
             return CacheMaintenanceGroupResult{.outcome = CacheMaintenanceOutcome::Retry};
           }
           if (outcome != VmAccessOutcome::Complete) {
-            return emit_error.emit() << "L2 cache maintenance backing write failed";
+            return fail("L2 cache maintenance backing write failed");
           }
         }
       }
@@ -469,6 +478,9 @@ DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(
     auto result = acquire();
     if (result.failed() || result.value().outcome == CacheMaintenanceOutcome::Retry) {
       release_unpublished();
+    }
+    if (result.failed()) {
+      return emit_error.emit() << failure_message;
     }
     return result;
   } catch (...) {
