@@ -130,7 +130,7 @@ function(rccl_resolve_full_coverage
     output_blocker)
   set(_blocker "")
   if(NOT device_linker_enabled)
-    set(_blocker "the device linker is disabled")
+    set(_blocker "the device linker is disabled (ENABLE_DEVICE_LINKER=OFF, or ENABLE_DEVICE_THINLTO=ON)")
   elseif(NOT rocm_version_ok)
     set(_blocker "the ROCm version could not be parsed")
   elseif(rocm_version VERSION_LESS "71500")

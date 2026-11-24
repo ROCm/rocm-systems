@@ -103,6 +103,13 @@ endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
+option(ENABLE_DEVICE_THINLTO                   "Link device code with ThinLTO instead of the device linker" OFF)
+# ENABLE_DEVICE_THINLTO replaces the device linker, so it turns the device linker off for this configuration. The
+# cached ENABLE_DEVICE_LINKER does not change.
+if(ENABLE_DEVICE_THINLTO AND ENABLE_DEVICE_LINKER)
+  message(STATUS "ENABLE_DEVICE_THINLTO=ON turns off the device linker (ENABLE_DEVICE_LINKER)")
+  set(ENABLE_DEVICE_LINKER OFF)
+endif()
 # EMIT_LLVM_IR is the name before NCCL 2.32.6. Consume it on every configure, so it still works in a build
 # directory that already caches NCCL_EMIT_LLVM_IR. An entry left by the old option() carries its help string;
 # it only seeds NCCL_EMIT_LLVM_IR. A value given with -DEMIT_LLVM_IR always wins, also over a -DNCCL_EMIT_LLVM_IR
@@ -728,6 +735,27 @@ if (HAVE_KERNARG_PRELOAD AND NOT DISABLE_KERNARG_PRELOAD)
   message(STATUS "Kernarg preloading to SGPR enabled")
 elseif (HAVE_KERNARG_PRELOAD AND DISABLE_KERNARG_PRELOAD)
   message(STATUS "Kernarg preloading to SGPR disabled by DISABLE_KERNARG_PRELOAD=ON")
+endif()
+
+# ENABLE_DEVICE_THINLTO needs a compiler that supports ThinLTO for AMDGPU device code. The driver of such a compiler
+# adds -amdgpu-enable-object-linking to a -fgpu-rdc -foffload-lto=thin compile, so check for it and stop early.
+if(ENABLE_DEVICE_THINLTO)
+  list(GET GPU_TARGETS 0 _rccl_thinlto_probe_arch)
+  set(_rccl_thinlto_probe_src "${CMAKE_CURRENT_BINARY_DIR}/rccl_thinlto_probe.hip")
+  file(WRITE "${_rccl_thinlto_probe_src}" "")
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" "-###" -x hip "--offload-arch=${_rccl_thinlto_probe_arch}" -fgpu-rdc
+            -foffload-lto=thin -nogpulib -nogpuinc -c "${_rccl_thinlto_probe_src}"
+            -o "${CMAKE_CURRENT_BINARY_DIR}/rccl_thinlto_probe.o"
+    OUTPUT_VARIABLE _rccl_thinlto_probe
+    ERROR_VARIABLE _rccl_thinlto_probe
+    RESULT_VARIABLE _rccl_thinlto_probe_result)
+  if(NOT _rccl_thinlto_probe_result EQUAL 0 OR NOT _rccl_thinlto_probe MATCHES "amdgpu-enable-object-linking")
+    message(FATAL_ERROR
+      "ENABLE_DEVICE_THINLTO=ON needs a compiler that supports ThinLTO for AMDGPU device code, and "
+      "${CMAKE_CXX_COMPILER} does not. Use a newer compiler, or turn off ENABLE_DEVICE_THINLTO.")
+  endif()
+  message(STATUS "Device link: ThinLTO")
 endif()
 
 check_cxx_compiler_flag("-parallel-jobs=12" HAVE_PARALLEL_JOBS)

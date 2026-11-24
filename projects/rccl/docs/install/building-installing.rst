@@ -80,6 +80,7 @@ The RCCL build and installation helper script options are as follows:
           --debug-fast            Build debug library with lto optimization disabled (fast build times)
        -d|--dependencies          Install RCCL dependencies
           --device-linker         Build with assembly-extract device linker (default)
+          --device-thinlto        Link device code with ThinLTO instead of the device linker (opt-in)
           --disable-roctx         Build without ROCTX logging
           --disable-sym-kernels   Disable symmetric memory kernels
           --disable-warp-speed    Disable WARP_SPEED kernel optimizations
@@ -116,6 +117,7 @@ The RCCL build and installation helper script options are as follows:
        -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env (default: OFF)
        -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
        -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
+       -DENABLE_DEVICE_THINLTO=ON            Link device code with ThinLTO instead of the device linker (default: OFF)
        -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
        -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
        -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
@@ -175,6 +177,17 @@ required. Then build the library from the ``projects/rccl`` directory:
     cd build
     cmake ..
     make -j 16      # Or some other suitable number of parallel jobs
+
+.. note::
+
+    ``-DENABLE_DEVICE_THINLTO=ON`` (``./install.sh --device-thinlto``) links the
+    device code with ThinLTO instead of the device linker. This option is opt-in.
+    It needs a compiler that supports ThinLTO for AMDGPU device code;
+    configuration stops with an error if the compiler does not. With this option,
+    device code coverage is not available: ``ENABLE_FULL_COVERAGE=AUTO`` gives
+    host coverage only, and ``ENABLE_FULL_COVERAGE=ON`` is an error. A program
+    that links the static library (``--static``) must link with ``-fgpu-rdc
+    -foffload-lto=thin`` and use the same compiler as RCCL.
 
 .. note::
 
