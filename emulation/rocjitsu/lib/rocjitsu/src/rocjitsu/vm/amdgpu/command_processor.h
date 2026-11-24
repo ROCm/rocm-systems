@@ -23,6 +23,7 @@
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -1002,6 +1003,8 @@ private:
   std::atomic<uint64_t> dispatched_workgroups_{0};
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
+  /// Host threads this processor's running quantum occupies, for borrowed MMA helpers.
+  matrix_coexecution::ScopedOccupancyShard occupancy_;
   /// Protected by hw_queue_mutex_; true only while the CU batch owns its workers.
   bool dispatch_workers_active_ = false;
   /// Queue registration IDs whose waves are cancelled but whose cache maintenance

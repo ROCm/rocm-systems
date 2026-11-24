@@ -474,11 +474,18 @@ public:
   Replay(const Replay &) = delete;
   Replay &operator=(const Replay &) = delete;
 
-  bool submit(unsigned slot, const Step &step, void *wave,
-              const MatrixInputSnapshot *const *snapshots = nullptr) {
-    tickets_[slot] = pool_.submit(step.chain.data(), step.members, wave, snapshots);
+  /// Claims a helper first; `fill` copies snapshot factors into that helper's
+  /// own buffer only after the claim succeeded.
+  template <typename Fill>
+  bool submit(unsigned slot, const Step &step, void *wave, Fill &&fill) {
+    tickets_[slot] = pool_.claim();
     if (!tickets_[slot])
       return false;
+    const MatrixInputSnapshot *const *snapshots =
+        step.snapshots ? fill(matrix_coexecution::SharedPool::snapshot_buffer(tickets_[slot]))
+                       : nullptr;
+    matrix_coexecution::SharedPool::start(tickets_[slot], step.chain.data(), step.members, wave,
+                                          snapshots);
     heads_[slot] = &step;
     active_ |= uint8_t(1u << slot);
     return true;
@@ -527,13 +534,7 @@ public:
     uint64_t pool_full = 0, early_exit = 0, entry_rejects = 0;
     uint64_t snapshot_chains = 0, snapshot_bytes = 0;
   };
-  /// Factor copies for the chain in each helper slot; reused once the slot is joined.
-  struct SlotSnapshots {
-    std::array<MatrixInputSnapshot, kMaxChain> entries{};
-    std::array<const MatrixInputSnapshot *, kMaxChain> pointers{};
-    std::vector<uint32_t> data;
-  };
-  std::array<SlotSnapshots, kSlots> snapshots;
+
   explicit PlanCache(size_t capacity = 4096) : capacity_(capacity) {}
   ~PlanCache() { flush(); }
 

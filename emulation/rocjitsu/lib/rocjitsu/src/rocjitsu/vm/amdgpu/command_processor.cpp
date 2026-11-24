@@ -3059,6 +3059,7 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
   uint32_t effective_threads =
       std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
   FunctionalQuantumResult result;
+  occupancy_.occupy(int(effective_threads));
   if (shared_dispatch_pool_)
     result =
         shared_dispatch_pool_->run(active_cu_scratch_, effective_threads, quantum_result_scratch_);
@@ -3071,6 +3072,7 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
     quantum_result_scratch_.front() = active_cu_scratch_.front()->run_quantum();
     result = quantum_result_scratch_.front();
   }
+  occupancy_.occupy(0);
 
   for (size_t i = 0; i < active_cu_scratch_.size(); ++i) {
     auto *cu = active_cu_scratch_[i];

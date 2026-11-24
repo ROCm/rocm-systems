@@ -2995,16 +2995,14 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
       for (unsigned i = 0; i != step.members; ++i)
         check_static_isa_diagnostics(*step.chain[i], *active);
       active->clear_setreg_vgpr_msb_hazard();
-      // Copy only the factor registers a later step overwrites; the slot's
-      // previous chain was joined before this step, so its buffer is free.
-      const MatrixInputSnapshot *const *snapshots = nullptr;
-      if (step.snapshots && !inline_only) {
-        auto &slot = cache.snapshots[step.slot];
+      // Copy only the factor registers a later step overwrites, into the
+      // claimed helper's buffer; a chain that finds no helper copies nothing.
+      const auto fill = [&](matrix_coexecution::SnapshotBuffer &buffer) {
         size_t words = 0;
         for (unsigned i = 0; i != step.members; ++i)
           words += size_t(step.snapshot[i].a_regs + step.snapshot[i].b_regs) * wave_size;
-        slot.data.resize(words);
-        uint32_t *out = slot.data.data();
+        buffer.data.resize(words);
+        uint32_t *out = buffer.data.data();
         const auto copy = [&](uint16_t base, uint8_t regs, MatrixInputSnapshot::Operand &operand) {
           if (!regs)
             return;
@@ -3014,16 +3012,16 @@ bool ComputeUnitCore::replay_mma_plan(Wavefront *active, uint32_t wave_size, boo
         };
         for (unsigned i = 0; i != step.members; ++i) {
           const mma_plan::SnapshotSpec &spec = step.snapshot[i];
-          slot.entries[i] = {};
-          copy(spec.a_base, spec.a_regs, slot.entries[i].a);
-          copy(spec.b_base, spec.b_regs, slot.entries[i].b);
-          slot.pointers[i] = spec.a_regs || spec.b_regs ? &slot.entries[i] : nullptr;
+          buffer.entries[i] = {};
+          copy(spec.a_base, spec.a_regs, buffer.entries[i].a);
+          copy(spec.b_base, spec.b_regs, buffer.entries[i].b);
+          buffer.pointers[i] = spec.a_regs || spec.b_regs ? &buffer.entries[i] : nullptr;
         }
-        snapshots = slot.pointers.data();
         ++cache.stats.snapshot_chains;
         cache.stats.snapshot_bytes += words * sizeof(uint32_t);
-      }
-      if (!inline_only && replay.submit(step.slot, step, active, snapshots)) {
+        return static_cast<const MatrixInputSnapshot *const *>(buffer.pointers.data());
+      };
+      if (!inline_only && replay.submit(step.slot, step, active, fill)) {
         ++cache.stats.offloads;
         cache.stats.chained += step.members - 1u;
         // A replay is one asynchronous window; every accepted job is joined.

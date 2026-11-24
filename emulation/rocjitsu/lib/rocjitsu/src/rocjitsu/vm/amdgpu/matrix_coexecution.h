@@ -20,6 +20,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -29,14 +30,31 @@
 
 #if defined(__linux__)
 #include <pthread.h>
+#include <sched.h>
 #endif
 
 namespace rocjitsu::amdgpu::matrix_coexecution {
 
-// Bound the warm handoff period before falling back to a blocking wait.
-inline constexpr unsigned spin_count() { return 512; }
-inline constexpr unsigned idle_spin_count() { return spin_count(); }
-inline constexpr unsigned completion_spin_count() { return spin_count(); }
+// Bound the warm handoff period before falling back to a blocking wait. An
+// idle helper must stay awake across the gap between one wave's MMA blocks
+// (memory steps, other waves on the CU); otherwise every handoff pays a futex
+// wakeup. The issuer's completion wait only has to cover one chain.
+// RJ_MMA_SPIN=<pauses> overrides both, e.g. for ceiling measurements.
+inline unsigned spin_override() {
+  static const unsigned pauses = [] {
+    const char *value = std::getenv("RJ_MMA_SPIN");
+    return value ? static_cast<unsigned>(std::strtoul(value, nullptr, 0)) : 0u;
+  }();
+  return pauses;
+}
+inline unsigned idle_spin_count() {
+  const unsigned pauses = spin_override();
+  return pauses ? pauses : 1u << 13;
+}
+inline unsigned completion_spin_count() {
+  const unsigned pauses = spin_override();
+  return pauses ? pauses : 1u << 12;
+}
 inline void relax_cpu() {
 #if RJ_HOST_HAS_GNU_X86_PAUSE_BUILTIN
   __builtin_ia32_pause();
@@ -66,31 +84,129 @@ inline void register_helper_fork_guard() {
 #endif
 }
 
-// Borrowed helper capacity. When a budget is set, helpers may only use host
-// threads that CU dispatch leaves idle: a claim succeeds while running CU
-// quanta plus claimed helpers stay below the budget. Dispatch is never gated.
-// A zero budget keeps helpers as a separate reservation.
-inline constinit std::atomic<int> running_cus{0};
-inline constinit std::atomic<int> executor_budget{0};
-/// @brief Counts one CU quantum as an occupied host thread.
-struct RunningCu {
-  RunningCu() { running_cus.fetch_add(1, std::memory_order_relaxed); }
-  ~RunningCu() { running_cus.fetch_sub(1, std::memory_order_relaxed); }
-  RunningCu(const RunningCu &) = delete;
-  RunningCu &operator=(const RunningCu &) = delete;
+// Borrowed helper capacity. With a budget (RJ_MMA_BORROW=1: the process's
+// allowed CPUs; RJ_MMA_BORROW=<n>: n), helpers only use host threads that
+// engines and CU dispatch leave idle. Each command processor publishes the
+// threads its current quantum occupies (the engine thread plus its dispatch
+// workers) in its own cache line; a helper claim sums those shards and the
+// claimed helpers. Dispatch is never gated. Without a budget, helpers are a
+// separate reservation.
+struct alignas(64) OccupancyShard {
+  std::atomic<int> threads{0};
 };
-/// RJ_MMA_BORROW=1 shares the dispatch width with helpers instead of adding to it.
-inline void offer_dispatch_threads(uint32_t threads) {
-  static const bool borrow = [] {
+inline constexpr unsigned kMaxOccupancyShards = 256;
+inline constinit std::array<std::atomic<OccupancyShard *>, kMaxOccupancyShards> occupancy_shards{};
+inline constinit std::atomic<unsigned> occupancy_shard_end{0};
+inline int borrow_budget() {
+  static const int budget = [] {
     const char *value = std::getenv("RJ_MMA_BORROW");
+    if (!value || !*value || *value == '0')
+      return 0;
+    const long requested = std::strtol(value, nullptr, 0);
+    if (requested > 1)
+      return int(requested);
+#if defined(__linux__)
+    cpu_set_t allowed;
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0)
+      return CPU_COUNT(&allowed);
+#endif
+    return int(std::thread::hardware_concurrency());
+  }();
+  return budget;
+}
+/// @brief Registers one command processor's occupancy for its lifetime.
+class ScopedOccupancyShard {
+public:
+  ScopedOccupancyShard() {
+    for (unsigned i = 0; i != kMaxOccupancyShards; ++i) {
+      OccupancyShard *expected = nullptr;
+      if (occupancy_shards[i].compare_exchange_strong(expected, &shard_,
+                                                      std::memory_order_acq_rel)) {
+        index_ = i;
+        unsigned end = occupancy_shard_end.load(std::memory_order_relaxed);
+        while (end <= i && !occupancy_shard_end.compare_exchange_weak(end, i + 1,
+                                                                      std::memory_order_release)) {
+        }
+        return;
+      }
+    }
+  }
+  ~ScopedOccupancyShard() {
+    if (index_ != kMaxOccupancyShards)
+      occupancy_shards[index_].store(nullptr, std::memory_order_release);
+  }
+  ScopedOccupancyShard(const ScopedOccupancyShard &) = delete;
+  ScopedOccupancyShard &operator=(const ScopedOccupancyShard &) = delete;
+  /// Plain stores, once at the start and end of a quantum; no shared read-modify-write.
+  void occupy(int threads) {
+    if (index_ != kMaxOccupancyShards)
+      shard_.threads.store(threads, std::memory_order_relaxed);
+  }
+
+private:
+  OccupancyShard shard_;
+  unsigned index_ = kMaxOccupancyShards;
+};
+inline int occupied_threads() {
+  int threads = 0;
+  const unsigned end = occupancy_shard_end.load(std::memory_order_acquire);
+  for (unsigned i = 0; i != end; ++i)
+    if (const OccupancyShard *shard = occupancy_shards[i].load(std::memory_order_acquire))
+      threads += shard->threads.load(std::memory_order_relaxed);
+  return threads;
+}
+
+/// @brief Last-level-cache domains of the allowed host CPUs.
+/// @details A helper reads and writes the issuer's register tiles; across a
+/// CCD boundary each line crosses the fabric. Helpers are pinned to one domain
+/// and issuers claim helpers of their own domain.
+struct CacheDomains {
+  std::vector<std::vector<int>> cpus;  ///< Allowed CPUs per domain.
+  std::vector<int8_t> domain_of_cpu;   ///< -1 when not allowed.
+  static CacheDomains detect() {
+    CacheDomains result;
+#if defined(__linux__)
+    cpu_set_t allowed;
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0)
+      return result;
+    std::vector<int> ids;
+    for (int cpu = 0; cpu != CPU_SETSIZE; ++cpu) {
+      if (!CPU_ISSET(cpu, &allowed))
+        continue;
+      // Shared L3 list identifies the domain; fall back to one domain.
+      char path[96];
+      std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cache/index3/id", cpu);
+      int id = 0;
+      if (FILE *file = std::fopen(path, "r")) {
+        if (std::fscanf(file, "%d", &id) != 1)
+          id = 0;
+        std::fclose(file);
+      }
+      auto it = std::find(ids.begin(), ids.end(), id);
+      if (it == ids.end()) {
+        ids.push_back(id);
+        result.cpus.emplace_back();
+        it = ids.end() - 1;
+      }
+      const auto domain = it - ids.begin();
+      result.cpus[domain].push_back(cpu);
+      if (result.domain_of_cpu.size() <= size_t(cpu))
+        result.domain_of_cpu.resize(cpu + 1, -1);
+      result.domain_of_cpu[cpu] = int8_t(domain);
+    }
+#endif
+    if (result.cpus.size() > 64)
+      result = {};
+    return result;
+  }
+};
+/// RJ_MMA_REMOTE=1 lets an issuer fall back to helpers of another cache domain.
+inline bool remote_helpers() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_MMA_REMOTE");
     return value && *value && *value != '0';
   }();
-  if (!borrow)
-    return;
-  int budget = executor_budget.load(std::memory_order_relaxed);
-  while (int(threads) > budget &&
-         !executor_budget.compare_exchange_weak(budget, int(threads), std::memory_order_relaxed)) {
-  }
+  return enabled;
 }
 
 // Persistent helpers belong to a VM-owned pool, constructed lazily.
@@ -134,6 +250,17 @@ public:
   }
 
   bool ready() const { return state_.load(std::memory_order_acquire) == 0; }
+  void pin(const std::vector<int> &cpus) {
+#if defined(__linux__)
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    for (int cpu : cpus)
+      CPU_SET(cpu, &set);
+    (void)pthread_setaffinity_np(thread_.native_handle(), sizeof(set), &set);
+#else
+    (void)cpus;
+#endif
+  }
   /// The first failing chain member and its error; valid after wait().
   unsigned failed_member() const { return failed_; }
   const HelperErrorSink &error() const { return error_; }
@@ -202,11 +329,19 @@ private:
   std::thread thread_;
 };
 
-// Map the issuer hash into the pool before selecting a bit in its current word.
-// Pools above 64 helpers keep first-word priority.
+// Map the issuer hash into a domain's helpers before selecting a free bit.
 constexpr unsigned preferred_helper_start(uint32_t issuer_hash, std::size_t capacity) {
   return static_cast<unsigned>((uint64_t{issuer_hash} * capacity) >> 32) & 63;
 }
+
+/// @brief Factor copies for the chain a claimed helper executes.
+/// @details Owned by the helper slot, so only chains that really run on a
+/// helper copy anything; reused after the slot is joined.
+struct SnapshotBuffer {
+  std::array<MatrixInputSnapshot, Helper::kMaxChain> entries{};
+  std::array<const MatrixInputSnapshot *, Helper::kMaxChain> pointers{};
+  std::vector<uint32_t> data;
+};
 
 // Each claim covers publication through joining, so another issuer cannot
 // reuse a helper's payload while its previous owner still reads completion.
@@ -217,6 +352,7 @@ class SharedPool {
   struct Slot {
     Helper helper;
     unsigned index;
+    SnapshotBuffer snapshot;
     explicit Slot(unsigned i) : index(i) {}
   };
 
@@ -226,14 +362,24 @@ public:
     explicit operator bool() const { return slot != nullptr; }
   };
 
-  /// Claim a helper without waiting, or return an empty ticket for inline execution.
+  /// Claim a helper and publish one instruction, or return an empty ticket.
   Ticket submit(Instruction &instruction, void *context) {
     Instruction *chain = &instruction;
-    return {try_submit(&chain, 1, context)};
+    return submit(&chain, 1, context);
   }
   Ticket submit(Instruction *const *chain, unsigned count, void *context,
                 const MatrixInputSnapshot *const *snapshots = nullptr) {
-    return {try_submit(chain, count, context, snapshots)};
+    const Ticket ticket = claim();
+    if (ticket)
+      start(ticket, chain, count, context, snapshots);
+    return ticket;
+  }
+  /// Reserve a helper without publishing; start() must follow on success.
+  Ticket claim() { return {try_claim()}; }
+  static SnapshotBuffer &snapshot_buffer(Ticket ticket) { return ticket.slot->snapshot; }
+  static void start(Ticket ticket, Instruction *const *chain, unsigned count, void *context,
+                    const MatrixInputSnapshot *const *snapshots = nullptr) {
+    ticket.slot->helper.submit(chain, count, context, snapshots);
   }
   /// A true result permits finish() without waiting for the helper.
   static bool ready(Ticket ticket) { return !helpers_enabled() || ticket.slot->helper.ready(); }
@@ -253,7 +399,7 @@ public:
     return util::Result::success();
   }
 
-  explicit SharedPool(unsigned count) {
+  explicit SharedPool(unsigned count) : domains_(CacheDomains::detect()) {
     assert(count <= 128);
     register_helper_fork_guard();
     if (!helpers_enabled())
@@ -266,6 +412,19 @@ public:
       free_[word].store(bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1,
                         std::memory_order_relaxed);
     }
+    // Split helpers evenly over cache domains, contiguous per domain, and pin them.
+    const size_t domains = domains_.cpus.size();
+    if (domains > 1 && count) {
+      domain_masks_.assign(domains, {});
+      unsigned next = 0;
+      for (size_t d = 0; d != domains; ++d) {
+        const unsigned share = unsigned(count / domains + (d < count % domains));
+        for (unsigned k = 0; k != share; ++k, ++next) {
+          domain_masks_[d][next / 64] |= uint64_t{1} << (next % 64);
+          slots_[next]->helper.pin(domains_.cpus[d]);
+        }
+      }
+    }
   }
 
   ~SharedPool() {
@@ -276,7 +435,7 @@ public:
         (void)slot.release();
   }
 
-  /// Cheap advisory capacity check. A following submit() may still lose a race.
+  /// Cheap advisory capacity check. A following claim() may still lose a race.
   bool available() const {
     if (!helpers_enabled() || !within_budget())
       return false;
@@ -285,49 +444,52 @@ public:
   }
 
 private:
-  /// Claimed helpers plus running CU quanta stay below a borrowing budget.
   bool within_budget() const {
-    const int budget = executor_budget.load(std::memory_order_relaxed);
+    const int budget = borrow_budget();
     if (!budget)
       return true;
     int claimed = int(slots_.size());
     for (const auto &word : free_)
       claimed -= std::popcount(word.load(std::memory_order_relaxed));
-    return running_cus.load(std::memory_order_relaxed) + claimed < budget;
+    return occupied_threads() + claimed < budget;
   }
 
-  Slot *try_submit(Instruction *const *chain, unsigned count, void *wave,
-                   const MatrixInputSnapshot *const *snapshots = nullptr) {
+  /// Helpers of the issuer's cache domain; every helper with one domain.
+  std::array<uint64_t, 2> local_mask() const {
+    if (domain_masks_.empty())
+      return {~uint64_t{0}, ~uint64_t{0}};
+#if defined(__linux__)
+    const int cpu = sched_getcpu();
+    if (cpu >= 0 && size_t(cpu) < domains_.domain_of_cpu.size() &&
+        domains_.domain_of_cpu[cpu] >= 0) {
+      if (!remote_helpers())
+        return domain_masks_[domains_.domain_of_cpu[cpu]];
+      return {~uint64_t{0}, ~uint64_t{0}};
+    }
+#endif
+    return {~uint64_t{0}, ~uint64_t{0}};
+  }
+
+  Slot *try_claim() {
     if (!helpers_enabled() || !within_budget())
       return nullptr;
-    // A stable preference may reuse a still-awake helper without pinning or a
-    // per-job cursor. Single-issuer counters support lower sleep/wakeup costs,
-    // but neither this preference nor more complex allocation policies gave
-    // consistent throughput gains; multi-issuer wake delays can increase.
-    // Keep the simple policy: useful issuer overlap and spare CPU capacity
-    // determine the payoff. Bound claims and fall back inline on a miss.
-    //
-    // One or two loads detect an exhausted pool. Reservation is bounded even
-    // under contention: after two failed CAS attempts per word, run inline.
-    // A conservative miss is allowed; waiting for worker capacity is not.
-    // Scale the hash to the pool size so small pools do not send out-of-range
-    // starts to the lowest helper.
-    // Pools above 64 helpers retain first-word priority; this preference does
-    // not distribute issuers uniformly across both words.
+    // Bound claims and fall back inline on a miss: one or two loads detect an
+    // exhausted pool, and after two failed CAS attempts per word the chain
+    // runs on the issuer. A stable per-issuer start keeps reusing an awake helper.
     static thread_local const uint32_t issuer_hash =
         static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    const auto mask = local_mask();
     const unsigned start = preferred_helper_start(issuer_hash, slots_.size());
     for (unsigned word = 0; word != (slots_.size() > 64 ? 2u : 1u); ++word) {
       auto free = free_[word].load(std::memory_order_relaxed);
-      for (unsigned attempt = 0; free && attempt != 2; ++attempt) {
-        const unsigned bit = (std::countr_zero(std::rotr(free, int(start))) + start) & 63;
+      for (unsigned attempt = 0; (free & mask[word]) && attempt != 2; ++attempt) {
+        const uint64_t candidates = free & mask[word];
+        const unsigned bit = (std::countr_zero(std::rotr(candidates, int(start))) + start) & 63;
         if (!free_[word].compare_exchange_strong(free, free & ~(uint64_t{1} << bit),
                                                  std::memory_order_acquire,
                                                  std::memory_order_relaxed))
           continue;
-        auto *slot = slots_[word * 64 + bit].get();
-        slot->helper.submit(chain, count, wave, snapshots);
-        return slot;
+        return slots_[word * 64 + bit].get();
       }
     }
     return nullptr;
@@ -337,6 +499,8 @@ private:
   }
   alignas(64) std::array<std::atomic<uint64_t>, 2> free_{};
 
+  CacheDomains domains_;
+  std::vector<std::array<uint64_t, 2>> domain_masks_;
   std::vector<std::unique_ptr<Slot>> slots_;
 };
 
