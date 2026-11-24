@@ -1080,11 +1080,13 @@ bool RocVideoDecoder::CodecSupported(int device_id, rocDecVideoCodec codec_id, u
     decode_caps.codec_type = codec_id;
     decode_caps.chroma_format = rocDecVideoChromaFormat_420;
     decode_caps.bit_depth_minus_8 = bit_depth - 8;
-    if((rocDecGetDecoderCaps(&decode_caps) != ROCDEC_SUCCESS) || !decode_caps.is_supported) {
-        return false;
-    } else {
-        return true;
+    // A failed query means the decode stack is unusable, not that the codec is unsupported; throw so callers don't
+    // mistake it for a reason to skip.
+    rocDecStatus status = rocDecGetDecoderCaps(&decode_caps);
+    if (status != ROCDEC_SUCCESS) {
+        ROCDEC_THROW("Decode capability query failed: " + std::string(rocDecGetErrorName(status)), status);
     }
+    return decode_caps.is_supported != 0;
 }
 
 void RocVideoDecoder::WaitForDecodeCompletion() {
