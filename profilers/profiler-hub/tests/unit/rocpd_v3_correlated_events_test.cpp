@@ -122,12 +122,17 @@ protected:
 
         for(size_t index = 0; index < 2; ++index)
         {
+            // The writer's name fields are string_views, so the names must outlive
+            // the inserts below.
             const std::string suffix =
                 std::to_string(static_cast<int>(group)) + "-" + std::to_string(index);
+            const std::string region_name = "region-" + suffix;
+            const std::string kernel_name = "kernel-" + suffix;
+            const std::string copy_name   = "copy-" + suffix;
 
             const uint64_t region_start = start_of(group, event_type_t::region, index);
             writer_types::region_data_t region;
-            region.name            = "region-" + suffix;
+            region.name            = region_name;
             region.start_timestamp = region_start;
             region.end_timestamp   = region_start + 5;
             region.event           = event;
@@ -139,14 +144,14 @@ protected:
             kernel.kernel_symbol_id = 20;
             kernel.start_timestamp  = kernel_start;
             kernel.end_timestamp    = kernel_start + 5;
-            kernel.name             = "kernel-" + suffix;
+            kernel.name             = kernel_name;
             kernel.event            = event;
             writer.insert_kernel_dispatch_data(kernel, environment);
 
             const uint64_t copy_start = start_of(group, event_type_t::memory_copy, index);
             writer_types::memory_copy_data_t copy;
-            copy.name            = "copy-" + suffix;
-            copy.region_name     = "copy-" + suffix;
+            copy.name            = copy_name;
+            copy.region_name     = copy_name;
             copy.start_timestamp = copy_start;
             copy.end_timestamp   = copy_start + 5;
             copy.size            = 64;
