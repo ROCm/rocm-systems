@@ -11604,14 +11604,16 @@ TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWh
 }
 
 // RCCL_CE_REDUCE_PER_CHUNK{,_SLOTS} size the CE staging and signal windows only
-// when CE ReduceScatter can stage on this comm (enabled and single-node). There a
-// peer that disagrees must fail init; elsewhere a stray per-rank env difference
-// must not, because every rank resolves to the default layout.
+// when CE ReduceScatter can stage on this comm: enabled and comm->nNodes == 1, as
+// ncclCeInit decides. There a peer that disagrees must fail init; elsewhere a stray
+// per-rank env difference must not. comm->nNodes counts ring roots, not hosts, so
+// an MNNVL comm spread over two hosts still stages and must still be checked.
 TEST_F(InitMicrotest, InitTransportsRank_CeReducePerChunkMismatch_FailsOnlyWhereCeReduceScatterStages) {
   using Patch = std::function<void(Tr_AllGatherInfo&)>;
   struct Scene {
     int64_t ceReduceScatter;
-    bool multiNode;
+    bool twoHosts;
+    bool twoCommNodes;
     int expectPerChunk;
     int expectSlots;
   };
@@ -11628,8 +11630,9 @@ TEST_F(InitMicrotest, InitTransportsRank_CeReducePerChunkMismatch_FailsOnlyWhere
       return deft;
     });
     std::vector<PeerSpec> specs(4);
-    if (s.multiNode) specs[2].node = specs[3].node = 1;
+    if (s.twoHosts) specs[2].node = specs[3].node = 1;
     const auto gathers = Tr_InstallGathers(c, specs, [&](int r, Tr_AllGatherInfo& row) {
+      row.topoRanks.ringRecv[0] = (s.twoCommNodes && r >= 2) ? 102 : 100;
       if (r == 0) {
         EXPECT_EQ(row.ceReducePerChunk, s.expectPerChunk);
         EXPECT_EQ(row.ceReduceNumStagingSlots, s.expectSlots);
@@ -11645,11 +11648,14 @@ TEST_F(InitMicrotest, InitTransportsRank_CeReducePerChunkMismatch_FailsOnlyWhere
     row.ceReducePerChunk = 0;
     row.ceReduceNumStagingSlots = NCCL_CE_NUM_SLOTS;
   };
-  const Scene staging{/*ceReduceScatter=*/1, /*multiNode=*/false, /*expectPerChunk=*/1, /*expectSlots=*/4};
-  const Scene ceRsOff{/*ceReduceScatter=*/0, /*multiNode=*/false, /*expectPerChunk=*/0,
-                      /*expectSlots=*/NCCL_CE_NUM_SLOTS};
-  const Scene multiNode{/*ceReduceScatter=*/1, /*multiNode=*/true, /*expectPerChunk=*/0,
-                        /*expectSlots=*/NCCL_CE_NUM_SLOTS};
+  const Scene staging{/*ceReduceScatter=*/1, /*twoHosts=*/false, /*twoCommNodes=*/false,
+                      /*expectPerChunk=*/1, /*expectSlots=*/4};
+  const Scene ceRsOff{/*ceReduceScatter=*/0, /*twoHosts=*/false, /*twoCommNodes=*/false,
+                      /*expectPerChunk=*/0, /*expectSlots=*/NCCL_CE_NUM_SLOTS};
+  const Scene multiNode{/*ceReduceScatter=*/1, /*twoHosts=*/true, /*twoCommNodes=*/true,
+                        /*expectPerChunk=*/1, /*expectSlots=*/4};
+  const Scene mnnvl{/*ceReduceScatter=*/1, /*twoHosts=*/true, /*twoCommNodes=*/false,
+                    /*expectPerChunk=*/1, /*expectSlots=*/4};
 
   EXPECT_TRUE(reachesPostset(staging, nullptr)) << "matching values";
   EXPECT_FALSE(reachesPostset(staging, defaultPeer)) << "peer on the default layout";
@@ -11659,6 +11665,8 @@ TEST_F(InitMicrotest, InitTransportsRank_CeReducePerChunkMismatch_FailsOnlyWhere
       << "peer with per-chunk off and the same slot count";
   EXPECT_TRUE(reachesPostset(ceRsOff, defaultPeer)) << "CE ReduceScatter off";
   EXPECT_TRUE(reachesPostset(multiNode, defaultPeer)) << "multi-node comm";
+  EXPECT_TRUE(reachesPostset(mnnvl, nullptr)) << "MNNVL comm, matching values";
+  EXPECT_FALSE(reachesPostset(mnnvl, defaultPeer)) << "MNNVL comm across two hosts";
   g_rcclParamCeReduceScatter = savedCeRs;
 }
 

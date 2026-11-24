@@ -2564,14 +2564,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
   {
-    // Effective values only: with CE ReduceScatter off or a multi-node comm the
-    // per-chunk knobs do not reach the staging layout, so a stray per-rank env
-    // difference must not fail init.
-    const bool ceRsStaging = ncclCeReduceScatterStagingEnabled(rcclParamCeReduceScatter(), nNodes);
+    // The layout ncclCeInit would pick if this comm resolves to one node; the
+    // comparison below runs only once comm->nNodes is known. With CE ReduceScatter
+    // off the per-chunk knobs do not reach the layout.
+    const bool ceRsEnabled = rcclParamCeReduceScatter() != 0;
     allGather3Data[rank].ceReducePerChunk =
-        ncclCeReduceScatterPerChunkEnabled(ceRsStaging, (int)rcclParamCeReducePerChunk()) ? 1 : 0;
+        ncclCeReduceScatterPerChunkEnabled(ceRsEnabled, (int)rcclParamCeReducePerChunk()) ? 1 : 0;
     allGather3Data[rank].ceReduceNumStagingSlots = (int)ncclCeReduceScatterNumStagingSlots(
-        ceRsStaging, (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
+        ceRsEnabled, (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
   }
   allGather3Data[rank].blocking = comm->config.blocking;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
@@ -2619,21 +2619,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       WARN("NCCL_TREE_COMPACT mismatch: rank %d (%s) has %d, rank %d (%s) has %d; all ranks must set the same value",
            rank, allGather3Data[rank].hostname, allGather3Data[rank].treeCompact, r, allGather3Data[r].hostname,
            allGather3Data[r].treeCompact);
-      ret = ncclInvalidUsage;
-      goto fail;
-    }
-  }
-
-  // RCCL_CE_REDUCE_PER_CHUNK / RCCL_CE_REDUCE_PER_CHUNK_SLOTS size each rank's CE
-  // staging and signal windows. Ranks that disagree write past peers' windows.
-  for (int r = 0; r < nranks; r++) {
-    if (allGather3Data[r].ceReducePerChunk != allGather3Data[rank].ceReducePerChunk ||
-        allGather3Data[r].ceReduceNumStagingSlots != allGather3Data[rank].ceReduceNumStagingSlots) {
-      WARN("RCCL_CE_REDUCE_PER_CHUNK/SLOTS mismatch: rank %d (%s) has perChunk=%d slots=%d, "
-           "rank %d (%s) has perChunk=%d slots=%d; all ranks must set the same values",
-           rank, allGather3Data[rank].hostname, allGather3Data[rank].ceReducePerChunk,
-           allGather3Data[rank].ceReduceNumStagingSlots, r, allGather3Data[r].hostname,
-           allGather3Data[r].ceReducePerChunk, allGather3Data[r].ceReduceNumStagingSlots);
       ret = ncclInvalidUsage;
       goto fail;
     }
@@ -2698,6 +2683,26 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     comm->minNetCount = std::min(comm->minNetCount, allGather3Data[r].localNetCountByBw);
     comm->minLocalNetBw = std::min(comm->minLocalNetBw, allGather3Data[r].localNetBw);
   }
+
+  // RCCL_CE_REDUCE_PER_CHUNK / RCCL_CE_REDUCE_PER_CHUNK_SLOTS size each rank's CE
+  // staging and signal windows whenever ncclCeInit sees comm->nNodes == 1, which
+  // MNNVL also reports for multi-host gfx1250. Ranks that disagree write past
+  // peers' windows. Gate on the same comm->nNodes so the check and the sizing agree.
+  if (comm->nNodes == 1) {
+    for (int r = 0; r < nranks; r++) {
+      if (allGather3Data[r].ceReducePerChunk != allGather3Data[rank].ceReducePerChunk ||
+          allGather3Data[r].ceReduceNumStagingSlots != allGather3Data[rank].ceReduceNumStagingSlots) {
+        WARN("RCCL_CE_REDUCE_PER_CHUNK/SLOTS mismatch: rank %d (%s) has perChunk=%d slots=%d, "
+             "rank %d (%s) has perChunk=%d slots=%d; all ranks must set the same values",
+             rank, allGather3Data[rank].hostname, allGather3Data[rank].ceReducePerChunk,
+             allGather3Data[rank].ceReduceNumStagingSlots, r, allGather3Data[r].hostname,
+             allGather3Data[r].ceReducePerChunk, allGather3Data[r].ceReduceNumStagingSlots);
+        ret = ncclInvalidUsage;
+        goto fail;
+      }
+    }
+  }
+
   if (rank == 0) {
     INFO(NCCL_INIT, "Local Net device counts across ranks: min %d max %d", minLocalNetCount, maxLocalNetCount);
     INFO(NCCL_INIT, "Local CollNet device counts across ranks: min %d max %d", minLocalCollNetCount,

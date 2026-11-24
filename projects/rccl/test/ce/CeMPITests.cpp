@@ -84,6 +84,9 @@ constexpr float kUpperHalfBias = 1048576.0f;
 // they never divide a chunk or slot size: the same offset in neighbouring chunks
 // holds a different value, and reading the wrong slot or writing the wrong output
 // offset changes the result. Float Sum stays an exact integer (<= 2036 at 8 ranks).
+// Back-to-back iterations pass i + iter, so every element changes between calls and
+// a reducer that runs early on a stale doorbell reads the previous call's bytes and
+// fails, without widening the value range.
 constexpr size_t kFloatValuePeriod = 251;
 
 // BF16 holds every integer up to 256 exactly. Pick the largest prime period whose
@@ -990,13 +993,6 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, sendSym));
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
 
-        // Vary by rank and element with a prime period so neighbouring chunks and
-        // slots hold different bytes; a wrong slot or output offset then changes
-        // the result. Sums stay small integers, so float Sum is exact.
-        ASSERT_EQ(hipSuccess,
-                  initializeBufferWithPattern<float>(sendSym.ptr, alignedCount, [rank](size_t i) {
-                      return ceRankIndexValueFloat(rank, i);
-                  }));
         int predictedAlgo = -1, proto = 0, nChannels = 0;
         ASSERT_EQ(ncclSuccess,
                   rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, alignedCount, ncclFloat32, op,
@@ -1011,6 +1007,11 @@ protected:
 
         for(int iter = 0; iter < iterations; ++iter)
         {
+            const size_t shift = static_cast<size_t>(iter);
+            ASSERT_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(sendSym.ptr, alignedCount, [rank, shift](size_t i) {
+                          return ceRankIndexValueFloat(rank, i + shift);
+                      }));
             if(op == ncclSum)
             {
                 ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0xFF, bytes));
@@ -1022,8 +1023,8 @@ protected:
 
             if(op == ncclSum)
             {
-                ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, alignedCount, [nRanks](size_t i) {
-                    return ceRankIndexSumFloat(nRanks, i);
+                ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, alignedCount, [nRanks, shift](size_t i) {
+                    return ceRankIndexSumFloat(nRanks, i + shift);
                 }))
                     << "Rank " << rank << ": CE AllReduce Sum verification failed on iteration " << iter;
             }
@@ -1327,17 +1328,17 @@ protected:
         ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, recvcount * sizeof(hip_bfloat16)));
         RCCLTestGuards::DeviceBufferAutoGuard sendGuard(sendBuf);
         RCCLTestGuards::DeviceBufferAutoGuard recvGuard(recvBuf);
-        ASSERT_EQ(hipSuccess,
-                  initializeBufferWithPattern<hip_bfloat16>(
-                      sendBuf, totalElem,
-                      [rank, period](size_t i) { return hip_bfloat16(ceRankIndexValueBf16(rank, i, period)); }));
-
         const size_t shardBase = static_cast<size_t>(rank) * recvcount;
-        const auto   expected  = [nRanks, shardBase, period](size_t j) {
-            return hip_bfloat16(ceRankIndexAvgBf16(nRanks, shardBase + j, period));
-        };
         for(int iter = 0; iter < iterations; ++iter)
         {
+            const size_t shift = static_cast<size_t>(iter);
+            ASSERT_EQ(hipSuccess, initializeBufferWithPattern<hip_bfloat16>(
+                                      sendBuf, totalElem, [rank, period, shift](size_t i) {
+                                          return hip_bfloat16(ceRankIndexValueBf16(rank, i + shift, period));
+                                      }));
+            const auto expected = [nRanks, shardBase, period, shift](size_t j) {
+                return hip_bfloat16(ceRankIndexAvgBf16(nRanks, shardBase + j + shift, period));
+            };
             ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0xFF, recvcount * sizeof(hip_bfloat16)));
             if(grouped)
                 ASSERT_EQ(ncclSuccess, ncclGroupStart());
