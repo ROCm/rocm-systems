@@ -1878,7 +1878,7 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 </tr>
 <tr>
 <td>LDS wrong address</td>
-<td>Implemented for gfx1200/gfx1201 wave32/wave64 <code>ds_store_b32</code>/<code>ds_load_b32</code>, gfx942/gfx950 wave64 <code>ds_write_b32</code>/<code>ds_write_b128</code>, and gfx1250 wave32 <code>ds_store_b32</code>/<code>ds_load_b32</code> in the direct, independently owned CFG profile. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR. Other LDS forms and targets remain follow-up work.</td>
+<td>Implements scalar b32/b64/b96/b128 loads and stores on gfx1200/gfx1201 wave32/wave64, gfx942/gfx950 wave64, and gfx1250 wave32. Also admits b32/b64 two-address and stride64 families on gfx1200/gfx1201/gfx942/gfx950. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR in the direct, independently owned CFG profile. See the exact LDS matrix below. Other forms and targets remain follow-up work.</td>
 <td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h">LDS API</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_wrong_address_test.cpp">library tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_cli_test.cpp">CLI tests</a></td>
 </tr>
 <tr>
@@ -2011,9 +2011,9 @@ targets and ten target/wave combinations:</p>
 </tbody>
 </table>
 <p>The table above describes Drop only. <code>lds_wrong_address_capabilities()</code> separately
-reports linked LDS profiles: gfx1200/gfx1201 wave32/wave64 <code>ds_store_b32</code>/<code>ds_load_b32</code>,
-gfx942/gfx950 wave64 <code>ds_write_b32</code>/<code>ds_write_b128</code>, and gfx1250 wave32
-<code>ds_store_b32</code>/<code>ds_load_b32</code>, restricted to independently owned direct CFGs.
+reports the exact LDS matrix below: scalar b32/b64/b96/b128 loads and stores on
+all five concrete targets, plus b32/b64 two-address and stride64 families on
+gfx1200/gfx1201/gfx942/gfx950, restricted to independently owned direct CFGs.
 CDNA GDS encodings are excluded; the ACC data selector is preserved.
 A target is omitted if its decoder or binding is not linked. Other targets,
 waves, and DS forms are not advertised by this recipe; the Drop table does not
@@ -2079,6 +2079,44 @@ must decode completely and satisfy the shared source checks before discovery
 can return an inventory. Detailed admission and diagnostics are in
 the <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp">source context</a>
 and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h">shared Instrumentor contract</a>.</p>
+<p>The LDS address profiles cover these exact instruction families:</p>
+<table>
+<thead>
+<tr>
+<th>Concrete target</th>
+<th>Waves</th>
+<th>Scalar forms</th>
+<th>Two-address forms</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>gfx1200, gfx1201</td>
+<td>32, 64</td>
+<td><code>ds_load_b32/b64/b96/b128</code>, <code>ds_store_b32/b64/b96/b128</code></td>
+<td><code>ds_load_2addr_b32/b64</code>, <code>ds_store_2addr_b32/b64</code>, <code>ds_load_2addr_stride64_b32/b64</code>, <code>ds_store_2addr_stride64_b32/b64</code></td>
+</tr>
+<tr>
+<td>gfx942, gfx950</td>
+<td>64</td>
+<td><code>ds_read_b32/b64/b96/b128</code>, <code>ds_write_b32/b64/b96/b128</code></td>
+<td><code>ds_read2_b32/b64</code>, <code>ds_write2_b32/b64</code>, <code>ds_read2st64_b32/b64</code>, <code>ds_write2st64_b32/b64</code></td>
+</tr>
+<tr>
+<td>gfx1250</td>
+<td>32</td>
+<td><code>ds_load_b32/b64/b96/b128</code>, <code>ds_store_b32/b64/b96/b128</code></td>
+<td>None; these forms require split relocation outside this profile.</td>
+</tr>
+</tbody>
+</table>
+<p>A slash-separated width suffix denotes each named form, for example
+<code>ds_load_b32/b64</code> denotes <code>ds_load_b32</code> and <code>ds_load_b64</code>. This is 72 concrete
+target/form profiles, expanded to 104 target/wave/form capabilities. Only the
+address VGPR selector changes; the two offsets, stride semantics, data and
+destination tuples, and CDNA ACC bit are preserved. CDNA3/4 GDS instructions
+remain excluded. gfx1250 requires a statically proven address bank and checks
+the replacement selector against that bank's allocated register window.</p>
 <p>The LDS inventory contains complete, reachable instructions of the admitted forms in
 the kernel; clause members are not advertised. It does not require a
 barrier or successful Drop qualification. The replacement register must be
@@ -2324,15 +2362,15 @@ Mutation success and the capability listing make no execution or detector
 qualification claim.</p>
 <p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">Drop CLI tests</a> exercise
 all ten Drop rows above using the built executable. The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_cli_test.cpp">LDS CLI tests</a>
-cover the bounded LDS profile. These tests compare library and CLI bytes, decode
+cover the bounded LDS profile. The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/b96_lds_test.cpp">b96 library</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/b96_lds_cli_test.cpp">b96 CLI</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/scalar_two_lds_test.cpp">scalar/two-address library</a>, and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/scalar_two_lds_cli_test.cpp">scalar/two-address CLI</a> suites exercise the additional widths and forms, including RDNA4 wave32. These tests compare library and CLI bytes, decode
 selected instructions, reparse mutants and check preservation and rejection
 paths; the Drop tests also cover sibling kernels and I/O paths. The
 symbol-boundary test checks the actual executable for runtime and execution
 provider dependencies. To run the focused suites:</p>
 <div class="highlight"><pre><span></span><code>ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--show-only<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'</span>
 ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--output-on-failure<span class="w"> </span>--no-tests<span class="o">=</span>error<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'</span>
 </code></pre></div>
 
 
