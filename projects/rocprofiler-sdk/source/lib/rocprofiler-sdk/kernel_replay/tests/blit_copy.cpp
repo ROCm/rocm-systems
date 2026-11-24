@@ -25,12 +25,16 @@
 
 #include <gtest/gtest.h>
 
+#include <elf.h>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -130,14 +134,33 @@ TEST(kernel_replay_blit_copy, short_lists_split_into_pieces_down_to_4_kib)
                   std::uint64_t{1} << abi::min_piece_shift);
 }
 
-// The test links the SDK statically, so the lookup starts from the test's own bin directory, which
-// sits beside lib in the build tree.
-TEST(kernel_replay_blit_copy, code_objects_are_found_beside_the_library)
+TEST(kernel_replay_blit_copy, code_objects_are_built_into_the_library)
 {
+    namespace blit = rocprofiler::kernel_replay::blit;
+
+    auto expected  = std::vector<std::string>{};
     auto gpu_names = std::istringstream{KERNEL_REPLAY_BLIT_GPU_NAMES};
     for(auto gpu_name = std::string{}; std::getline(gpu_names, gpu_name, ',');)
-        EXPECT_FALSE(rocprofiler::kernel_replay::blit::find_code_object(gpu_name).empty())
-            << gpu_name;
-    EXPECT_TRUE(rocprofiler::kernel_replay::blit::find_code_object("gfx9999").empty());
+        expected.emplace_back(gpu_name);
+
+    ASSERT_EQ(blit::get_embedded_code_objects().size(), expected.size());
+    for(const auto& gpu_name : expected)
+    {
+        const auto* code_object = blit::find_code_object(gpu_name);
+        ASSERT_NE(code_object, nullptr) << gpu_name;
+        EXPECT_EQ(reinterpret_cast<std::uintptr_t>(code_object->data) % 4096, 0) << gpu_name;
+        ASSERT_GE(code_object->size, sizeof(Elf64_Ehdr)) << gpu_name;
+
+        auto header = Elf64_Ehdr{};
+        std::memcpy(&header, code_object->data, sizeof(header));
+        EXPECT_EQ(std::memcmp(header.e_ident, ELFMAG, SELFMAG), 0) << gpu_name;
+        EXPECT_EQ(header.e_machine, EM_AMDGPU) << gpu_name;
+
+        // The code object's target ends in its GPU's name, as in amdgcn-amd-amdhsa--gfx942.
+        const auto bytes =
+            std::string_view{static_cast<const char*>(code_object->data), code_object->size};
+        EXPECT_NE(bytes.find("-" + gpu_name), std::string_view::npos) << gpu_name;
+    }
+    EXPECT_EQ(blit::find_code_object("gfx9999"), nullptr);
 }
 }  // namespace

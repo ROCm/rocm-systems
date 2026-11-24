@@ -260,9 +260,9 @@ the SDK owns, holding its defaults, and the tool changes the flags through it:
    * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE``
      - Device memory only, as much as the snapshot needs, leaving the application 5% of what is
        free (memory kept from earlier replays counts as free) for the replayed kernel's scratch.
-       This needs the SDK's copy kernels for the GPU. They are built for the GPUs in
-       ``GPU_TARGETS`` that the SDK's compiler supports, or for every GPU it supports from gfx8
-       on when ``GPU_TARGETS`` is empty, and installed in ``share/rocprofiler-sdk/kernel-replay``.
+       This needs the SDK's copy kernels for the GPU. They are built into the SDK library for the
+       GPUs in ``GPU_TARGETS`` that the SDK's compiler supports, or for every GPU it supports from
+       gfx8 on when ``GPU_TARGETS`` is empty.
    * - ``SNAPSHOT_DEVICE | SNAPSHOT_HOST_PINNED``
      - Device memory first, as above, and pinned host memory for what does not fit, as much as
        the snapshot needs.

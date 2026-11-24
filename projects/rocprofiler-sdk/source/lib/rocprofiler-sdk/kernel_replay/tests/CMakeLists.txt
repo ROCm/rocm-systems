@@ -125,8 +125,8 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# The tile arithmetic the blit kernels share with the host, and where the SDK finds their
-# code objects, checked without a GPU.
+# The tile arithmetic the blit kernels share with the host, and the code objects built
+# into the library, checked without a GPU.
 add_executable(kernel-replay-blit-copy-test)
 target_sources(kernel-replay-blit-copy-test PRIVATE blit_copy.cpp)
 

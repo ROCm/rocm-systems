@@ -22,8 +22,6 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/blit-copy.hpp"
 
-#include "lib/common/dl.hpp"
-#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -33,9 +31,6 @@
 #include "lib/rocprofiler-sdk/kernel_replay/blit-copy-kernel.hpp"
 
 #include <fmt/format.h>
-
-#include <fcntl.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -148,7 +143,6 @@ struct workspace_layout_t
 
 struct kernel_state_t
 {
-    int                                     file = -1;
     hsa_code_object_reader_t                reader{};
     hsa_executable_t                        executable{};
     std::array<kernel_info_t, kernel_count> kernels{};
@@ -219,20 +213,6 @@ states()
     return *value;
 }
 
-// share/rocprofiler-sdk/kernel-replay beside the lib directory of the library this code is in. The
-// function has internal linkage, so dladdr names this library rather than another copy of the SDK
-// loaded first.
-std::string
-code_object_directory()
-{
-    const auto library = common::dl::get_symbol_path(
-        {}, "code_object_directory", reinterpret_cast<const void*>(&code_object_directory), true);
-    if(!library) return {};
-    return (common::filesystem::path{*library}.parent_path().parent_path() /
-            "share/rocprofiler-sdk/kernel-replay")
-        .string();
-}
-
 hsa_status_t
 get_symbol_info(hsa_executable_symbol_t symbol, hsa_executable_symbol_info_t attribute, void* value)
 {
@@ -276,19 +256,21 @@ initialize_state(const hsa::AgentCache& agent, kernel_state_t& state)
     auto* ext  = hsa::get_amd_ext_table();
     if(!core || !ext || !ext->hsa_amd_signal_create_fn) return HSA_STATUS_ERROR;
 
-    const auto path = find_code_object(agent.name());
-    if(path.empty())
+    const auto* code_object = find_code_object(agent.name());
+    if(!code_object)
     {
-        ROCP_ERROR << fmt::format("kernel replay blit: no code object for agent '{}' in '{}'",
-                                  agent.name(),
-                                  code_object_directory());
+        auto built_for = std::string{};
+        for(const auto& built : get_embedded_code_objects())
+            built_for += fmt::format("{}{}", built_for.empty() ? "" : ", ", built.gpu_name);
+        ROCP_ERROR << fmt::format(
+            "kernel replay blit: no code object for agent '{}'; this build has them for: {}",
+            agent.name(),
+            built_for.empty() ? "none" : built_for);
         return HSA_STATUS_ERROR;
     }
 
-    state.file = open(path.c_str(), O_RDONLY);
-    if(state.file < 0) return HSA_STATUS_ERROR;
-
-    auto status = core->hsa_code_object_reader_create_from_file_fn(state.file, &state.reader);
+    auto status = core->hsa_code_object_reader_create_from_memory_fn(
+        code_object->data, code_object->size, &state.reader);
     if(status != HSA_STATUS_SUCCESS) return status;
 
     status = core->hsa_executable_create_alt_fn(
@@ -323,7 +305,9 @@ initialize_state(const hsa::AgentCache& agent, kernel_state_t& state)
     status = ext->hsa_amd_signal_create_fn(1, 0, nullptr, 0, &state.completion);
     if(status != HSA_STATUS_SUCCESS) return status;
 
-    ROCP_INFO << fmt::format("kernel replay blit: loaded '{}' for agent '{}'", path, agent.name());
+    ROCP_INFO << fmt::format("kernel replay blit: loaded the {}B code object for agent '{}'",
+                             code_object->size,
+                             agent.name());
     return HSA_STATUS_SUCCESS;
 }
 
@@ -334,7 +318,6 @@ release_partial_state(kernel_state_t& state)
     auto* core = hsa::get_core_table();
     if(core && state.executable.handle != 0) core->hsa_executable_destroy_fn(state.executable);
     if(core && state.reader.handle != 0) core->hsa_code_object_reader_destroy_fn(state.reader);
-    if(state.file >= 0) close(state.file);
 }
 
 kernel_state_t*
@@ -525,18 +508,15 @@ prepare(const hsa::Queue& queue)
 bool
 has_code_object(const hsa::Queue& queue)
 {
-    return !find_code_object(queue.get_agent().name()).empty();
+    return find_code_object(queue.get_agent().name()) != nullptr;
 }
 
-std::string
+const embedded_code_object_t*
 find_code_object(std::string_view gpu_name)
 {
-    const auto directory = code_object_directory();
-    if(directory.empty()) return {};
-
-    auto path = fmt::format("{}/{}_kernel_replay_blit.hsaco", directory, gpu_name);
-    if(access(path.c_str(), R_OK) == 0) return path;
-    return {};
+    for(const auto& code_object : get_embedded_code_objects())
+        if(code_object.gpu_name == gpu_name) return &code_object;
+    return nullptr;
 }
 
 struct packet_info::implementation

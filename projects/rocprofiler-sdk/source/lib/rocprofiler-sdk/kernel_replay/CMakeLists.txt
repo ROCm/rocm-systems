@@ -1,5 +1,6 @@
 #
 set(ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS
+    blit-code-objects.hpp
     blit-copy-kernel.hpp
     blit-copy.hpp
     kernel_replay.hpp
@@ -13,6 +14,7 @@ set(ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS
     untracked_memory.hpp
     utils.hpp)
 set(ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES
+    blit-code-objects.cpp
     blit-copy.cpp
     kernel_replay.cpp
     local_context.cpp
@@ -82,11 +84,9 @@ if(NOT kernel_replay_blit_targets)
         )
 endif()
 
-# The SDK looks for the code objects in share/rocprofiler-sdk/kernel-replay beside its lib
-# directory, a layout the build tree mirrors.
-set(kernel_replay_blit_dir ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/kernel-replay)
-file(MAKE_DIRECTORY ${kernel_replay_blit_dir})
+set(kernel_replay_blit_dir ${CMAKE_CURRENT_BINARY_DIR})
 set(kernel_replay_blit_code_objects)
+set(kernel_replay_blit_table)
 foreach(gpu_name IN LISTS kernel_replay_blit_targets)
     set(output_file ${kernel_replay_blit_dir}/${gpu_name}_kernel_replay_blit.hsaco)
     add_custom_command(
@@ -99,16 +99,29 @@ foreach(gpu_name IN LISTS kernel_replay_blit_targets)
                 ${CMAKE_CURRENT_SOURCE_DIR}/blit-copy-kernel.hpp
         COMMENT "Building ${gpu_name} kernel replay blit code object")
     list(APPEND kernel_replay_blit_code_objects ${output_file})
+    string(MAKE_C_IDENTIFIER "${gpu_name}" symbol)
+    string(
+        APPEND
+        kernel_replay_blit_table
+        "ROCPROFILER_KERNEL_REPLAY_BLIT_TABLE_ENTRY(${symbol}, \"${gpu_name}\", \"${output_file}\")\n"
+        )
 endforeach()
 
 add_custom_target(kernel-replay-blit-code-objects
                   DEPENDS ${kernel_replay_blit_code_objects})
 add_dependencies(rocprofiler-sdk-object-library kernel-replay-blit-code-objects)
 
-install(
-    FILES ${kernel_replay_blit_code_objects}
-    DESTINATION share/rocprofiler-sdk/kernel-replay
-    COMPONENT core)
+# blit-code-objects.cpp assembles the code objects into the library, so it is rebuilt
+# whenever one of them is.
+set(kernel_replay_blit_table_file ${CMAKE_CURRENT_BINARY_DIR}/blit-code-objects.inc)
+file(CONFIGURE OUTPUT ${kernel_replay_blit_table_file} CONTENT
+     "${kernel_replay_blit_table}" @ONLY)
+set_source_files_properties(
+    blit-code-objects.cpp TARGET_DIRECTORY rocprofiler-sdk-object-library
+    PROPERTIES
+        OBJECT_DEPENDS "${kernel_replay_blit_code_objects}"
+        COMPILE_DEFINITIONS
+        ROCPROFILER_KERNEL_REPLAY_BLIT_CODE_OBJECTS="${kernel_replay_blit_table_file}")
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/kernel_replay/blit-code-objects.hpp"
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 
@@ -60,9 +62,8 @@ prepare(const hsa::Queue& queue);
 bool
 has_code_object(const hsa::Queue& queue);
 
-// The path of the code object for a GPU such as gfx942, or empty without one. They are installed
-// in share/rocprofiler-sdk/kernel-replay beside the library's lib directory.
-std::string
+// The code object built into the library for a GPU such as gfx942, or null without one.
+const embedded_code_object_t*
 find_code_object(std::string_view gpu_name);
 
 class packet_info
