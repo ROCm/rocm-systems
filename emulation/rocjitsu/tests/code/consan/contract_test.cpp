@@ -146,17 +146,18 @@ TEST(ConSanBoundedLaunch, FourCompleteGroupsKeepAllPartialWaves) {
 }
 
 TEST(ConSanBoundedLaunch, AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission) {
-  for (const TargetProfile &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       SCOPED_TRACE(target.name);
       SCOPED_TRACE(wave_size);
       Manifest manifest = example();
       manifest.target = target.id;
       manifest.wave_size = wave_size;
       manifest.entry.workgroup_id_scalar = target.id == 1201 || target.id == 1250 ? 117 : 15;
-      for (const uint32_t groups : {1u, 4u, 16u})
+      for (const uint32_t groups : {1u, 4u, 16u}) {
         for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1}) {
           SCOPED_TRACE(groups);
           SCOPED_TRACE(threads);
@@ -181,6 +182,7 @@ TEST(ConSanBoundedLaunch, AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission) 
                       row % waves);
           }
         }
+      }
       util::StringDiagnostic error;
       EXPECT_TRUE(
           plan_launch(manifest, {{17 * wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0, error.emitter())
@@ -197,6 +199,7 @@ TEST(ConSanBoundedLaunch, AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission) 
           error.message(),
           "multi-workgroup profile requires at most 16 groups and original workgroup-X input");
     }
+  }
 }
 
 TEST(ConSanBoundedLaunch, ValidateAllRowsDimensionsIdentityAndBudgetsBeforeAllocation) {
@@ -266,7 +269,7 @@ TEST(ConSanBoundedLaunch, DefaultReportCapNeverReducesQuotasOrSamplesWorkgroups)
   manifest.prepared_text_bytes = 262144;
   manifest.entry.prepared_descriptor_offset = 524288;
   manifest.sites.clear();
-  for (uint32_t site = 0; site < 1024; ++site)
+  for (uint32_t site = 0; site < 1024; ++site) {
     manifest.sites.push_back({.id = site,
                               .analysis = AnalysisKind::LdsRaceDetection,
                               .width = 4,
@@ -277,6 +280,7 @@ TEST(ConSanBoundedLaunch, DefaultReportCapNeverReducesQuotasOrSamplesWorkgroups)
                               .probe_offset = uint64_t{site} * 128 + 16,
                               .probe_size = 64,
                               .first_slot = site * kAddressGroupsPerSite});
+  }
   ASSERT_TRUE(validate_manifest(manifest).succeeded());
   util::StringDiagnostic error;
   EXPECT_TRUE(plan_launch(manifest, {{16384, 1, 1}, {1024, 1, 1}}, 8, 0, error.emitter()).failed());
@@ -296,7 +300,7 @@ TEST(ConSanBoundedLaunch, ProbeRowOffsetsCannotWrapWhenSoftwareBudgetsAreRaised)
   manifest.prepared_text_bytes = 16 * 1024 * 1024;
   manifest.entry.prepared_descriptor_offset = 24 * 1024 * 1024;
   manifest.sites.clear();
-  for (uint32_t site = 0; site < 65536; ++site)
+  for (uint32_t site = 0; site < 65536; ++site) {
     manifest.sites.push_back({.id = site,
                               .analysis = AnalysisKind::LdsRaceDetection,
                               .width = 4,
@@ -307,6 +311,7 @@ TEST(ConSanBoundedLaunch, ProbeRowOffsetsCannotWrapWhenSoftwareBudgetsAreRaised)
                               .probe_offset = uint64_t{site} * 128 + 16,
                               .probe_size = 64,
                               .first_slot = site * kAddressGroupsPerSite});
+  }
   ASSERT_TRUE(validate_manifest(manifest).succeeded());
   ContractLimits limits;
   limits.report_bytes = UINT64_MAX;
@@ -329,8 +334,9 @@ protected:
 
   void put32(size_t offset, uint32_t value) {
     ASSERT_LE(offset + 4, bytes_.size());
-    for (size_t index = 0; index < 4; ++index)
+    for (size_t index = 0; index < 4; ++index) {
       bytes_[offset + index] = static_cast<uint8_t>(value >> (index * 8));
+    }
   }
 
   void rehash() {
@@ -381,8 +387,9 @@ TEST_F(ConSanContract, OwningFactsRoundTripIsCanonicalAndLittleEndian) {
 }
 
 TEST_F(ConSanContract, EveryTruncatedPrefixAndTrailingBytesAreRejected) {
-  for (size_t size = 0; size < bytes_.size(); ++size)
+  for (size_t size = 0; size < bytes_.size(); ++size) {
     EXPECT_TRUE(decode_manifest(std::span<const uint8_t>(bytes_).first(size)).failed()) << size;
+  }
   bytes_.push_back(0);
   EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
   EXPECT_EQ(error_.message(), "invalid static-facts framing");
@@ -457,8 +464,8 @@ TEST_F(ConSanContract, ValidChecksumDoesNotBypassRequiredMappings) {
 }
 
 TEST_F(ConSanContract, BarrierFormsRoundTripAcrossEveryNativeTargetWaveAndScope) {
-  for (const TargetProfile &target : kNativeLdsTargets)
-    for (const uint32_t wave_size : {32u, 64u})
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    for (const uint32_t wave_size : {32u, 64u}) {
       for (const ScopeKind scope :
            {ScopeKind::NativeLdsWorkgroupBarrier, ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
         SCOPED_TRACE(target.name);
@@ -475,7 +482,7 @@ TEST_F(ConSanContract, BarrierFormsRoundTripAcrossEveryNativeTargetWaveAndScope)
         const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), error_.emitter());
         ASSERT_TRUE(decoded.succeeded()) << error_.message();
         EXPECT_EQ(decoded.value(), manifest);
-        for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1})
+        for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1}) {
           for (const uint32_t groups : {1u, 4u}) {
             SCOPED_TRACE(threads);
             SCOPED_TRACE(groups);
@@ -489,18 +496,22 @@ TEST_F(ConSanContract, BarrierFormsRoundTripAcrossEveryNativeTargetWaveAndScope)
             EXPECT_EQ(layout.value().wave_count, groups * waves);
             EXPECT_EQ(layout.value().row_stride, report_row_bytes(manifest.sites.size(), true));
           }
+        }
         EXPECT_TRUE(
             plan_launch(manifest, {{wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0, error_.emitter())
                 .failed());
         EXPECT_EQ(error_.message(), "barrier profile requires at least two waves per workgroup");
       }
+    }
+  }
 }
 
 TEST_F(ConSanContract, BarrierGroupsCanEndExactlyAtTheOriginalTextBoundary) {
-  for (const TargetProfile &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       SCOPED_TRACE(target.name);
       SCOPED_TRACE(wave_size);
       Manifest manifest =
@@ -516,13 +527,15 @@ TEST_F(ConSanContract, BarrierGroupsCanEndExactlyAtTheOriginalTextBoundary) {
       ASSERT_TRUE(decoded.succeeded()) << error_.message();
       EXPECT_EQ(decoded.value(), manifest);
     }
+  }
 }
 
 TEST_F(ConSanContract, RejectsBarrierFormMismatchesInTypedAndRehashedEncodedFacts) {
-  for (const TargetProfile &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       SCOPED_TRACE(target.name);
       SCOPED_TRACE(wave_size);
       const Manifest manifest =
@@ -566,23 +579,27 @@ TEST_F(ConSanContract, RejectsBarrierFormMismatchesInTypedAndRehashedEncodedFact
         const std::array<uint64_t, 6> fields = {barrier.original_drain, barrier.original_signal,
                                                 barrier.original_wait,  barrier.prepared_signal,
                                                 barrier.prepared_wait,  barrier.completion_probe};
-        for (size_t index = 0; index < fields.size(); ++index)
+        for (size_t index = 0; index < fields.size(); ++index) {
           ASSERT_TRUE(wire::write_u64(bytes_, offset + index * sizeof(uint64_t), fields[index]));
+        }
         put32(offset + 52, barrier.identity);
         rehash();
         EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
         EXPECT_EQ(error_.message(), "invalid fixed barrier qualification or mapping");
       }
     }
+  }
 }
 
 TEST_F(ConSanContract, LegacyBarrierAliasDoesNotPermitOverlappingPreparedGroups) {
   for (const TargetProfile &target : kNativeLdsTargets) {
-    if (target.id == 1201 || target.id == 1250)
+    if (target.id == 1201 || target.id == 1250) {
       continue;
+    }
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       SCOPED_TRACE(target.name);
       SCOPED_TRACE(wave_size);
       Manifest manifest = barrier_example(target, wave_size, ScopeKind::NativeLdsWorkgroupBarrier);
@@ -744,10 +761,11 @@ TEST_F(ConSanContract, RejectsBarrierCallbacksOverlappingAccessEnvelopes) {
 }
 
 TEST_F(ConSanContract, BarrierMaximumWorkgroupMustPermitTwoWaves) {
-  for (const TargetProfile &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       SCOPED_TRACE(target.name);
       SCOPED_TRACE(wave_size);
       Manifest manifest = barrier_example(target, wave_size, ScopeKind::NativeLdsWorkgroupBarrier);
@@ -780,6 +798,7 @@ TEST_F(ConSanContract, BarrierMaximumWorkgroupMustPermitTwoWaves) {
       no_barrier.entry.maximum_workgroup_size = wave_size;
       EXPECT_TRUE(validate_manifest(no_barrier, error_.emitter()).succeeded()) << error_.message();
     }
+  }
 }
 
 TEST_F(ConSanContract, BarrierJournalCapacityIsInclusiveForTypedAndEncodedFacts) {
@@ -803,8 +822,9 @@ TEST_F(ConSanContract, BarrierJournalCapacityIsInclusiveForTypedAndEncodedFacts)
                         .completion_probe = prepared + 8,
                         .probe_size = 8};
   };
-  for (uint32_t group = 0; group < kSyncCapacity; ++group)
+  for (uint32_t group = 0; group < kSyncCapacity; ++group) {
     manifest.barriers.push_back(barrier_at(group));
+  }
   ASSERT_TRUE(validate_manifest(manifest, error_.emitter()).succeeded()) << error_.message();
   const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, error_.emitter());
   ASSERT_TRUE(encoded.succeeded()) << error_.message();
@@ -830,8 +850,9 @@ TEST_F(ConSanContract, BarrierJournalCapacityIsInclusiveForTypedAndEncodedFacts)
   const std::array<uint64_t, 6> offsets = {extra.original_drain, extra.original_signal,
                                            extra.original_wait,  extra.prepared_signal,
                                            extra.prepared_wait,  extra.completion_probe};
-  for (size_t index = 0; index < offsets.size(); ++index)
+  for (size_t index = 0; index < offsets.size(); ++index) {
     ASSERT_TRUE(wire::write_u64(bytes_, tail + index * sizeof(uint64_t), offsets[index]));
+  }
   put32(tail + 48, extra.probe_size);
   put32(tail + 52, extra.identity);
   reframe();

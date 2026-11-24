@@ -28,11 +28,13 @@ inline std::optional<std::vector<uint8_t>>
 expected_drop_image(const FaultMutationContext &context, const DropBarrierSelection &selection) {
   const IsaTargetDescriptor *target =
       default_isa_target_registry().find(context.source().target_id());
-  if (!target)
+  if (!target) {
     return std::nullopt;
+  }
   const FailureOr<uint32_t> nop = build_s_nop(0, target->family);
-  if (nop.failed())
+  if (nop.failed()) {
     return std::nullopt;
+  }
   std::vector<test::ExpectedReplacement> edits;
   for (const StaticBarrierMember &member : selection.barrier().members) {
     std::vector<uint8_t> replacement(sizeof(uint32_t));
@@ -59,13 +61,16 @@ inline bool same_barrier_members(const StaticBarrier &left, const StaticBarrier 
 }
 
 inline bool branch_reaches(Decoder &decoder, const Section &text, uint64_t from, uint64_t to) {
-  if (from > text.size() || sizeof(uint32_t) > text.size() - from)
+  if (from > text.size() || sizeof(uint32_t) > text.size() - from) {
     return false;
+  }
   uint32_t word = 0;
   std::memcpy(&word, reinterpret_cast<const uint8_t *>(text.data()) + from, sizeof(word));
   const DecodeResult decoded = decoder.decode_window(std::span(&word, 1), from);
-  if (decoded.failed() || decoded.value()->size() != 4 || decoded.value()->mnemonic() != "s_branch")
+  if (decoded.failed() || decoded.value()->size() != 4 ||
+      decoded.value()->mnemonic() != "s_branch") {
     return false;
+  }
   const std::optional<int64_t> delta = decoded.value()->branch_offset_bytes();
   return delta && static_cast<int64_t>(from + 4) + *delta == static_cast<int64_t>(to);
 }
@@ -80,40 +85,47 @@ inline bool descriptors_preserved(const FaultMutationContext &context,
   const std::vector<KernelDescriptorInfo> after =
       scan_kernel_descriptors(mutant.image(), after_text.sectionOffset(), after_text.size(),
                               after_text.sectionHeaderIndex());
-  if (before.size() != after.size())
+  if (before.size() != after.size()) {
     return false;
+  }
   Elf64_Ehdr header = {};
-  if (mutant.image().size() < sizeof(header))
+  if (mutant.image().size() < sizeof(header)) {
     return false;
+  }
   std::memcpy(&header, mutant.image().data(), sizeof(header));
   const std::optional<std::vector<Elf64_Phdr>> segments = read_elf_table<Elf64_Phdr>(
       mutant.image(), header.e_phoff, header.e_phnum, header.e_phentsize);
-  if (!segments)
+  if (!segments) {
     return false;
+  }
   auto loaded_address = [&](uint64_t file_offset, uint64_t size,
                             uint32_t flags) -> std::optional<uint64_t> {
     std::optional<uint64_t> address;
     for (const Elf64_Phdr &segment : *segments) {
       if (segment.p_type != PT_LOAD || (segment.p_flags & flags) != flags ||
           file_offset < segment.p_offset || file_offset - segment.p_offset > segment.p_filesz ||
-          size > segment.p_filesz - (file_offset - segment.p_offset))
+          size > segment.p_filesz - (file_offset - segment.p_offset)) {
         continue;
+      }
       const uint64_t delta = file_offset - segment.p_offset;
-      if (address || delta > std::numeric_limits<uint64_t>::max() - segment.p_vaddr)
+      if (address || delta > std::numeric_limits<uint64_t>::max() - segment.p_vaddr) {
         return std::nullopt;
+      }
       address = segment.p_vaddr + delta;
     }
     return address;
   };
   const std::optional<uint64_t> text_address =
       loaded_address(after_text.sectionOffset(), after_text.size(), PF_X);
-  if (!text_address || *text_address != after_text.vaddr())
+  if (!text_address || *text_address != after_text.vaddr()) {
     return false;
+  }
   for (const KernelDescriptorInfo &original : before) {
     const std::vector<KernelDescriptorInfo>::const_iterator updated =
         std::ranges::find(after, original.kernel_name, &KernelDescriptorInfo::kernel_name);
-    if (updated == after.end() || updated->entry_text_offset != original.entry_text_offset)
+    if (updated == after.end() || updated->entry_text_offset != original.entry_text_offset) {
       return false;
+    }
     const std::optional<uint64_t> descriptor_address =
         loaded_address(updated->descriptor_file_offset, sizeof(updated->descriptor), 0);
     if (!descriptor_address ||
@@ -122,13 +134,15 @@ inline bool descriptors_preserved(const FaultMutationContext &context,
             static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
         updated->descriptor.kernel_code_entry_byte_offset !=
             static_cast<int64_t>(after_text.vaddr() + updated->entry_text_offset) -
-                static_cast<int64_t>(*descriptor_address))
+                static_cast<int64_t>(*descriptor_address)) {
       return false;
+    }
     amdhsa::kernel_descriptor_t normalized = updated->descriptor;
     // Only the relative entry field follows the descriptor's changed address.
     normalized.kernel_code_entry_byte_offset = original.descriptor.kernel_code_entry_byte_offset;
-    if (std::memcmp(&normalized, &original.descriptor, sizeof(normalized)) != 0)
+    if (std::memcmp(&normalized, &original.descriptor, sizeof(normalized)) != 0) {
       return false;
+    }
   }
   return true;
 }
@@ -146,8 +160,9 @@ inline Result matches_drop_output(const FaultMutationContext &context,
   }
   FailureOr<FaultBarrierInventory> pristine =
       discover_drop_barriers(context, selection.owner().entry, error);
-  if (pristine.failed())
+  if (pristine.failed()) {
     return Result::failure();
+  }
   auto mismatch = [&] {
     error = {.code = FaultMutationErrorCode::ValidationFailure,
              .offset = 0,
@@ -158,59 +173,69 @@ inline Result matches_drop_output(const FaultMutationContext &context,
   const std::span<const StaticBarrier>::iterator selected =
       std::ranges::find(barriers, selection.barrier());
   const std::optional<std::vector<uint8_t>> expected = expected_drop_image(context, selection);
-  if (selected == barriers.end() || !expected || !std::ranges::equal(*expected, candidate))
+  if (selected == barriers.end() || !expected || !std::ranges::equal(*expected, candidate)) {
     return mismatch();
+  }
   const FaultMutationContext mutant(candidate);
   if (!mutant.source().is_valid() || mutant.source().text_sections().size() != 1 ||
       mutant.source().target_id() != context.source().target_id() ||
-      !descriptors_preserved(context, mutant))
+      !descriptors_preserved(context, mutant)) {
     return mismatch();
+  }
   const Section &text = *mutant.source().text_sections().front();
   const Section &original_text = *context.source().text_sections().front();
   const auto *original_bytes = reinterpret_cast<const uint8_t *>(original_text.data());
   const auto *mutant_bytes = reinterpret_cast<const uint8_t *>(text.data());
-  if (text.size() < original_text.size())
+  if (text.size() < original_text.size()) {
     return mismatch();
+  }
   for (uint64_t offset = 0; offset < original_text.size(); ++offset) {
     const bool selected_byte =
         std::ranges::any_of(selected->members, [&](const StaticBarrierMember &member) {
           return offset >= member.offset && offset - member.offset < member.bytes.size();
         });
-    if (!selected_byte && original_bytes[offset] != mutant_bytes[offset])
+    if (!selected_byte && original_bytes[offset] != mutant_bytes[offset]) {
       return mismatch();
+    }
   }
   std::unique_ptr<Decoder> decoder =
       Decoder::create(default_isa_target_registry(), context.source().target_id());
-  if (!decoder)
+  if (!decoder) {
     return mismatch();
+  }
   uint64_t cave = pristine.value().section().size;
   for (const StaticBarrierMember &member : selected->members) {
     if (member.bytes.size() != 4 || cave > text.size() || text.size() - cave < 8 ||
         !branch_reaches(*decoder, text, member.offset, cave) ||
-        !branch_reaches(*decoder, text, cave + 4, member.offset + member.bytes.size()))
+        !branch_reaches(*decoder, text, cave + 4, member.offset + member.bytes.size())) {
       return mismatch();
+    }
     uint32_t word = 0;
     std::memcpy(&word, reinterpret_cast<const uint8_t *>(text.data()) + cave, sizeof(word));
     const DecodeResult instruction = decoder->decode_window(std::span(&word, 1), cave);
     if (instruction.failed() || instruction.value()->size() != 4 ||
         instruction.value()->mnemonic() != "s_nop" ||
         instruction.value()->num_src_operands() != 1 ||
-        instruction.value()->src_operand(0)->encoding_value() != 0)
+        instruction.value()->src_operand(0)->encoding_value() != 0) {
       return mismatch();
+    }
     cave += 8;
   }
-  if (cave != text.size())
+  if (cave != text.size()) {
     return mismatch();
+  }
   // Fresh analysis checks executable load coverage, descriptor entry resolution,
   // exclusive ownership and complete same-block membership in the changed CFG.
   FailureOr<FaultBarrierInventory> remaining =
       discover_drop_barriers(mutant, selection.owner().entry, error);
-  if (remaining.failed())
+  if (remaining.failed()) {
     return mismatch();
+  }
   std::vector<StaticBarrier> wanted(barriers.begin(), barriers.end());
   std::erase(wanted, *selected);
-  if (!std::ranges::equal(remaining.value().barriers(), wanted, same_barrier_members))
+  if (!std::ranges::equal(remaining.value().barriers(), wanted, same_barrier_members)) {
     return mismatch();
+  }
   return Result::success();
 }
 

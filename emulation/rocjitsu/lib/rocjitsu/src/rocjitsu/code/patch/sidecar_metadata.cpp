@@ -41,8 +41,9 @@ template <typename T> void append_pod(std::vector<uint8_t> &out, const T &value)
 
 template <typename T>
 [[nodiscard]] bool read_pod(std::span<const uint8_t> bytes, size_t offset, T &value) {
-  if (offset > bytes.size() || sizeof(T) > bytes.size() - offset)
+  if (offset > bytes.size() || sizeof(T) > bytes.size() - offset) {
     return false;
+  }
   std::memcpy(&value, bytes.data() + offset, sizeof(T));
   return true;
 }
@@ -61,8 +62,9 @@ template <typename T>
 
 [[nodiscard]] bool read_string(std::span<const uint8_t> strings, uint32_t offset, uint32_t size,
                                std::string &value) {
-  if (offset > strings.size() || size > strings.size() - offset)
+  if (offset > strings.size() || size > strings.size() - offset) {
     return false;
+  }
   value.assign(reinterpret_cast<const char *>(strings.data() + offset), size);
   return true;
 }
@@ -96,8 +98,9 @@ std::vector<uint8_t> serialize_sidecar_metadata(std::span<const SidecarVariantMe
   std::vector<uint8_t> out;
   out.reserve(sizeof(header) + records.size() * sizeof(MetadataRecord) + strings.size());
   append_pod(out, header);
-  for (const MetadataRecord &record : records)
+  for (const MetadataRecord &record : records) {
     append_pod(out, record);
+  }
   out.insert(out.end(), strings.begin(), strings.end());
   return out;
 }
@@ -105,16 +108,19 @@ std::vector<uint8_t> serialize_sidecar_metadata(std::span<const SidecarVariantMe
 std::optional<std::vector<SidecarVariantMetadata>>
 parse_sidecar_metadata(std::span<const uint8_t> bytes) {
   MetadataHeader header{};
-  if (!read_pod(bytes, 0, header))
+  if (!read_pod(bytes, 0, header)) {
     return std::nullopt;
-  if (header.magic != kMagic || header.version != kVersion || header.reserved != 0)
+  }
+  if (header.magic != kMagic || header.version != kVersion || header.reserved != 0) {
     return std::nullopt;
+  }
 
   const uint64_t records_bytes =
       static_cast<uint64_t>(header.record_count) * sizeof(MetadataRecord);
   const uint64_t strings_offset = sizeof(MetadataHeader) + records_bytes;
-  if (strings_offset > bytes.size() || header.string_bytes > bytes.size() - strings_offset)
+  if (strings_offset > bytes.size() || header.string_bytes > bytes.size() - strings_offset) {
     return std::nullopt;
+  }
   const auto strings = bytes.subspan(static_cast<size_t>(strings_offset), header.string_bytes);
 
   std::vector<SidecarVariantMetadata> variants;
@@ -122,8 +128,9 @@ parse_sidecar_metadata(std::span<const uint8_t> bytes) {
   for (uint32_t i = 0; i < header.record_count; ++i) {
     MetadataRecord record{};
     const size_t offset = sizeof(MetadataHeader) + static_cast<size_t>(i) * sizeof(MetadataRecord);
-    if (!read_pod(bytes, offset, record))
+    if (!read_pod(bytes, offset, record)) {
       return std::nullopt;
+    }
 
     SidecarVariantMetadata variant{};
     if (!read_string(strings, record.kernel_name_offset, record.kernel_name_size,

@@ -193,11 +193,12 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
         counterCapacitiesForArch(rocjitsu::IsaFamily::Rdna4), /*ldsSizeBytes=*/64 * 1024);
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 32> addresses{64, 128, 256};
-    for (uint32_t reg : {1u, 2u})
+    for (uint32_t reg : {1u, 2u}) {
       wave.registerLdsEvent(
           testInstruction(reg), MemoryEventType::LDS_TO_VGPR, {reg}, /*execMask=*/3,
           /*waveSize=*/32, addresses, /*bytesPerLane=*/4, 0xf,
           kMixedOrderGenericFlatLoadObligations, MemoryOrderClass::UNORDERED, lds_mask);
+    }
     const auto &events = detector.events();
     ASSERT_EQ(events.totalAllocated(), 2);
     for (const EventId event : {EventId{0}, EventId{1}}) {
@@ -276,14 +277,15 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 4> addresses{0x80000040u, UINT32_MAX, 0x7ffffffeu, 64};
     const std::array<uint32_t, 4> second_addresses{0x80000080u, UINT32_MAX, 0x7fffffffu, 96};
-    if (dual_access)
+    if (dual_access) {
       wave.registerLdsEvent(testInstruction(0), MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4,
                             addresses, second_addresses, 4, 0xf,
                             kMixedOrderGenericFlatLoadObligations, MemoryOrderClass::UNORDERED);
-    else
+    } else {
       wave.registerLdsEvent(testInstruction(0), MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4,
                             addresses, 4, 0xf, kMixedOrderGenericFlatLoadObligations,
                             MemoryOrderClass::UNORDERED);
+    }
     const auto &events = detector.events();
     const EventId event{0};
     ASSERT_EQ(events.totalAllocated(), 1);
@@ -293,8 +295,9 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     EXPECT_EQ(events.ldsIntervals(event).contains(96), dual_access);
     EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 1);
     EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::DSCNT), 1);
-    for (int lane = 0; lane < 4; ++lane)
+    for (int lane = 0; lane < 4; ++lane) {
       wave.checkVgprReadLanes(1, uint64_t{1} << lane, 0xf);
+    }
     EXPECT_EQ(violations.size(), 4u);
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
@@ -328,9 +331,11 @@ TEST(RaceDetector, PositiveOutOfBoundsLdsKeepsDependencies) {
     EXPECT_EQ(events.ldsIntervals(event).getTotalBytes(), 4);
     EXPECT_TRUE(events.ldsIntervals(event).contains(capacity - 4));
     // An invalid access crossing the end must not race with the valid tail.
-    for (uint32_t address : addresses)
-      if (address != capacity - 4)
+    for (uint32_t address : addresses) {
+      if (address != capacity - 4) {
         detector.validateWrite(address, WaveId{1}, 0, 4);
+      }
+    }
     EXPECT_TRUE(violations.empty());
     detector.validateWrite(capacity - 4, WaveId{1}, 0, 4);
     EXPECT_EQ(violations.size(), 1u);
@@ -916,16 +921,18 @@ TEST(RaceDetector, LdsSameWave_SharedChunksKeepOtherWaveHazards) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
     RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
     auto issue = [&](int wave, int addr, int bytes) {
-      if (writes)
+      if (writes) {
         b.ldsWrite(wave, /*lane=*/0, addr, bytes);
-      else
+      } else {
         b.ldsRead(wave, /*lane=*/0, addr, bytes, /*vgprDst=*/2);
+      }
     };
     auto check = [&](int addr, int bytes) {
-      if (writes)
+      if (writes) {
         b.checkLdsRead(/*wave=*/0, /*lane=*/0, addr, bytes);
-      else
+      } else {
         b.checkLdsWrite(/*wave=*/0, /*lane=*/0, addr, bytes);
+      }
     };
     issue(/*wave=*/0, /*addr=*/0, /*bytes=*/4);
     issue(/*wave=*/0, /*addr=*/12, /*bytes=*/8);
@@ -955,10 +962,11 @@ TEST(RaceDetector, LdsSameWave_SpanningAccessChecksLaterChunks) {
     ASSERT_FALSE(b.hasRace());
     // The first chunk belongs only to wave 0; the query must reach the second
     // chunk to find wave 1's event.
-    if (writes)
+    if (writes) {
       b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/12, /*bytes=*/8);
-    else
+    } else {
       b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/12, /*bytes=*/8);
+    }
     EXPECT_EQ(b.raceCount(), 1);
   }
 }
@@ -968,14 +976,16 @@ TEST(RaceDetector, LdsMayConflictChecksOnlyTheAccessedChunks) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
     RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
     // Wave 1's pending access lies in the gap between wave 0's two ranges.
-    if (writes)
+    if (writes) {
       builder.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4);
-    else
+    } else {
       builder.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4, /*vgprDst=*/2);
+    }
     auto intervals = [](std::initializer_list<Interval> ranges) {
       IntervalSet set;
-      for (const Interval &range : ranges)
+      for (const Interval &range : ranges) {
         set.append(range.start, range.end);
+      }
       set.finalize();
       return set;
     };
@@ -1000,10 +1010,11 @@ TEST(RaceDetector, LdsMayConflictScansTheEventsOfALiveChunk) {
   for (bool writes : {false, true}) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
     RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
-    if (writes)
+    if (writes) {
       builder.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4);
-    else
+    } else {
       builder.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4, /*vgprDst=*/2);
+    }
     auto range = [](int start, int end) {
       IntervalSet set;
       set.append(start, end);
@@ -1026,25 +1037,28 @@ TEST(RaceDetector, LdsSameWave_MixedOrderingSurvivesPartialRetirement) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
     RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
     auto ordinary = [&](int wave) {
-      if (writes)
+      if (writes) {
         b.ldsWrite(wave, /*lane=*/0, /*addr=*/12, /*bytes=*/8);
-      else
+      } else {
         b.ldsRead(wave, /*lane=*/0, /*addr=*/12, /*bytes=*/8, /*vgprDst=*/2);
+      }
     };
     auto check = [&](int wave) {
-      if (writes)
+      if (writes) {
         b.checkLdsRead(wave, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
-      else
+      } else {
         b.checkLdsWrite(wave, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
+      }
     };
 
     ordinary(/*wave=*/0);
     // An unordered access from the same wave must invalidate the owner of
     // both chunks. Keep its destination distinct from the ordinary read's.
-    if (writes)
+    if (writes) {
       b.unorderedLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
-    else
+    } else {
       b.unorderedLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4, /*vgprDst=*/4);
+    }
     ASSERT_FALSE(b.hasRace());
     check(/*wave=*/0);
     EXPECT_EQ(b.raceCount(), 1);
@@ -2506,8 +2520,9 @@ TEST(RaceDetector, HandlerFiresPerLane) {
   b.globalLoad(/*wave=*/0, /*vgprBase=*/0, /*numRegs=*/1);
 
   // Check v0 across all 64 lanes without waitcnt — each lane fires the handler.
-  for (int lane = 0; lane < 64; ++lane)
+  for (int lane = 0; lane < 64; ++lane) {
     b.checkVgprRead(/*wave=*/0, /*reg=*/0, lane);
+  }
 
   EXPECT_EQ(b.raceCount(), 64);
 }
@@ -2519,8 +2534,9 @@ TEST(RaceDetector, HandlerFiresPerRegister) {
   b.globalLoad(/*wave=*/0, /*vgprBase=*/0, /*numRegs=*/4);
 
   // Read all 4 without waitcnt.
-  for (int reg = 0; reg < 4; ++reg)
+  for (int reg = 0; reg < 4; ++reg) {
     b.checkVgprRead(/*wave=*/0, reg, /*lane=*/0);
+  }
 
   EXPECT_EQ(b.raceCount(), 4);
 }
@@ -2549,8 +2565,9 @@ TEST(RaceDetector, RepeatedCheckSameRace) {
   // Check the same register+lane 100 times. The handler fires every time
   // because the core race detector does not deduplicate — that is the
   // plugin's responsibility.
-  for (int i = 0; i < 100; ++i)
+  for (int i = 0; i < 100; ++i) {
     b.checkVgprRead(/*wave=*/0, /*reg=*/0, /*lane=*/0);
+  }
 
   EXPECT_EQ(b.raceCount(), 100);
 }
@@ -2592,8 +2609,9 @@ void expectOneLdsRace(const RaceTestBuilder &b, int wave, int addr, bool isWrite
 
 /// Every listed wave signals `round`, then the round completes.
 void signalAndComplete(RaceTestBuilder &b, BarrierRoundId round, const std::vector<int> &members) {
-  for (int wave : members)
+  for (int wave : members) {
     b.signal(wave, round);
+  }
   b.completeRound(round, members);
 }
 
@@ -2622,8 +2640,9 @@ TEST(RaceDetector, SplitBarrier_ThresholdSelectsWhichProducerIsAcquired) {
       b.waitDscnt(1, 0);
       const auto ready = RaceTestBuilder::namedRound(1, 0);
       b.signal(first, ready);
-      if (threshold == 2)
+      if (threshold == 2) {
         b.signal(1 - first, ready);
+      }
       b.completeRound(ready, {2});
       b.waitPassed(2, ready);
 
@@ -2823,10 +2842,11 @@ bool issueTransfer(RaceTestBuilder &b, SplitBarrierTransfer transfer) {
 }
 
 void completeTransfer(RaceTestBuilder &b, SplitBarrierTransfer transfer) {
-  if (transfer == SplitBarrierTransfer::DsWrite)
+  if (transfer == SplitBarrierTransfer::DsWrite) {
     b.waitDscnt(0, 0);
-  else
+  } else {
     b.waitTensorcnt(0, 0);
+  }
 }
 
 constexpr std::array kSplitBarrierTransfers{SplitBarrierTransfer::DsWrite,
@@ -2842,10 +2862,11 @@ TEST(RaceDetector, SplitBarrier_TransfersCompletedBeforeSignalAreOrdered) {
     completeTransfer(b, transfer);
     signalAndComplete(b, round, {0, 1});
     b.waitPassed(1, round);
-    if (consumerWrites)
+    if (consumerWrites) {
       b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
-    else
+    } else {
       b.checkLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+    }
     EXPECT_EQ(b.raceCount(), 0);
   }
 }
@@ -2861,10 +2882,11 @@ TEST(RaceDetector, SplitBarrier_TransfersCompletedAfterSignalRace) {
     b.signal(1, round);
     b.completeRound(round, {0, 1});
     b.waitPassed(1, round);
-    if (consumerWrites)
+    if (consumerWrites) {
       b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
-    else
+    } else {
       b.checkLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+    }
     expectOneLdsRace(b, /*wave=*/1, kX, consumerWrites);
   }
 }
@@ -2881,8 +2903,9 @@ TEST(RaceDetector, SplitBarrier_CapacityCompletionBeforeSignalIsReleased) {
   const BarrierRoundId round = RaceTestBuilder::workgroupRound(0);
   // One more write than the counter holds: issuing the last one completes
   // the first.
-  for (int index = 0; index <= kLgkmcntCapacity; ++index)
+  for (int index = 0; index <= kLgkmcntCapacity; ++index) {
     b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/index * 4, /*bytes=*/4);
+  }
   signalAndComplete(b, round, {0, 1});
   b.waitPassed(1, round);
   b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
@@ -2925,8 +2948,9 @@ TEST(RaceDetector, SplitBarrier_NamedRoundNonMemberRaces) {
 
   b.clearViolations();
   signalAndComplete(b, workgroup, {0, 1, 2});
-  for (int wave : {0, 1, 2})
+  for (int wave : {0, 1, 2}) {
     b.waitPassed(wave, workgroup);
+  }
   b.checkLdsRead(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
   EXPECT_EQ(b.raceCount(), 0);
 }
@@ -3102,8 +3126,9 @@ TEST(RaceDetector, SplitBarrier_EachWavesEventsRetireAfterTheOthersWait) {
   EXPECT_EQ(b.barrierPendingEventCount(2), 1u);
   EXPECT_EQ(b.ldsWriteEventCount(), 2u);
   b.waitPassed(1, round);
-  for (int wave : {0, 1, 2})
+  for (int wave : {0, 1, 2}) {
     EXPECT_EQ(b.barrierPendingEventCount(wave), 0u);
+  }
   EXPECT_EQ(b.ldsWriteEventCount(), 0u);
 }
 
@@ -3368,8 +3393,9 @@ TEST(RaceDetector, SplitBarrier_AcquiredHistoryStillRacesWithANonMember) {
   b.clearViolations();
   const BarrierRoundId workgroup = RaceTestBuilder::workgroupRound(0);
   signalAndComplete(b, workgroup, {0, 1, 2});
-  for (int wave : {0, 1, 2})
+  for (int wave : {0, 1, 2}) {
     b.waitPassed(wave, workgroup);
+  }
   EXPECT_EQ(b.ldsWriteEventCount(), 0u);
   EXPECT_EQ(b.ldsReadEventCount(), 0u);
   b.checkLdsRead(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
@@ -3753,10 +3779,11 @@ TEST(RaceDetector, BarrierCell_OnlyAReadOfTheStateDwordAcquires) {
     b.cellRead(1, kCell + c.offset, /*vgprDst=*/7, c.bytes);
     b.waitDscnt(1, 0);
     b.checkLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
-    if (c.acquires)
+    if (c.acquires) {
       EXPECT_EQ(b.raceCount(), 0);
-    else
+    } else {
       expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+    }
   }
 }
 
@@ -4179,7 +4206,7 @@ TEST(RaceDetector, BarrierCell_OwnWaveReadAfterAsyncArriveIsNotARace) {
 }
 
 TEST(RaceDetector, BarrierCell_ArrivalsDoNotRaceWithEachOther) {
-  for (Arrival first : kDsArrivals)
+  for (Arrival first : kDsArrivals) {
     for (Arrival second : {Arrival::Ds, Arrival::Async, Arrival::Tensor}) {
       SCOPED_TRACE(testing::Message()
                    << static_cast<int>(first) << " then " << static_cast<int>(second));
@@ -4188,6 +4215,7 @@ TEST(RaceDetector, BarrierCell_ArrivalsDoNotRaceWithEachOther) {
       b.cellArrive(1, kCell, second, /*completes=*/true);
       EXPECT_EQ(b.raceCount(), 0);
     }
+  }
 }
 
 // A plain store that initializes the cell is ordinary LDS data: an arrival from

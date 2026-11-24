@@ -49,8 +49,9 @@ inline bool cdna_lds_output_matches(const FaultMutationContext &source, const Cd
                                     uint64_t selected_offset, uint32_t replacement_vgpr,
                                     std::span<const uint8_t> candidate) {
   const Section &original_text = *source.source().text_sections().front();
-  if (selected_offset > original_text.size() || original_text.size() - selected_offset < 8)
+  if (selected_offset > original_text.size() || original_text.size() - selected_offset < 8) {
     return false;
+  }
   const auto *original = reinterpret_cast<const uint8_t *>(original_text.data());
   std::vector<uint8_t> expected_bytes(original + selected_offset, original + selected_offset + 8);
   std::vector<uint8_t> replacement = expected_bytes;
@@ -59,37 +60,46 @@ inline bool cdna_lds_output_matches(const FaultMutationContext &source, const Cd
       .offset = selected_offset, .expected = expected_bytes, .replacement = replacement}};
   const std::optional<std::vector<uint8_t>> expected =
       expected_replacement_image(source.source(), edits, row.arch);
-  if (!expected || !std::ranges::equal(*expected, candidate))
+  if (!expected || !std::ranges::equal(*expected, candidate)) {
     return false;
+  }
   const FaultMutationContext mutant(candidate);
   if (!mutant.source().is_valid() || mutant.source().target_id() != row.target ||
-      mutant.source().text_sections().size() != 1 || !descriptors_preserved(source, mutant))
+      mutant.source().text_sections().size() != 1 || !descriptors_preserved(source, mutant)) {
     return false;
+  }
   const Section &text = *mutant.source().text_sections().front();
-  if (selected_offset > text.size() || text.size() - selected_offset < 4)
+  if (selected_offset > text.size() || text.size() - selected_offset < 4) {
     return false;
+  }
   const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
   uint32_t branch = 0;
   std::memcpy(&branch, bytes + selected_offset, sizeof(branch));
   std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), row.target);
-  if (!decoder)
+  if (!decoder) {
     return false;
+  }
   const DecodeResult jump = decoder->decode_window(std::span(&branch, 1), selected_offset);
-  if (jump.failed() || jump.value()->mnemonic() != "s_branch")
+  if (jump.failed() || jump.value()->mnemonic() != "s_branch") {
     return false;
+  }
   const std::optional<int64_t> delta = jump.value()->branch_offset_bytes();
-  if (!delta || selected_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - 4)
+  if (!delta || selected_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - 4) {
     return false;
+  }
   const int64_t base = static_cast<int64_t>(selected_offset + 4);
-  if (*delta > 0 && base > std::numeric_limits<int64_t>::max() - *delta)
+  if (*delta > 0 && base > std::numeric_limits<int64_t>::max() - *delta) {
     return false;
+  }
   const int64_t signed_guest = base + *delta;
-  if (signed_guest < 0)
+  if (signed_guest < 0) {
     return false;
+  }
   const uint64_t guest = static_cast<uint64_t>(signed_guest);
   if (guest > text.size() || text.size() - guest < 12 ||
-      !branch_reaches(*decoder, text, guest + 8, selected_offset + 8))
+      !branch_reaches(*decoder, text, guest + 8, selected_offset + 8)) {
     return false;
+  }
   std::array<uint32_t, 2> words = {};
   std::memcpy(words.data(), bytes + guest, sizeof(words));
   const DecodeResult decoded = decoder->decode_window(words, guest);
@@ -97,8 +107,9 @@ inline bool cdna_lds_output_matches(const FaultMutationContext &source, const Cd
       (decoded.value()->mnemonic() != "ds_write_b32" &&
        decoded.value()->mnemonic() != "ds_write_b128") ||
       decoded.value()->num_src_operands() < 2 ||
-      decoded.value()->src_operand(0)->encoding_value() != static_cast<int>(replacement_vgpr))
+      decoded.value()->src_operand(0)->encoding_value() != static_cast<int>(replacement_vgpr)) {
     return false;
+  }
   return std::memcmp(bytes + guest, replacement.data(), replacement.size()) == 0;
 }
 
