@@ -19,7 +19,6 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y python3.12 python3.12-venv
 #   https://github.com/ROCm/TheRock/blob/main/RELEASES.md#supported-python-device--install-extras
 # Pin a dated nightly via ROCM_VERSION for reproducibility; bump it manually to
 # update. Browse available versions at https://nightly.repo.amd.com/rocm/core/whl-next/rocm/
-# jax-rocm10-* needs a ROCm 10 nightly in ROCM_VERSION.
 ARG ROCM_VERSION=<rocm_version>
 ARG GFX_ARCH=<gfx_arch>
 RUN rm -rf /rocm-venv && python3.12 -m venv /rocm-venv && \
@@ -45,12 +44,11 @@ COPY projects/rocprofiler-compute/requirements-test.txt /app/projects/rocprofile
 COPY projects/rocprofiler-compute/requirements-development.txt /app/projects/rocprofiler-compute/requirements-development.txt
 RUN /rocm-venv/bin/pip install -r /app/projects/rocprofiler-compute/requirements.txt -r /app/projects/rocprofiler-compute/requirements-test.txt -r /app/projects/rocprofiler-compute/requirements-development.txt
 
-# Same /rocm-venv as analyze. PyPI is --index-url so the nightly jax extra-index
-# cannot hide the PyPI jax-rocm10-plugin. Pin jax/jaxlib to the plugin 0.11 series.
 RUN /rocm-venv/bin/pip install \
         --index-url https://pypi.org/simple/ \
         --extra-index-url https://nightly.repo.amd.com/rocm/jax/whl-next/ \
-        jax-rocm10-plugin jax-rocm10-pjrt "jax==0.11.*" "jaxlib==0.11.*"
+        "jax-rocm10-plugin==0.11.*" "jax-rocm10-pjrt==0.11.*" \
+        "jax==0.11.*" "jaxlib==0.11.*"
 
 # Set the working directory
 WORKDIR /app/projects/rocprofiler-compute
