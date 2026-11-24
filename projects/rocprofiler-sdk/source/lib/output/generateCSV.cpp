@@ -192,14 +192,6 @@ generate_csv(const output_config& cfg,
             _type = "UNK";
 
         auto row_ss = std::stringstream{};
-        // write_row takes forwarding references, which cannot bind to a bit-field.
-#if defined(HSAKMT_HAS_SPLIT_GFXIP)
-        const uint32_t sdma_fw_version    = itr.sdma_fw_version.uCodeSDMA;
-        const uint32_t compute_fw_version = itr.sdma_fw_version.uCodeCompute;
-#else
-        const uint32_t sdma_fw_version    = itr.sdma_fw_version.Value;
-        const uint32_t compute_fw_version = itr.fw_version.Value;
-#endif
         rocprofiler::tool::csv::agent_info_csv_encoder::write_row(row_ss,
                                                                   itr.node_id,
                                                                   itr.logical_node_id,
@@ -233,8 +225,8 @@ generate_csv(const output_config& cfg,
                                                                   itr.num_cp_queues,
                                                                   itr.max_engine_clk_ccompute,
                                                                   itr.max_engine_clk_fcompute,
-                                                                  sdma_fw_version,
-                                                                  compute_fw_version,
+                                                                  itr.sdma_fw_version.Value,
+                                                                  itr.fw_version.Value,
                                                                   itr.capability.Value,
                                                                   itr.cu_per_engine,
                                                                   itr.max_waves_per_cu,

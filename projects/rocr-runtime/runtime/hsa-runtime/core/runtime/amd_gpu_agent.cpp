@@ -179,16 +179,16 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   const core::Isa *isa_base;
 
-  if (node_props.OverrideGfxIpVersion.Value != 0) {
+  if (node_props.OverrideEngineId.Value != 0) {
      isa_base = core::IsaRegistry::GetIsa(
-         core::Isa::Version(node_props.OverrideGfxIpVersion.ui32.Major,
-                            node_props.OverrideGfxIpVersion.ui32.Minor,
-                            node_props.OverrideGfxIpVersion.ui32.Stepping));
+         core::Isa::Version(node_props.OverrideEngineId.ui32.Major,
+                            node_props.OverrideEngineId.ui32.Minor,
+                            node_props.OverrideEngineId.ui32.Stepping));
   } else {
      isa_base = core::IsaRegistry::GetIsa(
-         core::Isa::Version(node_props.GfxIpVersion.ui32.Major,
-                            node_props.GfxIpVersion.ui32.Minor,
-                            node_props.GfxIpVersion.ui32.Stepping));
+         core::Isa::Version(node_props.EngineId.ui32.Major,
+                            node_props.EngineId.ui32.Minor,
+                            node_props.EngineId.ui32.Stepping));
   }
 
   if (!isa_base) {
@@ -219,15 +219,15 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   }
 
   const core::Isa* isa;
-  if (node_props.OverrideGfxIpVersion.Value != 0) {
+  if (node_props.OverrideEngineId.Value != 0) {
     isa = core::IsaRegistry::GetIsa(
-          core::Isa::Version(node_props.OverrideGfxIpVersion.ui32.Major, node_props.OverrideGfxIpVersion.ui32.Minor,
-                             node_props.OverrideGfxIpVersion.ui32.Stepping), sramecc, xnack);
+          core::Isa::Version(node_props.OverrideEngineId.ui32.Major, node_props.OverrideEngineId.ui32.Minor,
+                             node_props.OverrideEngineId.ui32.Stepping), sramecc, xnack);
   } else {
   // Set instruction set architecture via node property, only on GPU device.
     isa = core::IsaRegistry::GetIsa(
-          core::Isa::Version(node_props.GfxIpVersion.ui32.Major, node_props.GfxIpVersion.ui32.Minor,
-                             node_props.GfxIpVersion.ui32.Stepping), sramecc, xnack);
+          core::Isa::Version(node_props.EngineId.ui32.Major, node_props.EngineId.ui32.Minor,
+                             node_props.EngineId.ui32.Stepping), sramecc, xnack);
   }
 
   assert(isa != nullptr && "ISA registry inconsistency.");
@@ -2840,7 +2840,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((bool*)value) = (kfd_version.KernelInterfaceMajorVersion > 1 ||
                          (kfd_version.KernelInterfaceMajorVersion == 1 &&
                           kfd_version.KernelInterfaceMinorVersion >= 20)) &&
-                        properties_.GfxIpVersion.ui32.Major >= 12;
+                        properties_.EngineId.ui32.Major >= 12;
       break;
     }
     case HSA_AMD_AGENT_INFO_CUID: {

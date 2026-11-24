@@ -191,25 +191,25 @@
                                 },
                                 "sdma_fw_version": {
                                     "type": "object",
-                                    "description": "SDMA and Compute firmware versions",
+                                    "description": "SDMA firmware version",
                                     "properties": {
                                         "uCodeSDMA": {
                                             "type": "integer",
                                             "description": "SDMA microcode version"
                                         },
-                                        "uCodeCompute": {
+                                        "uCodeRes": {
                                             "type": "integer",
-                                            "description": "Compute microcode version"
+                                            "description": "Reserved microcode version"
                                         }
                                     },
                                     "required": [
                                         "uCodeSDMA",
-                                        "uCodeCompute"
+                                        "uCodeRes"
                                     ]
                                 },
                                 "fw_version": {
                                     "type": "object",
-                                    "description": "Legacy firmware version. uCode is the low 10 bits of the compute microcode",
+                                    "description": "Firmware version",
                                     "properties": {
                                         "uCode": {
                                             "type": "integer",
@@ -361,29 +361,6 @@
                                         "CoherentHostAccess",
                                         "DebugSupportedFirmware",
                                         "Reserved"
-                                    ]
-                                },
-                                "gfxip_version": {
-                                    "type": "object",
-                                    "description": "GFXIP version",
-                                    "properties": {
-                                        "Major": {
-                                            "type": "integer",
-                                            "description": "GFXIP major version"
-                                        },
-                                        "Minor": {
-                                            "type": "integer",
-                                            "description": "GFXIP minor version"
-                                        },
-                                        "Stepping": {
-                                            "type": "integer",
-                                            "description": "GFXIP stepping"
-                                        }
-                                    },
-                                    "required": [
-                                        "Major",
-                                        "Minor",
-                                        "Stepping"
                                     ]
                                 }
                             },

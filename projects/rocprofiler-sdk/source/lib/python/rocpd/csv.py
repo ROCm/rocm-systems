@@ -105,7 +105,7 @@ def write_agent_info_csv(importData, config) -> None:
         "max_engine_clk_ccompute",
         "max_engine_clk_fcompute",
         "sdma_fw_version.uCodeSDMA AS Sdma_Fw_Version",
-        "sdma_fw_version.uCodeCompute AS Fw_Version",
+        "fw_version.uCode AS Fw_Version",
         "cu_per_engine",
         "max_waves_per_cu",
         "workgroup_max_size",

@@ -29,7 +29,7 @@
 #include "impl/wddm/queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
 
-uint32_t get_vgpr_size_per_cu(HSA_GFXIP_VERSION id) {
+uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id) {
   uint32_t vgpr_size = 0x40000;
 
   if (id.ui32.Major >= 11) {

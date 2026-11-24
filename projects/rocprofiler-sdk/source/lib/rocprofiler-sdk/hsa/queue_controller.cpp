@@ -353,8 +353,7 @@ constexpr rocprofiler_agent_t default_agent =
                         .logical_node_id            = 0,
                         .logical_node_type_id       = 0,
                         .runtime_visibility         = {0, 0, 0, 0, 0},
-                        .uuid          = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{}),
-                        .gfxip_version = {}};
+                        .uuid = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{})};
 
 RocAttachDispatchTable**
 get_attach_table()

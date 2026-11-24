@@ -215,7 +215,7 @@ typedef struct {
 	uint32_t device_id;
 	uint32_t node_id;
 	uint64_t local_mem_size;
-	HSA_GFXIP_VERSION EngineId;
+	HSA_ENGINE_ID EngineId;
 	aperture_t lds_aperture;
 	aperture_t scratch_aperture;
 	aperture_t mmio_aperture;
@@ -4009,9 +4009,9 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].usable_peer_id_array[0] = props.KFDGpuID;
 			gpu_mem[gpu_mem_count].usable_peer_id_num = 1;
 
-			gpu_mem[gpu_mem_count].EngineId.ui32.Major = props.GfxIpVersion.ui32.Major;
-			gpu_mem[gpu_mem_count].EngineId.ui32.Minor = props.GfxIpVersion.ui32.Minor;
-			gpu_mem[gpu_mem_count].EngineId.ui32.Stepping = props.GfxIpVersion.ui32.Stepping;
+			gpu_mem[gpu_mem_count].EngineId.ui32.Major = props.EngineId.ui32.Major;
+			gpu_mem[gpu_mem_count].EngineId.ui32.Minor = props.EngineId.ui32.Minor;
+			gpu_mem[gpu_mem_count].EngineId.ui32.Stepping = props.EngineId.ui32.Stepping;
 
 			gpu_mem[gpu_mem_count].drm_render_fd = fd;
 			gpu_mem[gpu_mem_count].gpu_id = props.KFDGpuID;

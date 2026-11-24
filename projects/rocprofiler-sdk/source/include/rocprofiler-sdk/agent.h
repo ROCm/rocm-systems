@@ -29,43 +29,6 @@
 
 #include <stdint.h>
 
-// rocprofiler_agent_v0_t::fw_version keeps the historical HSA_ENGINE_ID layout.
-// A hsakmt that defines HSAKMT_HAS_SPLIT_GFXIP no longer publishes that type,
-// so define it here. An older installed hsakmt still publishes it and has no
-// HSA_GFXIP_VERSION, so define that instead.
-#if defined(HSAKMT_HAS_SPLIT_GFXIP)
-typedef union
-{
-    HSAuint32 Value;
-    struct
-    {
-        unsigned int uCode    : 10;  // ucode packet processor version
-        unsigned int Major    : 6;   // GFXIP Major engine version
-        unsigned int Minor    : 8;   // GFXIP Minor engine version
-        unsigned int Stepping : 8;   // GFXIP Stepping info
-    } ui32;
-} HSA_ENGINE_ID;
-#else
-typedef union
-{
-    HSAuint32 Value;
-    struct
-    {
-        unsigned int Major    : 8;  // GFXIP Major engine version
-        unsigned int Minor    : 8;  // GFXIP Minor engine version
-        unsigned int Stepping : 8;  // GFXIP Stepping info
-    } ui32;
-} HSA_GFXIP_VERSION;
-#endif
-
-// rocprofiler_agent_v0_t::sdma_fw_version is an HSA_ENGINE_VERSION, and every
-// hsakmt header defines that type, so it cannot be redefined here the way
-// HSA_ENGINE_ID and HSA_GFXIP_VERSION are. Its layout comes from the hsakmt
-// header on the include path: uCodeSDMA:10, uCodeCompute:16 and Reserved:6 when
-// HSAKMT_HAS_SPLIT_GFXIP is defined, uCodeSDMA:10, uCodeRes:10 and Reserved:12
-// in older headers. A library and the clients that read its agents must be
-// built against hsakmt headers that agree on HSAKMT_HAS_SPLIT_GFXIP.
-
 ROCPROFILER_EXTERN_C_INIT
 
 /**
@@ -219,10 +182,10 @@ typedef struct rocprofiler_agent_v0_t
                                           ///< capabilities
     uint32_t max_engine_clk_fcompute;    ///< GPU only. Maximum engine clocks for GPU, including any
                                          ///< boost capabilities
-    HSA_ENGINE_VERSION sdma_fw_version;  ///< GPU only. SDMA and compute microcode
-    HSA_ENGINE_ID      fw_version;       ///< GPU only. Legacy 10-bit compute microcode
-    HSA_CAPABILITY     capability;       ///< GPU only
-    uint32_t           cu_per_engine;    ///< computed
+    HSA_ENGINE_VERSION sdma_fw_version;  ///< GPU only
+    HSA_ENGINE_ID      fw_version;
+    HSA_CAPABILITY     capability;        ///< GPU only
+    uint32_t           cu_per_engine;     ///< computed
     uint32_t           max_waves_per_cu;  ///< computed
     uint32_t           family_id;         ///< Family code
     uint32_t workgroup_max_size;  ///< GPU only. Maximum total number of work-items in a work-group.
@@ -247,16 +210,9 @@ typedef struct rocprofiler_agent_v0_t
     int32_t                               logical_node_type_id;
     rocprofiler_agent_runtime_visiblity_t runtime_visibility;
     rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
-    HSA_GFXIP_VERSION                     gfxip_version;  ///< GPU only. GFXIP version, may be 0
 
     /// @var fw_version
-    /// @brief GPU only. Legacy identifier (rev) of the GPU uEngine or Firmware.
-    /// uCode is the low 10 bits of the compute microcode. Major, Minor, and
-    /// Stepping are zero. The 12-bit compute microcode is
-    /// sdma_fw_version.uCodeCompute, and GFXIP is gfxip_version. May be 0.
-    ///
-    /// @var gfxip_version
-    /// @brief GPU only. GFXIP major, minor, and stepping. May be 0.
+    /// @brief GPU only. Identifier (rev) of the GPU uEngine or Firmware, may be 0
     ///
     /// @var hive_id
     /// @brief XGMI Hive the GPU node belongs to in the system. It is an opaque and

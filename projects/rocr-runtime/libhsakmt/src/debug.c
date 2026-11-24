@@ -697,13 +697,13 @@ static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
 	device_info->vendor_id = props.VendorId;
 	device_info->device_id = props.DeviceId;
 
-	/* gfx_target_version from GfxIpVersion - decimal encoding for KFD 1.18 compatibility */
-	device_info->gfx_target_version = (props.GfxIpVersion.ui32.Major * 10000
-	                                        + props.GfxIpVersion.ui32.Minor * 100
-	                                        + props.GfxIpVersion.ui32.Stepping);
+	/* gfx_target_version from EngineId - decimal encoding for KFD 1.18 compatibility */
+	device_info->gfx_target_version = (props.EngineId.ui32.Major * 10000
+	                                        + props.EngineId.ui32.Minor * 100
+	                                        + props.EngineId.ui32.Stepping);
 
-	/* fw_version from the compute uCode */
-	device_info->fw_version = props.uCodeEngineVersions.uCodeCompute;
+	/* fw_version from EngineId */
+	device_info->fw_version = props.EngineId.ui32.uCode;
 
 	/* SIMD/compute topology */
 	device_info->simd_count = props.NumFComputeCores;

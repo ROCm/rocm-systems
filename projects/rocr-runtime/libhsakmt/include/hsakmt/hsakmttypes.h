@@ -167,16 +167,12 @@ typedef union
     HSAuint32 Value;
     struct
     {
-        unsigned int Major    :  8;  // GFXIP Major engine version
+        unsigned int uCode    : 10;  // ucode packet processor version
+        unsigned int Major    :  6;  // GFXIP Major engine version
         unsigned int Minor    :  8;  // GFXIP Minor engine version
         unsigned int Stepping :  8;  // GFXIP Stepping info
     }ui32;
-} HSA_GFXIP_VERSION;
-
-// Set when this header stores GFXIP in HSA_GFXIP_VERSION and the compute
-// microcode in HSA_ENGINE_VERSION.uCodeCompute. Released headers that still
-// pack both into HSA_ENGINE_ID do not define it.
-#define HSAKMT_HAS_SPLIT_GFXIP 1
+} HSA_ENGINE_ID;
 
 typedef union
 {
@@ -184,12 +180,20 @@ typedef union
     struct
     {
         unsigned int uCodeSDMA: 10; // ucode version SDMA engine
-        // KFD stores mec_fw_version in a uint16_t. gfx9 uses bit 15
-        // (for example 459 + 32768 and 0x817a), so 12 bits is not enough.
+        // Full compute (MEC) microcode version. KFD stores mec_fw_version in a
+        // uint16_t and gfx9 sets bit 15 (for example 0x817a), so 10 bits are not
+        // enough. This field starts where uCodeRes did, and the bits it takes
+        // from Reserved were always zero, so a reader built against the old
+        // layout sees the low 10 bits and a reader of an old producer sees a
+        // value below 1024. HSA_ENGINE_ID.ui32.uCode still holds the low 10 bits.
         unsigned int uCodeCompute : 16; // ucode version Compute engine
         unsigned int Reserved : 6; // Reserved, must be 0
     };
 } HSA_ENGINE_VERSION;
+
+// Set when HSA_ENGINE_VERSION has uCodeCompute (it was uCodeRes in older
+// headers). Source that reads the field by name can test it.
+#define HSAKMT_HAS_UCODE_COMPUTE 1
 
 typedef union
 {
@@ -322,8 +326,8 @@ typedef struct _HsaNodeProperties
     HSAuint32       MaxSlotsScratchCU; // Number of temp. memory ("scratch") wave slots available to access,
                                        // may be 0 if HW has no restrictions
 
-    HSA_GFXIP_VERSION GfxIpVersion;         // GFXIP version of this node, may be 0
-    HSA_GFXIP_VERSION OverrideGfxIpVersion; // GFXIP version override, may be 0
+    HSA_ENGINE_ID   EngineId;          // Identifier (rev) of the GPU uEngine or Firmware, may be 0
+    HSA_ENGINE_ID   OverrideEngineId;  // Identifier (rev) of the Overrided GPU uEngine or Firmware, may be 0
 
     HSAuint16       VendorId;          // GPU vendor id; 0 on latency (= CPU)-only nodes
     HSAuint16       DeviceId;          // GPU device id; 0 on latency (= CPU)-only nodes
