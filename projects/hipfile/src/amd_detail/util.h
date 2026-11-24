@@ -22,8 +22,8 @@ inline constexpr bool is_variant_of_T_and_T_ptr<std::variant<T1, T2>> =
 /// @param v A variant
 /// @details Takes a variant of the form <T, T*> or the reverse. T may be const. Will return a pointer to the
 /// non-pointer entry if it is currently held, otherwise it will return the pointer entry.
-template <typename T1, typename T2,
-          typename = std::enable_if_t<is_variant_of_T_and_T_ptr<std::variant<T1, T2>>>>
+template <typename T1, typename T2>
+    requires is_variant_of_T_and_T_ptr<std::variant<T1, T2>>
 auto
 get_variant_ptr(std::variant<T1, T2> &v)
 {
