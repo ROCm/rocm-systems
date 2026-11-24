@@ -604,7 +604,6 @@
       "description": "NCCL_RMA_DISABLE=1 across two nodes: the peer needs the RMA proxy, which the flag keeps down, so put and wait must fail with ncclInvalidUsage instead of hanging, on symmetric and non-symmetric windows.",
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1",
-        "RCCL_RMA_USE_DMABUF": "1",
         "NCCL_RMA_DISABLE": "1"
       },
       "tests": [

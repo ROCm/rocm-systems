@@ -138,6 +138,8 @@ gdr_t ncclGdrCopy = nullptr;
 #include "fakes/param_redirect.h"
 // src/misc/rocmwrap.cc's param, which fakes/rocmwrap_fakes.cc does not define yet.
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
+// src/misc/rocmwrap.cc's param, read by ncclGinProxyRegMrSym.
+int64_t rcclParamForceEnableDMABUF() { return 0; }
 
 // CreateContext's error paths destroy the partial context; Create() records its host allocations to check that
 // none survives a failure (and to release any that would, so one leak cannot cascade into later tests).

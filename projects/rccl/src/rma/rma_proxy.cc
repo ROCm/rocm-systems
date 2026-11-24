@@ -25,9 +25,6 @@ extern int64_t ncclParamIbDataDirect();
 
 NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
-// [RCCL] Off by default: cpuAccessSignals/flush buffers may be host memory whose
-// dmabuf export fails (INVALID_AGENT) on ROCm; opt in via NCCL_RMA_USE_DMABUF=1.
-RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
 
 // world / rail-peer indexing conversion
 ncclResult_t ncclRmaProxyWorldToPeer(const struct ncclRmaProxyCtx* ctx, int worldRank, int* peer) {
@@ -140,7 +137,10 @@ static ncclResult_t ncclRmaProxyRegMrSym(ncclRma_t* rmaComm, void* rmaCollComm, 
     NCCLCHECK(rmaComm->regMrSym(rmaCollComm, addr, size, type, mr_flags, mhandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
-    if (ncclParamDmaBufEnable() && (props.ptrSupport & NCCL_PTR_DMABUF)) {
+    bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA) != 0;
+    bool dmabufAvailable = ncclParamDmaBufEnable() != 0 && (props.ptrSupport & NCCL_PTR_DMABUF) != 0;
+    if (rcclGdrUseDmaBuf(peermemAvailable, dmabufAvailable, rcclParamForceEnableDMABUF() != 0,
+                        ncclCuMemEnable() != 0)) {
       int dmabufFd = -1;
       // [RCCL] sym_buffer selects the cuMem (VMM) dmabuf export used for symmetric
       // windows; plain (hipExtMalloc) allocations use the ROCr portable export.
@@ -173,11 +173,6 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclRma_t* rmaCo
   // Enforcing strong ordering on the signals mr is vital to ensure ordering between puts and signals.
   size_t signalSlots = (size_t)comm->nRanks * comm->config.numRmaSig;
   size_t signalsBufSize = signalSlots * sizeof(uint64_t);
-  // [RCCL] Optionally strip DMA-BUF: signals may back onto memory whose dmabuf export fails on ROCm.
-  ncclNetProperties_t props_tmp = rmaProxyCtx->props;
-  if (rcclParamRmaProxyUseDMABUF() == 0) {
-    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
-  }
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void**)&rmaProxyCtx->signalsDev, &rmaProxyCtx->signalsCumemhandle, CU_MEM_HANDLE_TYPE_NONE,
                            signalsBufSize, comm->memManager));
@@ -185,8 +180,9 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclRma_t* rmaCo
   CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->signalsDev, signalsBufSize, hipDeviceMallocUncached));
 #endif
   CUDACHECK(cudaMemset(rmaProxyCtx->signalsDev, 0, signalsBufSize));
-  NCCLCHECK(ncclRmaProxyRegMrSym(rmaComm, rmaProxyCtx->rmaCollComm, props_tmp, rmaProxyCtx->signalsDev, signalsBufSize,
-                                 NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO | NCCL_NET_MR_FLAG_SIGNAL_NEVER_RESET,
+  NCCLCHECK(ncclRmaProxyRegMrSym(rmaComm, rmaProxyCtx->rmaCollComm, rmaProxyCtx->props, rmaProxyCtx->signalsDev,
+                                 signalsBufSize, NCCL_PTR_CUDA,
+                                 NCCL_NET_MR_FLAG_FORCE_SO | NCCL_NET_MR_FLAG_SIGNAL_NEVER_RESET,
                                  &rmaProxyCtx->signalsMhandle));
   // Allocate the host buffer to track the expected values of the signals
   NCCLCHECK(ncclCalloc(&rmaProxyCtx->signalsHost, signalsBufSize));
@@ -244,19 +240,13 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclRma_t* 
   // The clean up in case of failure will be done by the ncclRmaProxyDestroyContext function invoked by the caller.
   size_t signalSlots = (size_t)comm->nRanks * comm->config.numRmaSig;
   size_t signalsBufSize = signalSlots * sizeof(uint64_t);
-  // [RCCL] Strip DMA-BUF like ncclRmaProxyCtxAlloc: cpuAccessSignals may be
-  // host memory (GDRCopy off), whose dmabuf export fails (INVALID_AGENT).
-  ncclNetProperties_t props_tmp = rmaProxyCtx->props;
-  if (rcclParamRmaProxyUseDMABUF() == 0) {
-    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
-  }
   // Allocate the CPU-accessible signal for graph capture and then register the memory region with the RMA plugin.
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->cpuAccessSignals, &rmaProxyCtx->cpuAccessSignalsDev, signalSlots, 0,
                                   &rmaProxyCtx->cpuAccessSignalsGdrHandle, comm->memManager));
   int cpuAccessSignalsType = (rmaProxyCtx->cpuAccessSignalsGdrHandle != NULL) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-  NCCLCHECK(ncclRmaProxyRegMrSym(rmaComm, rmaProxyCtx->rmaCollComm, props_tmp, rmaProxyCtx->cpuAccessSignalsDev,
-                                 signalsBufSize, cpuAccessSignalsType, NCCL_NET_MR_FLAG_FORCE_SO,
-                                 &rmaProxyCtx->cpuAccessSignalsMhandle));
+  NCCLCHECK(ncclRmaProxyRegMrSym(rmaComm, rmaProxyCtx->rmaCollComm, rmaProxyCtx->props,
+                                 rmaProxyCtx->cpuAccessSignalsDev, signalsBufSize, cpuAccessSignalsType,
+                                 NCCL_NET_MR_FLAG_FORCE_SO, &rmaProxyCtx->cpuAccessSignalsMhandle));
   // Allocate the host buffer to track the expected values of the signals
   NCCLCHECK(ncclCalloc(&rmaProxyCtx->cpuAccessSignalsHost, signalsBufSize));
 
@@ -427,18 +417,8 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
     // [RCCL] Symmetric windows are cuMem/VMM allocations; export their dmabuf via
     // cuMemGetHandleForAddressRange (sym_buffer=true) instead of the ROCr export,
     // which fails with INVALID_ALLOCATION on VMM memory.
-    ncclNetProperties_t props_tmp = rmaProxyState->props[n];
-#if NCCL_CUMEM_DMABUF_EXPORT_GATE
-    if (!ncclCuMemEnable()) {
-      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
-    }
-#else
-    if (rcclParamRmaProxyUseDMABUF() == 0) {
-      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
-    }
-#endif
-    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], props_tmp, address, size,
-                                   NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
+    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], rmaProxyState->props[n],
+                                   address, size, NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
     if (rmaHostWins[n] == NULL) {
       WARN("rank %d - RMA Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
       return ncclSystemError;

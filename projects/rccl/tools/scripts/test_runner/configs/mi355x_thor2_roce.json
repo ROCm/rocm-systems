@@ -820,9 +820,7 @@
     },
     "host_api_tests_base": {
       "extends": "net_ib_base",
-      "env_variables": {
-        "RCCL_RMA_USE_DMABUF": "1"
-      },
+      "env_variables": {},
       "tests": [
         {
           "name": "HostApi_WindowRegisterDeregister",

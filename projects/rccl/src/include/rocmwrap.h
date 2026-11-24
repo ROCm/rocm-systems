@@ -229,6 +229,13 @@ extern int ncclCuMemHostEnable();
 extern int64_t rcclParamForceEnableDMABUF();
 extern int64_t ncclParamDmaBufEnable();
 
+// [RCCL] The only peermem-vs-DMA-BUF choice: one process must not mix both (NIC writes into a shared ROCr block get lost).
+static inline bool rcclGdrUseDmaBuf(bool peermemAvailable, bool dmabufAvailable, bool forceDmaBuf,
+                                    bool cuMemEnabled) {
+  if (forceDmaBuf || cuMemEnabled) return dmabufAvailable;
+  return dmabufAvailable && !peermemAvailable;
+}
+
 // Handle type used for cuMemCreate()
 extern CUmemAllocationHandleType ncclCuMemHandleType;
 

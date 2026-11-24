@@ -17,6 +17,7 @@
 #include <hsa/hsa_ext_amd.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -64,6 +65,49 @@ inline ncclRma_t* GetRmaPlugin()
     if (strcasecmp(envNet, "IB") == 0) return &ncclRmaIbProxy;
 
     return nullptr;
+}
+
+/** Block size ROCr's fragment allocator sub-allocates small hipMalloc requests from (2 MiB if unknown). */
+inline size_t RocrFragmentBlockGranule()
+{
+    constexpr size_t kFallbackGranule = 2ull * 1024 * 1024;
+
+    void* probe = nullptr;
+    if(hipMalloc(&probe, 1) != hipSuccess || probe == nullptr) return kFallbackGranule;
+
+    hsa_amd_pointer_info_t info{};
+    info.size = sizeof(info);
+    hsa_status_t status = hsa_amd_pointer_info(probe, &info, nullptr, nullptr, nullptr);
+    (void)hipFree(probe);
+    if(status != HSA_STATUS_SUCCESS) return kFallbackGranule;
+
+    size_t granule = 0;
+    auto onPool = [](hsa_amd_memory_pool_t pool, void* data) -> hsa_status_t {
+        size_t* out = static_cast<size_t*>(data);
+        hsa_amd_segment_t segment{};
+        if(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) != HSA_STATUS_SUCCESS ||
+           segment != HSA_AMD_SEGMENT_GLOBAL)
+        {
+            return HSA_STATUS_SUCCESS;
+        }
+        uint32_t flags = 0;
+        if(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags) != HSA_STATUS_SUCCESS ||
+           !(flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED))
+        {
+            return HSA_STATUS_SUCCESS;
+        }
+        size_t rec = 0;
+        if(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE, &rec) ==
+           HSA_STATUS_SUCCESS && rec > 0)
+        {
+            *out = rec;
+            return HSA_STATUS_INFO_BREAK;
+        }
+        return HSA_STATUS_SUCCESS;
+    };
+    (void)hsa_amd_agent_iterate_memory_pools(info.agentOwner, onPool, &granule);
+
+    return granule > 0 ? granule : kFallbackGranule;
 }
 
 class RmaMPITestBase : public MPITestBase
@@ -539,8 +583,16 @@ protected:
 
     void* AllocBuf(size_t size)
     {
+        // DMA-BUF and peermem NIC writes into one ROCr fragment block lose data; give DmaBuf cases their own block.
+        size_t allocSize = size;
+        if(UseDmaBuf())
+        {
+            static const size_t granule = RocrFragmentBlockGranule();
+            allocSize = std::max(size, granule) + granule;
+        }
+
         void* p = nullptr;
-        if(hipMalloc(&p, size) != hipSuccess) return nullptr;
+        if(hipMalloc(&p, allocSize) != hipSuccess) return nullptr;
 
         hipError_t err = hipMemset(p, 0, size);
         if(err != hipSuccess)

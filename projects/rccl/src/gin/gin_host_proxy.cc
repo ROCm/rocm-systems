@@ -488,7 +488,10 @@ static ncclResult_t ncclGinProxyRegMrSym(void* ginCtx, void* addr, size_t size, 
     NCCLCHECK(rmaBackend->regMrSym(cComm->collComm, addr, size, type, mrFlags, mhandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
-    if (ncclParamDmaBufEnable() && (cComm->props.ptrSupport & NCCL_PTR_DMABUF)) {
+    bool peermemAvailable = (cComm->props.ptrSupport & NCCL_PTR_CUDA) != 0;
+    bool dmabufAvailable = ncclParamDmaBufEnable() != 0 && (cComm->props.ptrSupport & NCCL_PTR_DMABUF) != 0;
+    if (rcclGdrUseDmaBuf(peermemAvailable, dmabufAvailable, rcclParamForceEnableDMABUF() != 0,
+                        ncclCuMemEnable() != 0)) {
       ncclResult_t registrationResult = ncclSuccess;
       int dmabufFd = -1;
       dmabufResult = getDmaBufFd(addr, size, &dmabufFd);
