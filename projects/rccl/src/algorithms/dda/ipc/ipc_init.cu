@@ -238,6 +238,11 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaScratch = scratch;
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
+  // The IPC path has one scratch for every protocol: CE-scratch and DDA Broadcast LL read it through these aliases
+  // (not owned; freed with ddaScratch). There is no IPC LL128 tier.
+  comm->ddaRegionCe = {scratch, bytes, peerDev, comm->ddaPeerPtrsHost};
+  comm->ddaRegionLL = {scratch, bytes, peerDev, comm->ddaPeerPtrsHost};
+  comm->ddaRegionLL128 = {};
   comm->ddaIpcBarrierState = barrierState;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = epochDev != nullptr ? (int)epochLen : 0;
@@ -298,6 +303,10 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
     delete comm->ddaIpcBarrierState;
     comm->ddaIpcBarrierState = nullptr;
   }
+  // The CE and LL regions alias ddaScratch and its peer tables; drop them before those are freed.
+  comm->ddaRegionCe = {};
+  comm->ddaRegionLL = {};
+  comm->ddaRegionLL128 = {};
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
   comm->ddaPeerPtrsDev = nullptr;
   free(comm->ddaPeerPtrsHost);

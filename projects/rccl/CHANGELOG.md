@@ -5,6 +5,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* `RCCL_DDA_FABRIC_SIMPLE_BUFFER_SIZE` (default 256 MiB), `RCCL_DDA_FABRIC_CE_BUFFER_SIZE` (default 256 MiB), `RCCL_DDA_FABRIC_LL_BUFFER_SIZE` (default 8 MiB) and `RCCL_DDA_FABRIC_LL128_BUFFER_SIZE` (default 64 MiB): fixed sizes of the per-protocol regions of the gfx1250 DDA fabric scratch. `0` disables a region and every DDA tier that stages through it. A message that does not fit its region falls back to the next tier. The sizes must match on every rank.
 * Documentation for the unified cost model (`docs/how-to/rccl-cost-model.rst`), covering the candidate ID space, the `NCCL_DEBUG_SUBSYS=TUNING` log records, which selections it drives today, and the tuner plugin boundary.
 * gfx1250 DDA fabric (VMM) `ncclAlltoAll` push kernels, selected by `RCCL_DDA_A2A_PUSH` (default `1`; `0` restores the previous pull kernel): each rank writes its chunks straight into its peers' DDA scratch buffers and syncs all ranks before finishing, so a following LL or LL128 collective cannot reuse the scratch early. `RCCL_DDA_A2A_TDM` (default `1`) moves the data through the tensor data mover; `0`, like in-place calls, uses vector loads and stores. The gfx1250 DPX table enables the AlltoAll VMM tier up to 256 MiB; the SPX table leaves it off, so on SPX these kernels run only when `RCCL_DDA_THRESHOLD` covers the message.
 * `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `16`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion. The channels share one non-blocking stream per proxy thread to avoid SDMA completion stalls.
@@ -54,6 +55,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_NVLS_FIFO_LAYOUT` (default `-1`): selects the NVLS staging-FIFO slot-addressing layout (`0`, `1` or `2`); `-1` picks automatically by topology and architecture.
 
 ### Changed
+* The gfx1250 DDA fabric scratch is one allocation split into separate Simple, CE-scratch, LL and LL128 regions, sized by the `RCCL_DDA_FABRIC_*_BUFFER_SIZE` variables instead of from the tuning thresholds and rank count. `RCCL_DDA_FABRIC_BUFFER_SIZE` is ignored.
 * An empty `NCCL_GIN_TYPE` now counts as unset for the in-tree GIN backends, as it already did for the backend filter: Anvil SDMA initializes and `RCCL_GIN_TYPE_LIST` applies. Previously an empty value turned Anvil SDMA off.
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
 * On gfx1250 SPX and CPX (not DPX), registered sum AllReduce from 8 MiB, where the symmetric kernel gives way, runs on DDA in graph capture where Ring would run, up to max(32 MiB, nRanks x 2 MiB), and on the DDA LL128 two-shot instead of CE-registered outside capture for per-rank shards of 512 KiB to 1 MiB when the LL128 tier is on; either launch stays within the blocks and threads of the backend it replaces. These bounds come from the arch table, so `RCCL_IGNORE_ARCH_TABLE=1` restores the previous selection.
@@ -110,6 +112,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* gfx1250 DDA fabric LL and LL128 collectives could return wrong results when an earlier call of another protocol left data in the shared scratch whose words matched the LL or LL128 epoch flag. Each protocol now has its own region.
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
 * Fixed hierarchical Copy Engine `ncclAlltoAllv` failing with `ncclInvalidArgument` on rail-only host RMA (`NCCL_CROSS_NIC=0`). Like `ncclAlltoAll`, it puts to every remote rank, so it now falls back to the kernel path unless host RMA reaches every rank.
 * When mlx5 data-direct DMA-BUF registration is missing or fails, RCCL uses `ibv_reg_dmabuf_mr` and reports a failed data-direct attempt once per protection domain. A missing `mlx5dv_reg_dmabuf_mr` leaves data-direct off.

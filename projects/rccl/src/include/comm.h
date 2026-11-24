@@ -683,6 +683,16 @@ struct ncclCommSymTeams;
 class ncclIpcMemHandler;
 class ncclFabricMemHandler;
 
+// [RCCL] One sub-range of the DDA scratch. On the fabric path every rank's region
+// sits at the same offset in that rank's scratch allocation; on the IPC path the
+// CE and LL regions alias ddaScratch.
+struct ncclDdaScratchRegion {
+  void* self;       // this rank's region base; nullptr when bytes == 0
+  size_t bytes;     // usable bytes; 0 disables every tier that uses the region
+  void* peersDev;   // device void*[nRanks]: every rank's region base; nullptr when bytes == 0
+  void** peersHost; // host copy of peersDev; nullptr when bytes == 0
+};
+
 // NCCL_CHECK_MODE=DEBUG_LOCAL/DEBUG_GLOBAL
 // ncclCheckModeDebugLocal : check the input args/pointers locally, it replaces ncclParamCheckPointers()
 // ncclCheckModeDebugGlobal : check the input args globally such as symmetric buffer check, etc.
@@ -725,15 +735,24 @@ struct ncclComm {
   void* bootstrap;
   bool isGrow; // true if this comm is created via ncclCommGrow
 
-  // DDA all-reduce. The scratch buffer and peer-pointer table below are shared
-  // by both the IPC path (ncclDdaIpcCommInit) and the fabric/VMM path
-  // (ncclDdaFabricCommInit); only one path is active per comm. The handler and
-  // barrier-state pointers are path-specific.
+  // DDA. The scratch buffer and peer-pointer table below are shared by both the
+  // IPC path (ncclDdaIpcCommInit) and the fabric/VMM path (ncclDdaFabricCommInit);
+  // only one path is active per comm. On the fabric path they describe only the
+  // Simple region of the scratch allocation; CE, LL and LL128 have their own
+  // regions (ddaRegion*). The handler and barrier-state pointers are path-specific.
   ncclIpcMemHandler* ddaIpcMemHandler; /* IPC path only */
   ncclFabricMemHandler* ddaFabricMemHandler; /* fabric path only */
   void* ddaScratch;
   size_t ddaScratchBytes;
   void* ddaPeerPtrsDev;
+  // Per-protocol scratch regions. Owned on the fabric path; aliases of ddaScratch
+  // (CE, LL) or empty (LL128) on the IPC path.
+  struct ncclDdaScratchRegion ddaRegionCe;
+  struct ncclDdaScratchRegion ddaRegionLL;
+  struct ncclDdaScratchRegion ddaRegionLL128;
+  // The single VMM allocation holding every fabric region; freed at teardown.
+  void* ddaFabricScratchBase;
+  size_t ddaFabricScratchTotalBytes;
   nccl_dda_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* IPC path only */
   nccl_dda_detail::DdaFabricBarrierState* ddaFabricBarrierState; /* fabric path only */
   int ddaFabricMaxBlocks;

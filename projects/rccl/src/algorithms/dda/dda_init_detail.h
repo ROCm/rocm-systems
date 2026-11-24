@@ -26,54 +26,39 @@ namespace nccl_dda_detail {
 
 using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128WireBytesPerSlice;
-using dda::common::kDdaLLMaxBytes;
 constexpr int kDdaNranks = dda::common::NRANKS;
 
-// Compute the fabric scratch allocation from the runtime configuration.
-// An explicit buffer-size override takes precedence over derived sizing.
-//
-// The derived size is: max(simpleCap, llFloor, ll128Floor) where:
-// - simpleCap: rcclDdaScratchPayloadCap() (max DDA/CE-scratch table/env cap,
-//   including graph VMM even when the comm never captures, or the pre-table
-//   DDA defaults when the arch table is ignored)
-// - llFloor:   2 banks * nRanks * kDdaLLMaxBytes (when LL enabled)
-// - ll128Floor: whole slices per rank to carry DDA_LL128_THRESHOLD, 2 banks
-//
-// simpleCap is the 1:1 payload footprint (VMM Simple, AG CE-Scratch). LL/LL128
-// slot arrays can still exceed that at high rank counts, which is why the
-// floors remain. Kernel-internal slot caps (kDdaLLArMaxBytes, etc.) may still
-// refuse a message even when scratch is large enough.
-inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, size_t ddaThreshold,
-                                     int64_t llEnabled, int64_t ll128Enabled, size_t ll128Threshold = 0) {
-  if (overrideBytes >= 0) {
-    return overrideBytes > 0 ? (size_t)overrideBytes : 0;
+// The fabric DDA scratch is one allocation split into one region per protocol,
+// at the same offsets on every rank. A flag word of one protocol must never hold
+// another protocol's data: the LL/LL128 receivers accept a line as soon as its
+// flag matches the epoch, so stale Simple, CE or LL128 bytes in an LL flag slot
+// could otherwise pass for this epoch's data. Each size comes from its own CVAR
+// (RCCL_DDA_FABRIC_{SIMPLE,CE,LL,LL128}_BUFFER_SIZE); a tier whose message does
+// not fit its region fails eligibility and falls back to the next tier.
+enum DdaFabricRegion { kDdaRegionSimple = 0, kDdaRegionCe, kDdaRegionLL, kDdaRegionLL128, kDdaRegionCount };
+
+// Region granule: keeps every region base 128B-aligned for LL128 lines.
+constexpr size_t kDdaFabricRegionAlign = 4096;
+
+struct DdaFabricRegionLayout {
+  size_t offset[kDdaRegionCount];
+  size_t bytes[kDdaRegionCount]; // rounded up to kDdaFabricRegionAlign; 0 = region (and its tiers) disabled
+  size_t total;
+};
+
+// Lays the regions out in enum order. A negative request is treated as 0.
+inline DdaFabricRegionLayout ddaFabricRegionLayout(const int64_t (&requested)[kDdaRegionCount]) {
+  DdaFabricRegionLayout layout{};
+  size_t offset = 0;
+  for (int i = 0; i < kDdaRegionCount; ++i) {
+    const size_t want = requested[i] > 0 ? (size_t)requested[i] : 0;
+    const size_t bytes = (want + kDdaFabricRegionAlign - 1) / kDdaFabricRegionAlign * kDdaFabricRegionAlign;
+    layout.offset[i] = offset;
+    layout.bytes[i] = bytes;
+    offset += bytes;
   }
-
-  const size_t simpleCap = ddaEnabled && ddaThreshold > 0 ? ddaThreshold : 0;
-  if (simpleCap == 0) {
-    return 0;
-  }
-
-  if (nRanks < 1) nRanks = 1;
-
-  // LL fixed slot arrays: 2 banks * nRanks * slotMaxBytes.
-  const size_t llFloor = llEnabled ? (size_t)2 * nRanks * kDdaLLMaxBytes : 0;
-
-  // LL128 slot arrays sized to carry the LL128 threshold: whole slices per rank,
-  // nRanks slots, 2 banks.
-  size_t ll128Floor = 0;
-  if ((llEnabled || ll128Enabled) && ll128Threshold > 0) {
-    const size_t perRank = (ll128Threshold + (size_t)nRanks - 1) / (size_t)nRanks;
-    size_t slotSlices = ddaLL128Slices(perRank);
-    slotSlices += slotSlices & 1; // even: the two-shot tier halves this slot
-    ll128Floor = (size_t)2 * nRanks * slotSlices * (size_t)kDdaLL128WireBytesPerSlice;
-  }
-
-  size_t bytes = simpleCap;
-  if (llFloor > bytes) bytes = llFloor;
-  if (ll128Floor > bytes) bytes = ll128Floor;
-
-  return bytes;
+  layout.total = offset;
+  return layout;
 }
 
 // Per-comm IPC barrier state stored in ncclComm::ddaIpcBarrierState.

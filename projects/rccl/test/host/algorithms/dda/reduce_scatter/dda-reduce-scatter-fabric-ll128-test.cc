@@ -94,7 +94,7 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
   void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount, const void* kernel = Kernel<T, 8>()) {
     EXPECT_EQ(launch.kernel, kernel);
     ASSERT_EQ(launch.args.size(), 11u);
-    EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
+    EXPECT_EQ(launch.Arg<T**>(0), comm().ddaRegionLL128.peersDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
     EXPECT_EQ(launch.Arg<size_t>(3), recvcount * sizeof(T));
@@ -103,7 +103,7 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), (recvcount * sizeof(T) + 1919) / 1920);
-    EXPECT_EQ(launch.Arg<size_t>(9), (comm().ddaScratchBytes / 2) / 128 * 128);
+    EXPECT_EQ(launch.Arg<size_t>(9), (comm().ddaRegionLL128.bytes / 2) / 128 * 128);
     EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
   }
 
@@ -133,8 +133,8 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_NeedsHandlerScratchAndPeer
   for (int missing = 0; missing < 3; ++missing) {
     mock_.setFabricResourcesPresent(true);
     comm().ddaFabricMemHandler = missing == 0 ? nullptr : comm().ddaFabricMemHandler;
-    comm().ddaScratch = missing == 1 ? nullptr : comm().ddaScratch;
-    comm().ddaPeerPtrsDev = missing == 2 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaRegionLL128.self = missing == 1 ? nullptr : comm().ddaRegionLL128.self;
+    comm().ddaRegionLL128.peersDev = missing == 2 ? nullptr : comm().ddaRegionLL128.peersDev;
     EXPECT_FALSE(Eligible(4)) << "missing resource " << missing;
   }
 }
@@ -212,15 +212,15 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_WholeMessageWithinTheLL128
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_RankSlotMustHoldEverySlice) {
-  comm().ddaScratchBytes = kOneSliceScratch8;
+  comm().ddaRegionLL128.bytes = kOneSliceScratch8;
   EXPECT_TRUE(Eligible(kSliceFloats));
   EXPECT_FALSE(Eligible(kSliceFloats + 4));
-  comm().ddaScratchBytes = kOneSliceScratch8 - 1;
+  comm().ddaRegionLL128.bytes = kOneSliceScratch8 - 1;
   EXPECT_FALSE(Eligible(4));
-  comm().ddaScratchBytes = 2 * kOneSliceScratch8;
+  comm().ddaRegionLL128.bytes = 2 * kOneSliceScratch8;
   EXPECT_TRUE(Eligible(kSliceFloats + 4));
   comm().nRanks = 4;
-  comm().ddaScratchBytes = kOneSliceScratch8 / 2;
+  comm().ddaRegionLL128.bytes = kOneSliceScratch8 / 2;
   EXPECT_TRUE(Eligible(4));
 }
 

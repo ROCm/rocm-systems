@@ -79,14 +79,14 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
   const size_t slices = ddaLL128Slices(perRankBytes);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL128.bytes);
 
   auto gridBlock = ddaAllGatherFabricLL128Geom(comm, perRankBytes);
   const dim3 grid = gridBlock.first;
   const dim3 block = gridBlock.second;
   const unsigned blocksPerPeer = grid.y;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL128.peersDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
@@ -131,7 +131,8 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL128.self == nullptr ||
+      comm->ddaRegionLL128.peersDev == nullptr) {
     return false;
   }
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) {
@@ -157,7 +158,7 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
     return false;
   }
   // Derived from the scratch allocation
-  if (perRankBytes > ddaLL128AGMaxPerRankBytes(comm->nRanks, comm->ddaScratchBytes)) {
+  if (perRankBytes > ddaLL128AGMaxPerRankBytes(comm->nRanks, comm->ddaRegionLL128.bytes)) {
     return false;
   }
 

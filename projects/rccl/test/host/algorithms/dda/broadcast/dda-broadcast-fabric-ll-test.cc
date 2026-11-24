@@ -191,8 +191,8 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_NeedsScratchPeersAndEpoch) {
   EXPECT_FALSE(ncclBroadcastDdaFabricLLEligible(nullptr, 16, ncclInt8));
   for (int missing = 0; missing < 3; ++missing) {
     mock_.setFabricResourcesPresent(true);
-    comm().ddaScratch = missing == 0 ? nullptr : comm().ddaScratch;
-    comm().ddaPeerPtrsDev = missing == 1 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaRegionLL.self = missing == 0 ? nullptr : comm().ddaRegionLL.self;
+    comm().ddaRegionLL.peersDev = missing == 1 ? nullptr : comm().ddaRegionLL.peersDev;
     comm().ddaLLEpochDev = missing == 2 ? nullptr : comm().ddaLLEpochDev;
     EXPECT_FALSE(Eligible(16)) << "missing resource " << missing;
   }
@@ -247,11 +247,11 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_UpToBroadcastLLThreshold) {
 
 TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_PayloadMustFitBankAfterTokenLines) {
   // A 1152 B bank is 72 lines: 8 rank tokens leave 64 packets, 512 B.
-  comm().ddaScratchBytes = 2 * 1152;
+  comm().ddaRegionLL.bytes = 2 * 1152;
   EXPECT_TRUE(Eligible(512));
   EXPECT_FALSE(Eligible(528));
   // The bank floors to 128 B.
-  comm().ddaScratchBytes = 2 * 1152 + 254;
+  comm().ddaRegionLL.bytes = 2 * 1152 + 254;
   EXPECT_TRUE(Eligible(512));
   EXPECT_FALSE(Eligible(528));
   // Four rank tokens leave 68 packets, 544 B.
@@ -311,7 +311,7 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Launch_AlignedKernelFromOwnBuffersOnly) {
 }
 
 TEST_F(DdaBroadcastFabricLLMicrotest, Launch_PassesBuffersBytesRanksEpochAndBank) {
-  comm().ddaScratchBytes = 4096 + 40;
+  comm().ddaRegionLL.bytes = 4096 + 40;
   ASSERT_EQ(Run(/*root=*/2, 8, kSendbuff, kRecvbuff, ncclFloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
@@ -325,7 +325,7 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Launch_PassesBuffersBytesRanksEpochAndBank
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
   ASSERT_EQ(launch.args.size(), 11u);
-  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaRegionLL.peersDev);
   EXPECT_EQ(launch.Arg<char*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const char*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 16u);

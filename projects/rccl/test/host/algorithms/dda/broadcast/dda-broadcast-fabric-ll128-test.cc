@@ -311,8 +311,8 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_NeedsScratchPeersAndEpoch) {
   for (int missing = 0; missing < 5; ++missing) {
     mock_.setFabricResourcesPresent(true);
     comm().ddaFabricMemHandler = missing == 4 ? nullptr : comm().ddaFabricMemHandler;
-    comm().ddaScratch = missing == 0 ? nullptr : comm().ddaScratch;
-    comm().ddaPeerPtrsDev = missing == 1 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaRegionLL128.self = missing == 0 ? nullptr : comm().ddaRegionLL128.self;
+    comm().ddaRegionLL128.peersDev = missing == 1 ? nullptr : comm().ddaRegionLL128.peersDev;
     comm().ddaLLEpochDev = missing == 2 ? nullptr : comm().ddaLLEpochDev;
     comm().ddaLLEpochLen = missing == 3 ? 0 : comm().ddaLLEpochLen;
     EXPECT_FALSE(Eligible(16)) << "missing resource " << missing;
@@ -364,13 +364,13 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_UpToBroadcastLL128Threshold) {
 TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_SlicesMustFitBankAfterTokenRegion) {
   // 256-word slices; 8 rank tokens pad to one slice, so a 528-word bank leaves one (two if unpadded).
   SetArch("gfx1250");
-  comm().ddaScratchBytes = 2 * 528 * 8;
+  comm().ddaRegionLL128.bytes = 2 * 528 * 8;
   EXPECT_TRUE(Eligible(kGfx1250Slice));
   EXPECT_FALSE(Eligible(kGfx1250Slice + 16));
   // 144 rank tokens pad to two slices: none left in a 528-word bank, one in a 768-word bank.
   comm().nRanks = 144;
   EXPECT_FALSE(Eligible(16));
-  comm().ddaScratchBytes = 2 * 768 * 8;
+  comm().ddaRegionLL128.bytes = 2 * 768 * 8;
   EXPECT_TRUE(Eligible(kGfx1250Slice));
   EXPECT_FALSE(Eligible(kGfx1250Slice + 16));
 }
@@ -442,7 +442,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_AlignedKernelFrom16ByteOwnBuffer
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesBuffersBytesRanksEpochAndBank) {
-  comm().ddaScratchBytes = 4096 + 40;
+  comm().ddaRegionLL128.bytes = 4096 + 40;
   ASSERT_EQ(Run(/*root=*/2, 8, kSendbuff, kRecvbuff, ncclFloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
@@ -456,7 +456,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesBuffersBytesRanksEpochAndB
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
   ASSERT_EQ(launch.args.size(), 11u);
-  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaRegionLL128.peersDev);
   EXPECT_EQ(launch.Arg<char*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const char*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 16u);

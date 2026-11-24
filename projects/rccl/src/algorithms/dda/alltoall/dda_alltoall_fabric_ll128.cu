@@ -62,7 +62,7 @@ static inline unsigned ddaLL128A2AThreads(unsigned dflt) {
 
 // Largest per-peer chunk the slot (carved from one scratch bank) can carry.
 static inline size_t ddaLL128A2AMaxPerChunkBytes(ncclComm* comm) {
-  return ddaLL128SlotPayloadBytes(ddaLL128A2ASlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks));
+  return ddaLL128SlotPayloadBytes(ddaLL128A2ASlotWords(ddaBankSize(comm->ddaRegionLL128.bytes), comm->nRanks));
 }
 
 // Geometry: grid.x = peer columns, grid.y = blocks of a warp per slice, all within the block
@@ -91,11 +91,11 @@ static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, s
 static ncclResult_t ddaAllToAllFabricLL128Launch(const void* sendbuff, void* recvbuff, size_t perChunkBytes,
                                                  ncclComm* comm, cudaStream_t stream) {
   const size_t slices = ddaLL128Slices(perChunkBytes);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL128.bytes);
   const auto gb = ddaAllToAllFabricLL128Geom(comm, perChunkBytes);
   INFO(NCCL_COLL, "DDA fabric AllToAll LL128: nRanks=%d perChunkBytes=%zu slices=%zu grid=%ux%u block=%u", comm->nRanks,
        perChunkBytes, slices, gb.first.x, gb.first.y, gb.second.x);
-  int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
+  int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaRegionLL128.peersDev);
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<int8_t>), gb.first, gb.second, 0, stream,
@@ -113,7 +113,8 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL128.self == nullptr ||
+      comm->ddaRegionLL128.peersDev == nullptr) {
     return false;
   }
   if (count == 0) {

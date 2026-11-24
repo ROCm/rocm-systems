@@ -195,7 +195,7 @@ struct rcclArchThresholds {
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
 
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
-  // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.
+  // whenever the receive fits the DDA CE scratch region, on top of the ceNonRegMin/Max window.
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for
   // unregistered buffers). RCCL_FORCE_CE=0 turns it off everywhere. A null table forces it.
   bool forceCeScratch;

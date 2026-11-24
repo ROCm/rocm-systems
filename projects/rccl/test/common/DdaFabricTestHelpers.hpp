@@ -34,6 +34,9 @@ struct DdaFabricMockComm
         // Capacity is not under test by default. Individual tests override this
         // with an exact small value when exercising scratch-size rejection.
         comm.ddaScratchBytes    = std::numeric_limits<size_t>::max();
+        comm.ddaRegionCe.bytes    = std::numeric_limits<size_t>::max();
+        comm.ddaRegionLL.bytes    = std::numeric_limits<size_t>::max();
+        comm.ddaRegionLL128.bytes = std::numeric_limits<size_t>::max();
         comm.ddaFabricMaxBlocks = DDA_FABRIC_MAXBLOCKS;
         comm.archName            = const_cast<char*>("gfx1250");
         // Non-null so launcher tests can tell the abort flag was forwarded.
@@ -49,6 +52,16 @@ struct DdaFabricMockComm
                 reinterpret_cast<ncclFabricMemHandler*>(0x1);
             comm.ddaScratch     = reinterpret_cast<void*>(0x2);
             comm.ddaPeerPtrsDev = reinterpret_cast<void*>(0x3);
+            // Per-protocol scratch regions (fabric path): distinct dummies per region.
+            comm.ddaRegionCe.self         = reinterpret_cast<void*>(0x12);
+            comm.ddaRegionCe.peersDev     = reinterpret_cast<void*>(0x13);
+            comm.ddaRegionCe.peersHost    = reinterpret_cast<void**>(0x14);
+            comm.ddaRegionLL.self         = reinterpret_cast<void*>(0x22);
+            comm.ddaRegionLL.peersDev     = reinterpret_cast<void*>(0x23);
+            comm.ddaRegionLL.peersHost    = reinterpret_cast<void**>(0x24);
+            comm.ddaRegionLL128.self      = reinterpret_cast<void*>(0x32);
+            comm.ddaRegionLL128.peersDev  = reinterpret_cast<void*>(0x33);
+            comm.ddaRegionLL128.peersHost = reinterpret_cast<void**>(0x34);
             comm.ddaFabricBarrierState =
                 reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x4);
             comm.ddaLLEpochDev = reinterpret_cast<uint32_t*>(0x5);
@@ -59,6 +72,15 @@ struct DdaFabricMockComm
             comm.ddaFabricMemHandler   = nullptr;
             comm.ddaScratch            = nullptr;
             comm.ddaPeerPtrsDev        = nullptr;
+            comm.ddaRegionCe.self         = nullptr;
+            comm.ddaRegionCe.peersDev     = nullptr;
+            comm.ddaRegionCe.peersHost    = nullptr;
+            comm.ddaRegionLL.self         = nullptr;
+            comm.ddaRegionLL.peersDev     = nullptr;
+            comm.ddaRegionLL.peersHost    = nullptr;
+            comm.ddaRegionLL128.self      = nullptr;
+            comm.ddaRegionLL128.peersDev  = nullptr;
+            comm.ddaRegionLL128.peersHost = nullptr;
             comm.ddaFabricBarrierState = nullptr;
             comm.ddaLLEpochDev         = nullptr;
             comm.ddaLLEpochLen         = 0;

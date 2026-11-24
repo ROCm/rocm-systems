@@ -163,7 +163,6 @@ extern int64_t g_rcclParamDdaLL128;   // kDdaThresholdUnset
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;  // kDdaLLBaseDefault, UNDRIVEN
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // 0
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold;  // kDdaVmmBaseDefault, UNDRIVEN
-extern std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap;
 
 void ResetRcclWrapFakes();
 

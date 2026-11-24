@@ -484,7 +484,7 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDe
     TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
     return false;
   }
-  // Scratch path writes output to ddaScratch, not the user recv buffer.
+  // Scratch path writes output to the DDA CE scratch region, not the user recv buffer.
   // Reject if recv is already a registered symmetric window.
   if (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg) {
     TRACE(NCCL_TUNING, "Skipping CE scratch: recv buffer is registered");

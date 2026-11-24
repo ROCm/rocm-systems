@@ -1178,6 +1178,7 @@ if(BUILD_TESTS)
       DdaFp8MPITests.cpp
       DdaAlltoAllInPlaceMPITests.cpp
       DdaAlltoAllLLBankMPITests.cpp
+      DdaScratchRegionsMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 

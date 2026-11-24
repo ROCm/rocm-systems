@@ -3356,6 +3356,12 @@ void InitA2ADecisionComm(ncclComm& comm, ncclTopoSystem& topo, const char* arch,
     comm.ddaScratch            = reinterpret_cast<void*>(0x3);
     comm.ddaPeerPtrsDev        = reinterpret_cast<void*>(0x4);
     comm.ddaScratchBytes       = std::numeric_limits<size_t>::max();
+    comm.ddaRegionCe           = {reinterpret_cast<void*>(0x9), std::numeric_limits<size_t>::max(),
+                                  reinterpret_cast<void*>(0xa), reinterpret_cast<void**>(0xb)};
+    comm.ddaRegionLL           = {reinterpret_cast<void*>(0xc), std::numeric_limits<size_t>::max(),
+                                  reinterpret_cast<void*>(0xd), reinterpret_cast<void**>(0xe)};
+    comm.ddaRegionLL128        = {reinterpret_cast<void*>(0xf), std::numeric_limits<size_t>::max(),
+                                  reinterpret_cast<void*>(0x10), reinterpret_cast<void**>(0x11)};
     comm.ddaFabricMaxBlocks    = DDA_FABRIC_MAXBLOCKS;
     comm.ddaFabricBarrierState =
         reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x5);

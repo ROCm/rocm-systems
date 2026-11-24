@@ -5163,7 +5163,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else {
           INFO(NCCL_TUNING, "Taking CE collective path for %s via DDA scratch, count=%zu", collName, info->count);
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
-                                     comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
+                                     comm->ddaRegionCe.self, comm->ddaRegionCe.peersHost, opDev));
         }
       } else if ((!allGatherDecided && !alltoAllDecided &&
                   (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
@@ -5176,11 +5176,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
 
       } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided && !alltoAllDecided &&
                  rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
-                 comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce &&
-                 info->coll != ncclFuncReduceScatter) {
+                 comm->ddaRegionCe.self != nullptr && recvBytes <= comm->ddaRegionCe.bytes &&
+                 info->coll != ncclFuncAllReduce && info->coll != ncclFuncReduceScatter) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
-        NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
-                                   comm->ddaPeerPtrsHost, opDev));
+        NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaRegionCe.self,
+                                   comm->ddaRegionCe.peersHost, opDev));
       } else if ((ceAllReduceFits || ceReduceScatterFits) && !hasSysmemSegment) {
         INFO(NCCL_COLL, "CE %s path without symmetric memory registration, count=%zu",
              info->coll == ncclFuncReduceScatter ? "ReduceScatter" : "AllReduce", info->count);

@@ -147,6 +147,19 @@ class IpcInitMicrotest : public ::testing::Test {
     EXPECT_NE(nullptr, comm_->ddaScratch);
     EXPECT_EQ(nullptr, comm_->ddaLLEpochDev);
     EXPECT_EQ(0, comm_->ddaLLEpochLen);
+    ExpectRegionsAliasTheScratch();
+  }
+
+  // The IPC path has one scratch: CE-scratch and Broadcast LL reach it through the CE and LL regions.
+  void ExpectRegionsAliasTheScratch() const {
+    for (const ncclDdaScratchRegion* region : {&comm_->ddaRegionCe, &comm_->ddaRegionLL}) {
+      EXPECT_EQ(comm_->ddaScratch, region->self);
+      EXPECT_EQ(comm_->ddaScratchBytes, region->bytes);
+      EXPECT_EQ(comm_->ddaPeerPtrsDev, region->peersDev);
+      EXPECT_EQ(comm_->ddaPeerPtrsHost, region->peersHost);
+    }
+    EXPECT_EQ(nullptr, comm_->ddaRegionLL128.self);
+    EXPECT_EQ(0u, comm_->ddaRegionLL128.bytes);
   }
 
   void ExpectNoDda() const {
@@ -154,6 +167,10 @@ class IpcInitMicrotest : public ::testing::Test {
     EXPECT_EQ(nullptr, comm_->ddaScratch);
     EXPECT_EQ(nullptr, comm_->ddaPeerPtrsDev);
     EXPECT_EQ(nullptr, comm_->ddaPeerPtrsHost);
+    for (const ncclDdaScratchRegion* region : {&comm_->ddaRegionCe, &comm_->ddaRegionLL, &comm_->ddaRegionLL128}) {
+      EXPECT_EQ(nullptr, region->self);
+      EXPECT_EQ(0u, region->bytes);
+    }
     EXPECT_EQ(nullptr, comm_->ddaIpcBarrierState);
     EXPECT_EQ(nullptr, comm_->ddaLLEpochDev);
     EXPECT_EQ(0, comm_->ddaLLEpochLen);
@@ -177,6 +194,7 @@ TEST_F(IpcInitMicrotest, CommInit_AllRanksReady_KeepsEpochCells) {
   ASSERT_EQ(1u, epochAllocs_.size());
   EXPECT_EQ(epochAllocs_[0], comm_->ddaLLEpochDev);
   EXPECT_EQ(kEpochBytes / sizeof(uint32_t), static_cast<size_t>(comm_->ddaLLEpochLen));
+  ExpectRegionsAliasTheScratch();
 }
 
 TEST_F(IpcInitMicrotest, CommInit_LocalEpochAllocFails_PublishesItAndDropsOnlyTheCells) {

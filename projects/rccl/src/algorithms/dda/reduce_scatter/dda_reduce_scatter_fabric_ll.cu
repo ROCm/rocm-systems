@@ -71,11 +71,11 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   const dim3 grid = geom.grid;
   const dim3 block = geom.block;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL.peersDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
   // Bank 1 starts at ddaBankSize, matching the other LL tiers on this scratch.
-  const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = dda::common::ddaBankSize(comm->ddaRegionLL.bytes);
 
   INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu%s",
        nRanks, bytes, nPk, grid.x, block.x, bankSize, geom.spread ? " (spread)" : "");
@@ -123,7 +123,8 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL.self == nullptr ||
+      comm->ddaRegionLL.peersDev == nullptr) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
@@ -150,8 +151,8 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   }
   // Bank 0 is [0, bankBytes). Bank 1 is [bankSize, bankSize + bankBytes).
   const size_t bankBytes = dda::common::ddaLLRsBankBytes(comm->nRanks);
-  const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
-  if (bankBytes > bankSize || bankSize + bankBytes > comm->ddaScratchBytes) {
+  const size_t bankSize = dda::common::ddaBankSize(comm->ddaRegionLL.bytes);
+  if (bankBytes > bankSize || bankSize + bankBytes > comm->ddaRegionLL.bytes) {
     return false;
   }
 

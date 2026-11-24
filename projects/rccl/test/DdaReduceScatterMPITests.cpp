@@ -147,7 +147,7 @@ std::vector<size_t> ll128Shapes(const ncclComm* comm, int nRanks)
     }
 
     const size_t sliceBytes = static_cast<size_t>(dda::common::kDdaLL128DataBytesPerSlice);
-    const size_t slotWords  = dda::common::ddaLL128RsSlotWords(dda::common::ddaBankSize(comm->ddaScratchBytes), nRanks);
+    const size_t slotWords  = dda::common::ddaLL128RsSlotWords(dda::common::ddaBankSize(comm->ddaRegionLL128.bytes), nRanks);
     const size_t slotSlices = slotWords / static_cast<size_t>(dda::common::kDdaLL128WireWordsPerSlice);
     size_t       maxBytes   = (ll128Cap / static_cast<size_t>(nRanks)) & ~size_t{15};
     const size_t slotBytes  = slotSlices * sliceBytes;

@@ -210,8 +210,10 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     for (int missing = 0; missing < 3; ++missing) {
       mock_.setFabricResourcesPresent(true);
       comm().ddaFabricMemHandler = missing == 0 ? nullptr : comm().ddaFabricMemHandler;
-      comm().ddaScratch = missing == 1 ? nullptr : comm().ddaScratch;
-      comm().ddaPeerPtrsDev = missing == 2 ? nullptr : comm().ddaPeerPtrsDev;
+      comm().ddaRegionLL.self = missing == 1 ? nullptr : comm().ddaRegionLL.self;
+      comm().ddaRegionLL128.self = missing == 1 ? nullptr : comm().ddaRegionLL128.self;
+      comm().ddaRegionLL.peersDev = missing == 2 ? nullptr : comm().ddaRegionLL.peersDev;
+      comm().ddaRegionLL128.peersDev = missing == 2 ? nullptr : comm().ddaRegionLL128.peersDev;
       EXPECT_FALSE(Eligible(fn, 64)) << "missing resource " << missing;
     }
     mock_.setFabricResourcesPresent(true);
@@ -267,11 +269,11 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_WholeMessageIn16ByteUnit
   EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 6));
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 12));
   // 8 ranks, a 4 KiB bank: 32 packets, 256 B, per slot.
-  comm().ddaScratchBytes = 8192;
+  comm().ddaRegionLL.bytes = 8192;
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 64));
   EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 68));
   // 31 packets per rank floor to a 16-packet slot.
-  comm().ddaScratchBytes = 2 * 8 * 31 * 16;
+  comm().ddaRegionLL.bytes = 2 * 8 * 31 * 16;
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 32));
   EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 36));
 }
@@ -299,11 +301,11 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLTwoShotEligible_EachShardIn16ByteUnitsWi
   EXPECT_FALSE(Eligible(ddaLLArTwoShotEligible, 16));
   EXPECT_TRUE(Eligible(ddaLLArTwoShotEligible, 32));
   // 8 ranks, a 4 KiB bank holding two staging areas: 16 packets, 128 B, per shard.
-  comm().ddaScratchBytes = 8192;
+  comm().ddaRegionLL.bytes = 8192;
   EXPECT_TRUE(Eligible(ddaLLArTwoShotEligible, 256));
   EXPECT_FALSE(Eligible(ddaLLArTwoShotEligible, 288));
   // 31 packets per shard floor to 16.
-  comm().ddaScratchBytes = 2 * 2 * 8 * 31 * 16;
+  comm().ddaRegionLL.bytes = 2 * 2 * 8 * 31 * 16;
   EXPECT_TRUE(Eligible(ddaLLArTwoShotEligible, 256));
   EXPECT_FALSE(Eligible(ddaLLArTwoShotEligible, 288));
 }
@@ -322,7 +324,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LL128OneShotEligible_AlignedWholeMessageWi
   EXPECT_FALSE(
       Eligible(ddaLL128ArOneShotEligible, 64, ncclFloat32, ncclSum, kSendbuff, reinterpret_cast<void*>(0x2001)));
   // 8 ranks, a bank of two 2 KiB slices per rank.
-  comm().ddaScratchBytes = 2 * 8 * 2 * kSliceWire;
+  comm().ddaRegionLL128.bytes = 2 * 8 * 2 * kSliceWire;
   EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, 2 * kSliceData / 4));
   EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 2 * kSliceData / 4 + 4));
 }
@@ -352,7 +354,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LL128TwoShotEligible_AlignedShardsWithinHa
   EXPECT_FALSE(
       Eligible(ddaLL128ArTwoShotEligible, 64, ncclFloat32, ncclSum, kSendbuff, reinterpret_cast<void*>(0x2002)));
   // 8 ranks, a bank holding two staging areas of two 2 KiB slices per rank.
-  comm().ddaScratchBytes = 2 * 2 * 8 * 2 * kSliceWire;
+  comm().ddaRegionLL128.bytes = 2 * 2 * 8 * 2 * kSliceWire;
   EXPECT_TRUE(Eligible(ddaLL128ArTwoShotEligible, 8 * 2 * kSliceData / 4));
   EXPECT_FALSE(Eligible(ddaLL128ArTwoShotEligible, 8 * (2 * kSliceData + 16) / 4));
 }
@@ -440,7 +442,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_FourAndEightRanksUnrolledOthersRuntime
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotPassesWholeMessageEpochAndBank) {
-  comm().ddaScratchBytes = (64u << 20) + 40;
+  comm().ddaRegionLL.bytes = (64u << 20) + 40;
   const DdaLaunch& launch = RunOneLL(64);
   EXPECT_EQ(launch.block.x, 512u);
   EXPECT_EQ(launch.stream, kStream);
@@ -450,7 +452,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotPassesWholeMessageEpochAndBan
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
   ASSERT_EQ(launch.args.size(), 10u);
-  EXPECT_EQ(launch.Arg<float**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<float**>(0), comm().ddaRegionLL.peersDev);
   EXPECT_EQ(launch.Arg<float*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const float*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 64u);
@@ -463,12 +465,12 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotPassesWholeMessageEpochAndBan
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotPassesWholeCountEpochAndBank) {
   OnlyTwoShot();
-  comm().ddaScratchBytes = (64u << 20) + 40;
+  comm().ddaRegionLL.bytes = (64u << 20) + 40;
   const DdaLaunch& launch = RunOneLL(256);
   EXPECT_EQ(launch.block.x, 1024u);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
   ASSERT_EQ(launch.args.size(), 10u);
-  EXPECT_EQ(launch.Arg<float**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<float**>(0), comm().ddaRegionLL.peersDev);
   EXPECT_EQ(launch.Arg<float*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const float*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 256u);
@@ -480,12 +482,12 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotPassesWholeCountEpochAndBank)
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotPassesBytesSlicesEpochAndBank) {
-  comm().ddaScratchBytes = (64u << 20) + 40;
+  comm().ddaRegionLL128.bytes = (64u << 20) + 40;
   const DdaLaunch& launch = RunOneLL128(1000, ncclBfloat16);
   EXPECT_EQ(launch.block.x, 512u);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
   ASSERT_EQ(launch.args.size(), 11u);
-  EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaRegionLL128.peersDev);
   EXPECT_EQ(launch.Arg<bf16*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const bf16*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 2000u);
@@ -499,12 +501,12 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotPassesBytesSlicesEpochAndB
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotPassesShardBytesAndSlices) {
   OnlyTwoShot();
-  comm().ddaScratchBytes = (64u << 20) + 40;
+  comm().ddaRegionLL128.bytes = (64u << 20) + 40;
   const DdaLaunch& launch = RunOneLL128(8 * 1000, ncclBfloat16);
   EXPECT_EQ(launch.block.x, 512u);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
   ASSERT_EQ(launch.args.size(), 11u);
-  EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaRegionLL128.peersDev);
   EXPECT_EQ(launch.Arg<bf16*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const bf16*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 2000u);
@@ -702,7 +704,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_LaunchErrorIsReportedFromEveryTier) {
 
 // Spread once the one-shot's block wire, 16 B x min(packets, 512) x (n - 1), reaches 96 KiB or its saved wire 4 MiB.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWireIsLarge) {
-  comm().ddaScratchBytes = 1u << 30;
+  comm().ddaRegionLL.bytes = 1u << 30;
   struct Case {
     int nRanks;
     size_t bytes;
@@ -733,7 +735,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadRuleEdges) {
   EXPECT_TRUE(ddaLLArSpreadWins(3 << 20, 3));     // 2 x 2 x 1 / 3 x 3 MiB = 4 MiB
   EXPECT_FALSE(ddaLLArSpreadWins(1398101, 4));    // 2 x 3 x 2 / 4 x bytes = 4 MiB - 1
   comm().nRanks = 13;
-  comm().ddaScratchBytes = 1u << 30;
+  comm().ddaRegionLL.bytes = 1u << 30;
   EXPECT_EQ(RunOneLL(Floats(4096)).kernel, (LLSpread<float, 0>()));
   EXPECT_EQ(RunOneLL(Floats(4080)).kernel, (LLOneShot<float, 0>()));
 }
@@ -741,7 +743,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadRuleEdges) {
 // The spread runs on exactly the one-shot's grid, which the reporter also returns.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesTheOneShotGridAndArguments) {
   comm().nRanks = 32;
-  comm().ddaScratchBytes = (256u << 20) + 40;
+  comm().ddaRegionLL.bytes = (256u << 20) + 40;
   for (size_t bytes : {size_t{2048}, size_t{64} << 10, size_t{1} << 20}) {
     comm().addonStopEvent = kStopEvent;
     const DdaLaunch& launch = RunOneLL(Floats(bytes));
@@ -752,7 +754,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesTheOneShotGridAndArgument
     EXPECT_EQ(launch.sharedMemBytes, 0u);
     EXPECT_EQ(launch.stopEvent, kStopEvent);
     ASSERT_EQ(launch.args.size(), 10u);
-    EXPECT_EQ(launch.Arg<float**>(0), comm().ddaPeerPtrsDev);
+    EXPECT_EQ(launch.Arg<float**>(0), comm().ddaRegionLL.peersDev);
     EXPECT_EQ(launch.Arg<float*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const float*>(2), kSendbuff);
     EXPECT_EQ(launch.Arg<size_t>(3), Floats(bytes));
@@ -770,7 +772,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesTheOneShotGridAndArgument
 // Shards need not be equal: a rank count that does not divide the message gives the last ranks shorter shards.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesUnevenShards) {
   comm().nRanks = 24;
-  comm().ddaScratchBytes = 1u << 30;
+  comm().ddaRegionLL.bytes = 1u << 30;
   EXPECT_EQ(RunOneLL(Floats(8192)).kernel, (LLSpread<float, 0>()));   // 1024 packets: 23 shards of 43, one of 35
   comm().nRanks = 64;
   EXPECT_EQ(RunOneLL(Floats(784)).kernel, (LLSpread<float, 0>()));    // 98 packets: 49 shards of 2, 15 empty
@@ -781,14 +783,14 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesUnevenShards) {
 // The shard must fit the two-shot slot: a scratch whose two-shot slot is below a shard keeps the one-shot.
 TEST_F(DdaAllReduceFabricLLMicrotest, LLSpreadSelected_ShardMustFitTheTwoShotSlot) {
   comm().nRanks = 32;
-  comm().ddaScratchBytes = 2 * 32 * 16 * 2 * 16;  // bank 16 KiB: one-shot slot 32 packets, two-shot slot 16
-  ASSERT_EQ(dda::common::ddaLLArSlotPkts(dda::common::ddaBankSize(comm().ddaScratchBytes), 32), 32u);
-  ASSERT_EQ(dda::common::ddaLLArTwoShotSlotPkts(dda::common::ddaBankSize(comm().ddaScratchBytes), 32), 16u);
+  comm().ddaRegionLL.bytes = 2 * 32 * 16 * 2 * 16;  // bank 16 KiB: one-shot slot 32 packets, two-shot slot 16
+  ASSERT_EQ(dda::common::ddaLLArSlotPkts(dda::common::ddaBankSize(comm().ddaRegionLL.bytes), 32), 32u);
+  ASSERT_EQ(dda::common::ddaLLArTwoShotSlotPkts(dda::common::ddaBankSize(comm().ddaRegionLL.bytes), 32), 16u);
   constexpr unsigned kFull = dda::common::kDdaLLSpreadThreads;
   EXPECT_TRUE(ddaLLArSpreadSelected(mock_.get(), 32 * 16 * 8, kFull)) << "16-packet shards fill the 16-packet slot";
   EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 32 * 16 * 8 + 16, kFull)) << "17-packet shards, rounded up";
   EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 1u << 20, kFull));
-  comm().ddaScratchBytes = 1u << 30;
+  comm().ddaRegionLL.bytes = 1u << 30;
   EXPECT_TRUE(ddaLLArSpreadSelected(mock_.get(), 1u << 20, kFull));
   EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 1u << 20, kFull - 64)) << "a narrowed block keeps the one-shot";
 }
@@ -828,7 +830,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLSpreadBlockPkts_EvenSplitRoundedUpTo16Pa
 // A cap that narrows the blocks keeps the one-shot; one that lowers only the blocks runs the spread on the capped grid.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsFullWidthBlocksUnderACap) {
   comm().nRanks = 32;
-  comm().ddaScratchBytes = 1u << 30;
+  comm().ddaRegionLL.bytes = 1u << 30;
   const size_t count = Floats(1 << 20);  // 131072 packets: 256 one-shot blocks uncapped
   ASSERT_EQ(RunOneLL(count).kernel, (LLSpread<float, 0>()));
   for (uint32_t threads : {64u, 256u, 448u, 511u}) {
@@ -848,7 +850,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsFullWidthBlocksUnderACap)
 // Every datatype has its own spread kernel.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadEachDatatypeLaunchesItsOwnKernel) {
   comm().nRanks = 16;
-  comm().ddaScratchBytes = 1u << 30;
+  comm().ddaRegionLL.bytes = 1u << 30;
   EXPECT_EQ(RunOneLL(4096 / 2, ncclFloat16).kernel, (LLSpread<half, 0>()));
   EXPECT_EQ(RunOneLL(4096 / 2, ncclBfloat16).kernel, (LLSpread<bf16, 0>()));
   EXPECT_EQ(RunOneLL(4096, ncclFloat8e4m3).kernel, (LLSpread<dda::common::fp8e4m3, 0>()));

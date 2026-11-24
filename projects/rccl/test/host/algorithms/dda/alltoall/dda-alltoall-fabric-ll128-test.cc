@@ -106,8 +106,8 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_NeedsHandlerScratchAndPeersButN
   for (int missing = 0; missing < 3; ++missing) {
     mock_.setFabricResourcesPresent(true);
     comm().ddaFabricMemHandler = missing == 0 ? nullptr : comm().ddaFabricMemHandler;
-    comm().ddaScratch = missing == 1 ? nullptr : comm().ddaScratch;
-    comm().ddaPeerPtrsDev = missing == 2 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaRegionLL128.self = missing == 1 ? nullptr : comm().ddaRegionLL128.self;
+    comm().ddaRegionLL128.peersDev = missing == 2 ? nullptr : comm().ddaRegionLL128.peersDev;
     EXPECT_FALSE(Eligible(4)) << "missing resource " << missing;
   }
 }
@@ -150,10 +150,10 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_PerPeerBytesMultipleOf16) {
 // Each bank holds nRanks slots of whole 2 KiB slices; a slot of S slices carries S * 1920 bytes.
 TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_PerPeerBytesUpToTheSlotCapacity) {
   constexpr size_t kSlices = 10;
-  comm().ddaScratchBytes = 2 * 4 * kSlices * 2048;
+  comm().ddaRegionLL128.bytes = 2 * 4 * kSlices * 2048;
   EXPECT_TRUE(Eligible(kSlices * kSliceFloats));
   EXPECT_FALSE(Eligible(kSlices * kSliceFloats + 4));
-  comm().ddaScratchBytes = 2 * 4 * kSlices * 2048 - 1;
+  comm().ddaRegionLL128.bytes = 2 * 4 * kSlices * 2048 - 1;
   EXPECT_FALSE(Eligible(kSlices * kSliceFloats));
   EXPECT_TRUE(Eligible((kSlices - 1) * kSliceFloats));
 }
@@ -211,7 +211,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFl
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
   ASSERT_EQ(launch.args.size(), 11u);
-  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaRegionLL128.peersDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 16u);
@@ -219,7 +219,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFl
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 1u);
-  EXPECT_EQ(launch.Arg<size_t>(9), dda::common::ddaBankSize(comm().ddaScratchBytes));
+  EXPECT_EQ(launch.Arg<size_t>(9), dda::common::ddaBankSize(comm().ddaRegionLL128.bytes));
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
