@@ -809,11 +809,14 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   // Two methods available via RCCL_AINIC_SIGNAL_METHOD for benchmarking:
   //   0 = array-based (default, O(1) indexing)
   //   1 = map-based (hash table)
+  INFO(NCCL_NET, "IbCastRmaIbProxyIPutSignal: before AINIC check, IbCastAinicRoce=%d", (int)IbCastAinicRoce);
   if (IbCastAinicRoce) {
     uint64_t increment = signalOp == NCCL_NET_SIGNAL_OP_INC ? 1 : signalValue;
     uint64_t cumulativeValue;
+    int64_t method = rcclParamAinicSignalMethod();
+    INFO(NCCL_NET, "IbCastRmaIbProxyIPutSignal: AINIC path, method=%ld increment=%lu", method, increment);
 
-    if (rcclParamAinicSignalMethod() == 0) {
+    if (method == 0) {
       // Method 0: Array-based (default, faster)
       if (comm->ainicSignalCounters == nullptr) {
         size_t slots = rcclParamAinicSignalSlots();
