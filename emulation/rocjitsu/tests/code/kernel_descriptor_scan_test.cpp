@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -38,6 +39,33 @@ std::vector<KernelDescriptorInfo> scan_via_text_section(const std::vector<uint8_
   EXPECT_FALSE(obj.text_sections().empty());
   const Section *text = obj.text_sections().front();
   return scan_kernel_descriptors({image.data(), image.size()}, text->sectionOffset(), text->size());
+}
+
+TEST(KernelDescriptorScan, HardwareRootsRespectPreloadFamilyAndExtent) {
+  KernelDescriptorInfo kernel = {
+      .descriptor_file_offset = 0, .kernel_name = "", .entry_text_offset = 32, .descriptor = {}};
+  const std::optional<std::vector<uint64_t>> ordinary =
+      kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna4, 64);
+  ASSERT_TRUE(ordinary);
+  EXPECT_EQ(*ordinary, (std::vector<uint64_t>{32}));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna4, 32));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Invalid, 512));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Rv64i, 512));
+  RJ_AMDHSA_BITS_SET(kernel.descriptor.kernarg_preload, amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 3);
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const std::optional<std::vector<uint64_t>> roots =
+        kernel_hardware_entry_candidates(kernel, arch, 512);
+    ASSERT_TRUE(roots);
+    EXPECT_EQ(*roots, (std::vector<uint64_t>{32, 288}));
+    EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, arch, 288));
+  }
+  const std::optional<std::vector<uint64_t>> cdna5 =
+      kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna5, 512);
+  ASSERT_TRUE(cdna5);
+  EXPECT_EQ(*cdna5, (std::vector<uint64_t>{32}));
+  kernel.entry_text_offset = std::numeric_limits<uint64_t>::max() - 1;
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna3,
+                                                std::numeric_limits<uint64_t>::max()));
 }
 
 void rewrite_descriptor_entry(std::vector<uint8_t> &image, uint64_t descriptor_vaddr,
