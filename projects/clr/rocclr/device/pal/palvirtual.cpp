@@ -2450,6 +2450,8 @@ void VirtualGPU::submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cm
   bool result = blitMgr().batchMemOps(cmd.getParamPtr(), cmd.paramSize(), cmd.count());
   if (!result) {
     LogError("submitBatchMemoryOperation failed!");
+    // No operation ran: fail the command, so the caller does not see success.
+    cmd.setStatus(CL_INVALID_OPERATION);
   }
 
   addBarrier(RgpSqqtBarrierReason::MemDependency);
