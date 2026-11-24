@@ -743,7 +743,7 @@ analysis or physical-GPU coverage.
 The test uses the checkout's own build and pinned ROCm SDK, Python 3.12, and a
 separate environment with IREE compiler/runtime `3.13.0rc20261006`, NumPy, and
 pytest. The exact wheel pins and hashes are in the
-[CI workflow](../../../.github/workflows/rocjitsu-corpus-tests.yml). It runs once
+[CI workflow](https://github.com/ROCm/rocm-systems/blob/develop/.github/workflows/rocjitsu-corpus-tests.yml). It runs once
 as a separate Release step rather than being repeated by full CTest and
 required-ConSan selection. Each application uses four simulator CPU threads
 in CI, with a 60-second deadline shared by the compile and execution stages.
