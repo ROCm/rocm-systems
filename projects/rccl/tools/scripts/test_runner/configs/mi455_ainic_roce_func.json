@@ -6261,6 +6261,62 @@
       "extends": "dda_fabric_broadcast_ll128_base",
       "num_ranks": 8,
       "num_gpus": 8
+    },
+    "net_ib_gdr_flush_mseg": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "IB"
+      }
+    },
+    "net_ib_gdr_flush_flag_mseg": {
+      "extends": "net_ib_gdr_flush_flag",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "IB"
+      }
+    },
+    "net_ib_initialization_mseg": {
+      "extends": "net_ib_initialization",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "IB"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Init_DefaultIsIbMseg",
+          "description": "With NCCL_MULTI_SEGMENT_REGISTER=1 and NCCL_NET unset, the fixture drives IB-MSEG, so these suites cannot pass on net_ib",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbMsegUnderMultiSegmentRegister"
+        }
+      ]
+    },
+    "net_ib_properties_mseg": {
+      "extends": "net_ib_properties",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "IB"
+      }
+    },
+    "net_ib_connection_mseg": {
+      "extends": "net_ib_connection",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "IB"
+      }
+    },
+    "net_ib_memory_mseg": {
+      "extends": "net_ib_memory",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "IB"
+      }
+    },
+    "net_ib_transfer_mseg": {
+      "extends": "net_ib_transfer",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_NET": "IB"
+      }
     }
   },
   "test_suites": [
@@ -6349,27 +6405,27 @@
     },
     {
       "name": "NET IB - Initialization Tests",
-      "description": "InfiniBand plugin initialization and device enumeration. No IB-MSEG (_mseg) twin: NCCL_NET is unset, so AINIC keeps IB-CAST under NCCL_MULTI_SEGMENT_REGISTER=1 and the twin would rerun this suite.",
+      "description": "InfiniBand plugin initialization and device enumeration",
       "config": "net_ib_initialization"
     },
     {
       "name": "NET IB - Device Properties",
-      "description": "InfiniBand device property queries. No IB-MSEG (_mseg) twin: NCCL_NET is unset, so AINIC keeps IB-CAST under NCCL_MULTI_SEGMENT_REGISTER=1 and the twin would rerun this suite.",
+      "description": "InfiniBand device property queries",
       "config": "net_ib_properties"
     },
     {
       "name": "NET IB - Connection Setup",
-      "description": "InfiniBand connection lifecycle and rapid reconnect tests. No IB-MSEG (_mseg) twin: NCCL_NET is unset, so AINIC keeps IB-CAST under NCCL_MULTI_SEGMENT_REGISTER=1 and the twin would rerun this suite.",
+      "description": "InfiniBand connection lifecycle and rapid reconnect tests",
       "config": "net_ib_connection"
     },
     {
       "name": "NET IB - Memory Registration",
-      "description": "InfiniBand memory registration tests. No IB-MSEG (_mseg) twin: NCCL_NET is unset, so AINIC keeps IB-CAST under NCCL_MULTI_SEGMENT_REGISTER=1 and the twin would rerun this suite.",
+      "description": "InfiniBand memory registration tests",
       "config": "net_ib_memory"
     },
     {
       "name": "NET IB - Data Transfer",
-      "description": "InfiniBand data transfer and stress tests. No IB-MSEG (_mseg) twin: NCCL_NET is unset, so AINIC keeps IB-CAST under NCCL_MULTI_SEGMENT_REGISTER=1 and the twin would rerun this suite.",
+      "description": "InfiniBand data transfer and stress tests",
       "config": "net_ib_transfer"
     },
     {
@@ -6415,7 +6471,7 @@
     },
     {
       "name": "NET IB - WQE Latency Monitor",
-      "description": "AICOMRCCL-2013: per-QP WQE latency monitor on live net_ib connections, default QP layout. No IB-MSEG (_mseg) twin: NCCL_NET is unset, so AINIC keeps IB-CAST under NCCL_MULTI_SEGMENT_REGISTER=1 and the twin would rerun this suite.",
+      "description": "AICOMRCCL-2013: per-QP WQE latency monitor on live net_ib connections, default QP layout",
       "config": "net_ib_wqe_lat"
     },
     {
@@ -7264,6 +7320,48 @@
       "name": "DDA Fabric Broadcast LL128 - 8-Rank",
       "description": "DDA fabric Broadcast LL128 two-shot data checks on 8 GPUs (fanOut=1 and default). Requires gfx1250 with MNNVL fabric DDA under UT_DDA_FABRIC_REQUIRE_INIT=1.",
       "config": "dda_fabric_broadcast_ll128_8rank",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-MSEG)",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1). NCCL_NET=IB selects IB-MSEG on AINIC under the switch; unset would select IB-CAST. Disabled like net_ib_gdr_flush: with the flush off the recv buffer keeps its unsynchronized hipMemset value (AICOMRCCL-2829), and with it on ionic rejects the flush RDMA READ.",
+      "config": "net_ib_gdr_flush_mseg",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank) (IB-MSEG)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1). NCCL_NET=IB selects IB-MSEG on AINIC under the switch; unset would select IB-CAST. Disabled like net_ib_gdr_flush_flag: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag_mseg",
+      "enabled": false
+    },
+    {
+      "name": "NET IB - Initialization Tests (IB-MSEG)",
+      "description": "InfiniBand plugin initialization and device enumeration. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1). NCCL_NET=IB selects IB-MSEG on AINIC under the switch; unset would select IB-CAST.",
+      "config": "net_ib_initialization_mseg",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Device Properties (IB-MSEG)",
+      "description": "InfiniBand device property queries. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1). NCCL_NET=IB selects IB-MSEG on AINIC under the switch; unset would select IB-CAST.",
+      "config": "net_ib_properties_mseg",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup (IB-MSEG)",
+      "description": "InfiniBand connection lifecycle and rapid reconnect tests. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1). NCCL_NET=IB selects IB-MSEG on AINIC under the switch; unset would select IB-CAST.",
+      "config": "net_ib_connection_mseg",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Memory Registration (IB-MSEG)",
+      "description": "InfiniBand memory registration tests. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1). NCCL_NET=IB selects IB-MSEG on AINIC under the switch; unset would select IB-CAST.",
+      "config": "net_ib_memory_mseg",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (IB-MSEG)",
+      "description": "InfiniBand data transfer and stress tests. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1). NCCL_NET=IB selects IB-MSEG on AINIC under the switch; unset would select IB-CAST.",
+      "config": "net_ib_transfer_mseg",
       "enabled": true
     }
   ]
