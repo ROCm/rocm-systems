@@ -2617,12 +2617,12 @@ addressing, memory operations, scheduling, HWREG access and trap delivery remain
 rocjitsu responsibilities.</p>
 <p>Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
 guest rounding and denormal controls; integer WMMA does not accept those controls.
-rj-arith never explicitly changes host FP controls. It assumes the default host FP
-environment: round-to-nearest, FTZ/DAZ disabled, and exceptions masked. In local mode,
-the executable must satisfy this precondition too: linking with <code>-ffast-math</code> can
-enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky exception flags. Compatibility deliberately
-does not retain legacy host-environment isolation; nondefault host controls are
-outside the contract in every semantics mode. <code>RJ_FORCE_SCALAR</code>
+rocjitsu, including rj-arith, assumes the default host FP environment: round-to-nearest,
+FTZ/DAZ disabled, and exceptions masked. rj-arith never explicitly changes host FP
+controls. In local mode, the executable must satisfy this precondition too: linking with
+<code>-ffast-math</code> can enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky
+exception flags. Nondefault host controls are outside the contract in every semantics
+mode. <code>RJ_FORCE_SCALAR</code>
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.</p>
 <p>Scalar F16/F32 add, subtract, multiply, FMAC and the rounding conversions follow the

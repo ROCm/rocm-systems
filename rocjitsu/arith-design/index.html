@@ -2194,7 +2194,8 @@ including rounding modes, denormal flushing, or exception controls. Ordinary
 arithmetic may raise sticky exception flags.</p>
 <p>The library assumes the CPU's default floating-point environment: nearest-even
 rounding, denormal flushing disabled, and exceptions masked. Results are not
-guaranteed to be correct under a nondefault environment.</p>
+guaranteed to be correct under a nondefault environment. The rest of rocjitsu makes
+the same assumption.</p>
 <p>The caller explicitly selects the CPU feature level through each entry point's
 <code>flags</code> argument, enabling internal SIMD paths such as AVX-512. Instruction calls
 never detect CPU features. Only the convenience function
