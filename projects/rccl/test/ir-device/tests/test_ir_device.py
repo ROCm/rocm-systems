@@ -200,6 +200,9 @@ def test_b128_accesses_use_upstream_builtins(ir_bitcode, paths, tmp_path):
     the bitcode does not contain. The probe is also compiled for gfx1250, where the flow LL FIFO
     takes its 128-bit path, when the compiler can target it.
     """
+    if paths.ARCH not in _PROBE_B128_KERNELS:
+        # RCCL_HAVE_AV_B128_BUILTINS (rccl_ptr.h) covers only these arches; others keep the 64-bit fallback.
+        pytest.skip(f"the device API has no 128-bit system-scope path on {paths.ARCH}")
     if not _has_av_b128(paths, paths.ARCH):
         pytest.skip(f"compiler lacks __builtin_amdgcn_av_{{store,load}}_b128 for {paths.ARCH}")
 
