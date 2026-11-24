@@ -13,7 +13,6 @@
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"
-#include "logger/logger.hpp"
 
 #include <fmt/ranges.h>
 
@@ -71,15 +70,6 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 void
 exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) const
 {
-    // Before Active, std::exit runs static destructors while exit_gotcha is
-    // installed. Teardown then uses a timemory hash map that exit already
-    // destroyed. _exit skips that teardown. abort is a separate handler.
-    if(state::process::get() < state::process::Active)
-    {
-        logger_t::instance().flush();
-        ::_exit(_ec);
-    }
-
     _exit_info = { .is_known  = true,
                    .is_quick  = _data.tool_id.find("quick") != std::string::npos,
                    .exit_code = _ec };
