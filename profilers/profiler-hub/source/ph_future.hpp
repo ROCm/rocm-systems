@@ -42,7 +42,9 @@ struct ph_future : std::enable_shared_from_this<ph_future>
     [[nodiscard]] ph_result_t cancel();
 
     /** Registers a SQLite connection that this future may interrupt. If the
-     *  stop was already requested, @p interrupt is called before returning. */
+     *  stop was already requested, @p interrupt is called before returning.
+     *  cancel() calls @p interrupt while holding the future's lock, so it must
+     *  not block or call back into the future. */
     void bind_sql(void (*interrupt)(void*) noexcept, void* arg);
     void unbind_sql(void* arg);
 
