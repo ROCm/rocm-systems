@@ -1293,6 +1293,49 @@ TEST_P(ConSanAtomicF64Sim, AtomicF64PerformsFloatingPointAddition) {
   ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f64", 8));
 }
 
+TEST_P(ConSanTargetSim, AtomicCompareStorePreservesOldValueAndUsesThePreGuestAddress) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const std::string_view gpu = target.target;
+  const std::string_view mnemonic =
+      gpu == "gfx942" || gpu == "gfx950" ? "ds_cmpst_rtn_b32" : "ds_cmpstore_rtn_b32";
+  RunResult before, after;
+  AtomicIssueTrace::Masks before_masks, after_masks;
+  ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::None, before, target, threads,
+                              true, 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+  ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::Instrumented, after, target,
+                              threads, true, 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
+  expect_guest_state(before, after);
+  // Both waves see the old value 7. Only wave zero matches the comparison.
+  // The neighboring inactive lane retains the original address in the aliased VGPR.
+  EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 0x2468, 1008, 0, 7, 7, 1016, 0}));
+  EXPECT_EQ(after_masks, before_masks);
+  EXPECT_EQ(after.manifest.scope, ScopeKind::NativeLdsNoSynchronization);
+  const auto records = published_accesses(after);
+  ASSERT_EQ(records.size(), 6u);
+  const std::array roles{AccessKind::Write, AccessKind::Atomic, AccessKind::Read};
+  ASSERT_EQ(after.manifest.sites.size(), roles.size());
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    EXPECT_EQ(before_masks[wave], (std::vector<uint64_t>{high}));
+    for (uint32_t site = 0; site < roles.size(); ++site) {
+      EXPECT_EQ(after.manifest.sites[site].access, roles[site]);
+      EXPECT_EQ(after.manifest.sites[site].width, 4u);
+      const auto &record = records[3 * wave + site];
+      EXPECT_EQ(record.wave, wave);
+      EXPECT_EQ(record.site, site);
+      EXPECT_EQ(record.offset, 1012 + 8 * wave);
+      EXPECT_EQ(record.mask, high);
+    }
+  }
+#ifdef CONSAN_ANALYZER_ENABLED
+  expect_atomic_analysis(after, threads, records.size(), 0);
+#endif
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("cas", 4));
+}
+
 class NativeWidthIssueCounter final : public ExecutionPlugin {
 public:
   explicit NativeWidthIssueCounter(std::vector<std::array<unsigned, 2>> &counts)

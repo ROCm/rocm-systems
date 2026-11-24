@@ -112,6 +112,8 @@ NativeLdsForm native_lds_form(const Instruction &instruction) {
     if (instruction.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Lds)
       return {};
     switch (instruction.amdgpu_operation()) {
+    case amdgpu::Operation::DS_CMPST_RTN_B32:
+    case amdgpu::Operation::DS_CMPSTORE_RTN_B32:
     case amdgpu::Operation::DS_ADD_U32:
     case amdgpu::Operation::DS_ADD_F32:
       return {.width = 4};
@@ -352,6 +354,12 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     const uint32_t value_words = read && dual ? 2 * words_per_range : words_per_range;
     const std::optional<RegisterRef> value_reg =
         allocated_vgpr_tuple(value, value_words, allocated_vgprs);
+    const bool compare_store = operation == amdgpu::Operation::DS_CMPST_RTN_B32 ||
+                               operation == amdgpu::Operation::DS_CMPSTORE_RTN_B32;
+    if (compare_store && (!allocated_vgpr_tuple(instruction.src_operand(2), 1, allocated_vgprs) ||
+                          !allocated_vgpr_tuple(instruction.dst_operand(0), 1, allocated_vgprs)))
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "LDS compare-store operands exceed allocation", offset);
     if (!address_reg || !value_reg ||
         (dual_store &&
          !allocated_vgpr_tuple(instruction.src_operand(2), words_per_range, allocated_vgprs))) {

@@ -177,7 +177,7 @@ foreach(
             list(APPEND _target_fixtures ${_image})
         endforeach()
         set(_atomic_specs)
-        set(_atomic_forms u32 u64 f32)
+        set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")
             list(APPEND _atomic_forms f64)
         endif()

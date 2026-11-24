@@ -59,7 +59,7 @@ CASES = (
     ),
     *(
         f'atomic_{form}_{peer}'
-        for form in ('u32', 'u64', 'f32', 'f64')
+        for form in ('u32', 'u64', 'f32', 'f64', 'cas')
         for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
     ),
     'wide_u8',
@@ -699,7 +699,7 @@ class Driver:
             expected_rows = [
                 [
                     (0, address, high),
-                    (1, address, high | (high >> 1)),
+                    (1, address, high if form == 'cas' else high | (high >> 1)),
                     (2, address, high),
                 ]
                 for address in (1024 - 3 * width, 1024 - width)
