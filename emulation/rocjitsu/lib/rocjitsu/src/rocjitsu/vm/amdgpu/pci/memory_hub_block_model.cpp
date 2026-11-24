@@ -202,8 +202,9 @@ void MemoryHubBlockModel::observe_register_write(uint64_t byte_offset, PciMemory
   for (uint32_t engine = 0; engine < kInvalidationEngines; ++engine) {
     const uint32_t request_dword = layout_->request + engine * kInvalidationEngineStride;
     const std::optional<uint64_t> request = registers_.resolve(kHubSegment, request_dword);
-    if (!request || *request != byte_offset)
+    if (!request || *request != byte_offset) {
       continue;
+    }
 
     const uint32_t requested = registers_.read(kHubSegment, request_dword) & kVmidRequestMask;
     const uint32_t acknowledge_dword = layout_->acknowledge + engine * kInvalidationEngineStride;

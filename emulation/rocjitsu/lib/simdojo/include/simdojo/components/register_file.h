@@ -45,26 +45,30 @@ public:
   const RegType &operator[](uint32_t idx) const { return data_[idx]; }
 
   template <typename Function> void for_each(uint32_t base, uint32_t count, Function &&function) {
-    for (uint32_t idx = base; idx < base + count; ++idx)
+    for (uint32_t idx = base; idx < base + count; ++idx) {
       function(data_[idx]);
+    }
   }
 
   template <typename Function>
   void for_each(uint32_t base, uint32_t count, Function &&function) const {
-    for (uint32_t idx = base; idx < base + count; ++idx)
+    for (uint32_t idx = base; idx < base + count; ++idx) {
       function(data_[idx]);
+    }
   }
 
   void copy_to(uint32_t base, std::span<std::byte> destination) const {
-    if (destination.empty())
+    if (destination.empty()) {
       return;
+    }
     std::memcpy(destination.data(), reinterpret_cast<const std::byte *>(data_.data() + base),
                 destination.size());
   }
 
   void copy_from(uint32_t base, std::span<const std::byte> source) {
-    if (source.empty())
+    if (source.empty()) {
       return;
+    }
     std::memcpy(reinterpret_cast<std::byte *>(data_.data() + base), source.data(), source.size());
   }
 
@@ -105,24 +109,27 @@ public:
       chunks_.resize((static_cast<size_t>(count) + REGS_PER_CHUNK - 1) / REGS_PER_CHUNK);
     } else {
       assert(count <= MaxRegisters && "register count exceeds lazy storage capacity");
-      if (count > MaxRegisters)
+      if (count > MaxRegisters) {
         std::abort();
+      }
     }
     total_regs_ = count;
   }
 
   void reset(uint32_t base, uint32_t count) {
     assert(base <= total_regs_ && count <= total_regs_ - base && "range exceeds storage");
-    if (count == 0)
+    if (count == 0) {
       return;
+    }
 
     const size_t first_chunk = base / REGS_PER_CHUNK;
     const size_t last_chunk = (static_cast<size_t>(base) + count - 1) / REGS_PER_CHUNK;
     const size_t range_end = static_cast<size_t>(base) + count;
     for (size_t chunk_idx = first_chunk; chunk_idx <= last_chunk; ++chunk_idx) {
       auto &chunk = chunks_[chunk_idx];
-      if (!chunk)
+      if (!chunk) {
         continue;
+      }
 
       const size_t chunk_base = chunk_idx * REGS_PER_CHUNK;
       const size_t valid_chunk_end =
@@ -133,10 +140,11 @@ public:
         // Retain up to 64 KiB of retired chunks per register file for reuse.
         // They are logically absent and are zeroed when materialized again;
         // excess chunks release their allocations immediately.
-        if (spare_count_ < spares_.size())
+        if (spare_count_ < spares_.size()) {
           spares_[spare_count_++] = std::move(chunk);
-        else
+        } else {
           chunk.reset();
+        }
       } else {
         std::ranges::fill(
             chunk->registers.begin() + static_cast<ptrdiff_t>(clear_begin - chunk_base),
@@ -161,16 +169,18 @@ public:
   RegType &operator[](uint32_t idx) {
     assert(idx < total_regs_);
     auto &chunk = chunks_[idx / REGS_PER_CHUNK];
-    if (!chunk)
+    if (!chunk) {
       chunk = acquire_chunk();
+    }
     return chunk->registers[idx % REGS_PER_CHUNK];
   }
 
   const RegType &operator[](uint32_t idx) const {
     assert(idx < total_regs_);
     const auto &chunk = chunks_[idx / REGS_PER_CHUNK];
-    if (!chunk)
+    if (!chunk) {
       return zero_register_;
+    }
     return chunk->registers[idx % REGS_PER_CHUNK];
   }
 
@@ -182,11 +192,13 @@ public:
       const size_t chunk_end = local_idx + chunk_count;
 
       auto &chunk = chunks_[chunk_idx];
-      if (!chunk)
+      if (!chunk) {
         chunk = acquire_chunk();
+      }
 
-      for (; local_idx < chunk_end; ++local_idx)
+      for (; local_idx < chunk_end; ++local_idx) {
         function(chunk->registers[local_idx]);
+      }
       count -= chunk_count;
       ++chunk_idx;
       local_idx = 0;
@@ -203,11 +215,13 @@ public:
 
       const auto &chunk = chunks_[chunk_idx];
       if (chunk) {
-        for (; local_idx < chunk_end; ++local_idx)
+        for (; local_idx < chunk_end; ++local_idx) {
           function(chunk->registers[local_idx]);
+        }
       } else {
-        for (; local_idx < chunk_end; ++local_idx)
+        for (; local_idx < chunk_end; ++local_idx) {
           function(zero_register_);
+        }
       }
       count -= chunk_count;
       ++chunk_idx;
@@ -234,8 +248,9 @@ public:
         base, source.size(),
         [&](size_t chunk_idx, size_t chunk_offset, size_t run_size, size_t source_offset) {
           auto &chunk = chunks_[chunk_idx];
-          if (!chunk)
+          if (!chunk) {
             chunk = acquire_chunk();
+          }
           auto *destination = reinterpret_cast<std::byte *>(chunk->registers.data());
           std::memcpy(destination + chunk_offset, source.data() + source_offset, run_size);
         });
@@ -248,11 +263,13 @@ public:
         base, source.size(),
         [&](size_t chunk_idx, size_t chunk_offset, size_t run_size, size_t source_offset) {
           const auto run = source.subspan(source_offset, run_size);
-          if (std::ranges::all_of(run, [](std::byte value) { return value == std::byte{}; }))
+          if (std::ranges::all_of(run, [](std::byte value) { return value == std::byte{}; })) {
             return;
+          }
           auto &chunk = chunks_[chunk_idx];
-          if (!chunk)
+          if (!chunk) {
             chunk = acquire_chunk();
+          }
           auto *destination = reinterpret_cast<std::byte *>(chunk->registers.data());
           std::memcpy(destination + chunk_offset, run.data(), run.size());
         });
@@ -269,8 +286,9 @@ private:
   };
 
   std::unique_ptr<Chunk> acquire_chunk() {
-    if (spare_count_ == 0)
+    if (spare_count_ == 0) {
       return std::make_unique<Chunk>();
+    }
     auto chunk = std::move(spares_[--spare_count_]);
     std::ranges::fill(chunk->registers, RegType{});
     return chunk;
@@ -356,15 +374,17 @@ public:
   /// @returns Base register index, or -1 if the requested allocation is unavailable.
   /// @post On success, every register in the returned allocation block is zero.
   int32_t allocate(uint32_t count, std::optional<uint32_t> block = std::nullopt) {
-    if (count == 0 || regs_per_block_ == 0 || free_block_count_ == 0)
+    if (count == 0 || regs_per_block_ == 0 || free_block_count_ == 0) {
       return -1;
+    }
     assert(count <= regs_per_block_ && "requested register count exceeds block size");
     const size_t i =
         block ? *block
               : static_cast<size_t>(std::find(free_blocks_.begin(), free_blocks_.end(), true) -
                                     free_blocks_.begin());
-    if (i >= free_blocks_.size() || !free_blocks_[i])
+    if (i >= free_blocks_.size() || !free_blocks_[i]) {
       return -1;
+    }
     free_blocks_[i] = false;
     --free_block_count_;
     const auto base = static_cast<uint32_t>(i * regs_per_block_);
@@ -378,13 +398,16 @@ public:
   /// @brief Free a previously allocated block.
   /// @param base Base register index returned by allocate().
   void free(uint32_t base) {
-    if (regs_per_block_ == 0)
+    if (regs_per_block_ == 0) {
       return;
-    if (base % regs_per_block_ != 0)
+    }
+    if (base % regs_per_block_ != 0) {
       return;
+    }
     uint32_t block = base / regs_per_block_;
-    if (block >= free_blocks_.size())
+    if (block >= free_blocks_.size()) {
       return;
+    }
     assert(!free_blocks_[block] && "double-free of register block");
     free_blocks_[block] = true;
     ++free_block_count_;
@@ -519,19 +542,22 @@ public:
 private:
   void assert_allocated_range(uint32_t base, uint32_t count) const {
     assert(base <= total_regs_ && count <= total_regs_ - base && "range exceeds register file");
-    if (count == 0)
+    if (count == 0) {
       return;
+    }
     assert(regs_per_block_ != 0);
     const size_t first_block = base / regs_per_block_;
     const size_t last_block = (static_cast<size_t>(base) + count - 1) / regs_per_block_;
-    for (size_t block = first_block; block <= last_block; ++block)
+    for (size_t block = first_block; block <= last_block; ++block) {
       assert(block < free_blocks_.size() && !free_blocks_[block] &&
              "range includes a free register block");
+    }
   }
 
   bool is_allocated(uint32_t idx) const {
-    if (regs_per_block_ == 0)
+    if (regs_per_block_ == 0) {
       return false;
+    }
     const size_t block = idx / regs_per_block_;
     return block < free_blocks_.size() && !free_blocks_[block];
   }
