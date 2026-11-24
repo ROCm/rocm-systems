@@ -1055,8 +1055,6 @@ _VOPC_SUFFIX: dict[str, tuple[str, str]] = {
     # 64-bit lanes: read directly as the native 64-bit lane type (read_simd64),
     # so the conversion is the identity. Routed through the VOPC64 glue.
     'f64': ('double', '{x}'),
-    'i64': ('int64_t', '{x}'),
-    'u64': ('uint64_t', '{x}'),
 }
 
 # relation -> mask expression over converted operands {a}, {b}. These mirror the
@@ -1141,14 +1139,10 @@ def _build_simd_vopc() -> dict[str, tuple[str, str]]:
 
 
 def _build_simd_vopc64() -> dict[str, tuple[str, str]]:
-    """64-bit-lane VOPC compares (f64/i64/u64), routed through the VOPC64 glue."""
+    """FP64 VOPC compares, routed through the VOPC64 glue."""
     table: dict[str, tuple[str, str]] = {}
     for rel in _VOPC_FLOAT_RELS:
         table[f'v_cmp_{rel}_f64_vopc'] = _float_vopc_entry('f64', rel)
-    for suf in ('i64', 'u64'):
-        lane_t, conv = _VOPC_SUFFIX[suf]
-        for rel in _VOPC_INT_RELS:
-            table[f'v_cmp_{rel}_{suf}_vopc'] = (lane_t, _vopc_functor(conv, rel))
     return table
 
 
@@ -1170,7 +1164,7 @@ SIMD_VOPC64: dict[str, tuple[str, str]] = _build_simd_vopc64()
 # Integer/bitwise VOPC bodies apply no modifiers, so their functors are the
 # same as the VOPC ones (built by _vopc_functor); they go through
 # try_execute_vopc_vop3_int_simd (32-bit lane) or
-# try_execute_vopc64_vop3_int_simd (64-bit lane).
+# The 64-bit integer forms use rj-arith on every profile.
 #
 # Floating-point VOPC bodies in VOP3 form read the raw encodings through the
 # same raw-lane glue; shared/comparison.h applies the captured abs/neg fields,
@@ -1195,19 +1189,7 @@ def _build_simd_vopc_vop3_int_32() -> dict[str, tuple[str, str]]:
     return table
 
 
-def _build_simd_vopc_vop3_int_64() -> dict[str, tuple[str, str]]:
-    """VOP3 form of the 64-bit-lane integer VOPC relations (i64/u64). Same
-    keying / functor as the VOPC64 path; no modifiers."""
-    table: dict[str, tuple[str, str]] = {}
-    for suf in ('i64', 'u64'):
-        lane_t, conv = _VOPC_SUFFIX[suf]
-        for rel in _VOPC_INT_RELS:
-            table[f'v_cmp_{rel}_{suf}_vop3'] = (lane_t, _vopc_functor(conv, rel))
-    return table
-
-
 SIMD_VOPC_VOP3_INT_32: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_int_32()
-SIMD_VOPC_VOP3_INT_64: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_int_64()
 
 
 def _build_simd_vopc_vop3_float() -> dict[str, tuple[str, str]]:
@@ -2041,12 +2023,6 @@ def _simd_probe_line(
         writer_arg = f'{result_writer}, ' if result_writer is not None else ''
         suffix = '_RESULT' if result_writer is not None else ''
         return f'  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT{suffix}({writer_arg}{lane_t}, {cpp_op});'
-    specvopcv3i64 = SIMD_VOPC_VOP3_INT_64.get(template_name)
-    if specvopcv3i64 is not None:
-        lane_t, cpp_op = specvopcv3i64
-        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
-        suffix = '_RESULT' if result_writer is not None else ''
-        return f'  ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT{suffix}({writer_arg}{lane_t}, {cpp_op});'
     # VOP3 form of the f16/f32/f64 VOPC compares (17 ops each). Raw lanes go
     # through the integer glue; the functor applies the captured abs/neg.
     specvopcv3float = SIMD_VOPC_VOP3_FLOAT.get(template_name)
