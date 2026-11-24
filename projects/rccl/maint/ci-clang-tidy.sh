@@ -28,6 +28,7 @@ BASE_REF="${1:-origin/develop}"
 HEAD_REF="${2:-HEAD}"
 
 FINDINGS="projects/rccl/build/clang-tidy/clang-tidy-findings.txt"
+NOT_ANALYSED="projects/rccl/build/clang-tidy/clang-tidy-not-analysed.txt"
 
 LOG="${RUNNER_TEMP:-/tmp}/rccl-clang-tidy-precommit.txt"
 
@@ -94,6 +95,13 @@ summarise() {
     cat "$FINDINGS"
     echo '```'
   fi
+  if [[ -s "$NOT_ANALYSED" ]]; then
+    echo
+    echo "Not analysed (not in the compile database):"
+    echo
+    # shellcheck disable=SC2016  # literal backticks for Markdown
+    sed 's|^|- `|; s|$|`|' "$NOT_ANALYSED"
+  fi
 }
 
 # shellcheck disable=SC2329  # invoked from the EXIT trap armed below
@@ -117,7 +125,7 @@ install_pre_commit
 export PATH="/opt/rocm/bin:${VENV_DIR}/bin:${PATH}"
 
 # A leftover file from an earlier run would be mistaken for this run's result.
-rm -f "$FINDINGS"
+rm -f "$FINDINGS" "$NOT_ANALYSED"
 
 STATUS=0
 set -o pipefail

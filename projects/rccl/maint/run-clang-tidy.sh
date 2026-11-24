@@ -193,6 +193,9 @@ fi
 # ---------------------------------------------------------------------------
 # Analyse
 # ---------------------------------------------------------------------------
+NOT_ANALYSED_LIST="${BUILD_DIR}/clang-tidy-not-analysed.txt"
+rm -f "$NOT_ANALYSED_LIST"
+
 # Explicit -config-file: clang-tidy finds .clang-tidy by walking up from each
 # analysed file, and those are the hipified copies in the build directory,
 # possibly outside the tree. Relying on the walk-up silently yields nothing.
@@ -206,16 +209,32 @@ if [[ ${#FILTERS[@]} -gt 0 ]]; then
   # end so src/init.cc does not also match src/transport/init.cc. x.cu is
   # hipified to x.cu.cpp, and add_file_unique (cmake/Dependencies.cmake)
   # renames a repeated basename to x_tmp.cc.
-  FILTER_REGEX="$(printf '%s\n' "${FILTERS[@]}" \
-    | sed -E 's|^(.*/)?projects/rccl/||; s|^\./||; s|(\.[A-Za-z0-9]+)$|(_tmp)?\1|; s/\./\\./g; s|^|/hipify/|; s|$|(\\.cpp)?$|' \
-    | paste --serial --delimiters='|')"
-  # A filter that matches nothing would analyse nothing and read as clean.
-  if ! sed -nE 's|^ *"file": "(.*)",?$|\1|p' "${BUILD_DIR}/compile_commands.json" \
-    | grep -E "$FILTER_REGEX" >/dev/null; then
-    echo "ERROR: none of the given paths is in ${BUILD_DIR}/compile_commands.json:" >&2
-    printf '         %s\n' "${FILTERS[@]}" >&2
-    exit 2
+  to_regex() {
+    sed -E 's|^(.*/)?projects/rccl/||; s|^\./||; s|(\.[A-Za-z0-9]+)$|(_tmp)?\1|; s/\./\\./g; s|^|/hipify/|; s|$|(\\.cpp)?$|'
+  }
+  # Some sources (e.g. those the device linker builds outside the rccl target)
+  # are not in the compile database. Report them as not analysed rather than
+  # failing, and record them so the CI summary does not read as a clean run.
+  DB_FILES="$(sed -nE 's|^ *"file": "(.*)",?$|\1|p' "${BUILD_DIR}/compile_commands.json")"
+  ANALYSED=()
+  NOT_ANALYSED=()
+  for f in "${FILTERS[@]}"; do
+    if grep -E "$(printf '%s\n' "$f" | to_regex)" <<<"$DB_FILES" >/dev/null; then
+      ANALYSED+=("$f")
+    else
+      NOT_ANALYSED+=("$f")
+    fi
+  done
+  printf '%s\n' "${NOT_ANALYSED[@]}" | sed '/^$/d' > "$NOT_ANALYSED_LIST"
+  if [[ ${#NOT_ANALYSED[@]} -gt 0 ]]; then
+    echo "WARNING: not in ${BUILD_DIR}/compile_commands.json, so not analysed:" >&2
+    printf '         %s\n' "${NOT_ANALYSED[@]}" >&2
   fi
+  if [[ ${#ANALYSED[@]} -eq 0 ]]; then
+    : > "${BUILD_DIR}/clang-tidy-findings.txt"
+    exit 0
+  fi
+  FILTER_REGEX="$(printf '%s\n' "${ANALYSED[@]}" | to_regex | paste --serial --delimiters='|')"
   ARGS+=("$FILTER_REGEX")
 fi
 
