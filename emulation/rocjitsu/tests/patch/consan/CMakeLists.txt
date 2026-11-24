@@ -838,7 +838,14 @@ if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
     foreach(
         _profile
         IN
-        ITEMS SelectedAB WrongProfile BarrierAB LoopAB NativeApplication
+        ITEMS
+            SelectedAB
+            WrongProfile
+            BarrierAB
+            LoopAB
+            NativeApplication
+            ApplicationLds
+            ApplicationLdsBarrier
     )
         set(_profile_options)
         set(_multi_case_image ${_fixture_dir}/multi-entry.hsaco)
@@ -853,6 +860,12 @@ if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
             set(_multi_variant loop)
         elseif(_profile STREQUAL "NativeApplication")
             set(_profile_options --native-application)
+        elseif(_profile STREQUAL "ApplicationLds")
+            set(_profile_options --application)
+        elseif(_profile STREQUAL "ApplicationLdsBarrier")
+            set(_profile_options --application)
+            set(_multi_case_image ${_fixture_dir}/multi-entry-barrier.hsaco)
+            set(_multi_variant barrier)
         endif()
         set(_test ConSanMultiEntrySim.${_profile})
         add_test(

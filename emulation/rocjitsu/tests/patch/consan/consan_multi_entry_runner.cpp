@@ -113,14 +113,16 @@ int run(int argc, char **argv) {
   }
   const bool instrumented = std::string_view(argv[2]) == "instrumented";
   const bool native_application = std::string_view(argv[2]) == "native-application";
-  const bool trace = argc >= 4;
-  if (native_application && trace)
+  const bool application_completion = argc >= 4;
+  if (native_application && application_completion)
     return 3;
   uint32_t cluster_size = 0;
   uint32_t workgroups = 1;
-  if (trace) {
+  if (application_completion) {
     const std::string_view option(argv[3]);
-    constexpr std::string_view prefix = "--trace-workgroups=";
+    const std::string_view prefix = option.starts_with("--application-workgroups=")
+                                        ? "--application-workgroups="
+                                        : "--trace-workgroups=";
     if (!option.starts_with(prefix))
       return 3;
     const std::string_view count = option.substr(prefix.size());
@@ -341,7 +343,7 @@ int run(int argc, char **argv) {
     packet->group_segment_size = entry.group_bytes;
     packet->kernel_object = entry.kernel;
     packet->kernarg_address = arguments;
-    packet->completion_signal = trace ? hsa_signal_t{} : signal;
+    packet->completion_signal = application_completion ? hsa_signal_t{} : signal;
     uint16_t header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
                       (1u << HSA_PACKET_HEADER_BARRIER) |
                       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
@@ -365,7 +367,7 @@ int run(int argc, char **argv) {
     }
     __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
     uint64_t published_index = write_index;
-    if (trace) {
+    if (application_completion) {
       // The fixture application waits through its own following barrier. ConSan
       // sees the original null-completion dispatch and adds no dependency packet.
       published_index = hsa_queue_add_write_index_relaxed(queue, 1);

@@ -75,7 +75,8 @@ def run(args):
     original = directory / 'original.hsaco'
     shutil.copyfile(args.fixture, original)
     app = [args.launcher, '--config', args.config, '--', args.runner, original]
-    baseline_text = execute('original-baseline', [*app, 'baseline'])
+    launch_options = ['--application-workgroups=1'] if args.application else []
+    baseline_text = execute('original-baseline', [*app, 'baseline', *launch_options])
     baseline = [
         json.loads(line) for line in baseline_text.splitlines() if line.startswith('{')
     ]
@@ -146,9 +147,11 @@ def run(args):
         'RJ_CONSAN_CAPTURE_PATH': str(capture),
         'RJ_CONSAN_SELECTION_PROFILE': '0' * 64 if args.wrong_profile else profile,
     }
+    if args.application:
+        active['RJ_CONSAN_APPLICATION_PROFILE'] = '1'
     application = execute(
         'instrumented',
-        [*app, 'instrumented'],
+        [*app, 'instrumented', *launch_options],
         expected=20 if args.wrong_profile else 0,
         env=active,
     )
@@ -163,8 +166,9 @@ def run(args):
     summary = ledger[-1]
     assert summary['app_status'] == summary['finish_status'] == 0
     assert summary['loads'] == 1 and summary['completed'] == 4
-    for counter in ('submitted', 'forwarded', 'copied', 'written'):
+    for counter in ('submitted', 'copied', 'written'):
         assert summary[counter] == 3, (counter, summary)
+    assert summary['forwarded'] == (0 if args.application else 3), summary
     assert summary['reused'] == 2, summary
     assert summary['native_submitted'] == summary['native_completed'] == 1, summary
     inspected = json.loads(execute('inspect', [args.inspect, capture]))
@@ -257,6 +261,7 @@ def main():
     profile = parser.add_mutually_exclusive_group()
     profile.add_argument('--wrong-profile', action='store_true')
     profile.add_argument('--native-application', action='store_true')
+    profile.add_argument('--application', action='store_true')
     parser.add_argument(
         '--variant', choices=('no-sync', 'barrier', 'loop'), default='no-sync'
     )
