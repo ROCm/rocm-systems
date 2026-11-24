@@ -5,7 +5,7 @@
 
 use super::queue::{
     QueueParameters, QueuePriority, QueueProducerMode, QueueRequest, QueueRingMemory,
-    RetainedQueue, store_ordered_mmio64,
+    QueueTransport, RetainedQueue, store_ordered_mmio64,
 };
 use super::{CopyFailure, GpuDevice};
 use crate::memory::{DeviceAccess, MemoryKind, host_page_size};
@@ -75,6 +75,62 @@ fn write_wait_diagnostic(
         output,
         "rocddi code-cache: wait={outcome:?}; read={read}; write={write}; completion={completion}; ib_entry={entry}; ib_exit={exit}"
     )
+}
+
+/// Records retained operand addresses only for an incomplete diagnostic wait.
+#[cold]
+fn write_failure_address_diagnostic(
+    output: &mut impl Write,
+    outcome: WaitOutcome,
+    (host, gpu_address, page): (usize, u64, u64),
+    (indirect_buffer_address, command_count): (u64, usize),
+    transport: QueueTransport,
+) -> io::Result<()> {
+    if outcome == WaitOutcome::Completed {
+        return Ok(());
+    }
+    let completion_value_offset = std::mem::offset_of!(Completion, value);
+    write!(
+        output,
+        concat!(
+            "rocddi code-cache: addresses; ",
+            "command_page_cpu={host:#x}; command_page_gpu={gpu_address:#x}; command_page_size_bytes={page}; ",
+            "completion_cpu={host:#x}; completion_gpu={gpu_address:#x}; completion_size_bytes={completion_size}; ",
+            "completion_value_cpu={completion_value_host:#x}; completion_value_gpu={completion_value_device:#x}; ",
+            "ib_cpu={indirect_buffer_host:#x}; ib_gpu={indirect_buffer_address:#x}; ib_words={command_count}; ",
+            "ib_entry_cpu={entry_host:#x}; ib_entry_gpu={entry_device:#x}; ",
+            "ib_exit_cpu={exit_host:#x}; ib_exit_gpu={exit_device:#x}; ",
+            "ring_cpu={ring_host:#x}; ring_gpu={ring_device:#x}; ring_size_bytes={ring_size}; ",
+            "read_index_cpu={read_index_host:#x}; read_index_gpu={read_index_device:#x}; ",
+            "write_index_cpu={write_index_host:#x}; write_index_gpu={write_index_device:#x}; ",
+            "doorbell_cpu={doorbell_host:#x}; doorbell_gpu="
+        ),
+        host = host,
+        gpu_address = gpu_address,
+        page = page,
+        completion_size = size_of::<Completion>(),
+        completion_value_host = host + completion_value_offset,
+        completion_value_device = gpu_address + completion_value_offset as u64,
+        indirect_buffer_host = host + INDIRECT_BUFFER_OFFSET,
+        indirect_buffer_address = indirect_buffer_address,
+        command_count = command_count,
+        entry_host = host + IB_ENTRY_MARKER_OFFSET,
+        entry_device = gpu_address + IB_ENTRY_MARKER_OFFSET as u64,
+        exit_host = host + IB_EXIT_MARKER_OFFSET,
+        exit_device = gpu_address + IB_EXIT_MARKER_OFFSET as u64,
+        ring_host = transport.ring_host_address,
+        ring_device = transport.ring_device_address,
+        ring_size = transport.ring_size_bytes,
+        read_index_host = transport.read_index_host_address,
+        read_index_device = transport.read_index_device_address,
+        write_index_host = transport.write_index_host_address,
+        write_index_device = transport.write_index_device_address,
+        doorbell_host = transport.doorbell_host_address,
+    )?;
+    match transport.doorbell_device_address {
+        Some(address) => writeln!(output, "{address:#x}"),
+        None => writeln!(output, "None"),
+    }
 }
 
 /// Builds the full-range `ACQUIRE_MEM` cache operation used by `ROCr`'s loader.
@@ -183,6 +239,8 @@ impl GpuDevice<'_> {
         queue: &RetainedQueue<(crate::memory::Allocation, crate::device::Device)>,
         completion: &Completion,
         markers: Option<(usize, usize)>,
+        command_page: (usize, u64, u64),
+        indirect_buffer: (u64, usize),
     ) {
         let Ok(_operation) = self.driver.admit() else {
             return;
@@ -218,6 +276,15 @@ impl GpuDevice<'_> {
                 completion,
                 markers,
             );
+            if outcome != WaitOutcome::Completed {
+                let _ = write_failure_address_diagnostic(
+                    &mut std::io::stderr().lock(),
+                    outcome,
+                    command_page,
+                    indirect_buffer,
+                    transport,
+                );
+            }
         }
     }
 
@@ -373,6 +440,8 @@ impl GpuDevice<'_> {
                 unsafe { &*(host as *const Completion) },
                 diagnostics
                     .then_some((host + IB_ENTRY_MARKER_OFFSET, host + IB_EXIT_MARKER_OFFSET)),
+                (host, gpu_address, page),
+                (ib, count),
             );
         }
         queue
@@ -403,8 +472,9 @@ mod tests {
     use super::{
         Completion, IB_ENTRY_MARKER_OFFSET, IB_EXIT_MARKER_OFFSET, INDIRECT_BUFFER_OFFSET,
         WaitOutcome, inactivation_failure, invalidate_packet, publication_commands,
-        publication_packet, write_wait_diagnostic,
+        publication_packet, write_failure_address_diagnostic, write_wait_diagnostic,
     };
+    use crate::device::gpu::queue::{HostQueuePublication, QueueAccessWidth, QueueTransport};
     use crate::{Error, ErrorKind};
     use std::io;
 
@@ -571,6 +641,85 @@ mod tests {
         assert!(
             write_wait_diagnostic(&mut full, WaitOutcome::Deadline, (0, 1), 1, (0, 0)).is_err()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn failure_addresses_preserve_host_device_and_optional_transport_facts() -> io::Result<()> {
+        let mut transport = QueueTransport {
+            ring_host_address: 0x1000,
+            ring_device_address: 0x2000,
+            ring_size_bytes: 4096,
+            aql_control: None,
+            sdma_engine_id: None,
+            read_index_host_address: 0x3000,
+            read_index_device_address: 0x4000,
+            write_index_host_address: 0x5000,
+            write_index_device_address: 0x6000,
+            read_index_width: QueueAccessWidth::Bits64,
+            write_index_width: QueueAccessWidth::Bits64,
+            index_unit_bytes: 64,
+            read_index_wraps: false,
+            doorbell_host_address: 0x7000,
+            doorbell_device_address: None,
+            doorbell_width: QueueAccessWidth::Bits64,
+            host_publication: HostQueuePublication::Ordered64BitMmio,
+        };
+        let mut output = Vec::new();
+        write_failure_address_diagnostic(
+            &mut output,
+            WaitOutcome::Deadline,
+            (0x1000_0000, 0x2000_0000, 8192),
+            (0x2000_0100, 17),
+            transport,
+        )?;
+        assert_eq!(
+            output,
+            concat!(
+                "rocddi code-cache: addresses; ",
+                "command_page_cpu=0x10000000; command_page_gpu=0x20000000; command_page_size_bytes=8192; ",
+                "completion_cpu=0x10000000; completion_gpu=0x20000000; completion_size_bytes=64; ",
+                "completion_value_cpu=0x10000008; completion_value_gpu=0x20000008; ",
+                "ib_cpu=0x10000100; ib_gpu=0x20000100; ib_words=17; ",
+                "ib_entry_cpu=0x10000040; ib_entry_gpu=0x20000040; ",
+                "ib_exit_cpu=0x10000080; ib_exit_gpu=0x20000080; ",
+                "ring_cpu=0x1000; ring_gpu=0x2000; ring_size_bytes=4096; ",
+                "read_index_cpu=0x3000; read_index_gpu=0x4000; ",
+                "write_index_cpu=0x5000; write_index_gpu=0x6000; ",
+                "doorbell_cpu=0x7000; doorbell_gpu=None\n"
+            )
+            .as_bytes()
+        );
+        transport.doorbell_device_address = Some(0x8000);
+        output.clear();
+        write_failure_address_diagnostic(
+            &mut output,
+            WaitOutcome::Cancelled,
+            (0x1000_0000, 0x2000_0000, 4096),
+            (0x2000_0100, 18),
+            transport,
+        )?;
+        assert!(output.ends_with(b"doorbell_gpu=0x8000\n"));
+        assert!(!output[..output.len() - 1].contains(&b'\n'));
+        let mut full = &mut [0_u8; 0][..];
+        assert!(
+            write_failure_address_diagnostic(
+                &mut full,
+                WaitOutcome::Deadline,
+                (0x1000_0000, 0x2000_0000, 4096),
+                (0x2000_0100, 17),
+                transport,
+            )
+            .is_err()
+        );
+        // A completed wait must neither write nor evaluate address offsets.
+        write_failure_address_diagnostic(
+            &mut full,
+            WaitOutcome::Completed,
+            (usize::MAX, u64::MAX, 0),
+            (u64::MAX, 0),
+            transport,
+        )?;
         Ok(())
     }
 
