@@ -342,8 +342,9 @@ void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -374,8 +375,9 @@ void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -406,8 +408,9 @@ void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -438,8 +441,9 @@ void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -470,8 +474,9 @@ void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -502,8 +507,9 @@ void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -534,8 +540,9 @@ void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -566,8 +573,9 @@ void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -598,8 +606,9 @@ void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -630,8 +639,9 @@ void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -662,8 +672,9 @@ void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -694,8 +705,9 @@ void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -726,8 +738,9 @@ void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -758,8 +771,9 @@ void ImageAtomicFcmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -790,8 +804,9 @@ void ImageAtomicFminMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -822,8 +837,9 @@ void ImageAtomicFmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 

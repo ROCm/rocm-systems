@@ -123,3 +123,11 @@ current limits with:
 
 The soft limit can be raised up to the hard limit, for example with
 ``ulimit -n <limit>`` before starting the application.
+
+Host memory buffers
+===================
+
+Asynchronous I/O doesn't support a buffer registered from host memory with
+``hipFileBufRegister()``. ``hipFileReadAsync()`` and ``hipFileWriteAsync()``
+return ``hipFileAsyncNotSupported`` for a host buffer; use ``hipFileRead()``
+and ``hipFileWrite()`` instead.

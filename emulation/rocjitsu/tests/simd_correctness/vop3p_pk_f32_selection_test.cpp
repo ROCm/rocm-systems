@@ -25,6 +25,8 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <array>
 #include <cfenv>
@@ -32,6 +34,8 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <tuple>
+#include <utility>
+#include <vector>
 
 #if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
@@ -67,7 +71,7 @@ struct Machine {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wave = nullptr;
 
-  explicit Machine(rocjitsu::IsaFamily arch) {
+  explicit Machine(rocjitsu::IsaFamily arch, std::shared_ptr<ExecutionPluginGroup> plugins = {}) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 1;
@@ -76,14 +80,20 @@ struct Machine {
     config.lds_size_kb = 64;
     cache.set_backing_memory(&memory);
     rocjitsu::test::initialize_compute_unit(cu, "packed_f32_selection", config, &memory, &cache);
-    if (!cu)
+    if (!cu) {
       return;
+    }
+    if (plugins) {
+      cu->set_plugin_group(plugins);
+      plugins->onInit();
+    }
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
   }
   ~Machine() {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
 
   using Result = std::array<std::array<uint32_t, 2>, 64>;
@@ -91,10 +101,12 @@ struct Machine {
     util::set_force_scalar_for_testing(scalar);
     const uint32_t base = wave->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
-      for (uint32_t reg = 0; reg < 6; ++reg)
+      for (uint32_t reg = 0; reg < 6; ++reg) {
         cu->write_vgpr(base + reg, lane, kBits[(lane + 3 * reg) % kBits.size()]);
-      for (uint32_t reg = 6; reg < 8; ++reg)
+      }
+      for (uint32_t reg = 6; reg < 8; ++reg) {
         cu->write_vgpr(base + reg, lane, kSentinel);
+      }
     }
     wave->debug_write_sgpr(8, 0x3f800001);
     wave->debug_write_sgpr(9, 0x33800000);
@@ -102,9 +114,11 @@ struct Machine {
     wave->set_exec(exec);
     EXPECT_TRUE(cu->execute_instruction(&inst, *wave).succeeded());
     Result result{};
-    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
-      for (uint32_t half = 0; half < 2; ++half)
+    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+      for (uint32_t half = 0; half < 2; ++half) {
         result[lane][half] = cu->read_vgpr(base + dst + half, lane);
+      }
+    }
     return result;
   }
 };
@@ -212,15 +226,22 @@ TEST_P(PackedF32Selection, AllSelectionsPreservePolicies) {
   Machine machine(std::get<0>(GetParam()));
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const unsigned selections = std::get<1>(GetParam()) == 2 ? 8 : 4;
-  for (uint8_t lo = 0; lo < selections; ++lo)
-    for (uint8_t hi = 0; hi < selections; ++hi)
-      for (uint32_t round = 0; round < 4; ++round)
-        for (uint32_t denorm = 0; denorm < 4; ++denorm)
-          for (uint8_t clamp : {0, 1})
-            for (uint32_t dx10_clamp : {0u, 0x100u})
-              for (uint32_t ieee : {0u, 0x200u})
+  for (uint8_t lo = 0; lo < selections; ++lo) {
+    for (uint8_t hi = 0; hi < selections; ++hi) {
+      for (uint32_t round = 0; round < 4; ++round) {
+        for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+          for (uint8_t clamp : {0, 1}) {
+            for (uint32_t dx10_clamp : {0u, 0x100u}) {
+              for (uint32_t ieee : {0u, 0x200u}) {
                 compare(machine, lo, hi, 5, 2, 0xc0 | round | (denorm << 4) | dx10_clamp | ieee,
                         clamp, 6, SourceKind::Vgpr, 0xd6a53cf0a5c3697bULL);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
@@ -230,51 +251,71 @@ TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
   // Only CDNA5 admits a literal source in this packed-F32 encoding.
   for (SourceKind source :
        {SourceKind::Vgpr, SourceKind::Sgpr, SourceKind::InlineFloat, SourceKind::Literal}) {
-    if (source == SourceKind::Literal && std::get<0>(GetParam()) != rocjitsu::IsaFamily::Cdna5)
+    if (source == SourceKind::Literal && std::get<0>(GetParam()) != rocjitsu::IsaFamily::Cdna5) {
       continue;
+    }
     // Packed FP32 register pairs must start at even VGPR addresses.
-    for (uint8_t dst : {0, 2, 4, 6})
-      for (uint8_t neg = 0; neg < 8; ++neg)
-        for (uint64_t exec : {uint64_t{0}, uint64_t{0xaaaaaaaa55555555}, ~uint64_t{0}})
+    for (uint8_t dst : {0, 2, 4, 6}) {
+      for (uint8_t neg = 0; neg < 8; ++neg) {
+        for (uint64_t exec : {uint64_t{0}, uint64_t{0xaaaaaaaa55555555}, ~uint64_t{0}}) {
           compare(machine, 3, 2, neg, neg ^ 7, 0xf0, 0, dst, source, exec);
+        }
+      }
+    }
   }
 }
 
-TEST_P(PackedF32Selection, RestoresHostEnvironment) {
+TEST_P(PackedF32Selection, LeavesHostControlsUnchanged) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  if (std::get<0>(GetParam()) != rocjitsu::IsaFamily::Cdna2) {
-    // rj-arith assumes default host controls and permits arithmetic sticky flags.
-    // Unlike the legacy executor, it never saves or writes host FP controls.
-    ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-    std::feraiseexcept(FE_DIVBYZERO);
+  // Execution assumes the default host controls and may raise sticky flags.
+  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
+  std::feraiseexcept(FE_DIVBYZERO);
 #if RJ_HOST_ARCH_X86
-    const uint32_t controls = _mm_getcsr() & ~0x3fu;
+  const uint32_t controls = _mm_getcsr() & ~0x3fu;
 #endif
-    compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
-    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
-    EXPECT_NE(std::fetestexcept(FE_DIVBYZERO), 0);
+  compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
+  EXPECT_EQ(std::fegetround(), FE_TONEAREST);
+  EXPECT_NE(std::fetestexcept(FE_DIVBYZERO), 0);
 #if RJ_HOST_ARCH_X86
-    EXPECT_EQ(_mm_getcsr() & ~0x3fu, controls);
+  EXPECT_EQ(_mm_getcsr() & ~0x3fu, controls);
 #endif
-    return;
+}
+
+// The scope that installs the guest rounding starts after the register views
+// exist, so the plugin callbacks fired while acquiring and releasing them run
+// under the default host controls. A check made after execution alone cannot
+// see that interval: it is already closed.
+TEST_P(PackedF32Selection, RegisterCallbacksSeeDefaultHostRounding) {
+  class RoundingObserver final : public ExecutionPlugin {
+  public:
+    RoundingObserver() : ExecutionPlugin("packed_f32_rounding_observer") {}
+    void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
+      reads.push_back(std::fegetround());
+    }
+    void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
+      writes.push_back(std::fegetround());
+    }
+    std::vector<int> reads, writes;
+  };
+  HostState saved;
+  auto owner = std::make_unique<RoundingObserver>();
+  auto *observer = owner.get();
+  auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(plugins->add(std::move(owner)));
+  Machine machine(std::get<0>(GetParam()), plugins);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  // MODE 0xf1 selects round-to-plus-infinity, so a scope that spans a view
+  // leaks FE_UPWARD into its callbacks.
+  compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
+  ASSERT_FALSE(observer->reads.empty());
+  ASSERT_FALSE(observer->writes.empty());
+  for (const int rounding : observer->reads) {
+    EXPECT_EQ(rounding, FE_TONEAREST);
   }
-  for (int rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(rounding), 0);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_DIVBYZERO);
-#if RJ_HOST_ARCH_X86
-    _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
-    const uint32_t mxcsr = _mm_getcsr();
-#endif
-    const int exceptions = std::fetestexcept(FE_ALL_EXCEPT);
-    compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
-    EXPECT_EQ(std::fegetround(), rounding);
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), exceptions);
-#if RJ_HOST_ARCH_X86
-    EXPECT_EQ(_mm_getcsr(), mxcsr);
-#endif
+  for (const int rounding : observer->writes) {
+    EXPECT_EQ(rounding, FE_TONEAREST);
   }
 }
 

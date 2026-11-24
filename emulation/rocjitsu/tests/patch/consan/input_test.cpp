@@ -103,6 +103,55 @@ TEST(ConSanInput, MissingEntryAndAdditionalKernelHaveDistinctDiagnostics) {
   EXPECT_EQ(error.message, "ConSan requires a single-kernel code object; found 2 kernels");
 }
 
+#ifdef CONSAN_MULTI_ENTRY_FIXTURE
+TEST(ConSanInputImage, QualifiesDistinctEntriesWithoutExtractingTheirImage) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> image = {std::istreambuf_iterator<char>(file),
+                                      std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(image.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> first = build_image_entry_program(image, target, "mk_a", error);
+  ASSERT_TRUE(first.succeeded()) << error.message;
+  const FailureOr<InputProgram> second = build_image_entry_program(image, target, "mk_b", error);
+  ASSERT_TRUE(second.succeeded()) << error.message;
+  EXPECT_EQ(first.value().image, image);
+  EXPECT_EQ(second.value().image, image);
+  EXPECT_NE(first.value().kernel.descriptor_file_offset,
+            second.value().kernel.descriptor_file_offset);
+  EXPECT_EQ(first.value().original_sgprs, 16u);
+  EXPECT_EQ(second.value().original_sgprs, 32u);
+  EXPECT_EQ(first.value().kernel.descriptor.kernarg_size, 16u);
+  EXPECT_EQ(second.value().kernel.descriptor.kernarg_size, 32u);
+  EXPECT_EQ(first.value().accesses.size(), 2u);
+  EXPECT_EQ(second.value().accesses.size(), 2u);
+  EXPECT_NE(first.value().accesses[0].original_offset, second.value().accesses[0].original_offset);
+}
+
+TEST(ConSanInputImage, SelectedFlowCannotEnterASiblingKernel) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_FIXTURE, std::ios::binary);
+  std::vector<uint8_t> image = {std::istreambuf_iterator<char>(file),
+                                std::istreambuf_iterator<char>()};
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> first = build_image_entry_program(image, target, "mk_a", error);
+  const FailureOr<InputProgram> second = build_image_entry_program(image, target, "mk_b", error);
+  ASSERT_TRUE(first.succeeded());
+  ASSERT_TRUE(second.succeeded());
+  const int16_t displacement = static_cast<int16_t>(
+      (second.value().kernel.entry_text_offset - first.value().kernel.entry_text_offset - 4) / 4);
+  const util::FailureOr<uint32_t> branch = build_s_branch(displacement, IsaFamily::Cdna5);
+  ASSERT_TRUE(branch.succeeded());
+  const uint32_t word = branch.value();
+  std::memcpy(image.data() + first.value().text_file_offset +
+                  first.value().kernel.entry_text_offset,
+              &word, sizeof(word));
+  EXPECT_TRUE(build_image_entry_program(image, target, "mk_a", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(error.message, "selected control flow enters another kernel");
+}
+#endif
+
 class ConSanInputFixture : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -205,8 +254,9 @@ protected:
     const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kTarget.arch);
     ASSERT_TRUE(maybe_nop.succeeded());
     const uint32_t nop = maybe_nop.value();
-    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t))
+    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t)) {
       std::memcpy(patched.data() + anchor + offset, &nop, sizeof(nop));
+    }
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(patched));
     image = std::move(patcher).emit();
@@ -618,8 +668,9 @@ TEST_F(ConSanInputFixture, LdsAccessOrderAtAJoinIncludesEveryPredecessor) {
     words[first + 4] = join_branch.value();
     std::memcpy(words.data() + first + 6, text.data() + read, 8);
     words[first + 8] = terminator.value();
-    if (high_access)
+    if (high_access) {
       std::memcpy(words.data() + first + 10, text.data() + write, 8);
+    }
     words[first + 12] = backward_branch.value();
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(

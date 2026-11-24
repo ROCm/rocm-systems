@@ -471,7 +471,7 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for GDA wave conduit.");
+      LOGD_WARN("Unsupported reduction size for GDA wave backend.");
       return ROCSHMEM_ERROR;
     }
   }
@@ -745,7 +745,7 @@ __device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for GDA conduit.");
+      LOGD_WARN("Unsupported reduction size for GDA backend.");
       return ROCSHMEM_ERROR;
     }
   }

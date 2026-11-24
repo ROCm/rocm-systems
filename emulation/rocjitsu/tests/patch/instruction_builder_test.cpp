@@ -247,11 +247,12 @@ TEST(InstructionBuilder, PcDeltaBuilderStopsAfterItsFirstDiagnostic) {
       const util::DiagnosticEmitter error(record);
       EXPECT_FALSE(append_pc_delta_builder(words, arch, 128, delta, false, &error));
       EXPECT_EQ(messages, 1u);
-      if (arch == rocjitsu::IsaFamily::Cdna3)
+      if (arch == rocjitsu::IsaFamily::Cdna3) {
         EXPECT_EQ(message, "SOP2 encoding field out of range");
-      else
+      } else {
         EXPECT_EQ(message,
                   "Unimplemented instruction: scalar PC delta builder for target architecture");
+      }
       EXPECT_TRUE(words.empty());
     }
   }
@@ -409,8 +410,9 @@ TEST(InstructionBuilder, SoppEncodingReturnsEncodingOrFailure) {
   for (int value = 0; value < static_cast<int>(rocjitsu::IsaFamily::Count); ++value) {
     const auto arch = static_cast<rocjitsu::IsaFamily>(value);
     SCOPED_TRACE(value);
-    if (arch == rocjitsu::IsaFamily::Rv32i || arch == rocjitsu::IsaFamily::Rv64i)
+    if (arch == rocjitsu::IsaFamily::Rv32i || arch == rocjitsu::IsaFamily::Rv64i) {
       continue;
+    }
     util::FailureOr<uint32_t> maybe_sopp_op_nop = sopp_op_nop(arch);
     ASSERT_TRUE(maybe_sopp_op_nop.succeeded());
     EXPECT_TRUE(build_sopp_encoding(arch, maybe_sopp_op_nop.value(), 0).succeeded());
@@ -454,8 +456,9 @@ TEST(InstructionBuilder, DelayAluReturnsEncodingOrFailure) {
   for (auto arch :
        {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
         rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
-        rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid})
+        rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid}) {
     EXPECT_TRUE(build_s_delay_alu(0, arch).failed());
+  }
 }
 
 TEST(InstructionBuilder, DelayAluEmitsOnlyRequestedFailureDiagnostic) {

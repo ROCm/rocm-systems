@@ -108,8 +108,9 @@ TEST_P(SmemSbaseOperandTest, SbaseResolvesToScaledSgpr) {
   const RegisterRef expected_sbase{RegClass::SGPR, 4, tc.sbase_width};
   int matches = 0;
   for (int i = 0; i < inst->num_src_operands(); ++i) {
-    if (inst->src_operand(i)->to_register_ref() == expected_sbase)
+    if (inst->src_operand(i)->to_register_ref() == expected_sbase) {
       ++matches;
+    }
   }
   EXPECT_EQ(matches, 1) << "expected exactly one source operand = s[4:" << hi
                         << "] (scaled SBASE) for " << tc.label;

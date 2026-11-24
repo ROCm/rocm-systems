@@ -83,7 +83,7 @@ echo "    ROCM_PATH=${ROCM_PATH} ROCM_RELEASE=${ROCM_RELEASE:-<unset>}"
 echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
 export HIP_PATH="${ROCM_PATH}"
-export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
+export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 export CMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake:${ROCM_PATH}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
 
@@ -187,15 +187,37 @@ assert_conn_check_kernels_in_fatbin() {
     rm -f "${fatbin}"
     exit 1
   fi
-  local kernel
-  for kernel in ginAnvilConnWriteKernel ginAnvilConnCheckKernel; do
-    if ! grep -qa "${kernel}" "${fatbin}"; then
-      echo "ERROR: ${kernel} missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
-      rm -f "${fatbin}"
+  # The section is an offload bundle, compressed under ENABLE_COMPRESS, so the
+  # names are only visible in the unbundled code objects. Check every GPU target.
+  local targets target kernel code_object
+  if ! targets="$(clang-offload-bundler --type=o --input="${fatbin}" --list 2>&1)"; then
+    echo "ERROR: could not list the bundles in ${lib} .hip_fatbin: ${targets}" >&2
+    rm -f "${fatbin}"
+    exit 1
+  fi
+  targets="$(grep '^hip-amdgcn' <<< "${targets}" || true)"
+  if [[ -z "${targets}" ]]; then
+    echo "ERROR: ${lib} .hip_fatbin has no GPU code objects" >&2
+    rm -f "${fatbin}"
+    exit 1
+  fi
+  code_object="$(mktemp)"
+  for target in ${targets}; do
+    if ! clang-offload-bundler --type=o --input="${fatbin}" --unbundle \
+         --targets="${target}" --output="${code_object}"; then
+      echo "ERROR: could not unbundle ${target} from ${lib} .hip_fatbin" >&2
+      rm -f "${fatbin}" "${code_object}"
       exit 1
     fi
+    for kernel in ginAnvilConnWriteKernel ginAnvilConnCheckKernel; do
+      if ! grep -qa "${kernel}" "${code_object}"; then
+        echo "ERROR: ${kernel} missing from ${lib} .hip_fatbin ${target} (conn-check not device-linked)" >&2
+        rm -f "${fatbin}" "${code_object}"
+        exit 1
+      fi
+    done
   done
-  rm -f "${fatbin}"
+  rm -f "${fatbin}" "${code_object}"
 }
 assert_conn_check_kernels_in_fatbin "${librccl}"
 echo "    conn-check kernels present in ${librccl} .hip_fatbin"

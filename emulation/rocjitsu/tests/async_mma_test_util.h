@@ -40,10 +40,11 @@ inline unsigned execute_independent(amdgpu::matrix_coexecution::SharedPool &pool
     }
     instructions[i]->execute(*instructions[i], context);
   }
-  for (auto ticket : tickets)
+  for (auto ticket : tickets) {
     if (ticket) {
       EXPECT_TRUE(pool.finish(ticket).succeeded());
     }
+  }
   return submitted;
 }
 } // namespace mma_test

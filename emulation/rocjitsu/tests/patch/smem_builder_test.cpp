@@ -89,8 +89,9 @@ constexpr std::array<rocjitsu::IsaFamily, 3> kNonAmdGpuArchs{
 std::unique_ptr<Instruction> decode_one(const std::array<uint32_t, 2> &words,
                                         rocjitsu::IsaFamily arch) {
   auto decoder = Decoder::create(arch);
-  if (!decoder)
+  if (!decoder) {
     return nullptr;
+  }
   return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
 }
 
@@ -154,8 +155,9 @@ TEST(SmemBuilder, RdnaNamesItsOwnNullCodeInSoffset) {
   bool saw_125 = false;
   bool saw_124 = false;
   for (const SmemArch &a : kArchs) {
-    if (a.shape != SmemOffsetShape::RdnaSoffsetNull)
+    if (a.shape != SmemOffsetShape::RdnaSoffsetNull) {
       continue;
+    }
     const auto words_result =
         build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/6, /*byte_offset=*/0x40, a.arch);
     ASSERT_TRUE(words_result.succeeded());

@@ -82,15 +82,17 @@ struct CliOptions {
 
 void print_supported_targets(std::ostream &os) {
   for (size_t i = 0; i < kTargetInfos.size(); ++i) {
-    if (i != 0)
+    if (i != 0) {
       os << ", ";
+    }
     os << kTargetInfos[i].name;
   }
 }
 
 [[nodiscard]] bool parse_u32(std::string_view text, uint32_t &value) {
-  if (text.empty())
+  if (text.empty()) {
     return false;
+  }
   int base = 10;
   if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
     text.remove_prefix(2);
@@ -122,16 +124,18 @@ public:
       : Flag(std::move(info)), choices_(std::move(choices)), value_(std::move(initial)) {}
   const std::optional<T> &value() const { return value_; }
   util::Result set_value(std::optional<T> value, util::DiagnosticEmitter diagnostic) {
-    if (value && !choice_name<T>(choices(), *value))
+    if (value && !choice_name<T>(choices(), *value)) {
       return diagnostic.emit() << "unsupported choice";
+    }
     value_ = std::move(value);
     return util::Result::success();
   }
   std::string format_value() const override {
     if (value_) {
       std::optional<std::string_view> name = choice_name<T>(choices(), *value_);
-      if (name)
+      if (name) {
         return std::string(*name);
+      }
     }
     return "unset";
   }
@@ -139,8 +143,9 @@ public:
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
     std::optional<T> choice = find_choice<T>(choices(), text);
-    if (choice)
+    if (choice) {
       return set_value(*choice, diagnostic);
+    }
     return diagnostic.emit() << "unsupported value '" << text << "'";
   }
   std::span<const NamedChoice<T>> choices() const { return {choices_.data(), choices_.size()}; }
@@ -155,8 +160,9 @@ public:
       : Flag(std::move(info)), value_(initial), maximum_(maximum) {}
   std::optional<uint32_t> value() const { return value_; }
   util::Result set_value(std::optional<uint32_t> value, util::DiagnosticEmitter diagnostic) {
-    if (value && *value > maximum_)
+    if (value && *value > maximum_) {
       return diagnostic.emit() << "expected an integer at most " << maximum_;
+    }
     value_ = value;
     return util::Result::success();
   }
@@ -165,8 +171,9 @@ public:
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
     uint32_t parsed = 0;
-    if (!parse_u32(text, parsed))
+    if (!parse_u32(text, parsed)) {
       return diagnostic.emit() << "expected a decimal or hexadecimal uint32";
+    }
     return set_value(parsed, diagnostic);
   }
   std::optional<uint32_t> value_;
@@ -218,8 +225,9 @@ struct DbtFlags {
 
   DbtFlags() {
     std::vector<NamedChoice<TargetInfo>> targets;
-    for (const TargetInfo &target : kTargetInfos)
+    for (const TargetInfo &target : kTargetInfos) {
       targets.emplace_back(target.name, target);
+    }
     input_target = std::make_shared<ChoiceFlag<TargetInfo>>(
         cli::FlagInfo{"--input-target", {}, "Input LLVM machine, e.g. gfx950"}, targets);
     output_target = std::make_shared<ChoiceFlag<TargetInfo>>(
@@ -252,8 +260,9 @@ struct DbtFlags {
                        {debug_min_free_vgpr, debug_continue_after_failure, skip_failed_kernels,
                         verify_idempotence, verify_rewrite_discharge, show_all_translations},
                        diagnostic)
-            .failed())
+            .failed()) {
       return util::Result::failure();
+    }
     return command.add_flags("Information", {list_code_objects, help}, diagnostic);
   }
 };
@@ -273,23 +282,27 @@ void print_help(const cli::Command &command) {
                               CliOptions &options) {
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
-  if (flags.register_flags(command, diagnostic).failed())
+  if (flags.register_flags(command, diagnostic).failed()) {
     return false;
+  }
   const std::vector<std::string_view> arguments(argv + 1, argv + argc);
   auto parsed = cli::parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return false;
+  }
   options.show_help = flags.help->value();
-  if (options.show_help)
+  if (options.show_help) {
     return true;
+  }
   if (parsed.value().positional.size() > 1) {
     std::cerr << "unexpected positional argument: " << parsed.value().positional[1] << '\n';
     return false;
   }
   options.saw_input =
       !parsed.value().positional.empty() && !parsed.value().positional.front().empty();
-  if (options.saw_input)
+  if (options.saw_input) {
     options.translate.input_path = parsed.value().positional.front();
+  }
   if (const auto &target = flags.input_target->value()) {
     options.translate.guest_arch = target->arch;
     options.translate.input_target = target->code_object_target;
@@ -309,9 +322,10 @@ void print_help(const cli::Command &command) {
   options.translate.output_revision =
       flags.output_revision->value().value_or(ProcessorRevision::Unspecified);
   options.translate.code_object_index = flags.code_object_index->value().value_or(0);
-  if (flags.debug_min_free_vgpr->value())
+  if (flags.debug_min_free_vgpr->value()) {
     options.translate.debug_min_free_vgpr =
         static_cast<uint16_t>(*flags.debug_min_free_vgpr->value());
+  }
   options.translate.debug_continue_after_failure = flags.debug_continue_after_failure->value();
   options.translate.skip_failed_kernels = flags.skip_failed_kernels->value();
   options.translate.verify_idempotence = flags.verify_idempotence->value();
@@ -347,8 +361,9 @@ struct ReportTotals {
 [[nodiscard]] std::string words_text(const std::vector<uint32_t> &words) {
   std::ostringstream os;
   for (size_t i = 0; i < words.size(); ++i) {
-    if (i != 0)
+    if (i != 0) {
       os << ' ';
+    }
     os << std::hex << std::setw(8) << std::setfill('0') << words[i];
   }
   return os.str();
@@ -394,21 +409,26 @@ struct ReportTotals {
 
 void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
                       std::string_view prefix = {}) {
-  if (!prefix.empty())
+  if (!prefix.empty()) {
     os << prefix << ' ';
+  }
   os << diagnostic_severity_name(diagnostic.severity) << ": "
      << diagnostic_kind_name(diagnostic.kind);
-  if (diagnostic.guest_offset)
+  if (diagnostic.guest_offset) {
     os << " .text+" << hex_offset(*diagnostic.guest_offset);
-  if (diagnostic.output_offset)
+  }
+  if (diagnostic.output_offset) {
     os << " output:.text+" << hex_offset(*diagnostic.output_offset);
-  if (!diagnostic.mnemonic.empty())
+  }
+  if (!diagnostic.mnemonic.empty()) {
     os << " " << diagnostic.mnemonic;
+  }
   os << ": " << diagnostic.message << "\n";
   for (const auto &item : diagnostic.required_work) {
     os << "  ";
-    if (!prefix.empty())
+    if (!prefix.empty()) {
       os << prefix << ' ';
+    }
     os << "required: " << item << "\n";
   }
 }
@@ -430,26 +450,30 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
 }
 
 [[nodiscard]] std::string translation_action_text(const InstructionTranslationReport &translation) {
-  if (translation.copied_original)
+  if (translation.copied_original) {
     return "copy_original";
+  }
 
   // An unclassified semantic lowering deliberately reads the same as a
   // classified expansion: whether a legalization entry also named the opcode is
   // internal to the profile, and the action the reader sees is the same one.
   const auto action = translation.effective_action();
-  if (!action)
+  if (!action) {
     return "encode";
+  }
 
   std::string text = legalization_action_name(*action);
-  if (translation.semantic_lowering)
+  if (translation.semantic_lowering) {
     text += " semantic";
+  }
   return text;
 }
 
 [[nodiscard]] bool should_show_translation(const InstructionTranslationReport &translation) {
   if (translation.copied_original ||
-      (translation.has_legalization && translation.action == Action::Identity))
+      (translation.has_legalization && translation.action == Action::Identity)) {
     return translation.changed || translation.emitted_in_cave;
+  }
   return true;
 }
 
@@ -474,8 +498,9 @@ count_runtime_encode(const std::vector<InstructionTranslationReport> &translatio
 count_copied_original(const std::vector<InstructionTranslationReport> &translations) {
   size_t count = 0;
   for (const auto &translation : translations) {
-    if (translation.copied_original)
+    if (translation.copied_original) {
       ++count;
+    }
   }
   return count;
 }
@@ -484,15 +509,17 @@ count_copied_original(const std::vector<InstructionTranslationReport> &translati
 count_semantic_lowerings(const std::vector<InstructionTranslationReport> &translations) {
   size_t count = 0;
   for (const auto &translation : translations) {
-    if (translation.semantic_lowering)
+    if (translation.semantic_lowering) {
       ++count;
+    }
   }
   return count;
 }
 
 [[nodiscard]] std::string target_location(const InstructionTranslationReport &translation) {
-  if (translation.emitted_in_cave)
+  if (translation.emitted_in_cave) {
     return ".text(local-cave)+" + hex_offset(translation.target_offset);
+  }
   return ".text+" + hex_offset(translation.target_offset);
 }
 
@@ -528,10 +555,12 @@ void print_instruction_translation_report(std::ostream &os, const TranslateOutpu
   size_t shown = 0;
   size_t changed = 0;
   for (const auto &translation : translations) {
-    if (translation.changed)
+    if (translation.changed) {
       ++changed;
-    if (show_all_translations || should_show_translation(translation))
+    }
+    if (show_all_translations || should_show_translation(translation)) {
       ++shown;
+    }
   }
 
   os << "\ninstruction_translations:\n";
@@ -546,19 +575,23 @@ void print_instruction_translation_report(std::ostream &os, const TranslateOutpu
      << " semantic=" << count_semantic_lowerings(translations) << "\n";
 
   for (const auto &translation : translations) {
-    if (!show_all_translations && !should_show_translation(translation))
+    if (!show_all_translations && !should_show_translation(translation)) {
       continue;
+    }
 
     os << "  " << hex_offset(translation.source_offset) << " "
        << translation_action_text(translation) << " .text+" << hex_offset(translation.source_offset)
        << " -> " << target_location(translation) << "\n";
-    if (!translation.source_words.empty())
+    if (!translation.source_words.empty()) {
       os << "    source_words: " << words_text(translation.source_words) << "\n";
+    }
     os << "    source: " << translation.source_instruction << "\n";
-    if (!translation.target_words.empty())
+    if (!translation.target_words.empty()) {
       os << "    target_words: " << words_text(translation.target_words) << "\n";
-    for (const auto &target_instruction : translation.target_instructions)
+    }
+    for (const auto &target_instruction : translation.target_instructions) {
       os << "    target: " << target_instruction << "\n";
+    }
   }
 }
 
@@ -571,11 +604,13 @@ void print_text_report(std::ostream &os, const CliOptions &options,
   os << "input_target: " << options.input_target_name << "\n";
   os << "source_code_object_id: fnv1a64:" << std::hex << std::setfill('0') << std::setw(16)
      << output.source_code_object_id << std::dec << std::setfill(' ') << "\n";
-  if (options.saw_input_revision)
+  if (options.saw_input_revision) {
     os << "input_revision: " << revision_name(output.input_revision) << "\n";
+  }
   os << "output_target: " << options.output_target_name << "\n";
-  if (options.saw_output_revision)
+  if (options.saw_output_revision) {
     os << "output_revision: " << revision_name(output.output_revision) << "\n";
+  }
   os << "output_elf_bytes: " << output.elf_bytes.size() << "\n";
   if (options.translate.verify_idempotence) {
     const std::string_view status = !output.idempotence_checked   ? "not-checked"
@@ -663,8 +698,9 @@ int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
     return kUsageError;
   }
 
-  if (options.list_code_objects)
+  if (options.list_code_objects) {
     return list_code_objects(options);
+  }
 
   if (!options.saw_input || !options.saw_input_target || !options.saw_output_target) {
     std::cerr << "input path, --input-target, and --output-target are required\n";
@@ -685,17 +721,21 @@ int rocjitsu::tools::detail::run_dbt_translate_cli(int argc, char **argv,
 
   auto result = translate(options.translate);
 
-  for (const auto &diagnostic : result.value.diagnostics)
+  for (const auto &diagnostic : result.value.diagnostics) {
     print_diagnostic(std::cerr, diagnostic);
-  for (const auto &diagnostic : result.value.idempotence_diagnostics)
+  }
+  for (const auto &diagnostic : result.value.idempotence_diagnostics) {
     print_diagnostic(std::cerr, diagnostic, "idempotence");
+  }
 
-  if (options.output_mode == OutputMode::Diff)
+  if (options.output_mode == OutputMode::Diff) {
     print_text_report(std::cout, options, result);
+  }
 
   if (!result.ok()) {
-    for (const auto &error : result.errors)
+    for (const auto &error : result.errors) {
       std::cerr << "error: " << error.message << "\n";
+    }
     return result.errors.front().exit_code;
   }
 

@@ -74,8 +74,9 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
   sigset_t previous_signals;
   if (sigprocmask(SIG_BLOCK, &daemon_signals, &previous_signals) != 0) {
     std::cerr << std::format("rocjitsu: failed to block daemon signals: {}\n", strerror(errno));
-    if (ready_fd >= 0)
+    if (ready_fd >= 0) {
       close(ready_fd);
+    }
     return 1;
   }
 
@@ -88,8 +89,9 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
   if (!config_stream) {
     std::cerr << std::format("rocjitsu: failed to read daemon configuration from {}\n",
                              config_path);
-    if (ready_fd >= 0)
+    if (ready_fd >= 0) {
       close(ready_fd);
+    }
     sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
     return 1;
   }
@@ -106,8 +108,9 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
       ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to start daemon from {} at {}\n", config_path,
                              resolved_socket_path);
-    if (ready_fd >= 0)
+    if (ready_fd >= 0) {
       close(ready_fd);
+    }
     sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
     return 1;
   }
@@ -129,10 +132,12 @@ int run_daemon_server(const char *config_path, const std::string &socket_path = 
   while (rj_daemon_status(daemon) == RJ_DAEMON_STATUS_RUNNING) {
     const timespec timeout{.tv_sec = 0, .tv_nsec = 100'000'000};
     const int signal = sigtimedwait(&daemon_signals, nullptr, &timeout);
-    if (signal == SIGINT || signal == SIGTERM)
+    if (signal == SIGINT || signal == SIGTERM) {
       break;
-    if (signal < 0 && errno != EAGAIN && errno != EINTR)
+    }
+    if (signal < 0 && errno != EAGAIN && errno != EINTR) {
       break;
+    }
   }
 
   const bool failed = rj_daemon_status(daemon) == RJ_DAEMON_STATUS_ERROR;
@@ -149,18 +154,21 @@ std::optional<std::filesystem::path> current_executable_path() {
   std::vector<char> buffer(256);
   for (;;) {
     ssize_t n = readlink("/proc/self/exe", buffer.data(), buffer.size());
-    if (n < 0)
+    if (n < 0) {
       return std::nullopt;
-    if (static_cast<size_t>(n) < buffer.size())
+    }
+    if (static_cast<size_t>(n) < buffer.size()) {
       return std::filesystem::path(std::string(buffer.data(), static_cast<size_t>(n)));
+    }
     buffer.resize(buffer.size() * 2);
   }
 }
 
 std::string canonical_existing_path(const std::filesystem::path &candidate) {
   std::error_code ec;
-  if (!std::filesystem::exists(candidate, ec) || ec)
+  if (!std::filesystem::exists(candidate, ec) || ec) {
     return {};
+  }
 
   // The launcher should keep probing candidate layouts when a path disappears
   // or cannot be canonicalized, rather than letting a filesystem exception
@@ -171,8 +179,9 @@ std::string canonical_existing_path(const std::filesystem::path &candidate) {
 
 std::string find_runtime_lib(std::string_view lib_name) {
   auto self = current_executable_path();
-  if (!self)
+  if (!self) {
     return {};
+  }
   auto bin_dir = self->parent_path();
   const std::filesystem::path library_name{std::string(lib_name)};
 
@@ -187,8 +196,9 @@ std::string find_runtime_lib(std::string_view lib_name) {
            bin_dir / ".." / ".." / "lib64" / "rocjitsu" / "src" / "rocjitsu" / "hooks" /
                library_name,
        }) {
-    if (std::string path = canonical_existing_path(candidate); !path.empty())
+    if (std::string path = canonical_existing_path(candidate); !path.empty()) {
       return path;
+    }
   }
   return {};
 }
@@ -215,8 +225,9 @@ void reap_stale_runtime_dirs() {
   // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset, but guard here too
   // since the loop body deletes.
   const std::string root = rpc_default_runtime_dir();
-  if (root.empty())
+  if (root.empty()) {
     return;
+  }
   // Advance the iterator with an error_code (not the throwing operator++): another
   // launcher may remove_all an entry concurrently, and a throw here would abort the
   // launcher before exec. Best-effort — any filesystem error just ends the scan.
@@ -231,15 +242,18 @@ void reap_stale_runtime_dirs() {
     // root.
     std::error_code status_error;
     auto status = std::filesystem::symlink_status(it->path(), status_error);
-    if (status_error || status.type() != std::filesystem::file_type::directory)
+    if (status_error || status.type() != std::filesystem::file_type::directory) {
       continue;
+    }
     const std::string name = it->path().filename().string();
-    if (!std::ranges::all_of(name, [](unsigned char c) { return std::isdigit(c); }))
+    if (!std::ranges::all_of(name, [](unsigned char c) { return std::isdigit(c); })) {
       continue;
+    }
     pid_t pid = 0;
     auto [ptr, parse_error] = std::from_chars(name.data(), name.data() + name.size(), pid);
-    if (parse_error != std::errc{} || ptr != name.data() + name.size() || pid <= 0)
+    if (parse_error != std::errc{} || ptr != name.data() + name.size() || pid <= 0) {
       continue;
+    }
     // kill(pid, 0) probes existence without signalling: ESRCH means the process
     // is gone and its runtime dir is safe to reclaim. EPERM/success mean it is
     // still alive (possibly another user's PID), so leave it alone.
@@ -255,8 +269,9 @@ using KfdGpuOrdinal = launcher::VisibleGpu;
 std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
   std::ifstream in(path);
   uint32_t value = 0;
-  if (!(in >> value))
+  if (!(in >> value)) {
     return std::nullopt;
+  }
   return value;
 }
 
@@ -265,8 +280,9 @@ std::optional<uint32_t> read_u32_property(const std::filesystem::path &path, std
   std::string name;
   uint64_t value = 0;
   while (in >> name >> value) {
-    if (name == key)
+    if (name == key) {
       return static_cast<uint32_t>(value);
+    }
   }
   return std::nullopt;
 }
@@ -276,8 +292,9 @@ std::optional<uint64_t> read_u64_property(const std::filesystem::path &path, std
   std::string name;
   uint64_t value = 0;
   while (in >> name >> value) {
-    if (name == key)
+    if (name == key) {
       return value;
+    }
   }
   return std::nullopt;
 }
@@ -287,11 +304,13 @@ real_kfd_gpu_ordinals(util::DiagnosticEmitter emit_error) {
   std::filesystem::path nodes_dir = "/sys/devices/virtual/kfd/kfd/topology/nodes";
   std::error_code ec;
   const bool exists = std::filesystem::exists(nodes_dir, ec);
-  if (ec)
+  if (ec) {
     return emit_error.emit() << "cannot inspect KFD topology: " << nodes_dir << ": "
                              << ec.message();
-  if (!exists)
+  }
+  if (!exists) {
     nodes_dir = "/sys/class/kfd/kfd/topology/nodes";
+  }
 
   struct KfdNodeInfo {
     uint32_t node_id = 0;
@@ -304,16 +323,19 @@ real_kfd_gpu_ordinals(util::DiagnosticEmitter emit_error) {
   for (std::filesystem::directory_iterator node(nodes_dir, ec), end; node != end;
        node.increment(ec)) {
     const bool is_directory = node->is_directory(ec);
-    if (ec)
+    if (ec) {
       return emit_error.emit() << "cannot inspect KFD node: " << node->path() << ": "
                                << ec.message();
-    if (!is_directory)
+    }
+    if (!is_directory) {
       continue;
+    }
 
     std::string name = node->path().filename().string();
     const std::optional<uint32_t> node_id = config::parse_uint32(name);
-    if (!node_id)
+    if (!node_id) {
       continue;
+    }
 
     auto gpu_id = read_u32_file(node->path() / "gpu_id");
     if (gpu_id && *gpu_id != 0) {
@@ -323,16 +345,18 @@ real_kfd_gpu_ordinals(util::DiagnosticEmitter emit_error) {
       nodes.push_back({*node_id, *gpu_id, gfx_target_version, unique_id});
     }
   }
-  if (ec)
+  if (ec) {
     return emit_error.emit() << "cannot read KFD topology: " << nodes_dir << ": " << ec.message();
+  }
 
   std::ranges::sort(nodes, {}, &KfdNodeInfo::node_id);
 
   std::vector<KfdGpuOrdinal> gpus;
   gpus.reserve(nodes.size());
-  for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal)
+  for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal) {
     gpus.push_back({ordinal, nodes[ordinal].gpu_id, nodes[ordinal].gfx_target_version,
                     nodes[ordinal].unique_id});
+  }
   return launcher::enumerate_kfd_gpus(gpus);
 }
 
@@ -383,19 +407,22 @@ util::FailureOr<std::vector<KfdGpuOrdinal>>
 dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
                            const rocjitsu::config::DbtGuestConfig &dbt_guest,
                            util::DiagnosticEmitter emit_error) {
-  if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
+  if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware) {
     return real_kfd_gpu_ordinals(emit_error);
+  }
 
   const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
       dbt_config_path, dbt_guest.host.simulator_config_path);
   auto maybe_loaded =
       rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema, emit_error);
-  if (maybe_loaded.failed())
+  if (maybe_loaded.failed()) {
     return util::Result::failure();
+  }
   const auto &loaded = maybe_loaded.value();
   std::vector<rocjitsu::config::KfdDeviceConfig> devices = loaded.devices;
-  if (devices.empty() && loaded.device.present)
+  if (devices.empty() && loaded.device.present) {
     devices.push_back(loaded.device);
+  }
 
   std::vector<KfdGpuOrdinal> gpus;
   for (uint32_t ordinal = 0; ordinal < devices.size(); ++ordinal) {
@@ -432,12 +459,14 @@ int main(int argc, char *argv[]) {
   launcher::LaunchFlags flags;
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
-  if (flags.register_flags(command, diagnostic).failed())
+  if (flags.register_flags(command, diagnostic).failed()) {
     return 1;
+  }
   std::vector<std::string_view> arguments(argv + 1, argv + argc);
   auto parsed = ucli::parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return 1;
+  }
   if (flags.help->value()) {
     print_usage(command);
     return 0;
@@ -517,10 +546,12 @@ int main(int argc, char *argv[]) {
   util::StringDiagnostic launch_config_diagnostic;
   auto config_json_for_this_launch = [&]() -> rocjitsu::FailureOr<std::string> {
     auto json = rocjitsu::config::read_config_file(abs_config, launch_config_diagnostic.emitter());
-    if (json.failed())
+    if (json.failed()) {
       return util::Result::failure();
-    if (overrides.empty())
+    }
+    if (overrides.empty()) {
       return std::move(json.value());
+    }
     return rocjitsu::config::json_with_launch_overrides(json.value(), overrides,
                                                         launch_config_diagnostic.emitter());
   };
@@ -551,14 +582,16 @@ int main(int argc, char *argv[]) {
     auto print = [&](const std::string &label) -> util::Result {
       util::FailureOr<rocjitsu::config::ExecutionThreadAllocation> allocation =
           settings.resolve(host, launch_config_diagnostic.emitter());
-      if (allocation.failed())
+      if (allocation.failed()) {
         return util::Result::failure();
+      }
       const auto &plan = allocation.value();
       uint64_t total = uint64_t{plan.engines} + plan.helpers;
       std::string dispatch;
       for (uint32_t width : plan.dispatch) {
-        if (!dispatch.empty())
+        if (!dispatch.empty()) {
           dispatch += ",";
+        }
         dispatch += std::to_string(width);
         total += width - 1;
       }
@@ -571,7 +604,7 @@ int main(int argc, char *argv[]) {
                                launch_config_diagnostic.message());
       return 1;
     }
-    for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
+    for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 56u, 64u}) {
       settings.request.budget = budget;
       if (print(std::to_string(budget)).failed()) {
         std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
@@ -592,8 +625,9 @@ int main(int argc, char *argv[]) {
   // The copy lives in this invocation's runtime directory, beside the config-path
   // handoff an exec'd workload already reads, so the same cleanup reclaims it.
   auto write_config_for_this_launch = [&]() {
-    if (overrides.empty())
+    if (overrides.empty()) {
       return true;
+    }
     util::StringDiagnostic diagnostic;
     rocjitsu::FailureOr<std::string> written = rocjitsu::config::write_effective_config(
         abs_config, overrides, my_pid, diagnostic.emitter());
@@ -615,8 +649,9 @@ int main(int argc, char *argv[]) {
                    "--daemon, --attach, or an application\n";
       return 1;
     }
-    if (!write_config_for_this_launch())
+    if (!write_config_for_this_launch()) {
       return 1;
+    }
 #if defined(RJ_ENABLE_VFIO_USER)
     const int status =
         rocjitsu::run_vfio_server(abs_config, vfio_sockets, vfio_ready_fd, fabric_effect_trace);
@@ -671,8 +706,9 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  if (!write_config_for_this_launch())
+  if (!write_config_for_this_launch()) {
     return 1;
+  }
 
   if (!dbt_guest_mode) {
     if (attach_mode) {
@@ -702,8 +738,9 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (daemon_mode && !has_app)
+  if (daemon_mode && !has_app) {
     return run_daemon_server(abs_config.c_str(), {}, -1, fabric_effect_trace);
+  }
 
   if (!has_app) {
     std::cerr << "rocjitsu: no application specified after --\n";
@@ -719,8 +756,9 @@ int main(int argc, char *argv[]) {
 #endif
 
   std::vector<char *> application_arguments;
-  for (auto &argument : parsed.value().positional)
+  for (auto &argument : parsed.value().positional) {
     application_arguments.push_back(argument.data());
+  }
   application_arguments.push_back(nullptr);
   char **app_argv = application_arguments.data();
 
@@ -745,8 +783,9 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     dbt_execution_gpus = std::move(maybe_gpus.value());
-    if (!resolve_host_gpu(&dbt_guest_config, dbt_execution_gpus))
+    if (!resolve_host_gpu(&dbt_guest_config, dbt_execution_gpus)) {
       return 1;
+    }
     hooks_path = find_hooks_lib();
     if (hooks_path.empty()) {
       std::cerr << "rocjitsu: could not find librocjitsu_hooks.so\n";
@@ -836,8 +875,9 @@ int main(int argc, char *argv[]) {
     if (std::optional<launcher::VisibilityOverride> client_visible =
             launcher::normalized_client_visible_devices(
                 dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
-                environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
+                environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id)) {
       launch_environment.set(client_visible->name, client_visible->value);
+    }
     // The HSA hook still uses the legacy tools callback path. Disable the
     // rocprofiler-register table-delivery path so it cannot validate an
     // unshadowed table before rocjitsu installs guest-agent wrappers. Also
@@ -847,10 +887,12 @@ int main(int argc, char *argv[]) {
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory
   // holding config_path/daemon.sock. Attach mode creates no such dir.
-  if (!attach_mode)
+  if (!attach_mode) {
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
-  if (launched_daemon_pid)
+  }
+  if (launched_daemon_pid) {
     launch_environment.set(rocjitsu::kRpcDaemonPidEnv, std::to_string(*launched_daemon_pid));
+  }
   launcher::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
