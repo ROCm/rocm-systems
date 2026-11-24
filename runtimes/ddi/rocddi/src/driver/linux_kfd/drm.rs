@@ -54,6 +54,7 @@ const AMDGPU_GEM_USERPTR_REGISTER: u32 = 1 << 3;
 const AMDGPU_GEM_OP_GET_GEM_CREATE_INFO: u32 = 0;
 const AMDGPU_INFO_DEV_INFO: u32 = 0x16;
 const AMDGPU_INFO_HW_IP_INFO: u32 = 0x02;
+const AMDGPU_INFO_GPUVM_FAULT: u32 = 0x23;
 const AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE: u32 = 3;
 pub(super) const GEM_DOMAIN_GTT: u64 = 1 << 1;
 pub(super) const GEM_CREATE_NO_CPU_ACCESS: u64 = 1 << 1;
@@ -195,6 +196,32 @@ struct AmdgpuInfoQuery {
     return_size: u32,
     query: u32,
     payload: [u32; 4],
+}
+
+/// Raw per-VM fault cache, without a timestamp or completeness guarantee.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct GpuVmFault {
+    /// Cached GPU virtual address; it can describe an earlier fault.
+    pub(super) address: u64,
+    /// Raw hardware protection-fault status, including an uninformative zero.
+    pub(super) status: u32,
+    /// Raw memory-hub type and instance encoding from the DRM UAPI.
+    pub(super) vmhub: u32,
+}
+
+/// Reads, without clearing, the fault cache of the VM bound to this exact file.
+/// Zero or unchanged fields do not exclude a fault or establish its ordering.
+pub(super) fn gpuvm_fault(file: &File) -> io::Result<GpuVmFault> {
+    let mut info = GpuVmFault::default();
+    let mut query = AmdgpuInfoQuery {
+        return_pointer: (&raw mut info) as u64,
+        return_size: 16,
+        query: AMDGPU_INFO_GPUVM_FAULT,
+        ..AmdgpuInfoQuery::default()
+    };
+    call(file, AMDGPU_INFO, &mut query)?;
+    Ok(info)
 }
 
 /// DRM hardware IP capabilities and available ring mask.
@@ -441,6 +468,7 @@ union CommandWait {
 #[derive(Debug)]
 pub(super) enum TestCall {
     QuerySdmaRings(Result<u32, i32>),
+    QueryGpuVmFault(i32, Result<GpuVmFault, i32>),
     SetPersistingL2CacheSize(u32, Result<(), i32>),
     CreateSyncobj(u32),
     DestroySyncobj,
@@ -548,7 +576,7 @@ fn scripted_submission_ring(body: &mut dyn std::any::Any, ring: u32) {
     clippy::too_many_lines,
     reason = "a mismatched test ioctl is a test failure"
 )]
-fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()>> {
+fn scripted_call<T: 'static>(file: &File, request: u64, body: &mut T) -> Option<io::Result<()>> {
     use std::any::Any;
     SCRIPT.with(|script| {
         let mut script = script.borrow_mut();
@@ -558,6 +586,24 @@ fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()
             .expect("unexpected DRM ioctl after script");
         let body = body as &mut dyn Any;
         let reply = match (request, step) {
+            (AMDGPU_INFO, TestCall::QueryGpuVmFault(descriptor, reply)) => {
+                assert_eq!(file.as_raw_fd(), descriptor);
+                let query = body
+                    .downcast_ref::<AmdgpuInfoQuery>()
+                    .expect("DRM GPUVM fault query body");
+                assert_eq!(query.query, AMDGPU_INFO_GPUVM_FAULT);
+                assert_eq!(query.return_size, 16);
+                assert_eq!(query.payload, [0; 4]);
+                match reply {
+                    Ok(info) => {
+                        // SAFETY: gpuvm_fault retains this aligned, writable
+                        // result through the synchronous native boundary.
+                        unsafe { (query.return_pointer as *mut GpuVmFault).write(info) };
+                        Ok(())
+                    }
+                    Err(errno) => Err(io::Error::from_raw_os_error(errno)),
+                }
+            }
             (AMDGPU_INFO, TestCall::QuerySdmaRings(reply)) => {
                 let query = body
                     .downcast_ref::<AmdgpuInfoQuery>()
@@ -700,7 +746,7 @@ fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()
 
 fn call<T: 'static>(file: &File, request: u64, body: &mut T) -> io::Result<()> {
     #[cfg(test)]
-    if let Some(reply) = scripted_call(request, body) {
+    if let Some(reply) = scripted_call(file, request, body) {
         return reply;
     }
     // SAFETY: Every caller supplies the exact repr(C) body for this request and
@@ -1139,6 +1185,12 @@ pub(super) fn wait(file: &File, handle: u32, point: u64) -> io::Result<()> {
 }
 
 const _: () = {
+    assert!(std::mem::size_of::<AmdgpuInfoQuery>() == 32);
+    assert!(std::mem::offset_of!(AmdgpuInfoQuery, payload) == 16);
+    assert!(std::mem::size_of::<GpuVmFault>() == 16);
+    assert!(std::mem::offset_of!(GpuVmFault, status) == 8);
+    assert!(std::mem::offset_of!(GpuVmFault, vmhub) == 12);
+    assert!(AMDGPU_INFO == 0x4020_6445);
     assert!(std::mem::size_of::<DeviceInfoPrefix>() == 32);
     assert!(std::mem::offset_of!(DeviceInfoPrefix, gpu_counter_frequency_khz) == 28);
     assert!(std::mem::size_of::<HwIpInfo>() == 40);

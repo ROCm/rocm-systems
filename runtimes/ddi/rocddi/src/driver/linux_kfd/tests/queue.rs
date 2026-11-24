@@ -9,6 +9,8 @@
 
 use super::super::memory;
 use super::*;
+#[path = "backing_ranges.rs"]
+mod backing_ranges;
 #[path = "queue_context.rs"]
 mod context;
 use crate::session::DriverContextLifetime;
@@ -373,6 +375,14 @@ enum RingBacking {
 
 #[derive(Default)]
 struct State {
+    /// Number of native exception queries, including production health checks.
+    native_waits: usize,
+    /// First four event IDs and queue-update counts, without hook allocations.
+    wait_update_boundaries: [(u32, usize); 4],
+    /// Number of populated entries in the bounded observation record.
+    wait_update_count: usize,
+    /// Resets at the native event boundary, independently of passive reads.
+    native_resets: usize,
     next_handle: u64,
     next_offset: u64,
     buffers: BTreeMap<u64, uapi::AllocMemory>,
@@ -412,6 +422,16 @@ struct State {
     cu_masks: Vec<(uapi::SetCuMask, Vec<u32>)>,
 }
 
+impl State {
+    fn record_wait(&mut self, event_id: u32) {
+        self.native_waits += 1;
+        if let Some(entry) = self.wait_update_boundaries.get_mut(self.wait_update_count) {
+            *entry = (event_id, self.updates.len());
+            self.wait_update_count += 1;
+        }
+    }
+}
+
 struct Fixture {
     state: Arc<Mutex<State>>,
     contents: File,
@@ -442,6 +462,7 @@ impl Fixture {
                 let mut state = observed.lock().unwrap();
                 match call {
                     connection::Call::Wait(args, event) if event.event_id == 19 => {
+                        state.record_wait(event.event_id);
                         if state.lost {
                             event.payload[0] = 42;
                             event.payload[1] = 1;
@@ -451,9 +472,11 @@ impl Fixture {
                         }
                     }
                     connection::Call::Wait(args, event) if event.event_id == 20 => {
+                        state.record_wait(event.event_id);
                         args.result = uapi::WAIT_TIMEOUT;
                     }
                     connection::Call::ResetEvent(args) if args.event_id == 19 => {
+                        state.native_resets += 1;
                         state.lost = false;
                     }
                     connection::Call::DestroyEvent(_) => {}

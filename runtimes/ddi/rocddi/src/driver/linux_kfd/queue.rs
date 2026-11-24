@@ -7,6 +7,7 @@
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
 mod compute_storage;
+mod diagnostics;
 
 use compute_storage::{ComputeStorage, compute_storage};
 
@@ -2203,7 +2204,11 @@ impl KfdQueue {
                 percentage: 0,
                 priority: self.priority,
             })
-            .map_err(|source| native_error("AMDKFD_IOC_UPDATE_QUEUE", source))?;
+            .map_err(|source| {
+                self.vm.diagnose_queue_update_failure(id, &source);
+                self.diagnose_backing_ranges(id);
+                native_error("AMDKFD_IOC_UPDATE_QUEUE", source)
+            })?;
         self.active = false;
         Ok(())
     }

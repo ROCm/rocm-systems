@@ -144,6 +144,10 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         self.inner.progress()
     }
 
+    pub(crate) fn diagnose_incomplete_cache_wait(&self) {
+        self.inner.diagnose_incomplete_cache_wait();
+    }
+
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         self.inner.inactivate()
     }
@@ -266,6 +270,10 @@ impl<D, Q> RetainedQueue<D, Q> {
 }
 
 impl<D> RetainedQueue<D> {
+    pub(super) fn diagnose_incomplete_cache_wait(&self) {
+        self.queue.inner.diagnose_incomplete_cache_wait();
+    }
+
     /// Copies the native transport facts while this owner is live.
     #[must_use]
     pub fn info(&self) -> QueueTransport {

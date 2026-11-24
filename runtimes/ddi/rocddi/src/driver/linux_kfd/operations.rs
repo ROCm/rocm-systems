@@ -980,6 +980,10 @@ impl UserQueueResource for KfdQueue {
         KfdQueue::inactivate(self)
     }
 
+    fn diagnose_incomplete_cache_wait(&self) {
+        KfdQueue::diagnose_incomplete_cache_wait(self);
+    }
+
     fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
         KfdQueue::set_priority(self, priority)
     }

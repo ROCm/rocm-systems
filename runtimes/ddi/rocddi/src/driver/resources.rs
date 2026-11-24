@@ -730,6 +730,17 @@ pub(crate) enum QueueState {
 }
 
 impl QueueState {
+    pub(crate) fn diagnose_incomplete_cache_wait(&self) {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(queue) => queue.diagnose_incomplete_cache_wait(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.diagnose_incomplete_cache_wait(),
+        }
+    }
+
     pub(crate) fn info(&self) -> QueueTransport {
         match self {
             #[cfg(not(target_os = "linux"))]
