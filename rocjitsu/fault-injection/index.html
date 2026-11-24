@@ -202,8 +202,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
       </ul>
     </div>
   </a>
@@ -255,8 +255,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 570 · build snapshot" aria-label="Stars: 570">570</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 513 · build snapshot" aria-label="Forks: 513">513</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
       </ul>
     </div>
   </a>
@@ -1878,7 +1878,7 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 </tr>
 <tr>
 <td>LDS wrong address</td>
-<td>Implements scalar b32/b64/b96/b128 loads and stores on gfx1200/gfx1201 wave32/wave64, gfx942/gfx950 wave64, and gfx1250 wave32. Also admits b32/b64 two-address and stride64 families on gfx1200/gfx1201/gfx942/gfx950. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR in the direct, independently owned CFG profile. See the exact LDS matrix below. Other forms and targets remain follow-up work.</td>
+<td>Implements scalar b32/b64/b96/b128 loads and stores on gfx1200/gfx1201 wave32/wave64, gfx942/gfx950 wave64, and gfx1250 wave32. Also admits b32/b64 two-address and stride64 families on gfx1200/gfx1201/gfx942/gfx950. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR in the direct, independently owned CFG profile. Adds the target-specific subword, D16, and transpose profiles in the exact LDS matrices below. Other forms and targets remain follow-up work.</td>
 <td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h">LDS API</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_wrong_address_test.cpp">library tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/lds_cli_test.cpp">CLI tests</a></td>
 </tr>
 <tr>
@@ -2013,7 +2013,8 @@ targets and ten target/wave combinations:</p>
 <p>The table above describes Drop only. <code>lds_wrong_address_capabilities()</code> separately
 reports the exact LDS matrix below: scalar b32/b64/b96/b128 loads and stores on
 all five concrete targets, plus b32/b64 two-address and stride64 families on
-gfx1200/gfx1201/gfx942/gfx950, restricted to independently owned direct CFGs.
+gfx1200/gfx1201/gfx942/gfx950 and the target-specific subword/transpose
+profiles below, restricted to independently owned direct CFGs.
 CDNA GDS encodings are excluded; the ACC data selector is preserved.
 A target is omitted if its decoder or binding is not linked. Other targets,
 waves, and DS forms are not advertised by this recipe; the Drop table does not
@@ -2110,9 +2111,45 @@ and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjits
 </tr>
 </tbody>
 </table>
+<p>Additional subword and transpose forms are admitted only on their listed targets:</p>
+<table>
+<thead>
+<tr>
+<th>Concrete target</th>
+<th>Subword forms</th>
+<th>Transpose forms</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>gfx1200, gfx1201</td>
+<td><code>ds_load_i8/u8/i16/u16</code>, <code>ds_load_u8_d16</code>, <code>ds_load_i8_d16</code>, <code>ds_load_u16_d16</code> and their <code>_hi</code> variants; <code>ds_store_b8/b16</code> and their <code>_d16_hi</code> variants</td>
+<td>None</td>
+</tr>
+<tr>
+<td>gfx942</td>
+<td><code>ds_read_i8/u8/i16/u16</code>, <code>ds_read_u8_d16</code>, <code>ds_read_i8_d16</code>, <code>ds_read_u16_d16</code> and their <code>_hi</code> variants; <code>ds_write_b8/b16</code> and their <code>_d16_hi</code> variants</td>
+<td>None</td>
+</tr>
+<tr>
+<td>gfx950</td>
+<td>Same subword families as gfx942</td>
+<td><code>ds_read_b64_tr_b16</code></td>
+</tr>
+<tr>
+<td>gfx1250</td>
+<td>Same subword families as gfx1200/gfx1201</td>
+<td><code>ds_load_tr8_b64</code>, <code>ds_load_tr16_b128</code></td>
+</tr>
+</tbody>
+</table>
+<p>All admitted gfx1200/gfx1201 forms support both descriptor-selected waves.
+Wave32 allocation uses the descriptor granularity of eight VGPRs. The gfx1250
+two-address exclusion also applies when other transpose forms are admitted.</p>
 <p>A slash-separated width suffix denotes each named form, for example
-<code>ds_load_b32/b64</code> denotes <code>ds_load_b32</code> and <code>ds_load_b64</code>. This is 72 concrete
-target/form profiles, expanded to 104 target/wave/form capabilities. Only the
+<code>ds_load_b32/b64</code> denotes <code>ds_load_b32</code> and <code>ds_load_b64</code>; similarly,
+<code>ds_load_i8/u8</code> denotes <code>ds_load_i8</code> and <code>ds_load_u8</code>. The two matrices cover
+145 concrete target/form profiles, expanded to 205 target/wave/form capabilities. Only the
 address VGPR selector changes; the two offsets, stride semantics, data and
 destination tuples, and CDNA ACC bit are preserved. CDNA3/4 GDS instructions
 remain excluded. gfx1250 requires a statically proven address bank and checks
