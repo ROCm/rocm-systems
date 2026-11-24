@@ -46,7 +46,7 @@ REQUIRE = os.environ.get("RDC_CI_REQUIRE_FAKE") == "1"
 FACTOR = float(os.environ.get("RDC_TEST_TIME_FACTOR", "1"))
 FAKE_NAME = "librdc_fake_amdsmi.so"
 NUM_GPUS = 4
-DMON_FIELDS = [100, 101, 200, 201, 300, 500, 501, 502]
+DMON_FIELDS = [100, 101, 200, 201, 300, 500, 501, 502, 504]
 # The lock files of a root rdcd and of any other rdcd; see _rdcd_lock_problem().
 RDCD_LOCKS = ("/var/run/rdcd.lock", "/tmp/rdcd.lock")
 

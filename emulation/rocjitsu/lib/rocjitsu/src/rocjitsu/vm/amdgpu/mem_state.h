@@ -565,7 +565,11 @@ public:
     std::vector<uint8_t> ds2_store = std::move(ds2_store_data);
     std::vector<TranslatedMemoryRequest> requests = std::move(translated.requests);
     std::vector<uint8_t> reordered_data = std::move(translated.reordered_data);
-    std::destroy_at(this);
+    // Inline destruction here so the compiler can discard cleanup of the moved buffers.
+#if defined(__clang__)
+    [[clang::always_inline]]
+#endif
+    this->~VectorMemState();
     VectorMemState *fresh = std::construct_at(this, pipeline);
     fresh->response_data = std::move(response);
     fresh->store_data = std::move(store);

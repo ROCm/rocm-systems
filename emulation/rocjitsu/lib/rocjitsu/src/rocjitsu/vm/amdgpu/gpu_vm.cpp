@@ -992,6 +992,10 @@ VmAccessOutcome GpuVmAccess::probe_impl(uint64_t address, std::size_t size, VmAc
   return VmAccessOutcome::Complete;
 }
 
+bool GpuVmAccess::reports_faults() const {
+  return access_state_ && access_state_->fault_reporter && *access_state_->fault_reporter;
+}
+
 void GpuVmAccess::report_terminal_fault(uint64_t address, VmAccessKind access,
                                         VmAccessOutcome outcome) const {
   if (access_state_ && access_state_->fault_reporter && *access_state_->fault_reporter &&

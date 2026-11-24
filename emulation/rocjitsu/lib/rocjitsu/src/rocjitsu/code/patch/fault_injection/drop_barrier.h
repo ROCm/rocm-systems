@@ -4,9 +4,8 @@
 #pragma once
 
 #include "rocjitsu/code/analysis/static_barriers.h"
-#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/code/patch/fault_injection/fault_mutation_context.h"
 #include "rocjitsu/isa/isa_family.h"
-#include "rocjitsu/result.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -19,80 +18,7 @@
 
 namespace rocjitsu {
 
-class AmdGpuCodeObject;
-
-enum class FaultMutationKind { DropBarrier };
-enum class FaultMutationErrorCode {
-  None,
-  BadIdentity,
-  UnsupportedTarget,
-  UnsupportedForm,
-  AmbiguousSelection,
-  IncompleteSelection,
-  InvalidParameters,
-  ValidationFailure,
-  NoCandidates,
-  OrdinalOutOfRange,
-};
-struct FaultMutationError {
-  FaultMutationErrorCode code = FaultMutationErrorCode::None;
-  uint64_t offset = 0; // .text-relative byte location when known; zero is also the default.
-  std::string message;
-};
-/// @brief Source .text facts retained by an inventory after its context expires.
-struct FaultMutationSection {
-  uint64_t index = 0;       // ELF section-header table index, not a text-section ordinal.
-  uint64_t file_offset = 0; // Byte offset from the start of the ELF image.
-  uint64_t vaddr = 0;       // Declared section virtual address, before any runtime load bias.
-  uint64_t size = 0;        // Section extent in bytes.
-};
-/// @brief One descriptor-backed hardware entry; offsets use the pristine context's image.
-class FaultMutationOwner {
-public:
-  std::string entry;                   // Exact descriptor-derived kernel name used for discovery.
-  uint64_t entry_offset = 0;           // .text-relative byte offset, not an ELF file offset.
-  uint64_t descriptor_file_offset = 0; // Byte offset from the start of the ELF image.
-  bool operator==(const FaultMutationOwner &) const = default;
-};
-
-class FaultBarrierInventory;
-class DropBarrierSelection;
 struct FaultBarrierRecord;
-
-/// @brief Own an immutable source snapshot and its selection lifetime.
-/// @details Copies the input once. Independently constructed contexts have distinct
-/// identities even for identical bytes. The owned code object supplies the target;
-/// changing the caller's input buffer does not change this snapshot. The context
-/// caches the fixed all-entry direct-ownership profile and retains an Instrumentor
-/// seed whose full-text facts are shared by independent replacement batches.
-/// It does not support alternate roots/ranges/options or helper/indirect-analysis profiles.
-/// The caller/session should retain one context per immutable input across discovery,
-/// selection and apply, until all related operations finish. Repeated applies produce
-/// independent mutants of that original snapshot. To analyze a mutant, create a new
-/// context; the pristine context and its facts are never retargeted to changed bytes.
-class FaultMutationContext {
-public:
-  explicit FaultMutationContext(std::span<const uint8_t> image);
-  ~FaultMutationContext();
-  FaultMutationContext(const FaultMutationContext &) = delete;
-  FaultMutationContext &operator=(const FaultMutationContext &) = delete;
-
-  const AmdGpuCodeObject &source() const { return *source_; }
-  std::span<const uint8_t> image() const;
-
-private:
-  class State;
-  Result analyze() const;
-  // This context is the sole persistent strong source owner. The shared control block
-  // lets records/selections observe expiry via weak_ptr, including after address reuse.
-  const std::shared_ptr<const AmdGpuCodeObject> source_;
-  std::unique_ptr<State> state_;
-  friend FailureOr<struct DropBarrierResult> apply_drop_barrier(const FaultMutationContext &,
-                                                                const DropBarrierSelection &,
-                                                                FaultMutationError &);
-  friend FailureOr<FaultBarrierInventory>
-  discover_drop_barriers(const FaultMutationContext &, std::string_view, FaultMutationError &);
-};
 
 /// @brief Context-bound exact handle with inspectable selection facts.
 /// @details Read-only fact snapshots belong to this handle; inspecting them does not

@@ -677,13 +677,22 @@ int rj_arith_v_pk_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 // Loose binary paths accept but ignore
 // guest arithmetic rounding flags, retaining SIMD dispatch. OMOD scaling honors
 // guest rounding for overflow in both exact and loose paths.
-// gfx12 MUL supports FP status for nearest-even rounding, preserved denormals
-// and no OMOD/CLAMP: INVALID, INPUT_DENORM, OVERFLOW, UNDERFLOW and INEXACT.
-// Exact subnormal products report INPUT_DENORM without UNDERFLOW. Other guest
-// controls and RDNA3 reporting return UNSUPPORTED_FP_STATUS. Compatibility retains
-// the inherited numerical model and native-nearest MUL exception classifier,
-// independently of strict reporting qualification. gfx12 ADD/SUB/SUBREV also
-// accumulate inherited input/invalid and pre-OMOD overflow causes. Compatibility
+// MUL has one FP status classifier, fitted to gfx1201 captures in every MODE with and
+// without ABS/NEG, OMOD and CLAMP: INVALID for signaling NaNs and infinity times zero,
+// INPUT_DENORM for a preserved denormal operand without NaN operands, and OVERFLOW,
+// UNDERFLOW and INEXACT judged after rounding the significand with the guest rounding
+// mode and an unbounded exponent, so a product stored as the minimum normal still
+// underflows when that rounding stays below it. A subnormal product that is exact with
+// denormals preserved reports neither UNDERFLOW nor INEXACT; flushing it to zero reports
+// both. An output modifier suppresses only UNDERFLOW and INEXACT, leaving OVERFLOW raised
+// before or after scaling and leaving the operand causes INVALID and INPUT_DENORM in place;
+// CLAMP suppresses every cause. Compatibility reports this classifier in every guest mode
+// on gfx12. RDNA3 keeps its inherited Compatibility classifier: gfx11 has no status capture,
+// because its TRAPSTS does not latch with exceptions disabled, so nothing there has been
+// requalified. Explicit gfx12 mode 3 reporting is
+// qualified for nearest-even rounding, preserved denormals and no OMOD/CLAMP; other
+// guest controls and RDNA3 reporting return UNSUPPORTED_FP_STATUS. gfx12 ADD/SUB/SUBREV
+// also accumulate inherited input/invalid and pre-OMOD overflow causes. Compatibility
 // requires valid status storage for these instructions; modes 0–2 leave it unused.
 // Other binary operations do not support explicit mode 3 FP status reporting.
 int rj_arith_v_add_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -724,10 +733,13 @@ int rj_arith_v_mul_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 // OMOD, CLAMP, RJ_ARITH_FP16_OVFL, and guest input/output flushing.
 // APIs without _gfx12 are RDNA3; _gfx12 variants are RDNA4. RDNA3 ignores OMOD
 // when output denormals are preserved or IEEE is set; RDNA4 applies it regardless.
-// Loose and Compatibility are supported; mode 1 may fall back to Loose.
-// Mode 2 returns UNSUPPORTED_SEMANTICS; mode 3 returns UNSUPPORTED_FP_STATUS.
-// Loose may combine arithmetic and OMOD rounding; Compatibility rounds to FP16
-// before OMOD, preserving rocjitsu behavior (including intermediate overflow).
+// Exact modes and Compatibility carry the hardware rules the gfx1100 and gfx1201
+// captures show: the first NaN source is returned (quieted on RDNA4, and on RDNA3
+// only with IEEE set), the result is rounded to FP16 before OMOD (so an
+// intermediate overflow scales as infinity), and NaN results are quiet.
+// Compatibility resolves to mode 2; mode 3 returns UNSUPPORTED_FP_STATUS. Loose
+// may combine arithmetic and OMOD rounding and leave NaN selection to the host,
+// so Loose results can differ from hardware on those inputs.
 // Output flushing and OMOD test tininess after rounding: a product that reaches
 // the minimum normal only through subnormal rounding is still flushed.
 // Loose semantics require host nearest-even arithmetic with denormals enabled.
@@ -2267,6 +2279,56 @@ int rj_arith_v_pk_add_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_pk_add_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *trapsts);
+
+// gfx1250 F16 ADD/SUB/SUBREV share the gfx12 numeric model; strict exact is unsupported
+// pending gfx1250 captures. Compatibility keeps the inherited hardware rules.
+int rj_arith_v_add_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_add_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_sub_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_sub_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_subrev_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *excp_flag_user);
+int rj_arith_v_subrev_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *excp_flag_user);
+
+// RDNA2 F16 ADD/SUB/SUBREV/MUL share the RDNA3 numeric model; strict exact is unsupported
+// pending gfx10 captures. Compatibility keeps the inherited hardware rules.
+int rj_arith_v_add_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_add_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, uint32_t *trapsts);
 
 // gfx1250 ordinary MUL rounds to FP16 before output tininess checks.
 int rj_arith_v_mul_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,

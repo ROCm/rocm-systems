@@ -1042,6 +1042,9 @@ TEST_F(AllocMicrotest, CudaAllocs_WithCuMemDispatchToCuMemAlloc) {
   for (const TrackCall& t : tracked_) EXPECT_EQ(t.type, kFabricHandle);
   EXPECT_EQ(Count("extMalloc"), 0);
   EXPECT_EQ(Count("memset"), 3);  // ncclCuMemAlloc's own zeroing only
+  // ncclCuMemAlloc counts each buffer once at its aligned size; the helpers add nothing.
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 3u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 3 * kGran);
 }
 
 TEST_F(AllocMicrotest, CudaAllocs_FailuresReturnNull) {
@@ -1081,30 +1084,32 @@ TEST_F(AllocMicrotest, CudaCalloc_ZeroingFailuresWithoutCuMem) {
   Unheap(p);
 }
 
-// Zero elements allocate nothing but count an allocation that freeing never takes back.
-TEST_F(AllocMicrotest, CudaAllocs_ZeroElementsCountAnAllocation) {
+// Zero elements allocate nothing and must not move the tracker: a free of the null
+// pointer cannot take the count back.
+TEST_F(AllocMicrotest, CudaAllocs_ZeroElementsAreNotTracked) {
   char* p = reinterpret_cast<char*>(this);
   ASSERT_EQ(ncclCudaMalloc(&p, 0, nullptr), ncclSuccess);
   EXPECT_EQ(p, nullptr);
   ASSERT_EQ(ncclCudaCalloc(&p, 0, nullptr), ncclSuccess);
   ASSERT_EQ(ncclCudaCallocAsync(&p, 0, kSideStream, nullptr), ncclSuccess);
-  EXPECT_EQ(allocTracker[kDev].totalAlloc, 3u);
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
   EXPECT_EQ(Count("extMalloc"), 0);
   ASSERT_EQ(ncclCudaFree(p, nullptr), ncclSuccess);
-  EXPECT_EQ(allocTracker[kDev].totalAlloc, 3u);
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
 }
 
-// With cuMem each allocation is counted twice and the byte total drifts by the padding.
-TEST_F(AllocMicrotest, CudaAllocs_CuMemCountsEveryAllocationTwice) {
+// cuMem allocations are counted once, at the aligned size ncclCuMemAlloc recorded.
+TEST_F(AllocMicrotest, CudaAllocs_CuMemCountsTheAlignedAllocationOnce) {
   cuMem_ = 1;
   char* p = nullptr;
   ASSERT_EQ(ncclCudaMalloc(&p, 100, nullptr), ncclSuccess);
-  EXPECT_EQ(allocTracker[kDev].totalAlloc, 2u);
-  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 100 + kGran);
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 1u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, kGran);
   ranges_[p] = {p, kGran};
   ASSERT_EQ(ncclCudaFree(p, nullptr), ncclSuccess);
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
-  EXPECT_EQ((int64_t)allocTracker[kDev].totalAllocSize, (int64_t)(100 - kGran));
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
 }
 
 // A zeroing failure keeps and counts a buffer the caller can't free, and leaks the stream.
