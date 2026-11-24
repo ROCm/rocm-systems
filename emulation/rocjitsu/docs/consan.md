@@ -237,8 +237,11 @@ range is independent of the launch alignment mode. The minimum fixed LDS extent 
 
 On all seven supported target/wave profiles, Group-FLAT B32 loads and stores
 record four-byte LDS ranges. Unsigned and signed halfword loads, D16 low/high
-loads, and low/high halfword stores record two bytes. The saved site
-identifies the Group-FLAT origin and its byte width.
+loads, and low/high halfword stores record two bytes. B64 and B128 loads and
+stores accept two- and four-word data tuples, respectively. They record a single
+eight- or sixteen-byte range. A native access that overlaps any part of the tuple
+can produce a finding. The saved site identifies the Group-FLAT origin and its
+byte width.
 
 Preparation follows the shared-aperture high word through register copies
 into the address VGPR pair. A site is exact when the shared high word is proven

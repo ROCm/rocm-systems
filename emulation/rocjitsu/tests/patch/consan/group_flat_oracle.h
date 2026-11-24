@@ -21,4 +21,11 @@ inline std::vector<uint32_t> flat_half_output(std::string_view target, uint32_t 
           0xabcd3344u};
 }
 
+inline std::vector<uint32_t> flat_wide_output(uint32_t width, uint32_t input, uint32_t wave) {
+  if (width == 8)
+    return {input + wave, 0x12345678u, 0x13579bdfu, 0x2468ace0u};
+  return {input + wave, 0x12345678u, 0x87654321u, 0xfedcba98u,
+          0x13579bdfu,  0x2468ace0u, 0x10203040u, input + wave};
+}
+
 } // namespace rocjitsu::consan::test

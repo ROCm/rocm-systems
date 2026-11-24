@@ -180,7 +180,7 @@ TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndNonGroupMappings) {
   EXPECT_TRUE(validate_prepared(image, result.value(), error).succeeded()) << error.message;
 }
 
-TEST(ConSanInput, GroupFlatHalfwordChecksBothAddressWordsAndTheValueRegister) {
+TEST(ConSanInput, GroupFlatChecksBothAddressWordsAndTheCompleteValueTuple) {
   const std::unique_ptr<Decoder> decoder = Decoder::create(IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   const auto check = [&](uint16_t opcode, cdna4::FlatBuilderFields fields) {
@@ -197,6 +197,10 @@ TEST(ConSanInput, GroupFlatHalfwordChecksBothAddressWordsAndTheValueRegister) {
   check(cdna4::kFlatLoadShortD16HiFlat, {.addr = 7, .vdst = 0});
   check(cdna4::kFlatLoadShortD16Flat, {.addr = 0, .vdst = 8});
   check(cdna4::kFlatStoreShortD16HiFlat, {.addr = 0, .data = 8});
+  check(cdna4::kFlatLoadDwordx2Flat, {.addr = 0, .vdst = 7});
+  check(cdna4::kFlatStoreDwordx2Flat, {.addr = 0, .data = 7});
+  check(cdna4::kFlatLoadDwordx4Flat, {.addr = 0, .vdst = 5});
+  check(cdna4::kFlatStoreDwordx4Flat, {.addr = 0, .data = 5});
 }
 
 TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {

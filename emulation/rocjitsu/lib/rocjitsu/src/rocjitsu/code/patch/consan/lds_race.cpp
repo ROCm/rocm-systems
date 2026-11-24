@@ -241,6 +241,16 @@ uint32_t group_flat_width(const Instruction &instruction) {
   case Op::FLAT_STORE_B32:
   case Op::FLAT_STORE_DWORD:
     return 4;
+  case Op::FLAT_LOAD_DWORDX2:
+  case Op::FLAT_LOAD_B64:
+  case Op::FLAT_STORE_DWORDX2:
+  case Op::FLAT_STORE_B64:
+    return 8;
+  case Op::FLAT_LOAD_DWORDX4:
+  case Op::FLAT_LOAD_B128:
+  case Op::FLAT_STORE_DWORDX4:
+  case Op::FLAT_STORE_B128:
+    return 16;
   default:
     return 0;
   }
@@ -363,8 +373,9 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       immediate = words[0] & 0xfff;
     }
     const auto address = allocated_vgpr_tuple(instruction.src_operand(0), 2, allocated_vgprs);
-    const auto value = allocated_vgpr_tuple(
-        read ? instruction.dst_operand(0) : instruction.src_operand(1), 1, allocated_vgprs);
+    const auto value =
+        allocated_vgpr_tuple(read ? instruction.dst_operand(0) : instruction.src_operand(1),
+                             (flat_width + 3) / 4, allocated_vgprs);
     if (!address || !value)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "FLAT operands exceed allocation", offset);

@@ -595,6 +595,8 @@ class ConSanTargetSim : public ConSanBootstrapSim,
 protected:
   void check_atomic_add(const std::string &form, uint32_t width,
                         const std::vector<uint32_t> &expected_words);
+  void check_flat_width(std::string_view form, const std::vector<std::string> &expected_issues,
+                        const std::vector<uint32_t> &value_output);
   void check_atomic_peers(const std::string &form, uint32_t width);
 };
 
@@ -1196,6 +1198,31 @@ private:
   uint32_t wave_size_;
 };
 
+void ConSanTargetSim::check_flat_width(std::string_view form,
+                                       const std::vector<std::string> &expected_issues,
+                                       const std::vector<uint32_t> &value_output) {
+  const test::TargetMode target = GetParam();
+  for (std::string_view scenario : {"values", "overlap", "adjacent"}) {
+    SCOPED_TRACE(std::string(form) + "-" + std::string(scenario));
+    const bool values = scenario == "values";
+    const std::string fixture = "width-flat-" + std::string(form) + "-" + std::string(scenario);
+    const uint32_t output_words = values ? static_cast<uint32_t>(value_output.size() / 2) : 1;
+    RunResult before, after;
+    GroupFlatIssues::Trace original_issues, prepared_issues;
+    ASSERT_NO_FATAL_FAILURE(
+        run(fixture, Bootstrap::None, before, target, 2 * target.wave_size, true, output_words,
+            false, 1, std::make_unique<GroupFlatIssues>(original_issues, target.wave_size)));
+    ASSERT_NO_FATAL_FAILURE(run(
+        fixture, Bootstrap::Instrumented, after, target, 2 * target.wave_size, true, output_words,
+        false, 1, std::make_unique<GroupFlatIssues>(prepared_issues, target.wave_size)));
+    expect_guest_state(before, after);
+    EXPECT_EQ(prepared_issues, original_issues);
+    EXPECT_EQ(original_issues[0], expected_issues);
+    EXPECT_EQ(original_issues[1], values ? expected_issues : std::vector<std::string>{});
+    EXPECT_EQ(before.full_output, (values ? value_output : std::vector<uint32_t>{7, 8}));
+  }
+}
+
 TEST_P(ConSanTargetSim, GroupFlatHalfwordFormsPreserveEveryResultAndIssueOnce) {
   const test::TargetMode target = GetParam();
   const std::string_view gpu = target.target;
@@ -1207,32 +1234,27 @@ TEST_P(ConSanTargetSim, GroupFlatHalfwordFormsPreserveEveryResultAndIssueOnce) {
              : std::vector<std::string>{"flat_store_b16",       "flat_load_u16",
                                         "flat_load_i16",        "flat_load_d16_b16",
                                         "flat_load_d16_hi_b16", "flat_store_d16_hi_b16"};
-  for (std::string_view scenario : {"values", "overlap", "adjacent"}) {
-    SCOPED_TRACE(scenario);
-    const bool values = scenario == "values";
-    const std::string fixture = "width-flat-half-" + std::string(scenario);
-    RunResult before, after;
-    GroupFlatIssues::Trace original_issues, prepared_issues;
-    ASSERT_NO_FATAL_FAILURE(
-        run(fixture, Bootstrap::None, before, target, 2 * target.wave_size, true, values ? 6 : 1,
-            false, 1, std::make_unique<GroupFlatIssues>(original_issues, target.wave_size)));
-    ASSERT_NO_FATAL_FAILURE(run(
-        fixture, Bootstrap::Instrumented, after, target, 2 * target.wave_size, true, values ? 6 : 1,
-        false, 1, std::make_unique<GroupFlatIssues>(prepared_issues, target.wave_size)));
-    expect_guest_state(before, after);
-    EXPECT_EQ(prepared_issues, original_issues);
-    EXPECT_EQ(original_issues[0], expected);
-    EXPECT_EQ(original_issues[1], values ? expected : std::vector<std::string>{});
-    if (values) {
-      std::vector<uint32_t> words;
-      for (uint32_t wave = 0; wave < 2; ++wave) {
-        const std::vector<uint32_t> expected_words = test::flat_half_output(gpu, wave);
-        words.insert(words.end(), expected_words.begin(), expected_words.end());
-      }
-      EXPECT_EQ(before.full_output, words);
-    } else {
-      EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 8}));
+  std::vector<uint32_t> words;
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    const std::vector<uint32_t> expected_words = test::flat_half_output(gpu, wave);
+    words.insert(words.end(), expected_words.begin(), expected_words.end());
+  }
+  ASSERT_NO_FATAL_FAILURE(check_flat_width("half", expected, words));
+}
+
+TEST_P(ConSanTargetSim, GroupFlatWideTuplesPreserveEveryWordAndIssueOnce) {
+  const std::string_view gpu = GetParam().target;
+  const bool legacy = gpu == "gfx950" || gpu == "gfx942";
+  for (uint32_t width : {8u, 16u}) {
+    const std::string form = width == 8 ? "b64" : "b128";
+    const std::string suffix = legacy ? (width == 8 ? "dwordx2" : "dwordx4") : form;
+    const std::vector<std::string> expected = {"flat_load_" + suffix, "flat_store_" + suffix};
+    std::vector<uint32_t> words;
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      const std::vector<uint32_t> expected_words = test::flat_wide_output(width, 7, wave);
+      words.insert(words.end(), expected_words.begin(), expected_words.end());
     }
+    ASSERT_NO_FATAL_FAILURE(check_flat_width(form, expected, words));
   }
 }
 

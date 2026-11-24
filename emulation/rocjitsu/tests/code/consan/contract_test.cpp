@@ -940,10 +940,14 @@ TEST_F(ConSanContract, GroupFlatOriginSurvivesRoundTripOnlyInItsProvenProfile) {
   site.origin = static_cast<AccessOrigin>(2);
   EXPECT_TRUE(validate_manifest(manifest).failed());
   site.origin = AccessOrigin::GroupFlat;
-  site.width = 2;
-  EXPECT_TRUE(validate_manifest(manifest).succeeded());
-  site.width = 8;
-  EXPECT_TRUE(validate_manifest(manifest).failed());
+  for (uint32_t width : {2u, 8u, 16u}) {
+    site.width = width;
+    EXPECT_TRUE(validate_manifest(manifest).succeeded()) << width;
+  }
+  for (uint32_t width : {1u, 12u}) {
+    site.width = width;
+    EXPECT_TRUE(validate_manifest(manifest).failed()) << width;
+  }
   site.width = 4;
   manifest.options = {
       0x9d, 0x20, 0x4e, 0x58, 0xc8, 0xf7, 0x59, 0x94, 0x98, 0xf9, 0x43,
