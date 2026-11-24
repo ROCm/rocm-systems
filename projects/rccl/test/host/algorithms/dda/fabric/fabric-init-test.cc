@@ -109,6 +109,14 @@ void ExpectNoFabricResources(const ncclComm& comm) {
   EXPECT_FALSE(comm.ddaScratchIsVmm);
   EXPECT_EQ(comm.ddaPeerPtrsDev, nullptr);
   EXPECT_EQ(comm.ddaPeerPtrsHost, nullptr);
+  EXPECT_EQ(comm.ddaFabricScratchBase, nullptr);
+  EXPECT_EQ(comm.ddaFabricScratchTotalBytes, 0u);
+  for (const ncclDdaScratchRegion* region : {&comm.ddaRegionCe, &comm.ddaRegionLL, &comm.ddaRegionLL128}) {
+    EXPECT_EQ(region->self, nullptr);
+    EXPECT_EQ(region->bytes, 0u);
+    EXPECT_EQ(region->peersDev, nullptr);
+    EXPECT_EQ(region->peersHost, nullptr);
+  }
   EXPECT_EQ(comm.ddaFabricBarrierState, nullptr);
   EXPECT_EQ(comm.ddaLLEpochDev, nullptr);
   EXPECT_EQ(comm.ddaLLEpochLen, 0);
@@ -166,12 +174,18 @@ class FabricInitMicrotest : public FabricLedgerTest {
     FabricLedgerTest::SetUp();
     if (HasFatalFailure()) return;
     SetMicroEnvAbsent("RCCL_DDA_FABRIC_MAXBLOCKS");
+    SetMicroEnvAbsent("RCCL_DDA_FABRIC_BUFFER_SIZE");
     g_hostAllocs.Reset();
     // Host-to-host copies must land inside a tracked host block.
     g_hipMemcpy = g_hostAllocs.GuardHostCopies(g_hipMemcpy);
     g_loadParam = [this](const char* name, int64_t deftVal) {
-      const bool unset = !bufferSize_.has_value() || std::string(name) != "RCCL_DDA_FABRIC_BUFFER_SIZE";
-      return unset ? deftVal : *bufferSize_;
+      const std::string param(name);
+      const std::optional<int64_t>* size = param == "RCCL_DDA_FABRIC_SIMPLE_BUFFER_SIZE"  ? &bufferSize_
+                                           : param == "RCCL_DDA_FABRIC_CE_BUFFER_SIZE"    ? &ceBytes_
+                                           : param == "RCCL_DDA_FABRIC_LL_BUFFER_SIZE"    ? &llBytes_
+                                           : param == "RCCL_DDA_FABRIC_LL128_BUFFER_SIZE" ? &ll128Bytes_
+                                                                                          : nullptr;
+      return size != nullptr && size->has_value() ? **size : deftVal;
     };
 
     comm_ = std::make_unique<ncclComm>();
@@ -217,7 +231,12 @@ class FabricInitMicrotest : public FabricLedgerTest {
     };
   }
 
-  std::optional<int64_t> bufferSize_ = kScratchBytes;  // RCCL_DDA_FABRIC_BUFFER_SIZE
+  // Region CVARs. Only the Simple region is non-empty by default, so the scratch is kScratchBytes and the Simple
+  // region (the legacy ddaScratch fields) is the whole allocation; region tests set the others.
+  std::optional<int64_t> bufferSize_ = kScratchBytes;  // RCCL_DDA_FABRIC_SIMPLE_BUFFER_SIZE
+  std::optional<int64_t> ceBytes_ = 0;                 // RCCL_DDA_FABRIC_CE_BUFFER_SIZE
+  std::optional<int64_t> llBytes_ = 0;                 // RCCL_DDA_FABRIC_LL_BUFFER_SIZE
+  std::optional<int64_t> ll128Bytes_ = 0;              // RCCL_DDA_FABRIC_LL128_BUFFER_SIZE
   std::unique_ptr<ncclMemManager> manager_;  // outlives TearDown
   std::unique_ptr<ncclComm> comm_;
 };
@@ -268,7 +287,7 @@ INSTANTIATE_TEST_SUITE_P(
                       SkipCase{"NoBootstrap", [](ncclComm* c, std::optional<int64_t>*) { c->bootstrap = nullptr; }},
                       SkipCase{"SpansCliques",
                                [](ncclComm* c, std::optional<int64_t>*) { c->clique.size = kNRanks / 2; }},
-                      SkipCase{"BufferSizeZero", [](ncclComm*, std::optional<int64_t>* bytes) { *bytes = 0; }},
+                      SkipCase{"AllRegionsZero", [](ncclComm*, std::optional<int64_t>* bytes) { *bytes = 0; }},
                       SkipCase{"DdaDisabled",
                                [](ncclComm*, std::optional<int64_t>* bytes) {
                                  bytes->reset();
@@ -323,52 +342,107 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_GathersOverTheCommsBoots
   for (void* state : gatherStates_) EXPECT_EQ(state, kBootstrap);
 }
 
-TEST_F(FabricInitCommInitMicrotest, CommInit_BufferSizeUnset_SizesScratchFromDdaPayloadCap) {
-  bufferSize_.reset();
-  g_rcclParamDdaLL = 0;
-  g_rcclParamDdaLL128 = 0;
-  // Not a page multiple.
-  constexpr size_t kPayloadCap = 3 * kPage + 100;
-  ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
-
+// Every region at its CVAR size, packed in protocol order at the same offsets on every rank; each region's peer
+// table points at that offset in each rank's mapping of the one scratch allocation.
+TEST_F(FabricInitCommInitMicrotest, CommInit_Regions_SitAtTheirOffsetsInOneAllocation) {
+  bufferSize_ = 2 * kPage;
+  ceBytes_ = 3 * kPage;
+  llBytes_ = kPage + 100;  // rounds up to the region granule
+  ll128Bytes_ = 4 * kPage;
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
-  EXPECT_EQ(comm_->ddaScratchBytes, kPayloadCap);
+  char* const base = static_cast<char*>(comm_->ddaFabricScratchBase);
+  ASSERT_NE(base, nullptr);
+  EXPECT_EQ(comm_->ddaFabricScratchTotalBytes, 11 * kPage);
+  EXPECT_EQ(comm_->ddaScratch, base);
+  EXPECT_EQ(comm_->ddaScratchBytes, 2 * kPage);
+  EXPECT_EQ(comm_->ddaRegionCe.self, base + 2 * kPage);
+  EXPECT_EQ(comm_->ddaRegionCe.bytes, 3 * kPage);
+  EXPECT_EQ(comm_->ddaRegionLL.self, base + 5 * kPage);
+  EXPECT_EQ(comm_->ddaRegionLL.bytes, 2 * kPage);
+  EXPECT_EQ(comm_->ddaRegionLL128.self, base + 7 * kPage);
+  EXPECT_EQ(comm_->ddaRegionLL128.bytes, 4 * kPage);
+
+  auto* handler = comm_->ddaFabricMemHandler;
+  const struct {
+    const char* name;
+    void* peersDev;
+    void* const* peersHost;
+    size_t offset;
+  } regions[] = {{"Simple", comm_->ddaPeerPtrsDev, comm_->ddaPeerPtrsHost, 0},
+                 {"CE", comm_->ddaRegionCe.peersDev, comm_->ddaRegionCe.peersHost, 2 * kPage},
+                 {"LL", comm_->ddaRegionLL.peersDev, comm_->ddaRegionLL.peersHost, 5 * kPage},
+                 {"LL128", comm_->ddaRegionLL128.peersDev, comm_->ddaRegionLL128.peersHost, 7 * kPage}};
+  for (const auto& region : regions) {
+    auto* const* dev = static_cast<void* const*>(region.peersDev);  // host stand-in
+    ASSERT_NE(dev, nullptr) << region.name;
+    ASSERT_NE(region.peersHost, nullptr) << region.name;
+    for (int i = 0; i < kNRanks; ++i) {
+      void* peerBase = base;
+      if (i != kRank) ASSERT_EQ(handler->getPeerDeviceMemPtr(i, &peerBase), ncclSuccess);
+      void* expected = static_cast<char*>(peerBase) + region.offset;
+      EXPECT_EQ(dev[i], expected) << region.name << " rank " << i;
+      EXPECT_EQ(region.peersHost[i], expected) << region.name << " rank " << i;
+    }
+  }
 }
 
-TEST_F(FabricInitCommInitMicrotest, CommInit_BufferSizeUnset_SizesScratchForTheAllReduceLL128Threshold) {
-  bufferSize_.reset();
-  g_rcclParamDdaLL = 0;
-  g_rcclParamDdaLL128 = 1;
-  constexpr size_t kPayloadCap = kPage;
-  constexpr size_t kLL128Threshold = 1024 * 1024;
-  ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
-  ScopedHook ll128(g_rcclDdaLL128Threshold, [](const ncclComm*, ncclFunc_t func) {
-    EXPECT_EQ(func, ncclFuncAllReduce);
-    return kLL128Threshold;
+TEST_F(FabricInitCommInitMicrotest, CommInit_Regions_ZeroSizedRegionStaysEmpty) {
+  ceBytes_ = kPage;
+  ll128Bytes_ = kPage;
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(comm_->ddaRegionLL.self, nullptr);
+  EXPECT_EQ(comm_->ddaRegionLL.bytes, 0u);
+  EXPECT_EQ(comm_->ddaRegionLL.peersDev, nullptr);
+  EXPECT_EQ(comm_->ddaRegionLL.peersHost, nullptr);
+  EXPECT_NE(comm_->ddaRegionCe.peersDev, nullptr);
+  EXPECT_NE(comm_->ddaRegionLL128.peersDev, nullptr);
+  EXPECT_EQ(comm_->ddaFabricScratchTotalBytes, static_cast<size_t>(kScratchBytes) + 2 * kPage);
+}
+
+// Only the Simple region empty: the LL and LL128 tiers keep their regions and fabric DDA still comes up.
+TEST_F(FabricInitCommInitMicrotest, CommInit_Regions_SimpleRegionZeroKeepsTheOthers) {
+  bufferSize_ = 0;
+  llBytes_ = kPage;
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_NE(comm_->ddaFabricMemHandler, nullptr);
+  EXPECT_EQ(comm_->ddaScratch, nullptr);
+  EXPECT_EQ(comm_->ddaScratchBytes, 0u);
+  EXPECT_EQ(comm_->ddaPeerPtrsDev, nullptr);
+  EXPECT_EQ(comm_->ddaRegionLL.self, comm_->ddaFabricScratchBase);
+  EXPECT_EQ(comm_->ddaRegionLL.bytes, kPage);
+}
+
+// A peer with a different region layout would address this rank's scratch at the wrong offsets: skip the fabric path
+// before allocating anything.
+TEST_F(FabricInitCommInitMicrotest, CommInit_Regions_PeerLayoutMismatch_SkipsWithoutAllocating) {
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [this, mirror](void* state, void* allData, int size) {
+    const ncclResult_t result = mirror(state, allData, size);
+    if (result == ncclSuccess && size == static_cast<int>(nccl_dda_detail::kDdaRegionCount * sizeof(uint64_t))) {
+      const int peer = PeerRanks(comm_->nRanks, comm_->rank).front();
+      static_cast<uint64_t*>(allData)[peer * nccl_dda_detail::kDdaRegionCount + nccl_dda_detail::kDdaRegionLL] +=
+          nccl_dda_detail::kDdaFabricRegionAlign;
+    }
+    return result;
   });
+  ScopedHook create(g_hipMemCreate, g_hipMemCreate);  // count only
 
-  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+  EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
-  const size_t expected = nccl_dda_detail::ddaFabricScratchSizing(kNRanks, -1, 1, kPayloadCap, 0, 1, kLL128Threshold);
-  ASSERT_GT(expected, kPayloadCap);
-  EXPECT_EQ(comm_->ddaScratchBytes, expected);
+  ExpectNoFabricState(*comm_);
+  EXPECT_EQ(create.calls, 0);
 }
 
-TEST_F(FabricInitCommInitMicrotest, CommInit_BufferSizeUnset_SizesScratchForTheLLSlots) {
-  comm_->nRanks = 2;  // keeps the LL floor (2 banks * nRanks * 32 MiB) small
-  comm_->clique.size = 2;
-  bufferSize_.reset();
-  g_rcclParamDdaLL = 1;
-  g_rcclParamDdaLL128 = 0;
-  constexpr size_t kPayloadCap = kPage;
-  ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
-
+// The retired single-size CVAR no longer sizes or disables anything.
+TEST_F(FabricInitCommInitMicrotest, CommInit_LegacyBufferSizeEnv_IsIgnored) {
+  SetMicroEnv("RCCL_DDA_FABRIC_BUFFER_SIZE", "0");
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
-  const size_t expected = nccl_dda_detail::ddaFabricScratchSizing(2, -1, 1, kPayloadCap, 1, 0, 0);
-  ASSERT_GT(expected, kPayloadCap);
-  EXPECT_EQ(comm_->ddaScratchBytes, expected);
+  EXPECT_NE(comm_->ddaFabricMemHandler, nullptr);
+  EXPECT_EQ(comm_->ddaScratchBytes, static_cast<size_t>(kScratchBytes));
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_PeersMapTheWholeScratch) {
@@ -805,6 +879,19 @@ TEST_F(FabricInitCommFiniMicrotest, CommFini_NullComm_ReturnsSuccess) {
 TEST_F(FabricInitCommFiniMicrotest, CommFini_AfterInit_ReleasesEverythingAndClearsFabricState) {
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
   ASSERT_NE(comm_->ddaScratch, nullptr);
+
+  EXPECT_EQ(ncclDdaFabricCommFini(comm_.get()), ncclSuccess);
+
+  ExpectNoFabricResources(*comm_);
+  EXPECT_TRUE(AllReleased());
+}
+
+TEST_F(FabricInitCommFiniMicrotest, CommFini_AfterInitWithEveryRegion_ReleasesEveryRegionAndTheScratch) {
+  ceBytes_ = kPage;
+  llBytes_ = kPage;
+  ll128Bytes_ = kPage;
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+  ASSERT_NE(comm_->ddaRegionLL128.peersDev, nullptr);
 
   EXPECT_EQ(ncclDdaFabricCommFini(comm_.get()), ncclSuccess);
 

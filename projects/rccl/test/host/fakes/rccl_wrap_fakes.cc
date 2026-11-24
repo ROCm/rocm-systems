@@ -324,17 +324,12 @@ static size_t DefaultDdaLLThreshold(const struct ncclComm*, ncclFunc_t) { return
 // DDA_LL128 unset with no arch table: off.
 static size_t DefaultDdaLL128Threshold(const struct ncclComm*, ncclFunc_t) { return 0; }
 static size_t DefaultDdaVmmThreshold(const struct ncclComm*, ncclFunc_t) { return kDdaVmmBaseDefault; }
-static size_t DefaultDdaScratchPayloadCap(const struct ncclComm*) {
-  return std::max({kDdaLLBaseDefault, kDdaLL128BaseDefault, kDdaVmmBaseDefault});
-}
 std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
 std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
 std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold = DefaultDdaVmmThreshold;
-std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap = DefaultDdaScratchPayloadCap;
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLL128Threshold(comm, func); }
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaVmmThreshold(comm, func); }
-size_t rcclDdaScratchPayloadCap(const ncclComm* comm) { return g_rcclDdaScratchPayloadCap(comm); }
 
 static ncclResult_t DefaultNetRegSegmentCount(struct ncclComm*, struct ncclReg*, int*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetRegSegmentCount =
@@ -360,7 +355,6 @@ void ResetRcclWrapFakes() {
   g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
   g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
   g_rcclDdaVmmThreshold = DefaultDdaVmmThreshold;
-  g_rcclDdaScratchPayloadCap = DefaultDdaScratchPayloadCap;
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
   g_rcclOverrideChannels = DefaultOverrideChannels;

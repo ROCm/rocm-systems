@@ -109,8 +109,8 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_NeedsHandlerScratchPeersAndEpo
   for (int missing = 0; missing < 5; ++missing) {
     mock_.setFabricResourcesPresent(true);
     comm().ddaFabricMemHandler = missing == 0 ? nullptr : comm().ddaFabricMemHandler;
-    comm().ddaScratch = missing == 1 ? nullptr : comm().ddaScratch;
-    comm().ddaPeerPtrsDev = missing == 2 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaRegionLL128.self = missing == 1 ? nullptr : comm().ddaRegionLL128.self;
+    comm().ddaRegionLL128.peersDev = missing == 2 ? nullptr : comm().ddaRegionLL128.peersDev;
     comm().ddaLLEpochDev = missing == 3 ? nullptr : comm().ddaLLEpochDev;
     comm().ddaLLEpochLen = missing == 4 ? 0 : comm().ddaLLEpochLen;
     EXPECT_FALSE(Eligible(4)) << "missing resource " << missing;
@@ -172,12 +172,12 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_GatheredTotalUpToAllGatherLL12
 
 // The slot is a whole number of 2 KiB slices out of a bank split four ways.
 TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_PerRankBytesMustFitTheSlotSlices) {
-  comm().ddaScratchBytes = 2 * 4 * 3 * kSliceWire;
+  comm().ddaRegionLL128.bytes = 2 * 4 * 3 * kSliceWire;
   EXPECT_TRUE(Eligible(3 * kSliceData / 4));
   EXPECT_FALSE(Eligible(3 * kSliceData / 4 + 4));
-  comm().ddaScratchBytes = 2 * 4 * (4 * kSliceWire - 16);
+  comm().ddaRegionLL128.bytes = 2 * 4 * (4 * kSliceWire - 16);
   EXPECT_FALSE(Eligible(3 * kSliceData / 4 + 4));
-  comm().ddaScratchBytes = 2 * 4 * kSliceWire - 32;
+  comm().ddaRegionLL128.bytes = 2 * 4 * kSliceWire - 32;
   EXPECT_FALSE(Eligible(4));
 }
 
@@ -201,7 +201,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOthersR
 }
 
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_PassesBuffersBytesEpochSlicesAndBank) {
-  comm().ddaScratchBytes = 4096 + 40;
+  comm().ddaRegionLL128.bytes = 4096 + 40;
   ASSERT_EQ(Run(1000, ncclBfloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
@@ -213,7 +213,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_PassesBuffersBytesEpochSlicesAnd
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
   ASSERT_EQ(launch.args.size(), 11u);
-  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaRegionLL128.peersDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
   EXPECT_EQ(launch.Arg<size_t>(3), 2000u);

@@ -75,7 +75,7 @@ class DdaReduceScatterFabricLLMicrotest : public ::testing::Test {
   void ExpectLaunchOf(const DdaLaunch& launch, const void* kernel, size_t recvcount) {
     EXPECT_EQ(launch.kernel, kernel);
     ASSERT_EQ(launch.args.size(), 10u);
-    EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
+    EXPECT_EQ(launch.Arg<T**>(0), comm().ddaRegionLL.peersDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
     EXPECT_EQ(launch.Arg<size_t>(3), recvcount);
@@ -83,7 +83,7 @@ class DdaReduceScatterFabricLLMicrotest : public ::testing::Test {
     EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-    EXPECT_EQ(launch.Arg<size_t>(8), dda::common::ddaBankSize(comm().ddaScratchBytes));
+    EXPECT_EQ(launch.Arg<size_t>(8), dda::common::ddaBankSize(comm().ddaRegionLL.bytes));
     EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
   }
 
@@ -106,8 +106,8 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_NeedsHandlerScratchAndPeersBu
   for (int missing = 0; missing < 3; ++missing) {
     mock_.setFabricResourcesPresent(true);
     comm().ddaFabricMemHandler = missing == 0 ? nullptr : comm().ddaFabricMemHandler;
-    comm().ddaScratch = missing == 1 ? nullptr : comm().ddaScratch;
-    comm().ddaPeerPtrsDev = missing == 2 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaRegionLL.self = missing == 1 ? nullptr : comm().ddaRegionLL.self;
+    comm().ddaRegionLL.peersDev = missing == 2 ? nullptr : comm().ddaRegionLL.peersDev;
     EXPECT_FALSE(Eligible(4)) << "missing resource " << missing;
   }
 }
@@ -163,12 +163,12 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_IgnoresBufferAlignment) {
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ScratchMustHoldBothBanksOfFixedSlots) {
-  comm().ddaScratchBytes = 8 * kScratchPerRank;
+  comm().ddaRegionLL.bytes = 8 * kScratchPerRank;
   EXPECT_TRUE(Eligible(4));
-  comm().ddaScratchBytes = 8 * kScratchPerRank - 1;
+  comm().ddaRegionLL.bytes = 8 * kScratchPerRank - 1;
   EXPECT_FALSE(Eligible(4));
   comm().nRanks = 4;
-  comm().ddaScratchBytes = 4 * kScratchPerRank;
+  comm().ddaRegionLL.bytes = 4 * kScratchPerRank;
   EXPECT_TRUE(Eligible(4));
 }
 

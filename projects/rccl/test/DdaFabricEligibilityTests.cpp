@@ -156,149 +156,71 @@ TEST(DdaFabricMaxBlocksTest, ReportsInvalidOverride)
 }
 
 // ---------------------------------------------------------------------------
-// Scratch sizing
+// Scratch regions
 // ---------------------------------------------------------------------------
 
 namespace
 {
-size_t ll128FloorSlices(size_t perRank)
-{
-    const size_t slices = nccl_dda_detail::ddaLL128Slices(perRank);
-    return slices + (slices & 1);
-}
+using nccl_dda_detail::ddaFabricRegionLayout;
+using nccl_dda_detail::DdaFabricRegionLayout;
+using nccl_dda_detail::kDdaFabricRegionAlign;
+using nccl_dda_detail::kDdaRegionCe;
+using nccl_dda_detail::kDdaRegionCount;
+using nccl_dda_detail::kDdaRegionLL;
+using nccl_dda_detail::kDdaRegionLL128;
+using nccl_dda_detail::kDdaRegionSimple;
+constexpr int64_t kMiB = 1024 * 1024;
 } // namespace
 
-TEST(DdaFabricScratchSizingTest, ExplicitOverrideTakesPrecedence)
+TEST(DdaFabricRegionLayoutTest, DefaultSizesPackInProtocolOrder)
 {
-    const size_t forced = nccl_dda_detail::ddaFabricScratchSizing(8, 4096, 0, 0, 0, 0);
-    EXPECT_EQ(forced, 4096u);
-
-    const size_t disabled =
-        nccl_dda_detail::ddaFabricScratchSizing(8, 0, 1, 128 * 1024 * 1024, 1, 1);
-    EXPECT_EQ(disabled, 0u);
+    const int64_t requested[kDdaRegionCount] = {256 * kMiB, 256 * kMiB, 8 * kMiB, 64 * kMiB};
+    const DdaFabricRegionLayout layout = ddaFabricRegionLayout(requested);
+    EXPECT_EQ(layout.offset[kDdaRegionSimple], 0u);
+    EXPECT_EQ(layout.offset[kDdaRegionCe], (size_t)(256 * kMiB));
+    EXPECT_EQ(layout.offset[kDdaRegionLL], (size_t)(512 * kMiB));
+    EXPECT_EQ(layout.offset[kDdaRegionLL128], (size_t)(520 * kMiB));
+    EXPECT_EQ(layout.bytes[kDdaRegionLL], (size_t)(8 * kMiB));
+    EXPECT_EQ(layout.bytes[kDdaRegionLL128], (size_t)(64 * kMiB));
+    EXPECT_EQ(layout.total, (size_t)(584 * kMiB));
 }
 
-TEST(DdaFabricScratchSizingTest, DisabledDdaHasNoDerivedAllocation)
+TEST(DdaFabricRegionLayoutTest, SizesRoundUpToRegionAlign)
 {
-    const size_t sizing =
-        nccl_dda_detail::ddaFabricScratchSizing(8, -1, 0, 128 * 1024 * 1024, 1, 1);
-    EXPECT_EQ(sizing, 0u);
+    const int64_t requested[kDdaRegionCount] = {1, (int64_t)kDdaFabricRegionAlign, (int64_t)kDdaFabricRegionAlign + 1, 0};
+    const DdaFabricRegionLayout layout = ddaFabricRegionLayout(requested);
+    EXPECT_EQ(layout.bytes[kDdaRegionSimple], kDdaFabricRegionAlign);
+    EXPECT_EQ(layout.bytes[kDdaRegionCe], kDdaFabricRegionAlign);
+    EXPECT_EQ(layout.bytes[kDdaRegionLL], 2 * kDdaFabricRegionAlign);
+    EXPECT_EQ(layout.offset[kDdaRegionLL128], 4 * kDdaFabricRegionAlign);
+    // Every region base stays 128B-aligned for LL128 lines.
+    for (int i = 0; i < kDdaRegionCount; ++i)
+        EXPECT_EQ(layout.offset[i] % 128, 0u) << "region " << i;
 }
 
-TEST(DdaFabricScratchSizingTest, ZeroOverallThresholdHasNoDerivedAllocation)
+TEST(DdaFabricRegionLayoutTest, ZeroAndNegativeSizesDisableTheRegion)
 {
-    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, 0, 1, 1);
-    EXPECT_EQ(sizing, 0u);
+    const int64_t requested[kDdaRegionCount] = {0, -1, 8 * kMiB, -64};
+    const DdaFabricRegionLayout layout = ddaFabricRegionLayout(requested);
+    EXPECT_EQ(layout.bytes[kDdaRegionSimple], 0u);
+    EXPECT_EQ(layout.bytes[kDdaRegionCe], 0u);
+    EXPECT_EQ(layout.bytes[kDdaRegionLL128], 0u);
+    EXPECT_EQ(layout.offset[kDdaRegionLL], 0u);
+    EXPECT_EQ(layout.total, (size_t)(8 * kMiB));
 }
 
-TEST(DdaFabricScratchSizingTest, DisabledLL128UsesSimpleCapacity)
+TEST(DdaFabricRegionLayoutTest, AllZeroGivesEmptyLayout)
 {
-    constexpr int64_t simpleThreshold = 128 * 1024 * 1024;
-    // With LL and LL128 both disabled, scratch = simpleCap (the threshold).
-    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, simpleThreshold, 0, 0);
-    EXPECT_EQ(sizing, (size_t)simpleThreshold);
+    const int64_t requested[kDdaRegionCount] = {0, 0, 0, 0};
+    EXPECT_EQ(ddaFabricRegionLayout(requested).total, 0u);
 }
 
-TEST(DdaFabricScratchSizingTest, LL128FloorDominatesWhenLargerThanSimpleCap)
-{
-    // The LL128 floor carries the threshold in whole slices: at 8 ranks with a
-    // 32 MiB threshold that is 2 * 8 * ceil(4 MiB / 1920) * 2048 = ~68 MiB.
-    constexpr int nRanks = 8;
-    constexpr int64_t smallSimpleCap = 4 * 1024 * 1024;   // 4 MiB
-    constexpr int64_t ll128Threshold = 32 * 1024 * 1024;  // 32 MiB
-    const size_t sizing =
-        nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 0, 1, ll128Threshold);
-    const size_t ll128Floor = (size_t)2 * nRanks *
-        ll128FloorSlices((size_t)ll128Threshold / nRanks) *
-        nccl_dda_detail::kDdaLL128WireBytesPerSlice;
-    EXPECT_EQ(sizing, ll128Floor);
-    EXPECT_GT(sizing, (size_t)smallSimpleCap);
-}
-
-// Scratch sizing arms the LL128 floor when either LL or LL128 is enabled (for
-// backwards compatibility), so the floor applies with only the LL flag set.
-// Two ranks keeps the LL floor at 64 MiB so the threshold-derived floor shows.
-TEST(DdaFabricScratchSizingTest, LL128FloorArmedByLLFlagAlone)
-{
-    constexpr int nRanks = 2;
-    constexpr int64_t smallSimpleCap = 8 * 1024 * 1024;   // 8 MiB
-    constexpr int64_t ll128Threshold = 64 * 1024 * 1024;  // 64 MiB
-    const size_t sizing =
-        nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 1, 0, ll128Threshold);
-    const size_t ll128Floor = (size_t)2 * nRanks *
-        ll128FloorSlices((size_t)ll128Threshold / nRanks) *
-        nccl_dda_detail::kDdaLL128WireBytesPerSlice;
-    EXPECT_EQ(sizing, ll128Floor);
-    EXPECT_GT(sizing, (size_t)2 * nRanks * dda::common::kDdaLLMaxBytes);
-}
-
-TEST(DdaFabricScratchSizingTest, LargeSimpleCapDominatesWhenEnabled)
-{
-    // If simpleCap > LL/LL128 floors, scratch = simpleCap.
-    constexpr int64_t largeSimpleCap = 512 * 1024 * 1024;  // 512 MiB
-    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(8, -1, 1, largeSimpleCap, 1, 1);
-    EXPECT_EQ(sizing, (size_t)largeSimpleCap);
-}
-
-TEST(DdaFabricScratchSizingTest, LLFloorDominatesAtHighRankCount)
-{
-    // At 72 ranks with small threshold, LL floor should dominate.
-    // LL floor = 2 * 72 * 16384 * 16 = 37,748,736 (~36 MiB)
-    constexpr int nRanks = 72;
-    constexpr int64_t smallSimpleCap = 8 * 1024 * 1024;  // 8 MiB
-    const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 1, 0);
-    constexpr size_t llFloor = 2 * nRanks * dda::common::kDdaLLMaxBytes;
-    EXPECT_EQ(sizing, llFloor);
-    EXPECT_GT(sizing, (size_t)smallSimpleCap);
-}
-
-TEST(DdaFabricScratchSizingTest, LL128FloorDominatesAtHighRankCount)
-{
-    // At 72 ranks the per-rank share of the threshold is small, but 2 banks of 72
-    // slots still outweigh a small simpleCap. The per-rank share rounds up, since
-    // 72 does not divide the threshold evenly.
-    constexpr int nRanks = 72;
-    constexpr int64_t smallSimpleCap = 8 * 1024 * 1024;   // 8 MiB
-    constexpr int64_t ll128Threshold = 32 * 1024 * 1024;  // 32 MiB
-    const size_t sizing =
-        nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 0, 1, ll128Threshold);
-    const size_t perRank = ((size_t)ll128Threshold + nRanks - 1) / nRanks;
-    const size_t ll128Floor = (size_t)2 * nRanks * ll128FloorSlices(perRank) *
-        nccl_dda_detail::kDdaLL128WireBytesPerSlice;
-    EXPECT_EQ(sizing, ll128Floor);
-    EXPECT_GT(sizing, (size_t)smallSimpleCap);
-}
-
-TEST(DdaFabricScratchSizingTest, PayloadCapTakesMaxAcrossDdaAndCeScratchTables)
-{
-    rcclArchThresholds table{};
-    table.ddaVmmMax[ncclFuncAllReduce] = 16ULL * 1024 * 1024;
-    table.ddaLL128Max[ncclFuncAllReduce] = 32ULL * 1024 * 1024;
-    table.ceNonRegMax[ncclFuncAllGather] = 32ULL * 1024 * 1024;
-    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 256ULL * 1024 * 1024;
-    table.ddaLLMax[ncclFuncReduceScatter] = 1ULL * 1024 * 1024;
-
-    DdaFabricMockComm mock;
-    mock.comm.nRanks = 4;
-    mock.comm.archThresholds = &table;
-
-    // Graph VMM (256 MiB) dominates LL128/CE-Scratch (32 MiB) and RS LL
-    // (1 MiB/rank * 4 = 4 MiB). AR-only VMM (16 MiB) must not win.
-    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 256ULL * 1024 * 1024);
-
-    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 0;
-    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 32ULL * 1024 * 1024);
-}
-
-TEST(DdaFabricScratchSizingTest, PayloadCapUsesPreTableDefaultsWhenNoArchTable)
+TEST(DdaFabricThresholdsTest, PreTableDefaultsWhenNoArchTable)
 {
     DdaFabricMockComm mock;
     mock.comm.nRanks = 8;
     mock.comm.archThresholds = nullptr;
     mock.comm.archName = nullptr;
-    // Matches rcclDdaVmmThreshold() with a null table (128 MiB dominates
-    // the 32 KiB / 32 MiB LL defaults).
-    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), kDdaVmmBaseDefault);
     EXPECT_EQ(rcclDdaVmmThreshold(mock.get(), ncclFuncAllReduce), kDdaVmmBaseDefault);
     EXPECT_EQ(rcclDdaLLThreshold(mock.get(), ncclFuncAllReduce), kDdaLLBaseDefault);
     EXPECT_EQ(rcclDdaLL128Threshold(mock.get(), ncclFuncAllReduce), kDdaLL128BaseDefault);
@@ -382,38 +304,65 @@ TEST_F(DdaFabricEligibilityTest, AllGather_ScratchTooSmall)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
-TEST_F(DdaFabricEligibilityTest, ReduceScatter_DerivedScratchAcceptsSmallMessage)
+TEST_F(DdaFabricEligibilityTest, ReduceScatter_DefaultSimpleRegionAcceptsSmallMessage)
 {
-    // Use derived scratch sizing with default params (8 ranks, 128 MiB threshold, LL+LL128 enabled).
-    constexpr int64_t defaultThreshold = 128 * 1024 * 1024;
-    mockComm_.comm.ddaScratchBytes = nccl_dda_detail::ddaFabricScratchSizing(
-        mockComm_.comm.nRanks, -1, 1, defaultThreshold, 1, 1);
+    // The default RCCL_DDA_FABRIC_SIMPLE_BUFFER_SIZE.
+    mockComm_.comm.ddaScratchBytes = 256 * 1024 * 1024;
     EXPECT_TRUE(ncclReduceScatterDdaFabricEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricEligibilityTest, AllToAll_DerivedScratchRejectsOversizedMessage)
+TEST_F(DdaFabricEligibilityTest, AllToAll_SimpleRegionRejectsOversizedMessage)
 {
-    // Use derived scratch with small threshold so LL128 floor dominates.
-    constexpr int64_t smallThreshold = 4 * 1024 * 1024;  // 4 MiB
-    const size_t derivedScratch = nccl_dda_detail::ddaFabricScratchSizing(
-        mockComm_.comm.nRanks, -1, 1, smallThreshold, 0, 1);
-    mockComm_.comm.ddaScratchBytes = derivedScratch;
-    // LL128 floor at 8 ranks = ~8.5 MiB. Large message exceeds derived scratch.
-    const size_t largeCount = 2 * 1024 * 1024;  // 2M elements
+    mockComm_.comm.ddaScratchBytes = 4 * 1024 * 1024;
+    // 2M floats per peer x 8 ranks = 64 MiB, more than the 4 MiB Simple region.
+    const size_t largeCount = 2 * 1024 * 1024;
     EXPECT_FALSE(ncclAllToAllDdaFabricEligible(
         mockComm_.get(), sendbuff_, recvbuff_, largeCount, ncclFloat32));
 }
 
-// LL128 AllReduce uses compact layout (scratch scales with message size).
-// Small message needs less scratch than the fixed floor.
+// The Simple region does not gate the LL and LL128 tiers, nor Simple the others.
+TEST_F(DdaFabricEligibilityTest, Regions_SimpleRegionAbsentKeepsLLAndLL128)
+{
+    mockComm_.comm.ddaScratch      = nullptr;
+    mockComm_.comm.ddaScratchBytes = 0;
+    mockComm_.comm.ddaPeerPtrsDev  = nullptr;
+    EXPECT_FALSE(ncclAllReduceDdaFabricEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, Regions_LLRegionAbsentKeepsSimpleAndLL128)
+{
+    mockComm_.comm.ddaRegionLL = {};
+    EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+    EXPECT_TRUE(ncclAllReduceDdaFabricEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, Regions_LL128RegionAbsentKeepsSimpleAndLL)
+{
+    mockComm_.comm.ddaRegionLL128 = {};
+    EXPECT_FALSE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ncclAllReduceDdaFabricEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
+}
+
+// LL128 AllReduce uses compact layout (region use scales with message size).
 TEST_F(DdaFabricLL128EligibilityTest, AllReduce_LL128CompactLayoutSmallMessageFits)
 {
-    // Give scratch smaller than LL128 fixed floor but enough for a small message.
-    // LL128 floor at 8 ranks = 2 * 8 * 4370 * 128 = ~8.5 MiB.
-    // LL128 AR compact: 2 * nRanks * numLines * 128 for the message.
-    // Small message (1024 floats = 4KB) needs much less.
-    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 1 MiB - less than fixed floor
+    mockComm_.comm.ddaRegionLL128.bytes = 1 * 1024 * 1024;
     EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
 }
@@ -577,9 +526,9 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL_PastThresholdRejected)
 // allows more. Exactly filling the slot is admitted.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotExactlyFits)
 {
-    mockComm_.comm.ddaScratchBytes = 128 * 1024;
+    mockComm_.comm.ddaRegionLL.bytes = 128 * 1024;
     const size_t capBytes =
-        ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+        ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL.bytes);
     ASSERT_LT(capBytes * (size_t)mockComm_.comm.nRanks,
               rcclDdaLLThreshold(mockComm_.get(), ncclFuncAllGather));
     EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
@@ -590,9 +539,9 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotExactlyFits)
 // only the slot bound can reject it.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotOverflow)
 {
-    mockComm_.comm.ddaScratchBytes = 128 * 1024;
+    mockComm_.comm.ddaRegionLL.bytes = 128 * 1024;
     const size_t capBytes =
-        ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+        ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL.bytes);
     ASSERT_LT((capBytes + 16) * (size_t)mockComm_.comm.nRanks,
               rcclDdaLLThreshold(mockComm_.get(), ncclFuncAllGather));
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
@@ -602,8 +551,8 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotOverflow)
 // Below a bank of 16 packets per rank the slot rounds to zero, so nothing fits.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL_ScratchTooSmallForOnePacket)
 {
-    mockComm_.comm.ddaScratchBytes = 2048;
-    ASSERT_EQ(ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
+    mockComm_.comm.ddaRegionLL.bytes = 2048;
+    ASSERT_EQ(ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL.bytes), 0u);
     EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
@@ -733,8 +682,8 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedRecvbuff)
 // allocation to 1 MiB still leaves a 32-slice slot that a small message fits in.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch)
 {
-    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
-    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes),
+    mockComm_.comm.ddaRegionLL128.bytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
+    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL128.bytes),
               4u * sizeof(float));
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
@@ -744,9 +693,9 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch)
 // slice would run into the next rank's slot.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotOverflow)
 {
-    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;
+    mockComm_.comm.ddaRegionLL128.bytes = 1 * 1024 * 1024;
     const size_t capBytes =
-        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL128.bytes);
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
 }
@@ -755,8 +704,8 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotOverflow)
 // zero and nothing fits.
 TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
 {
-    mockComm_.comm.ddaScratchBytes = 16 * 1024;
-    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
+    mockComm_.comm.ddaRegionLL128.bytes = 16 * 1024;
+    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL128.bytes), 0u);
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
@@ -885,7 +834,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_MissingFabricResources)
 
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_MissingScratch)
 {
-    mockComm_.comm.ddaScratch = nullptr;
+    mockComm_.comm.ddaRegionLL.self = nullptr;
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
@@ -958,7 +907,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_MaxRanksEligible)
 
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_ScratchTooSmall)
 {
-    mockComm_.comm.ddaScratchBytes = 8;
+    mockComm_.comm.ddaRegionLL.bytes = 8;
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
@@ -1084,11 +1033,11 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotRejectsUnevenShard)
 //
 // Two more tiers behind the same gate, tested through their per-variant
 // predicates so neither masks the other. They differ from the LL tiers in where
-// the size cap comes from: a slot is carved out of the scratch at run time
-// (half the scratch per bank, split across ranks, floored to whole slices)
-// rather than fixed by a constant. So unlike the LL bounds, this one is
-// reachable from a unit test by shrinking comm.ddaScratchBytes, and the helpers
-// below size the scratch to hold an exact number of slices.
+// the size cap comes from: a slot is carved out of the LL128 scratch region at
+// run time (half the region per bank, split across ranks, floored to whole
+// slices) rather than fixed by a constant. So unlike the LL bounds, this one is
+// reachable from a unit test by shrinking comm.ddaRegionLL128.bytes, and the
+// helpers below size the region to hold an exact number of slices.
 //
 // Sizes are derived from kDdaLL128DataBytesPerSlice / kDdaLL128WireBytesPerSlice
 // rather than written out, so these keep testing the same boundary if the
@@ -1148,7 +1097,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_UnalignedBuffers)
 // zero, which takes the tier out rather than dividing by it.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_ScratchTooSmallForOneSlice)
 {
-    mockComm_.comm.ddaScratchBytes = 8;
+    mockComm_.comm.ddaRegionLL128.bytes = 8;
     EXPECT_FALSE(ddaLL128ArOneShotEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
@@ -1159,7 +1108,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_AtSlotCapacityEligible)
 {
     constexpr size_t kSlices    = 4;
     const int        nRanks     = mockComm_.comm.nRanks;
-    mockComm_.comm.ddaScratchBytes = scratchForOneShotSlices(nRanks, kSlices);
+    mockComm_.comm.ddaRegionLL128.bytes = scratchForOneShotSlices(nRanks, kSlices);
 
     const size_t count = payloadBytesForSlices(kSlices) / sizeof(float);
     EXPECT_TRUE(ddaLL128ArOneShotEligible(
@@ -1173,7 +1122,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_OverSlotCapacityRejected)
 {
     constexpr size_t kSlices    = 4;
     const int        nRanks     = mockComm_.comm.nRanks;
-    mockComm_.comm.ddaScratchBytes = scratchForOneShotSlices(nRanks, kSlices);
+    mockComm_.comm.ddaRegionLL128.bytes = scratchForOneShotSlices(nRanks, kSlices);
 
     const size_t count = (payloadBytesForSlices(kSlices) + 16) / sizeof(float);
     EXPECT_FALSE(ddaLL128ArOneShotEligible(
@@ -1218,7 +1167,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
 {
     constexpr size_t kShardSlices = 4;
     const int        nRanks       = mockComm_.comm.nRanks;
-    mockComm_.comm.ddaScratchBytes = scratchForTwoShotSlices(nRanks, kShardSlices);
+    mockComm_.comm.ddaRegionLL128.bytes = scratchForTwoShotSlices(nRanks, kShardSlices);
 
     const size_t shardBytes = payloadBytesForSlices(kShardSlices);
     const size_t count      = shardBytes * static_cast<size_t>(nRanks) / sizeof(float);
@@ -1502,8 +1451,8 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedRecvbuff)
 // allocation to 1 MiB still leaves a 32-slice slot that a small message fits in.
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch)
 {
-    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
-    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes),
+    mockComm_.comm.ddaRegionLL128.bytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
+    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL128.bytes),
               4u * sizeof(float));
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
@@ -1513,9 +1462,9 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch
 // slice would run into the next rank's slot.
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotOverflow)
 {
-    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;
+    mockComm_.comm.ddaRegionLL128.bytes = 1 * 1024 * 1024;
     const size_t capBytes =
-        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL128.bytes);
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
 }
@@ -1524,8 +1473,8 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotOverflow)
 // zero and nothing fits.
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
 {
-    mockComm_.comm.ddaScratchBytes = 16 * 1024;
-    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
+    mockComm_.comm.ddaRegionLL128.bytes = 16 * 1024;
+    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaRegionLL128.bytes), 0u);
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
@@ -1618,7 +1567,7 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_MissingEpochCells)
 
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_ScratchTooSmallForOneSlice)
 {
-    mockComm_.comm.ddaScratchBytes = 8;
+    mockComm_.comm.ddaRegionLL128.bytes = 8;
     EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
@@ -1627,7 +1576,7 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtSlotCapacityEligible)
 {
     constexpr size_t kSlices = 4;
     const int        nRanks  = mockComm_.comm.nRanks;
-    mockComm_.comm.ddaScratchBytes = scratchForOneShotSlices(nRanks, kSlices);
+    mockComm_.comm.ddaRegionLL128.bytes = scratchForOneShotSlices(nRanks, kSlices);
 
     const size_t recvcount = payloadBytesForSlices(kSlices) / sizeof(float);
     EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
@@ -1638,7 +1587,7 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_OverSlotCapacityRejecte
 {
     constexpr size_t kSlices = 4;
     const int        nRanks  = mockComm_.comm.nRanks;
-    mockComm_.comm.ddaScratchBytes = scratchForOneShotSlices(nRanks, kSlices);
+    mockComm_.comm.ddaRegionLL128.bytes = scratchForOneShotSlices(nRanks, kSlices);
 
     const size_t recvcount = (payloadBytesForSlices(kSlices) + 16) / sizeof(float);
     EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(
@@ -1746,11 +1695,9 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AboveLlCapWithinLl128Ca
         mockComm_.get(), sendbuff_, recvbuff_, shardBytes / sizeof(float), ncclFloat32, ncclSum));
 }
 
-// Scratch is sized the way fabric init does: LL enabled, AllReduce LL128 cap,
-// payload cap from the arch table. The ReduceScatter cap is read after nRanks
-// changes. Below rankScaledMinRanks it is the table total (224 MiB), and from 8
-// ranks it is nRanks times the 32 MiB per-rank entry, clipped to 256 MiB. The 2-rank
-// shard is the largest, which is the scratch case this test is for.
+// The ReduceScatter cap is read after nRanks changes. Below rankScaledMinRanks it is the table total (224 MiB), and
+// from 8 ranks it is nRanks times the 32 MiB per-rank entry, clipped to 256 MiB. The LL128 region is left unbounded so
+// the threshold, not the region, is the limit under test.
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
 {
     const int savedRanks = mockComm_.comm.nRanks;
@@ -1764,16 +1711,27 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
                                            : std::min(static_cast<size_t>(nRanks) * 32 * 1024 * 1024,
                                                       static_cast<size_t>(256) * 1024 * 1024);
         EXPECT_EQ(totalCap, expected) << "nRanks=" << nRanks;
-        mockComm_.comm.ddaScratchBytes = nccl_dda_detail::ddaFabricScratchSizing(
-            nRanks, /*overrideBytes=*/-1, rcclParamDdaEnable(),
-            rcclDdaScratchPayloadCap(mockComm_.get()), rcclParamDdaLL(), rcclParamDdaLL128(),
-            rcclDdaLL128Threshold(mockComm_.get(), ncclFuncAllReduce));
         const size_t shardBytes = totalCap / static_cast<size_t>(nRanks);
         ASSERT_EQ(shardBytes % 16, 0u);
         EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
             mockComm_.get(), sendbuff_, recvbuff_, shardBytes / sizeof(float), ncclFloat32, ncclSum))
-            << "nRanks=" << nRanks << " scratch=" << mockComm_.comm.ddaScratchBytes;
+            << "nRanks=" << nRanks;
     }
+    mockComm_.comm.nRanks = savedRanks;
+}
+
+// With the default 64 MiB LL128 region the 112 MiB 2-rank shard no longer fits: the tier falls back instead of
+// running past its region.
+TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_DefaultRegionRejectsShardPastRegion)
+{
+    const int savedRanks = mockComm_.comm.nRanks;
+    mockComm_.comm.nRanks = 2;
+    mockComm_.comm.ddaRegionLL128.bytes = 64ULL * 1024 * 1024;
+    const size_t shardBytes = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncReduceScatter) / 2;
+    EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, shardBytes / sizeof(float), ncclFloat32, ncclSum));
+    EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1024, ncclFloat32, ncclSum));
     mockComm_.comm.nRanks = savedRanks;
 }
 
@@ -1801,12 +1759,12 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_ScratchBanksFit)
         ASSERT_LE(bankBytes, bankSize) << "nRanks=" << nRanks;
         ASSERT_LE(bankSize + bankBytes, scratch) << "nRanks=" << nRanks;
 
-        mockComm_.comm.ddaScratchBytes = scratch;
+        mockComm_.comm.ddaRegionLL.bytes = scratch;
         EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
             mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum))
             << "nRanks=" << nRanks;
 
-        mockComm_.comm.ddaScratchBytes = scratch - 16;
+        mockComm_.comm.ddaRegionLL.bytes = scratch - 16;
         EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(
             mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum))
             << "nRanks=" << nRanks;

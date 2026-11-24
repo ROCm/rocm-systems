@@ -98,7 +98,7 @@ size_t ll128NearCapShardBytes(ncclComm* comm)
         return 0;
     size_t shard = (ll128Cap / static_cast<size_t>(nRanks)) & ~size_t{15};
     const size_t slotWords = dda::common::ddaLL128SlotWords(
-        dda::common::ddaBankSize(comm->ddaScratchBytes), nRanks, 1);
+        dda::common::ddaBankSize(comm->ddaRegionLL128.bytes), nRanks, 1);
     const size_t maxSlices = slotWords / static_cast<size_t>(dda::common::kDdaLL128WireWordsPerSlice);
     const size_t maxBytes  = maxSlices * static_cast<size_t>(dda::common::kDdaLL128DataBytesPerSlice);
     if(shard > maxBytes)

@@ -40,6 +40,9 @@ struct DdaIpcMockComm
                 reinterpret_cast<ncclIpcMemHandler*>(0x1);
             comm.ddaScratch       = reinterpret_cast<void*>(0x2);
             comm.ddaPeerPtrsDev   = reinterpret_cast<void*>(0x3);
+            // ncclDdaIpcCommInit aliases the CE and LL regions to the one IPC scratch.
+            comm.ddaRegionCe      = {comm.ddaScratch, comm.ddaScratchBytes, comm.ddaPeerPtrsDev, nullptr};
+            comm.ddaRegionLL      = {comm.ddaScratch, comm.ddaScratchBytes, comm.ddaPeerPtrsDev, nullptr};
             comm.ddaIpcBarrierState  =
                 reinterpret_cast<nccl_dda_detail::DdaIpcBarrierState*>(0x4);
         }
@@ -48,6 +51,8 @@ struct DdaIpcMockComm
             comm.ddaIpcMemHandler   = nullptr;
             comm.ddaScratch      = nullptr;
             comm.ddaPeerPtrsDev  = nullptr;
+            comm.ddaRegionCe     = {};
+            comm.ddaRegionLL     = {};
             comm.ddaIpcBarrierState = nullptr;
         }
     }
