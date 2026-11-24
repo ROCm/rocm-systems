@@ -64,7 +64,12 @@ assemble_virtual_machine_topology(config::LoadedConfig &loaded, simdojo::Topolog
         std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon_mode);
     VirtualMachine *machine_ptr = machine.get();
     topology.set_root(std::move(machine));
-    machine_ptr->install_peer_routes(std::move(peer_routes), topology, loaded.exec_mode);
+    if (machine_ptr
+            ->install_peer_routes(std::move(peer_routes), topology, loaded.exec_mode, emit_error)
+            .failed()) {
+      topology = simdojo::Topology{};
+      return util::Result::failure();
+    }
 
     auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &prefix) {
       for (auto &spec : specs) {
@@ -98,7 +103,12 @@ assemble_virtual_machine_topology(config::LoadedConfig &loaded, simdojo::Topolog
   auto machine = std::make_unique<VirtualMachine>(std::unique_ptr<SoC>(primary_soc), daemon_mode);
   VirtualMachine *machine_ptr = machine.get();
   topology.set_root(std::move(machine));
-  machine_ptr->install_peer_routes(std::move(peer_routes), topology, loaded.exec_mode);
+  if (machine_ptr
+          ->install_peer_routes(std::move(peer_routes), topology, loaded.exec_mode, emit_error)
+          .failed()) {
+    topology = simdojo::Topology{};
+    return util::Result::failure();
+  }
   if (loaded.wire_links(topology, emit_error).failed()) {
     topology = simdojo::Topology{};
     return util::Result::failure();

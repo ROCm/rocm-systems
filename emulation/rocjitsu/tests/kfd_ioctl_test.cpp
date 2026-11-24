@@ -3494,8 +3494,10 @@ protected:
     }
     auto routes = project_routes_or_throw(graph, "local");
     ASSERT_EQ(routes.routes().size(), install_peer_route() ? 1u : 0u);
-    machine_->install_peer_routes(std::move(routes), engine_.topology(),
-                                  simdojo::ExecMode::FUNCTIONAL);
+    ASSERT_TRUE(machine_
+                    ->install_peer_routes(std::move(routes), engine_.topology(),
+                                          simdojo::ExecMode::FUNCTIONAL)
+                    .succeeded());
     ASSERT_TRUE(engine_.create().succeeded());
     engine_.register_as_primary();
     started_ = true;
@@ -4598,8 +4600,10 @@ protected:
     }
     auto routes = project_routes_or_throw(graph, "local");
     ASSERT_EQ(routes.routes().size(), connect_second_requester() ? 3u : 1u);
-    machine_->install_peer_routes(std::move(routes), engine_.topology(),
-                                  simdojo::ExecMode::FUNCTIONAL);
+    ASSERT_TRUE(machine_
+                    ->install_peer_routes(std::move(routes), engine_.topology(),
+                                          simdojo::ExecMode::FUNCTIONAL)
+                    .succeeded());
     ASSERT_TRUE(engine_.create().succeeded());
     engine_.register_as_primary();
     started_ = true;
