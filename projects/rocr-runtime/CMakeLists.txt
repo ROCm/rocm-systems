@@ -68,6 +68,13 @@ set ( BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL "Build shared library (.
 if (NOT DEFINED BUILD_ROCR)
   set(BUILD_ROCR ON)
 endif()
+## Code coverage flags
+option(ENABLE_CODE_COVERAGE "Enable code coverage instrumentation" OFF)
+if(ENABLE_CODE_COVERAGE)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "ENABLE_CODE_COVERAGE requires Clang (found ${CMAKE_CXX_COMPILER_ID})")
+  endif()
+endif()
 
 function(add_rocm_subdir subdir subdir_assigns)
     message("add_rocm_subdir() -- " ${subdir})
