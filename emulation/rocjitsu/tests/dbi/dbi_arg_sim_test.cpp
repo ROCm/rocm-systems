@@ -31,6 +31,7 @@
 #include "../cdna5_sim_test_common.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -45,6 +46,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -79,16 +81,16 @@ constexpr uint32_t kArgSentinel = 0xA5A5A5A5u;
 // ELF machine flag, and the wavefront size.
 struct ArgSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
 };
 
-inline constexpr ArgSimArch kCdna3ArgArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
+inline constexpr ArgSimArch kCdna3ArgArch{"cdna3", rocjitsu::IsaFamily::Cdna3,
                                           EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64};
-inline constexpr ArgSimArch kCdna4ArgArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
+inline constexpr ArgSimArch kCdna4ArgArch{"cdna4", rocjitsu::IsaFamily::Cdna4,
                                           EF_AMDGPU_MACH_AMDGCN_GFX950, /*wave_size=*/64};
-inline constexpr ArgSimArch kRdna4ArgArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
+inline constexpr ArgSimArch kRdna4ArgArch{"rdna4", rocjitsu::IsaFamily::Rdna4,
                                           EF_AMDGPU_MACH_AMDGCN_GFX1200, /*wave_size=*/32};
 
 // Patches a kernel so a probe taking one argument is called at an anchor where
@@ -334,9 +336,9 @@ TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
       const std::vector<uint32_t> guest = {test::make_mov_vgpr_inline(1, kOldValue),
                                            test::make_mov_vgpr_inline(0, kAnchorResult), kMovV1V0,
                                            guest_move.value(), endpgm.value()};
-      const bool wave32 = arch.arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const bool wave32 = arch.arch == rocjitsu::IsaFamily::Rdna4;
       const uint32_t granulated_sgpr_count =
-          arch.arch == ROCJITSU_CODE_ARCH_CDNA3 ? test::kCallableProbeGranulatedSgprCount : 3u;
+          arch.arch == rocjitsu::IsaFamily::Cdna3 ? test::kCallableProbeGranulatedSgprCount : 3u;
       const std::vector<uint8_t> image =
           wave32 ? test::make_gfx1200_wave32_kernel_elf(guest, 64, 3)
                  : test::make_amdgpu_kernel_elf(guest, 64, granulated_sgpr_count, arch.e_flags);
@@ -393,7 +395,7 @@ TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
 }
 
 TEST(DbiAfterInstSim, RejectsGprIndexEnableWhileBeforeInstPreservesTheDisplacedRegister) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   static_assert(nop.succeeded());
   constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
@@ -452,7 +454,7 @@ TEST(DbiAfterInstSim, RejectsGprIndexEnableWhileBeforeInstPreservesTheDisplacedR
 }
 
 TEST(DbiAfterInstSim, RejectsFutureIndexedReadsWhileDirectReadsPreserveGuestState) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr uint32_t kGuestV7Value = 9;
   constexpr uint32_t kProbeValue = 5;
   constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
@@ -516,7 +518,7 @@ TEST(DbiAfterInstSim, RejectsFutureIndexedReadsWhileDirectReadsPreserveGuestStat
 }
 
 TEST(DbiAfterInstSim, PreservesGuestValueReadByResolvedHelper) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   constexpr util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
   constexpr util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
@@ -561,8 +563,72 @@ TEST(DbiAfterInstSim, PreservesGuestValueReadByResolvedHelper) {
   }
 }
 
+TEST(DbiAfterInstSim, RejectsGfx942HelperThatChangesItsReturnLinkThroughVcc) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna3;
+  constexpr uint16_t kLink = 46;
+  constexpr uint32_t kNop = build_s_nop(0, kArch).value();
+  constexpr uint32_t kEnd = build_s_endpgm(kArch).value();
+  constexpr uint32_t kCall = build_s_call_b64(kLink, 4, kArch).value();
+  constexpr uint32_t kAdjust =
+      build_s_add_u32(amdgpu::kVccSelectorFirst, kLink, scalar_positive_inline_u32(8), kArch)
+          .value();
+  constexpr uint32_t kHelperReturn = build_s_setpc_b64(kLink, kArch).value();
+  const util::FailureOr<uint32_t> read_v7 = build_v_mov_b32_src(2, 256 + 7, kArch);
+  ASSERT_TRUE(read_v7.succeeded());
+  // A normal return sets v2 to 3. If s[46:47] backs VCC, the helper advances
+  // the return PC by eight bytes, so the continuation reads v7 instead.
+  const std::vector<uint32_t> guest = {test::make_mov_vgpr_inline(7, 9),
+                                       kNop,
+                                       kCall,
+                                       test::make_mov_vgpr_inline(2, 3),
+                                       kEnd,
+                                       read_v7.value(),
+                                       kEnd,
+                                       kAdjust,
+                                       kHelperReturn};
+  const std::vector<uint8_t> body = test::make_gfx942_probe_elf(
+      "clobber_v7", {test::make_mov_vgpr_inline(7, 5), build_s_setpc_b64(30, kArch).value()});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+
+  for (const uint32_t sgpr_count : {48u, 64u}) {
+    SCOPED_TRACE(sgpr_count);
+    const bool aliased = sgpr_count == 48;
+    const uint32_t granulated_sgprs = sgpr_count / 8 - 1;
+    test::DbiSim baseline;
+    ASSERT_NO_FATAL_FAILURE(baseline.initialize("cdna3", 64, granulated_sgprs));
+    const std::vector<uint32_t> original = baseline.run_and_read_vgpr(guest, 64, 2);
+    ASSERT_EQ(original, std::vector<uint32_t>(64, aliased ? 9 : 3));
+
+    const std::vector<uint8_t> image = test::with_descriptor_metadata(
+        test::make_gfx942_kernel_elf(guest, 64, granulated_sgprs, 3, 1), kArch);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    instrumentor.add_point({.anchor_offset = 4,
+                            .kind = InstrumentationKind::AfterInst,
+                            .probe_obj = &probe,
+                            .probe_symbol = "clobber_v7",
+                            .probe_args = {}});
+    const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_EQ(validation.errors.empty(), !aliased);
+    EXPECT_EQ(result.errors.empty(), !aliased);
+    if (!result.errors.empty()) {
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      continue;
+    }
+    ASSERT_EQ(result.sites.size(), 1u);
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna3", 64, granulated_sgprs));
+    EXPECT_EQ(sim.run_and_read_vgpr(test::section_words(patched, ".text"),
+                                    test::patched_private_segment_size(patched), 2),
+              original);
+  }
+}
+
 TEST(DbiAfterInstSim, PreservesGuestValueReadAfterComputedReentry) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   constexpr util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
   constexpr util::FailureOr<uint32_t> probe_ret = build_s_setpc_b64(30, kArch);
@@ -665,7 +731,7 @@ public:
 };
 
 TEST(DbiAfterInstSim, TwoWaveBarrierWaitObservesCompletionAfterTheRelocatedWaitReturns) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
   constexpr uint32_t kMarker = 5;
   constexpr uint16_t kDelayInstructions = 32;
   constexpr uint32_t kSignal = cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = 193})[0];
@@ -735,7 +801,7 @@ TEST(DbiAfterInstSim, TwoWaveBarrierWaitObservesCompletionAfterTheRelocatedWaitR
 }
 
 TEST(DbiAfterInstSim, VskipEnableRejectsAfterInstWhileBeforeInstPreservesScalarState) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint32_t> result =
       build_s_mov_b32(4, scalar_positive_inline_u32(7), kArch);
   constexpr util::FailureOr<uint32_t> clobber =
@@ -786,7 +852,7 @@ TEST(DbiAfterInstSim, VskipEnableRejectsAfterInstWhileBeforeInstPreservesScalarS
 }
 
 TEST(DbiAfterInstSim, UnknownIncomingVskipRejectsInstructionAndExitObservations) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr uint64_t kObservationOffset = 36;
   constexpr uint64_t kExitOffset = 48;
   constexpr uint32_t kGuestScalar = 7;
@@ -883,7 +949,7 @@ TEST(DbiAfterInstSim, UnknownIncomingVskipRejectsInstructionAndExitObservations)
 }
 
 TEST(DbiAfterInstSim, RejectsVskipEnablingProbeAndPreservesScalarStateWithClearOnlyProbe) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint32_t> result =
       build_s_mov_b32(4, scalar_positive_inline_u32(7), kArch);
   constexpr util::FailureOr<uint32_t> clobber =
@@ -935,7 +1001,7 @@ TEST(DbiAfterInstSim, RejectsVskipEnablingProbeAndPreservesScalarStateWithClearO
 }
 
 TEST(DbiAfterInstSim, PreservesANewScalarDefinitionWithoutArguments) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr uint16_t kResultSgpr = 4;
   constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
   static_assert(endpgm.succeeded());
@@ -993,7 +1059,7 @@ TEST(DbiAfterInstSim, PreservesANewScalarDefinitionWithoutArguments) {
 }
 
 TEST(DbiAfterInstSim, ObservesAndRestoresTheExecMaskProducedByTheAnchor) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint16_t> exec_lo = scalar_operand_exec_lo(kArch);
   static_assert(exec_lo.succeeded());
   constexpr uint16_t kExecLo = exec_lo.value();

@@ -74,7 +74,7 @@ IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
 
   /**
    * Check if num_pes == ipcImpl.shm_size)
-   * All the PEs must be with in a node for IPC conduit
+   * All the PEs must be with in a node for IPC backend
    */
   if(num_pes != ipcImpl.shm_size) {
     LOG_ERROR_EXIT("IPC Backend selected but some PEs are non-local. This is not a supported configuration. "
@@ -98,7 +98,7 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 
   /**
    * Check if num_pes == ipcImpl.shm_size)
-   * All the PEs must be with in a node for IPC conduit
+   * All the PEs must be with in a node for IPC backend
    */
   assert(num_pes == ipcImpl.shm_size);
 
@@ -380,6 +380,19 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
   new (new_team_obj)
       IPCTeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
                 my_pe_in_new_team, new_team_comm, common_index);
+
+  // Barrier to prevent kernel racing with hipMemsets
+  if (new_team_comm != MPI_COMM_NULL) {
+    NET_CHECK(mpilib_ftable_.Barrier(new_team_comm));
+  } else {
+    std::vector<int> world_ranks;
+    world_ranks.reserve(num_pes);
+    for (int i = 0; i < num_pes; i++) {
+      world_ranks.push_back(team_info_wrt_world.pe_start +
+                             i * team_info_wrt_world.stride);
+    }
+    backend_bootstr->groupBarrier(world_ranks);
+  }
 
   *new_team = get_external_team(new_team_obj);
 }

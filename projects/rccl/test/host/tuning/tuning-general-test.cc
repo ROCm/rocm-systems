@@ -417,7 +417,7 @@ TEST_F(TuningGeneralMicrotest, TimeEstimateAllowsValidatedGfx1250Fp8AllReduceRin
     ncclTuningInput_t below = MakeTimeInput(ceiling - 1, 1, ncclFloat8e4m3);
     below.func = ncclFuncAllReduce;
     const float belowBase = latency + static_cast<float>(below.nBytes) / (1000.0f * bandwidth);
-    EXPECT_FLOAT_EQ(belowBase * 1024.0f, ncclTuningGetTime(&below, NCCL_ALGO_RING, latency, bandwidth))
+    EXPECT_FLOAT_EQ(belowBase, ncclTuningGetTime(&below, NCCL_ALGO_RING, latency, bandwidth))
         << "nRanks=" << nRanks;
   }
 

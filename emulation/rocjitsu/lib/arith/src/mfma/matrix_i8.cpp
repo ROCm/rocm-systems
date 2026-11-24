@@ -4,6 +4,7 @@
 // gfx942/gfx950 signed-byte MFMA and gfx1250 mixed-signedness byte WMMA.
 #include "common/internal.h"
 #include "mfma/backends.h"
+#include "mfma/gfx1250_integer_dispatch.h"
 #include "mfma/integer.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
@@ -22,6 +23,10 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     return error;
   }
   const bool clamp = Wmma ? (controls & RJ_ARITH_WMMA_CLAMP) : (flags & RJ_ARITH_FP16_OVFL);
+  if constexpr (Wmma) {
+    dispatch_gfx1250_integer<false>(flags, controls, clamp, d, a, b, c, nullptr);
+    return RJ_ARITH_SUCCESS;
+  }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     matrix_i8_x86_64_v4<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);

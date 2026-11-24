@@ -798,6 +798,10 @@ if(ENABLE_ROCSHMEM_GIN)
       DEFINES NCCL_GIN_ANVIL_SDMA_ENABLE=1 NCCL_GIN_PROXY_ENABLE=0
               NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
   endforeach()
+  dl_add_fat_object(gin_all_gather_sdma
+    ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_all_gather_sdma.cu.cpp
+    DEFINES NCCL_GIN_ANVIL_SDMA_ENABLE=1 NCCL_GIN_PROXY_ENABLE=0
+            NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
   dl_add_fat_object(gin_anvil_conn_check_device
     ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
     DEFINES ENABLE_ROCSHMEM_GIN)

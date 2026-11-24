@@ -121,7 +121,7 @@ pub const AMDSMI_MAX_NUM_CLKS_PER_MID: u32 = 2;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 27;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 2;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 3;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
@@ -1719,6 +1719,49 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_date) - 256usize];
     ["Offset of field: AmdsmiDriverInfoT::driver_name"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_name) - 512usize];
+};
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiDriverPackageT {
+    AmdsmiDriverPackageNone = 0,
+    AmdsmiDriverPackageDkms = 1,
+    AmdsmiDriverPackageKmod = 2,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiDriverInfoV2T {
+    pub driver_version: [::std::os::raw::c_char; 256usize],
+    pub driver_date: [::std::os::raw::c_char; 256usize],
+    pub driver_name: [::std::os::raw::c_char; 256usize],
+    pub driver_kernel_version: [::std::os::raw::c_char; 256usize],
+    pub amdgpu_driver_version: [::std::os::raw::c_char; 256usize],
+    pub driver_build_version: [::std::os::raw::c_char; 256usize],
+    pub driver_full_version: [::std::os::raw::c_char; 256usize],
+    pub driver_package: AmdsmiDriverPackageT,
+    pub reserved: [u32; 575usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiDriverInfoV2T"][::std::mem::size_of::<AmdsmiDriverInfoV2T>() - 4096usize];
+    ["Alignment of AmdsmiDriverInfoV2T"][::std::mem::align_of::<AmdsmiDriverInfoV2T>() - 4usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_version) - 0usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_date"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_date) - 256usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_name"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_name) - 512usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_kernel_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_kernel_version) - 768usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::amdgpu_driver_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, amdgpu_driver_version) - 1024usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_build_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_build_version) - 1280usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_full_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_full_version) - 1536usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_package"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_package) - 1792usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::reserved"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, reserved) - 1796usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -5395,6 +5438,12 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_driver_info_v2(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiDriverInfoV2T,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_asic_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiAsicInfoT,
@@ -5836,4 +5885,87 @@ extern "C" {
 }
 extern "C" {
     pub fn amdsmi_reset_ttm_pages_limit() -> AmdsmiStatusT;
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiHawkInsertionPriorityT {
+    AmdsmiHawkInsertionPriorityOpportunistic = 0,
+    AmdsmiHawkInsertionPriorityGuaranteed = 1,
+    AmdsmiHawkInsertionPriorityDynamic = 2,
+}
+impl AmdsmiPowerStabilizationParamIdT {
+    pub const AmdsmiPowerStabilizationParamLast: AmdsmiPowerStabilizationParamIdT =
+        AmdsmiPowerStabilizationParamIdT::AmdsmiPowerStabilizationParamRampStopDelay;
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiPowerStabilizationParamIdT {
+    AmdsmiPowerStabilizationParamEnable = 0,
+    AmdsmiPowerStabilizationParamPowerFloor = 1,
+    AmdsmiPowerStabilizationParamDelay = 2,
+    AmdsmiPowerStabilizationParamInsertionPriority = 3,
+    AmdsmiPowerStabilizationParamRampEnable = 4,
+    AmdsmiPowerStabilizationParamRampMaxRampUpRate = 5,
+    AmdsmiPowerStabilizationParamRampMaxRampDownRate = 6,
+    AmdsmiPowerStabilizationParamRampMinTimeAtPowerFloor = 7,
+    AmdsmiPowerStabilizationParamRampStopDelay = 8,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiPowerStabilizationInfoT {
+    pub host_control_enabled: bool,
+    pub enabled: bool,
+    pub power_floor: u32,
+    pub delay: u32,
+    pub insertion_priority: AmdsmiHawkInsertionPriorityT,
+    pub ramp_enabled: bool,
+    pub ramp_max_ramp_up_rate: u32,
+    pub ramp_max_ramp_down_rate: u32,
+    pub ramp_min_time_at_power_floor: u32,
+    pub ramp_stop_delay: u32,
+    pub reserved: [u64; 11usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiPowerStabilizationInfoT"]
+        [::std::mem::size_of::<AmdsmiPowerStabilizationInfoT>() - 128usize];
+    ["Alignment of AmdsmiPowerStabilizationInfoT"]
+        [::std::mem::align_of::<AmdsmiPowerStabilizationInfoT>() - 8usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::host_control_enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, host_control_enabled) - 0usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, enabled) - 1usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::power_floor"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, power_floor) - 4usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::delay"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, delay) - 8usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::insertion_priority"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, insertion_priority) - 12usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_enabled"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_enabled) - 16usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_up_rate"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_up_rate) - 20usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_down_rate"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_down_rate) - 24usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_min_time_at_power_floor"][::std::mem::offset_of!(
+        AmdsmiPowerStabilizationInfoT,
+        ramp_min_time_at_power_floor
+    ) - 28usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_stop_delay"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_stop_delay) - 32usize];
+    ["Offset of field: AmdsmiPowerStabilizationInfoT::reserved"]
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, reserved) - 40usize];
+};
+extern "C" {
+    pub fn amdsmi_get_power_stabilization_info(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiPowerStabilizationInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_power_stabilization_param(
+        processor_handle: AmdsmiProcessorHandle,
+        param_id: AmdsmiPowerStabilizationParamIdT,
+        value: i64,
+    ) -> AmdsmiStatusT;
 }

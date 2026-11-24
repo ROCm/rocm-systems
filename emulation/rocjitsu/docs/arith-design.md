@@ -1,13 +1,13 @@
-# Rocjitsu Arithmetic Library design
+# rocjitsu Arithmetic Library design
 
-This document describes the Rocjitsu Arithmetic Library (`rj-arith`), located in
+This document describes the rocjitsu Arithmetic Library (`rj-arith`), located in
 [`lib/arith/`](../lib/arith/). It implements GPU arithmetic on a CPU. Its interface follows GPU
 instructions and register layouts; its implementation uses portable C++ and
 CPU-specific SIMD arithmetic.
 
 ## Scope and contract
 
-GETREG/SETREG hardware-register access stays in Rocjitsu’s VM. Its register mapping,
+GETREG/SETREG hardware-register access stays in rocjitsu’s VM. Its register mapping,
 privilege checks, topology, and execution side effects are outside this arithmetic library.
 
 The library is a collection of C entry points mapping one-to-one to GPU instructions.
@@ -51,7 +51,7 @@ has none. Where no builtin distinguishes different instruction contracts,
 architecture suffixes disambiguate them. Scalar instructions omit wave width.
 
 The C interface constrains the API to a narrow, hermetic surface rather than
-making Rocjitsu a C project. Typed `constexpr` constants work in both languages.
+making rocjitsu a C project. Typed `constexpr` constants work in both languages.
 C++17 header checks always run; C23 checks run only when a compiler probe succeeds.
 Skipping C checks on older toolchains is intentional, including current CI.
 The project itself does not require C23.
@@ -148,10 +148,10 @@ loose arithmetic.
 ### Compatibility mode
 
 Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
-Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
+Each entry point selects the arithmetic and FP status policy matching rocjitsu's
 previous behavior. This can retain instruction-specific details beyond the
 other modes, such as rounding FP16 results before applying OMOD.
-FP32 MUL retains Rocjitsu's inherited numerical and exception-classification
+FP32 MUL retains rocjitsu's inherited numerical and exception-classification
 models inside the library for Compatibility; explicit mode 3 uses its separately
 qualified reporting domain. Gfx12 binary arithmetic and selection likewise own
 their inherited Compatibility causes in the library. Their status storage must
@@ -174,7 +174,7 @@ The simulator only commits the comparison mask and causes.
 Dual FP32 arithmetic slots share the wave’s
 
 exception flags. Explicit numeric-only modes suppress these additional flags.
-Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
+rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
 [Instruction coverage](../lib/arith/COVERAGE.md) describes the migrated families.
@@ -221,7 +221,7 @@ implement the same instruction contracts. This small duplication keeps those
 hardware-specific policies under the arithmetic library's ownership.
 
 
-Exact arithmetic follows validated Rocjitsu models or simple ISA-defined behavior.
+Exact arithmetic follows validated rocjitsu models or simple ISA-defined behavior.
 Sources and evidence stay beside the code and tests; optimizing a model does not
 establish that it matches hardware.
 

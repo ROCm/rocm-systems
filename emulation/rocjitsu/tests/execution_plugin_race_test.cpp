@@ -5,15 +5,18 @@
 /// @brief Execution plugin race detection and diagnostic output tests.
 
 #include "execution_plugin_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "mma_test_util.h"
 #include "race-detector/race_test_instruction.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -76,6 +79,28 @@ using namespace rocjitsu::plugins::race_detector;
 using namespace rocjitsu::test::execution_plugin;
 using mma_test::make_cdna4_mfma_scale_words;
 
+enum class InlineImageQuery { ResourceInfo, Lod };
+constexpr InlineImageQuery kInlineImageQueries[]{
+    InlineImageQuery::ResourceInfo,
+    InlineImageQuery::Lod,
+};
+
+/// Report one round of a single-instruction workgroup barrier as the simulator
+/// does: each member signals, the round completes, and each member passes its
+/// wait. Each round closes before the next opens, so rounds can share a
+/// generation.
+void report_workgroup_barrier(ExecutionPluginGroup &group, std::span<Wavefront *> members) {
+  const BarrierRound round{.kind = BarrierKind::Workgroup,
+                           .completion_bit = kWorkgroupBarrierBit,
+                           .named_id = 0,
+                           .generation = 0};
+  for (auto *wave : members)
+    group.onAmdgpuBarrierSignaled(*wave, round);
+  group.onAmdgpuBarrierRoundResolved(members, members, round);
+  for (auto *wave : members)
+    group.onAmdgpuBarrierWaitPassed(*wave, round);
+}
+
 void record_register_probe(ExecutionPluginGroup &plugins, Wavefront &wave) {
   auto decoder = Decoder::create(wave.cu().arch());
   const uint32_t word = S_NOP;
@@ -103,8 +128,8 @@ void execute_wait(ExecutionPluginGroup &plugins, Wavefront &wave, uint32_t word)
   plugins.onAmdgpuAfterExecuteInstruction(wave.pc, inst, wave);
 }
 
-uint32_t legacy_wait_word(rj_code_arch_t arch, uint8_t vmcnt, uint8_t lgkmcnt) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+uint32_t legacy_wait_word(rocjitsu::IsaFamily arch, uint8_t vmcnt, uint8_t lgkmcnt) {
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     return 0xbf890007u | (uint32_t{vmcnt} << 10) | (uint32_t{lgkmcnt} << 4);
   return 0xbf8c0070u | (vmcnt & 0xfu) | ((vmcnt & 0x30u) << 10) | (uint32_t{lgkmcnt} << 8);
 }
@@ -187,7 +212,7 @@ protected:
     std::array<Wavefront *, 1> waves{wave};
     fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
     plugin_state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
     ASSERT_NE(decoder, nullptr);
   }
 
@@ -420,7 +445,7 @@ protected:
   void issue(uint32_t mask, uint8_t destination = 32) {
     const bool scratch = GetParam().scratch;
     std::array<uint32_t, 3> words;
-    if (fixture->cu()->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (fixture->cu()->arch() == rocjitsu::IsaFamily::Cdna5) {
       words =
           scratch
               ? cdna5::build_vscratch(cdna5::kScratchLoadBlock,
@@ -554,11 +579,14 @@ protected:
   PluginFixture fixture;
   StringSink *sink = nullptr;
   RaceDetectorPlugin *plugin = nullptr;
+  /// Wave slots on the CU; a derived fixture may raise it before SetUp().
+  uint32_t wf_slots = 2;
   std::array<Wavefront *, 2> waves{};
   std::unique_ptr<Decoder> decoder;
+  uint64_t next_workgroup_generation = 0;
 
   void SetUp() override {
-    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna5",
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(wf_slots, "cdna5",
                                                /*wavefront_size=*/32, /*sgprs_per_wf=*/128));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
@@ -614,23 +642,27 @@ protected:
   }
 
   /// Issue a one-lane DS access and report whether it produced a race.
-  bool ds_access(int wave, uint32_t address, bool is_load) {
-    waves[wave]->pc += 16;
+  bool ds_access(Wavefront &wave, uint32_t address, bool is_load) {
+    wave.pc += 16;
     const size_t previous = sink->str().size();
     auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
     state->elem_size = sizeof(uint32_t);
     state->num_elems = 1;
     state->is_load = is_load;
-    state->wf_size = waves[wave]->wf_size();
+    state->wf_size = wave.wf_size();
     state->exec_mask = 1;
     state->lane_mask = 1;
-    state->dst_reg_base = waves[wave]->vgpr_alloc().base;
+    state->dst_reg_base = wave.vgpr_alloc().base;
     state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}});
-    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
-    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, inst, wave);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, wave);
     return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool ds_access(int wave, uint32_t address, bool is_load) {
+    return ds_access(*waves[wave], address, is_load);
   }
 
   bool ds_read(int wave, uint32_t address) { return ds_access(wave, address, true); }
@@ -710,23 +742,34 @@ protected:
                              exec);
   }
 
+  /// The routed access of a DS instruction whose lanes in `exec` are active.
+  static MemoryAccessObservation local_access(uint64_t exec) {
+    MemoryAccessObservation access{};
+    access.route = MemoryRoute::LOCAL;
+    access.decoded_space = DecodedMemorySpace::LOCAL;
+    access.request_lane_mask = exec;
+    return access;
+  }
+
   /// Issue a one-lane ds_atomic_async_barrier_arrive_b64 on the barrier cell at
-  /// `address`, as execution does. It completes on ASYNCcnt in the async-load
-  /// class.
+  /// `address`, as execution does: an aligned 64-bit LDS atomic that completes
+  /// on ASYNCcnt in the async-load class.
   void async_barrier_arrive(int wave, uint32_t address) {
     waves[wave]->pc += 16;
     auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
     state->elem_size = sizeof(uint64_t);
     state->num_elems = 1;
     state->is_load = false;
+    state->atomic_op = AtomicOp::BARRIER_ARRIVE;
     state->wf_size = waves[wave]->wf_size();
     state->exec_mask = 1;
     state->lane_mask = 1;
     state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
-                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                               /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
-    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted(local_access(1), inst, *waves[wave]);
   }
 
   void wait_tensorcnt(int wave, uint16_t count) {
@@ -741,7 +784,51 @@ protected:
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
   }
 
-  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup); }
+  static BarrierRound workgroup_round(uint64_t generation) {
+    return {.kind = BarrierKind::Workgroup,
+            .completion_bit = kWorkgroupBarrierBit,
+            .named_id = 0,
+            .generation = generation};
+  }
+
+  void signal(int wave, const BarrierRound &round) {
+    fixture.plugin_group_->onAmdgpuBarrierSignaled(*waves[wave], round);
+  }
+
+  /// Complete `round` for `members`, reporting it through both completion
+  /// hooks as the simulator does.
+  void complete(const BarrierRound &round, std::span<Wavefront *> members) {
+    fixture.plugin_group_->onAmdgpuBarrierRoundResolved(members, members, round);
+  }
+
+  /// Complete `round`, which notifies `notified` but sets the completion bit
+  /// of `armed` only.
+  void complete(const BarrierRound &round, std::span<Wavefront *> notified,
+                std::span<Wavefront *> armed) {
+    fixture.plugin_group_->onAmdgpuBarrierRoundResolved(notified, armed, round);
+  }
+
+  void wait_passed(int wave, const BarrierRound &round) {
+    fixture.plugin_group_->onAmdgpuBarrierWaitPassed(*waves[wave], round);
+  }
+
+  /// A workgroup barrier whose signal and wait coincide, reported as the
+  /// simulator reports s_barrier.
+  void barrier() {
+    const BarrierRound round = workgroup_round(next_workgroup_generation++);
+    for (int wave = 0; wave < static_cast<int>(waves.size()); ++wave)
+      signal(wave, round);
+    complete(round, waves);
+    for (int wave = 0; wave < static_cast<int>(waves.size()); ++wave)
+      wait_passed(wave, round);
+  }
+
+  /// The detector of the fixture's workgroup.
+  const RaceDetector &detector() const {
+    const auto *state =
+        static_cast<const RaceWavefrontState *>(waves[0]->plugin_state(plugin->slot_index()));
+    return *state->race_state->getDetector();
+  }
 
   /// Wave 0 issues a tensor load at 0x2010 that overwrites bytes wave 1 is
   /// still reading. Returns the race report.
@@ -1635,6 +1722,7 @@ protected:
     state->elem_size = sizeof(uint64_t);
     state->num_elems = 1;
     state->is_load = false;
+    state->atomic_op = AtomicOp::BARRIER_ARRIVE;
     state->wf_size = waves[wave]->wf_size();
     state->exec_mask = exec;
     state->lane_mask = exec;
@@ -1642,7 +1730,7 @@ protected:
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
                                /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
-    issue(wave, inst, {}, exec);
+    issue(wave, inst, local_access(exec), exec);
   }
 
   /// Issue a one-dword async load into LDS with EXEC zero.
@@ -2361,10 +2449,10 @@ TEST_F(Gfx1250CounterCapacityRaceTest, TensorBelowCapacityOverwritingAPendingSou
   EXPECT_TRUE(tensor_load_oldest());
 }
 
-/// Counter capacity on gfx950 (CDNA4), whose combined VMCNT holds 63 tokens and
+/// Counter capacity on CDNA1 through CDNA4: combined VMCNT holds 63 tokens and
 /// LGKMCNT 15 (the generated ISA properties). These tests pin the pre-GFX12 side
 /// of behavior that differs on gfx1250.
-class Gfx950CounterCapacityRaceTest : public ::testing::Test {
+class CdnaCounterCapacityRaceTest : public ::testing::TestWithParam<const char *> {
 protected:
   static constexpr int kVmcntCapacity = 63;
   static constexpr int kLgkmcntCapacity = 15;
@@ -2375,7 +2463,7 @@ protected:
   std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
-    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1, "cdna4"));
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1, GetParam()));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2425,7 +2513,7 @@ protected:
 
 // Messages share LGKMCNT with DS operations before GFX12, so a message issued
 // at a full LGKMCNT completes the oldest DS read.
-TEST_F(Gfx950CounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
+TEST_P(CdnaCounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
   load(/*lds=*/true, /*vgpr=*/0);
   for (int index = 0; index < kLgkmcntCapacity - 1; ++index)
     load(/*lds=*/true, /*vgpr=*/1);
@@ -2437,9 +2525,9 @@ TEST_F(Gfx950CounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
   EXPECT_FALSE(vgpr_read(0));
 }
 
-// Measured on MI355X (#15938): an EXEC-zero buffer or global instruction counts
-// on VMCNT, so it applies backpressure.
-TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
+// An EXEC-zero buffer or global instruction counts on VMCNT, so it applies
+// backpressure (CDNA1 through CDNA4 ISA sections 3.3 and 4.4).
+TEST_P(CdnaCounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
   load(/*lds=*/false, /*vgpr=*/0);
   for (int index = 0; index < kVmcntCapacity - 1; ++index)
     load(/*lds=*/false, /*vgpr=*/1);
@@ -2449,7 +2537,7 @@ TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
 
 // An EXEC-zero instruction holds a VMCNT slot: after a load and an EXEC-zero
 // load, store or load to LDS, s_waitcnt vmcnt(1) completes the first load.
-TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction) {
+TEST_P(CdnaCounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction) {
   auto exec_zero = [&](bool is_load, bool lds_dst) {
     wave->pc += 16;
     auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
@@ -2465,9 +2553,9 @@ TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction)
     fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *wave);
     wave->set_exec(1);
   };
-  const uint32_t wait_one = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15);
-  const uint32_t wait_all = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/0, /*lgkmcnt=*/15);
-  // A gfx950 buffer load to LDS sets both is_load and lds_dst.
+  const uint32_t wait_one = legacy_wait_word(wave->cu().arch(), /*vmcnt=*/1, /*lgkmcnt=*/15);
+  const uint32_t wait_all = legacy_wait_word(wave->cu().arch(), /*vmcnt=*/0, /*lgkmcnt=*/15);
+  // A buffer load to LDS sets both is_load and lds_dst.
   for (const auto &[is_load, lds_dst] : {std::pair{true, false}, {false, false}, {true, true}}) {
     SCOPED_TRACE(testing::Message() << "is_load=" << is_load << " lds_dst=" << lds_dst);
     load(/*lds=*/false, /*vgpr=*/0);
@@ -2480,20 +2568,468 @@ TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction)
 
 // With no EXEC-zero instruction after the load, s_waitcnt vmcnt(1) leaves it
 // pending.
-TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitLeavesOnlyLoadPending) {
+TEST_P(CdnaCounterCapacityRaceTest, PartialVmcntWaitLeavesOnlyLoadPending) {
   load(/*lds=*/false, /*vgpr=*/0);
   execute_wait(*fixture.plugin_group_, *wave,
-               legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15));
+               legacy_wait_word(wave->cu().arch(), /*vmcnt=*/1, /*lgkmcnt=*/15));
   EXPECT_TRUE(vgpr_read(0));
 }
 
 // A load issued at a full VMCNT with active lanes completes the oldest load.
-TEST_F(Gfx950CounterCapacityRaceTest, LoadAdvancesVmcnt) {
+TEST_P(CdnaCounterCapacityRaceTest, LoadAdvancesVmcnt) {
   load(/*lds=*/false, /*vgpr=*/0);
   for (int index = 0; index < kVmcntCapacity - 1; ++index)
     load(/*lds=*/false, /*vgpr=*/1);
   load(/*lds=*/false, /*vgpr=*/2);
   EXPECT_FALSE(vgpr_read(0));
+}
+
+INSTANTIATE_TEST_SUITE_P(Cdna1ThroughCdna4, CdnaCounterCapacityRaceTest,
+                         ::testing::Values("cdna1", "cdna2", "cdna3", "cdna4"));
+
+// --- LDS barrier cells: an arrival releases, a read of the cell acquires ---
+
+/// Drives the race detector's LDS barrier cell handling for two gfx1250 waves
+/// of one workgroup: the routed-memory hook for the DS arrive instructions and
+/// for reads of a cell, and the arrival hook that reports each arrival (CDNA5
+/// ISA 11.2.2). Ordering semantics are covered in race_detector_tests.cpp;
+/// these tests cover the hooks' translation.
+class LdsBarrierCellRaceTest : public Gfx1250CounterCapacityRaceTest {
+protected:
+  using Source = LdsBarrierArrivalObservation::Source;
+
+  /// A data tile and a barrier cell, apart from each other.
+  static constexpr uint32_t kTile = 0;
+  static constexpr uint32_t kCell = kFlatLdsAddress;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(Gfx1250CounterCapacityRaceTest::SetUp());
+    // Reports are deduplicated by PC, so keep the waves' PCs apart.
+    waves[1]->pc = 0x8000;
+  }
+
+  /// Issue a one-lane barrier arrive on the cell at `cell`, as execution does:
+  /// an aligned 64-bit LDS atomic, on DScnt for the returning form and on
+  /// ASYNCcnt in the async-load class for the async form. With `exec` zero the
+  /// instruction issues with no active lane. Returns whether it raced.
+  bool issue_arrive(int wave, Source source, uint32_t cell, uint64_t exec = 1) {
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    const bool returns = source == Source::DsAtomic;
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint64_t);
+    state->num_elems = 1;
+    state->is_load = returns;
+    state->atomic_op = AtomicOp::BARRIER_ARRIVE;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + 4;
+    state->per_lane_addr[0] = cell;
+    const MemoryAccessObservation access = local_access(exec);
+    if (returns) {
+      TestMemoryInstruction inst(std::move(state),
+                                 {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                                 /*exec_masked=*/true, "ds_atomic_barrier_arrive_rtn_b64");
+      issue(wave, inst, access, exec);
+    } else {
+      TestMemoryInstruction inst(std::move(state),
+                                 {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                                 /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
+      issue(wave, inst, access, exec);
+    }
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  /// Report one arrival at `cell`, as the simulator does once the cell is
+  /// updated. The plugin uses the source, the address and whether the phase
+  /// completed; the cell states are filled in to match: a cell that needs one
+  /// arrival per phase completes on each, one that needs two is left with one
+  /// pending. Returns whether it raced.
+  bool arrived(int wave, Source source, uint32_t cell, bool completes) {
+    const size_t previous = sink->str().size();
+    const uint64_t old_state = lds_barrier_cell_init_state(completes ? 1 : 2);
+    fixture.plugin_group_->onAmdgpuLdsBarrierArrived(
+        {.source = source,
+         .cell_address = cell,
+         .old_state = old_state,
+         .new_state = lds_barrier_cell_update_arrive(old_state),
+         .phase_completed = completes},
+        *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  /// A DS arrive instruction and its arrival. Returns whether either raced.
+  bool arrive(int wave, Source source, uint32_t cell = kCell, bool completes = true) {
+    const bool issue_raced = issue_arrive(wave, source, cell);
+    return arrived(wave, source, cell, completes) || issue_raced;
+  }
+
+  /// How many times `needle` occurs in `text`.
+  static int occurrences(std::string_view text, std::string_view needle) {
+    int count = 0;
+    for (size_t at = text.find(needle); at != std::string_view::npos;
+         at = text.find(needle, at + needle.size()))
+      ++count;
+    return count;
+  }
+
+  /// Poll the cell with a DS load of its low dword, which holds the phase
+  /// (CDNA5 ISA 11.2.2, Table 70), and wait for the value. Returns whether the
+  /// load raced.
+  bool poll(int wave, uint32_t cell = kCell) {
+    const bool raced = ds_read(wave, cell);
+    wait_dscnt(wave, 0);
+    return raced;
+  }
+};
+
+// The canonical async handoff: the producer never waits on ASYNCcnt, because
+// the arrive executes only after its earlier async loads (CDNA5 ISA 11.2.2).
+TEST_F(LdsBarrierCellRaceTest, AsyncArriveHandsOffAPendingAsyncLoad) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+TEST_F(LdsBarrierCellRaceTest, AsyncLoadIssuedAfterTheArriveRaces) {
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// A consumer that reads the tile without reading the cell acquired nothing.
+TEST_F(LdsBarrierCellRaceTest, HandoffWithoutAReadOfTheCellRaces) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// ds_atomic_barrier_arrive_rtn_b64 is in order with the wave's DS instructions
+// (CDNA5 ISA 11.2.2), so it hands off a DS write the wave has not waited for.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveHandsOffAPendingDsWrite) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::DsAtomic));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+// The returning arrive reads the cell, so the wave whose arrival completes the
+// phase acquires it without a separate load.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveThatCompletesThePhaseAcquiresIt) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::DsAtomic, kCell, /*completes=*/false));
+  EXPECT_FALSE(arrive(1, Source::DsAtomic, kCell, /*completes=*/true));
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+// The async arrive returns nothing, so it acquires nothing.
+TEST_F(LdsBarrierCellRaceTest, AsyncArriveThatCompletesThePhaseDoesNotAcquireIt) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::DsAtomic, kCell, /*completes=*/false));
+  EXPECT_FALSE(arrive(1, Source::AsyncDsAtomic, kCell, /*completes=*/true));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// A tensor transfer's arrival follows the transfer (CDNA5 ISA 10.11.3), so the
+// producer never waits on TENSORcnt.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalHandsOffItsTensorLoad) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile + 4));
+}
+
+// The same transfer with no arrival reported: the release comes from the
+// arrival hook, not from the consumer's read of the cell.
+TEST_F(LdsBarrierCellRaceTest, TensorLoadWithoutAnArrivalRaces) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile + 4));
+}
+
+// A tensor load, a TENSORcnt wait, then an async arrive: the arrive releases
+// the load the wave has completed.
+TEST_F(LdsBarrierCellRaceTest, TensorLoadWaitedBeforeAnAsyncArriveIsHandedOff) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_read(1, kTile + 4));
+}
+
+// Tensor instructions are unordered with other memory instructions (CDNA5 ISA
+// 10.11.1), so an async arrive does not follow a pending tensor load.
+TEST_F(LdsBarrierCellRaceTest, TensorLoadWaitedAfterAnAsyncArriveRaces) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile + 4));
+}
+
+// An arrive updates the cell atomically, so polling the cell from another
+// wave is not a race, whichever comes first.
+TEST_F(LdsBarrierCellRaceTest, PollingACellIsNotARace) {
+  uint32_t cell = kCell;
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    EXPECT_FALSE(arrive(0, source, cell)) << "arrive, then poll";
+    EXPECT_FALSE(poll(1, cell)) << "arrive, then poll";
+    cell += 16;
+    EXPECT_FALSE(poll(1, cell)) << "poll, then arrive";
+    EXPECT_FALSE(arrive(0, source, cell)) << "poll, then arrive";
+    cell += 16;
+  }
+}
+
+// A wave that polls a cell after its own async arrive: the arrive is in the
+// async-load class and the load in the LDS class.
+TEST_F(LdsBarrierCellRaceTest, PollingACellAfterTheWavesOwnAsyncArriveIsNotARace) {
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  EXPECT_FALSE(poll(0));
+}
+
+// A plain store to the cell is ordinary LDS data. A tensor transfer's arrival
+// at a cell another wave stores to, with no barrier between them, races with
+// the store in either order: the store can erase the arrival. The arrival has
+// no lane.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverAnUnorderedInitRaces) {
+  {
+    SCOPED_TRACE("store, then arrival");
+    EXPECT_FALSE(ds_write(1, kCell));
+    wait_dscnt(1, 0);
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "RACE "), 1) << report;
+    EXPECT_EQ(occurrences(report, std::format("type=LDS access=read reg={} wave=0 lane=-1", kCell)),
+              1)
+        << report;
+  }
+  {
+    SCOPED_TRACE("arrival, then store");
+    const uint32_t cell = kCell + 16;
+    waves[0]->pc = 0x3000;
+    const uint64_t transfer_pc = waves[0]->pc + 16;
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile + 16, .bytes = 16}}));
+    EXPECT_FALSE(arrived(0, Source::TensorDma, cell, /*completes=*/true));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(ds_write(1, cell));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "RACE "), 1) << report;
+    EXPECT_EQ(occurrences(report, std::format("type=LDS access=write reg={} wave=1 lane=0", cell)),
+              1)
+        << report;
+    EXPECT_EQ(occurrences(report, "write-after-read (WAR)"), 1) << report;
+    EXPECT_EQ(occurrences(
+                  report,
+                  std::format("  Conflict: arrival at an LDS barrier cell at PC 0x{:x}, wave 0.\n",
+                              transfer_pc)),
+              1)
+        << report;
+  }
+}
+
+// A wave that polled the cell after the phase completed acquired the transfer
+// and its arrival, so it may store to the cell.
+TEST_F(LdsBarrierCellRaceTest, StoreToTheCellAfterPollingATensorArrivalIsSafe) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_write(1, kCell));
+}
+
+// The arrival updates the cell atomically, as another wave's arrive does.
+TEST_F(LdsBarrierCellRaceTest, ArriveAfterATensorArrivalIsNotARace) {
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+    EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/false));
+    EXPECT_FALSE(arrive(1, source, kCell, /*completes=*/true));
+  }
+}
+
+// The ISA does not order a tensor transfer's arrival with its wave's DS
+// instructions (CDNA5 ISA 10.11.1), so the wave has to wait for the transfer
+// before it stores to the cell.
+TEST_F(LdsBarrierCellRaceTest, OwnStoreToTheCellBeforeTheTransfersWaitRaces) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_TRUE(ds_write(0, kCell));
+}
+
+// The cell shares the transfer's wait: once the wave has waited for the
+// transfer, its own store to the cell follows the arrival. Another wave's
+// store needs a barrier as well.
+TEST_F(LdsBarrierCellRaceTest, StoreToTheCellAfterTheTransfersWait) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(ds_write(0, kCell)) << "after the wait";
+  wait_dscnt(0, 0);
+  EXPECT_TRUE(ds_write(1, kCell)) << "another wave, no barrier";
+  wait_dscnt(1, 0);
+  barrier();
+  EXPECT_FALSE(ds_write(1, kCell)) << "another wave, after a barrier";
+}
+
+// The arrival takes no TENSORcnt slot: s_wait_tensorcnt 1 after two transfers
+// completes the first and its arrival, and not the second and its arrival.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalTakesNoTensorcntSlot) {
+  const uint32_t second_cell = kCell + 16;
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile + 16, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, second_cell, /*completes=*/true));
+  wait_tensorcnt(0, 1);
+  EXPECT_FALSE(ds_write(0, kCell));
+  EXPECT_TRUE(ds_write(0, second_cell));
+}
+
+// The ISA does not order a tensor transfer's arrival with its wave's DS
+// instructions (CDNA5 ISA 10.11.1), so the wave has to wait for its own store
+// to the cell before a transfer arrives there.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverTheWavesOwnPendingInitRaces) {
+  EXPECT_FALSE(ds_write(0, kCell));
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_TRUE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+}
+
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverTheWavesOwnCompletedInitIsSafe) {
+  EXPECT_FALSE(ds_write(0, kCell));
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+}
+
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverAnInitOrderedByABarrierIsSafe) {
+  EXPECT_FALSE(ds_write(1, kCell));
+  wait_dscnt(1, 0);
+  barrier();
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+}
+
+// A FLAT load whose address resolves to the cell reads it like a DS load.
+TEST_F(LdsBarrierCellRaceTest, FlatLoadOfTheCellAcquires) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+  const size_t previous = sink->str().size();
+  flat_load(1, /*vgpr=*/8, FlatRoute::Lds);
+  EXPECT_EQ(sink->str().find("RACE ", previous), std::string::npos);
+  wait_loadcnt(1, 0);
+  wait_dscnt(1, 0);
+  EXPECT_FALSE(ds_read(1, kTile));
+}
+
+// ds_atomic_barrier_arrive_rtn_b64 with an update value of zero reads the cell
+// without arriving: the simulator reports it with the cell unchanged. No phase
+// waits for it, so it releases and hands off nothing, and the pending write is
+// not ordered for the wave whose arrival completes the phase.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveWithUpdateZeroReleasesNothing) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(issue_arrive(0, Source::DsAtomic, kCell));
+  const uint64_t unchanged = lds_barrier_cell_init_state(1);
+  fixture.plugin_group_->onAmdgpuLdsBarrierArrived({.source = Source::DsAtomic,
+                                                    .cell_address = kCell,
+                                                    .old_state = unchanged,
+                                                    .new_state = unchanged,
+                                                    .phase_completed = false},
+                                                   *waves[0]);
+  EXPECT_FALSE(arrive(1, Source::DsAtomic));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
+// A race report describes a barrier arrive as an arrival, not as a plain
+// transfer: a plain store over a cell another wave arrived at conflicts with
+// the arrive's read of the cell.
+TEST_F(LdsBarrierCellRaceTest, ReportDescribesTheConflictingArrive) {
+  uint32_t cell = kCell;
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    waves[0]->pc = 0x3000 + cell;
+    const uint64_t arrive_pc = waves[0]->pc + 16;
+    EXPECT_FALSE(arrive(0, source, cell));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(ds_write(1, cell));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "write-after-read (WAR)"), 1) << report;
+    EXPECT_EQ(occurrences(
+                  report,
+                  std::format(
+                      "  Conflict: arrival at an LDS barrier cell{} at PC 0x{:x}, wave 0.\n",
+                      source == Source::DsAtomic ? " returning the cell to VGPRs" : "", arrive_pc)),
+              1)
+        << report;
+    cell += 16;
+  }
+}
+
+// A FLAT load routed to LDS that the wave has not waited for is handed off by
+// a returning arrive, which stays in order with it (CDNA5 ISA 5.7.1.3), so
+// the wave that reads the cell may overwrite the bytes the load read.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveHandsOffAPendingFlatLdsLoad) {
+  flat_load(0, /*vgpr=*/8, FlatRoute::Lds);
+  EXPECT_FALSE(arrive(0, Source::DsAtomic, kCell + 16));
+  EXPECT_FALSE(poll(1, kCell + 16));
+  EXPECT_FALSE(ds_write(1, kFlatLdsAddress));
+}
+
+// A FLAT load whose lanes split between global memory and LDS has its LDS
+// lanes checked when they are accessed, after its global lanes translate. Its
+// read of a cell acquires then, not when the instruction issues.
+TEST_F(LdsBarrierCellRaceTest, MixedFlatLoadOfTheCellAcquiresWhenItsLdsLanesAreAccessed) {
+  constexpr uint32_t kOtherTile = kTile + 32;
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(async_load(0, kOtherTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+
+  // Lane 0 resolves to global memory and lane 1 to the cell.
+  waves[1]->pc += 16;
+  constexpr uint64_t kExec = 0x3;
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = waves[1]->wf_size();
+  state->exec_mask = kExec;
+  state->lane_mask = kExec;
+  state->dst_reg_base = waves[1]->vgpr_alloc().base + 8;
+  state->per_lane_addr[0] = kCell;
+  state->per_lane_addr[1] = kCell;
+  TestMemoryInstruction load(std::move(state),
+                             {{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM},
+                              {WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                             /*exec_masked=*/true, "flat_load_b32");
+  // Execution records the issue it routed, which defers the LDS lanes.
+  load.data_as<VectorMemState>()->routed_issue_info = *load.amdgpu_memory_issue_info();
+  MemoryAccessObservation access{};
+  access.route = MemoryRoute::GLOBAL;
+  access.decoded_space = DecodedMemorySpace::FLAT;
+  access.request_lane_mask = kExec;
+  access.flat_local_lane_mask = 0x2;
+  const size_t previous = sink->str().size();
+  issue(1, load, access, kExec);
+  EXPECT_EQ(sink->str().find("RACE ", previous), std::string::npos);
+
+  // The cell has not been read yet, so nothing is acquired.
+  EXPECT_TRUE(ds_read(1, kTile));
+  fixture.plugin_group_->onAmdgpuMixedFlatLdsAccess(load, *waves[1]);
+  EXPECT_FALSE(ds_read(1, kOtherTile));
+}
+
+// With EXEC zero no lane arrives, so the simulator reports no arrival (see
+// LdsBarrierArriveTest.ExecZeroArriveReportsNothing) and nothing is handed
+// off: the instruction is issued here without one.
+TEST_F(LdsBarrierCellRaceTest, ExecZeroArriveHandsOffNothing) {
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(issue_arrive(0, Source::AsyncDsAtomic, kCell, /*exec=*/0));
+  EXPECT_FALSE(poll(1));
+  EXPECT_TRUE(ds_read(1, kTile));
 }
 
 // Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
@@ -2507,9 +3043,25 @@ protected:
     waves[1]->end();
   }
 
+  /// Wave 0 alone signals, completes and passes a round of a `kind` barrier.
   void barrier_without_wave_1(BarrierKind kind) {
+    BarrierRound round{.kind = kind};
+    switch (kind) {
+    case BarrierKind::Workgroup:
+      round = workgroup_round(next_workgroup_generation++);
+      break;
+    case BarrierKind::Named:
+      round.completion_bit = kNamedBarrierBit;
+      round.named_id = 1;
+      break;
+    case BarrierKind::Cluster:
+      round.completion_bit = kClusterBarrierBit;
+      break;
+    }
     std::array<Wavefront *, 1> remaining{waves[0]};
-    fixture.plugin_group_->onAmdgpuBarrierResolved(remaining, kind);
+    signal(0, round);
+    complete(round, remaining);
+    wait_passed(0, round);
   }
 };
 
@@ -2555,6 +3107,196 @@ TEST_F(ExitedWaveRaceTest, NamedAndClusterBarriersDoNotRetireCompletedWrite) {
   EXPECT_TRUE(ds_read(0, 64));
 }
 
+// --- Split barriers: a signal releases what its wave completed before it; a
+// --- passed wait acquires the round. ---
+
+/// The report text written since `previous`.
+std::string report_since(const StringSink &sink, size_t previous) {
+  return sink.str().substr(previous);
+}
+
+TEST_F(TensorDmaRaceTest, TensorcntWaitBeforeSignalIsSafe) {
+  const BarrierRound round = workgroup_round(0);
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  signal(0, round);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  EXPECT_FALSE(ds_read(1, 4));
+}
+
+// The load completes after wave 0's signal, so the round never released it.
+TEST_F(TensorDmaRaceTest, TensorcntWaitAfterSignalRacesInAnotherWave) {
+  const BarrierRound round = workgroup_round(0);
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  signal(0, round);
+  wait_tensorcnt(0, 0);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 4));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=1 lane=0"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, AsynccntWaitBeforeSignalIsSafe) {
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(dtl_write(0, 4));
+  wait_asynccnt(0, 0);
+  signal(0, round);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  EXPECT_FALSE(ds_read(1, 4));
+}
+
+// The async load to LDS completes after wave 0's signal.
+TEST_F(TensorDmaRaceTest, AsynccntWaitAfterSignalRacesInAnotherWave) {
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(dtl_write(0, 4));
+  signal(0, round);
+  wait_asynccnt(0, 0);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 4));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=1 lane=0"), std::string::npos) << report;
+}
+
+// Wave 1 ends after the round completes, without passing its wait; wave 0
+// still acquires the round at its wait, and the round leaves no state behind.
+TEST_F(TensorDmaRaceTest, HaltDuringOpenRoundReleasesState) {
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(ds_write(1, 64));
+  wait_dscnt(1);
+  signal(1, round);
+  signal(0, round);
+  complete(round, waves);
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  wait_passed(0, round);
+  EXPECT_FALSE(ds_read(0, 64));
+  EXPECT_EQ(detector().openBarrierRounds(), 0u);
+  EXPECT_EQ(detector().liveLdsWriteEvents(), 0u);
+}
+
+// The ended wave's write is released into the workgroup round, which wave 0
+// acquires only at its wait.
+TEST_F(ExitedWaveRaceTest, WorkgroupRoundOrdersExitedWriteOnlyAfterWait) {
+  write_and_exit(/*wait=*/true);
+  const BarrierRound round = workgroup_round(0);
+  std::array<Wavefront *, 1> remaining{waves[0]};
+  signal(0, round);
+  complete(round, remaining);
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(0, 64));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=0 lane=0"), std::string::npos) << report;
+  wait_passed(0, round);
+}
+
+// Both waves signal two rounds without waiting. The second round arms no wave,
+// since their completion bits are still set by the first, so the detector
+// closes it at once; the first closes when both have waited.
+TEST_F(TensorDmaRaceTest, RoundThatArmsNoWaveClosesInTheDetector) {
+  const BarrierRound round0 = workgroup_round(0);
+  const BarrierRound round1 = workgroup_round(1);
+  signal(0, round0);
+  signal(1, round0);
+  complete(round0, waves);
+  signal(0, round1);
+  signal(1, round1);
+  EXPECT_EQ(detector().openBarrierRounds(), 2u);
+  complete(round1, waves, /*armed=*/{});
+  EXPECT_EQ(detector().openBarrierRounds(), 1u);
+  wait_passed(0, round0);
+  wait_passed(1, round0);
+  EXPECT_EQ(detector().openBarrierRounds(), 0u);
+}
+
+// The barrier hooks are not filtered by wave subscription. A wave the plugin
+// holds no state for, here one whose workgroup was never reported to it, is
+// skipped, and the round still orders the fixture's waves.
+class UntrackedWaveRaceTest : public TensorDmaRaceTest {
+protected:
+  UntrackedWaveRaceTest() { wf_slots = 3; }
+};
+
+TEST_F(UntrackedWaveRaceTest, BarrierHooksSkipWavesWithoutPluginState) {
+  Wavefront *stranger = fixture.cu()->dispatch_wf(/*wg_id=*/7, /*pc=*/0x100, /*sgprs=*/128,
+                                                  /*vgprs=*/256, /*wf_size=*/32);
+  ASSERT_NE(stranger, nullptr);
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(ds_write(0, 64));
+  wait_dscnt(0);
+  signal(0, round);
+  signal(1, round);
+  fixture.plugin_group_->onAmdgpuBarrierSignaled(*stranger, round);
+  std::array<Wavefront *, 3> members{waves[0], waves[1], stranger};
+  complete(round, members);
+  fixture.plugin_group_->onAmdgpuBarrierWaitPassed(*stranger, round);
+  wait_passed(0, round);
+  wait_passed(1, round);
+  EXPECT_FALSE(ds_read(1, 64));
+  EXPECT_EQ(detector().openBarrierRounds(), 0u);
+}
+
+/// Adds a second workgroup of two waves to TensorDmaRaceTest, for cluster
+/// rounds, whose members span workgroups and therefore race detectors.
+class ClusterRoundRaceTest : public TensorDmaRaceTest {
+protected:
+  ClusterRoundRaceTest() { wf_slots = 4; }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(TensorDmaRaceTest::SetUp());
+    for (auto &peer : peers) {
+      peer = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0x100, /*sgprs=*/128, /*vgprs=*/256,
+                                       /*wf_size=*/32);
+      ASSERT_NE(peer, nullptr);
+      peer->set_exec(1);
+    }
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/1, 256, 128,
+                                                       peers);
+  }
+
+  static BarrierRound cluster_round(uint64_t generation) {
+    return {.kind = BarrierKind::Cluster,
+            .completion_bit = kClusterBarrierBit,
+            .named_id = 0,
+            .generation = generation};
+  }
+
+  std::array<Wavefront *, 2> peers{};
+};
+
+// One wave per workgroup signals the cluster round. Each workgroup's detector
+// orders only its own waves, and wave 1, which has not passed its wait, has
+// acquired nothing.
+TEST_F(ClusterRoundRaceTest, ClusterRoundOrdersEachWorkgroupAtItsWaits) {
+  const BarrierRound round = cluster_round(0);
+  EXPECT_FALSE(ds_write(0, 64));
+  wait_dscnt(0);
+  signal(0, round);
+  fixture.plugin_group_->onAmdgpuBarrierSignaled(*peers[0], round);
+  std::array<Wavefront *, 4> members{waves[0], waves[1], peers[0], peers[1]};
+  complete(round, members);
+  wait_passed(0, round);
+  for (auto *peer : peers)
+    fixture.plugin_group_->onAmdgpuBarrierWaitPassed(*peer, round);
+  EXPECT_FALSE(ds_access(*peers[1], 64, /*is_load=*/true));
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 64));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=1 lane=0"), std::string::npos) << report;
+}
+
 // Run a two-wave CDNA4 kernel: wave 1 writes LDS, optionally waits for the
 // write, and ends; wave 0 passes s_barrier and reads the same bytes. Returns
 // the race report.
@@ -2580,7 +3322,7 @@ std::string run_exited_writer_kernel(bool wait) {
   const auto write = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 1, .data0 = 0});
   // offset1 is the high byte of the 16-bit offset, so the read is at v1 + 256.
   const auto read = cdna4::build_ds(cdna4::kDsReadB32Ds, {.offset1 = 1, .addr = 1, .vdst = 2});
-  const uint32_t lgkm_wait = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0);
+  const uint32_t lgkm_wait = legacy_wait_word(rocjitsu::IsaFamily::Cdna4, 63, 0);
   const uint32_t code[] = {
       first_id[0],
       address[0],
@@ -3006,6 +3748,119 @@ TEST(RaceDetectorPluginTest, Gfx11ConditionalImageFeedbackSharesThePayloadCounte
   }
 }
 
+TEST(RaceDetectorPluginTest, Cdna2ClaimedLdsToBufferFaultLeavesNoOutstandingLdsRead) {
+  for (const bool fault : {false, true}) {
+    for (const bool wait : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "fault=" << fault << " wait=" << wait);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna2", 64, 102));
+      PluginSinkConfig config;
+      auto &sink = config.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+      auto *cu = f.cu();
+      GpuVm vm;
+      std::shared_ptr<AddressSpaceTranslator> translator;
+      if (fault)
+        translator = std::make_shared<FaultingLdsStorePage>();
+      else
+        translator = std::make_shared<IdentityAddressSpaceTranslator>();
+      auto space = vm.register_address_space(5, std::move(translator),
+                                             std::make_shared<GpuMemoryPhysicalAccess>(*f.mem));
+      ASSERT_TRUE(space);
+      cu->set_gpu_vm(&vm);
+      constexpr uint64_t pc = 0x8000;
+      auto *wave = cu->dispatch_wf(0, pc, 32, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_process_id(5);
+      wave->set_address_space(space);
+      wave->set_lds_size(512);
+      wave->set_exec(1);
+      wave->set_m0(0);
+      const auto sb = wave->sgpr_alloc().base;
+      cu->write_sgpr(sb, 0x4000);
+      cu->write_sgpr(sb + 1, 4u << 16);
+      cu->write_sgpr(sb + 2, 256);
+      cu->write_sgpr(sb + 3, 1u << 23);
+      cu->write_vgpr(wave->vgpr_alloc().base + 2, 0, 99);
+      const auto buffer =
+          cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.lds = 1, .soffset = 128});
+      const auto ds = cdna2::build_ds(cdna2::kDsWriteB32, {.addr = 0, .data0 = 2});
+      const uint32_t code[] = {buffer[0], buffer[1], wait ? 0xbf8c0000u : 0xbf800000u, ds[0],
+                               ds[1]};
+      f.mem->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), pc);
+      std::array<Wavefront *, 1> waves{wave};
+      cu->begin_workgroup(0, 0, 1);
+      f.plugin_group_->onAmdgpuWorkgroupDispatched(0, 0, 32, 32, waves);
+      bool claimed = false;
+      cu->set_memory_violation_handler([&](Wavefront &, uint64_t, bool, uint64_t issue_pc) {
+        EXPECT_EQ(issue_pc, pc);
+        claimed = true;
+        return true;
+      });
+      for (unsigned tick = 0; tick < 32 && wave->pc != pc + sizeof(code); ++tick)
+        cu->step();
+      ASSERT_EQ(wave->pc, pc + sizeof(code));
+      EXPECT_EQ(claimed, fault);
+      EXPECT_EQ(cu->lds().read32(0), 99u);
+      const bool race = sink.str().find("type=LDS access=write reg=0") != std::string::npos;
+      EXPECT_EQ(race, !fault && !wait) << sink.str();
+      wave->set_address_space({});
+      cu->set_gpu_vm(nullptr);
+      wave->halt();
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Cdna2FaultingLdsToBufferKeepsOlderDsScoreboardPosition) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna2", 64, 102));
+  auto *cu = f.cu();
+  GpuVm vm;
+  auto space = vm.register_address_space(5, std::make_shared<FaultingLdsStorePage>(),
+                                         std::make_shared<GpuMemoryPhysicalAccess>(*f.mem));
+  ASSERT_TRUE(space);
+  cu->set_gpu_vm(&vm);
+  constexpr uint64_t pc = 0x8000;
+  auto *wave = cu->dispatch_wf(0, pc, 32, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(5);
+  wave->set_address_space(space);
+  wave->set_lds_size(512);
+  wave->set_exec(1);
+  wave->set_m0(0);
+  const auto sb = wave->sgpr_alloc().base;
+  cu->write_sgpr(sb, 0x4000);
+  cu->write_sgpr(sb + 1, 4u << 16);
+  cu->write_sgpr(sb + 2, 256);
+  cu->write_sgpr(sb + 3, 1u << 23);
+  cu->write_vgpr(wave->vgpr_alloc().base, 0, 0);
+  const auto ds = cdna2::build_ds(cdna2::kDsReadB32, {.addr = 0, .vdst = 8});
+  const auto store = cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.lds = 1, .soffset = 128});
+  const uint32_t code[] = {ds[0], ds[1], store[0], store[1]};
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), pc);
+  bool claimed = false;
+  cu->set_memory_violation_handler([&](Wavefront &, uint64_t, bool, uint64_t issue_pc) {
+    claimed = true;
+    EXPECT_EQ(issue_pc, pc + 8);
+    return true;
+  });
+  ASSERT_TRUE(cu->step());
+  ASSERT_EQ(wave->pc, pc + 8);
+  const auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  ASSERT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  ASSERT_TRUE(cu->step());
+  ASSERT_TRUE(claimed);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 0u);
+  wave->set_address_space({});
+  cu->set_gpu_vm(nullptr);
+  wave->halt();
+}
+
 TEST(RaceDetectorPluginTest, Cdna2DsChecksAndRecordsOnlyCompleteElementsInWorkgroupLds) {
   struct Case {
     uint16_t store_opcode;
@@ -3043,7 +3898,7 @@ TEST(RaceDetectorPluginTest, Cdna2DsChecksAndRecordsOnlyCompleteElementsInWorkgr
       wave->set_lds_size(1024);
     }
     f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 204, waves);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna2);
     ASSERT_NE(decoder, nullptr);
     const auto route = [&](unsigned wave_idx, uint16_t op, uint32_t offset, uint8_t offset1) {
       auto *wave = waves[wave_idx];
@@ -3483,22 +4338,35 @@ TEST(RaceDetectorPluginTest, Rdna4InterpolationRetiresItsEmbeddedWaitBeforeReadi
   }
 }
 
+// Wave 0 writes and takes no part in wave 1's barriers. A named round can
+// complete without it and orders nothing it wrote. A workgroup round can
+// complete without it only once it has ended, and then orders its write.
 TEST_F(TensorDmaRaceTest, OnlyWholeWorkgroupBarriersPublishAnAbsentWritersCompletedBytes) {
   EXPECT_FALSE(ds_write(0, 64));
   wait_dscnt(0);
   const auto reader = std::span(waves).subspan(1);
-  fixture.plugin_group_->onAmdgpuBarrierResolved(reader, BarrierKind::Named);
+  const BarrierRound named{.kind = BarrierKind::Named,
+                           .completion_bit = kNamedBarrierBit,
+                           .named_id = 1,
+                           .generation = 0};
+  signal(1, named);
+  complete(named, reader);
+  wait_passed(1, named);
   EXPECT_TRUE(ds_read(1, 64));
 
   EXPECT_FALSE(ds_write(0, 128));
   wait_dscnt(0);
-  fixture.plugin_group_->onAmdgpuBarrierResolved(reader, BarrierKind::Workgroup);
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[0]);
+  const BarrierRound workgroup = workgroup_round(0);
+  signal(1, workgroup);
+  complete(workgroup, reader);
+  wait_passed(1, workgroup);
   EXPECT_FALSE(ds_read(1, 128));
 }
 
 class RoutedRaceControl {
 public:
-  void initialize(const char *target, rj_code_arch_t arch) {
+  void initialize(const char *target, rocjitsu::IsaFamily arch) {
     ASSERT_NO_FATAL_FAILURE(fixture.initialize(2, target, 32, 106));
     PluginSinkConfig config;
     sink = &config.emplace<StringSink>();
@@ -3549,8 +4417,9 @@ TEST(RaceDetectorPluginTest, UnorderedGlobalWritebackRequiresWaitOnTheSplitLoadC
     for (bool waited : {false, true}) {
       SCOPED_TRACE(testing::Message() << cdna << ' ' << waited);
       RoutedRaceControl r;
-      ASSERT_NO_FATAL_FAILURE(r.initialize(
-          cdna ? "cdna5" : "rdna4", cdna ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_RDNA4));
+      ASSERT_NO_FATAL_FAILURE(
+          r.initialize(cdna ? "cdna5" : "rdna4",
+                       cdna ? rocjitsu::IsaFamily::Cdna5 : rocjitsu::IsaFamily::Rdna4));
       r.fixture.mem->write32(0x9000, 11);
       r.set(0, 0, 0x9000);
       r.set(0, 1, 0);
@@ -3569,9 +4438,9 @@ TEST(RaceDetectorPluginTest, UnorderedGlobalWritebackRequiresWaitOnTheSplitLoadC
 }
 
 TEST(RaceDetectorPluginTest, FaultingNativeAtomicDoesNotClaimPeerLdsBytes) {
-  for (auto [name, arch] :
-       {std::pair{"rdna3", ROCJITSU_CODE_ARCH_RDNA3}, std::pair{"rdna4", ROCJITSU_CODE_ARCH_RDNA4},
-        std::pair{"cdna5", ROCJITSU_CODE_ARCH_CDNA5}}) {
+  for (auto [name, arch] : {std::pair{"rdna3", rocjitsu::IsaFamily::Rdna3},
+                            std::pair{"rdna4", rocjitsu::IsaFamily::Rdna4},
+                            std::pair{"cdna5", rocjitsu::IsaFamily::Cdna5}}) {
     for (bool aligned : {false, true}) {
       SCOPED_TRACE(testing::Message() << name << ' ' << aligned);
       RoutedRaceControl r;
@@ -3594,8 +4463,9 @@ TEST(RaceDetectorPluginTest, SharedFlatStorePublishesAfterItsLdsCounterRetires) 
   for (bool split : {false, true}) {
     for (bool waited : {false, true}) {
       RoutedRaceControl r;
-      ASSERT_NO_FATAL_FAILURE(r.initialize(
-          split ? "rdna4" : "rdna3", split ? ROCJITSU_CODE_ARCH_RDNA4 : ROCJITSU_CODE_ARCH_RDNA3));
+      ASSERT_NO_FATAL_FAILURE(
+          r.initialize(split ? "rdna4" : "rdna3",
+                       split ? rocjitsu::IsaFamily::Rdna4 : rocjitsu::IsaFamily::Rdna3));
       constexpr uint64_t shared = uint64_t{16} << 32;
       r.waves[0]->set_apertures(shared, shared + 0xffff, 0, 0, /*override_launch=*/true);
       r.set(0, 0, 64);
@@ -3613,7 +4483,7 @@ TEST(RaceDetectorPluginTest, SharedFlatStorePublishesAfterItsLdsCounterRetires) 
       if (waited) {
         ASSERT_NO_FATAL_FAILURE(r.issue(0, std::array{split ? 0xbfc60000u : 0xbf89fc07u}));
       }
-      r.fixture.plugin_group_->onAmdgpuBarrierResolved(r.waves, BarrierKind::Workgroup);
+      report_workgroup_barrier(*r.fixture.plugin_group_, r.waves);
       r.set(1, 4, 64);
       ASSERT_NO_FATAL_FAILURE(r.issue(1, std::array{0xd8d80000u, 0x08000004u})); // DS_LOAD_B32
       EXPECT_EQ(r.waves[1]->debug_read_vgpr(8, 0), 11u);
@@ -3761,7 +4631,7 @@ TEST(RaceDetectorPluginTest, OnlySuccessfulRdna2EndpgmCompletesTheLegacyWaitCoun
   ASSERT_NE(waves[1], nullptr);
   ASSERT_NE(waves[2], nullptr);
   f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 768, 318, waves);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   using Counter = amdgpu::WaitCounterType;
   constexpr std::array counters{Counter::VMCNT, Counter::LGKMCNT, Counter::EXPCNT, Counter::VSCNT};
   for (int i : {0, 1, 2}) {
@@ -3920,42 +4790,46 @@ TEST(RaceDetectorPluginTest, Rdna2SingleCounterWaitReadsItsThresholdBeforeRetiri
 }
 
 TEST(RaceDetectorPluginTest, Rdna2EmptyReturningDsAtomicHasAnLgkmcntPosition) {
-  for (const bool issue_atomic : {true, false}) {
-    SCOPED_TRACE(testing::Message() << "returning_atomic=" << issue_atomic);
-    PluginFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna2", 32, 106, 256));
-    PluginSinkConfig config;
-    auto &sink = config.emplace<StringSink>();
-    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
-    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
-    f.soc->set_plugin_group(f.plugin_group_);
-    f.plugin_group_->onInit();
-    const auto first = rdna2::build_ds(rdna2::kDsReadB32, {.addr = 8, .vdst = 0});
-    const auto second = rdna2::build_ds(rdna2::kDsAddRtnU64, {.addr = 8, .data0 = 4, .vdst = 15});
-    const uint32_t nop = 0xbf800000;
-    const uint32_t code[] = {
-        0xbefc03ff,
-        0x00800000, // s_mov_b32 m0, (128 << 16): GDS window
-        first[0],    first[1], issue_atomic ? second[0] : nop, issue_atomic ? second[1] : nop,
-        0xbf8cc17fu, // lgkmcnt(1) retires the older LDS/GDS result.
-        0x7e040300,
-        0x7e06030f, // consume the older v0 and the suppressed v15
-        0xbf810000};
-    const auto kernel = f.write_kernel(0x1000, code, std::size(code), 12, 1024);
-    using namespace amdhsa;
-    auto count = f.mem->read32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1));
-    RJ_AMDHSA_BITS_SET(count, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 1);
-    f.mem->write32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1), count);
-    auto properties = f.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
-    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
-    f.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties), properties);
-    test::AqlQueue queue(f.mem, f.cp());
-    queue.dispatch(kernel, 32, 32);
-    f.run_until_idle();
-    ASSERT_TRUE(f.cu()->is_idle());
-    EXPECT_EQ(sink.str().find("Race on VGPR v0 [") != std::string::npos, !issue_atomic);
-    EXPECT_EQ(sink.str().find("Race on VGPR v15 ["), std::string::npos);
-    EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(!issue_atomic));
+  for (const bool gds : {false, true}) {
+    for (const bool issue_atomic : {true, false}) {
+      SCOPED_TRACE(testing::Message() << "gds=" << gds << " returning_atomic=" << issue_atomic);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna2", 32, 106, 256));
+      PluginSinkConfig config;
+      auto &sink = config.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+      const auto first = rdna2::build_ds(rdna2::kDsReadB32, {.gds = gds, .addr = 8, .vdst = 0});
+      const auto second =
+          rdna2::build_ds(rdna2::kDsAddRtnU64, {.gds = gds, .addr = 8, .data0 = 4, .vdst = 15});
+      const uint32_t nop = 0xbf800000;
+      const uint32_t code[] = {
+          0xbefc03ff,
+          0x00800000, // s_mov_b32 m0, (128 << 16): GDS window
+          first[0],    first[1], issue_atomic ? second[0] : nop, issue_atomic ? second[1] : nop,
+          0xbf8cc17fu, // lgkmcnt(1) retires the older LDS/GDS result.
+          0x7e040300,
+          0x7e06030f, // consume the older v0 and the suppressed v15
+          0xbf810000};
+      const auto kernel = f.write_kernel(0x1000, code, std::size(code), 12, 1024);
+      using namespace amdhsa;
+      auto count = f.mem->read32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1));
+      RJ_AMDHSA_BITS_SET(count, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 1);
+      f.mem->write32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1), count);
+      auto properties =
+          f.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
+      RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+      f.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties), properties);
+      test::AqlQueue queue(f.mem, f.cp());
+      queue.dispatch(kernel, 32, 32);
+      f.run_until_idle();
+      ASSERT_TRUE(f.cu()->is_idle());
+      EXPECT_EQ(sink.str().find("Race on VGPR v0 [") != std::string::npos, !issue_atomic);
+      EXPECT_EQ(sink.str().find("Race on VGPR v15 ["), std::string::npos);
+      EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(!issue_atomic));
+    }
   }
 }
 
@@ -4076,7 +4950,7 @@ TEST(RaceDetectorPluginTest, Rdna2FlatIssuesBothCountersAcrossRoutedDomains) {
 }
 
 TEST(RaceDetectorPluginTest, Rdna2CounterOnlyIssuesKeepBoundedHistory) {
-  enum class Loop { FlatGlobal, FlatEmpty, BufferNull };
+  enum class Loop { FlatGlobal, FlatEmpty, BufferNull, GdsEmpty };
   constexpr uint32_t count = 1100, address = 0x4000, value = 0x76543210;
   class ObserveLoop : public ExecutionPlugin {
   public:
@@ -4097,7 +4971,7 @@ TEST(RaceDetectorPluginTest, Rdna2CounterOnlyIssuesKeepBoundedHistory) {
     bool saw_marker = false;
     uint32_t result = 0;
   };
-  for (const auto form : {Loop::FlatGlobal, Loop::FlatEmpty, Loop::BufferNull}) {
+  for (const auto form : {Loop::FlatGlobal, Loop::FlatEmpty, Loop::BufferNull, Loop::GdsEmpty}) {
     SCOPED_TRACE(static_cast<int>(form));
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna2", 64, 106, 256));
@@ -4111,10 +4985,12 @@ TEST(RaceDetectorPluginTest, Rdna2CounterOnlyIssuesKeepBoundedHistory) {
     ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
     f.soc->set_plugin_group(f.plugin_group_);
     f.plugin_group_->onInit();
-    const bool empty = form == Loop::FlatEmpty;
+    const bool empty = form == Loop::FlatEmpty || form == Loop::GdsEmpty;
     auto load = rdna2::build_flat(rdna2::kFlatLoadDword, {.addr = 8, .saddr = 125, .vdst = 4});
     if (form == Loop::BufferNull)
       load = rdna2::build_mubuf(rdna2::kBufferLoadDwordx2, {.vdata = 15, .soffset = 128});
+    if (form == Loop::GdsEmpty)
+      load = rdna2::build_ds(rdna2::kDsReadB32, {.gds = 1, .addr = 8, .vdst = 4});
     const uint32_t code[] = {0x7e1002ff,
                              address,
                              0x7e120280,
@@ -4434,6 +5310,302 @@ TEST(RaceDetectorPluginTest, Rdna2FlatAdmitsBothCountersBeforeReadingAddress) {
   }
 }
 
+static void check_gfx10_gds_exec_locks(const char *arch) {
+  constexpr uint32_t clear_scc = 0xbf070000, set_scc = 0xbf060000, nop = 0xbf800000;
+  constexpr uint32_t mov_lo = 0xbefe0381, cmov_lo = 0xbefe0580, cmov_hi = 0xbeff0580;
+  constexpr uint32_t cmov_pair = 0xbefe06c1, cmovk_lo = 0xb17e0001;
+  constexpr uint32_t bad_source = 0xbefe05d1; // s_cmov_b32 exec_lo, reserved selector 209
+  constexpr uint32_t loop_begin = 0xbd840000, loop_end = 0xbe040000;
+  constexpr uint32_t lgkm0 = 0xbf8cc07f, exp0 = 0xbf8cff0f;
+  struct Case {
+    uint32_t condition;
+    uint32_t probe;
+    bool wave32;
+    bool wave64;
+    uint32_t next = nop;
+    uint32_t low = 1;
+    uint32_t high = 0;
+  };
+  for (const auto &c : {
+           Case{clear_scc, cmov_lo, false, false}, Case{set_scc, cmov_lo, true, true},
+           Case{clear_scc, cmov_hi, false, false}, Case{set_scc, cmov_hi, false, true},
+           Case{clear_scc, cmov_pair, false, false}, Case{set_scc, cmov_pair, true, true},
+           Case{clear_scc, cmovk_lo, false, false}, Case{set_scc, cmovk_lo, true, true},
+           Case{clear_scc, cmov_lo, true, true,
+                mov_lo},                            // The following real write still sees the lock.
+           Case{set_scc, bad_source, false, false}, // Decode rejects the reserved source.
+           Case{nop, loop_begin, false, false, nop, 0, 1}, // High pass saves zero.
+           Case{nop, loop_end, true, true, nop, 0, 1},     // High pass writes EXEC_LO.
+           Case{nop, mov_lo, true, true},                  // EXEC_LO already equals 1.
+           Case{nop, 0x7da40100, true, true},      // v_cmpx_eq_u32 v0,v0 leaves EXEC unchanged.
+           Case{nop, loop_begin, false, true},     // Low pass clears only EXEC_HI.
+           Case{nop, loop_end, false, false},      // Saved s4 and EXEC_HI are zero.
+           Case{0xbe840381, loop_end, true, true}, // s_mov_b32 s4, 1 starts a high pass.
+           Case{nop, 0xbefe2104, true, true},      // s_swappc_b64 writes the return PC to EXEC.
+       }) {
+    for (uint32_t width : {32u, 64u}) {
+      for (uint32_t wait : {lgkm0, exp0}) {
+        SCOPED_TRACE(testing::Message() << std::hex << c.condition << "," << c.probe << " wave="
+                                        << std::dec << width << " wait=" << std::hex << wait);
+        PluginFixture f;
+        ASSERT_NO_FATAL_FAILURE(f.initialize(1, arch, 64, 106, 256));
+        PluginSinkConfig config;
+        auto &sink = config.emplace<StringSink>();
+        f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+        ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+        f.soc->set_plugin_group(f.plugin_group_);
+        f.plugin_group_->onInit();
+        const auto ds = rdna2::build_ds(rdna2::kDsReadB32, {.gds = 1, .addr = 8, .vdst = 4});
+        const uint32_t code[] = {0xbefc03ff,
+                                 0x00800004, // s_mov_b32 m0, GDS segment
+                                 0xbe840480, // s_mov_b64 s[4:5],0
+                                 0xbefe0380 + c.low,
+                                 0xbeff0380 + c.high, // s_mov_b32 exec_lo/hi, inline constant
+                                 ds[0],
+                                 ds[1],
+                                 wait,
+                                 c.condition,
+                                 c.probe,
+                                 c.next,
+                                 0xbf8c0000,
+                                 0xbf810000};
+        f.mem->write32(0, 0xbf810000); // S_ENDPGM at the SWAPPC target.
+        const auto kernel = f.write_kernel(0x1000, code, std::size(code), 12, 1024);
+        using namespace amdhsa;
+        auto properties =
+            f.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
+        RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, width == 32);
+        f.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties), properties);
+        test::AqlQueue queue(f.mem, f.cp());
+        queue.dispatch(kernel, width, width);
+        f.run_until_idle();
+        ASSERT_TRUE(f.cu()->is_idle());
+        EXPECT_EQ(f.engine->exit_code(), c.probe == bad_source ? 1 : 0);
+        const bool hazard = wait != exp0 && (width == 32 ? c.wave32 : c.wave64);
+        EXPECT_EQ(sink.str().find("Race on EXEC [") != std::string::npos, hazard);
+        EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(hazard));
+      }
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, Rdna1GdsExecLockChecksOnlyWrittenActiveWords) {
+  check_gfx10_gds_exec_locks("rdna1");
+}
+
+TEST(RaceDetectorPluginTest, Rdna2GdsExecLockChecksOnlyWrittenActiveWords) {
+  check_gfx10_gds_exec_locks("rdna2");
+}
+
+TEST(RaceDetectorPluginTest, Gfx10GdsRangeViolationIsIndependentOfRoutedObservers) {
+  class HaltStatus final : public ExecutionPlugin {
+  public:
+    HaltStatus() : ExecutionPlugin("halt_status") {}
+    void onAmdgpuWavefrontHalted(Wavefront &wave) override { trapsts = wave.trapsts(); }
+    std::optional<uint32_t> trapsts;
+  };
+
+  for (const char *arch : {"rdna1", "rdna2"}) {
+    for (bool observe : {false, true}) {
+      for (uint32_t offset : {0u, 16u}) {
+        SCOPED_TRACE(testing::Message() << arch << " observe=" << observe << " offset=" << offset);
+        PluginFixture f;
+        ASSERT_NO_FATAL_FAILURE(f.initialize(1, arch, 64, 106, 256));
+        PluginSinkConfig config;
+        config.emplace<StringSink>();
+        f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+        if (observe) {
+          ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+        }
+        auto status = std::make_unique<HaltStatus>();
+        auto *halt = status.get();
+        ASSERT_TRUE(f.plugin_group_->add(std::move(status)));
+        f.soc->set_plugin_group(f.plugin_group_);
+        f.plugin_group_->onInit();
+
+        // On RDNA2 a range violation enters the trap handler before the normal end instruction.
+        constexpr uint64_t trap_entry = 0x9000;
+        f.cu()->set_trap_handler_resolver([](const Wavefront &) {
+          return ComputeUnitCore::TrapHandlerConfig{trap_entry, 0, false};
+        });
+        f.mem->write32(trap_entry, 0xbf810000); // s_endpgm
+
+        const auto ds = rdna2::build_ds(rdna2::kDsReadB32, {.gds = 1, .addr = 8, .vdst = 4});
+        const uint32_t code[] = {0xba800501, 1,          // s_setreg_imm32_b32 MODE[20], 1
+                                 0xbefc03ff, 0x00800004, // M0 selects four bytes at 128.
+                                 0x7e1002ff, offset,     // v_mov_b32 v8, offset
+                                 0xbefe0481,             // s_mov_b64 exec, 1
+                                 ds[0],      ds[1],      0xbf8c0000, 0xbf810000};
+        const auto kernel = f.write_kernel(0x1000, code, std::size(code), 12, 1024);
+        test::AqlQueue queue(f.mem, f.cp());
+        queue.dispatch(kernel, 64, 64);
+        f.run_until_idle();
+        ASSERT_TRUE(halt->trapsts.has_value());
+        const bool mem_viol = (*halt->trapsts & (1u << 8)) != 0;
+        EXPECT_EQ(mem_viol, std::string_view(arch) == "rdna2" && offset >= 4);
+      }
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, Rdna2GdsViolationHandlerRetiresOnlyTheFaultingSourceLock) {
+  constexpr uint32_t nop = 0xbf800000, exp0 = 0xbf8cff0f;
+  constexpr uint32_t write_addr = 0x7e100280, write_exec = 0xbefe0481;
+  constexpr uint64_t tba = 0x9000;
+  struct Case {
+    uint8_t offset;
+    bool enable_trap;
+    bool older_gds;
+    bool wait_exp;
+    bool source_hazard;
+  };
+  const Case cases[] = {
+      {8, true, false, false, false}, {8, true, true, false, true},  {8, true, true, true, false},
+      {8, false, false, false, true}, {0, true, false, false, true}, {0, true, false, true, false},
+  };
+  for (uint32_t width : {32u, 64u}) {
+    for (const auto &c : cases) {
+      for (const bool probe_vgpr : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "width=" << width << " offset=" << unsigned(c.offset)
+                                        << " trap=" << c.enable_trap << " older=" << c.older_gds
+                                        << " wait=" << c.wait_exp << " probe_vgpr=" << probe_vgpr);
+        PluginFixture f;
+        ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna2", width, 106, 256));
+        PluginSinkConfig config;
+        auto &sink = config.emplace<StringSink>();
+        f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+        ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+        f.soc->set_plugin_group(f.plugin_group_);
+        f.plugin_group_->onInit();
+
+        unsigned entries = 0;
+        f.cu()->set_trap_handler_resolver([&](const Wavefront &) {
+          ++entries;
+          return ComputeUnitCore::TrapHandlerConfig{tba, 0, false};
+        });
+        const bool takes_trap = c.enable_trap && c.offset == 8;
+        f.mem->write32(tba, c.wait_exp ? exp0 : nop);
+        f.mem->write32(tba + 4, probe_vgpr ? write_addr : write_exec);
+        f.mem->write32(tba + 8, 0xbe80226c); // s_rfe_b64 ttmp[0:1] restores PC and PRIV.
+        const auto older = rdna2::build_ds(rdna2::kDsReadB32, {.gds = 1, .addr = 8, .vdst = 3});
+        const auto current = rdna2::build_ds(rdna2::kDsReadB32,
+                                             {.offset0 = c.offset, .gds = 1, .addr = 8, .vdst = 4});
+        const uint32_t code[] = {0xbefc03ff,
+                                 0x00800008, // M0 selects eight bytes starting at 128.
+                                 write_addr, write_exec, 0xba800501,
+                                 c.enable_trap, // s_setreg_imm32_b32 MODE[20]
+                                 c.older_gds ? older[0] : nop, c.older_gds ? older[1] : nop,
+                                 current[0], current[1], !takes_trap && c.wait_exp ? exp0 : nop,
+                                 // The checker reports each source once. Probe the other
+                                 // source after RFE to verify its lock survived the handler.
+                                 (takes_trap != probe_vgpr) ? write_addr : write_exec, 0xbf8c0000,
+                                 0xbf810000};
+        const auto kernel = f.write_kernel(0x1000, code, std::size(code));
+        using namespace amdhsa;
+        auto props = f.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
+        RJ_AMDHSA_BITS_SET(props, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, width == 32);
+        f.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties), props);
+        test::AqlQueue queue(f.mem, f.cp());
+        queue.dispatch(kernel, 1, width);
+        f.run_until_idle();
+        ASSERT_TRUE(f.cu()->is_idle());
+        EXPECT_EQ(entries, unsigned(takes_trap));
+        const auto race = probe_vgpr ? "Race on VGPR v8 [" : "Race on EXEC [";
+        EXPECT_EQ(sink.str().find(race) != std::string::npos, c.source_hazard) << sink.str();
+        // The plugin emits one report per conflicting producer PC. The default
+        // checker separately diagnoses its EXEC and VGPR source obligations.
+        const unsigned writes = takes_trap ? 2u : 1u;
+        EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), c.source_hazard ? writes : 0u);
+      }
+    }
+  }
+}
+
+static void check_gfx10_gds_waits(const char *arch) {
+  enum class Probe { ReadResult, ReadAddress, WriteAddress, WriteHighData, CompareExec, WriteExec };
+  enum class Form { Read, AliasedRead, AddReturn64, EmptyRead, SuppressedReturn };
+  constexpr uint32_t no_wait = 0xbf800000, lgkm0 = 0xbf8cc07f, exp0 = 0xbf8cff0f;
+  constexpr uint32_t exp1 = 0xbf8cff1f, both = 0xbf8c0000, barrier = 0xbf8a0000;
+  struct Case {
+    Form form;
+    uint32_t wait;
+    Probe probe;
+    bool hazard;
+  };
+  for (const auto &c : {Case{Form::Read, no_wait, Probe::ReadResult, true},
+                        Case{Form::Read, lgkm0, Probe::ReadResult, false},
+                        Case{Form::Read, exp0, Probe::ReadResult, true},
+                        Case{Form::Read, both, Probe::ReadResult, false},
+                        Case{Form::Read, no_wait, Probe::ReadAddress, false},
+                        Case{Form::Read, lgkm0, Probe::WriteAddress, true},
+                        Case{Form::Read, exp0, Probe::WriteAddress, false},
+                        Case{Form::Read, exp1, Probe::WriteAddress, true},
+                        Case{Form::Read, barrier, Probe::WriteAddress, true},
+                        Case{Form::AliasedRead, lgkm0, Probe::ReadResult, false},
+                        Case{Form::AliasedRead, lgkm0, Probe::WriteAddress, true},
+                        Case{Form::AddReturn64, lgkm0, Probe::ReadResult, false},
+                        Case{Form::AddReturn64, exp0, Probe::ReadResult, true},
+                        Case{Form::AddReturn64, lgkm0, Probe::WriteHighData, true},
+                        Case{Form::AddReturn64, exp0, Probe::WriteHighData, false},
+                        Case{Form::Read, lgkm0, Probe::WriteExec, true},
+                        Case{Form::Read, exp0, Probe::WriteExec, false},
+                        Case{Form::Read, lgkm0, Probe::CompareExec, true},
+                        Case{Form::Read, exp0, Probe::CompareExec, false},
+                        Case{Form::EmptyRead, no_wait, Probe::WriteExec, true},
+                        Case{Form::SuppressedReturn, no_wait, Probe::WriteExec, false},
+                        Case{Form::SuppressedReturn, no_wait, Probe::WriteHighData, false}}) {
+    SCOPED_TRACE(testing::Message() << "form=" << int(c.form) << " wait=" << std::hex << c.wait
+                                    << " probe=" << int(c.probe));
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, arch, 64, 106, 256));
+    PluginSinkConfig config;
+    auto &sink = config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    const bool atomic = c.form == Form::AddReturn64 || c.form == Form::SuppressedReturn;
+    const uint8_t dst = c.form == Form::AliasedRead ? 8 : c.form == Form::SuppressedReturn ? 15 : 4;
+    const auto ds = rdna2::build_ds(atomic ? rdna2::kDsAddRtnU64 : rdna2::kDsReadB32,
+                                    {.gds = 1, .addr = 8, .data0 = 12, .vdst = dst});
+    const uint32_t probe = c.probe == Probe::ReadResult ? 0x7e140300u + dst // v_mov_b32 v10, vdst
+                           : c.probe == Probe::ReadAddress   ? 0x7e140308u
+                           : c.probe == Probe::WriteAddress  ? 0x7e100280u
+                           : c.probe == Probe::WriteHighData ? 0x7e1a0280u
+                           : c.probe == Probe::CompareExec   ? 0x7da40d06u
+                                                             : 0xbefe0481u;
+    const uint32_t code[] = {
+        0xbefc03ff, 0x00800004, 0x7e100280,
+        0x7e180280, 0x7e1a0280, c.form == Form::EmptyRead ? 0xbefe0480u : 0xbefe0481u,
+        ds[0],      ds[1],      c.wait,
+        probe,      both,       0xbf810000};
+    const auto kernel = f.write_kernel(0x1000, code, std::size(code), 12, 1024);
+    using namespace amdhsa;
+    auto fields = f.mem->read32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1));
+    RJ_AMDHSA_BITS_SET(fields, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 3);
+    f.mem->write32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1), fields);
+    test::AqlQueue queue(f.mem, f.cp());
+    queue.dispatch(kernel, 64, 64);
+    f.run_until_idle();
+    ASSERT_TRUE(f.cu()->is_idle());
+    const auto reg = c.probe == Probe::WriteExec || c.probe == Probe::CompareExec
+                         ? std::string("EXEC")
+                         : "VGPR v" + std::to_string(c.probe == Probe::ReadResult      ? dst
+                                                     : c.probe == Probe::WriteHighData ? 13
+                                                                                       : 8);
+    EXPECT_EQ(sink.str().find("Race on " + reg + " [") != std::string::npos, c.hazard);
+    EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(c.hazard));
+  }
+}
+
+TEST(RaceDetectorPluginTest, Rdna2GdsResultsAndSourceLocksHaveIndependentWaits) {
+  check_gfx10_gds_waits("rdna2");
+}
+
+TEST(RaceDetectorPluginTest, Rdna1GdsResultsAndSourceLocksHaveIndependentWaits) {
+  check_gfx10_gds_waits("rdna1");
+}
+
 TEST(RaceDetectorPluginTest, Rdna2DualDsStoresReadAndLockOnlyEffectiveData) {
   struct Form {
     uint16_t write, read;
@@ -4489,80 +5661,274 @@ TEST(RaceDetectorPluginTest, Rdna2DualDsStoresReadAndLockOnlyEffectiveData) {
   constexpr uint32_t nop = 0xbf800000, lgkm0 = 0xbf8cc07f, exp0 = 0xbf8cff0f, both = 0xbf8c0000;
   for (const auto &f : forms)
     for (uint32_t width : {32u, 64u})
-      for (bool equal : {false, true})
-        for (auto probe : {ReadData0, ReadData1, OverwriteData0, OverwriteData1,
-                           WaitThenOverwriteData1, OverwriteAlias}) {
-          if (probe == OverwriteAlias && !equal)
-            continue;
-          SCOPED_TRACE(testing::Message()
-                       << f.write << " wave" << width << " equal=" << equal << " probe=" << probe);
-          PluginFixture fixture;
-          ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "rdna2", 64, 106, 256));
-          PluginSinkConfig config;
-          auto &sink = config.emplace<StringSink>();
-          fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
-          ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
-          const bool reads = probe == ReadData0 || probe == ReadData1;
-          const bool data0 =
-              probe == ReadData0 || probe == OverwriteData0 || probe == OverwriteAlias;
-          const uint8_t reg = (data0 ? 8 : 12) + f.words - 1;
-          auto observer = std::make_unique<Registers>(reads ? reg : 255);
-          auto *captured = observer.get();
-          ASSERT_TRUE(fixture.plugin_group_->add(std::move(observer)));
-          fixture.soc->set_plugin_group(fixture.plugin_group_);
-          fixture.plugin_group_->onInit();
+      for (uint8_t gds : {0, 1})
+        for (bool equal : {false, true})
+          for (auto probe : {ReadData0, ReadData1, OverwriteData0, OverwriteData1,
+                             WaitThenOverwriteData1, OverwriteAlias}) {
+            if (probe == OverwriteAlias && !equal)
+              continue;
+            SCOPED_TRACE(testing::Message() << f.write << " wave" << width << " gds=" << int(gds)
+                                            << " equal=" << equal << " probe=" << probe);
+            PluginFixture fixture;
+            ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "rdna2", 64, 106, 256));
+            PluginSinkConfig config;
+            auto &sink = config.emplace<StringSink>();
+            fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+            ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+            const bool reads = probe == ReadData0 || probe == ReadData1;
+            const bool data0 =
+                probe == ReadData0 || probe == OverwriteData0 || probe == OverwriteAlias;
+            const uint8_t reg = (data0 ? 8 : 12) + f.words - 1;
+            auto observer = std::make_unique<Registers>(reads ? reg : 255);
+            auto *captured = observer.get();
+            ASSERT_TRUE(fixture.plugin_group_->add(std::move(observer)));
+            fixture.soc->set_plugin_group(fixture.plugin_group_);
+            fixture.plugin_group_->onInit();
 
-          const uint8_t first = width == 32 ? 0 : 1, second = first + !equal;
-          const auto prior = rdna2::build_ds(rdna2::kDsReadB32, {.addr = 5, .vdst = reg});
-          // An unused DATA1 may alias an active DATA0 word.
-          const uint8_t second_data = probe == OverwriteAlias ? reg : 12;
-          const auto write =
-              rdna2::build_ds(f.write, {.offset0 = first,
-                                        .offset1 = second,
-
-                                        .addr = 4,
-                                        .data0 = 8,
-                                        .data1 = second_data,
-                                        .vdst = f.exchange ? uint8_t{20} : uint8_t{0}});
-          const auto read =
-              rdna2::build_ds(f.read, {.offset0 = first, .offset1 = second, .addr = 4, .vdst = 24});
-          const uint32_t code[] = {reads ? prior[0] : nop,
-                                   reads ? prior[1] : nop,
-                                   write[0],
-                                   write[1],
-                                   lgkm0,
-                                   probe == WaitThenOverwriteData1 ? exp0 : nop,
-                                   reads ? nop : 0x7e000280u | (uint32_t{reg} << 17),
-                                   both,
-                                   read[0],
-                                   read[1],
-                                   both,
-                                   0xbf810000};
-          const auto kernel = fixture.write_kernel(0x1000, code, std::size(code), 12, 4096);
-          using namespace amdhsa;
-          auto properties =
-              fixture.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
-          RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, width == 32);
-          fixture.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties),
-                               properties);
-          test::AqlQueue queue(fixture.mem, fixture.cp());
-          queue.dispatch(kernel, 1, 1);
-          fixture.run_until_idle();
-          ASSERT_TRUE(fixture.cu()->is_idle());
-          const bool hazard = (data0 || !equal) && reads;
-          EXPECT_EQ(sink.str().find("Race on VGPR v" + std::to_string(reg) + " [") !=
-                        std::string::npos,
-                    hazard);
-          EXPECT_EQ(fixture.cu()->memory_wait_diagnostic_count(), unsigned(hazard));
-          for (unsigned i = 0; i < f.words; ++i) {
-            EXPECT_EQ(captured->stored[i], captured->input(8 + i));
-            EXPECT_EQ(captured->stored[f.words + i], captured->input((equal ? 8 : 12) + i));
-            if (f.exchange) {
-              EXPECT_EQ(captured->returned[i], 0u);
-              EXPECT_EQ(captured->returned[f.words + i], 0u);
+            const uint8_t first = width == 32 ? 0 : 1, second = first + !equal;
+            const auto prior =
+                rdna2::build_ds(rdna2::kDsReadB32, {.gds = gds, .addr = 5, .vdst = reg});
+            // An unused DATA1 may alias an active DATA0 word.
+            const uint8_t second_data = probe == OverwriteAlias ? reg : 12;
+            const auto write =
+                rdna2::build_ds(f.write, {.offset0 = first,
+                                          .offset1 = second,
+                                          .gds = gds,
+                                          .addr = 4,
+                                          .data0 = 8,
+                                          .data1 = second_data,
+                                          .vdst = f.exchange ? uint8_t{20} : uint8_t{0}});
+            const auto read = rdna2::build_ds(
+                f.read, {.offset0 = first, .offset1 = second, .gds = gds, .addr = 4, .vdst = 24});
+            const uint32_t code[] = {reads ? prior[0] : nop,
+                                     reads ? prior[1] : nop,
+                                     write[0],
+                                     write[1],
+                                     lgkm0,
+                                     probe == WaitThenOverwriteData1 ? exp0 : nop,
+                                     reads ? nop : 0x7e000280u | (uint32_t{reg} << 17),
+                                     both,
+                                     read[0],
+                                     read[1],
+                                     both,
+                                     0xbf810000};
+            const auto kernel = fixture.write_kernel(0x1000, code, std::size(code), 12, 4096);
+            using namespace amdhsa;
+            auto properties =
+                fixture.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
+            RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                               width == 32);
+            fixture.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties),
+                                 properties);
+            test::AqlQueue queue(fixture.mem, fixture.cp());
+            queue.dispatch(kernel, 1, 1);
+            fixture.run_until_idle();
+            ASSERT_TRUE(fixture.cu()->is_idle());
+            const bool hazard =
+                (data0 || !equal) && (reads || (gds && probe != WaitThenOverwriteData1));
+            EXPECT_EQ(sink.str().find("Race on VGPR v" + std::to_string(reg) + " [") !=
+                          std::string::npos,
+                      hazard);
+            EXPECT_EQ(fixture.cu()->memory_wait_diagnostic_count(), unsigned(hazard));
+            for (unsigned i = 0; i < f.words; ++i) {
+              EXPECT_EQ(captured->stored[i], captured->input(8 + i));
+              EXPECT_EQ(captured->stored[f.words + i], captured->input((equal ? 8 : 12) + i));
+              if (f.exchange) {
+                EXPECT_EQ(captured->returned[i], 0u);
+                EXPECT_EQ(captured->returned[f.words + i], 0u);
+              }
             }
           }
-        }
+}
+
+TEST(RaceDetectorPluginTest, Rdna2GdsStoreLocksTheSourceWordsItReadsAtTheVgprBoundary) {
+  constexpr uint32_t low = 0x76543210, high = 0xfedcba98, nop = 0xbf800000;
+  enum class Probe { PendingSource, OverwriteLow, OverwriteHigh, OverwriteUnrelated };
+  class Data : public ExecutionPlugin {
+  public:
+    Data() : ExecutionPlugin("gds_source_data") {}
+    void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                     std::span<Wavefront *> waves) override {
+      for (auto *wf : waves)
+        wf->lds().write32(wf->lds_base(), 0xfedcba98);
+    }
+    void onAmdgpuWavefrontHalted(Wavefront &wf) override {
+      lo = wf.debug_read_vgpr(4, 0);
+      hi = wf.debug_read_vgpr(5, 0);
+    }
+    uint32_t lo = 0, hi = 0;
+  };
+  for (const auto probe : {Probe::PendingSource, Probe::OverwriteLow, Probe::OverwriteHigh,
+                           Probe::OverwriteUnrelated}) {
+    for (const bool wait : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "probe=" << int(probe) << " wait=" << wait);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna2", 64, 106, 256));
+      PluginSinkConfig config;
+      auto &sink = config.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      auto data = std::make_unique<Data>();
+      auto *result = data.get();
+      ASSERT_TRUE(f.plugin_group_->add(std::move(data)));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+      const auto prior = rdna2::build_ds(rdna2::kDsReadB32, {.addr = 8, .vdst = 0});
+      const auto store = rdna2::build_ds(rdna2::kDsWriteB64, {.gds = 1, .addr = 8, .data0 = 15});
+      const auto read = rdna2::build_ds(rdna2::kDsReadB64, {.gds = 1, .addr = 8, .vdst = 4});
+      const bool pending = probe == Probe::PendingSource;
+      const uint32_t write = probe == Probe::OverwriteLow         ? 0x7e1e0280u
+                             : probe == Probe::OverwriteHigh      ? 0x7e000280u
+                             : probe == Probe::OverwriteUnrelated ? 0x7e020280u
+                                                                  : nop;
+      const uint32_t code[] = {0xbefc03ff,
+                               0x00800010,
+                               0xbefe0481,
+                               0x7e100280,
+                               0x7e0002ff,
+                               high,
+                               0x7e1e02ff,
+                               low,
+                               pending ? prior[0] : nop,
+                               pending ? prior[1] : nop,
+                               pending && wait ? 0xbf8cc07fu : nop,
+                               store[0],
+                               store[1],
+                               !pending && wait ? 0xbf8cff0fu : nop,
+                               write,
+                               0xbf8c0000u,
+                               read[0],
+                               read[1],
+                               0xbf8c0000u,
+                               0xbf810000u};
+      const auto kernel = f.write_kernel(0x1000, code, std::size(code), 12, 1024);
+      using namespace amdhsa;
+      auto fields = f.mem->read32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1));
+      RJ_AMDHSA_BITS_SET(fields, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 3);
+      f.mem->write32(kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc1), fields);
+      test::AqlQueue queue(f.mem, f.cp());
+      queue.dispatch(kernel, 64, 64);
+      f.run_until_idle();
+      ASSERT_TRUE(f.cu()->is_idle());
+      EXPECT_EQ(result->lo, low);
+      EXPECT_EQ(result->hi, high);
+      const bool hazard = !wait && probe != Probe::OverwriteUnrelated;
+      const char *reg = probe == Probe::OverwriteLow         ? "v15"
+                        : probe == Probe::OverwriteUnrelated ? "v1"
+                                                             : "v0";
+      EXPECT_EQ(sink.str().find(std::string("Race on VGPR ") + reg + " [") != std::string::npos,
+                hazard);
+      EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(hazard));
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, Rdna2GdsDestinationWriteOrderKeepsSourceLocksIndependent) {
+  enum class Op { GdsRead, GdsAdd, LdsRead };
+  enum class Alias { Result, AddressAndResult, Data, Distinct };
+  constexpr uint32_t none = 0xbf800000, lgkm0 = 0xbf8cc07f, exp0 = 0xbf8cff0f;
+  struct Case {
+    Op first;
+    Op second;
+    Alias alias;
+    uint32_t wait;
+    bool hazard;
+  };
+  const Case cases[] = {
+      {Op::GdsRead, Op::GdsRead, Alias::Result, none, false},
+      {Op::GdsRead, Op::GdsAdd, Alias::Result, none, false},
+      {Op::GdsAdd, Op::GdsRead, Alias::Result, none, false},
+      {Op::GdsAdd, Op::GdsAdd, Alias::Result, none, false},
+      {Op::GdsRead, Op::GdsRead, Alias::Distinct, none, false},
+      {Op::GdsRead, Op::GdsRead, Alias::AddressAndResult, none, true},
+      {Op::GdsRead, Op::GdsRead, Alias::AddressAndResult, lgkm0, true},
+      {Op::GdsRead, Op::GdsRead, Alias::AddressAndResult, exp0, false},
+      {Op::GdsAdd, Op::GdsRead, Alias::Data, none, true},
+      {Op::GdsAdd, Op::GdsRead, Alias::Data, exp0, false},
+      {Op::LdsRead, Op::GdsRead, Alias::Result, none, true},
+      {Op::GdsRead, Op::LdsRead, Alias::Result, exp0, true},
+      {Op::LdsRead, Op::GdsRead, Alias::Result, lgkm0, false},
+      {Op::GdsRead, Op::LdsRead, Alias::Result, lgkm0, false},
+  };
+  class ObserveResult : public ExecutionPlugin {
+  public:
+    ObserveResult() : ExecutionPlugin("gds_waw_result") {}
+    void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                     std::span<Wavefront *> waves) override {
+      for (auto *wf : waves)
+        wf->lds().write32(wf->lds_base() + 4, 0x33333333);
+    }
+    void onAmdgpuWavefrontHalted(Wavefront &wf) override { value = wf.debug_read_vgpr(6, 0); }
+    uint32_t value = 0;
+  };
+  for (uint32_t width : {32u, 64u}) {
+    for (const auto &c : cases) {
+      SCOPED_TRACE(testing::Message()
+                   << "width=" << width << " first=" << int(c.first) << " second=" << int(c.second)
+                   << " alias=" << int(c.alias) << " wait=" << std::hex << c.wait);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna2", width, 106, 256));
+      PluginSinkConfig config;
+      auto &sink = config.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      auto observer = std::make_unique<ObserveResult>();
+      auto *result = observer.get();
+      ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+      const uint8_t destination = c.alias == Alias::Distinct ? 5 : c.alias == Alias::Data ? 9 : 4;
+      const auto first =
+          rdna2::build_ds(c.first == Op::GdsAdd ? rdna2::kDsAddRtnU32 : rdna2::kDsReadB32,
+                          {.gds = c.first != Op::LdsRead,
+                           .addr = static_cast<uint8_t>(c.alias == Alias::AddressAndResult ? 4 : 8),
+                           .data0 = 9,
+                           .vdst = 4});
+      const auto second =
+          rdna2::build_ds(c.second == Op::GdsAdd ? rdna2::kDsAddRtnU32 : rdna2::kDsReadB32,
+                          {.offset0 = 4,
+                           .gds = c.second != Op::LdsRead,
+                           .addr = 8,
+                           .data0 = 9,
+                           .vdst = destination});
+      const auto init =
+          rdna2::build_ds(rdna2::kDsWriteB32, {.offset0 = 4, .gds = 1, .addr = 8, .data0 = 10});
+      const uint32_t code[] = {
+          0xbefc03ff,
+          0x00800010,
+          0xbefe0481,
+          0x7e080280,
+          0x7e100280,
+          0x7e120281,
+          0x7e1402ff,
+          0x22222222,
+          init[0],
+          init[1],
+          0xbf8c0000,
+          first[0],
+          first[1],
+          c.wait,
+          second[0],
+          second[1],
+          0xbf8c0000,
+          0x7e0c0300u + destination, // consume the younger result after both counters drain
+          0xbf810000};
+      const auto kernel = f.write_kernel(0x1000, code, std::size(code), 12, 16);
+      using namespace amdhsa;
+      auto props = f.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
+      RJ_AMDHSA_BITS_SET(props, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, width == 32);
+      f.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties), props);
+      test::AqlQueue queue(f.mem, f.cp());
+      queue.dispatch(kernel, width, width);
+      f.run_until_idle();
+      ASSERT_TRUE(f.cu()->is_idle());
+      EXPECT_EQ(result->value, c.second == Op::LdsRead ? 0x33333333u : 0x22222222u);
+      EXPECT_EQ(sink.str().find("Race on VGPR v" + std::to_string(destination) + " [") !=
+                    std::string::npos,
+                c.hazard);
+      EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(c.hazard));
+    }
+  }
 }
 
 TEST(RaceDetectorPluginTest, Rdna2ClippedFlatResultRequiresBothWaits) {
@@ -4941,24 +6307,24 @@ TEST(RaceDetectorPluginTest, Rdna2LdsAtomicSharesOneWaitWithItsReturnedRegister)
   const int add = rdna2::kDsAddU32, returning = rdna2::kDsAddRtnU32;
   struct Trial {
     int first, second;
-    bool same_wave, wait;
+    bool same_wave, wait, gds;
     uint32_t second_address;
     bool lds_race;
   };
-  for (Trial trial : {Trial{returning, direct, true, false, 64, true},
-                      Trial{returning, direct, true, true, 64, false},
-
-                      Trial{direct, returning, false, false, 64, true},
-                      Trial{direct, returning, true, false, 64, false},
-                      Trial{add, rdna2::kDsWriteB32, false, true, 64, true},
-                      Trial{returning, add, false, true, 64, false},
-                      Trial{add, returning, false, false, 64, false},
-                      Trial{returning, rdna2::kDsAddRtnU64, false, false, 64, true},
-                      Trial{returning, add, false, false, 66, true},
-                      Trial{add, rdna2::kDsWriteB32, false, false, 68, false}}) {
-    SCOPED_TRACE(testing::Message()
-                 << trial.first << " then " << trial.second << " same=" << trial.same_wave
-                 << " wait=" << trial.wait << " addr=" << trial.second_address);
+  for (Trial trial : {Trial{returning, direct, true, false, false, 64, true},
+                      Trial{returning, direct, true, true, false, 64, false},
+                      Trial{returning, direct, false, true, true, 64, false},
+                      Trial{direct, returning, false, false, false, 64, true},
+                      Trial{direct, returning, true, false, false, 64, false},
+                      Trial{add, rdna2::kDsWriteB32, false, true, false, 64, true},
+                      Trial{returning, add, false, true, false, 64, false},
+                      Trial{add, returning, false, false, false, 64, false},
+                      Trial{returning, rdna2::kDsAddRtnU64, false, false, false, 64, true},
+                      Trial{returning, add, false, false, false, 66, true},
+                      Trial{add, rdna2::kDsWriteB32, false, false, false, 68, false}}) {
+    SCOPED_TRACE(testing::Message() << trial.first << " then " << trial.second
+                                    << " same=" << trial.same_wave << " wait=" << trial.wait
+                                    << " GDS=" << trial.gds << " addr=" << trial.second_address);
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(2, "rdna2", 32, 106));
     PluginSinkConfig config;
@@ -4978,7 +6344,7 @@ TEST(RaceDetectorPluginTest, Rdna2LdsAtomicSharesOneWaitWithItsReturnedRegister)
       w->set_lds_size(1024);
     }
     f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 212, waves);
-    auto dec = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+    auto dec = Decoder::create(rocjitsu::IsaFamily::Rdna2);
     auto issue = [&](Wavefront &w, int op, uint32_t address, bool gds, uint64_t pc) {
       w.set_m0(gds ? 128 : 0x20040);
       cu->write_vgpr(w.vgpr_alloc().base, 0, address);
@@ -4997,7 +6363,7 @@ TEST(RaceDetectorPluginTest, Rdna2LdsAtomicSharesOneWaitWithItsReturnedRegister)
     auto &first = *waves[0];
     auto *state = static_cast<RaceWavefrontState *>(first.plugin_state(detector->slot_index()));
     auto &race = *state->race_state;
-    ASSERT_NO_FATAL_FAILURE(issue(first, trial.first, 64, false, 0x100));
+    ASSERT_NO_FATAL_FAILURE(issue(first, trial.first, 64, trial.gds, 0x100));
     EXPECT_EQ(race.getWaveMemoryEvents().size(), trial.first == direct ? 0u : 1u);
     EXPECT_EQ(race.getVgprMemoryEvents(12).size(), trial.first == returning ? 1u : 0u);
     if (trial.wait) {
@@ -5050,7 +6416,7 @@ TEST(RaceDetectorPluginTest, Rdna2DsChecksAndRecordsOnlyCompleteElementsInWorkgr
       wave->set_lds_size(1024);
     }
     f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 212, waves);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
     ASSERT_NE(decoder, nullptr);
     const auto route = [&](unsigned wave_idx, uint16_t op, uint32_t offset, uint8_t offset1) {
       auto *wave = waves[wave_idx];
@@ -5121,7 +6487,7 @@ TEST(RaceDetectorPluginTest, Rdna2SynchronousLdsSourceChecksOnlyTheBytesRead) {
       wave->set_lds_size(1024);
     }
     f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 212, waves);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
     auto &writer = *waves[0];
     auto &reader = *waves[test.same_wave ? 0 : 1];
     writer.lds().write32(base + 64, word);
@@ -5189,7 +6555,7 @@ TEST(RaceDetectorPluginTest, DirectLdsReadBlocksOnlyOtherWavesUntilBarrier) {
     wave->set_lds_size(1024);
   }
   f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 212, waves);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   auto &reader = *waves[0];
   auto &other = *waves[1];
   const uint32_t mov = 0x7e0802fe; // v_mov_b32 v4,src_lds_direct
@@ -5237,7 +6603,7 @@ TEST(RaceDetectorPluginTest, DirectLdsReadBlocksOnlyOtherWavesUntilBarrier) {
   ASSERT_NO_FATAL_FAILURE(write(other, 67, 0x204));
   EXPECT_NE(sink.str().find("Race on LDS byte " + std::to_string(base + 67)), std::string::npos);
   const std::string reports = sink.str();
-  f.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+  report_workgroup_barrier(*f.plugin_group_, waves);
   EXPECT_TRUE(race.getBarrierPendingEvents().empty());
   EXPECT_EQ(events.status(EventId{2}), EventStatus::RETIRED);
   ASSERT_NO_FATAL_FAILURE(write(other, 67, 0x208));
@@ -5382,7 +6748,7 @@ TEST(RaceDetectorPluginTest, Cdna3ClipsLdsRacesAndIntervalsToTheWorkgroup) {
       wave->set_exec(1);
     }
     f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
     auto issue = [&](const std::array<uint32_t, 2> &words, amdgpu::Wavefront &wf) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -5451,7 +6817,7 @@ TEST(RaceDetectorPluginTest, DualOffsetStoreTracksBothOffsetOrders) {
     fixture.cu()->write_vgpr(writer->vgpr_alloc().base + 2, 0, 22);
     fixture.cu()->write_vgpr(reader->vgpr_alloc().base, 0, kReadAddress);
 
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     ASSERT_NE(decoder, nullptr);
     const std::array<uint32_t, 2> store_words = cdna4::build_ds(
         cdna4::kDsWrite2B32Ds,
@@ -5480,6 +6846,146 @@ TEST(RaceDetectorPluginTest, DualOffsetStoreTracksBothOffsetOrders) {
         << report;
     EXPECT_NE(report.find("ds_write2_b32"), std::string::npos) << report;
     EXPECT_NE(report.find("ds_read_b32"), std::string::npos) << report;
+  }
+}
+
+TEST(RaceDetectorPluginTest, Cdna1Src2TracksValidSourceReadsAndAtomicDestinations) {
+  constexpr auto src2 = cdna1::kDsAddSrc2U32;
+  constexpr auto exchange = cdna1::kDsWrxchg2RtnB32;
+  struct Access {
+    uint16_t opcode;
+    uint32_t address;
+    uint8_t offset = 0;
+    uint8_t offset1 = 0;
+  };
+  const Access update{src2, 4, 1}; // update byte 4 using byte 8
+  struct Case {
+    Access other;
+    bool race;
+    bool barrier = false;
+  };
+  const Case cases[] = {
+      {{cdna1::kDsReadB32, 4}, true},
+      {{cdna1::kDsWriteB32, 4}, true},
+      {{cdna1::kDsReadB32, 8}, false},
+      {{cdna1::kDsWriteB32, 8}, true},
+      {{cdna1::kDsAddU32, 4}, false},
+      {{cdna1::kDsAddRtnU32, 4}, false},
+      {{cdna1::kDsAddU32, 8}, true},
+      {{cdna1::kDsAddRtnU32, 8}, true},
+      // Each returned value comes from an atomic exchange. Exercise the
+      // overlap in each address slot, in both issue orders.
+      {{exchange, 4, 0, 2}, false},
+      {{exchange, 4, 2, 0}, false},
+      {{exchange, 8, 0, 2}, true},
+      {{exchange, 8, 2, 0}, true},
+      {{src2, 4, 2}, false},
+      {{src2, 12, 0}, false},
+      {{src2, 8, 1}, true},
+      {{cdna1::kDsWriteB32, 8}, false, true},
+  };
+  auto run = [&](Access first, Access second, bool barrier, bool race, uint32_t conflictByte,
+                 bool sameWave = false) {
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(2, "cdna1"));
+    PluginSinkConfig sink_config;
+    auto &sink = sink_config.emplace<StringSink>();
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *race_plugin = plugin.get();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    auto *cu = f.cu();
+    std::array waves{cu->dispatch_wf(0, 0x1000, 104, 256), cu->dispatch_wf(0, 0x2000, 104, 256)};
+    for (auto *wave : waves) {
+      ASSERT_NE(wave, nullptr);
+      wave->set_m0(~0u);
+      wave->set_lds_size(256);
+      wave->set_exec(1);
+    }
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
+    auto *state =
+        static_cast<RaceWavefrontState *>(waves[0]->plugin_state(race_plugin->slot_index()));
+    ASSERT_NE(state, nullptr);
+    auto decoder = Decoder::create(cu->arch());
+    auto issue = [&](unsigned waveIndex, Access op) {
+      auto &wave = *waves[waveIndex];
+      cu->write_vgpr(wave.vgpr_alloc().base, 0, op.address);
+      cu->write_vgpr(wave.vgpr_alloc().base + 1, 0, 7);
+      auto words = cdna1::build_ds(
+          op.opcode,
+          {.offset0 = op.offset, .offset1 = op.offset1, .addr = 0, .data0 = 1, .vdst = 2});
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      auto &inst = decoded.value();
+      f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *inst, wave);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), wave);
+      const auto &events = state->race_state->getDetector()->events();
+      const EventId event{static_cast<int>(events.totalAllocated()) - 1};
+      ASSERT_TRUE(events.contains(event));
+      if (op.opcode == exchange) {
+        EXPECT_TRUE(events.atomicLdsElementMatches(event, 4));
+        const auto registers = events.registers(event);
+        ASSERT_EQ(registers.size(), 2u);
+        EXPECT_EQ(registers[0], 2u);
+        EXPECT_EQ(registers[1], 3u);
+      }
+      if (op.opcode == cdna1::kDsWrite2B32) {
+        const auto &intervals = events.ldsIntervals(event);
+        EXPECT_TRUE(intervals.contains(252));
+        EXPECT_FALSE(intervals.contains(256));
+      }
+    };
+    ASSERT_NO_FATAL_FAILURE(issue(0, first));
+    EXPECT_EQ(state->race_state->getDetector()->events().totalAllocated(), 1);
+    if (barrier) {
+      execute_wait(*f.plugin_group_, *waves[0], legacy_wait_word(rocjitsu::IsaFamily::Cdna1, 0, 0));
+      report_workgroup_barrier(*f.plugin_group_, waves);
+    }
+    ASSERT_NO_FATAL_FAILURE(issue(sameWave ? 0 : 1, second));
+    EXPECT_EQ(state->race_state->getDetector()->events().totalAllocated(), 2);
+    EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, race) << sink.str();
+    if (race) {
+      EXPECT_NE(sink.str().find("Race on LDS byte " + std::to_string(conflictByte) + " ["),
+                std::string::npos)
+          << sink.str();
+      if (first.opcode == src2) {
+        const std::string operation =
+            conflictByte == first.address ? "atomic update of LDS" : "read of LDS source operand";
+        EXPECT_NE(sink.str().find("Conflict: " + operation + " at PC"), std::string::npos)
+            << sink.str();
+      }
+    }
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(testing::Message() << test.other.opcode << ',' << test.other.address << ','
+                                    << unsigned(test.other.offset) << ','
+                                    << unsigned(test.other.offset1) << ',' << test.barrier);
+    run(update, test.other, test.barrier, test.race, test.other.address);
+    run(test.other, update, test.barrier, test.race, test.other.address);
+  }
+  // The same native LDS stream orders the store before the SRC2 source read.
+  run({cdna1::kDsWriteB32, 8}, update, false, false, 8, /*sameWave=*/true);
+  const Access dualStore{cdna1::kDsWrite2B32, 252, 0, 1};
+  for (auto address : {252u, 256u}) {
+    const Access load{cdna1::kDsReadB32, address};
+    const Access store{cdna1::kDsWriteB32, address};
+    const bool inRange = address == 252;
+    run(store, load, false, inRange, address);
+    run(load, store, false, inRange, address);
+    run(dualStore, load, false, inRange, address);
+    run(load, dualStore, false, inRange, address);
+  }
+  for (const Access dropped : {Access{src2, 256, 1}, Access{src2, 252, 1}}) {
+    // An invalid destination suppresses the RMW. An invalid source contributes zero:
+    // the valid destination still conflicts, while neither case reads byte zero.
+    for (unsigned addr : {0u, 252u}) {
+      const bool writes = dropped.address == 252 && addr == 252;
+      run({cdna1::kDsReadB32, addr}, dropped, false, writes, addr);
+      run(dropped, {cdna1::kDsWriteB32, addr}, false, writes, addr);
+    }
   }
 }
 
@@ -5624,7 +7130,7 @@ TEST(RaceDetectorPluginTest, DualOffsetIntervalsPreserveUnionAndInstructionLifet
         PendingWaitCount wait;
         wait.add(WaitCounterType::LGKMCNT, remaining);
         race.dispatch(wait);
-        race.flushBarrierPendingEvents();
+        race.retireReleasedThrough(std::numeric_limits<uint32_t>::max());
         EXPECT_EQ(events.status(EventId{0}), EventStatus::RETIRED);
         EXPECT_EQ(events.status(EventId{1}),
                   remaining ? EventStatus::ACTIVE : EventStatus::RETIRED);
@@ -5793,7 +7299,7 @@ TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
     cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, lane, lane * sizeof(uint64_t));
   const auto words = cdna5::build_vds(cdna5::kDsLoadTr8B64Vds, {.addr = kAddressVgpr, .vdst = 0});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
   ASSERT_NE(load, nullptr);
@@ -5959,7 +7465,7 @@ TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
 
       const auto words = cdna4::build_flat(cdna4::kFlatStoreDwordx2Flat,
                                            {.seg = 0, .addr = 0, .data = 2, .saddr = 0x7F});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
       EXPECT_NE(decoder, nullptr);
       if (!decoder)
         return false;
@@ -6081,7 +7587,7 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
                                   .vdst = uint8_t(load ? 8 : 0),
                                   .vsrc = uint8_t(load ? 0 : 8),
                                   .vaddr = 0});
-          auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+          auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           f.plugin_group_->onAmdgpuBeforeExecuteInstruction(flat_wave->pc, *inst, *flat_wave);
@@ -6156,7 +7662,7 @@ TEST(RaceDetectorPluginTest, PrivateB64FlatAtomicRejectsAllRoutedLanes) {
     std::array<Wavefront *, 1> waves{wave};
     fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 64, 128, waves);
     constexpr std::array words{0xec10c07cu, 0x02100000u, 0x00000002u};
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *inst, *wave);
@@ -6230,7 +7736,7 @@ TEST(RaceDetectorPluginTest, MixedFlatAtLdsBackingEndTracksExecutedElements) {
     const auto words = cdna5::build_vflat(
         load ? cdna5::kFlatLoadB128Vflat : cdna5::kFlatStoreB128Vflat,
         {.saddr = 124, .vdst = uint8_t(load ? 8 : 0), .vsrc = uint8_t(load ? 0 : 8), .vaddr = 0});
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(flat_wave->pc, *inst, *flat_wave);
@@ -6310,7 +7816,7 @@ TEST(RaceDetectorPluginTest, Cdna4DsFootprintsRespectEachAllocationBound) {
                                                      .addr = 0,
                                                      .data0 = uint8_t(load ? 0 : 1),
                                                      .vdst = uint8_t(load ? 8 : 0)});
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *inst, *wave);
@@ -6396,7 +7902,7 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       const auto words = cdna5::build_vflat(
           load ? cdna5::kFlatLoadB32 : cdna5::kFlatStoreB32,
           {.saddr = 124, .vdst = uint8_t(load ? 8 : 0), .vsrc = uint8_t(load ? 0 : 8), .vaddr = 0});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *inst, *wave);
@@ -6680,6 +8186,70 @@ TEST(RaceDetectorPluginTest, Cdna5DiscardedLoadResultsStillOccupyTheirIssuedCoun
   }
 }
 
+TEST(RaceDetectorPluginTest, Rdna4NullifiedImageAtomicOccupiesLoadcntWithOlderGlobalLoad) {
+  for (const uint8_t vdata : {30, 31}) {
+    for (const int threshold : {-1, 0, 1}) {
+      SCOPED_TRACE(testing::Message() << "vdata=" << +vdata << " threshold=" << threshold);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna4", 32, 96, 32));
+      PluginSinkConfig config;
+      auto &sink = config.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+
+      constexpr uint64_t pc = 0x8000;
+      constexpr uint32_t address = 0x4000;
+      auto *cu = f.cu();
+      auto *wf = cu->dispatch_wf(0, pc, 96, 32, 32);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_EQ(wf->num_vgprs(), 32u);
+      wf->set_exec(1);
+      std::array waves{wf};
+      f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 96, waves);
+      f.mem->write32(address, 42);
+      wf->debug_write_vgpr(0, 0, address);
+      const auto sb = wf->sgpr_alloc().base;
+      cu->write_sgpr(sb, (address + 0x100) >> 8);
+      cu->write_sgpr(sb + 1, 48u << 17);
+      cu->write_sgpr(sb + 3, (9u << 28) | 0x688);
+      std::vector<uint32_t> code;
+      auto append = [&](const auto &words) { code.insert(code.end(), words.begin(), words.end()); };
+      append(rdna4::build_vglobal(rdna4::kGlobalLoadB32Vglobal,
+                                  {.saddr = amdgpu::kModernNullSelector, .vdst = 8}));
+      const uint64_t load_end = pc + 4 * code.size();
+      append(rdna4::build_vimage(
+          rdna4::kImageAtomicCmpswapVimage,
+          {.dim = 1, .dmask = 15, .vdata = vdata, .th = 1, .vaddr0 = 4, .vaddr1 = 5}));
+      const uint64_t image_end = pc + 4 * code.size();
+      if (threshold >= 0)
+        append(rdna4::build_sopp(rdna4::kSWaitLoadcntSopp,
+                                 {.simm16 = static_cast<uint16_t>(threshold)}));
+      append(rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9}));
+      f.mem->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size() * 4, pc);
+
+      ASSERT_TRUE(cu->step());
+      ASSERT_EQ(wf->pc, load_end);
+      ASSERT_TRUE(cu->step());
+      ASSERT_FALSE(wf->is_halted());
+      ASSERT_EQ(wf->pc, image_end);
+      ASSERT_EQ(wf->ensure_memory_wait_scoreboard().outstanding(WaitCounterKind::Load), 2u);
+      if (threshold >= 0) {
+        ASSERT_TRUE(cu->step());
+      }
+      ASSERT_TRUE(cu->step());
+      ASSERT_EQ(wf->pc, pc + code.size() * 4);
+      EXPECT_EQ(wf->debug_read_vgpr(9, 0), 42u);
+      const bool runtime_warning = cu->memory_wait_diagnostic_count() != 0;
+      const bool observer_warning = sink.str().find("Race on VGPR v8") != std::string::npos;
+      EXPECT_EQ(runtime_warning, threshold < 0);
+      EXPECT_EQ(observer_warning, threshold < 0);
+      wf->halt();
+    }
+  }
+}
+
 TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
@@ -6703,7 +8273,7 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
   constexpr uint32_t kAddressVgpr = 4;
   cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, /*lane=*/0, 0);
   cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr + 1, /*lane=*/0, 0);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t dst : {0u, 1u}) {
     const auto words =
@@ -6750,7 +8320,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
   constexpr uint32_t kAddressVgpr = 4;
   cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, /*lane=*/0, 0);
   cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr + 1, /*lane=*/0, 0);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t dst : {0u, 1u}) {
     const auto words =
@@ -6826,7 +8396,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
     const auto words = rdna4::build_vflat(
         rdna4::kFlatStoreB32Vflat,
         {.saddr = amdgpu::kModernNullSelector, .vsrc = kDataVgpr, .vaddr = kAddressVgpr});
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
     ASSERT_NE(store, nullptr);
@@ -7121,7 +8691,7 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
   constexpr uint32_t kTtmp0Selector = amdgpu::kTtmpSelectorFirst;
   const auto words =
       cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = kTtmp0Selector, .imm = 1});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
   ASSERT_NE(load, nullptr);
@@ -7170,7 +8740,7 @@ TEST(RaceDetectorPluginTest, DirectToLdsLoadsDoNotInferTheirSourceMemorySpace) {
       cu->write_vgpr(wave->vgpr_alloc().base, 0, scratch ? 0 : 0x4000);
       cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0);
       cu->write_vgpr(wave->vgpr_alloc().base + 2, 0, 16);
-      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
       ASSERT_NE(decoder, nullptr);
       const std::array<uint32_t, 2> words = cdna4::build_flat(
           scratch ? cdna4::kScratchLoadLdsDwordFlat : cdna4::kGlobalLoadLdsDwordFlat,
@@ -7224,7 +8794,7 @@ TEST(RaceDetectorPluginTest, ScalarLoadsDoNotInferTheirSourceMemorySpace) {
     fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
     fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0x1000);
     fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     ASSERT_NE(decoder, nullptr);
     const std::array<uint32_t, 2> words =
         cdna4::build_smem(opcode, {.sbase = 0, .sdata = 8, .imm = 1});
@@ -7288,7 +8858,7 @@ TEST(RaceDetectorPluginTest, DebuggerReadsIgnorePendingLoads) {
       cu->write_sgpr(sbase + 8, 42);
       cu->write_vgpr(vbase + 8, 0, 43);
       cu->write_vgpr(vbase + 8, 31, 44);
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
       ASSERT_NE(decoder, nullptr);
       util::StringDiagnostic error;
       auto load =
@@ -7594,10 +9164,10 @@ TEST(RaceDetectorPluginTest, Gfx11FlatVmemReplacementUsesTheWritebackClassAndWri
 }
 
 TEST(RaceDetectorPluginTest, Gfx10ImageTfeTracksTheLanesThatReceiveStatus) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(
-        f.initialize(1, arch == ROCJITSU_CODE_ARCH_RDNA1 ? "rdna1" : "rdna2", 32, 106, 32));
+        f.initialize(1, arch == rocjitsu::IsaFamily::Rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
     PluginSinkConfig sinks;
     auto &sink = sinks.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -7621,7 +9191,7 @@ TEST(RaceDetectorPluginTest, Gfx10ImageTfeTracksTheLanesThatReceiveStatus) {
                                 (20u << 20) | (3u << 30),
                                 511u,
                                 (9u << 28) | 4u | (1u << 9),
-                                arch == ROCJITSU_CODE_ARCH_RDNA2 ? 2047u : 0u,
+                                arch == rocjitsu::IsaFamily::Rdna2 ? 2047u : 0u,
                                 0u,
                                 0u,
                                 0u};
@@ -7835,11 +9405,25 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
     bool compare = false;
   };
   const Case cases[] = {
+      {0, rdna1::kImageSampleDG16Mimg, false, false, {0x3, 0x3, 0xf}},
+      {0, rdna1::kImageSampleDG16Mimg, true, false, {0x3, 0x3, 0x3}},
+      {1, rdna1::kImageSampleDG16Mimg, true, false, {0xf, 0xf, 0xf}},
+      {2,
+       rdna1::kImageSampleCDOG16Mimg,
+       true,
+       true,
+       {0xf, 0xf, 0xf, 0x3, 0xf, 0x3, 0xf, 0x3},
+       true},
+      {3, rdna1::kImageSampleDOG16Mimg, false, true, {0xf, 0xf, 0xf, 0xf, 0xf, 0xf}},
+      {0, rdna1::kImageSampleBMimg, true, false, {0x3, 0x3}},
+      {1, rdna1::kImageSampleCBOMimg, true, true, {0xf, 0x3, 0xf, 0xf}, true},
+      {1, rdna1::kImageGather4BMimg, true, false, {0x3, 0xf}},
+      {0, rdna1::kImageSampleBMimg, false, false, {0xf, 0xf}},
       {0, rdna1::kImageSampleDMimg, true, false, {0xf, 0xf, 0x3}},
       {2, rdna1::kImageSampleDMimg, false, false, {0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf}},
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const bool gfx1010 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    const bool gfx1010 = arch == rocjitsu::IsaFamily::Rdna1;
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(1, gfx1010 ? "rdna1" : "rdna2", 32, 106, 32));
     PluginSinkConfig sinks;
@@ -7940,7 +9524,36 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
             }));
       }
     }
-
+    // Choose between two 1D mip levels using the low FP16; the high half contains a NaN.
+    cu->write_sgpr(sb + 1, (22u << 20) | (1u << 30));     // Width 2.
+    cu->write_sgpr(sb + 3, (8u << 28) | (1u << 16) | 4u); // LAST_LEVEL=1.
+    cu->write_sgpr(sb + 4, gfx1010 ? 0 : 63);
+    cu->write_sgpr(sb + 5, 1u << 4); // MAX_MIP=1.
+    cu->write_sgpr(sb + 9, 256u << 12);
+    cu->write_sgpr(sb + 10, 1u << 26);    // Point mip filter.
+    constexpr uint32_t mip1 = 0x40400000; // 3.0.
+    cu->write_sgpr(sb, 0x6000 >> 8);
+    // In a GFX10 linear mip chain the smaller, one-texel level is first.
+    f.mem->write32(0x6000, mip1);
+    f.mem->write32(0x6100, texel);
+    f.mem->write32(0x6104, texel);
+    for (bool bias : {false, true}) {
+      for (bool higher : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "numeric bias=" << bias << " higher=" << higher);
+        for (unsigned lane = 0; lane < 4; ++lane) {
+          const uint32_t low = higher ? 0x3c00 : bias ? 0 : 0x3800;
+          cu->write_vgpr(vb, lane, 0x7e000000u | low);
+          cu->write_vgpr(vb + 1, lane, bias && (lane & 1) ? 0x3800 : 0);
+          cu->write_vgpr(vb + 2, lane, 0);
+        }
+        ASSERT_NO_FATAL_FAILURE(
+            issue(rdna1::build_mimg(bias ? rdna1::kImageSampleBMimg : rdna1::kImageSampleDG16Mimg,
+                                    {.dmask = 1, .vdata = 24, .ssamp = 2, .a16 = 1}),
+                  15));
+        EXPECT_EQ(cu->read_vgpr_storage(vb + 24, 0), higher ? mip1 : texel);
+        ASSERT_NO_FATAL_FAILURE(issue(std::array{legacy_wait_word(arch, 0, 0)}, 1));
+      }
+    }
     struct Transfer {
       uint16_t op;
       uint8_t dim;
@@ -7951,17 +9564,25 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
       bool returns = false; // GLC on an atomic.
     };
     const unsigned msaa_offset = gfx1010 ? 32892 : 32956; // (3,7), fragment 2, 64KB_R_X.
-    const Transfer transfers[] = {
+    std::vector<Transfer> transfers{
         {rdna1::kImageLoadMimg, 0, {1}, 4},
+        {rdna1::kImageLoadPckMimg, 0, {1}, 4},
         {rdna1::kImageStoreMimg, 0, {1}, 4},
+        {rdna1::kImageAtomicAddMimg, 0, {1}, 4},
+        {rdna1::kImageAtomicAddMimg, 0, {1}, 4, true, false, true},
         {rdna1::kImageLoadMimg, 4, {1, 1}, 260},
+        {rdna1::kImageStorePckMimg, 5, {1, 1, 1}, 772, true, true},
+        {rdna1::kImageAtomicAddMimg, 2, {1, 1, 1}, 772, true, true, true},
         {rdna1::kImageLoadMipMimg, 1, {1, 1, 1}, 260, true, true},
+        {rdna1::kImageStoreMipPckMimg, 1, {1, 1, 1}, 260, true, true},
         {rdna1::kImageLoadMimg, 6, {3, 7, 2}, msaa_offset, true, true},
         {rdna1::kImageStoreMimg, 6, {3, 7, 2}, msaa_offset, true, true},
         {rdna1::kImageLoadMimg, 0, {1}, 4, false},
         {rdna1::kImageGetResinfoMimg, 1, {1}, 0},
         {rdna1::kImageGetResinfoMimg, 1, {0x7e000001}, 0, false},
     };
+    if (arch == rocjitsu::IsaFamily::Rdna2)
+      transfers.push_back({rdna2::kImageMsaaLoadMimg, 6, {3, 7, 2}, msaa_offset, true, true});
     unsigned base_address = 0x200000;
     for (const auto &test : transfers) {
       SCOPED_TRACE(testing::Message()
@@ -8050,9 +9671,9 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
 }
 
 TEST(RaceDetectorPluginTest, Gfx10ResourceInfoTracksVmcntAndVgprWriteback) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     SCOPED_TRACE(arch);
-    const bool gfx1010 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+    const bool gfx1010 = arch == rocjitsu::IsaFamily::Rdna1;
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(1, gfx1010 ? "rdna1" : "rdna2", 32, 106, 32));
     PluginSinkConfig sinks;
@@ -8212,8 +9833,8 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyFetchCountsTowardsPartialVmcnt) {
     SuppressedFlat,
     EmptyFlatStore
   };
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const bool rdna1 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    const bool rdna1 = arch == rocjitsu::IsaFamily::Rdna1;
     SCOPED_TRACE(rdna1 ? "rdna1" : "rdna2");
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(1, rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
@@ -8411,8 +10032,8 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyFetchCountsTowardsPartialVmcnt) {
 
 TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyDsOperationCountsInItsOwnLgkmOrder) {
   enum class Lanes { Active, Empty, Suppressed };
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const bool rdna1 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    const bool rdna1 = arch == rocjitsu::IsaFamily::Rdna1;
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(1, rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
     PluginSinkConfig sinks;
@@ -8434,11 +10055,11 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyDsOperationCountsInItsOwnLgkmOrder)
     cu->write_vgpr(wave->vgpr_alloc().base + 4, 0, 4);
     cu->write_vgpr(wave->vgpr_alloc().base + 5, 0, 4);
     wave->lds().write32(wave->lds_base() + 4, 9);
-    {
-      enum class Second { Lds, FlatLoad, FlatStore };
-      for (auto second_op : {Second::Lds, Second::FlatLoad, Second::FlatStore}) {
+    for (bool first_gds : {false, true}) {
+      enum class Second { Lds, Gds, FlatLoad, FlatStore };
+      for (auto second_op : {Second::Lds, Second::Gds, Second::FlatLoad, Second::FlatStore}) {
+        const bool second_gds = second_op == Second::Gds;
         const bool flat = second_op == Second::FlatLoad || second_op == Second::FlatStore;
-
         for (const auto &[lanes, lgkm] :
              std::array<std::pair<Lanes, int>, 5>{{{Lanes::Active, 1},
                                                    {Lanes::Empty, 1},
@@ -8448,12 +10069,18 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyDsOperationCountsInItsOwnLgkmOrder)
           if (flat && (lanes == Lanes::Active ||
                        (lanes == Lanes::Suppressed && second_op == Second::FlatStore)))
             continue;
-          SCOPED_TRACE(testing::Message()
-                       << int(arch) << "/" << int(second_op) << "/" << int(lanes) << "/" << lgkm);
-
-          const auto first = rdna2::build_ds(rdna2::kDsReadB32, {.addr = 4, .vdst = 2});
-          auto second = rdna2::build_ds(
-              rdna2::kDsReadB32, {.addr = 5, .vdst = uint8_t(lanes == Lanes::Suppressed ? 16 : 8)});
+          SCOPED_TRACE(testing::Message() << int(arch) << "/" << first_gds << "/" << int(second_op)
+                                          << "/" << int(lanes) << "/" << lgkm);
+          cu->gws_device().access_gds(arch, 0, [](Lds &gds) { gds.write32(4, 9); });
+          const auto first = rdna2::build_ds(first_gds ? rdna2::kDsOrderedCount : rdna2::kDsReadB32,
+                                             {.offset0 = uint8_t(first_gds ? 4 : 0),
+                                              .gds = uint8_t(first_gds),
+                                              .addr = 4,
+                                              .vdst = 2});
+          auto second = rdna2::build_ds(rdna2::kDsReadB32,
+                                        {.gds = uint8_t(second_gds),
+                                         .addr = 5,
+                                         .vdst = uint8_t(lanes == Lanes::Suppressed ? 16 : 8)});
           if (flat)
             second = second_op == Second::FlatLoad
                          ? rdna2::build_flat(
@@ -8476,7 +10103,7 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyDsOperationCountsInItsOwnLgkmOrder)
             ASSERT_EQ(wave->pc, pc + 4 * word);
           };
           wave->set_exec(1);
-          wave->set_m0(256);
+          wave->set_m0(first_gds ? 0 : 256);
           ASSERT_NO_FATAL_FAILURE(advance(3));
           EXPECT_EQ(cu->read_vgpr_storage(wave->vgpr_alloc().base + 2, 0), 9u);
           wave->set_exec(lanes == Lanes::Empty ? 0 : 1);
@@ -8484,18 +10111,20 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyDsOperationCountsInItsOwnLgkmOrder)
           ASSERT_NO_FATAL_FAILURE(advance(5));
           const auto &events = state.getWaveMemoryEvents();
           const bool active = lanes == Lanes::Active;
-          const unsigned younger_events = unsigned(active);
-          ASSERT_EQ(events.size(), 1 + younger_events);
+          // The GDS EXPCNT source lock is tracked separately from result events.
+          ASSERT_EQ(events.size(), 1u + unsigned(active));
           const auto &registry = state.getDetector()->events();
           EXPECT_EQ(registry.pendingCounterIncrement(events.front(), WaitCounterType::LGKMCNT),
-                    !active ? 2 : 1);
-          EXPECT_EQ(wave->ensure_memory_wait_scoreboard().outstanding(WaitCounterKind::Ds), 2u);
+                    !active && first_gds == second_gds ? 2 : 1);
+          const auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+          EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Ds), 2u);
+          EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Exp), unsigned(second_gds));
           wave->set_exec(1);
           ASSERT_NO_FATAL_FAILURE(advance(6));
           const auto warnings = cu->memory_wait_diagnostic_count();
           const auto before = sink.str().size();
           ASSERT_NO_FATAL_FAILURE(advance(7));
-          const bool hazard = lgkm < 0;
+          const bool hazard = lgkm < 0 || (lgkm == 1 && first_gds != second_gds);
           EXPECT_EQ(cu->memory_wait_diagnostic_count() != warnings, hazard);
           EXPECT_EQ(sink.str().find("RACE ", before) != std::string::npos, hazard);
           ASSERT_NO_FATAL_FAILURE(advance(9));
@@ -8503,6 +10132,265 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedEmptyDsOperationCountsInItsOwnLgkmOrder)
       }
     }
     wave->halt();
+  }
+}
+
+TEST(RaceDetectorPluginTest, OrderedCountTracksRestoredExecAndIndependentGdsCounterEvents) {
+  for (const auto arch : {"rdna1", "rdna2"}) {
+    SCOPED_TRACE(arch);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, arch, 64, 106, 32));
+    PluginSinkConfig sinks;
+    auto &sink = sinks.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+    auto observer = std::make_unique<MemoryObservationPlugin>();
+    auto *observed = observer.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(observer)));
+    auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *race = race_plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(race_plugin)));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    auto *cu = fixture.cu();
+    auto *wave = cu->dispatch_wf(0, 0x100, 106, 16, 64);
+    ASSERT_NE(wave, nullptr);
+    wave->set_m0(0);
+    std::array<Wavefront *, 1> waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 106, waves);
+    const auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(race->slot_index()));
+    ASSERT_NE(state, nullptr);
+    auto decoder = Decoder::create(wave->cu().arch());
+    for (const auto &[incoming, dst] :
+         std::array<std::pair<uint64_t, uint8_t>, 3>{{{6, 2}, {0, 2}, {2, 16}}}) {
+      SCOPED_TRACE(testing::Message() << incoming << "/" << unsigned(dst));
+      const bool allocated = dst < wave->num_vgprs();
+      wave->pc += 0x20; // Race reports are deduplicated by instruction PC.
+      wave->set_exec(incoming);
+      const auto count =
+          rdna2::build_ds(rdna2::kDsOrderedCount, {.gds = 1, .addr = 1, .vdst = dst});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, count.data()));
+      ASSERT_TRUE(inst);
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *inst, *wave);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+      ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *wave),
+                VmAccessOutcome::Complete);
+      ASSERT_FALSE(observed->accesses.empty());
+      const auto &access = observed->accesses.back();
+      EXPECT_EQ(access.decoded_space, DecodedMemorySpace::GDS);
+      EXPECT_EQ(access.architectural_exec_lane_mask, incoming);
+      EXPECT_EQ(access.active_lane_mask, allocated ? incoming : 0);
+      EXPECT_EQ(access.valid_lane_mask, allocated ? incoming : 0);
+      EXPECT_EQ(access.request_lane_mask, allocated && incoming ? 2u : 0u);
+      EXPECT_EQ(access.ordered_count_result_lane_mask,
+                std::optional<uint64_t>(allocated ? ~uint64_t{0} : 0));
+      ASSERT_EQ(access.issued_counters.size(), 2u);
+
+      // Lane zero was inactive when GDS supplied the broadcast result.
+      wave->set_exec(1);
+      const auto mov =
+          rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = uint16_t(256u + dst), .vdst = 3});
+      inst.reset(decode_valid(*decoder, mov.data()));
+      ASSERT_TRUE(inst);
+      auto read_races = [&] {
+        const auto before = sink.str().size();
+        fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc + 8, *inst, *wave);
+        EXPECT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+        return sink.str().find("RACE ", before) != std::string::npos;
+      };
+      auto &race = *state->race_state;
+      const auto &events = race.getDetector()->events();
+      const auto pending_loads = [&] {
+        return std::ranges::count_if(race.getVgprMemoryEvents(dst), [&](EventId id) {
+          return events.type(id) == MemoryEventType::LDS_TO_VGPR && events.registerLanes(id, dst);
+        });
+      };
+      const auto pending_source = [&](uint32_t lane) {
+        return std::ranges::any_of(race.getVgprMemoryEvents(1), [&](EventId id) {
+          return isFromVgpr(events.type(id)) &&
+                 (events.registerLanes(id, 1) & (uint64_t{1} << lane));
+        });
+      };
+      EXPECT_EQ(pending_loads(), allocated ? 1 : 0);
+      EXPECT_EQ(read_races(), allocated);
+      execute_wait(*fixture.plugin_group_, *wave, legacy_wait_word(wave->cu().arch(), 63, 0));
+      EXPECT_EQ(pending_loads(), 0);
+      EXPECT_FALSE(read_races());
+      EXPECT_FALSE(pending_source(0));
+      EXPECT_EQ(pending_source(1), allocated && incoming);
+      EXPECT_FALSE(pending_source(2));
+      if (allocated && incoming) {
+        const auto &sources = race.getVgprMemoryEvents(1);
+        const auto source = std::ranges::find_if(sources, [&](EventId event) {
+          return events.type(event) == MemoryEventType::GDS_ORDERED_COUNT_SOURCE;
+        });
+        ASSERT_NE(source, sources.end());
+        const RaceViolation violation{RaceViolation::Space::VGPR, 1, 0, 1, true, Dim3d(0), *source};
+        const auto report =
+            formatRaceDescription(violation, events, wave->pc + 8, wave->cu().arch());
+        EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+        EXPECT_NE(report.find("Conflict: VGPR source read by DS_ORDERED_COUNT"), std::string::npos)
+            << report;
+        EXPECT_NE(report.find("pending counters: expcnt."), std::string::npos) << report;
+      }
+      execute_wait(*fixture.plugin_group_, *wave, 0xbf8c0000u);
+      EXPECT_FALSE(pending_source(1));
+    }
+    wave->halt();
+  }
+}
+
+TEST(RaceDetectorPluginTest, OrderedCountProtectsOnlyItsContributingVgprLaneUntilExpcnt) {
+  for (std::string_view arch : {"rdna1", "rdna2"}) {
+    SCOPED_TRACE(arch);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, arch, 32, 106, 32));
+    PluginSinkConfig sinks;
+    auto &sink = sinks.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    auto *cu = f.cu();
+    auto *wave = cu->dispatch_wf(0, 0, 106, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_m0(0);
+    wave->set_lds_size(256);
+    std::array<Wavefront *, 1> waves{wave};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 106, waves);
+
+    const auto overwrite = [&](std::array<uint32_t, 2> producer, uint32_t issued_exec,
+                               unsigned lane, uint8_t reg, uint32_t wait, bool expect_race) {
+      SCOPED_TRACE(testing::Message()
+                   << issued_exec << "/" << lane << "/v" << int(reg) << "/" << std::hex << wait);
+      // Each producer has a different PC because the plugin deduplicates reports.
+      const uint64_t pc = wave->pc + 0x100;
+      wave->pc = pc;
+      const auto mov = rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = 129, .vdst = reg})[0];
+      const uint32_t code[] = {producer[0], producer[1], wait, mov, 0xbf8c0000u, S_ENDPGM};
+      f.mem->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), pc);
+      const auto advance = [&](unsigned word) {
+        for (unsigned tick = 0; tick < 32 && wave->pc < pc + 4 * word; ++tick)
+          ASSERT_TRUE(cu->step());
+        ASSERT_EQ(wave->pc, pc + 4 * word);
+      };
+      wave->set_exec(issued_exec);
+      ASSERT_NO_FATAL_FAILURE(advance(3));
+      wave->set_exec(uint32_t{1} << lane);
+      const size_t before = sink.str().size();
+      const auto diagnostics = cu->memory_wait_diagnostic_count();
+      ASSERT_NO_FATAL_FAILURE(advance(4));
+      EXPECT_EQ(cu->memory_wait_diagnostic_count() != diagnostics, expect_race);
+      const auto report = sink.str().substr(before);
+      EXPECT_EQ(report.find("RACE ") != std::string::npos, expect_race) << report;
+      if (expect_race) {
+        EXPECT_NE(report.find("type=VGPR access=write reg=" + std::to_string(reg)),
+                  std::string::npos)
+            << report;
+      }
+      EXPECT_EQ(cu->read_vgpr_storage(wave->vgpr_alloc().base + reg, lane), 1u);
+      ASSERT_NO_FATAL_FAILURE(advance(5));
+    };
+    const uint32_t lgkm0 = legacy_wait_word(cu->arch(), 63, 0);
+    const uint32_t exp0 = legacy_wait_word(cu->arch(), 63, 63) & ~(7u << 4);
+    const auto count = rdna2::build_ds(rdna2::kDsOrderedCount, {.gds = 1, .addr = 1, .vdst = 2});
+    ASSERT_NO_FATAL_FAILURE(overwrite(count, 6, 1, 1, S_NOP, true));
+    ASSERT_NO_FATAL_FAILURE(overwrite(count, 6, 2, 1, S_NOP, false));
+    ASSERT_NO_FATAL_FAILURE(overwrite(count, 6, 0, 1, S_NOP, false));
+    ASSERT_NO_FATAL_FAILURE(overwrite(count, 6, 1, 4, S_NOP, false));
+    ASSERT_NO_FATAL_FAILURE(overwrite(count, 0, 1, 1, S_NOP, false));
+    ASSERT_NO_FATAL_FAILURE(overwrite(count, 6, 1, 1, lgkm0, true));
+    ASSERT_NO_FATAL_FAILURE(overwrite(count, 6, 1, 1, exp0, false));
+    const auto suppressed =
+        rdna2::build_ds(rdna2::kDsOrderedCount, {.gds = 1, .addr = 1, .vdst = 16});
+    ASSERT_NO_FATAL_FAILURE(overwrite(suppressed, 6, 1, 1, S_NOP, false));
+    // The LDS store snapshots its input at issue.
+    wave->set_m0(256);
+    const auto vb = wave->vgpr_alloc().base;
+    cu->write_vgpr(vb + 4, 1, 4);
+    cu->write_vgpr(vb + 4, 2, 8);
+    cu->write_vgpr(vb + 1, 1, 23);
+    const auto store = rdna2::build_ds(rdna2::kDsWriteB32, {.addr = 4, .data0 = 1});
+    ASSERT_NO_FATAL_FAILURE(overwrite(store, 6, 1, 1, S_NOP, false));
+    EXPECT_EQ(wave->lds().read32(wave->lds_base() + 4), 23u);
+    wave->halt();
+  }
+}
+
+TEST(RaceDetectorPluginTest, Gfx10OrderedCountAndGdsLoadsHonorWritebackOrder) {
+  enum class Operation { OrderedCount, LdsLoad, GdsLoad };
+  const auto ds = [](Operation op, uint8_t src) {
+    return rdna2::build_ds(op == Operation::OrderedCount ? rdna2::kDsOrderedCount
+                                                         : rdna2::kDsReadB32,
+                           {.gds = uint8_t(op != Operation::LdsLoad), .addr = src, .vdst = 2});
+  };
+  for (std::string_view arch : {"rdna1", "rdna2"}) {
+    for (auto [first, second] : {std::pair{Operation::OrderedCount, Operation::OrderedCount},
+                                 std::pair{Operation::OrderedCount, Operation::LdsLoad},
+                                 std::pair{Operation::LdsLoad, Operation::OrderedCount},
+                                 std::pair{Operation::OrderedCount, Operation::GdsLoad},
+                                 std::pair{Operation::GdsLoad, Operation::OrderedCount}}) {
+      // The ordinary GDS load executor is implemented on RDNA1.
+      if (arch == "rdna2" && (first == Operation::GdsLoad || second == Operation::GdsLoad))
+        continue;
+      SCOPED_TRACE(testing::Message() << arch << "/" << int(first) << "/" << int(second));
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, arch, 32, 106, 32));
+      PluginSinkConfig sinks;
+      auto &sink = sinks.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+      constexpr uint64_t pc = 0x100;
+      auto *cu = f.cu();
+      auto *wf = cu->dispatch_wf(0, pc, 106, 16, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_lds_size(256);
+      std::array<Wavefront *, 1> waves{wf};
+      f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 106, waves);
+      const auto vb = wf->vgpr_alloc().base;
+      cu->write_vgpr(vb + 4, 0, 4);
+      cu->write_vgpr(vb + 5, 1, 4);
+      const auto a = ds(first, 4);
+      const auto b = ds(second, 5);
+      const auto read = rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = 258, .vdst = 3})[0];
+      const uint32_t exp0 = legacy_wait_word(cu->arch(), 63, 63) & ~(7u << 4);
+      const uint32_t lgkm0 = legacy_wait_word(cu->arch(), 63, 0);
+      const uint32_t program[] = {a[0], a[1], exp0, b[0], b[1], exp0, read, lgkm0, read, S_ENDPGM};
+      f.mem->load_image(reinterpret_cast<const uint8_t *>(program), sizeof(program), pc);
+      const auto run_to = [&](unsigned next_word) {
+        for (unsigned tick = 0; tick < 32 && wf->pc < pc + 4 * next_word; ++tick)
+          ASSERT_TRUE(cu->step());
+        ASSERT_EQ(wf->pc, pc + 4 * next_word);
+      };
+      wf->set_m0(first == Operation::OrderedCount ? 0 : 8);
+      wf->set_exec(1);
+      ASSERT_NO_FATAL_FAILURE(run_to(3)); // Release the outgoing data before changing EXEC.
+      ASSERT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+      ASSERT_EQ(sink.str().find("RACE "), std::string::npos);
+      wf->set_m0(second == Operation::OrderedCount ? 0 : 8);
+      wf->set_exec(2);
+      ASSERT_NO_FATAL_FAILURE(run_to(6));
+      const bool cross_type = first == Operation::LdsLoad || second == Operation::LdsLoad;
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), unsigned(cross_type));
+      EXPECT_EQ(sink.str().find("access=write") != std::string::npos, cross_type) << sink.str();
+      if (first == Operation::OrderedCount && second == Operation::OrderedCount) {
+        EXPECT_EQ(cu->read_vgpr_storage(vb + 2, 0), 4u);
+        EXPECT_EQ(cu->read_vgpr_storage(vb + 2, 31), 4u);
+      }
+      // EXPCNT released the inputs. The result is still pending until LGKMCNT.
+      ASSERT_NO_FATAL_FAILURE(run_to(7));
+      if (!cross_type) {
+        EXPECT_GT(cu->memory_wait_diagnostic_count(), 0u);
+        EXPECT_NE(sink.str().find("access=read"), std::string::npos) << sink.str();
+      }
+      const auto reports = cu->memory_wait_diagnostic_count();
+      const size_t output = sink.str().size();
+      ASSERT_NO_FATAL_FAILURE(run_to(9));
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), reports);
+      EXPECT_EQ(sink.str().find("RACE ", output), std::string::npos);
+      wf->halt();
+    }
   }
 }
 
@@ -8748,13 +10636,72 @@ TEST(RaceDetectorPluginTest, FlatLoadWaitMakesOnlyTheCorrespondingLanesReady) {
   }
 }
 
+TEST(RaceDetectorPluginTest, ParameterLoadReadsThreeCoefficientsAndWritesFourLanes) {
+  constexpr std::array coefficient_addresses{128, 144, 160};
+  for (const auto arch : {"rdna3", "rdna3_5"}) {
+    for (const int store_address : {0, 128, 132, 144, 160}) {
+      SCOPED_TRACE(testing::Message() << arch << " store=" << store_address);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(2, arch));
+      PluginSinkConfig sinks;
+      auto &sink = sinks.emplace<StringSink>();
+      auto plugin = std::make_unique<RaceDetectorPlugin>();
+      auto *detector = plugin.get();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      auto *cu = fixture.cu();
+      std::array waves{cu->dispatch_wf(0, 0x1000, 32, 32), cu->dispatch_wf(0, 0x2000, 32, 32)};
+      for (auto *wave : waves) {
+        ASSERT_NE(wave, nullptr);
+        wave->set_lds_base(0);
+        wave->set_lds_size(256);
+        wave->set_exec(1);
+      }
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 64, waves);
+      const auto decoder = Decoder::create(cu->arch());
+      const auto issue = [&](auto words, amdgpu::Wavefront &wave) {
+        auto decoded = decoder->decode_window(words);
+        ASSERT_TRUE(decoded.succeeded());
+        auto instruction = std::move(decoded).value();
+        fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction, wave);
+        ASSERT_TRUE(cu->execute_instruction(instruction.get(), wave).succeeded());
+        test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(instruction), wave);
+      };
+      cu->write_vgpr(waves[0]->vgpr_alloc().base, 0, store_address);
+      ASSERT_NO_FATAL_FAILURE(
+          issue(rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0, .data0 = 1}), *waves[0]));
+      waves[1]->set_m0(128);
+      ASSERT_NO_FATAL_FAILURE(
+          issue(rdna3::build_ldsdir(rdna3::kLdsParamLoadLdsdir, {.vdst = 6}), *waves[1]));
+      EXPECT_EQ(sink.str().find("Race on LDS byte ") != std::string::npos,
+                std::ranges::binary_search(coefficient_addresses, store_address))
+          << sink.str();
+      auto *state =
+          static_cast<RaceWavefrontState *>(waves[1]->plugin_state(detector->slot_index()));
+      ASSERT_NE(state, nullptr);
+      const auto &events = state->race_state->getDetector()->events();
+      const EventId load{1};
+      ASSERT_TRUE(events.contains(load));
+      EXPECT_EQ(events.execMask(load), 15u);
+      const auto &reads = events.ldsIntervals(load);
+      EXPECT_TRUE(
+          std::ranges::equal(reads, coefficient_addresses, [](const auto &range, int address) {
+            return range.start == address && range.end == address + 4;
+          }));
+    }
+  }
+}
+
 TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
-  enum Op { Flat, Image, Sample, SampleL, SampleLz, SampleD, Direct, Ds, Resinfo };
+  enum Op { Flat, Image, Bvh, Sample, SampleL, SampleLz, SampleD, Direct, Ds, Resinfo, Param, Lod };
   // Both GFX11 profiles encode these operations and their field layouts identically.
   const auto encode = [](Op op, uint8_t dst) -> std::vector<uint32_t> {
-    if (op == Direct) {
-      const auto words =
-          rdna3::build_ldsdir(rdna3::kLdsDirectLoadLdsdir, {.vdst = dst, .wait_vdst = 15});
+    if (op == Direct || op == Param) {
+      const auto words = rdna3::build_ldsdir(op == Direct ? rdna3::kLdsDirectLoadLdsdir
+                                                          : rdna3::kLdsParamLoadLdsdir,
+                                             {.vdst = dst, .wait_vdst = 15});
       return {words.begin(), words.end()};
     }
     if (op == Ds) {
@@ -8770,24 +10717,31 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
                         : op == SampleL  ? rdna3::kImageSampleLMimg
                         : op == SampleLz ? rdna3::kImageSampleLzMimg
                         : op == SampleD  ? rdna3::kImageSampleDMimg
+                        : op == Bvh      ? rdna3::kImageBvhIntersectRayMimg
+                        : op == Lod      ? rdna3::kImageGetLodMimg
                                          : rdna3::kImageGetResinfoMimg;
-    const auto words =
-        rdna3::build_mimg(opcode, {.dim = 1,
-                                   .unorm = 1,
-                                   .dmask = 1,
-                                   .vaddr = 16,
-                                   .vdata = dst,
-                                   .ssamp = uint8_t(op >= Sample && op <= SampleD ? 2 : 0)});
+    const auto words = rdna3::build_mimg(
+        opcode, {.dim = uint8_t(op != Bvh),
+                 .unorm = 1,
+                 .dmask = uint8_t(op == Bvh ? 15 : 1),
+                 .r128 = uint8_t(op == Bvh),
+                 .vaddr = 16,
+                 .vdata = dst,
+                 .srsrc = uint8_t(op == Bvh ? 3 : 0),
+                 .ssamp = uint8_t(op == Lod || (op >= Sample && op <= SampleD) ? 2 : 0)});
     return {words.begin(), words.end()};
   };
   const auto pipeline = [](Op op, unsigned lane, unsigned shared_lanes) {
     switch (op) {
     case Flat:
       return (shared_lanes >> lane) & 1 ? Ds : Image;
+    case Lod:
     case SampleL:
     case SampleLz:
     case SampleD:
       return Sample;
+    case Param:
+      return Direct;
     case Resinfo:
       return Image;
     default:
@@ -8796,7 +10750,19 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
   };
   constexpr Op ops[]{
       // FLAT writeback follows the address space selected by each lane.
-      Flat, Direct, Ds, Image, Sample, SampleL, SampleLz, SampleD, Resinfo,
+      Flat,
+      Direct,
+      Ds,
+      Image,
+      Bvh,
+      Sample,
+      SampleL,
+      SampleLz,
+      SampleD,
+      // Inline LOD queries use sample writeback order.
+      Lod,
+      Resinfo,
+      Param,
   };
   constexpr uint64_t shared = uint64_t{2} << 32, global = uint64_t{8} << 32;
   for (const auto arch : {"rdna3", "rdna3.5"}) {
@@ -8808,7 +10774,8 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
           enum Wait { None, Full, Partial };
           for (auto wait : {None, Full, Partial}) {
             const auto has_vmcnt_result = [](Op op) {
-              return op == Image || (op >= Sample && op <= SampleD) || op == Resinfo;
+              return op == Image || op == Bvh || (op >= Sample && op <= SampleD) || op == Resinfo ||
+                     op == Lod;
             };
             if (wait == Partial && (!has_vmcnt_result(a) || !has_vmcnt_result(b)))
               continue;
@@ -8840,6 +10807,9 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
             cu->write_sgpr(sb + 1, 20u << 20);
             cu->write_sgpr(sb + 3, (9u << 28) | 4); // 1x1 R32_UINT image, select X.
             cu->write_sgpr(sb + 4, 63);
+            cu->write_sgpr(sb + 12, 0x6000 >> 8);
+            cu->write_sgpr(sb + 15,
+                           kGfx11BvhResourceType << 28); // One triangle node in the BVH resource.
             f.mem->write32(0x4000, 0x1234);
             for (unsigned lane = 0; lane < 4; ++lane)
               wf->debug_write_vgpr(1, lane, (shared_lanes & (1u << lane) ? shared : global) >> 32);
@@ -8863,7 +10833,7 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
             for (unsigned tick = 0; tick < 32 && wf->pc < pc + words.size() * 4; ++tick)
               ASSERT_TRUE(cu->step());
             ASSERT_EQ(wf->pc, pc + words.size() * 4);
-            const auto routed = [](Op op) { return op != Resinfo; };
+            const auto routed = [](Op op) { return op != Resinfo && op != Lod; };
             ASSERT_EQ(observed->accesses.size(), unsigned(routed(a)) + unsigned(routed(b)));
             for (const auto &access : observed->accesses)
               EXPECT_NE(access.request_lane_mask, 0u);
@@ -9302,10 +11272,10 @@ TEST(RaceDetectorPluginTest, Gfx10FlatReturnedBytesRequireBothCounterPositions) 
                              Wait{1, 0, false, true},   Wait{0, 0, false, false},
                              Wait{1, 1, false, true},   Wait{1, 1, true, false},
                              Wait{1, 63, true, true},   Wait{63, 1, true, true}};
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(
-        f.initialize(1, arch == ROCJITSU_CODE_ARCH_RDNA1 ? "rdna1" : "rdna2", 32, 106, 32));
+        f.initialize(1, arch == rocjitsu::IsaFamily::Rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
     PluginSinkConfig sinks;
     auto &sink = sinks.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -9434,12 +11404,12 @@ TEST(RaceDetectorPluginTest, Gfx12TrapDrainsSplitMemoryCounters) {
 }
 
 TEST(RaceDetectorPluginTest, Gfx10IssuedTrapCompletesOnlyTheIssuingWavesMemory) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     for (bool retry : {false, true}) {
       SCOPED_TRACE(testing::Message() << "arch=" << arch << " retry=" << retry);
       PluginFixture f;
       ASSERT_NO_FATAL_FAILURE(
-          f.initialize(2, arch == ROCJITSU_CODE_ARCH_RDNA1 ? "rdna1" : "rdna2", 32, 106, 32));
+          f.initialize(2, arch == rocjitsu::IsaFamily::Rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
       PluginSinkConfig sinks;
       auto &sink = sinks.emplace<StringSink>();
       f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -9515,6 +11485,8 @@ TEST(RaceDetectorPluginTest, Gfx10IssuedTrapCompletesOnlyTheIssuingWavesMemory) 
       }
       ASSERT_NO_FATAL_FAILURE(advance(trapped, handler));
       ASSERT_TRUE(trapped->in_trap_handler());
+      EXPECT_EQ(trapped->ttmp(0), 0x8010u);
+      EXPECT_EQ((trapped->ttmp(1) >> 16) & 0xffu, 7u);
       for (auto *wave : waves) {
         select(wave);
         const bool pending = wave != trapped;
@@ -9557,7 +11529,7 @@ TEST(RaceDetectorPluginTest, Gfx10BarrierPublishesCompletedLdsReadsFromExitedWav
     unsigned barriers;
     bool other_group = false;
   };
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     for (const Case test : {Case{Read::Direct, Finish::Endpgm, 0},
                             {Read::Direct, Finish::Endpgm, 1},
                             {Read::Direct, Finish::Endpgm, 2, true},
@@ -9583,7 +11555,7 @@ TEST(RaceDetectorPluginTest, Gfx10BarrierPublishesCompletedLdsReadsFromExitedWav
       PluginFixture f;
       const unsigned groups = test.other_group ? 2 : 1;
       ASSERT_NO_FATAL_FAILURE(f.initialize(
-          2 * groups, arch == ROCJITSU_CODE_ARCH_RDNA1 ? "rdna1" : "rdna2", 32, 106, 32));
+          2 * groups, arch == rocjitsu::IsaFamily::Rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
       PluginSinkConfig sinks;
       auto &sink = sinks.emplace<StringSink>();
       f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -9739,12 +11711,15 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
     Invalid,
     OutOfBounds,
     OtherGroup,
-    SameWave
+    SameWave,
+    InterpP1,
+    InterpP2,
+    InterpMov
   };
   enum class Sync { None, Lgkm, LgkmBarrier, Barrier };
   constexpr uint32_t word = 0x1234ff80;
   constexpr uint32_t sentinel = 0xdecafbad;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     const auto check = [&](Store store, uint32_t writer_offset, Read read, unsigned type, Sync sync,
                            bool hazard, uint32_t value, bool read_first = false) {
       SCOPED_TRACE(testing::Message() << int(arch) << " store=" << int(store) << " offset="
@@ -9752,7 +11727,7 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
                                       << " sync=" << int(sync) << " read_first=" << read_first);
       PluginFixture f;
       ASSERT_NO_FATAL_FAILURE(
-          f.initialize(2, arch == ROCJITSU_CODE_ARCH_RDNA1 ? "rdna1" : "rdna2", 32, 106, 32));
+          f.initialize(2, arch == rocjitsu::IsaFamily::Rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
       PluginSinkConfig sinks;
       auto &sink = sinks.emplace<StringSink>();
       f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -9765,6 +11740,8 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
       constexpr uint64_t shared = 0x0001'0000'0000'0000ULL;
       cu->set_apertures(shared, shared + 0xffff, 0, 0);
       const bool other = read == Read::OtherGroup;
+      const bool interp =
+          read == Read::InterpP1 || read == Read::InterpP2 || read == Read::InterpMov;
       std::array<Wavefront *, 2> waves{cu->dispatch_wf(0, 0x8000, 106, 16, 32),
                                        cu->dispatch_wf(other ? 1 : 0, 0xa000, 106, 16, 32)};
       auto *writer = waves[0];
@@ -9774,8 +11751,9 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
       ASSERT_NE(reader, nullptr);
       writer->set_lds_base(256);
       reader->set_lds_base(other ? 512 : 256);
-      writer->set_lds_size(16);
-      reader->set_lds_size(read == Read::OutOfBounds ? 4 : 16);
+      const unsigned allocation = interp ? 96 : 16;
+      writer->set_lds_size(allocation);
+      reader->set_lds_size(read == Read::OutOfBounds ? 4 : allocation);
       if (other) {
         f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 106, std::span(waves).first(1));
         f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 1, 32, 106, std::span(waves).last(1));
@@ -9825,7 +11803,7 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
           ASSERT_NO_FATAL_FAILURE(issue(wave, std::array{legacy_wait_word(arch, 63, 0)}, 1));
         }
         if (sync == Sync::Barrier || sync == Sync::LgkmBarrier)
-          f.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+          report_workgroup_barrier(*f.plugin_group_, waves);
       };
       if (!read_first) {
         ASSERT_NO_FATAL_FAILURE(write());
@@ -9838,7 +11816,12 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
       const uint64_t exec = read == Read::Empty ? 0 : 0x14;
       reader->set_m0((type << 16) | 4);
       const auto mov = rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = 254, .vdst = 9});
-      if (read == Read::Ds) {
+      if (interp) {
+        reader->set_m0(1u << 16); // The two active quads use separate primitive coefficient blocks.
+        const uint8_t op = read == Read::InterpP1 ? 0 : read == Read::InterpP2 ? 1 : 2;
+        ASSERT_NO_FATAL_FAILURE(
+            issue(reader_index, rdna1::build_vintrp(op, {.vsrc = 2, .vdst = 9}), exec));
+      } else if (read == Read::Ds) {
         ASSERT_NO_FATAL_FAILURE(
             issue(reader_index, rdna1::build_ds(rdna1::kDsReadB32, {.addr = 1, .vdst = 9}), exec));
       } else if (read == Read::Invalid) {
@@ -9873,8 +11856,8 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
         EXPECT_EQ(reader->wait_counters().vmcnt, 0u);
       }
       for (unsigned lane : {0u, 2u, 4u}) {
-        if (read == Read::Invalid)
-          continue; // The reserved M0 type reports an execution error.
+        if (interp || read == Read::Invalid)
+          continue; // Interpolation values depend on the coefficients for each primitive.
         const bool writes_v9 = read != Read::First && read != Read::SuppressedPair;
         EXPECT_EQ(cu->read_vgpr_storage(rv + 9, lane),
                   writes_v9 && (exec & (1u << lane)) ? value : sentinel);
@@ -9895,6 +11878,15 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
       for (auto *wave : waves)
         wave->halt();
     };
+    for (const auto &[read, first, last] : {std::tuple{Read::InterpP1, 0u, 4u},
+                                            {Read::InterpP2, 32u, 32u},
+                                            {Read::InterpMov, 0u, 0u}}) {
+      for (uint32_t offset : {first, last + 48}) {
+        ASSERT_NO_FATAL_FAILURE(check(Store::Ds, offset, read, 0, Sync::None, true, 0));
+        ASSERT_NO_FATAL_FAILURE(check(Store::Ds, offset, read, 0, Sync::LgkmBarrier, false, 0));
+      }
+      ASSERT_NO_FATAL_FAILURE(check(Store::Ds, 44, read, 0, Sync::None, false, 0));
+    }
     for (auto store : {Store::Flat, Store::Ds}) {
       for (auto read : {Read::Mov, Read::Ds}) {
         ASSERT_NO_FATAL_FAILURE(check(store, 4, read, 2, Sync::None, true, word));
@@ -9938,8 +11930,8 @@ TEST(RaceDetectorPluginTest, Gfx10SharedFlatClampsCompleteLaneTransfersAtTheWork
     Action action;
     unsigned words;
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const bool rdna1 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    const bool rdna1 = arch == rocjitsu::IsaFamily::Rdna1;
     const unsigned size = rdna1 ? 512 : 1024;
     const auto check = [&](Form form, unsigned offset, bool mixed) {
       SCOPED_TRACE(testing::Message() << int(arch) << "/" << form.opcode << "/" << int(form.action)
@@ -10099,8 +12091,8 @@ TEST(RaceDetectorPluginTest, Gfx10BufferToLdsChecksDestinationBeforeRequestingSo
     uint32_t exec, requests;
     bool bad_source = false;
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const bool rdna1 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    const bool rdna1 = arch == rocjitsu::IsaFamily::Rdna1;
     const unsigned size = rdna1 ? 512 : 1024;
     for (auto op : {rdna1::kBufferLoadDword, rdna1::kBufferLoadUbyte, rdna1::kBufferLoadSbyte,
                     rdna1::kBufferLoadFormatX}) {
@@ -10312,8 +12304,8 @@ TEST(RaceDetectorPluginTest, IndexedDsReportsOnlyExecutedWorkgroupLdsBytes) {
     uint8_t words;
     bool dual = false;
   };
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const bool gfx1010 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    const bool gfx1010 = arch == rocjitsu::IsaFamily::Rdna1;
     const uint32_t size = gfx1010 ? 512 : 1024;
     const auto check = [&](Form form, uint32_t offset, bool reverse, unsigned probe) {
       SCOPED_TRACE(testing::Message() << int(arch) << "/" << form.opcode << "/" << offset << "/"
@@ -10452,7 +12444,7 @@ TEST(RaceDetectorPluginTest, IndexedDsReportsOnlyExecutedWorkgroupLdsBytes) {
 TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependentWaits) {
   enum class Op { FlatRead, FlatWrite, FlatAdd, DsRead, DsWrite, DsAdd, DsAdd64, Direct };
   enum class Wait { None, Vm, Ds, Both, DsOne, DsOneWithYounger };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     const auto check = [&](Op first, Op next, Wait wait, bool peer = false, bool barrier = false,
                            bool overlap = true, uint64_t flat_exec = 5) {
       SCOPED_TRACE(testing::Message() << int(arch) << "/" << int(first) << "/" << int(next) << "/"
@@ -10460,7 +12452,7 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
                                       << " overlap=" << overlap << " exec=" << flat_exec);
       PluginFixture f;
       ASSERT_NO_FATAL_FAILURE(
-          f.initialize(2, arch == ROCJITSU_CODE_ARCH_RDNA1 ? "rdna1" : "rdna2", 32, 106, 32));
+          f.initialize(2, arch == rocjitsu::IsaFamily::Rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
       PluginSinkConfig sinks;
       auto &sink = sinks.emplace<StringSink>();
       f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -10557,7 +12549,7 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
             issue(0, rdna1::build_sopk(rdna1::kSWaitcntVscnt, {.sdst = 125}), 1));
       }
       if (barrier)
-        f.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+        report_workgroup_barrier(*f.plugin_group_, waves);
       const auto before = sink.str().size();
       ASSERT_NO_FATAL_FAILURE(memory(peer ? 1 : 0, next, 9));
       const bool atomic_pair = (first == Op::FlatAdd && next == Op::DsAdd) ||
@@ -10624,11 +12616,11 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
 }
 
 TEST(RaceDetectorPluginTest, Gfx10FlatWritebackWithIndexedLdsAndOrdinaryVmem) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(
-        f.initialize(1, arch == ROCJITSU_CODE_ARCH_RDNA1 ? "rdna1" : "rdna2", 32, 106, 32));
+        f.initialize(1, arch == rocjitsu::IsaFamily::Rdna1 ? "rdna1" : "rdna2", 32, 106, 32));
     PluginSinkConfig sinks;
     auto &sink = sinks.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -10839,7 +12831,7 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
                 full_lds ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::GLOBAL_TO_VGPR, {reg},
                 full_lds ? WaitCounterType::LGKMCNT : WaitCounterType::VMCNT,
                 full_lds ? MemoryOrderClass::LDS : MemoryOrderClass::VMEM);
-            const auto sequence = core.issue(older, ROCJITSU_CODE_ARCH_CDNA4);
+            const auto sequence = core.issue(older, rocjitsu::IsaFamily::Cdna4);
             core.add({sequence,
                       0x80 + i * 4,
                       1,
@@ -10848,13 +12840,13 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
                       0xF});
           }
 
-          auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+          auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
           const auto words =
               cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.addr = 0, .saddr = 0x7F, .vdst = 8});
           std::unique_ptr<Instruction> flat(decode_valid(*decoder, words.data()));
           ASSERT_NE(flat, nullptr);
           f.plugin_group_->onAmdgpuBeforeExecuteInstruction(0x100, *flat, *wf);
-          core.before(*flat, ROCJITSU_CODE_ARCH_CDNA4);
+          core.before(*flat, rocjitsu::IsaFamily::Cdna4);
           if (!before_routing) {
             auto data = std::make_unique<VectorMemState>(flat_lds ? LOCAL_MEM : GLOBAL_MEM);
             data->exec_mask = 1;
@@ -11163,7 +13155,7 @@ TEST(RaceDetectorPluginOutputTest, SwapPcDisassemblesAtTheCapturedInstructionAdd
     std::vector<uint32_t> code{mov(0, 255), 0x3000,      mov(1, 128), mov(2, 255),
                                target,      mov(3, 128), load[0],     load[1]};
     if (waited)
-      code.push_back(legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
+      code.push_back(legacy_wait_word(rocjitsu::IsaFamily::Cdna4, 63, 0));
     code.insert(code.end(), {swap[0], S_NOP, S_ENDPGM});
     const uint32_t value = 7;
     f.mem->load_image(reinterpret_cast<const uint8_t *>(&value), sizeof(value), 0x3000);
@@ -11278,7 +13270,7 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
     wave->set_lds_size(lds_size);
   }
   f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   const auto store_words = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1});
   auto store = decoder->decode_window(store_words);
   ASSERT_TRUE(store.succeeded());
@@ -11291,7 +13283,7 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
   ASSERT_EQ(state->race_state->getWaveMemoryEvents().size(), 1u);
   const auto event = state->race_state->getWaveMemoryEvents().front();
   ASSERT_TRUE(state->race_state->getDetector()->events().ldsIntervals(event).contains(lds_base));
-  execute_wait(*f.plugin_group_, *producer, legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
+  execute_wait(*f.plugin_group_, *producer, legacy_wait_word(rocjitsu::IsaFamily::Cdna4, 63, 0));
   EXPECT_FALSE(state->race_state->getDetector()->events().isTrimmable(event));
   const std::array<uint32_t, 1> nop_words{S_NOP};
   auto nop = decoder->decode_window(nop_words);
@@ -11313,14 +13305,14 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
   EXPECT_NE(sink.str().find(expected_store + "  ; <-- wave 0\n"
                                              "       Execution trace below is for wave 1.\n"),
             std::string::npos);
-  state->race_state->flushBarrierPendingEvents();
+  state->race_state->retireReleasedThrough(std::numeric_limits<uint32_t>::max());
   EXPECT_TRUE(state->race_state->getDetector()->events().isTrimmable(event));
 }
 
 TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4),
                         /*ldsSizeBytes=*/64 * 1024);
   const std::array obligations{
       MemoryCounterObligation{WaitCounterType::VMCNT, MemoryOrderClass::VMEM}};
@@ -11341,7 +13333,7 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4),
                         /*ldsSizeBytes=*/64 * 1024);
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
 
@@ -11474,7 +13466,7 @@ TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
   RingBuffer<InstructionSnapshot, 256> trace;
   for (const auto &instruction : {load, testInstruction(0x104), rewritten, testInstruction(0x108)})
     trace.push(instruction);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   const auto report =
       formatTrace(trace,
                   [&](const InstructionSnapshot &instruction) {
@@ -11544,14 +13536,14 @@ TEST(FormatTraceTest, PropagatesDisassemblyFailures) {
 TEST(RaceDisassemblyTest, SnapshotsOwnShortLiteralAndMaximumWidthEncodings) {
   const struct {
     const char *arch;
-    rj_code_arch_t code_arch;
+    rocjitsu::IsaFamily code_arch;
     uint32_t wave_size;
     std::array<uint32_t, 4> words;
   } cases[] = {
-      {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, 64, {S_NOP | 7}},
-      {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, 32, {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu}},
-      {"cdna5", ROCJITSU_CODE_ARCH_CDNA5, 32, {0xCF455083u, 0x00000086u, 0x0A000001u}},
-      {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, 64,
+      {"cdna4", rocjitsu::IsaFamily::Cdna4, 64, {S_NOP | 7}},
+      {"rdna4", rocjitsu::IsaFamily::Rdna4, 32, {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu}},
+      {"cdna5", rocjitsu::IsaFamily::Cdna5, 32, {0xCF455083u, 0x00000086u, 0x0A000001u}},
+      {"cdna4", rocjitsu::IsaFamily::Cdna4, 64,
        make_cdna4_mfma_scale_words(cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma, 1, 448, 449)},
   };
   for (const auto &test : cases) {
@@ -11751,7 +13743,7 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
       wave->set_lds_size(256);
     }
     f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     const auto read_words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
     auto read = decoder->decode_window(read_words);
     ASSERT_TRUE(read.succeeded());
@@ -11759,7 +13751,7 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
     ASSERT_TRUE(f.cu()->execute_instruction(read.value().get(), *reader).succeeded());
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *read.value(), *reader);
     if (complete)
-      execute_wait(*f.plugin_group_, *reader, legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
+      execute_wait(*f.plugin_group_, *reader, legacy_wait_word(rocjitsu::IsaFamily::Cdna4, 63, 0));
     const auto write_words = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1});
     auto write = decoder->decode_window(write_words);
     ASSERT_TRUE(write.succeeded());
@@ -11792,7 +13784,7 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
           << report;
     }
     auto *state = static_cast<RaceWavefrontState *>(reader->plugin_state(plugin->slot_index()));
-    state->race_state->flushBarrierPendingEvents();
+    state->race_state->retireReleasedThrough(std::numeric_limits<uint32_t>::max());
   }
 }
 
@@ -11823,7 +13815,7 @@ TEST(RaceDetectorPluginOutputTest, LdsAtomicsDescribeRecordedReadAndWriteRoles) 
         cu.write_vgpr(wave->vgpr_alloc().base + 1, 0, 7);
       }
       fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
-      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
       ASSERT_NE(decoder, nullptr);
       auto issue = [&](Wavefront &wave, const std::array<uint32_t, 2> &words) {
         std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
@@ -11916,7 +13908,7 @@ TEST(RaceDetectorPluginOutputTest, CapturesWaitBarrierControlFlowAndNopMetadata)
   std::array waves{wave};
   f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
   auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (uint16_t opcode : {cdna5::kSWaitDscntSopp, cdna5::kSWaitAsynccntSopp,
                           cdna5::kSWaitTensorcntSopp, cdna5::kSBarrierWaitSopp, cdna5::kSBranchSopp,
@@ -12338,10 +14330,21 @@ public:
 
   void wait(Wavefront &wave, uint8_t vmcnt, uint8_t lgkmcnt) {
     execute_wait(*f_.plugin_group_, wave,
-                 legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, vmcnt, lgkmcnt));
+                 legacy_wait_word(rocjitsu::IsaFamily::Cdna4, vmcnt, lgkmcnt));
   }
 
-  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_, BarrierKind::Workgroup); }
+  /// s_barrier, reported as the simulator reports it.
+  void barrier() {
+    const BarrierRound round{.kind = BarrierKind::Workgroup,
+                             .completion_bit = kWorkgroupBarrierBit,
+                             .named_id = 0,
+                             .generation = next_generation_++};
+    for (auto *wave : waves_)
+      f_.plugin_group_->onAmdgpuBarrierSignaled(*wave, round);
+    f_.plugin_group_->onAmdgpuBarrierRoundResolved(waves_, waves_, round);
+    for (auto *wave : waves_)
+      f_.plugin_group_->onAmdgpuBarrierWaitPassed(*wave, round);
+  }
 
 private:
   void execute(Wavefront &wave, std::array<uint32_t, 2> words) {
@@ -12358,7 +14361,8 @@ private:
   Wavefront *producer_ = nullptr;
   Wavefront *peer_ = nullptr;
   std::array<Wavefront *, 2> waves_{};
-  std::unique_ptr<Decoder> decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  uint64_t next_generation_ = 0;
+  std::unique_ptr<Decoder> decoder_ = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   std::vector<std::unique_ptr<Instruction>> instructions_;
 };
 
@@ -12475,7 +14479,7 @@ TEST(RaceDetectorPluginTest, Gfx11ImageCountersRetireInOrderAcrossWritebackClass
     };
     const auto wait = [&](unsigned count) {
       ASSERT_NO_FATAL_FAILURE(
-          issue(std::array{legacy_wait_word(ROCJITSU_CODE_ARCH_RDNA3, count, 63)}));
+          issue(std::array{legacy_wait_word(rocjitsu::IsaFamily::Rdna3, count, 63)}));
     };
     const auto image = [](uint16_t op, uint8_t dst) {
       const bool load = op == rdna3_5::kImageLoadMimg;
@@ -12526,6 +14530,148 @@ TEST(RaceDetectorPluginTest, Gfx11ImageCountersRetireInOrderAcrossWritebackClass
       }
     }
     wf->halt();
+  }
+}
+
+TEST(RaceDetectorPluginTest, Gfx10InlineImageQueriesTrackVmcntAndVgprWriteback) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    SCOPED_TRACE(arch);
+    const bool gfx1010 = arch == rocjitsu::IsaFamily::Rdna1;
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, gfx1010 ? "rdna1" : "rdna2", 32, 106, 32));
+    PluginSinkConfig sinks;
+    auto &sink = sinks.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *observer = plugin.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    auto routing = std::make_unique<MemoryObservationPlugin>();
+    const auto &routed = routing->accesses;
+    ASSERT_TRUE(f.plugin_group_->add(std::move(routing)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    auto *cu = f.cu();
+    auto *wave = cu->dispatch_wf(0, 0x8000, 106, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    std::array<Wavefront *, 1> waves{wave};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 106, waves);
+    auto &race =
+        *static_cast<RaceWavefrontState *>(wave->plugin_state(observer->slot_index()))->race_state;
+    const auto sb = wave->sgpr_alloc().base;
+    const auto vb = wave->vgpr_alloc().base;
+    cu->write_sgpr(sb, 0x4000 >> 8);
+    cu->write_sgpr(sb + 1, 20u << 20);
+    cu->write_sgpr(sb + 3, (9u << 28) | 4u);
+    cu->write_sgpr(sb + 4, gfx1010 ? 0 : 63);
+    cu->write_sgpr(sb + 12, 0x4000);
+    cu->write_sgpr(sb + 14, 256);
+    cu->write_sgpr(sb + 15, (3u << 28) | (20u << 12));
+    f.mem->write32(0x4000, 123);
+    const auto step = [&](const auto &words, uint64_t exec) {
+      const uint64_t pc = wave->pc + 0x100;
+      wave->pc = pc;
+      wave->set_exec(exec);
+      f.mem->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), pc);
+      for (unsigned tick = 0; tick < 32 && wave->pc == pc; ++tick)
+        ASSERT_TRUE(cu->step());
+      ASSERT_EQ(wave->pc, pc + sizeof(words));
+    };
+    const auto wait = [&](uint8_t threshold) {
+      ASSERT_NO_FATAL_FAILURE(step(std::array{legacy_wait_word(arch, threshold, 63)}, 1));
+    };
+    const auto read = [&](uint16_t reg, uint64_t exec, bool hazard) {
+      SCOPED_TRACE(testing::Message() << "read v" << reg << " exec=" << exec);
+      const auto output = sink.str().size();
+      ASSERT_NO_FATAL_FAILURE(step(
+          rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = uint16_t(256 + reg), .vdst = 3}), exec));
+      EXPECT_EQ(sink.str().find("type=VGPR access=read reg=" + std::to_string(reg), output) !=
+                    std::string::npos,
+                hazard);
+    };
+    for (const auto query_kind : kInlineImageQueries) {
+      const bool lod = query_kind == InlineImageQuery::Lod;
+      SCOPED_TRACE(lod ? "get_lod" : "get_resinfo");
+      const auto query = [lod](uint8_t dst, uint8_t addr = 0, uint8_t mask = 3) {
+        return rdna1::build_mimg(
+            lod ? rdna1::kImageGetLod : rdna1::kImageGetResinfo,
+            {.dim = 1, .dmask = mask, .vaddr = addr, .vdata = dst, .ssamp = uint8_t(lod ? 2 : 0)});
+      };
+      for (uint32_t reg : {8u, 9u}) {
+        for (unsigned lane : {1u, 2u})
+          cu->write_vgpr(vb + reg, lane, 0xdeadbeef);
+        ASSERT_NO_FATAL_FAILURE(step(query(8), 5));
+        EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 1), 0xdeadbeefu);
+        EXPECT_NE(cu->read_vgpr_storage(vb + reg, 2), 0xdeadbeefu);
+        ASSERT_NO_FATAL_FAILURE(read(reg, 2, false));
+        ASSERT_NO_FATAL_FAILURE(read(reg, 4, true));
+        ASSERT_NO_FATAL_FAILURE(wait(0));
+        ASSERT_NO_FATAL_FAILURE(read(reg, 4, false));
+      }
+
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "query VADDR waited=" << waited);
+        ASSERT_NO_FATAL_FAILURE(step(query(8), 1));
+        if (waited) {
+          ASSERT_NO_FATAL_FAILURE(wait(0));
+        }
+        const auto output = sink.str().size();
+        ASSERT_NO_FATAL_FAILURE(step(query(12, 8), 1));
+        EXPECT_EQ(sink.str().find("type=VGPR access=read reg=8", output) != std::string::npos,
+                  !waited);
+        ASSERT_NO_FATAL_FAILURE(wait(0));
+      }
+      const auto output = sink.str().size();
+      ASSERT_NO_FATAL_FAILURE(step(query(8, 8), 1));
+      EXPECT_EQ(sink.str().find("RACE ", output), std::string::npos);
+      ASSERT_NO_FATAL_FAILURE(wait(0));
+      cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+      cu->write_vgpr(vb + 9, 0, 0xbad0c0deu);
+      ASSERT_NO_FATAL_FAILURE(step(query(8, 0, 0), 1));
+      EXPECT_EQ(cu->read_vgpr_storage(vb + 8, 0), 0u);
+      EXPECT_EQ(cu->read_vgpr_storage(vb + 9, 0), 0xbad0c0deu);
+      ASSERT_NO_FATAL_FAILURE(read(8, 1, true));
+      ASSERT_NO_FATAL_FAILURE(wait(0));
+
+      cu->write_sgpr(sb + 3, 0); // An unbound image still writes zero results.
+      cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+      ASSERT_NO_FATAL_FAILURE(step(query(8), 1));
+      EXPECT_EQ(cu->read_vgpr_storage(vb + 8, 0), 0u);
+      ASSERT_NO_FATAL_FAILURE(read(8, 1, true));
+      ASSERT_NO_FATAL_FAILURE(wait(0));
+      cu->write_sgpr(sb + 3, (9u << 28) | 4u);
+
+      // Empty and out-of-range queries consume a wait position without acquiring result lanes.
+      for (const auto &[exec, dst] : {std::pair{0u, 8u}, {1u, 15u}}) {
+        const auto routes = routed.size();
+        ASSERT_NO_FATAL_FAILURE(step(query(dst), exec));
+        EXPECT_EQ(routed.size(), routes);
+        ASSERT_NO_FATAL_FAILURE(read(dst, 1, false));
+        ASSERT_NO_FATAL_FAILURE(wait(0));
+      }
+    }
+    // A failing GET_LOD skips the scheduler's after-execute hook. Preserve the older load.
+    ASSERT_NO_FATAL_FAILURE(step(
+        rdna1::build_mubuf(rdna1::kBufferLoadDword, {.vdata = 12, .srsrc = 3, .soffset = 128}), 1));
+    const auto pending = race.getWaveMemoryEvents();
+    ASSERT_EQ(pending.size(), 1u);
+    cu->write_sgpr(sb + 10, 0x84000000u); // DERIV_ADJUST_EN.
+    auto decoder = Decoder::create(arch);
+    auto invalid = decoder->decode_window(
+        rdna1::build_mimg(rdna1::kImageGetLod, {.dim = 1, .dmask = 3, .vdata = 8, .ssamp = 2}));
+    ASSERT_TRUE(invalid.succeeded());
+    wave->set_exec(1);
+    cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *invalid.value(), *wave);
+    ASSERT_TRUE(cu->execute_instruction(invalid.value().get(), *wave).failed());
+    EXPECT_EQ(wave->instruction_execution_error(),
+              InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(cu->read_vgpr_storage(vb + 8, 0), 0xdeadbeefu);
+    EXPECT_EQ(race.getWaveMemoryEvents(), pending);
+    wave->clear_instruction_execution_error();
+    ASSERT_NO_FATAL_FAILURE(read(8, 1, false));
+    ASSERT_NO_FATAL_FAILURE(read(12, 1, true));
+    ASSERT_NO_FATAL_FAILURE(wait(0));
+    wave->halt();
   }
 }
 
@@ -12620,7 +14766,7 @@ TEST(RaceDetectorPluginTest, Cdna1LdsDirectSourceChecksPendingWritesWithoutCreat
       ASSERT_NO_FATAL_FAILURE(write());
       if (order == WriterWaitBarrierReader) {
         wait(*writer);
-        fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+        report_workgroup_barrier(*fixture.plugin_group_, waves);
       }
       ASSERT_NO_FATAL_FAILURE(read());
     } else {
@@ -12628,7 +14774,7 @@ TEST(RaceDetectorPluginTest, Cdna1LdsDirectSourceChecksPendingWritesWithoutCreat
       if (order == ReaderWaitWriter)
         wait(*reader);
       if (order == ReaderBarrierWriter)
-        fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+        report_workgroup_barrier(*fixture.plugin_group_, waves);
       ASSERT_NO_FATAL_FAILURE(write());
     }
     const bool barrier = order == ReaderBarrierWriter || order == WriterWaitBarrierReader;

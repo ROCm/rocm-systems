@@ -13,6 +13,7 @@
 #include "functional/gpu/clock/frequencies_read_write.h"
 #include "functional/gpu/events/evt_notif_read_write.h"
 #include "functional/gpu/identity/device_cuid_read.h"
+#include "functional/gpu/identity/driver_info_read.h"
 #include "functional/gpu/identity/id_info_read.h"
 #include "functional/gpu/identity/version_read.h"
 #include "functional/gpu/memory/mem_page_info_read.h"
@@ -41,6 +42,7 @@
 #include "functional/gpu/power/power_cap_read_write.h"
 #include "functional/gpu/power/power_read.h"
 #include "functional/gpu/power/power_read_write.h"
+#include "functional/gpu/power/power_stabilization_read_write.h"
 #include "functional/gpu/ras/err_cnt_read.h"
 #include "functional/gpu/thermal/fan_read.h"
 #include "functional/gpu/thermal/fan_read_write.h"
@@ -208,6 +210,13 @@ TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
+TEST(GpuFunctionalReadWrite, TestPowerStabilizationReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestPowerStabilizationReadWrite tst;
+  RunGenericTest(&tst);
+}
 TEST(GpuFunctionalReadWrite, TestAmppReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
@@ -230,6 +239,10 @@ TEST(GpuFunctionalReadOnly, TestIdInfoRead) {
 }
 TEST(GpuFunctionalReadOnly, TestDeviceCuidRead) {
   TestDeviceCuidRead tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadOnly, TestDriverInfoRead) {
+  TestDriverInfoRead tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {

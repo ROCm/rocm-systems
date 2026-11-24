@@ -664,7 +664,10 @@ finally:
 
 ### amdsmi_get_gpu_driver_info
 
-Description: Returns the info of the driver
+Description: **deprecated** Returns the info of the driver. Use
+`amdsmi_get_gpu_driver_info_v2` instead, which returns the same three fields
+plus the driver build and package. This function emits a `DeprecationWarning`
+and is planned for removal in a future major release.
 
 Input parameters:
 
@@ -691,6 +694,8 @@ Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
 - `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
 - `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing a file
+- `AMDSMI_STATUS_DRM_ERROR` - Error when calling libdrm
 
 Example:
 
@@ -704,6 +709,86 @@ try:
     else:
         for device in devices:
             print("Driver info: ", amdsmi.amdsmi_get_gpu_driver_info(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_driver_info_v2
+
+Description: Returns the info of the driver, the parts of the amdgpu version,
+and the build number of the driver package. Supersedes
+`amdsmi_get_gpu_driver_info`.
+
+The driver package is the `amdgpu-dkms` package installed for the running
+kernel, or else its `amdgpu-kmod` RPM. It is reported only when it has the same
+base kernel version (`6.19.14` in `6.19.14.31400000`) as the loaded driver, and
+its build is then added to `driver_full_version`. Without such a package
+`driver_package` and `driver_build_version` are `N/A`.
+
+The build is read from the installed package, which is matched to the loaded
+driver by kernel version only. After a package upgrade it is the build of the
+loaded driver only once the driver has been reloaded.
+
+When the loaded driver has an amdgpu version (`A.B.C` or `A.B.C.D`) that no
+`amdgpu-dkms` package matches, the first call in a process runs `/usr/bin/rpm`
+to look for `amdgpu-kmod` and waits up to about 5 seconds for it. An rpm that
+has not answered by then is left to finish, and no `amdgpu-kmod` package is
+reported. A found ``amdgpu-kmod`` package, or an answer that none is installed,
+is kept until the process exits, also after a package upgrade. A failed lookup
+is asked again after 5 seconds, and not while that rpm still runs.
+``amdgpu-dkms`` is read on every call.
+
+A driver from an `amdgpu-kmod` package has a three-part version such as
+`6.16.13`, so its `amdgpu_driver_version` is `N/A`. On WSL `driver_version` and
+`driver_full_version` are the WDDM driver version, and the amdgpu parts and the
+package are `N/A`.
+
+Input parameters:
+
+* `processor_handle` device for which to query
+
+Output: Dictionary with fields. A value that is not available is `N/A`.
+
+Field | Content
+---|---
+`driver_name` | driver name
+`driver_version` | amdgpu module version, such as `6.19.14.31400000`
+`driver_date` | driver date, such as `2015/01/01 00:00`, or `N/A` when the kernel does not report one
+`driver_kernel_version` | base kernel version of the amdgpu source, such as `6.19.14`
+`amdgpu_driver_version` | amdgpu release, such as `31400000`
+`driver_build_version` | build number of the driver package, such as `2370381`
+`driver_full_version` | `driver_version` followed by the build, such as `6.19.14.31400000-2370381`; the same as `driver_version` when there is no build
+`driver_package` | `amdgpu-dkms` or `amdgpu-kmod`
+
+Exceptions that can be thrown by `amdsmi_get_gpu_driver_info_v2` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+The same as for `amdsmi_get_gpu_driver_info`. A package that cannot be looked
+up is not an error. In addition:
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Also when the loaded `libamd_smi.so` predates this call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_driver_info_v2(device)
+            print("amdgpu version:", info['driver_full_version'])
+            if info['driver_package'] != "N/A":
+                print("amdgpu package:", info['driver_package'])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -5849,6 +5934,60 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_cpu_links
+
+Description: Return this GPU's directly-connected CPU link(s), of any link type, via KFD io_link only.
+
+An empty list is a normal, successful result on GPUs that have no CPU io_link at all -- it means "no such links exist", not a failure.
+
+Input parameters:
+
+* `processor_handle` the device handle for which to query CPU links
+
+Output: list of dictionaries, one per connected CPU, each with fields:
+
+Field | Description
+---|---
+`package_id` | The real physical socket id of the connected CPU (not a NUMA node id -- a package can expose multiple NUMA nodes)
+`link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cpu_links` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device_num, device in enumerate(devices):
+            cpu_links = amdsmi.amdsmi_get_gpu_cpu_links(device)
+            for link in cpu_links:
+                print(link['package_id'])
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                    print('xgmi')
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                    print('pcie')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_link_topology
 
 Description: Return GPU link topology using the host API's fields.
@@ -6797,6 +6936,116 @@ import amdsmi
 try:
     amdsmi.amdsmi_init()
     amdsmi.amdsmi_reset_ttm_pages_limit()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_power_stabilization_info
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+
+Description: Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info for a GPU. Reads `host_control_enabled`, `enabled`, and all configuration parameters directly from sysfs. A read returns the current effective value of each parameter, which can differ from the last value written, regardless of `host_control_enabled` or `enabled` state. When NPM (Node-level Power Management) coordination is active on a node, every field becomes node-wide rather than per-GPU; a read reflects the current effective node-wide value regardless of which GPU handle on that node is used.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`host_control_enabled` | Read-only: `True` if the host has control of Power Stabilization
+`enabled` | Power Stabilization enabled
+`power_floor` | Power Floor, % of power limit (0-100)
+`delay` | Insertion delay, milliseconds
+`insertion_priority` | HAWK insertion priority (`AmdSmiHawkInsertionPriority`)
+`ramp_enabled` | Ramp Management enabled
+`ramp_max_ramp_up_rate` | Max ramp-up rate, %PL/sec (100 disables ramp-up management)
+`ramp_max_ramp_down_rate` | Max ramp-down rate, %PL/sec (100 disables ramp-down management)
+`ramp_min_time_at_power_floor` | Minimum time at Power Floor, seconds
+`ramp_stop_delay` | Ramp stop delay, seconds
+
+Exceptions that can be thrown by `amdsmi_get_power_stabilization_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, or the device is multi-VF
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_power_stabilization_info(device)
+            print(f"Enabled: {info['enabled']}")
+            print(f"Power floor: {info['power_floor']}")
+            print(f"Insertion priority: {info['insertion_priority'].name}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_power_stabilization_param
+
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+- Writing requires root (or equivalent sysfs write permission).
+
+Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. When NPM (Node-level Power Management) coordination is active on a node, every `param_id` becomes node-wide rather than per-GPU; amdsmi does not detect NPM state or reroute the write on the caller's behalf, so the caller is responsible for selecting the node's primary GPU handle (OAM ID 0) before calling this function. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `param_id` parameter to set (`AmdSmiPowerStabilizationParamId`)
+* `value` new value, written as a signed 64-bit integer: every `param_id`, including `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` despite being a %PL/sec rate, accepts an `int` only (`bool` is rejected since it is an `int` subclass; this parameter's sysfs node cannot accept floating-point values)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_power_stabilization_param` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, the device is multi-VF, or the driver rejects the write due to an unmet dependency
+- `AMDSMI_STATUS_NO_PERM` - amd-smi lacks permission to write sysfs
+- `AMDSMI_STATUS_INVAL` - `param_id` is invalid, or the driver rejects the value
+- `AMDSMI_STATUS_FILE_ERROR` - The sysfs write could not complete
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_power_stabilization_param(
+                device, amdsmi.AmdSmiPowerStabilizationParamId.POWER_FLOOR, 60
+            )
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

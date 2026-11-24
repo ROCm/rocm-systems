@@ -232,7 +232,7 @@ void TuningFree(void* pointer) {
 namespace {
 
 constexpr int GeneralId(int algo, int proto) { return algo * NCCL_NUM_PROTOCOLS + proto; }
-constexpr uint64_t TuningBit(int id) { return uint64_t{1} << id; }
+constexpr rcclTuningMask TuningBit(int id) { return rcclTuningMask::bit(id); }
 constexpr int symFirst = NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
 constexpr int symSecond = NCCL_TUNING_SYM_KERNEL_ID_OFFSET + 1;
 
@@ -851,6 +851,8 @@ TEST_F(TuningMicrotest, PartialGeneralCoordinatesAreNeverIndexedOrChanneled) {
     const std::string log = RcclUnitTesting::CaptureLog([&] { status = ncclTuningCompute(&input, &result); });
     EXPECT_EQ(ncclInternalError, status);
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, "No algorithm/protocol nor symKernelId available")) << log;
+    // [RCCL] The 128-bit mask prints as 32 hex digits.
+    EXPECT_TRUE(RcclUnitTesting::LogHas(log, "tuning mask 0x00000000000000000000000000000001.")) << log;
     EXPECT_EQ(1, plugin.calls);
     EXPECT_EQ(0, channels.calls);
     EXPECT_EQ(missingAlgo ? NCCL_ALGO_UNDEF : NCCL_ALGO_TREE, result.algo);
@@ -1370,6 +1372,72 @@ TEST_F(TuningMicrotest, NoValidTuningDistinguishesConfigurationErrors) {
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, name)) << log;
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, value)) << log;
   }
+}
+
+// ---------------------------------------------------------------------------
+// [RCCL] rcclTuningMask and the symmetric kernel conversions, on both sides of the 64-bit word boundary.
+// ---------------------------------------------------------------------------
+
+TEST(TuningMaskMicrotest, BitHoldsOnlyItsIdOnEitherSideOfTheWordBoundary) {
+  for (int id : {0, 1, 63, 64, 65, 127}) {
+    const rcclTuningMask m = rcclTuningMask::bit(id);
+    EXPECT_TRUE(m.any()) << "id " << id;
+    for (int other = 0; other < rcclTuningMask::kBits; other++) {
+      EXPECT_EQ(other == id, m.test(other)) << "bit(" << id << ").test(" << other << ")";
+    }
+  }
+  EXPECT_EQ(uint64_t(1) << 63, rcclTuningMask::bit(63).word(0));
+  EXPECT_EQ(uint64_t(1), rcclTuningMask::bit(64).word(64));
+}
+
+TEST(TuningMaskMicrotest, RangeHoldsExactlyItsIds) {
+  struct {
+    int lo, hi;
+  } const cases[] = {{0, 0},  {5, 5},   {64, 64},  {0, 1},    {0, 63},     {0, 64},
+                     {0, 65}, {60, 70}, {63, 65},  {64, 128}, {100, 128},  {0, 128}};
+  for (const auto& c : cases) {
+    const rcclTuningMask m = rcclTuningMask::range(c.lo, c.hi);
+    EXPECT_EQ(c.lo < c.hi, m.any()) << "range(" << c.lo << ", " << c.hi << ")";
+    for (int id = 0; id < rcclTuningMask::kBits; id++) {
+      EXPECT_EQ(id >= c.lo && id < c.hi, m.test(id)) << "range(" << c.lo << ", " << c.hi << ").test(" << id << ")";
+    }
+  }
+}
+
+TEST(TuningMaskMicrotest, SetOperationsSpanBothWords) {
+  const rcclTuningMask a = rcclTuningMask::bit(3) | rcclTuningMask::bit(70);
+  const rcclTuningMask b = rcclTuningMask::bit(70) | rcclTuningMask::bit(100);
+  EXPECT_EQ(rcclTuningMask::bit(70), a & b);
+  EXPECT_EQ(rcclTuningMask::bit(3) | rcclTuningMask::bit(70) | rcclTuningMask::bit(100), a | b);
+  EXPECT_EQ(rcclTuningMask::bit(3) | rcclTuningMask::bit(100), a ^ b);
+  EXPECT_TRUE((~a).test(4));
+  EXPECT_FALSE((~a).test(70));
+  EXPECT_TRUE((~a).test(127));
+  rcclTuningMask c = a;
+  c &= b;
+  EXPECT_EQ(a & b, c);
+  c |= a;
+  EXPECT_EQ(a, c);
+  c ^= a;
+  EXPECT_TRUE(c.none());
+  EXPECT_NE(a, b);
+  EXPECT_TRUE(rcclTuningMask().none());
+}
+
+TEST(TuningMaskMicrotest, SymkConversionsPutKernelIdAtOffsetPlusId) {
+  constexpr int off = NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+  // 64 - off is the first kernel id whose tuning id falls in the second word.
+  for (int k : {0, 1, 64 - off - 1, 64 - off, 63}) {
+    EXPECT_EQ(rcclTuningMask::bit(off + k), rcclTuningMaskFromSymk(ncclSymkKernelMask(1) << k)) << "kernel id " << k;
+  }
+  for (int k = 0; k < ncclSymkKernelId_Count; k++) {
+    EXPECT_EQ(ncclSymkKernelMask(1) << k, rcclSymkMaskFromTuning(rcclTuningMask::bit(off + k))) << "kernel id " << k;
+  }
+  const ncclSymkKernelMask allKernels =
+    ncclSymkKernelId_Count == 64 ? ~ncclSymkKernelMask(0) : (ncclSymkKernelMask(1) << ncclSymkKernelId_Count) - 1;
+  EXPECT_EQ(allKernels, rcclSymkMaskFromTuning(NCCL_TUNING_MASK_ALL)) << "general and CE ids must be dropped";
+  EXPECT_EQ(ncclSymkKernelMask(0), rcclSymkMaskFromTuning(NCCL_TUNING_MASK_GENERAL_KERNELS | NCCL_TUNING_MASK_CE));
+  EXPECT_EQ(NCCL_TUNING_MASK_SYM_KERNELS, rcclTuningMaskFromSymk(allKernels));
 }
 
 }  // namespace

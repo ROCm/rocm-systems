@@ -20,6 +20,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -113,7 +114,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4)
       : gpu_mem("vop3p_pk_bin_int_mem"), l2("vop3p_pk_bin_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -216,8 +217,8 @@ TEST(Vop3pPkBinaryIntSimdCorrectness, AppliesSignBitsAfterSelectingSourceHalves)
       {{0xcc006006, 0x9c0a0300}, 0xfffe800d}, // MAD_I16: select high C twice and negate only low C.
   };
   ForceScalarGuard guard;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
