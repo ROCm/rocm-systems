@@ -76,13 +76,8 @@ class TestGpuSystem(unittest.TestCase):
         self.common.print_func_name("")
 
         # Every amdsmi status code, including the two sentinels, must resolve to a
-        # description starting with its own enum name:
-        #   * AMDSMI_STATUS_UNKNOWN_ERROR -> a `case` is missing from
-        #     amdsmi_status_code_to_string() (e.g. TIMEOUT / MORE_DATA).
-        #   * AMDSMI_STATUS_MAP_ERROR -> a lower-level rsmi/esmi/nic status has
-        #     no amdsmi mapping.
-        # Either of these two errors is a library bug, which test should catch & fail.
-        # Only SUCCESS is accepted: NOT_SUPPORTED or any other status is a failure here.
+        # description starting with its own enum name. Only SUCCESS is accepted:
+        # UNKNOWN_ERROR means the code has no description, and any other status fails here.
         accept = [amdsmi.AmdSmiStatus.SUCCESS]
         wrong_names = []
         with self.common.status_sweep():
@@ -100,9 +95,8 @@ class TestGpuSystem(unittest.TestCase):
                 self.common.print(f"\t\t{error_name}: {description}")
                 self.common.print("")
 
-                # Every code's description must begin with its own enum name.
-                # Eg. Some code fallbacks provide an RSMI_STATUS_* string,
-                # but that is not a valid AMDSMI_STATUS_* string.
+                # Every code's description must begin with its own enum name, so a
+                # copy-pasted or mislabelled description fails here.
                 if not description.startswith(error_name):
                     wrong_names.append(f"{error_name}: '{description}'")
 
@@ -117,9 +111,9 @@ class TestGpuSystem(unittest.TestCase):
     def test_status_code_to_string_undefined_code(self):
         self.common.print_func_name("")
         # 100 sits in an enum gap (above the highest normal code, below the two
-        # high-value error codes). It has no case and no lower-level mapping, so
-        # it must fall through to UNKNOWN_ERROR. SUCCESS is deliberately not
-        # accepted: succeeding would mean an undefined code resolved to a string.
+        # high-value error codes). It matches no case, so it must return UNKNOWN_ERROR.
+        # SUCCESS is deliberately not accepted: succeeding would mean an undefined
+        # code resolved to a string.
         accept = [amdsmi.AmdSmiStatus.UNKNOWN_ERROR]
         msg = "\t### amdsmi_status_code_to_string(status=100):"
         with self.common.expect_status(msg, accept):

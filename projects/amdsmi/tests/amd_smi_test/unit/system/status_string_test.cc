@@ -1,8 +1,9 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Null out-pointer contract for the error-string helpers: a NULL status_string
-// must return AMDSMI_STATUS_INVAL instead of being dereferenced. No GPU required.
+// Status-code tests: amdsmi_status_code_to_string() descriptions, fallback and null out-pointer
+// contract (NULL status_string returns AMDSMI_STATUS_INVAL), and rsmi_to_amdsmi_status() mapping.
+// No GPU required.
 
 #include <gtest/gtest.h>
 
@@ -90,6 +91,10 @@ namespace enum_reflect {
 
 constexpr bool kAvailable = AMDSMI_ENUM_REFLECTION_AVAILABLE;
 
+// Scan beyond the current normal status-code range for future additions. Also bounds the
+// reflection-free rsmi scan.
+constexpr uint32_t kScanLimit = 128;
+
 // Compiler name and version, included in failure/skip diagnostics.
 inline const char* CompilerId() {
 #if defined(__clang__)
@@ -103,7 +108,7 @@ inline const char* CompilerId() {
 
 #if AMDSMI_ENUM_REFLECTION_AVAILABLE
 
-template <amdsmi_status_t V>
+template <auto V>
 constexpr const char* Signature() {
   // Return type is a plain `const char*` so the signature has no stray "= "
   // from typedef expansion to confuse the parse below.
@@ -111,7 +116,7 @@ constexpr const char* Signature() {
 }
 
 // Enumerator name for V, e.g. "AMDSMI_STATUS_TIMEOUT".
-template <amdsmi_status_t V>
+template <auto V>
 constexpr std::string_view EnumName() {
   std::string_view s = Signature<V>();
   const auto start = s.find("V = ") + 4;  // anchor on the value parameter
@@ -121,7 +126,7 @@ constexpr std::string_view EnumName() {
 
 // Real enumerators start like C identifiers. Unused values start with '(' on
 // GCC or a digit on Clang, so this rejects both renderings.
-template <amdsmi_status_t V>
+template <auto V>
 constexpr bool IsEnumerator() {
   const auto name = EnumName<V>();
   if (name.empty()) return false;
@@ -129,23 +134,25 @@ constexpr bool IsEnumerator() {
   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
 }
 
-template <uint32_t... Is>
-void Collect(std::vector<std::pair<amdsmi_status_t, std::string>>& out,
-             std::integer_sequence<uint32_t, Is...>) {
-  ((IsEnumerator<static_cast<amdsmi_status_t>(Is)>()
-        ? out.push_back({static_cast<amdsmi_status_t>(Is),
-                         std::string(EnumName<static_cast<amdsmi_status_t>(Is)>())})
+template <typename E, uint32_t... Is>
+void Collect(std::vector<std::pair<E, std::string>>& out, std::integer_sequence<uint32_t, Is...>) {
+  ((IsEnumerator<static_cast<E>(Is)>()
+        ? out.push_back({static_cast<E>(Is), std::string(EnumName<static_cast<E>(Is)>())})
         : void()),
    ...);
 }
 
-// Scan beyond the current normal status-code range for future additions.
-constexpr uint32_t kScanLimit = 128;
+// {value, name} for every enumerator of E in the low range [0, kScanLimit).
+template <typename E>
+std::vector<std::pair<E, std::string>> ScanLowRange() {
+  std::vector<std::pair<E, std::string>> out;
+  Collect(out, std::make_integer_sequence<uint32_t, kScanLimit>{});
+  return out;
+}
 
 // {value, "AMDSMI_STATUS_..."} for every amdsmi_status_t enumerator.
 std::vector<std::pair<amdsmi_status_t, std::string>> AllStatusCodes() {
-  std::vector<std::pair<amdsmi_status_t, std::string>> out;
-  Collect(out, std::make_integer_sequence<uint32_t, kScanLimit>{});
+  auto out = ScanLowRange<amdsmi_status_t>();
   // Append the two high-value sentinels the scan cannot reach.
   out.push_back({AMDSMI_STATUS_MAP_ERROR, std::string(EnumName<AMDSMI_STATUS_MAP_ERROR>())});
   out.push_back(
@@ -158,7 +165,11 @@ inline const char* SampleSignature() { return Signature<AMDSMI_STATUS_TIMEOUT>()
 
 #else  // !AMDSMI_ENUM_REFLECTION_AVAILABLE
 
-// Unsupported compiler: no codes discovered; the positive test skips itself.
+// Unsupported compiler: no codes discovered; the positive tests skip themselves.
+template <typename E>
+std::vector<std::pair<E, std::string>> ScanLowRange() {
+  return {};
+}
 std::vector<std::pair<amdsmi_status_t, std::string>> AllStatusCodes() { return {}; }
 inline const char* SampleSignature() { return "<enum reflection unavailable>"; }
 
@@ -173,7 +184,7 @@ bool StartsWith(const std::string& s, const std::string& prefix) {
 }  // namespace
 
 // Every status code should resolve to a string that starts with its enum name.
-// Missing cases fall through to AMDSMI_STATUS_UNKNOWN_ERROR and fail below.
+// A missing case is a build error (-Wswitch); this catches a wrong or copy-pasted description.
 TEST(SystemUnit, status_code_to_string__EveryStatusCodeResolvesToItsOwnName) {
   if (!enum_reflect::kAvailable) {
     GTEST_SKIP() << "enum reflection unavailable on this compiler (" << enum_reflect::CompilerId()
@@ -224,8 +235,7 @@ TEST(SystemUnit, status_code_to_string__EveryStatusCodeResolvesToItsOwnName) {
     }
     EXPECT_TRUE(StartsWith(description, name))
         << name << " (" << code << ") resolved to \"" << description
-        << "\". Expected the description to start with its own enum name. A "
-        << "missing case falls through to the UNKNOWN_ERROR default.";
+        << "\". Expected the description to start with its own enum name.";
   }
 }
 
@@ -253,7 +263,7 @@ TEST(SystemUnit, status_code_to_string__KnownStatusCodesResolveToTheirOwnName) {
         << "for a valid status code.";
     ASSERT_NE(status_string, nullptr) << name;
     if (IsVerbose()) {
-      std::cout << "\t### " << name << " (" << code << ") -> \"" << status_string << "\""
+      std::cout << "\t>>> " << name << " (" << code << ") -> \"" << status_string << "\""
                 << std::endl;
     }
     EXPECT_TRUE(StartsWith(status_string, name))
@@ -263,32 +273,34 @@ TEST(SystemUnit, status_code_to_string__KnownStatusCodesResolveToTheirOwnName) {
 }
 
 // Negative: a status value in an enum gap (matches no case) must return
-// AMDSMI_STATUS_UNKNOWN_ERROR with a non-empty description, rather than leaving
-// status_string stale or empty.
+// AMDSMI_STATUS_UNKNOWN_ERROR and overwrite status_string with the fallback text,
+// rather than leaving the caller's previous value in place.
 TEST(SystemUnit, status_code_to_string__UndefinedStatusCodeYieldsUnknownError) {
-  const char* status_string = nullptr;
-  // 100 sits in an enum gap (above the highest normal code, below the two
-  // high-value error codes).
-  const auto undefined_code = static_cast<amdsmi_status_t>(100);
+  const char* const stale = "stale";
+  const char* status_string = stale;
+  // In an enum gap: above the highest normal code, below the two high-value error codes.
+  constexpr uint32_t kUndefinedStatus = 100;
+  const auto undefined_code = static_cast<amdsmi_status_t>(kUndefinedStatus);
   const amdsmi_status_t ret =
-      StatusCodeToString(undefined_code, &status_string, AMDSMI_STATUS_UNKNOWN_ERROR, "status=100");
+      StatusCodeToString(undefined_code, &status_string, AMDSMI_STATUS_UNKNOWN_ERROR,
+                         "status=" + std::to_string(kUndefinedStatus));
   EXPECT_EQ(ret, AMDSMI_STATUS_UNKNOWN_ERROR);
   ASSERT_NE(status_string, nullptr);
-  EXPECT_STRNE(status_string, "")
-      << "an undefined status code returned UNKNOWN_ERROR but left an empty description.";
+  EXPECT_NE(status_string, stale) << "status_string was left pointing at the caller's old value.";
+  // The fallback has no "AMDSMI_STATUS_UNKNOWN_ERROR:" prefix, unlike the real status.
+  EXPECT_STREQ(status_string, "An unknown error occurred");
 }
 
 // Negative: a lower-level (rocm_smi) status that amdsmi has no mapping for must
-// surface AMDSMI_STATUS_MAP_ERROR. This guards against rocm_smi adding a new
-// status that silently goes untranslated through rsmi_to_amdsmi_status().
+// surface AMDSMI_STATUS_MAP_ERROR.
 TEST(SystemUnit, status_code_to_string__UnmappedLowerLevelStatusYieldsMapError) {
-  // A value that is intentionally not present in amd::smi::rsmi_status_map.
-  const auto unmapped_rsmi_status = static_cast<rsmi_status_t>(0x0BADF00D);
-  amdsmi_status_t ret =
-      RsmiToAmdsmiStatus(unmapped_rsmi_status, AMDSMI_STATUS_MAP_ERROR, "rsmi_status=0x0BADF00D");
+  // A value outside rsmi_status_t, so rsmi_to_amdsmi_status() has no case for it.
+  constexpr uint32_t kUnmappedRsmiStatus = 0x0BADF00D;
+  const auto unmapped_rsmi_status = static_cast<rsmi_status_t>(kUnmappedRsmiStatus);
+  amdsmi_status_t ret = RsmiToAmdsmiStatus(unmapped_rsmi_status, AMDSMI_STATUS_MAP_ERROR,
+                                           "rsmi_status=" + std::to_string(kUnmappedRsmiStatus));
   EXPECT_EQ(ret, AMDSMI_STATUS_MAP_ERROR)
-      << "An unmapped rocm_smi status must translate to AMDSMI_STATUS_MAP_ERROR; "
-      << "a new rsmi status is missing from amd::smi::rsmi_status_map.";
+      << "An unmapped rocm_smi status must translate to AMDSMI_STATUS_MAP_ERROR.";
 
   // Sanity: known mappings must NOT produce MAP_ERROR.
   ret = RsmiToAmdsmiStatus(RSMI_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS, "RSMI_STATUS_SUCCESS");
@@ -301,4 +313,80 @@ TEST(SystemUnit, status_code_to_string__UnmappedLowerLevelStatusYieldsMapError) 
   ret = RsmiToAmdsmiStatus(RSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED,
                            "RSMI_STATUS_NOT_SUPPORTED");
   EXPECT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+// rsmi_to_amdsmi_status() and rsmi_status_string() must agree on which values are real statuses.
+// No reflection, so it runs on every compiler. A status added to one but not the other fails here.
+TEST(SystemUnit, status_code_to_string__RsmiMappingAndDescriptionsAgree) {
+  std::vector<rsmi_status_t> candidates;
+  for (uint32_t v = 0; v < enum_reflect::kScanLimit; ++v) {
+    candidates.push_back(static_cast<rsmi_status_t>(v));
+  }
+  candidates.push_back(RSMI_STATUS_UNKNOWN_ERROR);  // High-value sentinel outside the scan range.
+
+  for (rsmi_status_t code : candidates) {
+    const char* description = nullptr;
+    // For a value it does not know, rsmi_status_string() returns RSMI_STATUS_UNKNOWN_ERROR.
+    const bool described = rsmi_status_string(code, &description) == RSMI_STATUS_SUCCESS;
+    const bool mapped = amd::smi::rsmi_to_amdsmi_status(code) != AMDSMI_STATUS_MAP_ERROR;
+    if (IsVerbose() && described) {
+      std::cout << "\t>>> rsmi status " << code << " (" << description << ") mapped=" << mapped
+                << std::endl;
+    }
+    EXPECT_EQ(mapped, described)
+        << "rsmi status " << code
+        << (mapped ? " is mapped in rsmi_to_amdsmi_status() but has no description in "
+                     "rsmi_status_string()."
+                   : " has a description in rsmi_status_string() but is not mapped in "
+                     "rsmi_to_amdsmi_status().");
+  }
+}
+
+// The compiler forces a case for every rsmi_status_t, but not what it returns. A real rsmi status
+// must map to a specific amdsmi status: never MAP_ERROR, and UNKNOWN_ERROR only for the rsmi
+// UNKNOWN_ERROR itself. Callers only see the amdsmi status, so a case that returns a generic error
+// (e.g. a copy-paste slip) hides the real cause, such as BUSY or PERMISSION. It must also have a
+// description in rsmi_status_string().
+TEST(SystemUnit, status_code_to_string__EveryRsmiStatusMapsToASpecificStatus) {
+  if (!enum_reflect::kAvailable) {
+    GTEST_SKIP() << "enum reflection unavailable on this compiler (" << enum_reflect::CompilerId()
+                 << "). This test needs Clang or GCC >= 9.";
+  }
+
+  auto rsmi_codes = enum_reflect::ScanLowRange<rsmi_status_t>();
+  // The scan cannot reach this high-value sentinel.
+  rsmi_codes.push_back({RSMI_STATUS_UNKNOWN_ERROR, "RSMI_STATUS_UNKNOWN_ERROR"});
+
+  // Keep this from passing on an empty or broken reflection result.
+  auto contains = [&](rsmi_status_t code) {
+    for (const auto& [value, name] : rsmi_codes) {
+      if (value == code) return true;
+    }
+    return false;
+  };
+  for (rsmi_status_t code :
+       {RSMI_STATUS_SUCCESS, RSMI_STATUS_IPC_ERROR, RSMI_STATUS_UNKNOWN_ERROR}) {
+    ASSERT_TRUE(contains(code)) << "enum reflection did not discover known rsmi status " << code
+                                << ". This is a test-harness problem. Compiler: "
+                                << enum_reflect::CompilerId();
+  }
+
+  for (const auto& [code, name] : rsmi_codes) {
+    const amdsmi_status_t ret = amd::smi::rsmi_to_amdsmi_status(code);
+    if (IsVerbose()) {
+      std::cout << "\t>>> rsmi_to_amdsmi_status(" << name << "=" << code << ") -> " << ret
+                << std::endl;
+    }
+    EXPECT_NE(ret, AMDSMI_STATUS_MAP_ERROR)
+        << name << " (" << code << ") maps to AMDSMI_STATUS_MAP_ERROR in rsmi_to_amdsmi_status().";
+    if (code != RSMI_STATUS_UNKNOWN_ERROR) {
+      EXPECT_NE(ret, AMDSMI_STATUS_UNKNOWN_ERROR)
+          << name << " (" << code
+          << ") maps to AMDSMI_STATUS_UNKNOWN_ERROR in rsmi_to_amdsmi_status().";
+    }
+
+    const char* description = nullptr;
+    EXPECT_EQ(rsmi_status_string(code, &description), RSMI_STATUS_SUCCESS)
+        << name << " (" << code << ") has no description in rsmi_status_string().";
+  }
 }

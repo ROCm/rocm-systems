@@ -22,8 +22,7 @@ class TestStatusCodeToString(unittest.TestCase):
     def test_status_code_to_string(self):
         self.common.print_func_name("")
         # Every status code, including the two sentinels, must describe itself with its own
-        # enum name. UNKNOWN_ERROR means a `case` is missing from
-        # amdsmi_status_code_to_string(); MAP_ERROR means a lower-level status has no mapping.
+        # enum name. Only SUCCESS is accepted: UNKNOWN_ERROR means the code has no description.
         accept = [amdsmi.AmdSmiStatus.SUCCESS]
         wrong_names = []
         with self.common.status_sweep():
@@ -51,9 +50,8 @@ class TestStatusCodeToString(unittest.TestCase):
 
     def test_undefined_code(self):
         self.common.print_func_name("")
-        # 100 sits in an enum gap: no case and no lower-level mapping, so it must fall
-        # through to UNKNOWN_ERROR. SUCCESS is not accepted, since that would mean an
-        # undefined code resolved to a string.
+        # 100 sits in an enum gap and matches no case, so it must return UNKNOWN_ERROR.
+        # SUCCESS is not accepted, since that would mean an undefined code resolved to a string.
         msg = "\t### amdsmi_status_code_to_string(status=100):"
         with self.common.expect_status(msg, [amdsmi.AmdSmiStatus.UNKNOWN_ERROR]):
             amdsmi.amdsmi_status_code_to_string(ctypes.c_uint32(100))
