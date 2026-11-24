@@ -240,8 +240,9 @@ private:
   ~CustomCounted() { destroyed_.fetch_add(1, std::memory_order_relaxed); }
   void add_ref() const noexcept { ++refs_; }
   void release_ref() const noexcept {
-    if (--refs_ == 0)
+    if (--refs_ == 0) {
       delete this;
+    }
   }
   std::atomic<int> &destroyed_;
   mutable uint32_t refs_ = 1;
@@ -404,8 +405,9 @@ TEST(RefCountedCacheAligned, AlignedStorageSeparatesCounterAndValue) {
   expect_isolated(*value);
 
   util::RefCountedCacheAligned<int> array[3];
-  for (const auto &element : array)
+  for (const auto &element : array) {
     expect_isolated(element);
+  }
 
   auto over_aligned = util::IntrusiveSharedPtr<util::RefCountedCacheAligned<OverAligned>>::make();
   expect_isolated(*over_aligned);
