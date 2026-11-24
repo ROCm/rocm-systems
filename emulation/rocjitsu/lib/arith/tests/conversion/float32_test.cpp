@@ -81,7 +81,8 @@ void check_float32(Call call, Conversion32 operation) {
       modifiers, Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
-      /*separately_tested_modifiers=*/0, /*status_free=*/false);
+      /*separately_tested_modifiers=*/0, /*status_free=*/false,
+      /*reports_status=*/Gfx12 && Exact && op < 2);
 }
 
 } // namespace
@@ -365,4 +366,37 @@ TEST(ConversionFloat32Gfx11, ExactMatchesHardware) {
       rj_arith_v_cvt_nearest_i32_f32_w32, 0x1f0, 0, 0x3fc00000, 0, 0, 0, 2);
   rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
       rj_arith_v_cvt_nearest_i32_f32_w32, 0x1f0, 0, 0xbfc00000, 0, 0, 0, 0xffffffffU);
+}
+
+// gfx1201 hardware-verified status for v_cvt_f32_{i,u}32: INX only, suppressed by OMOD/CLAMP.
+TEST(ConversionCvtF32IntGfx12, StatusRules) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    bool is_unsigned;
+    uint32_t input;
+    uint32_t mode;
+    uint32_t causes;
+  } cases[] = {
+      {false, 0x01000000U, 0, 0},
+      {false, 0x01000001U, 0, RJ_ARITH_EXCEPTION_INEXACT},
+      {false, 0x01000001U, RJ_ARITH_ALU_OMOD_2, 0},
+      {false, 0x01000001U, RJ_ARITH_ALU_CLAMP, 0},
+      {true, 0x01000000U, 0, 0},
+      {true, 0xffffffffU, 0, RJ_ARITH_EXCEPTION_INEXACT},
+      {true, 0xffffffffU, RJ_ARITH_ALU_CLAMP, 0},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      for (const auto &sample : cases) {
+        Registers<2, 32> r;
+        r.v[0][0] = sample.input;
+        uint32_t status = 0x80U;
+        auto fn = sample.is_unsigned ? rj_arith_v_cvt_f32_u32_w32_gfx12
+                                     : rj_arith_v_cvt_f32_i32_w32_gfx12;
+        ASSERT_EQ(fn(cpu | semantics, 1U, sample.mode, r.v + 1, r.v, &status), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(status, 0x80U | sample.causes);
+      }
+    }
+  }
 }

@@ -101,7 +101,8 @@ void check_float16(Call call, Conversion16 operation) {
       modifiers, Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | (op == 5 && !Gfx12 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0),
-      Cdna && (op < 2 || op == 4) ? RJ_ARITH_CVT_SDWA : 0);
+      Cdna && (op < 2 || op == 4) ? RJ_ARITH_CVT_SDWA : 0, /*status_free=*/true,
+      /*reports_status=*/Gfx12 && Exact && (op == 0 || op == 1));
 }
 
 } // namespace
@@ -482,4 +483,40 @@ TEST(ConversionFloat16Gfx11, ExactMatchesHardware) {
       rj_arith_v_cvt_f16_i16_w32, 0x1f5, 0, 0xd6a37fff, 0, 0, d, 0xa5a57800U);
   rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 16>(
       rj_arith_v_cvt_f16_i16_w32, 0x1fa, 0, 0xd6a37fff, 0, 0, d, 0xa5a577ffU);
+}
+
+// gfx1201 hardware-verified status for v_cvt_f16_{i,u}16: INX and OVF|INX, plus OMOD/CLAMP.
+TEST(ConversionCvtF16IntGfx12, StatusRules) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    bool is_unsigned;
+    uint16_t input;
+    uint32_t mode;
+    uint32_t causes;
+  } cases[] = {
+      {false, 2048U, 0, 0},
+      {false, 2049U, 0, RJ_ARITH_EXCEPTION_INEXACT},
+      {false, 0x7fffU, 0, RJ_ARITH_EXCEPTION_INEXACT},
+      {false, 0x7fffU, RJ_ARITH_ALU_OMOD_2, RJ_ARITH_EXCEPTION_OVERFLOW},
+      {false, 0x7fffU, RJ_ARITH_ALU_CLAMP, 0},
+      {true, 2048U, 0, 0},
+      {true, 2049U, 0, RJ_ARITH_EXCEPTION_INEXACT},
+      {true, 65520U, 0, RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+      {true, 65520U, RJ_ARITH_ALU_OMOD_2, RJ_ARITH_EXCEPTION_OVERFLOW},
+      {true, 65520U, RJ_ARITH_ALU_CLAMP, 0},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      for (const auto &sample : cases) {
+        Registers<2, 32> r;
+        r.v[0][0] = sample.input;
+        uint32_t status = 0x80U;
+        auto fn = sample.is_unsigned ? rj_arith_v_cvt_f16_u16_w32_gfx12
+                                     : rj_arith_v_cvt_f16_i16_w32_gfx12;
+        ASSERT_EQ(fn(cpu | semantics, 1U, sample.mode, r.v + 1, r.v, &status), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(status, 0x80U | sample.causes);
+      }
+    }
+  }
 }

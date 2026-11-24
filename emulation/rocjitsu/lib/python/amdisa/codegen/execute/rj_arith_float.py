@@ -839,7 +839,7 @@ def gen_conversion32(ctx: ExecuteContext) -> str | None:
         return None
     to_float = mnemonic in ('V_CVT_F32_I32', 'V_CVT_F32_U32')
     fixed_round = mnemonic in ('V_CVT_NEAREST_I32_F32', 'V_CVT_FLOOR_I32_F32')
-    reports = not to_float and not fixed_round
+    reports = (arch == 'rdna4' and to_float) or (not to_float and not fixed_round)
     # Fixed-rounding forms share one RDNA entry; CDNA entries stay loose-only.
     api = 'rj_arith_' + mnemonic.lower()
     if not (fixed_round and arch == 'rdna4'):
@@ -1254,6 +1254,12 @@ def gen_fp8_narrow(ctx: ExecuteContext) -> str | None:
     lines = [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+    ]
+    if arch == 'rdna4':
+        lines += [
+            '  if (!(wf.fp_denorm_mode_f32() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;'
+        ]
+    lines += [
         '  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
         '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);',
     ]
@@ -1276,13 +1282,20 @@ def gen_fp8_narrow(ctx: ExecuteContext) -> str | None:
             f'      (({selector} & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);',
             f'  const uint8_t destination_bytes = ({selector} & 8) ? 0xC : 0x3;',
         ]
-    adapter = 'execute_unary32' if half and not stochastic else 'execute_binary32'
-    operands = ', '.join(dst + src)
-    source_bytes = ', 0xF' if half and not stochastic else ''
-    lines += [
-        f'  amdgpu::arith::{adapter}(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
-        f'      {operands}{source_bytes}, destination_bytes);',
-    ]
+    if arch == 'rdna4':
+        operands = ', '.join(dst + src)
+        lines += [
+            f'  amdgpu::arith::execute_float_pack(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
+            f'      {operands}, /*half_sources=*/false, destination_bytes);',
+        ]
+    else:
+        adapter = 'execute_unary32' if half and not stochastic else 'execute_binary32'
+        operands = ', '.join(dst + src)
+        source_bytes = ', 0xF' if half and not stochastic else ''
+        lines += [
+            f'  amdgpu::arith::{adapter}(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
+            f'      {operands}{source_bytes}, destination_bytes);',
+        ]
     return '\n'.join(lines)
 
 

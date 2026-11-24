@@ -80,7 +80,8 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
         rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       uint32_t causes = rocjitsu::arith::root_exact_x86_64_v4(
           Op == rocjitsu::arith::Unary::Rsq, flags, exec_mask, uint32_t(mode), d[0], a[0],
-          !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE), rocjitsu::arith::reports_fp_status(flags));
+          !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE), rocjitsu::arith::reports_fp_status(flags),
+          rdna3);
       if (rocjitsu::arith::reports_fp_status(flags)) {
         *state |= causes;
       }
@@ -92,7 +93,8 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
         rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
       uint32_t causes = rocjitsu::arith::root_exact_x86_64_v3(
           Op == rocjitsu::arith::Unary::Rsq, flags, exec_mask, uint32_t(mode), d[0], a[0],
-          !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE), rocjitsu::arith::reports_fp_status(flags));
+          !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE), rocjitsu::arith::reports_fp_status(flags),
+          rdna3);
       if (rocjitsu::arith::reports_fp_status(flags)) {
         *state |= causes;
       }
@@ -121,9 +123,8 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
   uint32_t causes = 0;
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
+    result[lane] = rocjitsu::arith::unary_exact_value<Op>(flags, uint32_t(mode), a[0][lane], rdna3);
     if constexpr (Op == rocjitsu::arith::Unary::Sqrt) {
-      // Borrow rocjitsu's classify_sqrt_f32_vop3: test the modified input
-      // before flushing or CLAMP. Negative zero and NaNs do not contribute.
       if (rocjitsu::arith::reports_fp_status(flags) && ((exec_mask >> lane) & 1)) {
         uint32_t input = a[0][lane];
         if (mode & RJ_ARITH_ALU_ABS_A) {
@@ -133,12 +134,27 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
           input ^= 0x80000000U;
         }
         const uint32_t magnitude = input & 0x7fffffffU;
-        if ((input >> 31) && magnitude != 0 && magnitude <= 0x7f800000U) {
-          causes |= 1U;
+        if (rdna3) {
+          if ((input >> 31) && magnitude != 0 && magnitude <= 0x7f800000U) {
+            causes |= RJ_ARITH_EXCEPTION_INVALID;
+          }
+        } else if (!(mode & RJ_ARITH_ALU_CLAMP)) {
+          if (magnitude > 0x7f800000U) {
+            if (!(magnitude & 0x400000U)) {
+              causes |= RJ_ARITH_EXCEPTION_INVALID;
+            }
+          } else if ((input >> 31) && magnitude >= 0x800000U) {
+            causes |= RJ_ARITH_EXCEPTION_INVALID;
+          } else if (!(input >> 31) && magnitude >= 0x800000U && magnitude < 0x7f800000U &&
+                     !(mode & RJ_ARITH_ALU_OMOD_MASK)) {
+            const double root = double(rocjitsu::arith::as_float(result[lane]));
+            if (root * root != double(rocjitsu::arith::as_float(input))) {
+              causes |= RJ_ARITH_EXCEPTION_INEXACT;
+            }
+          }
         }
       }
     }
-    result[lane] = rocjitsu::arith::unary_exact_value<Op>(flags, uint32_t(mode), a[0][lane], rdna3);
   }
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {

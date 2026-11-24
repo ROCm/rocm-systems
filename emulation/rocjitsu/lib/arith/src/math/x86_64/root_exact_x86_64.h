@@ -114,9 +114,11 @@ template <typename V> V sqrt(V index) {
 // lanes only.
 template <bool Reciprocal, typename V>
 uint32_t run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
-             bool quiet_snan, bool reporting) {
+             bool quiet_snan, bool reporting, bool rdna3 = true) {
   constexpr int Lanes = sizeof(V) / sizeof(uint64_t);
-  uint32_t result[32], invalid = 0;
+  uint32_t result[32], invalid = 0, inexact = 0;
+  const bool report_gfx12_sqrt = !Reciprocal && reporting && !rdna3 && !(mode & RJ_ARITH_ALU_CLAMP);
+  const bool report_gfx12_inexact = report_gfx12_sqrt && !(mode & RJ_ARITH_ALU_OMOD_MASK);
   for (int base = 0; base < 32; base += Lanes) {
     V input = load(a + base, V{});
     if (mode & RJ_ARITH_ALU_ABS_A) {
@@ -128,16 +130,24 @@ uint32_t run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, con
     V sign = input & 0x80000000ULL, magnitude = input & 0x7fffffffULL, zero{};
     if constexpr (!Reciprocal) {
       if (reporting) {
-        invalid |=
-            bits((V)(sign != 0ULL) & (V)(magnitude != 0ULL) & (V)(magnitude <= 0x7f800000ULL))
-            << base;
+        if (rdna3) {
+          invalid |=
+              bits((V)(sign != 0ULL) & (V)(magnitude != 0ULL) & (V)(magnitude <= 0x7f800000ULL))
+              << base;
+        } else if (report_gfx12_sqrt) {
+          V neg_invalid =
+              (V)(sign != 0ULL) & (V)(magnitude >= 0x800000ULL) & (V)(magnitude <= 0x7f800000ULL);
+          V snan = (V)(magnitude > 0x7f800000ULL) & (V)((magnitude & 0x400000ULL) == 0ULL);
+          invalid |= bits(neg_invalid | snan) << base;
+        }
       }
     }
     // Special-only blocks need classification/finalization, but no polynomial.
     // This depends on operand values, never on EXEC density. Mixed blocks keep SIMD.
     V value{};
     V ordinary = (V)(input >= 0x800000ULL) & (V)(input < 0x7f800000ULL);
-    if (bits(ordinary)) {
+    uint32_t ordinary_mask = bits(ordinary);
+    if (ordinary_mask) {
       V index = (input ^ 0x800000ULL) & 0xffffffULL;
       V normalized;
       if constexpr (Reciprocal) {
@@ -155,6 +165,19 @@ uint32_t run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, con
         exponent = (normalized >> 23) + half_exponent;
       }
       value = (exponent << 23) | (normalized & 0x7fffffULL);
+      if constexpr (!Reciprocal) {
+        if (report_gfx12_inexact) {
+          uint32_t check = ordinary_mask & (exec_mask >> base);
+          while (check) {
+            int lane = __builtin_ctz(check);
+            check &= check - 1;
+            const double root = double(bit_cast<float>(uint32_t(value[lane])));
+            if (root * root != double(bit_cast<float>(uint32_t(input[lane])))) {
+              inexact |= 1U << (base + lane);
+            }
+          }
+        }
+      }
     }
     value = choose((V)(magnitude == 0x7f800000ULL), Reciprocal ? zero : input, value);
     value = choose((V)(sign != 0ULL), zero + 0xffc00000ULL, value);
@@ -169,7 +192,8 @@ uint32_t run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, con
     _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), mask,
                            _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result + lane)));
   }
-  return (invalid & exec_mask) ? 1U : 0U;
+  return ((invalid & exec_mask) ? RJ_ARITH_EXCEPTION_INVALID : 0U) |
+         ((inexact & exec_mask) ? RJ_ARITH_EXCEPTION_INEXACT : 0U);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::root_simd

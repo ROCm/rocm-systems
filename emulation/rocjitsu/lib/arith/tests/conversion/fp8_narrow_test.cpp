@@ -65,7 +65,9 @@ void check_fp8_narrow(Call call) {
         return fp8_narrow_result((Stochastic ? 2 : 0) + (Bf8 ? 1 : 0), uint32_t(a), b, old, mode,
                                  !Half && (flags & RJ_ARITH_FP16_OVFL), Arch, Half);
       },
-      conversion_bits, modifiers, true);
+      conversion_bits, modifiers, true, Arch == 12 && !Half ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0,
+      /*separately_tested_modifiers=*/0, /*status_free=*/true,
+      /*reports_status=*/Arch == 12 && !Half);
 }
 
 } // namespace
@@ -236,4 +238,40 @@ TEST(ConversionCvtSrBf8F16W32, Arithmetic) {
 
 TEST(ConversionCvtSrBf8F16W64, Arithmetic) {
   check_fp8_narrow<64, true, true, 1250, true>(rj_arith_v_cvt_sr_bf8_f16_w64);
+}
+
+// gfx1201 hardware-verified status for v_cvt_{pk,sr}_{fp8,bf8}_f32: INV on sNaN, DEN on
+// subnormal when FP32 input denormals are preserved; stochastic rounding ignores seed b.
+TEST(ConversionCvtFp8NarrowGfx12, StatusRules) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      Registers<3, 32> r;
+      uint32_t status = 0x80U;
+      // v_cvt_pk_fp8_f32 checks both a and b.
+      r.v[0][0] = 0x00000001U;
+      r.v[1][0] = 0x7f800001U;
+      ASSERT_EQ(
+          rj_arith_v_cvt_pk_fp8_f32_w32(cpu | semantics, 1U, 0, r.v + 2, r.v, r.v + 1, &status),
+          RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status, 0x80U | RJ_ARITH_EXCEPTION_INVALID | RJ_ARITH_EXCEPTION_INPUT_DENORM);
+
+      // Input flush suppresses DEN but keeps INV.
+      status = 0x80U;
+      ASSERT_EQ(rj_arith_v_cvt_pk_bf8_f32_w32(cpu | semantics | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS,
+                                              1U, 0, r.v + 2, r.v, r.v + 1, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status, 0x80U | RJ_ARITH_EXCEPTION_INVALID);
+
+      // v_cvt_sr_fp8_f32 ignores seed operand b even when its bits look like an sNaN/denormal.
+      status = 0x80U;
+      r.v[0][0] = 0x3f800000U;
+      r.v[1][0] = 0x7f800001U;
+      ASSERT_EQ(
+          rj_arith_v_cvt_sr_fp8_f32_w32(cpu | semantics, 1U, 0, r.v + 2, r.v, r.v + 1, &status),
+          RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status, 0x80U);
+    }
+  }
 }

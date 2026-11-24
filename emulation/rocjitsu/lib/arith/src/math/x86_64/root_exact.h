@@ -14,12 +14,14 @@ namespace rocjitsu::arith {
 // exec_mask.
 // Requires the named CPU features and validated instruction controls.
 uint32_t root_exact_x86_64_v3(bool reciprocal, uint64_t flags, uint32_t exec_mask, uint32_t mode,
-                              uint32_t *d, const uint32_t *a, bool quiet_snan, bool reporting);
+                              uint32_t *d, const uint32_t *a, bool quiet_snan, bool reporting,
+                              bool rdna3 = true);
 
 // Evaluate root exact for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.
 // Requires the named CPU features and validated instruction controls.
 uint32_t root_exact_x86_64_v4(bool reciprocal, uint64_t flags, uint32_t exec_mask, uint32_t mode,
-                              uint32_t *d, const uint32_t *a, bool quiet_snan, bool reporting);
+                              uint32_t *d, const uint32_t *a, bool quiet_snan, bool reporting,
+                              bool rdna3 = true);
 
 } // namespace rocjitsu::arith

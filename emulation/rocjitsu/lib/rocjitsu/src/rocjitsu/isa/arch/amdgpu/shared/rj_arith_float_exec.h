@@ -488,7 +488,7 @@ inline void execute_float64_word(Wavefront &wave, FloatBinary32Function wave32,
 inline void execute_float_pack(Wavefront &wave, FloatBinary32Function wave32,
                                FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
                                const Operand &destination, const Operand &lhs, const Operand &rhs,
-                               bool half_sources) {
+                               bool half_sources, uint8_t destination_bytes = 0xF) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
@@ -499,12 +499,14 @@ inline void execute_float_pack(Wavefront &wave, FloatBinary32Function wave32,
   VectorInput32 b(registers, wave, rhs, wave.exec(), b_bytes);
   uint32_t causes = 0;
   const bool success = write_vector32_result(
-      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+      wave, registers, destination, exec_mask,
+      [&](uint32_t *const *d, uint64_t write_mask) {
         uint32_t *state = &causes;
         return wave.wf_size() == 32
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, state);
-      });
+      },
+      /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);

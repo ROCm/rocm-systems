@@ -900,7 +900,8 @@ def test_fp8_narrow_modes_and_partial_destination(stochastic):
         name = 'V_CVT_' + ('SR_' if stochastic else 'PK_') + kind + '_F32'
         body = gen_fp8_narrow(context('rdna4', name, ['dst'], ['a', 'b'], is_vop3=True))
         assert 'rj_arith_' + name.lower() + '_w64' in body
-        assert 'execute_binary32' in body
+        assert 'execute_float_pack' in body
+        assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
         assert 'arithmetic_flags()' in body
         assert 'RJ_ARITH_FP16_OVFL' in body
         assert 'RJ_ARITH_ALU_ABS_A' in body and 'RJ_ARITH_ALU_NEG_A' in body
@@ -1155,7 +1156,7 @@ def test_generated_float_pack_methods_have_no_legacy_bypass(arch):
             assert 'try_execute_' not in body, match[1]
             assert 'amdgpu::execute_v_' not in body, match[1]
             checked += 1
-    assert checked == 14
+    assert checked == (22 if arch == 'rdna4' else 14)
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])

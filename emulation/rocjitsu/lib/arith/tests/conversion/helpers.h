@@ -197,7 +197,8 @@ template <int Lanes, int Operands, int InputWords, int OutputWords, bool Dpp, ty
           typename Reference, typename Compare>
 void check_conversion(Call call, const Registers<8, Lanes> &input, Reference reference,
                       Compare compare, uint64_t modifiers, bool exact, uint64_t guest_flags = 0,
-                      uint64_t separately_tested_modifiers = 0, bool status_free = true) {
+                      uint64_t separately_tested_modifiers = 0, bool status_free = true,
+                      bool reports_status = false) {
   using Mask = WaveMask<Lanes>;
   using Source = const uint32_t *const *;
   constexpr bool status_parameter =
@@ -255,7 +256,7 @@ void check_conversion(Call call, const Registers<8, Lanes> &input, Reference ref
                                                    : scenario >= 5 + int(modes.size()) ? 0
                                                    : scenario % 2                      ? 0
                                                                                        : 3);
-        int error = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL &&
+        int error = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && !reports_status &&
                             (status_parameter || (exact && !status_free))
                         ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
                     : !exact && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
@@ -272,14 +273,23 @@ void check_conversion(Call call, const Registers<8, Lanes> &input, Reference ref
           // A nonzero sentinel detects unwanted writes when FP status is unused or reporting is
           // rejected.
           uint32_t status = 0x80000055U;
-          uint32_t *status_ptr = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL || scenario % 2
-                                     ? &status
-                                     : nullptr;
+          const bool reporting =
+              reports_status && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                 semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
+          uint32_t *status_ptr =
+              reporting || semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL || scenario % 2
+                  ? &status
+                  : nullptr;
           ASSERT_EQ(invoke(flags, exec_mask, mode, exec_mask ? d : nullptr,
                            exec_mask ? r.v : nullptr, exec_mask ? r.v + 2 : nullptr,
                            exec_mask ? r.v + 4 : nullptr, status_ptr),
                     error);
-          EXPECT_EQ(status, 0x80000055U);
+          if (!reporting || error || !exec_mask) {
+            EXPECT_EQ(status, 0x80000055U);
+          } else {
+            EXPECT_EQ(status & 0xffffff80U, 0x80000000U);
+            EXPECT_EQ(status & 0x80000055U, 0x80000055U);
+          }
           if (error) {
             r.expect_preserved(input, 0, 0);
             continue;

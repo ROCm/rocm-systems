@@ -6673,10 +6673,11 @@ TEST(ArithBridgeTest, WordConversionsRoundingSaturationAndPolicies) {
                   ASSERT_TRUE(instruction.succeeded());
                   fixture.recorder->reads.clear();
                   fixture.recorder->writes.clear();
-                  const bool success =
+                  const bool success = policy_kind < 3 || (!rdna3 && op < 2);
+                  ASSERT_EQ(
                       fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
-                          .succeeded();
-                  ASSERT_EQ(success, policy_kind < 3);
+                          .succeeded(),
+                      success);
                   uint64_t read_lanes = 0, written = 0;
                   for (const auto &read : fixture.recorder->reads) {
                     EXPECT_EQ(read.reg, 0u);
@@ -6801,10 +6802,11 @@ TEST(ArithBridgeTest, HalfConversionsSelectedBytesModesAndPolicies) {
                     ASSERT_TRUE(instruction.succeeded());
                     fixture.recorder->reads.clear();
                     fixture.recorder->writes.clear();
+                    const bool supported = !required || (!rdna3 && op < 2);
                     ASSERT_EQ(
                         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded(),
-                        !required);
+                        supported);
                     // Packed E32 halves must use one bulk read, not a per-lane
                     // fallback.
                     EXPECT_EQ(fixture.recorder->reads.size(), 1u);
@@ -6820,10 +6822,10 @@ TEST(ArithBridgeTest, HalfConversionsSelectedBytesModesAndPolicies) {
                       EXPECT_EQ(write.bytes, destination_half ? (high_d ? 0xc : 0x3) : 0xf);
                       written |= write.lanes;
                     }
-                    EXPECT_EQ(written, required ? 0u : exec_mask);
+                    EXPECT_EQ(written, supported ? exec_mask : 0u);
                     for (unsigned lane = 0; lane < lanes; ++lane) {
                       uint32_t want = destination == 0 ? inputs[lane % 4] : 0x12345678;
-                      if (!required && ((exec_mask >> lane) & 1)) {
+                      if (supported && ((exec_mask >> lane) & 1)) {
                         const unsigned shift = high_d ? 16 : 0;
                         want = destination_half
                                    ? (want & ~(0xffffu << shift)) | (expected[lane % 4] << shift)
@@ -7145,8 +7147,8 @@ TEST(ArithBridgeTest, BitPackingSelectorsAliasingAndPolicies) {
                 ASSERT_TRUE(instruction.succeeded());
                 fixture.recorder->reads.clear();
                 fixture.recorder->writes.clear();
-                // Both architectures accept strict exact numeric requests; neither reports status.
-                const bool success = policy_kind < 3;
+                // RDNA4 V_PACK_B32_F16 also supports strict FP-status reporting.
+                const bool success = policy_kind < 3 || (!rdna3 && half);
                 ASSERT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded(),
                           success);
@@ -8032,7 +8034,10 @@ TEST(ArithBridgeTest, SqrtClassifiesModifiedInputsBeforeAliasedWrites) {
               const uint32_t modified = raw ^ (negate ? 0x80000000u : 0u);
               const uint32_t magnitude = modified & 0x7fffffffu;
               const bool raises = (modified >> 31) && magnitude && magnitude <= 0x7f800000u;
-              EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u | (report && raises ? 1u : 0u));
+              const bool raises_inv = (rdna3 || !clamp) && (modified >> 31) &&
+                                      magnitude >= (rdna3 ? 1u : 0x00800000u) &&
+                                      magnitude <= 0x7f800000u;
+              EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u | (report && raises_inv ? 1u : 0u));
               uint32_t expected;
               if (magnitude < 0x00800000u)
                 expected = modified & 0x80000000u;

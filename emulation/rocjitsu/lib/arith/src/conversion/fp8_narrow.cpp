@@ -16,17 +16,36 @@ namespace {
 
 using rocjitsu::arith::Fp8NarrowPolicy;
 
+// Classify one gfx12 FP32->FP8/BF8 lane (sNaN -> INVALID, unflushed denormal -> INPUT_DENORM).
+template <bool Stochastic>
+inline uint32_t fp8_narrow_causes_f32(uint32_t a, uint32_t b, uint64_t flags) {
+  const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  auto element = [flush](uint32_t v) -> uint32_t {
+    const uint32_t mag = v & 0x7fffffffU;
+    if (mag > 0x7f800000U) {
+      return !(mag & 0x400000U) ? RJ_ARITH_EXCEPTION_INVALID : 0;
+    }
+    return !flush && mag && mag < 0x800000U ? RJ_ARITH_EXCEPTION_INPUT_DENORM : 0;
+  };
+  if constexpr (Stochastic) {
+    (void)b;
+    return element(a);
+  } else {
+    return element(a) | element(b);
+  }
+}
+
 // Narrow FP16/FP32 to FP8/BF8 for the selected lanes. Reject invalid controls before changing
 // outputs.
-template <bool Bf8, bool Stochastic, bool Half = false>
+template <bool Bf8, bool Stochastic, bool Half = false, bool ReportStatus = false>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b,
-            Fp8NarrowPolicy policy = Fp8NarrowPolicy::Gfx12) {
+            Fp8NarrowPolicy policy = Fp8NarrowPolicy::Gfx12, uint32_t *excp_flag_user = nullptr) {
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return convert<Bf8, Stochastic, Half>(flags, exec_mask, uint32_t(mode), d, source, b,
-                                                policy);
+          return convert<Bf8, Stochastic, Half, ReportStatus>(flags, exec_mask, uint32_t(mode), d,
+                                                              source, b, policy, excp_flag_user);
         });
   }
   if constexpr (Half && Stochastic) {
@@ -44,17 +63,32 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
       (Stochastic ? RJ_ARITH_CVT_BYTE_3
                   : RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_HIGH_D) |
       (Half ? RJ_ARITH_ALU_HIGH_A : 0);
-  if (int error = rocjitsu::arith::validate(flags, mode & ~known)) {
+  const uint64_t allowed_fp_flags = ReportStatus ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0;
+  if (int error = rocjitsu::arith::validate(flags, mode & ~known, allowed_fp_flags)) {
     return error;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
+  }
+  const bool report = ReportStatus && rocjitsu::arith::reports_fp_status(flags) && excp_flag_user;
+  uint32_t causes = 0;
+  if constexpr (ReportStatus && !Half) {
+    if (report) {
+      for (int lane = 0; lane < 32; ++lane) {
+        if ((exec_mask >> lane) & 1) {
+          causes |= fp8_narrow_causes_f32<Stochastic>(a[0][lane], b ? b[0][lane] : 0, flags);
+        }
+      }
+    }
   }
   bool saturate = !Half && (flags & RJ_ARITH_FP16_OVFL);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     rocjitsu::arith::fp8_narrow_x86_64_v4<Bf8, Stochastic, Half>(exec_mask, mode, saturate, d[0],
                                                                  a[0], b ? b[0] : nullptr, policy);
+    if (report) {
+      *excp_flag_user |= causes;
+    }
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -62,6 +96,9 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp8_narrow_x86_64_v3<Bf8, Stochastic, Half>(exec_mask, mode, saturate, d[0],
                                                                  a[0], b ? b[0] : nullptr, policy);
+    if (report) {
+      *excp_flag_user |= causes;
+    }
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -92,31 +129,40 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
       d[0][lane] = result[lane];
     }
   }
+  if (report) {
+    *excp_flag_user |= causes;
+  }
   return RJ_ARITH_SUCCESS;
 }
 
 // Narrow FP16/FP32 to FP8/BF8 for Wave64. Reject invalid controls before changing outputs.
-template <bool Bf8, bool Stochastic, bool Half = false>
+template <bool Bf8, bool Stochastic, bool Half = false, bool ReportStatus = false>
 int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                    const uint32_t *const *a, const uint32_t *const *b,
-                   Fp8NarrowPolicy policy = Fp8NarrowPolicy::Gfx12) {
+                   Fp8NarrowPolicy policy = Fp8NarrowPolicy::Gfx12,
+                   uint32_t *excp_flag_user = nullptr) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error =
-          convert<Bf8, Stochastic, Half>(flags, 0, mode, nullptr, nullptr, nullptr, policy)) {
+  if (int error = convert<Bf8, Stochastic, Half, ReportStatus>(flags, 0, mode, nullptr, nullptr,
+                                                               nullptr, policy, excp_flag_user)) {
     return error;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  const bool report = ReportStatus && rocjitsu::arith::reports_fp_status(flags) && excp_flag_user;
+  uint32_t causes = 0;
   for (int half = 0; half < 2; ++half) {
     uint64_t half_instruction_flags = rocjitsu::arith::dpp_half_wave_instruction_flags(mode, half);
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source_a = a[0] + half * 32, *source_b = b ? b[0] + half * 32 : nullptr;
-    if (int error = convert<Bf8, Stochastic, Half>(flags, uint32_t(exec_mask >> (half * 32)),
-                                                   half_instruction_flags, &dest, &source_a,
-                                                   b ? &source_b : nullptr, policy)) {
+    if (int error = convert<Bf8, Stochastic, Half, ReportStatus>(
+            flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, &dest, &source_a,
+            b ? &source_b : nullptr, policy, report ? &causes : nullptr)) {
       return error;
     }
+  }
+  if (report) {
+    *excp_flag_user |= causes;
   }
   return RJ_ARITH_SUCCESS;
 }
@@ -140,104 +186,111 @@ template <bool Stochastic> uint64_t cdna_narrow_mode(uint64_t mode, Fp8NarrowPol
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_pk_fp8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<false, false>(flags, exec_mask, mode, d, a, b);
+  return convert<false, false, false, true>(flags, exec_mask, mode, d, a, b, Fp8NarrowPolicy::Gfx12,
+                                            excp_flag_user);
 }
 
 // Convert F32 to BF8 and pack results with packed elements for selected lanes.
-// Return errors before changing outputs. Inactive destination lanes are preserved.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_cvt_pk_bf8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<true, false>(flags, exec_mask, mode, d, a, b);
+  return convert<true, false, false, true>(flags, exec_mask, mode, d, a, b, Fp8NarrowPolicy::Gfx12,
+                                           excp_flag_user);
 }
 
 // Convert F32 to FP8 with seeded stochastic rounding for selected lanes.
-// Return errors before changing outputs. Inactive destination lanes are preserved.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_cvt_sr_fp8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<false, true>(flags, exec_mask, mode, d, a, b);
+  return convert<false, true, false, true>(flags, exec_mask, mode, d, a, b, Fp8NarrowPolicy::Gfx12,
+                                           excp_flag_user);
 }
 
 // Convert F32 to BF8 with seeded stochastic rounding for selected lanes.
-// Return errors before changing outputs. Inactive destination lanes are preserved.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_cvt_sr_bf8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<true, true>(flags, exec_mask, mode, d, a, b);
+  return convert<true, true, false, true>(flags, exec_mask, mode, d, a, b, Fp8NarrowPolicy::Gfx12,
+                                          excp_flag_user);
 }
 
 // Convert F32 to FP8 and pack results with packed elements for selected lanes.
-// Return errors before changing outputs. Inactive destination lanes are preserved.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_cvt_pk_fp8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<false, false>(flags, exec_mask, mode, d, a, b);
+  return convert_wave64<false, false, false, true>(flags, exec_mask, mode, d, a, b,
+                                                   Fp8NarrowPolicy::Gfx12, excp_flag_user);
 }
 
 // Convert F32 to BF8 and pack results with packed elements for selected lanes.
-// Return errors before changing outputs. Inactive destination lanes are preserved.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_cvt_pk_bf8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<true, false>(flags, exec_mask, mode, d, a, b);
+  return convert_wave64<true, false, false, true>(flags, exec_mask, mode, d, a, b,
+                                                  Fp8NarrowPolicy::Gfx12, excp_flag_user);
 }
 
 // Convert F32 to FP8 with seeded stochastic rounding for selected lanes.
-// Return errors before changing outputs. Inactive destination lanes are preserved.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_cvt_sr_fp8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<false, true>(flags, exec_mask, mode, d, a, b);
+  return convert_wave64<false, true, false, true>(flags, exec_mask, mode, d, a, b,
+                                                  Fp8NarrowPolicy::Gfx12, excp_flag_user);
 }
 
 // Convert F32 to BF8 with seeded stochastic rounding for selected lanes.
-// Return errors before changing outputs. Inactive destination lanes are preserved.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_cvt_sr_bf8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<true, true>(flags, exec_mask, mode, d, a, b);
+  return convert_wave64<true, true, false, true>(flags, exec_mask, mode, d, a, b,
+                                                 Fp8NarrowPolicy::Gfx12, excp_flag_user);
 }
 
 // Narrow with inherited gfx942 format, overflow and destination-half rules; honor EXEC.

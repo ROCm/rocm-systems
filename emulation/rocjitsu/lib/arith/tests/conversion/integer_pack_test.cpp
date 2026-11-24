@@ -45,7 +45,7 @@ void check_integer(Call call, IntegerConversion operation) {
       call, input,
       [=](uint64_t a, uint32_t b, uint32_t, uint32_t d, uint64_t, uint32_t mode) {
         return op == 5   ? pack_reference(bool(mode & RJ_ARITH_ALU_HIGH_D), uint32_t(a), b,
-                                        mode & RJ_ARITH_ALU_HIGH_D ? d : 0)
+                                          mode & RJ_ARITH_ALU_HIGH_D ? d : 0)
                : op == 4 ? pack_reference(bool(mode & RJ_ARITH_ALU_HIGH_D), uint32_t(a), b, d)
                          : integer_conversion_reference(op, uint32_t(a), b, mode);
       },
@@ -78,7 +78,9 @@ template <int Lanes, bool Gfx12, bool Exact = true, typename Call> void check_pa
           RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B,
       Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+      /*separately_tested_modifiers=*/0, /*status_free=*/true,
+      /*reports_status=*/Gfx12 && Exact);
 }
 
 } // namespace
@@ -196,4 +198,37 @@ TEST(ConversionPackB32F16Gfx11, ExactMatchesHardware) {
   rocjitsu::arith::test::expect_captured_conversion_gfx11<2, 1, 16>(
       rj_arith_v_pack_b32_f16_w32, 0x1f0, RJ_ARITH_ALU_NEG_B, 0x5a140000, 0x7d077e00, 0, 0,
       0xfe000000U);
+}
+
+// gfx1201 hardware-verified status for v_pack_b32_f16: INV on sNaN, DEN on subnormal when
+// input denormals are preserved.
+TEST(ConversionPackB32F16Gfx12, StatusRules) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    uint32_t a, b;
+    uint64_t fp_flags;
+    uint32_t causes;
+  } cases[] = {
+      {0x3c00U, 0x4000U, 0, 0},
+      {0x7c01U, 0x3c00U, 0, RJ_ARITH_EXCEPTION_INVALID},
+      {0x3c00U, 0x7e00U, 0, 0},
+      {0x0001U, 0x3c00U, 0, RJ_ARITH_EXCEPTION_INPUT_DENORM},
+      {0x0001U, 0x3c00U, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, 0},
+      {0x0001U, 0x7c01U, 0, RJ_ARITH_EXCEPTION_INVALID | RJ_ARITH_EXCEPTION_INPUT_DENORM},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      for (const auto &sample : cases) {
+        Registers<3, 32> r;
+        r.v[0][0] = sample.a;
+        r.v[1][0] = sample.b;
+        uint32_t status = 0x80U;
+        ASSERT_EQ(rj_arith_v_pack_b32_f16_w32_gfx12(cpu | semantics | sample.fp_flags, 1U, 0,
+                                                    r.v + 2, r.v, r.v + 1, &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(status, 0x80U | sample.causes);
+      }
+    }
+  }
 }

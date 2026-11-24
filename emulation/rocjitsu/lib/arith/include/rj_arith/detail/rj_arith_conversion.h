@@ -94,37 +94,37 @@ int rj_arith_v_pack_b32_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 // Results do not depend on host rounding and preserve all host FP state.
 int rj_arith_v_cvt_pk_fp8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 int rj_arith_v_cvt_pk_bf8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 int rj_arith_v_cvt_sr_fp8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 int rj_arith_v_cvt_sr_bf8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 // Wave64 narrowing uses the same exact rounding, seed alignment, selectors
 // and preserved destination bytes, with 64 lanes per VGPR.
 int rj_arith_v_cvt_pk_fp8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 int rj_arith_v_cvt_pk_bf8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 int rj_arith_v_cvt_sr_fp8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 int rj_arith_v_cvt_sr_bf8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b);
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 // DPP8/DPP16 permute A before nibble selection.
 // Convert A's signed low nibble to FP32 divided by 16, then apply OMOD/CLAMP.
@@ -1132,7 +1132,8 @@ int rj_arith_v_cvt_f32_i32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       const uint32_t *const *a);
 
 int rj_arith_v_cvt_f32_i32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
-                                     uint32_t *const *d, const uint32_t *const *a);
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *excp_flag_user);
 
 // gfx1250 inherits the gfx12 numeric model; strict exact is unsupported pending gfx1250 captures.
 int rj_arith_v_cvt_f32_i32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
@@ -1149,7 +1150,8 @@ int rj_arith_v_cvt_f32_u32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       const uint32_t *const *a);
 
 int rj_arith_v_cvt_f32_u32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
-                                     uint32_t *const *d, const uint32_t *const *a);
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *excp_flag_user);
 
 // gfx1250 inherits the gfx12 numeric model; strict exact is unsupported pending gfx1250 captures.
 int rj_arith_v_cvt_f32_u32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
@@ -1238,7 +1240,8 @@ int rj_arith_v_cvt_f32_i32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       const uint32_t *const *a);
 
 int rj_arith_v_cvt_f32_i32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
-                                     uint32_t *const *d, const uint32_t *const *a);
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *excp_flag_user);
 
 // gfx1250 inherits the gfx12 numeric model; strict exact is unsupported pending gfx1250 captures.
 int rj_arith_v_cvt_f32_i32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
@@ -1254,7 +1257,8 @@ int rj_arith_v_cvt_f32_u32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       const uint32_t *const *a);
 
 int rj_arith_v_cvt_f32_u32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
-                                     uint32_t *const *d, const uint32_t *const *a);
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *excp_flag_user);
 
 // gfx1250 inherits the gfx12 numeric model; strict exact is unsupported pending gfx1250 captures.
 int rj_arith_v_cvt_f32_u32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,

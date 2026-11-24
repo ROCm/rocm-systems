@@ -356,11 +356,17 @@ void check_unary(Call call, int op, bool iflag = false, bool accepts_exact = tru
       }
     }
   } else if (reporting && !iflag) {
-    // Inherited rocjitsu SQRT classification reports INVALID for negative
-    // inputs; it does not report arithmetic INEXACT for sqrt(2).
+    // RDNA3 uses the borrowed INVALID-only rule; gfx12 reports sNaN/negative-normal INVALID
+    // and INEXACT for non-exact squares (subnormal inputs flush to zero without INVALID).
     const struct {
       uint32_t input, causes;
-    } cases[] = {{0xbf800000U, RJ_ARITH_EXCEPTION_INVALID}, {0x40000000U, 0}, {0x40800000U, 0}};
+    } cases[] = {
+        {0xbf800000U, RJ_ARITH_EXCEPTION_INVALID},
+        {0x40000000U, Gfx12 ? RJ_ARITH_EXCEPTION_INEXACT : 0U},
+        {0x40800000U, 0},
+        {0x7f800001U, Gfx12 ? RJ_ARITH_EXCEPTION_INVALID : 0U},
+        {0x80000001U, Gfx12 ? 0U : RJ_ARITH_EXCEPTION_INVALID},
+    };
     for (uint64_t cpu : supported_cpu_levels()) {
       for (const auto &sample : cases) {
         // Only lane 7 is exceptional. A backend must not report masked-out causes.

@@ -95,8 +95,9 @@ void VCvtF32I32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
                          ~(RJ_ARITH_FP_DX10_CLAMP_OFF);
   const uint64_t modifiers = 0u;
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_i32_w32_gfx12,
-                                 rj_arith_v_cvt_f32_i32_w64_gfx12, flags, modifiers, vdst, src0);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_f32_i32_w32_gfx12,
+                                          rj_arith_v_cvt_f32_i32_w64_gfx12, flags, modifiers, vdst,
+                                          src0, /*from_double=*/false, /*to_double=*/false);
 }
 
 RJ_NOINLINE void VCvtF32I32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -118,8 +119,9 @@ RJ_NOINLINE void VCvtF32I32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
                          ~(RJ_ARITH_FP_DX10_CLAMP_OFF);
   const uint64_t modifiers = 0u;
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_i32_w32_gfx12,
-                                 rj_arith_v_cvt_f32_i32_w64_gfx12, flags, modifiers, vdst, src0);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_f32_i32_w32_gfx12,
+                                          rj_arith_v_cvt_f32_i32_w64_gfx12, flags, modifiers, vdst,
+                                          src0, /*from_double=*/false, /*to_double=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -131,8 +133,9 @@ void VCvtF32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
                          ~(RJ_ARITH_FP_DX10_CLAMP_OFF);
   const uint64_t modifiers = 0u;
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_u32_w32_gfx12,
-                                 rj_arith_v_cvt_f32_u32_w64_gfx12, flags, modifiers, vdst, src0);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_f32_u32_w32_gfx12,
+                                          rj_arith_v_cvt_f32_u32_w64_gfx12, flags, modifiers, vdst,
+                                          src0, /*from_double=*/false, /*to_double=*/false);
 }
 
 RJ_NOINLINE void VCvtF32U32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -154,8 +157,9 @@ RJ_NOINLINE void VCvtF32U32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   const uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), false) &
                          ~(RJ_ARITH_FP_DX10_CLAMP_OFF);
   const uint64_t modifiers = 0u;
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_u32_w32_gfx12,
-                                 rj_arith_v_cvt_f32_u32_w64_gfx12, flags, modifiers, vdst, src0);
+  amdgpu::arith::execute_float_conversion(wf, rj_arith_v_cvt_f32_u32_w32_gfx12,
+                                          rj_arith_v_cvt_f32_u32_w64_gfx12, flags, modifiers, vdst,
+                                          src0, /*from_double=*/false, /*to_double=*/false);
   dpp_write_mask_scope_.restore();
 }
 
