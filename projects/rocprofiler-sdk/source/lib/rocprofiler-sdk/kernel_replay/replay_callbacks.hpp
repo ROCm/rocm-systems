@@ -58,12 +58,15 @@ struct replay_plan_t
                            uint64_t                           total_passes,
                            rocprofiler_user_data_t            user_data)        = nullptr;
 
+    // The options config_data.replay_options points to during CONFIG PHASE_ENTER.
+    rocprofiler_kernel_replay_options_t options = {};
+
     // Where the snapshot may live, from the tool's replay_options.
     memory_snapshot::capture_mode snapshot_mode = memory_snapshot::capture_mode::automatic;
 };
 
-// Why the SDK cannot honor a tool's replay options, or nullptr when it can: a size that does not
-// cover flags, an unknown flag, or a flag naming memory the SDK cannot keep a snapshot in yet.
+// Why the SDK cannot honor a tool's replay options, or nullptr when it can: an unknown flag, or a
+// flag naming memory the SDK cannot keep a snapshot in yet.
 const char*
 options_rejection(const rocprofiler_kernel_replay_options_t* options);
 

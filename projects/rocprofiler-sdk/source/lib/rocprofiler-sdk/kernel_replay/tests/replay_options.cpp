@@ -108,19 +108,9 @@ TEST(kernel_replay_options, pageable_and_disk_are_not_supported_yet)
     }
 }
 
-TEST(kernel_replay_options, a_size_that_does_not_cover_flags_is_rejected)
+TEST(kernel_replay_options, size_belongs_to_the_sdk_and_is_not_checked)
 {
-    auto unsized = options(pinned_flag);
-    unsized.size = 0;
-    EXPECT_FALSE(kr::capture_mode_for(&unsized).has_value());
-
-    unsized.size = sizeof(unsized.size);
-    EXPECT_FALSE(kr::capture_mode_for(&unsized).has_value());
-}
-
-TEST(kernel_replay_options, a_larger_size_from_a_newer_tool_is_accepted)
-{
-    auto newer = options(pinned_flag);
-    newer.size = sizeof(rocprofiler_kernel_replay_options_t) + sizeof(uint64_t);
-    EXPECT_EQ(kr::capture_mode_for(&newer), msnp::capture_mode::force_pinned);
+    auto resized = options(pinned_flag);
+    resized.size = 0;
+    EXPECT_EQ(kr::capture_mode_for(&resized), msnp::capture_mode::force_pinned);
 }

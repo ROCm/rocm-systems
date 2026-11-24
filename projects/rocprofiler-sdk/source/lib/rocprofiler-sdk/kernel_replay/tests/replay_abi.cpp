@@ -232,7 +232,7 @@ TEST(kernel_replay_abi, options_struct_has_size_then_flags)
     EXPECT_EQ(offsetof(options_t, flags), sizeof(uint64_t));
     EXPECT_EQ(sizeof(options_t), 2 * sizeof(uint64_t));
     EXPECT_TRUE((std::is_same<decltype(options_t{}.flags), uint64_t>::value));
-    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_options), const options_t*>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_options), options_t*>::value));
 }
 
 // A record is passed by pointer and read field-by-field; it must be aligned for its widest member

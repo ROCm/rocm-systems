@@ -226,14 +226,10 @@ Choose where the snapshot is kept
 
 Keeping the snapshot in device memory makes restores fastest, but an application that allocates
 device memory as it runs can then run out of it. A tool that knows this can keep the snapshot in
-pinned host memory instead, by setting ``replay_options`` during ``CONFIG`` ``PHASE_ENTER``:
+pinned host memory instead. During ``CONFIG`` ``PHASE_ENTER``, ``replay_options`` points to options
+the SDK owns, holding its defaults, and the tool changes the flags through it:
 
 .. code-block:: cpp
-
-   // Static, because the SDK reads the options after CONFIG PHASE_ENTER returns.
-   static const auto pinned_host_only =
-       rocprofiler_kernel_replay_options_t{sizeof(rocprofiler_kernel_replay_options_t),
-                                           ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED};
 
    if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
@@ -243,7 +239,7 @@ pinned host memory instead, by setting ``replay_options`` during ``CONFIG`` ``PH
        if(payload->size >= offsetof(rocprofiler_callback_tracing_kernel_replay_data_t,
                                     replay_options) +
                                sizeof(payload->replay_options))
-           payload->replay_options = &pinned_host_only;
+           payload->replay_options->flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
    }
 
 .. list-table::

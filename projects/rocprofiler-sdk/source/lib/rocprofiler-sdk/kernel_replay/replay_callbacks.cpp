@@ -201,10 +201,6 @@ options_rejection(const rocprofiler_kernel_replay_options_t* options)
 {
     if(options == nullptr) return nullptr;
 
-    constexpr auto flags_end = offsetof(rocprofiler_kernel_replay_options_t, flags) +
-                               sizeof(rocprofiler_kernel_replay_options_t::flags);
-    if(options->size < flags_end) return "its size does not cover flags";
-
     constexpr auto known_flags = device_flag | pinned_flag | pageable_flag | disk_flag;
     if((options->flags & ~known_flags) != 0) return "it has an unknown flag";
     if((options->flags & (pageable_flag | disk_flag)) != 0)
@@ -248,6 +244,8 @@ execute_config_phase_enter(const hsa::Queue&              queue,
     plan.config_data =
         common::init_public_api_struct(rocprofiler_callback_tracing_kernel_replay_data_t{});
     plan.config_data.dispatch_info = make_dispatch_info(queue, pkt, dispatch_id);
+    common::init_public_api_struct(plan.options);
+    plan.config_data.replay_options = &plan.options;
 
     tracing::execute_phase_enter_callbacks(config_contexts,
                                            thr_id,
@@ -257,6 +255,12 @@ execute_config_phase_enter(const hsa::Queue&              queue,
                                            ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
                                            ROCPROFILER_KERNEL_REPLAY_CONFIG,
                                            plan.config_data);
+
+    // The plan is returned by value, so no record may keep a pointer into it.
+    if(plan.config_data.replay_options != &plan.options)
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: the tool replaced replay_options instead of "
+                                   "changing the options it points to; the replacement is ignored";
+    plan.config_data.replay_options = nullptr;
 
     // We expect only one context for kernel replay
     ROCP_FATAL_IF(config_contexts.size() > 1) << fmt::format(
@@ -289,15 +293,15 @@ execute_config_phase_enter(const hsa::Queue&              queue,
 
     if(plan.replay_requested)
     {
-        if(const auto mode = capture_mode_for(plan.config_data.replay_options))
+        if(const auto mode = capture_mode_for(&plan.options))
         {
             plan.snapshot_mode = *mode;
         }
         else
         {
-            LOG_FIRST_N(WARNING, 1) << "kernel replay: cannot honor replay_options, because "
-                                    << options_rejection(plan.config_data.replay_options)
-                                    << "; dispatch will not be replayed";
+            LOG_FIRST_N(WARNING, 1)
+                << "kernel replay: cannot honor replay_options, because "
+                << options_rejection(&plan.options) << "; dispatch will not be replayed";
             plan.replay_requested = false;
         }
     }

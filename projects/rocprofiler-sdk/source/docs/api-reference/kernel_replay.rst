@@ -76,9 +76,9 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
      - Tool responsibility
    * - ``ROCPROFILER_KERNEL_REPLAY_CONFIG``
      - ``PHASE_ENTER``
-     - Set ``replay_pass_count``. Optionally set ``replay_continue``, and ``replay_options`` to
-       choose where the snapshot is kept (:ref:`kernel-replay-snapshot-placement`). May stash
-       per-dispatch state in ``user_data``.
+     - Set ``replay_pass_count``. Optionally set ``replay_continue``, and change the options
+       ``replay_options`` points to, which choose where the snapshot is kept
+       (:ref:`kernel-replay-snapshot-placement`). May stash per-dispatch state in ``user_data``.
    * - ``ROCPROFILER_KERNEL_REPLAY_CONFIG``
      - ``PHASE_EXIT``
      - Replay of this dispatch has finished (or was declined).

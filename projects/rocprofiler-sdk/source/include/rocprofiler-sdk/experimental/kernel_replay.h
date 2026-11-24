@@ -71,7 +71,8 @@ typedef enum rocprofiler_kernel_replay_option_flag_t
 } rocprofiler_kernel_replay_option_flag_t;
 
 /**
- * @brief Options a tool sets for one dispatch during CONFIG @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
+ * @brief Options for one dispatch, which a tool may change during CONFIG
+ * @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
  *
  * The snapshot bits of @c flags name the memory the SDK may keep the dispatch's snapshot in:
  *  - only @ref ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED: the snapshot is kept in
@@ -98,12 +99,13 @@ typedef enum rocprofiler_kernel_replay_option_flag_t
  * replays. If the snapshot does not fit in the memory allowed, the dispatch is not replayed: it
  * runs once, as when @c replay_pass_count returns 1.
  *
- * Members added later come with a flag bit that enables them, so an SDK that predates a member
- * rejects a tool that uses it instead of ignoring it.
+ * The SDK owns the options. It sets @c size to the size of the struct it provides and @c flags to
+ * @ref ROCPROFILER_KERNEL_REPLAY_OPTION_NONE. A member added later is present only when @c size
+ * covers it, so check @c size before writing one.
  */
 typedef struct rocprofiler_kernel_replay_options_t
 {
-    uint64_t size;   ///< sizeof(rocprofiler_kernel_replay_options_t)
+    uint64_t size;   ///< Size of this struct, set by the SDK
     uint64_t flags;  ///< Bitwise OR of @ref rocprofiler_kernel_replay_option_flag_t values
 } rocprofiler_kernel_replay_options_t;
 
@@ -115,8 +117,9 @@ typedef struct rocprofiler_kernel_replay_options_t
  * depends on the current operation:
  *
  * - @ref ROCPROFILER_KERNEL_REPLAY_CONFIG: @c dispatch_info is populated by the SDK.
- *   The tool sets @c replay_pass_count and optionally @c replay_continue and @c replay_options
- *   during @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields are zero.
+ *   The tool sets @c replay_pass_count, and optionally @c replay_continue and the options
+ *   @c replay_options points to, during @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields
+ *   are zero.
  * - @ref ROCPROFILER_KERNEL_REPLAY_PASS: @c dispatch_info, @c current_pass, and
  *   @c total_passes are populated by the SDK. @c replay_pass_count and @c replay_options read as
  *   NULL and must not be modified (both are fixed at CONFIG PHASE_ENTER). @c replay_continue is
@@ -181,7 +184,7 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     rocprofiler_kernel_replay_continue_cb_t   replay_continue;
     rocprofiler_kernel_replay_context_cb_t    replay_start_context;
     rocprofiler_kernel_replay_context_cb_t    replay_stop_context;
-    const rocprofiler_kernel_replay_options_t* replay_options;
+    rocprofiler_kernel_replay_options_t*      replay_options;
 
     /// @var replay_pass_count
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
@@ -243,13 +246,13 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///    such a context reports success but has no effect.
     ///
     /// @var replay_options
-    /// @brief [CONFIG] Optional tool-provided options for this dispatch; NULL keeps the SDK's
-    /// defaults. Set it during CONFIG @ref ROCPROFILER_CALLBACK_PHASE_ENTER. The SDK reads the
-    /// options after that callback returns, so they must stay valid until CONFIG
-    /// @ref ROCPROFILER_CALLBACK_PHASE_EXIT for the dispatch; static storage works. If the SDK
-    /// cannot honor them, because @c size does not cover @c flags, a flag is unknown, or a flag
-    /// names memory the SDK cannot keep a snapshot in yet, the dispatch is not replayed. An older
-    /// SDK's record ends before this member, so write it only when @c size covers it.
+    /// @brief [CONFIG] Options for this dispatch, owned by the SDK. During CONFIG
+    /// @ref ROCPROFILER_CALLBACK_PHASE_ENTER it points to options holding the SDK's defaults, and
+    /// the tool changes the ones it wants through it; replacing the pointer itself has no effect.
+    /// It is NULL in every other callback. The SDK reads the options after that callback returns.
+    /// If it cannot honor them, because a flag is unknown or names memory the SDK cannot keep a
+    /// snapshot in yet, the dispatch is not replayed. An older SDK's record ends before this
+    /// member, so read it only when @c size covers it.
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 
 /** @} */

@@ -73,20 +73,12 @@ placement_is(const char* name)
     return placement != nullptr && std::strcmp(placement, name) == 0;
 }
 
-// The options are static because the SDK reads them after the CONFIG callback returns.
-const rocprofiler_kernel_replay_options_t*
-snapshot_options()
+uint64_t
+snapshot_flags()
 {
-    static const auto options = []() {
-        auto flags = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_NONE};
-        if(placement_is("host-pinned"))
-            flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
-        else if(placement_is("device"))
-            flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE;
-        return rocprofiler_kernel_replay_options_t{sizeof(rocprofiler_kernel_replay_options_t),
-                                                   flags};
-    }();
-    return &options;
+    if(placement_is("host-pinned")) return ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
+    if(placement_is("device")) return ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE;
+    return ROCPROFILER_KERNEL_REPLAY_OPTION_NONE;
 }
 
 void
@@ -103,8 +95,9 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
         p->replay_pass_count = replay_pass_count;
         // An older SDK's record ends before replay_options.
         if(p->size >= offsetof(rocprofiler_callback_tracing_kernel_replay_data_t, replay_options) +
-                          sizeof(p->replay_options))
-            p->replay_options = snapshot_options();
+                          sizeof(p->replay_options) &&
+           p->replay_options != nullptr)
+            p->replay_options->flags = snapshot_flags();
         auto lock = std::lock_guard{g_mutex};
         ++g_counts[agent].replays;
     }
