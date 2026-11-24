@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/consan/application_catalog.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "util/log.h"
 
@@ -25,6 +26,24 @@ bool write(const std::filesystem::path &path, std::span<const uint8_t> bytes) {
 }
 
 int run(int argc, char **argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--producer-contract") {
+    constexpr std::string_view digits = "0123456789abcdef";
+    for (const uint8_t byte : rocjitsu::consan::kProducerContract)
+      std::cout << digits[byte >> 4] << digits[byte & 15];
+    std::cout << '\n';
+    return std::cout ? 0 : 3;
+  }
+  if (argc == 3 && std::string_view(argv[1]) == "--validate-application-catalog") {
+    util::StringDiagnostic diagnostic;
+    const rocjitsu::FailureOr<rocjitsu::consan::ApplicationCatalog> catalog =
+        rocjitsu::consan::load_application_catalog(argv[2], diagnostic.emitter());
+    if (catalog.failed()) {
+      std::cerr << diagnostic.message() << '\n';
+      return 2;
+    }
+    std::cout << "images=" << catalog.value().images.size() << '\n';
+    return std::cout ? 0 : 3;
+  }
   std::vector<std::string_view> entries;
   std::filesystem::path destination;
   rocjitsu::consan::ScopeKind scope = rocjitsu::consan::ScopeKind::NativeLdsNoSynchronization;

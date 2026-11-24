@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "hsa/hsa_api_trace.h"
+#include "rocjitsu/code/consan/application_catalog.h"
 #include "rocjitsu/code/consan/capture.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
@@ -72,11 +73,13 @@ protected:
     ASSERT_NE(created, nullptr);
     directory_ = created;
     preserve_ = root != nullptr;
-    for (const char *name : {"RJ_CONSAN_ARTIFACT_DIR", "RJ_CONSAN_CAPTURE_PATH",
-                             "RJ_CONSAN_SELECTION_PROFILE", "RJ_CONSAN_APPLICATION_PROFILE"}) {
+    for (const char *name :
+         {"RJ_CONSAN_ARTIFACT_DIR", "RJ_CONSAN_CAPTURE_PATH", "RJ_CONSAN_SELECTION_PROFILE",
+          "RJ_CONSAN_APPLICATION_PROFILE", "RJ_CONSAN_APPLICATION_CATALOG"}) {
       const char *value = std::getenv(name);
       environment_[name] = value ? std::optional<std::string>(value) : std::nullopt;
     }
+    ASSERT_EQ(::unsetenv("RJ_CONSAN_APPLICATION_CATALOG"), 0);
     ASSERT_EQ(::setenv("RJ_CONSAN_ARTIFACT_DIR", artifact_fixture(), 1), 0);
     capture_ = directory_ / "capture.bin";
     ASSERT_EQ(::setenv("RJ_CONSAN_CAPTURE_PATH", capture_.c_str(), 1), 0);
@@ -215,11 +218,22 @@ protected:
       }
       return HSA_STATUS_SUCCESS;
     };
-    core_.hsa_executable_get_symbol_by_name_fn = [](hsa_executable_t, const char *name,
+    core_.hsa_executable_get_symbol_by_name_fn = [](hsa_executable_t executable, const char *name,
                                                     const hsa_agent_t *,
                                                     hsa_executable_symbol_t *symbol) {
-      for (size_t index = 0; index < current_->image_facts_.entries.size(); ++index) {
-        if (current_->image_facts_.entries[index].binding.name + ".kd" == name) {
+      const std::map<uint64_t, ImageFacts>::const_iterator found =
+          current_->executable_facts_.find(executable.handle);
+      const ImageFacts &facts =
+          found == current_->executable_facts_.end() ? current_->image_facts_ : found->second;
+      for (size_t index = 0; index < facts.entries.size(); ++index) {
+        if (facts.entries[index].binding.name + ".kd" == name) {
+          if (found != current_->executable_facts_.end()) {
+            symbol->handle = executable.handle * 1000 + 10 + index;
+            current_->symbols_[symbol->handle] = {
+                .entry = facts.entries[index],
+                .kernel_object = 0x123400 + executable.handle * 0x10000 + index * 0x100};
+            return HSA_STATUS_SUCCESS;
+          }
           symbol->handle = 10 + index;
           return HSA_STATUS_SUCCESS;
         }
@@ -484,6 +498,10 @@ protected:
                                 const char *, hsa_loaded_code_object_t *) {
     const std::span<const uint8_t> bytes = current_->readers_.at(reader.handle);
     ++current_->load_calls_;
+    if (current_->load_calls_ == 1 && current_->resume_load_.valid()) {
+      current_->load_entered_.set_value();
+      current_->resume_load_.wait();
+    }
     current_->loaded_image_.assign(bytes.begin(), bytes.end());
     if (current_->load_status_ != HSA_STATUS_SUCCESS) {
       current_->partial_load_bytes_ = bytes;
@@ -497,13 +515,19 @@ protected:
       current_->symbol_query_entered_.set_value();
       current_->resume_symbol_query_.wait();
     }
-    if (symbol.handle < 10 || symbol.handle - 10 >= current_->image_facts_.entries.size()) {
+    const std::map<uint64_t, FakeSymbol>::const_iterator found =
+        current_->symbols_.find(symbol.handle);
+    if (found == current_->symbols_.end() &&
+        (symbol.handle < 10 || symbol.handle - 10 >= current_->image_facts_.entries.size())) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
-    const size_t index = symbol.handle - 10;
-    const ImageEntryFacts &entry = current_->image_facts_.entries[index];
+    const ImageEntryFacts &entry = found == current_->symbols_.end()
+                                       ? current_->image_facts_.entries[symbol.handle - 10]
+                                       : found->second.entry;
     if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT) {
-      *static_cast<uint64_t *>(value) = 0x123400 + index * 0x100;
+      *static_cast<uint64_t *>(value) = found == current_->symbols_.end()
+                                            ? 0x123400 + (symbol.handle - 10) * 0x100
+                                            : found->second.kernel_object;
     } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE) {
       uint32_t bytes = entry.binding.original_kernarg_bytes;
       if (entry.selected) {
@@ -775,6 +799,12 @@ protected:
   std::vector<uint8_t> original_, loaded_image_;
   Manifest facts_;
   ImageFacts image_facts_;
+  struct FakeSymbol {
+    ImageEntryFacts entry;
+    uint64_t kernel_object = 0;
+  };
+  std::map<uint64_t, ImageFacts> executable_facts_;
+  std::map<uint64_t, FakeSymbol> symbols_;
   size_t argument_extent_ = 16;
   alignas(64) std::array<uint8_t, 32> arguments_{};
   uint8_t *report_ = nullptr;
@@ -792,6 +822,8 @@ protected:
   uint32_t freeze_calls_ = 0;
   hsa_status_t load_status_ = HSA_STATUS_SUCCESS;
   uint32_t load_calls_ = 0;
+  std::promise<void> load_entered_;
+  std::shared_future<void> resume_load_;
   std::span<const uint8_t> partial_load_bytes_;
   bool check_partial_load_storage_ = false;
   bool checked_partial_load_storage_ = false;
@@ -968,6 +1000,413 @@ protected:
   std::vector<hsa_signal_t> application_completions_;
   std::vector<std::span<uint8_t>> application_reports_;
 };
+
+class ConSanCatalogHsaPlugin : public ConSanApplicationHsaPlugin {
+protected:
+  void configure_catalog(bool include_second = true) {
+    EXPECT_NE(finish_(), 0);
+    unload_();
+    installed_ = false;
+    const std::array<const char *, 2> originals = {CONSAN_ORIGINAL_FIXTURE,
+                                                   CONSAN_APPLICATION_BARRIER_ORIGINAL};
+    const std::array<const char *, 2> artifacts = {CONSAN_ARTIFACT_FIXTURE,
+                                                   CONSAN_APPLICATION_BARRIER_ARTIFACT};
+    for (size_t index = 0; index < (include_second ? 2u : 1u); ++index) {
+      std::ifstream original_file(originals[index], std::ios::binary);
+      originals_[index] = {std::istreambuf_iterator<char>(original_file),
+                           std::istreambuf_iterator<char>()};
+      ASSERT_FALSE(originals_[index].empty());
+      const std::filesystem::path artifact = directory_ / ("image-" + std::to_string(index));
+      std::filesystem::copy(artifacts[index], artifact, std::filesystem::copy_options::recursive);
+      std::ofstream owned_original(artifact / "original.hsaco", std::ios::binary);
+      owned_original.write(reinterpret_cast<const char *>(originals_[index].data()),
+                           originals_[index].size());
+      owned_original.close();
+      ASSERT_TRUE(owned_original);
+      std::ifstream facts_file(artifact / "facts.bin", std::ios::binary);
+      const std::vector<uint8_t> encoded = {std::istreambuf_iterator<char>(facts_file),
+                                            std::istreambuf_iterator<char>()};
+      const FailureOr<ImageFacts> facts = decode_image_facts(encoded);
+      ASSERT_TRUE(facts.succeeded());
+      executable_facts_[7 + index] = facts.value();
+      capture_paths_[index] = directory_ / ("capture-" + std::to_string(index) + ".bin");
+      catalog_.images.push_back({.original = facts.value().original,
+                                 .target = facts.value().target,
+                                 .kind = ApplicationImageKind::Selected,
+                                 .path = artifact.string(),
+                                 .selection_profile = facts.value().selection_profile,
+                                 .capture_path = capture_paths_[index].string()});
+    }
+    const FailureOr<std::vector<uint8_t>> encoded = encode_application_catalog(catalog_);
+    ASSERT_TRUE(encoded.succeeded());
+    catalog_path_ = directory_ / "application.bin";
+    std::ofstream file(catalog_path_, std::ios::binary);
+    file.write(reinterpret_cast<const char *>(encoded.value().data()), encoded.value().size());
+    file.close();
+    ASSERT_TRUE(file);
+    for (const char *name : {"RJ_CONSAN_ARTIFACT_DIR", "RJ_CONSAN_CAPTURE_PATH",
+                             "RJ_CONSAN_SELECTION_PROFILE", "RJ_CONSAN_NATIVE_IMAGES"})
+      ASSERT_EQ(::unsetenv(name), 0);
+    ASSERT_EQ(::setenv("RJ_CONSAN_APPLICATION_CATALOG", catalog_path_.c_str(), 1), 0);
+    initialize_api();
+    ASSERT_TRUE(load_(&table_, 0, 0, nullptr));
+    installed_ = true;
+  }
+
+  bool bind_image(size_t image, uint64_t executable) {
+    hsa_code_object_reader_t reader = {};
+    return core_.hsa_code_object_reader_create_from_memory_fn(
+               originals_[image].data(), originals_[image].size(), &reader) == HSA_STATUS_SUCCESS &&
+           core_.hsa_executable_load_agent_code_object_fn({executable}, {1}, reader, nullptr,
+                                                          nullptr) == HSA_STATUS_SUCCESS &&
+           core_.hsa_code_object_reader_destroy_fn(reader) == HSA_STATUS_SUCCESS &&
+           core_.hsa_executable_freeze_fn({executable}, nullptr) == HSA_STATUS_SUCCESS;
+  }
+
+  static void catalog_writer(const void *packets, uint64_t count) {
+    ASSERT_EQ(count, 1u);
+    ConSanCatalogHsaPlugin &state = *static_cast<ConSanCatalogHsaPlugin *>(current_);
+    hsa_kernel_dispatch_packet_t packet = {};
+    std::memcpy(&packet, packets, sizeof(packet));
+    const FakeSymbol *symbol = nullptr;
+    for (const auto &[handle, candidate] : state.symbols_) {
+      (void)handle;
+      if (candidate.kernel_object == packet.kernel_object)
+        symbol = &candidate;
+    }
+    ASSERT_NE(symbol, nullptr);
+    ASSERT_TRUE(symbol->entry.selected.has_value());
+    inspect_selected(packet, symbol->entry);
+    state.published_completions_.push_back(packet.completion_signal);
+    if (state.auto_complete_)
+      store_signal(packet.completion_signal, 0);
+  }
+
+  void submit_image(uint64_t executable) {
+    const ImageEntryFacts &entry = executable_facts_.at(executable).entries.front();
+    hsa_kernel_dispatch_packet_t packet = dispatch_packet({}, 128);
+    packet.kernel_object = 0x123400 + executable * 0x10000;
+    packet.group_segment_size = entry.binding.original_group_bytes;
+    packet.private_segment_size = entry.binding.original_private_bytes;
+    handler_(&packet, 1, 0, handler_context_, catalog_writer);
+  }
+
+  Capture captured_image(size_t index) {
+    std::ifstream file(capture_paths_[index], std::ios::binary);
+    const std::vector<uint8_t> bytes = {std::istreambuf_iterator<char>(file),
+                                        std::istreambuf_iterator<char>()};
+    const FailureOr<Capture> capture = decode_capture(bytes);
+    EXPECT_TRUE(capture.succeeded());
+    return capture.succeeded() ? capture.value() : Capture{};
+  }
+
+  ApplicationCatalog catalog_;
+  std::filesystem::path catalog_path_;
+  std::array<std::vector<uint8_t>, 2> originals_;
+  std::array<std::filesystem::path, 2> capture_paths_;
+  std::vector<hsa_signal_t> published_completions_;
+};
+
+TEST_F(ConSanCatalogHsaPlugin, SeparateImagesKeepCollidingEntryKeysAndLocalSerialsDistinct) {
+  configure_catalog();
+  ASSERT_EQ(catalog_.images.size(), 2u);
+  ASSERT_NE(catalog_.images[0].original, catalog_.images[1].original);
+  ASSERT_EQ(executable_facts_.at(7).entries.front().key,
+            executable_facts_.at(8).entries.front().key);
+  ASSERT_TRUE(bind_image(0, 7));
+  ASSERT_TRUE(bind_image(1, 8));
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit_image(7);
+  submit_image(8);
+  ASSERT_EQ(published_completions_.size(), 2u);
+  // Complete image 1 first. The collector orders globally, then writes each
+  // snapshot into its owning image's capture with that image's local serial.
+  store_signal(published_completions_[1], 0);
+  store_signal(published_completions_[0], 0);
+  ASSERT_EQ(drain_(), 0);
+  auto_complete_ = true;
+  submit_image(7);
+  ASSERT_EQ(finish_(), 0);
+  const Capture first = captured_image(0);
+  const Capture second = captured_image(1);
+  EXPECT_EQ(first.header.image.original, catalog_.images[0].original);
+  EXPECT_EQ(second.header.image.original, catalog_.images[1].original);
+  EXPECT_EQ(first.header.run_identity, second.header.run_identity);
+  ASSERT_EQ(first.executions.size(), 2u);
+  ASSERT_EQ(second.executions.size(), 1u);
+  EXPECT_EQ(first.executions[0].serial, 1u);
+  EXPECT_EQ(first.executions[1].serial, 2u);
+  EXPECT_EQ(second.executions[0].serial, 1u);
+  EXPECT_EQ(statistics_().submitted, 3u);
+  EXPECT_EQ(statistics_().written, 3u);
+}
+
+TEST_F(ConSanCatalogHsaPlugin, RepeatedLoadsShareCaptureBeyondExecutableDestruction) {
+  configure_catalog(false);
+  ASSERT_TRUE(bind_image(0, 7));
+  executable_facts_[9] = executable_facts_.at(7);
+  ASSERT_TRUE(bind_image(0, 9));
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit_image(7);
+  std::future<hsa_status_t> destroyed =
+      std::async(std::launch::async, [&] { return core_.hsa_executable_destroy_fn({7}); });
+  EXPECT_EQ(destroyed.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  EXPECT_EQ(published_completions_.size(), 1u);
+  store_signal(published_completions_.front(), 0);
+  EXPECT_EQ(destroyed.get(), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(drain_(), 0);
+  auto_complete_ = true;
+  submit_image(9);
+  ASSERT_EQ(core_.hsa_executable_destroy_fn({9}), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(finish_(), 0);
+  const Capture capture = captured_image(0);
+  ASSERT_EQ(capture.executions.size(), 2u);
+  EXPECT_EQ(capture.executions[0].serial, 1u);
+  EXPECT_EQ(capture.executions[1].serial, 2u);
+}
+
+TEST_F(ConSanCatalogHsaPlugin, UnloadedConfiguredImagesDoNotFabricateCaptures) {
+  configure_catalog();
+  EXPECT_EQ(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[0]));
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[1]));
+}
+
+TEST_F(ConSanCatalogHsaPlugin, FrozenButUnexecutedSelectedImageHasNoInventedExecutions) {
+  configure_catalog(false);
+  ASSERT_TRUE(bind_image(0, 7));
+  ASSERT_EQ(finish_(), 0);
+  const Capture capture = captured_image(0);
+  EXPECT_TRUE(capture.executions.empty());
+  EXPECT_EQ(capture.header.image.original, catalog_.images[0].original);
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[1]));
+}
+
+TEST_F(ConSanCatalogHsaPlugin, NativeOnlyCatalogAdmitsExactOriginalWithoutSelectedCapture) {
+  configure_catalog(false);
+  EXPECT_EQ(finish_(), 0);
+  unload_();
+  installed_ = false;
+  ApplicationImage &image = catalog_.images.front();
+  image.kind = ApplicationImageKind::Native;
+  image.path = (std::filesystem::path(image.path) / "original.hsaco").string();
+  image.selection_profile = {};
+  image.capture_path.clear();
+  const FailureOr<std::vector<uint8_t>> encoded = encode_application_catalog(catalog_);
+  ASSERT_TRUE(encoded.succeeded());
+  std::ofstream file(catalog_path_, std::ios::binary | std::ios::trunc);
+  file.write(reinterpret_cast<const char *>(encoded.value().data()), encoded.value().size());
+  file.close();
+  ASSERT_TRUE(file);
+  const FailureOr<NativeImageInventory> inventory = inspect_native_image(originals_[0], "gfx1100");
+  ASSERT_TRUE(inventory.succeeded());
+  executable_facts_[7].entries = inventory.value().entries;
+  initialize_api();
+  ASSERT_TRUE(load_(&table_, 0, 0, nullptr));
+  installed_ = true;
+  ASSERT_TRUE(bind_image(0, 7));
+  EXPECT_EQ(loaded_image_, originals_[0]);
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_kernel_dispatch_packet_t packet = dispatch_packet({}, 128);
+  packet.kernel_object = 0x123400 + 7 * 0x10000;
+  packet.group_segment_size = inventory.value().entries.front().binding.original_group_bytes;
+  handler_(&packet, 1, 0, handler_context_, application_writer);
+  EXPECT_EQ(application_packets_.size(), 1u);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(finish_(), 0);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 1u);
+  EXPECT_EQ(statistics_().native_completed, 1u);
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[0]));
+}
+
+TEST_F(ConSanCatalogHsaPlugin, UnlistedOriginalRunsNativelyWithOneExplicitCoverageWarning) {
+  configure_catalog(false);
+  std::ifstream original(CONSAN_APPLICATION_BARRIER_ORIGINAL, std::ios::binary);
+  originals_[1] = {std::istreambuf_iterator<char>(original), std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(originals_[1].empty());
+  const FailureOr<NativeImageInventory> inventory = inspect_native_image(originals_[1], "gfx1100");
+  ASSERT_TRUE(inventory.succeeded());
+  executable_facts_[8] = executable_facts_.at(7);
+  executable_facts_[8].entries = inventory.value().entries;
+  executable_facts_[9] = executable_facts_.at(8);
+  ::testing::internal::CaptureStderr();
+  const bool first = bind_image(1, 8);
+  const bool second = bind_image(1, 9);
+  const std::string warning = ::testing::internal::GetCapturedStderr();
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  const std::string reason = "outside provided_application_images";
+  ASSERT_NE(warning.find(reason), std::string::npos) << warning;
+  EXPECT_EQ(warning.find(reason), warning.rfind(reason)) << warning;
+  EXPECT_EQ(loaded_image_, originals_[1]);
+  ASSERT_TRUE(create_queue_and_signal());
+  for (const uint64_t executable : {8u, 9u}) {
+    hsa_kernel_dispatch_packet_t packet = dispatch_packet({}, 128);
+    packet.kernel_object = 0x123400 + executable * 0x10000;
+    packet.group_segment_size = inventory.value().entries.front().binding.original_group_bytes;
+    handler_(&packet, 1, 0, handler_context_, application_writer);
+    ASSERT_EQ(drain_(), 0);
+  }
+  EXPECT_EQ(finish_(), 0);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 2u);
+  EXPECT_EQ(statistics_().native_completed, 2u);
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[0]));
+}
+
+TEST_F(ConSanCatalogHsaPlugin, ConfiguredPreparedImageCannotFallBackToNativeAdmission) {
+  configure_catalog(false);
+  std::ifstream prepared(std::filesystem::path(catalog_.images.front().path) / "prepared.hsaco",
+                         std::ios::binary);
+  const std::vector<uint8_t> bytes = {std::istreambuf_iterator<char>(prepared),
+                                      std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(bytes.empty());
+  hsa_code_object_reader_t reader = {};
+  ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(bytes.data(), bytes.size(), &reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_NE(core_.hsa_executable_load_agent_code_object_fn({7}, {1}, reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(load_calls_, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[0]));
+}
+
+TEST_F(ConSanCatalogHsaPlugin, CatalogedPreparedWrapperCannotEnterNativeInventory) {
+  configure_catalog(false);
+  EXPECT_EQ(finish_(), 0);
+  unload_();
+  installed_ = false;
+  std::ifstream prepared(std::filesystem::path(catalog_.images.front().path) / "prepared.hsaco",
+                         std::ios::binary);
+  const std::vector<uint8_t> bytes = {std::istreambuf_iterator<char>(prepared),
+                                      std::istreambuf_iterator<char>()};
+  EXPECT_TRUE(inspect_native_image(bytes, "gfx1100").failed());
+  const std::filesystem::path alias = directory_ / "probed-as-native.hsaco";
+  std::ofstream file(alias, std::ios::binary);
+  file.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+  file.close();
+  ASSERT_TRUE(file);
+  catalog_.images.push_back({.original = {.sha256 = digest(bytes), .bytes = bytes.size()},
+                             .target = 1100,
+                             .kind = ApplicationImageKind::Native,
+                             .path = alias.string(),
+                             .selection_profile = {},
+                             .capture_path = {}});
+  const FailureOr<std::vector<uint8_t>> encoded = encode_application_catalog(catalog_);
+  ASSERT_TRUE(encoded.succeeded());
+  std::ofstream catalog(catalog_path_, std::ios::binary | std::ios::trunc);
+  catalog.write(reinterpret_cast<const char *>(encoded.value().data()), encoded.value().size());
+  catalog.close();
+  ASSERT_TRUE(catalog);
+  initialize_api();
+  ::testing::internal::CaptureStderr();
+  const bool installed = load_(&table_, 0, 0, nullptr);
+  const std::string reason = ::testing::internal::GetCapturedStderr();
+  EXPECT_FALSE(installed);
+  EXPECT_NE(reason.find("reserved prepared kernarg wrapper section"), std::string::npos) << reason;
+  EXPECT_EQ(core_.hsa_code_object_reader_create_from_memory_fn, create_reader);
+}
+
+TEST_F(ConSanCatalogHsaPlugin, ConcurrentIndependentImageLoadsWaitForTheActiveTransaction) {
+  configure_catalog();
+  std::array<hsa_code_object_reader_t, 2> readers = {};
+  for (size_t image = 0; image < readers.size(); ++image)
+    ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(
+                  originals_[image].data(), originals_[image].size(), &readers[image]),
+              HSA_STATUS_SUCCESS);
+  std::promise<void> resume;
+  resume_load_ = resume.get_future().share();
+  std::future<void> entered = load_entered_.get_future();
+  std::future<hsa_status_t> first = std::async(std::launch::async, [&] {
+    return core_.hsa_executable_load_agent_code_object_fn({7}, {1}, readers[0], nullptr, nullptr);
+  });
+  entered.wait();
+  std::future<hsa_status_t> second = std::async(std::launch::async, [&] {
+    return core_.hsa_executable_load_agent_code_object_fn({8}, {1}, readers[1], nullptr, nullptr);
+  });
+  EXPECT_EQ(second.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  resume.set_value();
+  EXPECT_EQ(first.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(second.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(load_calls_, 2u);
+  EXPECT_EQ(core_.hsa_executable_freeze_fn({7}, nullptr), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(core_.hsa_executable_freeze_fn({8}, nullptr), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(finish_(), 0);
+}
+
+TEST_F(ConSanCatalogHsaPlugin, FinishWaitsForActiveAndQueuedImageLoadCallers) {
+  configure_catalog();
+  std::array<hsa_code_object_reader_t, 2> readers = {};
+  for (size_t image = 0; image < readers.size(); ++image)
+    ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(
+                  originals_[image].data(), originals_[image].size(), &readers[image]),
+              HSA_STATUS_SUCCESS);
+  std::promise<void> resume;
+  resume_load_ = resume.get_future().share();
+  std::future<void> entered = load_entered_.get_future();
+  std::future<hsa_status_t> loaded = std::async(std::launch::async, [&] {
+    return core_.hsa_executable_load_agent_code_object_fn({7}, {1}, readers[0], nullptr, nullptr);
+  });
+  entered.wait();
+  std::future<hsa_status_t> queued = std::async(std::launch::async, [&] {
+    return core_.hsa_executable_load_agent_code_object_fn({8}, {1}, readers[1], nullptr, nullptr);
+  });
+  EXPECT_EQ(queued.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  std::future<int> finished = std::async(std::launch::async, [&] { return finish_(); });
+  EXPECT_EQ(finished.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  EXPECT_EQ(queued.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  resume.set_value();
+  EXPECT_EQ(queued.get(), HSA_STATUS_ERROR_INVALID_EXECUTABLE);
+  EXPECT_EQ(loaded.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(finished.get(), 0);
+  EXPECT_EQ(core_.hsa_executable_destroy_fn({7}), HSA_STATUS_SUCCESS);
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[0]));
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[1]));
+}
+
+TEST_F(ConSanCatalogHsaPlugin, ForeignPreparedImageCannotEnterUnlistedNativeAdmission) {
+  configure_catalog(false);
+  std::ifstream prepared(std::filesystem::path(CONSAN_APPLICATION_BARRIER_ARTIFACT) /
+                             "prepared.hsaco",
+                         std::ios::binary);
+  const std::vector<uint8_t> bytes = {std::istreambuf_iterator<char>(prepared),
+                                      std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(bytes.empty());
+  ASSERT_NE(digest(bytes), executable_facts_.at(7).prepared.sha256);
+  hsa_code_object_reader_t reader = {};
+  ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(bytes.data(), bytes.size(), &reader),
+            HSA_STATUS_SUCCESS);
+  ::testing::internal::CaptureStderr();
+  const hsa_status_t status =
+      core_.hsa_executable_load_agent_code_object_fn({8}, {1}, reader, nullptr, nullptr);
+  const std::string reason = ::testing::internal::GetCapturedStderr();
+  EXPECT_NE(status, HSA_STATUS_SUCCESS);
+  EXPECT_NE(reason.find("reserved prepared kernarg wrapper section"), std::string::npos) << reason;
+  EXPECT_EQ(load_calls_, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_paths_[0]));
+}
+
+TEST_F(ConSanCatalogHsaPlugin, InvalidCatalogAndConflictingLegacyConfigurationDoNotInstallHooks) {
+  configure_catalog(false);
+  EXPECT_EQ(finish_(), 0);
+  unload_();
+  installed_ = false;
+  ASSERT_EQ(::setenv("RJ_CONSAN_ARTIFACT_DIR", artifact_fixture(), 1), 0);
+  initialize_api();
+  EXPECT_FALSE(load_(&table_, 0, 0, nullptr));
+  EXPECT_EQ(core_.hsa_code_object_reader_create_from_memory_fn, create_reader);
+  ASSERT_EQ(::unsetenv("RJ_CONSAN_ARTIFACT_DIR"), 0);
+  std::ofstream file(catalog_path_, std::ios::binary | std::ios::trunc);
+  file << "invalid catalog";
+  file.close();
+  initialize_api();
+  EXPECT_FALSE(load_(&table_, 0, 0, nullptr));
+  EXPECT_EQ(core_.hsa_code_object_reader_create_from_memory_fn, create_reader);
+}
 
 #if defined(CONSAN_MULTI_TRACE_ARTIFACT_FIXTURE)
 class ConSanTraceHsaPlugin : public ConSanApplicationHsaPlugin {
