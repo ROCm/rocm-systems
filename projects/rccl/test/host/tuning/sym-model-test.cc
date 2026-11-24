@@ -484,4 +484,53 @@ TEST_F(SymModelTdmHierTest, SelectionOfOnlyHierTma_KeepsItValid) {
   EXPECT_TRUE(Evaluate(in, ncclSymkKernelId_AllGather_HierLsaTmaST).valid);
 }
 
+// ---- Window-optional symmetric LL kernels (NCCL 2.32.6 "Make the new cost model work with genkernels") ----
+
+// g_loadParam stub: SYM_NOWIN_ENABLE and SINGLE_PROC_MEM_REG_ENABLE read as given; every other param keeps its default.
+std::function<int64_t(const char*, int64_t)> NoWinParams(int64_t noWin, int64_t singleProc = 0) {
+  return [noWin, singleProc](const char* env, int64_t deftVal) -> int64_t {
+    if (std::string(env) == "SYM_NOWIN_ENABLE") return noWin;
+    if (std::string(env) == "SINGLE_PROC_MEM_REG_ENABLE") return singleProc;
+    return deftVal;
+  };
+}
+
+// The model itself drops the symmetric LL kernels for unregistered buffers, so tuning.cc can pick the next-best
+// kernel, unless NCCL_SYM_NOWIN_ENABLE asks for them.
+class SymModelNoWinTest : public SymModelTdmTest {
+ protected:
+  void SetUp() override {
+    SymModelTdmTest::SetUp();
+    SetArch("gfx950", 95, /*warpSize=*/64);
+  }
+
+  bool LlValid(ncclSymRegType_t reg) {
+    ncclTuningInput_t in = Input(ncclFuncAllReduce, 4 << 10);
+    in.winRegType = reg;
+    return Evaluate(in, ncclSymkKernelId_AllReduce_AGxLL_R).valid != 0;
+  }
+};
+
+TEST_F(SymModelNoWinTest, DefaultParam_UnregisteredBuffers_SymkLlInvalid) {
+  ScopedHook loadParam(g_loadParam, NoWinParams(0));
+  ASSERT_TRUE(LlValid(ncclSymSendRegRecvReg)) << "precondition: the LL kernel is valid with both windows registered";
+  EXPECT_FALSE(LlValid(ncclSymSendNonregRecvNonreg));
+}
+
+TEST_F(SymModelNoWinTest, NoWinEnabled_UnregisteredBuffers_SymkLlValid) {
+  ScopedHook loadParam(g_loadParam, NoWinParams(1));
+  EXPECT_TRUE(LlValid(ncclSymSendNonregRecvNonreg));
+}
+
+// With several GPUs per thread the LL kernel can only run once the internal symk devComm exists.
+TEST_F(SymModelNoWinTest, NoWinEnabled_MultipleGpusPerThread_SymkLlNeedsInitializedDevComm) {
+  ScopedHook loadParam(g_loadParam, NoWinParams(1));
+  comm_->intraRanks = 2;
+  comm_->symkState.initialized = false;
+  EXPECT_FALSE(LlValid(ncclSymSendNonregRecvNonreg)) << "devComm not yet created";
+  comm_->symkState.initialized = true;
+  EXPECT_TRUE(LlValid(ncclSymSendNonregRecvNonreg)) << "devComm already created";
+  EXPECT_TRUE(LlValid(ncclSymSendRegRecvReg)) << "registered windows are not gated";
+}
+
 }  // namespace
