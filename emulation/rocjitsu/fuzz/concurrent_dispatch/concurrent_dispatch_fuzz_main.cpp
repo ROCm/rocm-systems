@@ -3,6 +3,8 @@
 
 #include "concurrent_dispatch_fuzz_core.h"
 
+#include "util/diagnostic.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
@@ -33,33 +35,44 @@ __AFL_FUZZ_INIT();
 namespace {
 using namespace rocjitsu::concurrent_dispatch_fuzz;
 
-uint64_t parse_uint64(std::string_view text) {
-  uint64_t value = 0;
+enum class CliStatus { Succeeded, InvalidInput, Failed };
+
+util::Result parse_uint64(std::string_view text, uint64_t &value,
+                          util::DiagnosticEmitter diagnostic) {
   const std::from_chars_result parsed =
       std::from_chars(text.data(), text.data() + text.size(), value);
   if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
-    throw std::invalid_argument("expected an unsigned integer");
-  return value;
+    return diagnostic.emit() << "expected an unsigned integer";
+  return util::Result::success();
 }
 
-std::string parse_path(std::string_view value) {
+util::Result parse_path(std::string_view value, std::string &path,
+                        util::DiagnosticEmitter diagnostic) {
   if (value.empty())
-    throw std::invalid_argument("expected a nonempty path");
-  return std::string(value);
+    return diagnostic.emit() << "expected a nonempty path";
+  path = value;
+  return util::Result::success();
 }
 
-std::vector<uint8_t> read_input(const std::filesystem::path &path) {
+CliStatus read_input(const std::filesystem::path &path, std::vector<uint8_t> &input,
+                     util::DiagnosticEmitter diagnostic) {
   std::ifstream stream(path, std::ios::binary | std::ios::ate);
-  if (!stream || stream.tellg() <= 0 || stream.tellg() > static_cast<std::streamoff>(kMaxInputSize))
-    throw std::invalid_argument("input has an invalid size");
-  std::vector<uint8_t> input(static_cast<std::size_t>(stream.tellg()));
+  if (!stream || stream.tellg() <= 0 ||
+      stream.tellg() > static_cast<std::streamoff>(kMaxInputSize)) {
+    (void)(diagnostic.emit() << "input has an invalid size").emit();
+    return CliStatus::InvalidInput;
+  }
+  input.resize(static_cast<std::size_t>(stream.tellg()));
   stream.seekg(0);
-  if (!stream.read(reinterpret_cast<char *>(input.data()), input.size()))
-    throw std::runtime_error("cannot read input");
-  return input;
+  if (!stream.read(reinterpret_cast<char *>(input.data()), input.size())) {
+    (void)(diagnostic.emit() << "cannot read input").emit();
+    return CliStatus::Failed;
+  }
+  return CliStatus::Succeeded;
 }
 
-void write_input(const std::filesystem::path &path, std::span<const uint8_t> input) {
+util::Result write_input(const std::filesystem::path &path, std::span<const uint8_t> input,
+                         util::DiagnosticEmitter diagnostic) {
   const std::string filename = path.string();
   static std::random_device entropy;
   std::filesystem::path temporary;
@@ -71,7 +84,8 @@ void write_input(const std::filesystem::path &path, std::span<const uint8_t> inp
     stream = std::fopen(temporary_filename.c_str(), "wbx");
     const int error = errno;
     if (!stream && error != EEXIST)
-      throw std::system_error(error, std::generic_category(), "cannot stage input: " + filename);
+      return diagnostic.emit() << "cannot stage input: " << filename << ": "
+                               << std::error_code(error, std::generic_category()).message();
   } while (!stream);
 
   const bool written = std::fwrite(input.data(), 1, input.size(), stream) == input.size();
@@ -83,23 +97,55 @@ void write_input(const std::filesystem::path &path, std::span<const uint8_t> inp
   std::error_code cleanup_error;
   std::filesystem::remove(temporary, cleanup_error);
   if (cleanup_error)
-    throw std::system_error(cleanup_error, "cannot remove staged input: " + temporary.string());
+    return diagnostic.emit() << "cannot remove staged input: " << temporary.string() << ": "
+                             << cleanup_error.message();
   if (!written || close_result != 0)
-    throw std::runtime_error("cannot write input: " + filename);
+    return diagnostic.emit() << "cannot write input: " << filename;
   if (publish_error)
-    throw std::system_error(publish_error, "cannot create input: " + filename);
+    return diagnostic.emit() << "cannot create input: " << filename << ": "
+                             << publish_error.message();
+  return util::Result::success();
 }
 
-void emit_seeds(const std::filesystem::path &directory) {
-  if (std::filesystem::exists(directory) &&
-      (!std::filesystem::is_directory(directory) ||
-       std::filesystem::directory_iterator(directory) != std::filesystem::directory_iterator()))
-    throw std::invalid_argument("seed destination must be an empty directory");
-  std::filesystem::create_directories(directory);
+util::Result create_directory(const std::filesystem::path &directory,
+                              util::DiagnosticEmitter diagnostic) {
+  std::error_code error;
+  std::filesystem::create_directories(directory, error);
+  if (error)
+    return diagnostic.emit() << "cannot create directory: " << directory << ": " << error.message();
+  return util::Result::success();
+}
+
+CliStatus emit_seeds(const std::filesystem::path &directory, util::DiagnosticEmitter diagnostic) {
+  const auto reject = [&](std::string_view message, CliStatus status) {
+    (void)(diagnostic.emit() << message).emit();
+    return status;
+  };
+  std::error_code error;
+  const bool exists = std::filesystem::exists(directory, error);
+  if (error)
+    return reject("cannot inspect seed destination: " + error.message(), CliStatus::Failed);
+  if (exists) {
+    const bool is_directory = std::filesystem::is_directory(directory, error);
+    if (error)
+      return reject("cannot inspect seed destination: " + error.message(), CliStatus::Failed);
+    if (!is_directory)
+      return reject("seed destination must be an empty directory", CliStatus::InvalidInput);
+    const bool empty = std::filesystem::is_empty(directory, error);
+    if (error)
+      return reject("cannot inspect seed destination: " + error.message(), CliStatus::Failed);
+    if (!empty)
+      return reject("seed destination must be an empty directory", CliStatus::InvalidInput);
+  }
+  if (create_directory(directory, diagnostic).failed())
+    return CliStatus::Failed;
   const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
   for (std::size_t index = 0; index < seeds.size(); ++index)
-    write_input(directory / std::format("seed-{:04}.bin", index), seeds[index]);
+    if (write_input(directory / std::format("seed-{:04}.bin", index), seeds[index], diagnostic)
+            .failed())
+      return CliStatus::Failed;
   std::cout << "wrote " << seeds.size() << " concurrent-dispatch seeds to " << directory << '\n';
+  return CliStatus::Succeeded;
 }
 
 void print_stats(const RunStats &stats) {
@@ -184,6 +230,20 @@ int run_afl() {
 int main(int argc, char **argv) {
   bool fuzz_loop_running = false;
   try {
+    util::StringDiagnostic diagnostic;
+    const auto invalid = [&](std::string_view message) {
+      std::cerr << "rj_concurrent_dispatch_fuzz: " << message << '\n';
+      usage(std::cerr);
+      return 2;
+    };
+    const auto fail = [&](std::string_view message) {
+      std::cerr << "rj_concurrent_dispatch_fuzz: " << message << '\n';
+      return 1;
+    };
+    const auto report = [&](CliStatus status) {
+      return status == CliStatus::InvalidInput ? invalid(diagnostic.message())
+                                               : fail(diagnostic.message());
+    };
     std::string input_path;
     std::string output_path;
     std::string seed_path;
@@ -198,58 +258,75 @@ int main(int argc, char **argv) {
       } else if (argument == "--afl") {
         afl = true;
       } else if (argument == "--input" && index + 1 < argc) {
-        input_path = parse_path(argv[++index]);
+        if (parse_path(argv[++index], input_path, diagnostic.emitter()).failed())
+          return invalid(diagnostic.message());
       } else if (argument == "--output" && index + 1 < argc) {
-        output_path = parse_path(argv[++index]);
+        if (parse_path(argv[++index], output_path, diagnostic.emitter()).failed())
+          return invalid(diagnostic.message());
       } else if (argument == "--emit-seeds" && index + 1 < argc) {
-        seed_path = parse_path(argv[++index]);
+        if (parse_path(argv[++index], seed_path, diagnostic.emitter()).failed())
+          return invalid(diagnostic.message());
       } else if (argument == "--random" && index + 1 < argc) {
-        cases = parse_uint64(argv[++index]);
+        uint64_t value = 0;
+        if (parse_uint64(argv[++index], value, diagnostic.emitter()).failed())
+          return invalid(diagnostic.message());
+        cases = value;
       } else if (argument == "--seed" && index + 1 < argc) {
-        first_seed = parse_uint64(argv[++index]);
+        uint64_t value = 0;
+        if (parse_uint64(argv[++index], value, diagnostic.emitter()).failed())
+          return invalid(diagnostic.message());
+        first_seed = value;
       } else {
-        throw std::invalid_argument("unknown or incomplete argument");
+        return invalid("unknown or incomplete argument");
       }
     }
 
     const unsigned modes = !input_path.empty() + cases.has_value() + !seed_path.empty() + afl;
     if (modes != 1)
-      throw std::invalid_argument("choose exactly one execution mode");
+      return invalid("choose exactly one execution mode");
     if (cases && *cases == 0)
-      throw std::invalid_argument("--random requires a positive count");
+      return invalid("--random requires a positive count");
     if (cases && output_path.empty())
-      throw std::invalid_argument("random mode requires --output DIRECTORY");
+      return invalid("random mode requires --output DIRECTORY");
     if (!cases && (!output_path.empty() || first_seed))
-      throw std::invalid_argument("--output and --seed require random mode");
+      return invalid("--output and --seed require random mode");
     const uint64_t seed_start = first_seed.value_or(0);
     if (cases && *cases - 1 > std::numeric_limits<uint64_t>::max() - seed_start)
-      throw std::invalid_argument("seed range exceeds uint64");
+      return invalid("seed range exceeds uint64");
 
     if (afl) {
       fuzz_loop_running = true;
       return run_afl();
     }
     if (!seed_path.empty()) {
-      emit_seeds(seed_path);
-      return 0;
+      const CliStatus status = emit_seeds(seed_path, diagnostic.emitter());
+      return status == CliStatus::Succeeded ? 0 : report(status);
     }
     if (!input_path.empty()) {
-      const std::vector<uint8_t> input = read_input(input_path);
+      std::vector<uint8_t> input;
+      const CliStatus status = read_input(input_path, input, diagnostic.emitter());
+      if (status != CliStatus::Succeeded)
+        return report(status);
       const RunStats stats = run_input(input);
       print_stats(stats);
       return 0;
     }
 
-    std::filesystem::create_directories(output_path);
+    if (create_directory(output_path, diagnostic.emitter()).failed())
+      return fail(diagnostic.message());
     RunStats total;
     for (uint64_t index = 0; index < *cases; ++index) {
       const uint64_t seed = seed_start + index;
       const std::vector<uint8_t> input = random_input(seed);
       const std::filesystem::path replay =
           std::filesystem::path(output_path) / std::format("failure-seed-{}.bin", seed);
-      write_input(replay, input);
+      if (write_input(replay, input, diagnostic.emitter()).failed())
+        return fail(diagnostic.message());
       accumulate_stats(total, run_input(input));
-      std::filesystem::remove(replay);
+      std::error_code error;
+      std::filesystem::remove(replay, error);
+      if (error)
+        return fail("cannot remove artifact: " + replay.string() + ": " + error.message());
     }
     print_stats(total);
     return 0;

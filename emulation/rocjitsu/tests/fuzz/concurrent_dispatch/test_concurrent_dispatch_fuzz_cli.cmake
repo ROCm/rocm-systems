@@ -251,4 +251,46 @@ if(
     )
 endif()
 
+function(expect_cli_error expected_status expected_message)
+    execute_process(
+        COMMAND "${FUZZ_EXECUTABLE}" ${ARGN}
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    if(
+        NOT result EQUAL expected_status
+        OR NOT stderr MATCHES "${expected_message}"
+    )
+        message(
+            FATAL_ERROR
+            "expected ${expected_status}/${expected_message}, got ${result}: ${stdout}${stderr}"
+        )
+    endif()
+    if(expected_status EQUAL 2 AND NOT stderr MATCHES "Usage:")
+        message(FATAL_ERROR "invalid input did not print usage: ${stderr}")
+    endif()
+endfunction()
+
+foreach(value IN ITEMS -1 1x 18446744073709551616)
+    expect_cli_error(2 "expected an unsigned integer" --random "${value}" --output "${random_output}")
+endforeach()
+expect_cli_error(2 "unknown or incomplete argument" --input)
+expect_cli_error(2 "input has an invalid size" --input "${WORK_DIRECTORY}/missing.bin")
+file(WRITE "${WORK_DIRECTORY}/empty.bin" "")
+expect_cli_error(2 "input has an invalid size" --input "${WORK_DIRECTORY}/empty.bin")
+string(REPEAT "x" 1025 oversized_input)
+file(WRITE "${WORK_DIRECTORY}/oversized.bin" "${oversized_input}")
+expect_cli_error(2 "input has an invalid size" --input "${WORK_DIRECTORY}/oversized.bin")
+file(WRITE "${WORK_DIRECTORY}/not-a-directory" "sentinel")
+expect_cli_error(2 "seed destination must be an empty directory" --emit-seeds "${WORK_DIRECTORY}/not-a-directory")
+expect_cli_error(1 "cannot create directory" --random 1 --output "${WORK_DIRECTORY}/not-a-directory/child")
+expect_cli_error(1 "cannot create directory" --emit-seeds "${WORK_DIRECTORY}/not-a-directory/child")
+file(CREATE_LINK "loop" "${WORK_DIRECTORY}/loop" SYMBOLIC)
+expect_cli_error(1 "cannot inspect seed destination" --emit-seeds "${WORK_DIRECTORY}/loop")
+file(READ "${WORK_DIRECTORY}/not-a-directory" sentinel)
+if(NOT sentinel STREQUAL "sentinel")
+    message(FATAL_ERROR "failed directory operation changed existing file")
+endif()
+
 file(REMOVE_RECURSE "${WORK_DIRECTORY}")
