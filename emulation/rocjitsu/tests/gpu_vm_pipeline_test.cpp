@@ -5,9 +5,13 @@
 #include "cdna5_sim_test_common.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 #include "rocjitsu/vm/graphics/image_address.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
@@ -16,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -23,13 +28,17 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <latch>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -3744,6 +3753,52 @@ TEST(GpuVmPipeline, LegacyAtomicBatchPreservesLaneResultsOnRetry) {
   }
 }
 
+TEST(GpuVmPipeline, PhysicalVectorAtomicRefusesMisalignedLane) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  amdgpu::ComputeUnitCore *cu = sim.cu();
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->process_id(), 0u);
+  wf->set_exec(0x3u);
+
+  constexpr uint64_t kAlignedAddress = 0x10000;
+  constexpr uint64_t kMisalignedWords = 0x10040;
+  constexpr uint32_t kInitial = 10, kSource = 5, kDestination = 30, kSentinel = 0xdeadbeef;
+  constexpr uint32_t kLowWord = 0x11111111, kHighWord = 0x22222222;
+  sim.memory->write32(kAlignedAddress, kInitial);
+  sim.memory->write32(kMisalignedWords, kLowWord);
+  sim.memory->write32(kMisalignedWords + 4, kHighWord);
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->atomic_op = amdgpu::AtomicOp::ADD;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = 0x3u;
+  state->lane_mask = 0x3u;
+  state->dst_reg_base = wf->vgpr_alloc().base + kDestination;
+  state->per_lane_addr[0] = kAlignedAddress;
+  state->per_lane_addr[1] = kMisalignedWords + 2;
+  state->store_data.resize(state->wf_size * sizeof(uint32_t));
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    std::memcpy(state->store_data.data() + lane * sizeof(uint32_t), &kSource, sizeof(kSource));
+    cu->write_vgpr(state->dst_reg_base, lane, kSentinel);
+  }
+
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  EXPECT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf),
+            amdgpu::VmAccessOutcome::Malformed);
+  EXPECT_TRUE(wf->wait_counters().empty());
+  // Lanes before the refused one apply, as at a nonzero VMID.
+  EXPECT_EQ(sim.memory->read32(kAlignedAddress), kInitial + kSource);
+  EXPECT_EQ(sim.memory->read32(kMisalignedWords), kLowWord);
+  EXPECT_EQ(sim.memory->read32(kMisalignedWords + 4), kHighWord);
+  for (uint32_t lane = 0; lane < 2; ++lane)
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDestination, lane), kSentinel);
+}
+
 TEST(GpuVmPipeline, TranslatedAtomicRetrySkipsCompletedLanes) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());
@@ -4452,6 +4507,332 @@ TEST(GpuVmPipeline, AtomicPermissionFaultDoesNotReachPhysicalBacking) {
   EXPECT_EQ(context.external->atomic_load_calls, 0u);
   EXPECT_EQ(context.external->compare_exchange_calls, 0u);
   EXPECT_TRUE(context.wf->wait_counters().empty());
+}
+
+/// @brief One host page mapped into a legacy address space as the KMD maps a USERPTR,
+/// and a wave whose atomics on it take the legacy (cache-compatible) path.
+class LegacyHostAtomicContext {
+public:
+  struct alignas(4096) HostPage {
+    std::array<std::byte, 4096> bytes;
+  };
+
+  static constexpr uint32_t kVmid = 78;
+  static constexpr uint64_t kBase = 0x200000;
+  static constexpr uint32_t kVectorDestination = 12;
+  static constexpr uint32_t kScalarDestination = 20;
+
+  Gfx1250Sim sim;
+  KfdProcess process{kVmid};
+  std::unique_ptr<HostPage> page = std::make_unique<HostPage>();
+  std::unique_ptr<amdgpu::LegacyGpuVmAdapter> adapter;
+  amdgpu::AddressSpaceHandle address_space;
+  amdgpu::ComputeUnitCore *cu = nullptr;
+  amdgpu::Wavefront *wf = nullptr;
+  std::unique_ptr<amdgpu::GlobalMemPipeline> vector_pipeline;
+  std::unique_ptr<amdgpu::ScalarMemPipeline> scalar_pipeline;
+
+  void initialize() {
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    process.map_pages(kBase, page->bytes.data(), page->bytes.size());
+    adapter = std::make_unique<amdgpu::LegacyGpuVmAdapter>(sim.soc->gpu_vm(), sim.soc->memory());
+    address_space = adapter->register_address_space(
+        kVmid, &process.page_table_, &process.page_table_mutex_, process.page_table_generation());
+    ASSERT_TRUE(address_space);
+    cu = sim.cu();
+    cu->set_gpu_vm(&sim.soc->gpu_vm());
+    wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_process_id(kVmid);
+    wf->set_address_space(address_space);
+    wf->set_exec(lane_mask());
+    vector_pipeline = std::make_unique<amdgpu::GlobalMemPipeline>(&cu->l1_vector(), cu->l2());
+    scalar_pipeline = std::make_unique<amdgpu::ScalarMemPipeline>(&cu->l1_scalar());
+  }
+
+  template <typename T> std::atomic_ref<T> word() {
+    return std::atomic_ref<T>(*reinterpret_cast<T *>(page->bytes.data()));
+  }
+
+  uint64_t lane_mask() const {
+    return wf->wf_size() == 64 ? ~uint64_t{0} : (uint64_t{1} << wf->wf_size()) - 1;
+  }
+
+  /// @brief Apply @p operation with @p source on every lane, all at the page's first word,
+  /// and append each lane's returned value to @p returned.
+  template <typename T>
+  void issue_vector_atomic(amdgpu::AtomicOp operation, T source, std::vector<T> &returned) {
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = sizeof(T);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->atomic_op = operation;
+    state->wf_size = wf->wf_size();
+    state->exec_mask = lane_mask();
+    state->lane_mask = lane_mask();
+    state->dst_reg_base = wf->vgpr_alloc().base + kVectorDestination;
+    state->store_data.resize(state->wf_size * sizeof(T));
+    for (uint32_t lane = 0; lane < state->wf_size; ++lane) {
+      state->per_lane_addr[lane] = kBase;
+      std::memcpy(state->store_data.data() + lane * sizeof(T), &source, sizeof(T));
+    }
+    const uint32_t lanes = state->wf_size;
+    ASSERT_EQ(vector_pipeline->issue(new TestMemoryInstruction(std::move(state)), *wf),
+              amdgpu::VmAccessOutcome::Complete);
+    for (uint32_t lane = 0; lane < lanes; ++lane) {
+      uint64_t value = cu->read_vgpr(wf->vgpr_alloc().base + kVectorDestination, lane);
+      if constexpr (sizeof(T) == sizeof(uint64_t))
+        value |= static_cast<uint64_t>(
+                     cu->read_vgpr(wf->vgpr_alloc().base + kVectorDestination + 1, lane))
+                 << 32;
+      T typed;
+      std::memcpy(&typed, &value, sizeof(T));
+      returned.push_back(typed);
+    }
+  }
+
+  /// @brief Apply a 64-bit scalar ADD of @p source at the page's first word and append
+  /// the returned value to @p returned.
+  void issue_scalar_add64(uint64_t source, std::vector<uint64_t> &returned) {
+    auto state = std::make_unique<amdgpu::ScalarMemState>();
+    state->addr = kBase;
+    state->elem_size = sizeof(uint64_t);
+    state->num_dwords = 2;
+    state->is_load = true;
+    state->atomic_op = amdgpu::AtomicOp::ADD;
+    state->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, kScalarDestination, 2};
+    std::memcpy(state->store_data, &source, sizeof(source));
+    ASSERT_EQ(scalar_pipeline->issue(new TestMemoryInstruction(std::move(state)), *wf),
+              amdgpu::VmAccessOutcome::Complete);
+    const uint32_t base = wf->sgpr_alloc().base + kScalarDestination;
+    returned.push_back(cu->read_sgpr_storage(base) |
+                       static_cast<uint64_t>(cu->read_sgpr_storage(base + 1)) << 32);
+  }
+};
+
+constexpr uint32_t kHostRaceThreads = 2;
+/// Bounds each host thread's results; epoch bases in the exchange test stay below 2^24.
+constexpr size_t kMaxHostOperations = size_t{1} << 20;
+template <typename HostResult>
+using HostRaceResults = std::array<std::vector<HostResult>, kHostRaceThreads>;
+
+/// @brief Call @p gpu_step @p gpu_steps times on this thread while kHostRaceThreads host
+/// threads call @p host_step(thread, iteration) until the simulator side finishes.
+/// @details Threads are not pinned, so a non-atomic update can go unseen when they land on
+/// different caches. Correct code never fails. A host thread stops early after
+/// kMaxHostOperations operations.
+/// @returns Each host thread's results, in its own order.
+template <typename HostResult, typename GpuStep, typename HostStep>
+HostRaceResults<HostResult> race_host_threads(uint32_t gpu_steps, GpuStep &&gpu_step,
+                                              HostStep &&host_step) {
+  HostRaceResults<HostResult> results;
+  std::atomic<bool> done{false};
+  std::latch start(kHostRaceThreads + 1);
+  {
+    std::vector<std::jthread> threads;
+    threads.reserve(kHostRaceThreads);
+    for (uint32_t thread = 0; thread < kHostRaceThreads; ++thread) {
+      threads.emplace_back([&, thread] {
+        std::vector<HostResult> &own = results[thread];
+        start.arrive_and_wait();
+        while (!done.load(std::memory_order_acquire) && own.size() < kMaxHostOperations)
+          own.push_back(host_step(thread, own.size()));
+      });
+    }
+    start.arrive_and_wait();
+    for (uint32_t step = 0; step < gpu_steps && !testing::Test::HasFatalFailure(); ++step)
+      gpu_step();
+    done.store(true, std::memory_order_release);
+  }
+  return results;
+}
+
+/// @brief Check that the returned values of every +1 update of a word that started at 0
+/// are 0 .. final-1, each once: no update was lost or applied to a stale value.
+template <typename T>
+void expect_every_increment_returned_once(std::vector<T> returned, uint64_t final_value) {
+  std::ranges::sort(returned);
+  EXPECT_EQ(final_value, returned.size())
+      << returned.size() - std::min<uint64_t>(final_value, returned.size()) << " updates lost";
+  for (size_t index = 0; index < returned.size(); ++index) {
+    if (static_cast<uint64_t>(returned[index]) != index) {
+      ADD_FAILURE() << "sorted returned value " << index << " is "
+                    << static_cast<uint64_t>(returned[index]);
+      return;
+    }
+  }
+}
+
+constexpr uint32_t kLegacyRaceIssues = 2000;
+
+TEST(GpuVmPipeline, LegacyVectorAtomicAdd32IsAtomicAgainstHostFetchAdd) {
+  LegacyHostAtomicContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  std::vector<uint32_t> returned;
+  const HostRaceResults<uint32_t> host_results = race_host_threads<uint32_t>(
+      kLegacyRaceIssues,
+      [&] { context.issue_vector_atomic<uint32_t>(amdgpu::AtomicOp::ADD, 1, returned); },
+      [&](uint32_t, size_t) { return context.word<uint32_t>().fetch_add(1); });
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  for (const std::vector<uint32_t> &results : host_results)
+    returned.insert(returned.end(), results.begin(), results.end());
+  expect_every_increment_returned_once(std::move(returned), context.word<uint32_t>().load());
+}
+
+TEST(GpuVmPipeline, LegacyVectorAtomicFaddF32IsAtomicAgainstHostFetchAdd) {
+  LegacyHostAtomicContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  std::vector<float> returned;
+  std::vector<uint32_t> bits;
+  const HostRaceResults<float> host_results = race_host_threads<float>(
+      kLegacyRaceIssues,
+      [&] {
+        bits.clear();
+        context.issue_vector_atomic<uint32_t>(amdgpu::AtomicOp::FADD, std::bit_cast<uint32_t>(1.0f),
+                                              bits);
+        for (uint32_t value : bits)
+          returned.push_back(std::bit_cast<float>(value));
+      },
+      [&](uint32_t, size_t) { return context.word<float>().fetch_add(1.0f); });
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  for (const std::vector<float> &results : host_results)
+    returned.insert(returned.end(), results.begin(), results.end());
+  // Every partial sum is an integer below 2^24, so each addition is exact.
+  ASSERT_LT(returned.size(), size_t{1} << 24);
+  expect_every_increment_returned_once(std::move(returned),
+                                       static_cast<uint64_t>(context.word<float>().load()));
+}
+
+TEST(GpuVmPipeline, LegacyScalarAtomicAdd64IsAtomicAgainstHostFetchAdd) {
+  LegacyHostAtomicContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  std::vector<uint64_t> returned;
+  const HostRaceResults<uint64_t> host_results = race_host_threads<uint64_t>(
+      kLegacyRaceIssues * 8, [&] { context.issue_scalar_add64(1, returned); },
+      [&](uint32_t, size_t) { return context.word<uint64_t>().fetch_add(1); });
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  for (const std::vector<uint64_t> &results : host_results)
+    returned.insert(returned.end(), results.begin(), results.end());
+  expect_every_increment_returned_once(std::move(returned), context.word<uint64_t>().load());
+}
+
+TEST(GpuVmPipeline, LegacyPm4AtomicMemIsAtomicAgainstHostFetchAdd) {
+  constexpr uint32_t kPacketsPerSubmission = 100;
+  constexpr uint32_t kSubmissions = 200;
+  constexpr uint64_t kCommandOffset = 0x100;
+  for (uint32_t width : {4u, 8u}) {
+    SCOPED_TRACE(width);
+    LegacyHostAtomicContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    // ATOMIC_MEM ADD (operation 15; bit 5 selects 64 bits) of 1 at the page's first word.
+    const std::array<uint32_t, 9> packet = {0xc0071e00u,
+                                            15u | (width == 8 ? 0x20u : 0u),
+                                            static_cast<uint32_t>(LegacyHostAtomicContext::kBase),
+                                            0u,
+                                            1u,
+                                            0u,
+                                            0u,
+                                            0u,
+                                            0u};
+    std::vector<uint32_t> commands;
+    for (uint32_t index = 0; index < kPacketsPerSubmission; ++index)
+      commands.insert(commands.end(), packet.begin(), packet.end());
+    const size_t command_bytes = commands.size() * sizeof(uint32_t);
+    ASSERT_LE(kCommandOffset + command_bytes, context.page->bytes.size());
+    std::memcpy(context.page->bytes.data() + kCommandOffset, commands.data(), command_bytes);
+
+    amdgpu::ComputeQueueRecord queue;
+    queue.address_space = context.address_space;
+    queue.process_id = LegacyHostAtomicContext::kVmid;
+    queue.packet_format = amdgpu::QueuePacketFormat::Pm4;
+    queue.submission_queue = true;
+    amdgpu::Pm4ExecutionContext cp;
+    cp.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    cp.flush_caches = [] { return amdgpu::VmAccessOutcome::Complete; };
+    cp.wake = [] {};
+    cp.retry = [] { ADD_FAILURE() << "unexpected PM4 retry"; };
+    cp.fault_queue = [&] {
+      queue.faulted = true;
+      ADD_FAILURE() << "PM4 queue faulted";
+    };
+    cp.dispatch = [](const std::array<uint32_t, 4> &, util::DiagnosticEmitter) {
+      ADD_FAILURE() << "unexpected PM4 dispatch";
+      return util::Result::failure();
+    };
+    cp.reset_gds_wave_id = [] {};
+
+    uint32_t completed = 0;
+    const HostRaceResults<uint64_t> host_results = race_host_threads<uint64_t>(
+        kSubmissions,
+        [&] {
+          amdgpu::Pm4Submission submission;
+          submission.buffers.push_back({.address = LegacyHostAtomicContext::kBase + kCommandOffset,
+                                        .dwords = static_cast<uint32_t>(commands.size())});
+          submission.complete = [&](bool success) {
+            if (success)
+              ++completed;
+          };
+          queue.commands.submissions.push_back(std::move(submission));
+          amdgpu::process_pm4_packets(queue, &context.sim.soc->gpu_vm(), cp);
+          ASSERT_TRUE(queue.commands.submissions.empty());
+        },
+        [&](uint32_t, size_t) -> uint64_t {
+          return width == 8 ? context.word<uint64_t>().fetch_add(1)
+                            : context.word<uint32_t>().fetch_add(1);
+        });
+    ASSERT_FALSE(testing::Test::HasFatalFailure());
+    EXPECT_EQ(completed, kSubmissions);
+    uint64_t expected = uint64_t{kSubmissions} * kPacketsPerSubmission;
+    for (const std::vector<uint64_t> &results : host_results)
+      expected += results.size();
+    const uint64_t final_value =
+        width == 8 ? context.word<uint64_t>().load() : context.word<uint32_t>().load();
+    EXPECT_EQ(final_value, expected)
+        << expected - std::min(final_value, expected) << " updates lost";
+  }
+}
+
+TEST(GpuVmPipeline, LegacyVectorAtomicAdd64IsAtomicAgainstHostExchange) {
+  // Host threads exchange the word for a fresh epoch base while every lane adds 1.
+  // Epoch bases differ above bit 40; counts stay below it.
+  constexpr uint32_t kEpochShift = 40;
+  LegacyHostAtomicContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  std::vector<uint64_t> gpu_returned;
+  const HostRaceResults<uint64_t> host_results = race_host_threads<uint64_t>(
+      kLegacyRaceIssues,
+      [&] { context.issue_vector_atomic<uint64_t>(amdgpu::AtomicOp::ADD, 1, gpu_returned); },
+      [&](uint32_t thread, size_t iteration) {
+        const uint64_t base = (static_cast<uint64_t>(iteration) * kHostRaceThreads + thread + 1)
+                              << kEpochShift;
+        return context.word<uint64_t>().exchange(base);
+      });
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+
+  // Each epoch, the initial one included, is closed exactly once: by the exchange that
+  // replaced it or, for the last, by the final value. The closing value counts its adds.
+  std::map<uint64_t, uint64_t> closing_counts;
+  size_t epochs = 1;
+  auto close = [&](uint64_t value) {
+    const uint64_t base = value >> kEpochShift << kEpochShift;
+    EXPECT_TRUE(closing_counts.emplace(base, value - base).second)
+        << "epoch " << (base >> kEpochShift) << " closed twice";
+  };
+  for (const std::vector<uint64_t> &replaced : host_results) {
+    epochs += replaced.size();
+    for (uint64_t value : replaced)
+      close(value);
+  }
+  close(context.word<uint64_t>().load());
+  EXPECT_EQ(closing_counts.size(), epochs) << "an exchange was lost";
+
+  std::vector<uint64_t> expected;
+  for (const auto &[base, count] : closing_counts)
+    for (uint64_t offset = 0; offset < count; ++offset)
+      expected.push_back(base + offset);
+  std::ranges::sort(gpu_returned);
+  EXPECT_EQ(expected.size(), gpu_returned.size());
+  EXPECT_TRUE(expected == gpu_returned) << "GPU returned values do not match the epoch counts";
 }
 
 } // namespace

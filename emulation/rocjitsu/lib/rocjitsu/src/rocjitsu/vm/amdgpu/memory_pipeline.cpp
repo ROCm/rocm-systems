@@ -780,10 +780,8 @@ VmAccessOutcome execute_cached_scalar_atomic_rmw(ScalarMemState &d, L2Cache &l2,
   return l2.atomic_rmw(
       d.addr, sizeof(T),
       [&](uint8_t *line, uint32_t offset) {
-        T old;
-        std::memcpy(&old, line + offset, sizeof(old));
-        const T value = scalar_atomic_result(d, old);
-        std::memcpy(line + offset, &value, sizeof(value));
+        const T old = atomic_update<T>(line + offset,
+                                       [&](T current) { return scalar_atomic_result(d, current); });
         std::memcpy(d.response_data, &old, sizeof(old));
       },
       vmid);
@@ -1457,10 +1455,10 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d, uint64_t lane_m
 
 /// @brief Perform a per-lane atomic RMW through L2.
 ///
-/// Reads the old value through L2's backing-memory atomic path, applies the
-/// operation, and writes the new value back. The device coherence epoch makes
-/// cached L1/L2 lines stale at the atomic boundary. Old values are stored in
-/// response_data for GLC return.
+/// Applies the operation to the backing word through L2's backing-memory atomic
+/// path with atomic_update(), so it is atomic against host atomics on the same
+/// word. The device coherence epoch makes cached L1/L2 lines stale at the atomic
+/// boundary. Old values are stored in response_data for GLC return.
 VmAccessOutcome execute_atomic_rmw(
     VectorMemState &d, L2Cache *l2, uint32_t vmid, uint64_t lane_mask,
     const GlobalMemPipeline::PreparedAtomicBoundaryHandler &prepared_boundary_handler) {
@@ -1529,54 +1527,30 @@ VmAccessOutcome execute_atomic_rmw(
   // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
   auto mutation = [&](uint32_t lane, uint8_t *line_data, uint32_t offset) {
     if (esz == 4) {
-      uint32_t old_val;
-      std::memcpy(&old_val, line_data + offset, 4);
-
-      uint32_t new_val;
-      if (is_packed_add(d.atomic_op)) {
-        uint32_t src_val;
-        std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-        new_val =
-            fp_mode::atomic_add_packed_16(old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16,
-                                          /*denorm_mode=*/3, d.atomic_source_nan_first);
-      } else if (fp_operation) {
-        uint32_t source_bits = 0, compare_bits = 0;
-        std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
-        if (uses_two_sources)
-          std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
-        new_val = apply_fp_atomic(d, *fp_operation, old_val, source_bits, compare_bits,
-                                  d.atomic_denorm_mode);
-      } else {
-        uint32_t src_val = 0, cmp_val = 0;
-        std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-        if (uses_two_sources)
-          std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
-        new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val).value();
-      }
-
-      std::memcpy(line_data + offset, &new_val, 4);
+      uint32_t src_val = 0, cmp_val = 0;
+      std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+      if (uses_two_sources)
+        std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+      const uint32_t old_val = atomic_update<uint32_t>(line_data + offset, [&](uint32_t current) {
+        if (is_packed_add(d.atomic_op))
+          return fp_mode::atomic_add_packed_16(current, src_val,
+                                               d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                               /*denorm_mode=*/3, d.atomic_source_nan_first);
+        if (fp_operation)
+          return apply_fp_atomic(d, *fp_operation, current, src_val, cmp_val, d.atomic_denorm_mode);
+        return apply_int_atomic(d.atomic_op, current, src_val, cmp_val).value();
+      });
       std::memcpy(&d.response_data[lane * 4], &old_val, 4);
     } else if (esz == 8) {
-      uint64_t old_val;
-      std::memcpy(&old_val, line_data + offset, 8);
-
-      uint64_t new_val;
-      if (fp_operation) {
-        uint64_t source_bits = 0, compare_bits = 0;
-        std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
-        if (uses_two_sources)
-          std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
-        new_val = apply_fp_atomic(d, *fp_operation, old_val, source_bits, compare_bits,
-                                  d.atomic_denorm_mode);
-      } else {
-        uint64_t src_val = 0, cmp_val = 0;
-        std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-        if (uses_two_sources)
-          std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
-        new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val).value();
-      }
-
-      std::memcpy(line_data + offset, &new_val, 8);
+      uint64_t src_val = 0, cmp_val = 0;
+      std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+      if (uses_two_sources)
+        std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+      const uint64_t old_val = atomic_update<uint64_t>(line_data + offset, [&](uint64_t current) {
+        return fp_operation ? apply_fp_atomic(d, *fp_operation, current, src_val, cmp_val,
+                                              d.atomic_denorm_mode)
+                            : apply_int_atomic(d.atomic_op, current, src_val, cmp_val).value();
+      });
       std::memcpy(&d.response_data[lane * 8], &old_val, 8);
     }
   };

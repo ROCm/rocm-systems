@@ -392,12 +392,11 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
                                                  : tc_operations[operation - 15];
         const auto mutate = [&]<typename T>() {
           return access->atomic_modify(address(1), sizeof(T), [&](std::span<std::byte> bytes) {
-            T value;
-            std::memcpy(&value, bytes.data(), sizeof(value));
-            value = apply_int_atomic(atomic, value, static_cast<T>(address(3)),
-                                     static_cast<T>(address(5)))
-                        .value();
-            std::memcpy(bytes.data(), &value, sizeof(value));
+            atomic_update<T>(bytes.data(), [&](T value) {
+              return apply_int_atomic(atomic, value, static_cast<T>(address(3)),
+                                      static_cast<T>(address(5)))
+                  .value();
+            });
           });
         };
         const auto outcome = width == 8 ? mutate.template operator()<uint64_t>()

@@ -610,6 +610,18 @@ these bounds and fault-order rules. They are observed on gfx90a with
 the same way by extrapolation, including `s_buffer_atomic_cmpswap_x2`, whose
 bound covers its 8-byte memory element although SDATA holds 16 bytes.
 
+**Atomicity against the host.** Vector and scalar atomics on this L2 path, and
+PM4 `ATOMIC_MEM`, apply each update to the backing word as one hardware
+compare-exchange (`atomic_update()` in `vm/amdgpu/atomic_op.h`). On host-backed
+memory (KMD USERPTR, GTT and VRAM allocations) an update is therefore atomic
+against CPU atomics on the same word, not only against other simulated
+atomics. The exception is a word whose bytes map to two separate host ranges
+within one GPU page: it is updated in a local copy, atomically only with
+respect to the simulator. Translated-VM and SDMA atomics already use a
+compare-exchange loop on the backing. LDS atomics never touch host memory. An
+atomic lane whose address is not aligned to its size faults without updating
+memory; earlier lanes of a vector atomic apply.
+
 **Cache management instructions:**
 
 - `s_dcache_inv` / `s_dcache_inv_vol` — invalidate the L1 scalar cache
