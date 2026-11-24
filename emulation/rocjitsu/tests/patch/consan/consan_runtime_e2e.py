@@ -71,6 +71,14 @@ CASES = (
             'ordered',
             'offset',
             'readread',
+            'likely',
+            'strict',
+            'provenstrict',
+            'alternate',
+            'unknown',
+            'unknownstrict',
+            'nongroup',
+            'nongroupstrict',
         )
     ),
     *(
@@ -254,8 +262,15 @@ class Driver:
         if args.fixture_kind == 'named-assembly':
             fixture = fixture_directory / f'{fixture_name}.hsaco'
         elif fixture_name.startswith(('transpose_', 'atomic_', 'flat_')):
+            # Run both policies against identical original bytes.
+            source_name = {
+                'flat_load_strict': 'flat_load_likely',
+                'flat_load_provenstrict': 'flat_load_overlap',
+                'flat_load_unknownstrict': 'flat_load_unknown',
+                'flat_load_nongroupstrict': 'flat_load_nongroup',
+            }.get(fixture_name, fixture_name)
             fixture = fixture_directory / (
-                'width-' + fixture_name.replace('_', '-') + '.hsaco'
+                'width-' + source_name.replace('_', '-') + '.hsaco'
             )
         elif fixture_name.startswith('wide_'):
             name = {'wide_alias': 'b128-alias', 'wide_collision': 'b64-collision'}.get(
@@ -413,9 +428,10 @@ class Driver:
                 'original-baseline',
                 [args.runner, original, entry, launches, mode, '--baseline'],
             )
-        preparation = self.run(
-            'prepare', [args.prepare, original, args.target, entry, artifact]
-        )
+        command = [args.prepare, original, args.target, entry, artifact]
+        if args.case.startswith('flat_') and args.case.endswith('strict'):
+            command.append('--flat-policy=strict')
+        preparation = self.run('prepare', command)
         profile = next(
             token.split('=', 1)[1]
             for token in preparation.split()
@@ -758,11 +774,22 @@ class Driver:
         flat_store = direction == 'store'
         high = 1 << (self.args.wave_size - 1)
         ordered = scenario == 'ordered'
-        assert [(s['access'], s['width']) for s in decoded['sites']] == [
-            (1 if scenario == 'readread' else 2, 4),
-            (1, 8 if scenario == 'tail' else 4),
-        ]
-        assert decoded['sites'][0 if flat_store else 1]['origin'] == 'group_flat'
+        omitted = scenario in (
+            'strict',
+            'unknown',
+            'unknownstrict',
+            'nongroup',
+            'nongroupstrict',
+        )
+        expected = [(1 if scenario == 'readread' else 2, 4)]
+        if not omitted:
+            expected.append((1, 8 if scenario == 'tail' else 4))
+            flat = decoded['sites'][0 if flat_store else 1]
+            assert flat['origin'] == 'group_flat'
+            assert flat['confidence'] == (
+                'conservative' if scenario in ('likely', 'alternate') else 'exact'
+            )
+        assert [(s['access'], s['width']) for s in decoded['sites']] == expected
         (execution,) = decoded['executions']
         assert (
             execution['grid_x']
@@ -778,7 +805,7 @@ class Driver:
                 (barrier,) = row['completions']
                 assert barrier['commit'] == 0x43534243 and barrier['participants'] == 2
                 assert barrier['sequence'] == 1 - wave
-            if wave == 1 and scenario == 'empty':
+            if wave == 1 and (scenario == 'empty' or omitted):
                 assert row['final_sequence'] == 0 and not row['records']
                 continue
             (record,) = row['records']
@@ -788,6 +815,11 @@ class Driver:
             )
             assert record['commit'] == 0x43534143 and record['flags'] == 1
             assert record['phase'] == int(ordered and wave == 1)
+            if wave and scenario == 'alternate':
+                # This branch reads the global output buffer through its valid full pointer.
+                # Its low dword is allocator-dependent; it is never an exact LDS observation.
+                assert (record['width'], record['mask']) == (4, high)
+                continue
             assert (record['width'], record['offset'], record['mask']) == (
                 8 if wave and scenario == 'tail' else 4,
                 1016 if wave and scenario in ('adjacent', 'tail') else 1020,

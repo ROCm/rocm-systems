@@ -187,6 +187,10 @@ foreach(
                     oob
                     offset
                     readread
+                    likely
+                    alternate
+                    unknown
+                    nongroup
                 )
                 if(_gfx12)
                     list(APPEND _scenarios underflow overflow)
@@ -208,6 +212,13 @@ foreach(
                 endif()
             endforeach()
         endforeach()
+        list(
+            APPEND _flat_cases_${_gpu}_${_wave_size}
+            flat-load-strict
+            flat-load-provenstrict
+            flat-load-unknownstrict
+            flat-load-nongroupstrict
+        )
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")

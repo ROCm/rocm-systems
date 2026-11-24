@@ -29,6 +29,7 @@ struct LdsRaceParticipant {
   // preserves the distinct guest EXEC at the instruction.
   std::optional<uint64_t> transpose_exec = std::nullopt;
   AccessOrigin origin = AccessOrigin::Native;
+  FlatAssumption assumption = FlatAssumption::None;
   bool operator==(const LdsRaceParticipant &) const = default;
 };
 
@@ -98,6 +99,9 @@ public:
   EntryKey key = 0;
   std::string name;
   EntryDisposition disposition = EntryDisposition::Native;
+  uint32_t observed_sites = 0;
+  std::vector<SiteFacts> flat_sites{};
+  std::vector<FlatExclusion> flat_exclusions{};
   bool operator==(const LdsRaceImageEntry &) const = default;
 };
 
@@ -112,6 +116,7 @@ struct LdsRaceResult {
   uint32_t target = 0;
   uint32_t wave_size = 0;
   ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
+  std::optional<FlatPolicy> flat_policy;
   bool has_group_flat = false;
   bool has_dual_ranges = false;
   bool has_transpose = false;

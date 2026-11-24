@@ -52,17 +52,20 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
   constexpr uint32_t clobber = 0x7e060280; // v_mov_b32_e32 v3, 0
   constexpr uint32_t narrow = 0xbe88206a;  // s_and_saveexec_b64 s[8:9], vcc
   constexpr uint32_t restore = 0xbefe0108; // s_mov_b64 exec, s[8:9]
-  const auto check = [&](std::initializer_list<uint32_t> setup, bool exact) {
+  constexpr uint32_t select = 0x85050705;  // s_cselect_b32 s5, s5, s7
+  const auto check = [&](std::initializer_list<uint32_t> setup, bool admitted,
+                         FlatAssumption premise = FlatAssumption::None) {
     auto candidate = image;
     std::vector<uint32_t> words(setup);
     words.insert(words.end(), {0xdc500000, 0x02000002, 0xbf810000}); // FLAT load then endpgm
     ASSERT_LE(entry + words.size() * 4, candidate.size());
     std::memcpy(candidate.data() + entry, words.data(), words.size() * 4);
     const auto input = build_input_program(candidate, target, "lds_producer_consumer", error);
-    ASSERT_EQ(input.succeeded(), exact) << error.message;
-    if (exact) {
+    ASSERT_EQ(input.succeeded(), admitted) << error.message;
+    if (admitted) {
       ASSERT_EQ(input.value().accesses.size(), 1u);
       EXPECT_EQ(input.value().accesses.front().origin, AccessOrigin::GroupFlat);
+      EXPECT_EQ(input.value().accesses.front().assumption, premise);
     } else {
       EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
     }
@@ -70,12 +73,23 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
   // An extended literal carries its numeric payload in the decoded operand.
   // Even the two aperture selector values must behave like an unknown pointer.
   constexpr uint32_t literal = 0xbe8401ff; // s_mov_b64 s[4:5], literal32
-  check({literal, 239, copy}, false);
-  const std::optional<uint64_t> unknown_offset = error.text_offset;
-  for (const uint32_t value : {235u, 237u}) {
+  for (const uint32_t value : {235u, 237u, 239u}) {
     SCOPED_TRACE(value);
-    check({literal, value, copy}, false);
-    EXPECT_EQ(error.text_offset, unknown_offset);
+    const std::array<uint32_t, 10> words = {
+        shared,    copy,  0xdc500000, 0x02000002,             // observed shared load
+        literal,   value, copy,       0xdc500000, 0x02000002, // excluded load from the literal
+        0xbf810000};
+    auto candidate = image;
+    ASSERT_LE(entry + sizeof(words), candidate.size());
+    std::memcpy(candidate.data() + entry, words.data(), sizeof(words));
+    const auto result = prepare(candidate, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    const auto &manifest = result.value().manifest;
+    ASSERT_EQ(manifest.sites.size(), 1u);
+    ASSERT_EQ(manifest.flat_exclusions.size(), 1u);
+    const auto &exclusion = manifest.flat_exclusions.front();
+    EXPECT_EQ(exclusion.original_offset, baseline.value().kernel.entry_text_offset + 28);
+    EXPECT_EQ(exclusion.reason, FlatExclusionReason::Unresolved);
   }
   check({shared, narrow, copy}, true);
   check({shared, copy, narrow}, true);
@@ -85,6 +99,36 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
   check({0xbe840100, copy}, false);                  // kernarg (global) pointer
   check({copy}, false);                              // no high-word definition
   check({shared, copy, 0xbf840001, clobber}, false); // conditional branch bypasses the clobber
+  check({shared, select, copy}, true, FlatAssumption::SelectedSharedHigh);
+  check({select, copy}, false);                     // neither high word is known shared
+  check({shared, 0xbe8601ed, select, copy}, false); // known private alternative in s7
+  check({shared, 0xbe860100, select, copy}, false); // known kernarg high in s7
+  check({shared, select, narrow, copy, restore}, false);
+  check({shared, select, copy, clobber}, false);
+}
+
+TEST(ConSanInput, StrictRejectsConditionalOnlyImageAndRevalidatesTheSavedPolicy) {
+  auto image =
+      test::read_fixture(test::target_fixture_path({"gfx950", 64}, "width-flat-load-likely"));
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto mixed = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(mixed.succeeded()) << error.message;
+  ASSERT_EQ(mixed.value().accesses.size(), 2u);
+  ASSERT_EQ(mixed.value().accesses[0].origin, AccessOrigin::Native);
+  const auto offset = mixed.value().text_file_offset + mixed.value().accesses[0].original_offset;
+  constexpr std::array<uint32_t, 2> nops = {0xbf800000, 0xbf800000};
+  ASSERT_LE(offset + sizeof(nops), image.size());
+  std::memcpy(image.data() + offset, nops.data(), sizeof(nops));
+  auto likely = prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(likely.succeeded()) << error.message;
+  ASSERT_EQ(likely.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(likely.value().manifest.sites.front().assumption, FlatAssumption::SelectedSharedHigh);
+  likely.value().manifest.options = mvp_options_digest(FlatPolicy::Strict);
+  EXPECT_TRUE(validate_prepared(image, likely.value(), error).failed());
+  EXPECT_TRUE(prepare(image, target, "lds_producer_consumer", error, FlatPolicy::Strict).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+  EXPECT_NE(error.message.find("no observed LDS sites"), std::string::npos);
 }
 
 TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndPrivateMappings) {
