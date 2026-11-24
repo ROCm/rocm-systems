@@ -1733,8 +1733,7 @@ void GraphExecSegmented::SelectStreamAssignment() {
     DFSStreamAssignment();
   } else {
     // 0 = collapse-eligible (ROI heuristic + max_level<=4) then round-robin.
-    // ShouldCollapseToSingleStream() is called later in BuildSyncPlan; the extra
-    // max_level guard here prevents collapse on deep graphs where multi-stream
+    // The max_level guard prevents collapse on deep graphs where multi-stream
     // overlap is genuinely valuable.
     const bool deep_graph = max_dependency_level_ > 4;
     if (deep_graph) {
@@ -1765,8 +1764,12 @@ void GraphExecSegmented::ApplyCollapseSelection() {
   const int collapse_stream = inherited_exec_stream_id_ >= 0 ? inherited_exec_stream_id_ : 0;
   for (auto& segment : segments_) {
     segment.stream_id = collapse_stream;
+    // Every segment is on one (device, stream), so no completion signal is consumed. This
+    // includes leaves: ComputeCompletionSignalFlags() would re-enable them because leaf sync
+    // is required for any multi-segment graph, and PASS 1 would then allocate and patch unused
+    // signals on every launch. Same as develop's PASS 0.
+    segment.needs_completion_signal = false;
   }
-  ComputeCompletionSignalFlags();
 }
 
 // ================================================================================================
