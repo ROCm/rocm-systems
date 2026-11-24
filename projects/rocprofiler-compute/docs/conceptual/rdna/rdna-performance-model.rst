@@ -12,7 +12,7 @@ ROCm Compute Profiler makes available an extensive list of metrics to better und
 achieved application performance on AMD RDNA™ GPUs including:
 
 * RDNA3.5 architecture based APUs: AMD Ryzen AI Max / Ryzen AI Max+ (gfx115x)
-* RDNA4 architecture based GPUs: AMD Radeon RX 9070 and RX 9070 XT, Navi 48 (gfx1201)
+* RDNA4 architecture based GPUs: Navi 48 (gfx1201) boards, for example the AMD Radeon RX 9070, RX 9070 XT and Radeon AI PRO R9700
 
 Navi 44 (gfx1200) is not supported. For gfx1201 profiling
 prerequisites, see :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
@@ -43,7 +43,7 @@ The table provides key details for the RDNA architectures covered by these chapt
      - RDNA4
    * - Products
      - AMD Ryzen AI Max / Ryzen AI Max+ (gfx115x)
-     - AMD Radeon RX 9070 and RX 9070 XT, Navi 48 (gfx1201)
+     - Navi 48 (gfx1201) boards, for example the AMD Radeon RX 9070, RX 9070 XT and Radeon AI PRO R9700
    * - Chip packaging
      - APU with shared system memory
      - Discrete GPU with dedicated VRAM
