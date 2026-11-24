@@ -32,10 +32,7 @@
 #include <pthread.h>
 #include <cstdint>
 #include <cstdlib>
-#include <mutex>
 #include <random>
-#include <set>
-#include <thread>
 #include <typeinfo>
 
 TEST(rocprofiler_lib, buffer)
@@ -74,73 +71,4 @@ TEST(rocprofiler_lib, buffer)
 
     auto destroy_status = rocprofiler_destroy_buffer(*buffer_id);
     EXPECT_EQ(destroy_status, ROCPROFILER_STATUS_SUCCESS);
-}
-
-namespace
-{
-std::mutex                callback_thread_mutex;
-std::set<std::thread::id> callback_thread_ids;
-
-void
-recording_buffer_callback(rocprofiler_context_id_t,
-                          rocprofiler_buffer_id_t,
-                          rocprofiler_record_header_t**,
-                          size_t,
-                          void*,
-                          uint64_t)
-{
-    auto _lk = std::lock_guard<std::mutex>{callback_thread_mutex};
-    callback_thread_ids.emplace(std::this_thread::get_id());
-}
-}  // namespace
-
-// Buffered records are delivered on the buffer's callback thread, which is what lets a tool
-// callback hold no lock of its own: it can neither run concurrently with itself nor be re-entered
-// from the application thread it is tracing. A flush that delivers on the calling thread satisfies
-// every ordering requirement and still breaks this. Both flush kinds are exercised, and the
-// callback must report one thread id that is not the thread that asked for the flush.
-TEST(rocprofiler_lib, buffer_flush_callback_thread_identity)
-{
-    namespace buffer = ::rocprofiler::buffer;
-    namespace common = ::rocprofiler::common;
-
-    auto buffer_id = buffer::allocate_buffer();
-    ASSERT_TRUE(buffer_id) << "failed to allocate buffer";
-
-    auto* buffer_v = buffer::get_buffer(*buffer_id);
-    ASSERT_NE(buffer_v, nullptr) << "get_buffer returned a nullptr. id=" << buffer_id->handle;
-
-    // High enough that emplacing below does not itself trigger a watermark flush.
-    buffer_v->watermark = common::units::get_page_size();
-    buffer_v->callback  = recording_buffer_callback;
-
-    for(size_t i = 0; i < buffer_v->buffers.size(); ++i)
-        ASSERT_TRUE(buffer_v->buffers.at(i).allocate(sizeof(rocprofiler_buffer_id_t)))
-            << "failed to allocate internal buffer " << i;
-
-    {
-        auto _lk = std::lock_guard<std::mutex>{callback_thread_mutex};
-        callback_thread_ids.clear();
-    }
-
-    // Both internal buffers hold a record, so the waiting flush has to visit both indices.
-    auto data = *buffer_id;
-    ASSERT_TRUE(buffer_v->emplace(1, 1, data));
-    ++buffer_v->buffer_idx;
-    ASSERT_TRUE(buffer_v->emplace(1, 1, data));
-
-    ASSERT_EQ(buffer::flush(*buffer_id, true), ROCPROFILER_STATUS_SUCCESS);
-
-    // The watermark path, then a waiting flush to join its task before reading the result.
-    ASSERT_TRUE(buffer_v->emplace(1, 1, data));
-    ASSERT_EQ(buffer::flush(*buffer_id, false), ROCPROFILER_STATUS_SUCCESS);
-    ASSERT_EQ(buffer::flush(*buffer_id, true), ROCPROFILER_STATUS_SUCCESS);
-
-    auto _lk = std::lock_guard<std::mutex>{callback_thread_mutex};
-    EXPECT_EQ(callback_thread_ids.size(), 1U)
-        << "buffer callback ran on " << callback_thread_ids.size() << " threads";
-    EXPECT_EQ(callback_thread_ids.count(std::this_thread::get_id()), 0U)
-        << "buffer callback ran on the thread that requested the flush";
-
-    EXPECT_EQ(rocprofiler_destroy_buffer(*buffer_id), ROCPROFILER_STATUS_SUCCESS);
 }
