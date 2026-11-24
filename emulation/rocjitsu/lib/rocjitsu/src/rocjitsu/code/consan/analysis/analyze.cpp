@@ -37,6 +37,7 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
     if (entry.selected) {
       for (const SiteFacts &site : entry.selected->sites) {
+        result.has_group_flat |= site.origin == AccessOrigin::GroupFlat;
         result.has_dual_ranges |= is_dual(site.lds_ranges.shape);
         result.has_transpose |= is_transpose(site.lds_ranges.shape);
       }

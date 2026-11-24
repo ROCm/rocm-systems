@@ -259,6 +259,11 @@ protected:
     config::LoadedConfig loaded;
     ASSERT_TRUE(::rocjitsu::test::load_valid_config_from_string(topology, loaded));
     SoC *soc = loaded.soc();
+    if (fixture.starts_with("width-flat-")) {
+      // This bare AQL harness bypasses the KFD initialization of the shared aperture.
+      constexpr uint64_t shared = uint64_t{1} << 48;
+      soc->set_apertures(shared, shared + UINT32_MAX, 0, 0);
+    }
     amdgpu::GpuMemory *memory = loaded.memory();
     simdojo::SimulationEngine engine(loaded.engine_config);
     engine.topology().set_root(loaded.take_root());
@@ -1153,12 +1158,12 @@ TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
 
 // The capture counts probes. Count the original memory operations independently,
 // including a second execution if instrumentation accidentally duplicates one.
-class AtomicIssueTrace final : public ExecutionPlugin {
+class GuestIssueTrace final : public ExecutionPlugin {
 public:
   using Masks = std::array<std::vector<uint64_t>, 2>;
 
-  AtomicIssueTrace(std::string_view mnemonic, Masks &masks)
-      : ExecutionPlugin("atomic_issue_trace"), mnemonic_(mnemonic), masks_(masks) {}
+  GuestIssueTrace(std::string_view mnemonic, Masks &masks)
+      : ExecutionPlugin("guest_issue_trace"), mnemonic_(mnemonic), masks_(masks) {}
   bool requires_serial_hot_hooks() const override { return true; }
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
                                         amdgpu::Wavefront &wave) override {
@@ -1170,6 +1175,60 @@ private:
   std::string_view mnemonic_;
   Masks &masks_;
 };
+
+TEST_F(ConSanBootstrapSim, GroupFlatLoadUsesTheOriginalPointerAndGuestBarrier) {
+  const test::TargetMode target{"gfx950", 64};
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  for (std::string_view scenario : {"overlap", "adjacent", "ordered", "empty", "oob"}) {
+    SCOPED_TRACE(scenario);
+    const bool ordered = scenario == "ordered";
+    const bool empty = scenario == "empty";
+    const bool oob = scenario == "oob";
+    const std::string fixture = "width-flat-load-" + std::string(scenario);
+    RunResult before, after;
+    GuestIssueTrace::Masks before_masks, after_masks;
+    ASSERT_NO_FATAL_FAILURE(
+        run(fixture, Bootstrap::None, before, target, threads, true, 1, false, 1,
+            std::make_unique<GuestIssueTrace>("flat_load_dword", before_masks)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 1,
+                                false, 1,
+                                std::make_unique<GuestIssueTrace>("flat_load_dword", after_masks)));
+    expect_guest_state(before, after);
+    EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 8}));
+    EXPECT_TRUE(before_masks[0].empty());
+    EXPECT_EQ(before_masks[1], empty ? std::vector<uint64_t>{} : std::vector<uint64_t>{high});
+    EXPECT_EQ(after_masks, before_masks);
+    ASSERT_EQ(after.manifest.sites.size(), 2u);
+    EXPECT_EQ(after.manifest.sites[0].access, AccessKind::Write);
+    EXPECT_EQ(after.manifest.sites[1].access, AccessKind::Read);
+    EXPECT_EQ(after.manifest.sites[1].origin, AccessOrigin::GroupFlat);
+    const auto records = published_accesses(after);
+    ASSERT_EQ(records.size(), empty ? 1u : 2u);
+    for (unsigned wave = 0; wave < records.size(); ++wave) {
+      EXPECT_EQ(after.manifest.sites[wave].width, 4u);
+      EXPECT_EQ(records[wave].wave, wave);
+      EXPECT_EQ(records[wave].site, wave);
+      EXPECT_EQ(records[wave].mask, high);
+      const uint32_t flat_offset = oob ? 1024 : (scenario == "adjacent" ? 1016 : 1020);
+      EXPECT_EQ(records[wave].offset, wave ? flat_offset : 1020u);
+    }
+#ifdef CONSAN_ANALYZER_ENABLED
+    const CapturedExecution execution = {.serial = 41,
+                                         .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                         .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                         .arguments = {},
+                                         .report = after.report};
+    const auto analysis = analyze_lds_race_execution(after.manifest, execution, 4);
+    EXPECT_EQ(analysis.coverage_complete, !oob);
+    EXPECT_EQ(analysis.rejected_records, oob ? 1u : 0u);
+    EXPECT_EQ(analysis.valid_observations, records.size() - (oob ? 1u : 0u));
+    EXPECT_EQ(analysis.cross_wave_pairs, scenario == "overlap" ? 1u : 0u);
+    EXPECT_EQ(analysis.ordered_pairs, ordered ? 1u : 0u);
+    EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+#endif
+  }
+}
 
 #ifdef CONSAN_ANALYZER_ENABLED
 void expect_atomic_analysis(const RunResult &run, uint32_t threads, size_t observations,
@@ -1200,13 +1259,12 @@ void ConSanTargetSim::check_atomic_add(const std::string &form, uint32_t width,
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
   const uint64_t atomic_mask = high | (high >> 1);
   RunResult before, after;
-  AtomicIssueTrace::Masks before_masks, after_masks;
+  GuestIssueTrace::Masks before_masks, after_masks;
   ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, width / 4,
-                              false, 1,
-                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+                              false, 1, std::make_unique<GuestIssueTrace>(mnemonic, before_masks)));
   ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true,
                               width / 4, false, 1,
-                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
+                              std::make_unique<GuestIssueTrace>(mnemonic, after_masks)));
   expect_guest_state(before, after);
   EXPECT_EQ(before.full_output, expected_words);
   EXPECT_EQ(after_masks, before_masks);
@@ -1301,13 +1359,13 @@ TEST_P(ConSanTargetSim, AtomicCompareStorePreservesOldValueAndUsesThePreGuestAdd
   const std::string_view mnemonic =
       gpu == "gfx942" || gpu == "gfx950" ? "ds_cmpst_rtn_b32" : "ds_cmpstore_rtn_b32";
   RunResult before, after;
-  AtomicIssueTrace::Masks before_masks, after_masks;
+  GuestIssueTrace::Masks before_masks, after_masks;
   ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::None, before, target, threads,
                               true, 4, false, 1,
-                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+                              std::make_unique<GuestIssueTrace>(mnemonic, before_masks)));
   ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::Instrumented, after, target,
                               threads, true, 4, false, 1,
-                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
+                              std::make_unique<GuestIssueTrace>(mnemonic, after_masks)));
   expect_guest_state(before, after);
   // Both waves see the old value 7. Only wave zero matches the comparison.
   // The neighboring inactive lane retains the original address in the aliased VGPR.

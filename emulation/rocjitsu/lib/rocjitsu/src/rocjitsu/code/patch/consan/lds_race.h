@@ -6,6 +6,7 @@
 #include "rocjitsu/code/consan/contract.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <memory>
 #include <span>
@@ -30,6 +31,7 @@ struct NativeLdsAccess {
   // Byte count set by decoding; zero is unspecified and cannot qualify a site.
   uint32_t width = 0;
   LdsRangeRecipe lds_ranges{};
+  AccessOrigin origin = AccessOrigin::Native;
 };
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.
@@ -50,11 +52,10 @@ struct NativeLdsAccess {
 /// A deferred self-edge is admitted only if qualify_lds_race_barrier() later succeeds.
 [[nodiscard]] FailureOr<std::vector<const BasicBlock *>>
 qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error);
-[[nodiscard]] Result classify_lds_race_instruction(const Instruction &instruction,
-                                                   rocjitsu::IsaFamily arch,
-                                                   uint32_t allocated_vgprs,
-                                                   std::vector<NativeLdsAccess> &accesses,
-                                                   InputError &error);
+[[nodiscard]] Result
+classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
+                              uint32_t allocated_vgprs, std::vector<NativeLdsAccess> &accesses,
+                              InputError &error, const RegisterSet *shared_high = nullptr);
 [[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,
                                                       bool has_barriers);
 

@@ -172,6 +172,7 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
                               .access = access.kind,
                               .width = access.width,
                               .lds_ranges = access.lds_ranges,
+                              .origin = access.origin,
                               .original_offset = access.original_offset,
                               .original_size = 8,
                               .prepared_guest_offset = mapping->guest_offset,

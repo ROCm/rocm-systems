@@ -176,6 +176,25 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        set(_flat_specs)
+        if(_gpu STREQUAL "gfx950")
+            foreach(
+                _scenario
+                IN
+                ITEMS overlap adjacent empty ordered oob
+            )
+                set(_name flat-load-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DCONSAN_GROUP_FLAT=1
+                    -DFLAT_${_scenario_define}=1
+                )
+                if(NOT _scenario STREQUAL "oob")
+                    list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+                endif()
+            endforeach()
+        endif()
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")
@@ -277,6 +296,7 @@ foreach(
             IN
             ITEMS
                 ${_atomic_specs}
+                ${_flat_specs}
                 ${_transpose_specs}
                 u16:16:0:0:0:0
                 i16:16:1:0:0:0
@@ -365,12 +385,13 @@ foreach(
                     -DCONSAN_SIGNED=${_signed} -DCONSAN_HIGH=${_high}
                     -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision}
                     ${_peer_option} ${_dual_options_${_name}}
-                    ${_atomic_options_${_name}} -c
+                    ${_atomic_options_${_name}} ${_flat_options_${_name}} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
                     ${_object}
                 DEPENDS
                     fixtures/native_widths.s
                     fixtures/native_atomic.inc
+                    fixtures/group_flat.inc
                     fixtures/native_d16.inc
                     fixtures/native_dual.inc
                     fixtures/native_transpose.inc

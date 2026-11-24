@@ -297,7 +297,8 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 
 Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                      uint32_t allocated_vgprs,
-                                     std::vector<NativeLdsAccess> &accesses, InputError &error) {
+                                     std::vector<NativeLdsAccess> &accesses, InputError &error,
+                                     const RegisterSet *shared_high) {
   const std::string_view name = instruction.mnemonic();
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
@@ -306,6 +307,32 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                                               operation == amdgpu::Operation::S_BARRIER_WAIT)) ||
       (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
+  }
+  if (addressing == amdgpu::MemoryAddressing::Flat &&
+      operation == amdgpu::Operation::FLAT_LOAD_DWORD) {
+    const uint32_t *words = instruction.raw_encoding();
+    // Admit the plain CDNA4 vector form: no offset, LDS routing, cache
+    // modifiers, scalar address, ACC destination or reserved operand fields.
+    if (arch != IsaFamily::Cdna4 || instruction.size() != 8 || (words[0] & 0x0203ffffu) != 0 ||
+        (words[1] & 0x00ffff00u) != 0)
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "unsupported Group-FLAT encoding", offset);
+    const auto address = allocated_vgpr_tuple(instruction.src_operand(0), 2, allocated_vgprs);
+    const auto value = allocated_vgpr_tuple(instruction.dst_operand(0), 1, allocated_vgprs);
+    if (!address || !value || !shared_high ||
+        !shared_high->contains({RegClass::VGPR, static_cast<uint16_t>(address->index + 1), 1}))
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "FLAT load requires proven shared aperture and allocated operands",
+                                offset);
+    // These apertures are 4-GiB aligned; with a proven high dword, the
+    // pre-guest low VGPR is exactly the byte offset from this WG's LDS base.
+    accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
+                        .original_offset = offset,
+                        .kind = AccessKind::Read,
+                        .address_vgpr = address->index,
+                        .width = 4,
+                        .origin = AccessOrigin::GroupFlat});
+    return Result::success();
   }
   const bool atomic = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic;
   const NativeLdsForm form = native_lds_form(instruction);
@@ -585,7 +612,9 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
       }
-      if (native_lds_form(instruction).width != 0) {
+      if (native_lds_form(instruction).width != 0 ||
+          (instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Flat &&
+           operation == amdgpu::Operation::FLAT_LOAD_DWORD)) {
         access_offsets.insert(instruction.src_loc());
       }
     }

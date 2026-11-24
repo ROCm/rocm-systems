@@ -75,6 +75,7 @@ class AnalysisDriver(Driver):
                     'high_lane',
                     'wide_b8_overlap',
                     'wide_b96_overlap',
+                    'flat_load_overlap',
                     'mixed_overlap',
                     'mixed_b16',
                     'barrier_missing_second',
@@ -207,6 +208,48 @@ class AnalysisDriver(Driver):
             )
             assert analyzed['cross_wave_pairs'] == per_launch_pairs
             assert analyzed['collision_groups'] == collisions
+            if case.startswith('flat_'):
+                ordered = case.endswith('_ordered')
+                suffix = 'epoch_workgroup_barriers' if ordered else 'no_sync_bounded_1d'
+                assert (
+                    result['scope']
+                    == 'native_and_group_flat_lds_single_range_' + suffix
+                )
+                assert analyzed['ordered_pairs'] == int(ordered)
+                assert analyzed['ordering_unresolved_pairs'] == 0
+                assert (
+                    analyzed['required_barrier_waves']
+                    == analyzed['completed_barrier_waves']
+                    == (2 if ordered else 0)
+                )
+                if pairs or ordered:
+                    (finding,) = analyzed[
+                        'ordered_examples' if ordered else 'cross_wave_examples'
+                    ]
+                    assert finding['ordering'] == (
+                        'ordered' if ordered else 'unordered'
+                    )
+                    assert finding['lane_pairs'] == 1
+                    native, flat = sorted(
+                        (finding['first'], finding['second']),
+                        key=lambda endpoint: endpoint['wave'],
+                    )
+                    assert (
+                        native['site'],
+                        native['access'],
+                        flat['site'],
+                        flat['access'],
+                    ) == (0, 'write', 1, 'read')
+                    assert (
+                        flat['origin'] == 'group_flat' and flat['confidence'] == 'exact'
+                    )
+                    for endpoint in (native, flat):
+                        assert endpoint['width'] == 4 and endpoint['offset'] == 1020
+                        assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
+                        assert (
+                            endpoint['original_offset']
+                            == raw['sites'][endpoint['site']]['original_offset']
+                        )
             if case.startswith('atomic_'):
                 assert (
                     analyzed['ordered_pairs']
