@@ -105,21 +105,21 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
                           static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes, comm->rank, nRanks,
                           epochDev, epochLen, slices, bankSize, params);
   };
-  // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
-  switch (nRanks) {
-  case 4:
-    aligned ? launch(dda::common::ddaAllGatherFabricLL128<T, 4, true>) :
-              launch(dda::common::ddaAllGatherFabricLL128<T, 4, false>);
-    break;
-  case 8:
-    aligned ? launch(dda::common::ddaAllGatherFabricLL128<T, 8, true>) :
-              launch(dda::common::ddaAllGatherFabricLL128<T, 8, false>);
-    break;
-  default:
-    aligned ? launch(dda::common::ddaAllGatherFabricLL128<T, 0, true>) :
-              launch(dda::common::ddaAllGatherFabricLL128<T, 0, false>);
-    break;
-  }
+  dda::common::ddaPickAligned(aligned, [&](auto a) {
+    constexpr bool kAligned = decltype(a)::value;
+    // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
+    switch (nRanks) {
+    case 4:
+      launch(dda::common::ddaAllGatherFabricLL128<T, 4, kAligned>);
+      break;
+    case 8:
+      launch(dda::common::ddaAllGatherFabricLL128<T, 8, kAligned>);
+      break;
+    default:
+      launch(dda::common::ddaAllGatherFabricLL128<T, 0, kAligned>);
+      break;
+    }
+  });
 
   CUDACHECK(cudaGetLastError());
 

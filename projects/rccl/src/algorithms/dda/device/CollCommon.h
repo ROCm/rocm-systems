@@ -237,6 +237,12 @@ inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbu
          (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
 }
 
+// Picks this rank's aligned or any-address user-buffer instance; both use the same wire format.
+template <typename Pick>
+inline auto ddaPickAligned(bool aligned, Pick pick) {
+  return aligned ? pick(std::true_type{}) : pick(std::false_type{});
+}
+
 // Reduce-scatter IPC copies each shard inside the kernel at or below this size.
 // Above it the host pre-copies the whole input into scratch. The cutoff is per
 // shard, so a multi-rank total cannot stage twice, and it lives only here: the

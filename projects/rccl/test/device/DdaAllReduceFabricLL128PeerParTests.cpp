@@ -5,7 +5,8 @@
  ************************************************************************/
 
 // DDA LL128 AllReduce peer-parallel one-shot and two-shot kernels on one GPU, against the rank-order host fold. A
-// helper kernel plays the peers.
+// helper kernel plays the peers. The one-warp-per-slice kernels share the wire layout and arguments, so the misaligned
+// cases run them too.
 
 #include <algorithm>
 #include <cstddef>
@@ -48,6 +49,7 @@ struct Case {
   unsigned grid;
   unsigned block;
   size_t bytes;  // what one slot holds: the message (one-shot) or one shard (two-shot)
+  bool peerPar = true;  // false: ddaAllReduceFlatLL128 or the cooperative ddaAllReduceTwoShotLL128
 };
 
 const char* name(Kind kind) {
@@ -119,7 +121,16 @@ void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch,
   const size_t bank = bankBytes(c.kind, c.nRanks, c.bytes);
   const size_t n = slices(c.bytes);
   const size_t lds = dda::common::ddaLL128ArPeerLdsBytes(c.block);
-  if (c.kind == Kind::kOneShot) {
+  if (!c.peerPar) {
+    if (c.kind == Kind::kOneShot) {
+      hipLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, N, kAligned>), dim3(c.grid), dim3(c.block), 0, 0,
+                         scratch, recv, send, c.bytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
+    } else {
+      hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128<T, N, dda::common::kDdaLL128WireCoop, kAligned>),
+                         dim3(c.grid), dim3(c.block), 0, 0, scratch, recv, send, c.bytes, c.self, c.nRanks, epoch,
+                         (int)kMaxGrid, n, bank, params);
+    }
+  } else if (c.kind == Kind::kOneShot) {
     hipLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128PeerPar<T, N, kAligned>), dim3(c.grid), dim3(c.block), lds,
                        0, scratch, recv, send, c.bytes, c.self, c.nRanks, epoch, (int)kMaxGrid, n, bank, params);
   } else {
@@ -382,8 +393,8 @@ std::vector<uint8_t> Bf16Sum(const std::vector<std::vector<uint8_t>>& send) {
 
 // The trace line of c.
 std::string Describe(const Case& c) {
-  return std::string(name(c.kind)) + ", " + std::to_string(c.nRanks) + " ranks, self " +
-         std::to_string(c.self) + ", ct " + std::to_string(c.ct) + ", " + std::to_string(c.grid) + "x" +
+  return std::string(name(c.kind)) + (c.peerPar ? "" : " warp-per-slice") + ", " + std::to_string(c.nRanks) +
+         " ranks, self " + std::to_string(c.self) + ", ct " + std::to_string(c.ct) + ", " + std::to_string(c.grid) + "x" +
          std::to_string(c.block) + ", " + std::to_string(c.bytes) + " B";
 }
 
@@ -458,6 +469,24 @@ TEST_F(DdaAllReduceFabricLL128PeerPar, MisalignedBuffersMatchTheRankOrderFold) {
         const auto send = FloatMessages(c.nRanks, messageBytes(c));
         setUp(c, send, FloatRankOrderFold(send), offset);
         expectRankOrderFold<float>(inPlace);
+      }
+    }
+  }
+}
+
+// The one-warp-per-slice kernels, aligned and at any byte offset. They do not fold in rank order, so the messages are
+// bf16 integers, exact in any order.
+TEST_F(DdaAllReduceFabricLL128PeerPar, WarpPerSliceKernelsMatchTheSumAtAnyOffset) {
+  for (size_t offset : {0, 1, 4, 8}) {
+    for (const Case& c : {Case{Kind::kOneShot, 3, 2, 0, 2, 512, kPartialBytes, false},
+                          Case{Kind::kOneShot, 8, 5, 8, 3, 512, kPartialBytes, false},
+                          Case{Kind::kTwoShot, 4, 1, 4, 2, 512, kPartialBytes, false},
+                          Case{Kind::kTwoShot, 16, 9, 0, 2, 512, kPartialBytes, false}}) {
+      for (bool inPlace : {false, true}) {
+        SCOPED_TRACE(Describe(c) + ", offset " + std::to_string(offset) + (inPlace ? ", in place" : ""));
+        const auto send = Bf16IntMessages(c.nRanks, messageBytes(c));
+        setUp(c, send, Bf16Sum(send), offset);
+        expectRankOrderFold<bf16>(inPlace);
       }
     }
   }

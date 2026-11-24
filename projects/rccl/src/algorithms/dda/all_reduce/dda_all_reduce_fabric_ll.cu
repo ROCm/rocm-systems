@@ -300,16 +300,9 @@ static std::pair<dim3, dim3> ddaArLL128Geom(const ncclComm* comm, size_t bytes, 
                            ddaArLL128SliceThreads(comm, peerPar, cap), cap);
 }
 
-// The LL128 kernels' user-buffer access: 16B-aligned, or valid at any address. Each rank picks it from its own
-// buffers; it does not change the wire, so ranks that pick differently still run the same algorithm.
-template <typename Pick>
-static auto ddaArPickAligned(bool aligned, Pick pick) {
-  return aligned ? pick(std::true_type{}) : pick(std::false_type{});
-}
-
 template <typename T>
 static DdaArLL128Kernel<T> ddaArLL128OneShotKernel(int nRanks, bool aligned) {
-  return ddaArPickAligned(aligned, [nRanks](auto a) {
+  return dda::common::ddaPickAligned(aligned, [nRanks](auto a) {
     return ddaArPickRanksCt(nRanks, [](auto n) -> DdaArLL128Kernel<T> {
       constexpr int kN = decltype(n)::value;
       return &dda::common::ddaAllReduceFlatLL128<T, kN, decltype(a)::value>;
@@ -319,7 +312,7 @@ static DdaArLL128Kernel<T> ddaArLL128OneShotKernel(int nRanks, bool aligned) {
 
 template <typename T>
 static DdaArLL128Kernel<T> ddaArLL128OneShotPeerParKernel(int nRanks, bool aligned) {
-  return ddaArPickAligned(aligned, [nRanks](auto a) {
+  return dda::common::ddaPickAligned(aligned, [nRanks](auto a) {
     return ddaArPickRanksCt(nRanks, [](auto n) -> DdaArLL128Kernel<T> {
       constexpr int kN = decltype(n)::value;
       return &dda::common::ddaAllReduceFlatLL128PeerPar<T, kN, decltype(a)::value>;
@@ -329,7 +322,7 @@ static DdaArLL128Kernel<T> ddaArLL128OneShotPeerParKernel(int nRanks, bool align
 
 template <typename T>
 static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire, bool peerPar, bool aligned) {
-  return ddaArPickAligned(aligned, [nRanks, wire, peerPar](auto a) {
+  return dda::common::ddaPickAligned(aligned, [nRanks, wire, peerPar](auto a) {
     return ddaArPickRanksCt(nRanks, [wire, peerPar](auto n) -> DdaArLL128Kernel<T> {
       constexpr int kN = decltype(n)::value;
       constexpr bool kAligned = decltype(a)::value;

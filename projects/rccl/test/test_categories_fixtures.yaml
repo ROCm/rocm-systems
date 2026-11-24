@@ -86,6 +86,7 @@ test_categories:
       - "DdaReduceScatterFabricSpreadLL.*"
       - "DdaAllReduceFabricLL.*"
       - "DdaAllReduceFabricLL128PeerPar.*"
+      - "DdaAllGatherFabricLL128.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"

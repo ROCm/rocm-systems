@@ -39,9 +39,13 @@ constexpr size_t kMiB = size_t{1} << 20;
 // fp32 count per rank that gathers totalBytes across the fixture's four ranks.
 constexpr size_t CountFor(size_t totalBytes) { return totalBytes / (4 * sizeof(float)); }
 
-template <int N>
+template <int N, bool kAligned = true>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t, N>);
+  return KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t, N, kAligned>);
+}
+
+const void* Addr(uintptr_t a) {
+  return reinterpret_cast<const void*>(a);
 }
 
 class DdaAllGatherFabricLL128Microtest : public ::testing::Test {
@@ -72,13 +76,14 @@ class DdaAllGatherFabricLL128Microtest : public ::testing::Test {
     return ncclAllGatherDdaFabricLL128Eligible(mock_.get(), sendbuff, recvbuff, sendcount, datatype);
   }
 
-  ncclResult_t Run(size_t sendcount, ncclDataType_t datatype = ncclFloat32) {
-    return ncclAllGatherDdaFabricLL128(kSendbuff, kRecvbuff, sendcount, datatype, mock_.get(), kStream);
+  ncclResult_t Run(size_t sendcount, ncclDataType_t datatype = ncclFloat32, const void* sendbuff = kSendbuff,
+                   void* recvbuff = kRecvbuff) {
+    return ncclAllGatherDdaFabricLL128(sendbuff, recvbuff, sendcount, datatype, mock_.get(), kStream);
   }
 
-  const DdaLaunch& RunOne(size_t sendcount) {
+  const DdaLaunch& RunOne(size_t sendcount, const void* sendbuff = kSendbuff, const void* recvbuff = kRecvbuff) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(Run(sendcount), ncclSuccess);
+    EXPECT_EQ(Run(sendcount, ncclFloat32, sendbuff, const_cast<void*>(recvbuff)), ncclSuccess);
     EXPECT_EQ(g_ddaLaunches.size(), 1u);
     return g_ddaLaunches.at(0);
   }
@@ -148,11 +153,12 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_OnlyDatatypesTheDdaGateAdmits)
   EXPECT_TRUE(Eligible(16, ncclFloat8e5m2));
 }
 
-TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_PerRankBytesAndBothBuffersAligned) {
+// Buffer alignment differs between ranks and every rank must pick the same tier, so it never decides eligibility.
+TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_PerRankBytesWhateverTheBufferAlignment) {
   EXPECT_FALSE(Eligible(2));
   EXPECT_FALSE(Eligible(12, ncclFloat16));
-  EXPECT_FALSE(Eligible(4, ncclFloat32, reinterpret_cast<void*>(0x1008)));
-  EXPECT_FALSE(Eligible(4, ncclFloat32, kSendbuff, reinterpret_cast<void*>(0x2008)));
+  EXPECT_TRUE(Eligible(4, ncclFloat32, reinterpret_cast<void*>(0x1008)));
+  EXPECT_TRUE(Eligible(4, ncclFloat32, kSendbuff, reinterpret_cast<void*>(0x2008)));
   EXPECT_TRUE(Eligible(4, ncclFloat32, reinterpret_cast<void*>(0x1010), reinterpret_cast<void*>(0x2030)));
 }
 
@@ -197,6 +203,25 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOthersR
     EXPECT_EQ(launch.kernel, kernel) << "nRanks " << nRanks;
     EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks - 1));
     EXPECT_EQ(launch.Arg<int>(5), nRanks);
+  }
+}
+
+TEST_F(DdaAllGatherFabricLL128Microtest, Launch_AlignedKernelFrom16ByteOwnBuffersOnly) {
+  struct Case {
+    int nRanks;
+    uintptr_t send, recv;
+    const void* kernel;
+  };
+  const Case cases[] = {
+      {4, 0x1000, 0x2010, Kernel<4, true>()},  {4, 0x1008, 0x2000, Kernel<4, false>()},
+      {4, 0x1000, 0x2004, Kernel<4, false>()}, {8, 0x1001, 0x2000, Kernel<8, false>()},
+      {8, 0x1010, 0x2020, Kernel<8, true>()},  {6, 0x1000, 0x2002, Kernel<0, false>()},
+      {6, 0x1000, 0x2000, Kernel<0, true>()},
+  };
+  for (const Case& c : cases) {
+    comm().nRanks = c.nRanks;
+    EXPECT_EQ(RunOne(4, Addr(c.send), Addr(c.recv)).kernel, c.kernel)
+        << "nRanks " << c.nRanks << " send " << std::hex << c.send << " recv " << c.recv;
   }
 }
 

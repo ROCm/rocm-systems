@@ -153,13 +153,11 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   // NRANKS_CT 4/8: unrolled peer loops; 0: runtime fallback.
   const auto launchRanks = [&](auto n) {
     constexpr int kN = decltype(n)::value;
-    if (aligned) {
-      launch(dda::common::ddaReduceScatterFabricLL128<T, kN, true>,
-             dda::common::ddaReduceScatterFabricLL128PeerPar<T, kN, true>);
-    } else {
-      launch(dda::common::ddaReduceScatterFabricLL128<T, kN, false>,
-             dda::common::ddaReduceScatterFabricLL128PeerPar<T, kN, false>);
-    }
+    dda::common::ddaPickAligned(aligned, [&](auto a) {
+      constexpr bool kAligned = decltype(a)::value;
+      launch(dda::common::ddaReduceScatterFabricLL128<T, kN, kAligned>,
+             dda::common::ddaReduceScatterFabricLL128PeerPar<T, kN, kAligned>);
+    });
   };
   switch (nRanks) {
   case 4:

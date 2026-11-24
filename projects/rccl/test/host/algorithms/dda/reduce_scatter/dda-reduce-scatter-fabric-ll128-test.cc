@@ -38,14 +38,14 @@ constexpr size_t kSliceFloats = 480;
 // Scratch holding exactly one slice per rank at 8 ranks: two banks of 8 x 2 KiB.
 constexpr size_t kOneSliceScratch8 = 2 * 8 * 2048;
 
-template <typename T, int N>
+template <typename T, int N, bool kAligned = true>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaReduceScatterFabricLL128<T, N>);
+  return KernelPtr(&dda::common::ddaReduceScatterFabricLL128<T, N, kAligned>);
 }
 
-template <typename T, int N>
+template <typename T, int N, bool kAligned = true>
 const void* PeerParKernel() {
-  return KernelPtr(&dda::common::ddaReduceScatterFabricLL128PeerPar<T, N>);
+  return KernelPtr(&dda::common::ddaReduceScatterFabricLL128PeerPar<T, N, kAligned>);
 }
 
 class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
@@ -74,13 +74,15 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     return ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), kSendbuff, kRecvbuff, recvcount, datatype, op);
   }
 
-  ncclResult_t Run(size_t recvcount, ncclDataType_t datatype = ncclFloat32) {
-    return ncclReduceScatterDdaFabricLL128(kSendbuff, kRecvbuff, recvcount, datatype, ncclSum, mock_.get(), kStream);
+  ncclResult_t Run(size_t recvcount, ncclDataType_t datatype = ncclFloat32, const void* sendbuff = kSendbuff,
+                   void* recvbuff = kRecvbuff) {
+    return ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, ncclSum, mock_.get(), kStream);
   }
 
-  const DdaLaunch& RunOne(size_t recvcount, ncclDataType_t datatype = ncclFloat32) {
+  const DdaLaunch& RunOne(size_t recvcount, ncclDataType_t datatype = ncclFloat32, const void* sendbuff = kSendbuff,
+                          void* recvbuff = kRecvbuff) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(Run(recvcount, datatype), ncclSuccess);
+    EXPECT_EQ(Run(recvcount, datatype, sendbuff, recvbuff), ncclSuccess);
     EXPECT_EQ(g_ddaLaunches.size(), 1u);
     return g_ddaLaunches.at(0);
   }
@@ -190,10 +192,11 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_ShardBytesMultipleOf16) {
   EXPECT_FALSE(Eligible(12, ncclBfloat16));
 }
 
-TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_BuffersMustBe16ByteAligned) {
+// Buffer alignment differs between ranks and every rank must pick the same tier, so it never decides eligibility.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_WhateverTheBufferAlignment) {
   void* const misaligned = reinterpret_cast<void*>(0x1008);
-  EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
-  EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), kSendbuff, misaligned, 4, ncclFloat32, ncclSum));
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), kSendbuff, misaligned, 4, ncclFloat32, ncclSum));
 }
 
 // The cap is checked against the whole message, nRanks shards, as the selector does.
@@ -344,6 +347,23 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, PeerParallel_UpToTheTableCapBatched
   EXPECT_EQ(RunOne(kSliceFloats + 4).kernel, (Kernel<float, 8>()));
   EXPECT_EQ(RunOne(2 * kSliceFloats, ncclFloat16).kernel, (PeerParKernel<half, 8>()));
   EXPECT_EQ(RunOne(2 * kSliceFloats + 8, ncclFloat16).kernel, (Kernel<half, 8>()));
+}
+
+// Both kernels come in an aligned and an any-address instance; my own buffers pick which.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_AlignedKernelFrom16ByteOwnBuffersOnly) {
+  void* const send8 = reinterpret_cast<void*>(0x1008);
+  void* const recv4 = reinterpret_cast<void*>(0x2004);
+  void* const send16 = reinterpret_cast<void*>(0x1010);
+  EXPECT_EQ(RunOne(kSliceFloats, ncclFloat32, send16, kRecvbuff).kernel, (Kernel<float, 8, true>()));
+  EXPECT_EQ(RunOne(kSliceFloats, ncclFloat32, send8, kRecvbuff).kernel, (Kernel<float, 8, false>()));
+  EXPECT_EQ(RunOne(kSliceFloats, ncclFloat32, kSendbuff, recv4).kernel, (Kernel<float, 8, false>()));
+  comm().nRanks = 6;
+  EXPECT_EQ(RunOne(kSliceFloats, ncclFloat32, send8, kRecvbuff).kernel, (Kernel<float, 0, false>()));
+  comm().nRanks = 8;
+  PeerParallelUpTo(8 * kSliceFloats * sizeof(float));
+  EXPECT_EQ(RunOne(kSliceFloats, ncclFloat32, send16, kRecvbuff).kernel, (PeerParKernel<float, 8, true>()));
+  EXPECT_EQ(RunOne(kSliceFloats, ncclFloat32, send8, kRecvbuff).kernel, (PeerParKernel<float, 8, false>()));
+  EXPECT_EQ(RunOne(kSliceFloats, ncclFloat32, kSendbuff, recv4).kernel, (PeerParKernel<float, 8, false>()));
 }
 
 // DDA_LL128_RS_PEER_MAX_BYTES overrides the table's cap. -1, the default, reads the table, and 0 or another negative
