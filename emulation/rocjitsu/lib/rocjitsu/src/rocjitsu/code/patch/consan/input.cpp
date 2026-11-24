@@ -110,12 +110,14 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
 // Track a shared or private aperture high word. A vector
 // definition under unknown EXEC proves this only for lanes active at that
 // point. A later EXEC change can expose older values in the other lanes.
+enum class ApertureSelector { SharedBase = 235, PrivateBase = 237 };
+
 struct ApertureWords {
   RegisterSet active;
   RegisterSet all_lanes;
 
   void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec,
-                std::string_view base_name) {
+                ApertureSelector base) {
     using Op = amdgpu::Operation;
     const Op op = inst.amdgpu_operation();
     const auto *source = inst.num_src_operands() ? inst.src_operand(0) : nullptr;
@@ -129,7 +131,7 @@ struct ApertureWords {
       const auto src = source->to_register_ref();
       writes_exec |= dst && dst->cls == RegClass::EXEC;
       if (dst && op == Op::S_MOV_B64 && dst->cls == RegClass::SGPR && dst->width == 2 &&
-          source->name() == base_name) {
+          source->encoding_value() == static_cast<int>(base)) {
         proven = RegisterRef{RegClass::SGPR, static_cast<uint16_t>(dst->index + 1), 1};
         all = true;
       } else if (dst && src && dst->width == 1 && src->width == 1 && active.contains(*src) &&
@@ -237,8 +239,10 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         latest = access;
       }
       const InstDefUse effects(instruction, program.wave_size);
-      aperture.shared.transfer(instruction, effects, exec.before(instruction), "src_shared_base");
-      aperture.scratch.transfer(instruction, effects, exec.before(instruction), "src_private_base");
+      aperture.shared.transfer(instruction, effects, exec.before(instruction),
+                               ApertureSelector::SharedBase);
+      aperture.scratch.transfer(instruction, effects, exec.before(instruction),
+                                ApertureSelector::PrivateBase);
       if (program.accesses.size() == previous_accesses &&
           instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Flat)
         program.non_lds_flat.push_back(offset);

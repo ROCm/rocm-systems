@@ -1213,7 +1213,12 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
     EXPECT_EQ(after.manifest.sites[0].access,
               scenario == "readread" ? AccessKind::Read : AccessKind::Write);
     EXPECT_EQ(after.manifest.sites[1].access, AccessKind::Read);
-    EXPECT_EQ(after.manifest.sites[store ? 0 : 1].origin, AccessOrigin::GroupFlat);
+    const SiteFacts &flat = after.manifest.sites[store ? 0 : 1];
+    EXPECT_EQ(flat.origin, AccessOrigin::GroupFlat);
+    const bool wide = std::string_view(target.target) == "gfx1201" ||
+                      std::string_view(target.target) == "gfx1250";
+    EXPECT_EQ(flat.original_size, wide ? 12u : 8u);
+    EXPECT_EQ(flat.prepared_guest_size, flat.original_size);
     const auto records = published_accesses(after);
     ASSERT_EQ(records.size(), empty ? 1u : 2u);
     for (unsigned wave = 0; wave < records.size(); ++wave) {
@@ -1341,6 +1346,32 @@ void ConSanTargetSim::check_atomic_peers(const std::string &form, uint32_t width
 #endif
   }
 }
+
+#ifdef CONSAN_ANALYZER_ENABLED
+class ConSanVflatSim : public ConSanTargetSim {};
+
+TEST_P(ConSanVflatSim, GroupFlatSignedImmediateCannotWrapIntoValidLds) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  for (std::string_view direction : {"underflow", "overflow"}) {
+    SCOPED_TRACE(direction);
+    RunResult result;
+    ASSERT_NO_FATAL_FAILURE(run("width-flat-load-" + std::string(direction),
+                                Bootstrap::Instrumented, result, target, threads, true));
+    const CapturedExecution execution = {.serial = 41,
+                                         .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                         .group_bytes = result.manifest.entry.prepared_group_bytes,
+                                         .arguments = {},
+                                         .report = result.report};
+    const auto analysis = analyze_lds_race_execution(result.manifest, execution, 4);
+    EXPECT_FALSE(analysis.coverage_complete);
+    EXPECT_EQ(analysis.rejected_records, 1u);
+    EXPECT_EQ(analysis.valid_observations, 1u);
+    EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+  }
+}
+
+#endif
 
 TEST_P(ConSanTargetSim, AtomicU32AddsOnceAndConflictsWithOverlappingOrdinaryPeers) {
   ASSERT_NO_FATAL_FAILURE(check_atomic_add("u32", 4, {9, 10}));
@@ -1901,8 +1932,12 @@ const auto target_name = [](const auto &info) {
 };
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanTargetSim, ::testing::ValuesIn(test::kTargetModes),
                          target_name);
-INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanGroupFlatSim,
-                         ::testing::ValuesIn(std::span(test::kTargetModes).first(4)), target_name);
+#ifdef CONSAN_ANALYZER_ENABLED
+INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanVflatSim,
+                         ::testing::ValuesIn(std::span(test::kTargetModes).last(3)), target_name);
+#endif
+INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanGroupFlatSim, ::testing::ValuesIn(test::kTargetModes),
+                         target_name);
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanAtomicF64Sim,
                          ::testing::Values(test::TargetMode{"gfx942", 64},
                                            test::TargetMode{"gfx950", 64},
