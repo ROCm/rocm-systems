@@ -6139,9 +6139,8 @@ TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
-  // These runtimes reserve large shadow mappings and may abort on allocation
-  // failure instead of letting the C++ allocation throw.
+TEST(InterposerSyncobjTest, OversizedBinaryWaitAllocationIsFatal) {
+  // These runtimes reserve large shadow mappings that conflict with RLIMIT_AS.
   if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init")) {
     GTEST_SKIP() << "address-space limits are incompatible with ASan and TSan";
   }
@@ -6157,14 +6156,15 @@ TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
     environment.push_back(child_env.data());
     environment.push_back(nullptr);
     char executable[] = "/proc/self/exe";
-    char filter[] = "--gtest_filter=InterposerSyncobjTest.OversizedBinaryWaitReturnsEnomem";
-    char *arguments[] = {executable, filter, nullptr};
+    char filter[] = "--gtest_filter=InterposerSyncobjTest.OversizedBinaryWaitAllocationIsFatal";
+    char uncaught[] = "--gtest_catch_exceptions=0";
+    char *arguments[] = {executable, filter, uncaught, nullptr};
     pid_t child = -1;
     ASSERT_EQ(posix_spawn(&child, executable, nullptr, nullptr, arguments, environment.data()), 0);
     int status = 0;
     ASSERT_EQ(waitpid(child, &status, 0), child);
-    ASSERT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(WIFSIGNALED(status));
+    EXPECT_EQ(WTERMSIG(status), SIGABRT);
     return;
   }
 
@@ -6183,8 +6183,8 @@ TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
   }
   const long page_size = sysconf(_SC_PAGESIZE);
   ASSERT_GT(page_size, 0);
-  // Leave room for background driver threads while rejecting the 32 GiB
-  // points allocation, regardless of the backend's existing VM reservations.
+  // Leave room for background driver threads while rejecting the oversized
+  // wait allocation, regardless of the backend's existing VM reservations.
   struct rlimit limited = original;
   limited.rlim_cur =
       std::min<rlim_t>(original.rlim_cur, virtual_pages * page_size + rlim_t{512} * 1024 * 1024);
@@ -6195,10 +6195,8 @@ TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
   const int result = ioctl(drm, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
   const int wait_errno = errno;
   ASSERT_EQ(setrlimit(RLIMIT_AS, &original), 0);
-  EXPECT_EQ(result, -1);
-  EXPECT_EQ(wait_errno, ENOMEM);
-  EXPECT_EQ(close(drm), 0);
-  EXPECT_EQ(close(kfd), 0);
+  FAIL() << "expected fatal allocation failure, but wait returned " << result << " with errno "
+         << wait_errno;
 }
 
 TEST(InterposerSyncobjTest, DestroyRejectsInvalidInput) {

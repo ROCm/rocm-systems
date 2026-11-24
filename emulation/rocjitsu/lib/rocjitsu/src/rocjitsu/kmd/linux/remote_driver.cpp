@@ -488,8 +488,9 @@ RemoteDriver::RemoteDriver(int sock_fd, std::function<void()> on_disconnect)
 
 RemoteDriver::~RemoteDriver() {
   request_close();
-  if (disconnect_monitor_.joinable()) {
-    disconnect_monitor_.join();
+  if (disconnect_monitor_started_) {
+    pthread_join(disconnect_monitor_, nullptr);
+    disconnect_monitor_started_ = false;
   }
   for (auto &[handle, fd] : handle_backings_) {
     if (fd >= 0) {
@@ -656,12 +657,21 @@ int RemoteDriver::open() {
     errno = EMFILE;
     return -1;
   }
-  try {
-    disconnect_monitor_ = std::thread([this, socket = sock_] { watch_disconnect(socket); });
-  } catch (const std::system_error &error) {
-    syscall(SYS_close, fd);
-    errno = error.code().value();
-    return -1;
+  {
+    const int started = pthread_create(
+        &disconnect_monitor_, nullptr,
+        +[](void *argument) -> void * {
+          auto *driver = static_cast<RemoteDriver *>(argument);
+          driver->watch_disconnect(driver->sock_);
+          return nullptr;
+        },
+        this);
+    if (started != 0) {
+      syscall(SYS_close, fd);
+      errno = started;
+      return -1;
+    }
+    disconnect_monitor_started_ = true;
   }
   return fd;
 }
@@ -740,8 +750,9 @@ int RemoteDriver::close() {
   int result = 0;
   {
     std::lock_guard<std::mutex> lock(rpc_mutex_);
-    if (disconnect_monitor_.joinable()) {
-      disconnect_monitor_.join();
+    if (disconnect_monitor_started_) {
+      pthread_join(disconnect_monitor_, nullptr);
+      disconnect_monitor_started_ = false;
     }
     if (sock_ >= 0) {
       RpcHeader hdr{};
@@ -1958,7 +1969,7 @@ void RemoteDriver::remember_host_svm_range_locked(uint64_t address, uint64_t len
     unbounded_host_svm_policy_ = true;
     return;
   }
-  try {
+  {
     uint64_t start = address;
     uint64_t end = address + length;
     auto first = std::lower_bound(
@@ -1972,8 +1983,6 @@ void RemoteDriver::remember_host_svm_range_locked(uint64_t address, uint64_t len
     }
     first = potential_host_svm_ranges_.erase(first, last);
     potential_host_svm_ranges_.insert(first, {start, end});
-  } catch (...) {
-    unbounded_host_svm_policy_ = true;
   }
 }
 

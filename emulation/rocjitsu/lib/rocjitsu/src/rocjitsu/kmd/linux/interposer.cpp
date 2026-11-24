@@ -1983,7 +1983,7 @@ public:
     while (candidate == 0 || state.syncobj_entries.count(candidate) != 0) {
       candidate = state.next_syncobj_handle++;
     }
-    try {
+    {
       auto entry = std::make_shared<SyncobjEntry>();
       entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
       entry->signaled = entry->has_fence;
@@ -1992,10 +1992,6 @@ public:
         entry->binary_fence->signaled.store(true, std::memory_order_relaxed);
       }
       state.syncobj_entries.emplace(candidate, std::move(entry));
-    } catch (const std::bad_alloc &) {
-      return -ENOMEM;
-    } catch (const std::length_error &) {
-      return -ENOMEM;
     }
     *handle = candidate;
     return 0;
@@ -2260,17 +2256,12 @@ public:
       real().close(fd);
       return -error;
     }
-    try {
-      sync_file_fds_.emplace(fd, object);
-    } catch (...) {
-      real().close(fd);
-      throw;
-    }
+    { sync_file_fds_.emplace(fd, object); }
     object->refresh();
     return fd;
   }
 
-  int export_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+  int export_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) {
     if (request.pad || request.flags != DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE) {
       return -EINVAL;
     }
@@ -2288,11 +2279,9 @@ public:
     }
     request.fd = fd;
     return 0;
-  } catch (const std::bad_alloc &) {
-    return -ENOMEM;
   }
 
-  int import_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+  int import_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) {
     if (request.pad || request.flags != DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE) {
       return -EINVAL;
     }
@@ -2316,11 +2305,9 @@ public:
     }
     notify_syncobj_waiters(file);
     return 0;
-  } catch (const std::bad_alloc &) {
-    return -ENOMEM;
   }
 
-  std::optional<int> merge_sync_files(int fd, sync_merge_data &request) try {
+  std::optional<int> merge_sync_files(int fd, sync_merge_data &request) {
     std::lock_guard lock(fd_mutex_);
     auto first = sync_file_fds_.find(fd);
     if (first == sync_file_fds_.end()) {
@@ -2351,8 +2338,6 @@ public:
     }
     request.fence = result;
     return 0;
-  } catch (const std::bad_alloc &) {
-    return -ENOMEM;
   }
 
   // Called inside the fd lifecycle lock, after a successful kernel dup operation.
@@ -2378,13 +2363,7 @@ public:
   /// @brief Copy a caller-owned array without faulting inside the interposer.
   template <typename T>
   static int snapshot_user_array(uint64_t address, uint32_t count, std::vector<T> &snapshot) {
-    try {
-      snapshot.resize(count);
-    } catch (const std::bad_alloc &) {
-      return -ENOMEM;
-    } catch (const std::length_error &) {
-      return -ENOMEM;
-    }
+    { snapshot.resize(count); }
     const size_t bytes = static_cast<size_t>(count) * sizeof(T);
     iovec local{snapshot.data(), bytes};
     iovec remote{reinterpret_cast<void *>(static_cast<uintptr_t>(address)), bytes};
@@ -2430,16 +2409,12 @@ public:
     }
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
     std::vector<std::shared_ptr<SyncobjFence>> fences;
-    try {
+    {
       if (binary) {
         points.resize(request.count_handles, 0);
       }
       fences.resize(request.count_handles);
       entries.reserve(request.count_handles);
-    } catch (const std::bad_alloc &) {
-      return -ENOMEM;
-    } catch (const std::length_error &) {
-      return -ENOMEM;
     }
     std::unique_lock lock(fd_mutex_, std::defer_lock);
     // Native exit bypasses C++ destructors with -fno-exceptions. Keep cleanup
@@ -2647,7 +2622,7 @@ public:
           assert_not_engine_thread();
           if (local_vm_thread_) {
             rj_vm_request_exit(vm, "interposer VM destruction");
-            local_vm_thread_->join();
+            pthread_join(*local_vm_thread_, nullptr);
             local_vm_thread_.reset();
           }
           int result = 0;
@@ -2685,7 +2660,7 @@ public:
   /// on self-join. This holds because the engine never takes a driver snapshot; the
   /// assert is what keeps it true as the engine grows.
   void assert_not_engine_thread() const {
-    assert((!local_vm_thread_ || local_vm_thread_->get_id() != std::this_thread::get_id()) &&
+    assert((!local_vm_thread_ || !pthread_equal(*local_vm_thread_, pthread_self())) &&
            "local VM teardown must not run on the engine thread (its deleter joins it)");
   }
 
@@ -2745,42 +2720,47 @@ public:
   /// before destroying VM/driver state it reaches. wait_until_started() closes the
   /// window where a short-lived caller could publish and then tear down a device
   /// whose components are still in startup() — the race that faulted the engine in
-  /// CommandProcessor::startup() against C++ finalizers. If startup() threw, the
+  /// CommandProcessor::startup() against C++ finalizers. If startup() failed, the
   /// engine already returned an error and stopped, so join the thread and report
   /// failure rather than leaving a published-but-dead device.
   [[nodiscard]] bool start_local_vm() {
     assert(local_vm_ != nullptr);
     assert(!local_vm_thread_);
-    try {
-      // make_unique/std::thread can throw system_error (resource exhaustion) or
-      // bad_alloc; treat any failure to launch as a start failure so the caller
-      // unwinds and never publishes a device with no engine behind it.
+    {
       // Latch readiness from the THREAD, not just from inside engine->run(): the
       // wait below happens under init_mutex_, so any rj_vm_run() path that returns
       // without reaching run() (e.g. its own argument validation) would otherwise
       // strand this wait forever AND hold init_mutex_ forever — deadlocking every
       // later interposed open/close and the DSO finalizer itself. The engine's own
       // in-band latch wins; this only fires if nothing latched.
-      local_vm_thread_ = std::make_unique<std::thread>([vm = local_vm_.get()]() {
-        const rj_status_t status = rj_vm_run(vm, nullptr);
-        vm->engine->latch_startup_if_unlatched(/*failed=*/true);
-        if (status != ROCJITSU_STATUS_SUCCESS && vm->engine->wait_until_started()) {
-          util::Logger::warn("rocjitsu: local VM failed: ", vm->engine->last_exit().message);
-          // rj_vm_run() has joined the engine workers and shut down components
-          // and plugins. The host may be blocked on a completion that can no
-          // longer arrive. exit() would run the interposer finalizer on this
-          // thread and try to join itself, so use the process-level fatal exit.
-          std::_Exit(EXIT_FAILURE);
-        }
-      });
-    } catch (const std::exception &e) {
-      util::Logger::debug_print("rocjitsu: failed to start local VM engine thread: ", e.what());
-      return false;
+      pthread_t thread;
+      const int started = pthread_create(
+          &thread, nullptr,
+          +[](void *argument) -> void * {
+            auto *vm = static_cast<rj_vm_t *>(argument);
+            const rj_status_t status = rj_vm_run(vm, nullptr);
+            vm->engine->latch_startup_if_unlatched(/*failed=*/true);
+            if (status != ROCJITSU_STATUS_SUCCESS && vm->engine->wait_until_started()) {
+              util::Logger::warn("rocjitsu: local VM failed: ", vm->engine->last_exit().message);
+              // rj_vm_run() has joined the engine workers and shut down components
+              // and plugins. The host may be blocked on a completion that can no
+              // longer arrive. exit() would run the interposer finalizer on this
+              // thread and try to join itself, so use the process-level fatal exit.
+              std::_Exit(EXIT_FAILURE);
+            }
+            return nullptr;
+          },
+          local_vm_.get());
+      if (started != 0) {
+        util::Logger::warn("rocjitsu: cannot start local VM engine: ", std::strerror(started));
+        return false;
+      }
+      local_vm_thread_ = thread;
     }
     if (!local_vm_->engine->wait_until_started()) {
-      // A component's startup() threw; the engine thread already returned. Join it
+      // A component's startup() failed; the engine thread already returned. Join it
       // so the caller can safely destroy the VM on the unwind path.
-      local_vm_thread_->join();
+      pthread_join(*local_vm_thread_, nullptr);
       local_vm_thread_.reset();
       util::Logger::debug_print("rocjitsu: local VM engine failed during component startup");
       return false;
@@ -2940,11 +2920,11 @@ public:
       return -ENODEV;
     }
     std::shared_ptr<SyncobjFence> finished;
-    // Keep queue identity stable through acceptance and exception cleanup.
+    // Keep queue identity stable through submission acceptance.
     std::lock_guard submission_lock(file->submission_mutex);
     std::optional<uint64_t> pending_queue;
     uint64_t sequence = 0;
-    try {
+    {
       const auto request = argument->in;
       if (request.flags || request.bo_list_handle || !request.num_chunks ||
           request.num_chunks > 1024) {
@@ -3227,19 +3207,6 @@ public:
       argument->out.handle = sequence;
       notify_syncobj_waiters(file);
       return 0;
-    } catch (const std::exception &error) {
-      if (pending_queue) {
-        std::lock_guard lock(fd_mutex_);
-        if (auto it = file->pm4_queues.find(*pending_queue); it != file->pm4_queues.end()) {
-          it->second.fences.erase(sequence);
-        }
-      }
-      if (finished) {
-        finished->failed.store(true, std::memory_order_release);
-        notify_syncobj_waiters(file);
-      }
-      util::Logger::warn("DRM submission failed: ", error.what());
-      return dynamic_cast<const std::bad_alloc *>(&error) ? -ENOMEM : -EINVAL;
     }
   }
 
@@ -4086,7 +4053,7 @@ public:
         return nullptr;
       }
 
-      try {
+      {
         util::StringDiagnostic diagnostic;
         auto maybe_dbt_guest =
             rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff, diagnostic.emitter());
@@ -4147,13 +4114,6 @@ public:
         if (!create_local_vm(handoff->config_path)) {
           return nullptr;
         }
-      } catch (const std::exception &e) {
-        // Retain containment for allocation and library exceptions during config
-        // loading and driver initialization. Failing closed leaves the process with
-        // a null driver, so the reason must be audible in a default build.
-        util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
-        destroy_local_vm();
-        return nullptr;
       }
 
       // Start the engine and wait for component startup to SUCCEED before
@@ -4321,12 +4281,9 @@ private:
   /// They remain live until a later local close or shutdown request retries them.
   std::atomic<rj_vm_t *> pending_vm_destroys_{nullptr};
   /// @brief Owner of the local VM engine loop; null when no local VM is running.
-  /// @details Deliberately unique_ptr<std::thread>, NOT std::jthread: a jthread
-  /// destructor always request_stop()+join()s, which would deadlock in the fork
-  /// child (the thread does not exist there, so join hangs). A raw-owned
-  /// std::thread keeps that abandonment expressible. Do not switch this to
-  /// jthread.
-  std::unique_ptr<std::thread> local_vm_thread_;
+  /// @details Keep the native handle explicit so the fork child can abandon it
+  /// without joining a thread that no longer exists there.
+  std::optional<pthread_t> local_vm_thread_;
   /// @brief Set once the interposer DSO finalizer has requested process-exit
   /// shutdown; the VM is torn down as soon as it is also idle.
   bool shutdown_requested_ = false;
@@ -4928,19 +4885,10 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   }
 
   InterposerContext::DrmFinalRelease displaced;
-  try {
+  {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
-    // backend_lease stays OURS across this call: on a throw it is released at this
-    // function's scope exit, by which point drm_lifecycle is gone. See track_drm().
+    // Release displaced state after dropping the lifecycle lock.
     displaced = InterposerContext::ctx.track_drm(drm_fd, render_minor, backend_lease);
-  } catch (const std::exception &) {
-    // Not just bad_alloc: unique_lock's constructor can throw system_error, and this
-    // is an extern "C" entry point -- letting anything escape into a C caller frame
-    // is undefined.
-    const int saved_errno = ENOMEM;
-    InterposerContext::real().close(drm_fd);
-    errno = saved_errno;
-    return {true, -1};
   }
   InterposerContext::ctx.complete_drm_release(std::move(displaced));
   return {true, drm_fd};

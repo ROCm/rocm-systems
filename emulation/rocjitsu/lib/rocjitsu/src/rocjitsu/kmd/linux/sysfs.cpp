@@ -186,7 +186,14 @@ void Sysfs::queue_file(const std::string &path, const std::string &content) {
   pending_files_.push_back({path, content});
 }
 
-void Sysfs::make_dir(const std::string &path) { fs::create_directories(path); }
+void Sysfs::make_dir(const std::string &path) {
+  std::error_code error;
+  fs::create_directories(path, error);
+  if (error) {
+    util::Logger::warn("Cannot generate topology directory '", path, "': ", error.message());
+    generation_failed_ = true;
+  }
+}
 
 void Sysfs::cleanup() {
   pending_files_.clear();
@@ -536,7 +543,12 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       queue_file(device_dir + "/device", device_hex.str());
       queue_file(device_dir + "/uevent", uevent.str());
       // drmParseSubsystemType does readlink("subsystem") then strncmp for "/pci"
-      std::filesystem::create_symlink("../../../bus/pci", device_dir + "/subsystem");
+      std::error_code error;
+      fs::create_symlink("../../../bus/pci", device_dir + "/subsystem", error);
+      if (error) {
+        util::Logger::warn("Cannot generate topology symlink: ", error.message());
+        generation_failed_ = true;
+      }
       // drmParsePciDeviceInfo reads all five files; missing any causes -ENODEV
       queue_file(device_dir + "/revision", revision_hex.str());
       queue_file(device_dir + "/subsystem_vendor", vendor_hex.str());
@@ -572,6 +584,7 @@ std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<Gp
 
 std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links) {
   cleanup();
+  generation_failed_ = false;
 
   static std::once_flag reap_once;
   std::call_once(reap_once, reap_stale_sysfs_dirs);
@@ -599,6 +612,10 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_
   }
 
   write_drm_tree(gpus);
+  if (generation_failed_) {
+    cleanup();
+    return {};
+  }
 
   // Publish only after all files have been populated. Reuse a temporary helper
   // connection for the tree without retaining application file descriptors.
