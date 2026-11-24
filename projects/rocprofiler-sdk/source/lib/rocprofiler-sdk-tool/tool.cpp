@@ -1798,12 +1798,12 @@ std::set<std::string>
 get_config_perf_counters()
 {
     auto tool_pmc_counters = std::set<std::string>{};
-    for(const auto& counters_group : tool::config().counters)
+    for(const auto& counters_group : tool::get_config().counters)
     {
         for(const auto& counter : counters_group)
             tool_pmc_counters.emplace(counter);
     }
-    for(const auto& att_counter : tool::config().att_param_perfcounters)
+    for(const auto& att_counter : tool::get_config().att_param_perfcounters)
     {
         tool_pmc_counters.emplace(att_counter.counter_name);
     }
