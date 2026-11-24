@@ -177,7 +177,11 @@ foreach(
             list(APPEND _target_fixtures ${_image})
         endforeach()
         set(_atomic_specs)
-        foreach(_form IN ITEMS u32 u64 f32)
+        set(_atomic_forms u32 u64 f32)
+        if(_legacy OR _gpu STREQUAL "gfx1250")
+            list(APPEND _atomic_forms f64)
+        endif()
+        foreach(_form IN LISTS _atomic_forms)
             string(TOUPPER "${_form}" _form_define)
             foreach(
                 _scenario

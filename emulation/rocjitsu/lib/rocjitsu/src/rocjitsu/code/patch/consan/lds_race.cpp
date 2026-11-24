@@ -116,6 +116,7 @@ NativeLdsForm native_lds_form(const Instruction &instruction) {
     case amdgpu::Operation::DS_ADD_F32:
       return {.width = 4};
     case amdgpu::Operation::DS_ADD_U64:
+    case amdgpu::Operation::DS_ADD_F64:
       return {.width = 8};
     default:
       return {};

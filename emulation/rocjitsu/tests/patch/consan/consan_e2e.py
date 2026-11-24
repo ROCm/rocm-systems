@@ -228,7 +228,7 @@ class AnalysisDriver(Driver):
                         (finding['first'], finding['second']), key=lambda e: e['wave']
                     )
                     _, form, peer = case.split('_')
-                    width = 8 if form == 'u64' else 4
+                    width = 8 if form in ('u64', 'f64') else 4
                     for wave, (endpoint, role) in enumerate(
                         zip(endpoints, ('atomic', peer))
                     ):

@@ -1286,6 +1286,13 @@ TEST_P(ConSanTargetSim, AtomicF32PerformsFloatingPointAddition) {
   ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f32", 4));
 }
 
+class ConSanAtomicF64Sim : public ConSanTargetSim {};
+
+TEST_P(ConSanAtomicF64Sim, AtomicF64PerformsFloatingPointAddition) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("f64", 8, {0, 0x40040000u, 0, 0x40040000u}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f64", 8));
+}
+
 class NativeWidthIssueCounter final : public ExecutionPlugin {
 public:
   explicit NativeWidthIssueCounter(std::vector<std::array<unsigned, 2>> &counts)
@@ -1779,6 +1786,11 @@ const auto target_name = [](const auto &info) {
   return std::string(info.param.target) + "Wave" + std::to_string(info.param.wave_size);
 };
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanTargetSim, ::testing::ValuesIn(test::kTargetModes),
+                         target_name);
+INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanAtomicF64Sim,
+                         ::testing::Values(test::TargetMode{"gfx942", 64},
+                                           test::TargetMode{"gfx950", 64},
+                                           test::TargetMode{"gfx1250", 32}),
                          target_name);
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanHipSim,
                          ::testing::ValuesIn(std::span(test::kTargetModes).first(6)), target_name);

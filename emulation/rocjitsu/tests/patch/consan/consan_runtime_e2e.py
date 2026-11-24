@@ -59,7 +59,7 @@ CASES = (
     ),
     *(
         f'atomic_{form}_{peer}'
-        for form in ('u32', 'u64', 'f32')
+        for form in ('u32', 'u64', 'f32', 'f64')
         for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
     ),
     'wide_u8',
@@ -692,7 +692,7 @@ class Driver:
 
     def assert_atomic_observations(self, decoded, fixture):
         _, form, scenario = fixture.split('_')
-        width = 8 if form == 'u64' else 4
+        width = 8 if form in ('u64', 'f64') else 4
         high = 1 << (self.args.wave_size - 1)
         if scenario == 'count':
             kinds = [2, 3, 1]

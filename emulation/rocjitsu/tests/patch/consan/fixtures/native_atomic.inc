@@ -1,8 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifdef ATOMIC_U64
+#if defined(ATOMIC_U64) || defined(ATOMIC_F64)
+#ifdef ATOMIC_F64
+#define ADD ds_add_f64 v3, v[8:9] offset:8
+#else
 #define ADD ds_add_u64 v3, v[8:9] offset:8
+#endif
 #define SIZE 8
 #define SEED DS_STORE_B64 v3, v[4:5] offset:8
 #define READ_RESULT DS_LOAD_B64 v[8:9], v3 offset:8
@@ -29,6 +33,11 @@
   v_mov_b32 v5, 3
   v_mov_b32 v8, 1
   v_mov_b32 v9, 0
+#elif defined(ATOMIC_F64)
+  v_mov_b32 v4, 0
+  v_mov_b32 v5, 0x3ff80000  // 1.5
+  v_mov_b32 v8, 0
+  v_mov_b32 v9, 0x3fe00000  // 0.5
 #elif defined(ATOMIC_F32)
   v_mov_b32 v4, 0x3fc00000  // 1.5f
   v_mov_b32 v7, 0x3f000000  // 0.5f

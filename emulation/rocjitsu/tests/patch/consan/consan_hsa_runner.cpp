@@ -109,7 +109,7 @@ int run(int argc, char **argv) {
                  "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
                  "wide_i16, "
                  "wide_b64, wide_b96, wide_b128, atomic_u32_count, atomic_u64_count, "
-                 "atomic_f32_count, transpose_BITS_SCENARIO, observe\n";
+                 "atomic_f32_count, atomic_f64_count, transpose_BITS_SCENARIO, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -137,7 +137,7 @@ int run(int argc, char **argv) {
       return 3;
     }
   }
-  const bool atomic_wide = mode == "atomic_u64_count";
+  const bool atomic_wide = mode == "atomic_u64_count" || mode == "atomic_f64_count";
   const bool defined =
       mode == "defined" || mode == "atomic_u32_count" || mode == "atomic_f32_count";
   const bool grouped = mode == "grouped" || mode == "grouped_sync";
@@ -470,8 +470,9 @@ int run(int argc, char **argv) {
       }
     }
     if (atomic_wide) {
+      const uint32_t expected_high = mode == "atomic_f64_count" ? 0x40040000u : 4u;
       for (uint32_t wave = 0; wave < wave_count; ++wave) {
-        if (last_output[2 * wave] != 0 || last_output[2 * wave + 1] != 4) {
+        if (last_output[2 * wave] != 0 || last_output[2 * wave + 1] != expected_high) {
           result = 23;
         }
       }

@@ -194,6 +194,8 @@ Preparation accepts a limited instruction/access subset with no synchronization,
 or qualified full-workgroup barriers on the supported target/wave profiles.
 On every supported target and wave size, relaxed native `ds_add_u32` and
 `ds_add_f32` record four-byte Atomic accesses. `ds_add_u64` records eight bytes.
+The native `ds_add_f64` also records eight bytes on gfx942, gfx950 and gfx1250.
+The gfx1100 and gfx1201 instruction sets have no native FP64 LDS atomic add.
 The probe captures the effective address and guest EXEC before the original RMW.
 This observation contributes no ordering edge. Other atomic and barrier forms
 require their own qualification. Exact
