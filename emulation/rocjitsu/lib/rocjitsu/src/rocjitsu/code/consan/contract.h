@@ -34,7 +34,7 @@ inline constexpr std::string_view kMvpOptions =
     "native-lds-widths=1,2,4,8,12,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
     "loop-lane-bank=ctz-mod4;sync-"
     "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
-    "site=4;collision=on";
+    "site=4;collision=on;relaxed-lds-atomic=single-range-access";
 // Software record slots for distinct effective LDS address groups per wave/site.
 // Acyclic accesses fill sequential slots; lanes beyond four groups cause loss.
 // Repeated accesses instead claim immutable lane-based banks, where a collision
@@ -61,7 +61,7 @@ inline constexpr std::array<KernargExtensionPayloadLayout, 1> kContextPointerPay
 
 enum class AnalysisKind : uint32_t { Invalid = 0, LdsRaceDetection = 1 };
 enum class RecordKind : uint32_t { Access = 1 };
-enum class AccessKind : uint32_t { Read = 1, Write = 2 };
+enum class AccessKind : uint32_t { Read = 1, Write = 2, Atomic = 3 };
 enum class ScopeKind : uint32_t {
   NativeLdsNoSynchronization = 1,
   NativeLdsWorkgroupBarrier = 2,

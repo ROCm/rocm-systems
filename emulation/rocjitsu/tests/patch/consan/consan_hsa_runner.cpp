@@ -100,15 +100,16 @@ hsa_amd_memory_pool_t fine_pool(hsa_agent_t cpu) {
 
 int run(int argc, char **argv) {
   if (argc < 5) {
-    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
-                 "[--baseline] "
-                 "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-                 "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
-                 "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
-                 "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u8, wide_i8, "
-                 "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
-                 "wide_i16, "
-                 "wide_b64, wide_b96, wide_b128, transpose_BITS_SCENARIO, observe\n";
+    std::cerr
+        << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
+           "[--baseline] "
+           "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
+           "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
+           "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
+           "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u8, wide_i8, "
+           "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
+           "wide_i16, "
+           "wide_b64, wide_b96, wide_b128, atomic_u32_count, transpose_BITS_SCENARIO, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -136,7 +137,8 @@ int run(int argc, char **argv) {
       return 3;
     }
   }
-  const bool defined = mode == "defined";
+  const bool atomic_count = mode == "atomic_u32_count";
+  const bool defined = mode == "defined" || atomic_count;
   const bool grouped = mode == "grouped" || mode == "grouped_sync";
   const bool group_barrier = mode == "grouped_sync";
   const bool mixed = mode == "mixed";
@@ -456,7 +458,7 @@ int run(int argc, char **argv) {
               << last_output[1] << '\n';
     if (defined) {
       for (uint32_t wave = 0; wave < wave_count; ++wave) {
-        if (last_output[wave] != input + wave) {
+        if (last_output[wave] != input + wave + (atomic_count ? 2u : 0u)) {
           result = 23;
         }
       }

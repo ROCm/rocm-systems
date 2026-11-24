@@ -406,10 +406,9 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
 }
 
 struct Bucket {
-  // Reads and writes remain separate so counts and example generation never
-  // enumerate the potentially quadratic Read/Read non-candidates.
+  // Separate by role to skip whole groups of Read/Read and Atomic/Atomic pairs.
   struct Wave {
-    std::vector<const Observation *> reads, writes;
+    std::vector<const Observation *> reads, writes, atomics;
   };
   std::map<uint32_t, Wave> waves;
 };
@@ -632,7 +631,17 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     const LdsRaceParticipant &participant = observation.participant;
     Bucket &bucket = domains[participant.workgroup][{participant.offset, participant.width}];
     Bucket::Wave &wave = bucket.waves[participant.wave];
-    (participant.access == AccessKind::Write ? wave.writes : wave.reads).push_back(&observation);
+    switch (participant.access) {
+    case AccessKind::Read:
+      wave.reads.push_back(&observation);
+      break;
+    case AccessKind::Write:
+      wave.writes.push_back(&observation);
+      break;
+    case AccessKind::Atomic:
+      wave.atomics.push_back(&observation);
+      break;
+    }
     if (participant.access == AccessKind::Write && observation.lanes() > 1) {
       const uint64_t pairs = uint64_t{observation.lanes()} * (observation.lanes() - 1) / 2;
       ++result.collision_groups;
@@ -672,6 +681,19 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
         complete_witnesses |= 1u << slot;
       }
     }
+    const auto compare_waves = [&](const Bucket::Wave &left, const Bucket::Wave &right) {
+      const auto pairs = [&](const auto &first, const auto &second) {
+        compare(first, second, examples, facts.scope, domain_completions, complete_witnesses,
+                complete_exit, result);
+      };
+      pairs(left.writes, right.writes);
+      pairs(left.writes, right.reads);
+      pairs(left.reads, right.writes);
+      pairs(left.atomics, right.writes);
+      pairs(left.atomics, right.reads);
+      pairs(left.writes, right.atomics);
+      pairs(left.reads, right.atomics);
+    };
     // Sweep checked half-open byte ranges. Grouping identical ranges retains
     // aggregate counting for dense no-barrier cases and never enumerates Read/Read
     // pairs. Natural alignment and the admitted widths bound active range shapes.
@@ -688,26 +710,18 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
             if (prior_wave == wave) {
               continue;
             }
-            compare(prior_accesses.writes, accesses.writes, examples, facts.scope,
-                    domain_completions, complete_witnesses, complete_exit, result);
-            compare(prior_accesses.writes, accesses.reads, examples, facts.scope,
-                    domain_completions, complete_witnesses, complete_exit, result);
-            compare(prior_accesses.reads, accesses.writes, examples, facts.scope,
-                    domain_completions, complete_witnesses, complete_exit, result);
+            compare_waves(prior_accesses, accesses);
           }
         }
       }
-      std::vector<const Observation *> prior_reads, prior_writes;
+      Bucket::Wave earlier;
       for (const auto &[wave, accesses] : bucket.waves) {
         (void)wave;
-        compare(prior_writes, accesses.writes, examples, facts.scope, domain_completions,
-                complete_witnesses, complete_exit, result);
-        compare(prior_writes, accesses.reads, examples, facts.scope, domain_completions,
-                complete_witnesses, complete_exit, result);
-        compare(prior_reads, accesses.writes, examples, facts.scope, domain_completions,
-                complete_witnesses, complete_exit, result);
-        prior_writes.insert(prior_writes.end(), accesses.writes.begin(), accesses.writes.end());
-        prior_reads.insert(prior_reads.end(), accesses.reads.begin(), accesses.reads.end());
+        compare_waves(earlier, accesses);
+        earlier.writes.insert(earlier.writes.end(), accesses.writes.begin(), accesses.writes.end());
+        earlier.reads.insert(earlier.reads.end(), accesses.reads.begin(), accesses.reads.end());
+        earlier.atomics.insert(earlier.atomics.end(), accesses.atomics.begin(),
+                               accesses.atomics.end());
       }
       active.push_back({range.first + range.second, &bucket});
     }

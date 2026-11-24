@@ -178,21 +178,24 @@ original code-object files nor live HSA state.
 ## Available analysis
 
 `LdsRaceDetection` is the only implemented analysis. It checks ordinary native
-LDS reads/writes at naturally aligned addresses, using the same observations
+LDS reads/writes and admitted relaxed LDS atomic accesses at naturally aligned addresses, using the same observations
 for two checks. All supported targets admit ordinary single-range b8, b16, b32,
 b64, b96, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
 gfx1250 wave32.
 
 | Check | What it reports |
 | --- | --- |
-| Cross-wave conflict | Address-group records from different waves access overlapping half-open byte ranges, with at least one write. Read/read pairs do not conflict. |
+| Cross-wave conflict | Address-group records from different waves access overlapping half-open byte ranges, with at least one ordinary write or an ordinary read paired with an atomic. Atomic/atomic and read/read pairs are excluded. |
 | Same-instruction ordinary-store collision | Multiple lanes of one store observation write the same LDS range. |
 
 ### Analysis and admission
 
 Preparation accepts a limited instruction/access subset with no synchronization,
 or qualified full-workgroup barriers on the supported target/wave profiles.
-Other barrier forms and atomics are rejected. Exact
+The relaxed native `ds_add_u32` on gfx950/w64 records a four-byte Atomic access.
+The probe captures the effective address and guest EXEC before the original RMW.
+This observation contributes no ordering edge. Other atomic and barrier forms
+require their own qualification. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
 and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp).
 
@@ -220,8 +223,7 @@ gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
 Access probes capture addresses before an aliased load can overwrite them, record actual byte
 widths and byte immediates, and preserve every guest result word. For b96 the
 range spans three dwords. Its effective start must be 16-byte aligned so the
-range is independent of the launch alignment mode. FLAT and atomic
-forms remain unsupported. The minimum fixed LDS extent remains four bytes.
+range is independent of the launch alignment mode. FLAT forms remain unsupported. The minimum fixed LDS extent remains four bytes.
 
 Two-address native LDS loads and stores support 32- and 64-bit elements.
 One guest instruction produces one occurrence and shares the four sampled

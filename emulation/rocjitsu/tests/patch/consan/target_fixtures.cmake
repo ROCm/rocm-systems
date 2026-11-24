@@ -176,6 +176,23 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        set(_atomic_specs)
+        if(_gpu STREQUAL "gfx950")
+            foreach(
+                _scenario
+                IN
+                ITEMS count read write atomic adjacent
+            )
+                set(_name atomic-u32-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _atomic_specs "${_name}:32:0:0:0:0")
+                list(APPEND _atomic_cases_${_gpu}_${_wave_size} ${_name})
+                set(_atomic_options_${_name}
+                    -DCONSAN_ATOMIC=1
+                    -DATOMIC_${_scenario_define}=1
+                )
+            endforeach()
+        endif()
         set(_dual_specs)
         foreach(_bits IN ITEMS 32 64)
             foreach(_spacing IN ITEMS normal stride64)
@@ -253,6 +270,7 @@ foreach(
             _spec
             IN
             ITEMS
+                ${_atomic_specs}
                 ${_transpose_specs}
                 u16:16:0:0:0:0
                 i16:16:1:0:0:0
@@ -340,11 +358,13 @@ foreach(
                     -DCONSAN_GFX12=${_gfx12} -DCONSAN_WIDTH=${_width}
                     -DCONSAN_SIGNED=${_signed} -DCONSAN_HIGH=${_high}
                     -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision}
-                    ${_peer_option} ${_dual_options_${_name}} -c
+                    ${_peer_option} ${_dual_options_${_name}}
+                    ${_atomic_options_${_name}} -c
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
                     ${_object}
                 DEPENDS
                     fixtures/native_widths.s
+                    fixtures/native_atomic.inc
                     fixtures/native_d16.inc
                     fixtures/native_dual.inc
                     fixtures/native_transpose.inc

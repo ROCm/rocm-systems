@@ -516,6 +516,12 @@ if(TARGET consan_hsa_runner)
                         endforeach()
                     endforeach()
                 endif()
+                foreach(_atomic IN LISTS _atomic_cases_${_gpu}_${_wave_size})
+                    string(REPLACE "-" "_" _case ${_atomic})
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_case} ${_threads} production analysis
+                    )
+                endforeach()
                 set(_width_cases
                     wide_u8
                     wide_i8_alias_high

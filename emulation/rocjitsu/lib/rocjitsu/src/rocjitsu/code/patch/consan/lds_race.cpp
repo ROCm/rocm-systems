@@ -107,8 +107,14 @@ struct NativeLdsForm {
   LdsRangeShape shape = LdsRangeShape::Single;
 };
 
-NativeLdsForm native_lds_form(const Instruction &instruction) {
+NativeLdsForm native_lds_form(const Instruction &instruction, IsaFamily arch) {
   switch (instruction.amdgpu_operation()) {
+  case amdgpu::Operation::DS_ADD_U32:
+    if (arch == IsaFamily::Cdna4 &&
+        instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Lds &&
+        instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic)
+      return {.width = 4};
+    return {};
   case amdgpu::Operation::DS_LOAD_B32:
   case amdgpu::Operation::DS_STORE_B32:
   case amdgpu::Operation::DS_READ_B32:
@@ -291,13 +297,13 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
   }
-  if ((instruction.flags() & BARRIER) != 0 ||
-      instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic ||
+  const bool atomic = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic;
+  const NativeLdsForm form = native_lds_form(instruction, arch);
+  if ((instruction.flags() & BARRIER) != 0 || (atomic && form.width == 0) ||
       name.starts_with("s_barrier") || name.starts_with("s_sendmsg")) {
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "unmodeled synchronization: " + std::string(name), offset);
   }
-  const NativeLdsForm form = native_lds_form(instruction);
   const uint32_t width = form.width;
   if ((addressing == amdgpu::MemoryAddressing::Lds || addressing == amdgpu::MemoryAddressing::Gds ||
        addressing == amdgpu::MemoryAddressing::DirectLds) &&
@@ -361,7 +367,9 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     }
     accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
                         .original_offset = offset,
-                        .kind = read ? AccessKind::Read : AccessKind::Write,
+                        .kind = atomic ? AccessKind::Atomic
+                                : read ? AccessKind::Read
+                                       : AccessKind::Write,
                         .address_vgpr = address_reg->index,
                         .immediate_bytes = immediate,
                         .width = width,
@@ -561,7 +569,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
       }
-      if (native_lds_form(instruction).width != 0) {
+      if (native_lds_form(instruction, program.target->arch).width != 0) {
         access_offsets.insert(instruction.src_loc());
       }
     }

@@ -33,7 +33,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "0c9d4a7a786bd84ae660c3ffa2cfe2f32bb429c7234b131787260f4dfa19e615");
+            "9d204e58c8f7599498f943f588810551497b7cedc3a922d4082a48511b62882e");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -923,6 +923,23 @@ TEST_F(ConSanContract, GuestMappingsAndReservationsMustBeUnambiguous) {
   manifest = example();
   manifest.sites.clear();
   EXPECT_TRUE(validate_manifest(manifest, error_.emitter()).failed());
+}
+
+TEST_F(ConSanContract, AtomicAccessRequiresAnAdmittedTargetAndSingleDwordRange) {
+  Manifest manifest = example();
+  manifest.target = 950;
+  manifest.wave_size = 64;
+  SiteFacts &site = manifest.sites.front();
+  site.access = AccessKind::Atomic;
+  ASSERT_TRUE(validate_manifest(manifest, error_.emitter()).succeeded()) << error_.message();
+  site.width = 8;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  site.width = 4;
+  site.lds_ranges.shape = LdsRangeShape::Dual;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  site.lds_ranges = {};
+  manifest.target = 942;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
 }
 
 TEST_F(ConSanContract, UnsupportedTargetAbiAndOptionsAreRejected) {
