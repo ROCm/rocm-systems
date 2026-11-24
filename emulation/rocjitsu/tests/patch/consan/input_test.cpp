@@ -335,7 +335,6 @@ TEST(ConSanInput, DirectLocalHelperRequiresTheTerminalApiOperationAndMatchingRet
       ASSERT_TRUE(helper.succeeded()) << error.message;
       EXPECT_EQ(helper.value().api, AccessKind::Read);
       EXPECT_EQ(helper.value().terminal_access, nullptr);
-      continue;
     }
     const auto artifact = prepare(image, profile, "lds_producer_consumer", error);
     if (control == "alias" || control == "badreturn" || control == "clobber") {
@@ -344,8 +343,10 @@ TEST(ConSanInput, DirectLocalHelperRequiresTheTerminalApiOperationAndMatchingRet
       continue;
     }
     ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_TRUE(validate_prepared(image, artifact.value(), error).succeeded()) << error.message;
     const auto &manifest = artifact.value().manifest;
     ASSERT_EQ(manifest.flat_exclusions.size(), 1u);
+    EXPECT_EQ(manifest.flat_exclusions.front().assumption, FlatAssumption::None);
     EXPECT_EQ(manifest.flat_exclusions.front().reason, control == "global" || control == "private"
                                                            ? FlatExclusionReason::NonGroup
                                                            : FlatExclusionReason::Unresolved);
@@ -359,6 +360,27 @@ TEST(ConSanInput, DirectLocalHelperRequiresTheTerminalApiOperationAndMatchingRet
       EXPECT_EQ(manifest.sites.front().origin, AccessOrigin::Native);
     }
   }
+}
+
+TEST(ConSanInput, HelperStoreMustPrecedeItsLaterObservedCallerSiteInSourceOrder) {
+  constexpr test::TargetMode mode = {.target = "gfx950", .wave_size = 64};
+  const TargetProfile &profile = *target_profile(mode.target);
+  InputError error;
+  const std::vector<uint8_t> placed_before =
+      test::read_fixture(test::target_fixture_path(mode, "width-flat-store-helper"));
+  ASSERT_FALSE(placed_before.empty());
+  const FailureOr<PreparedArtifact> accepted =
+      prepare(placed_before, profile, "lds_producer_consumer", error);
+  ASSERT_TRUE(accepted.succeeded()) << error.message;
+  ASSERT_EQ(accepted.value().manifest.sites.size(), 2u);
+  EXPECT_EQ(accepted.value().manifest.sites.front().assumption, FlatAssumption::HelperStoreAt);
+
+  const std::vector<uint8_t> placed_after =
+      test::read_fixture(test::target_fixture_path(mode, "width-flat-store-helper-after-caller"));
+  ASSERT_FALSE(placed_after.empty());
+  EXPECT_TRUE(prepare(placed_after, profile, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(error.message, "MVP requires increasing LDS access order along every CFG path");
 }
 
 TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {

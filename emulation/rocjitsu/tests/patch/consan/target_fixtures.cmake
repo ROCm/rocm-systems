@@ -278,6 +278,11 @@ foreach(
             )
         endforeach()
         if(_gpu STREQUAL "gfx950")
+            list(APPEND _flat_specs "flat-store-helper-after-caller:32:0:0:0:0")
+            set(_flat_options_flat-store-helper-after-caller
+                ${_flat_options_flat-store-helper}
+                -DHELPER_AFTER_CALLER=1
+            )
             foreach(
                 _control
                 IN

@@ -65,7 +65,7 @@ HELPER:
   .size overlapping_lds_function, .-HELPER
 #endif
 .endm
-#ifdef FLAT_STORE
+#if defined(FLAT_STORE) && !defined(HELPER_AFTER_CALLER)
 // Keep the store helper's original PC before its later native LDS peer.
 consan_flat_helper_body
 #endif
@@ -252,7 +252,7 @@ CONSAN_KERNEL:
   s_endpgm
 .Lkernel_end:
 .size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL
-#if defined(FLAT_HELPER) && !defined(FLAT_STORE)
+#if defined(FLAT_HELPER) && (!defined(FLAT_STORE) || defined(HELPER_AFTER_CALLER))
 consan_flat_helper_body
 #endif
 
