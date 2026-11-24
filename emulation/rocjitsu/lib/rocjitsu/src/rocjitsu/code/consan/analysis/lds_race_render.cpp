@@ -53,6 +53,8 @@ void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
       << ",\"mask\":" << value.mask << ",\"offset\":" << value.offset
       << ",\"width\":" << value.width << ",\"original_offset\":" << value.original_offset
       << ",\"access\":\"" << access_name(value.access) << '"';
+  if (value.origin == AccessOrigin::GroupFlat)
+    out << ",\"origin\":\"group_flat\",\"confidence\":\"exact\"";
   if (value.transpose_exec)
     out << ",\"mask_role\":\"transpose_source_lanes\",\"anchor_exec\":" << *value.transpose_exec;
   out << '}';
@@ -100,8 +102,8 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
   out << std::boolalpha;
   out << "{\"verdict\":\""
       << (result.cross_wave_pairs || result.collision_groups ? "findings" : "no_observed_findings")
-      << "\",\"scope\":\""
-      << (result.has_dual_ranges ? "native_lds_multi_range_" : "native_lds_single_range_")
+      << "\",\"scope\":\"" << (result.has_group_flat ? "native_and_group_flat_lds_" : "native_lds_")
+      << (result.has_dual_ranges ? "multi_range_" : "single_range_")
       << (result.has_transpose ? "transpose_" : "")
       << (result.scope != ScopeKind::NativeLdsNoSynchronization ? "epoch_workgroup_barriers"
                                                                 : "no_sync_bounded_1d")

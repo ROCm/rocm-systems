@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/exec_state.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -106,6 +107,56 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
   return Result::success();
 }
 
+// Each tracked word equals the high dword of SRC_SHARED_BASE. A vector
+// definition under unknown EXEC proves this only for lanes active at that
+// point. A later EXEC change can expose older values in the other lanes.
+struct SharedAperture {
+  RegisterSet active;
+  RegisterSet all_lanes;
+
+  void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec) {
+    using Op = amdgpu::Operation;
+    const Op op = inst.amdgpu_operation();
+    const auto *source = inst.num_src_operands() ? inst.src_operand(0) : nullptr;
+    const auto *destination = inst.num_dst_operands() ? inst.dst_operand(0) : nullptr;
+    std::optional<RegisterRef> proven;
+    bool all = false;
+    bool writes_exec =
+        (inst.flags() & WRITES_EXEC) || effects.defs.contains({RegClass::EXEC, 0, 1});
+    if (source && destination) {
+      const auto dst = destination->to_register_ref();
+      const auto src = source->to_register_ref();
+      writes_exec |= dst && dst->cls == RegClass::EXEC;
+      if (dst && op == Op::S_MOV_B64 && dst->cls == RegClass::SGPR && dst->width == 2 &&
+          source->name() == "src_shared_base") {
+        proven = RegisterRef{RegClass::SGPR, static_cast<uint16_t>(dst->index + 1), 1};
+        all = true;
+      } else if (dst && src && dst->width == 1 && src->width == 1 && active.contains(*src) &&
+                 ((op == Op::S_MOV_B32 && dst->cls == RegClass::SGPR &&
+                   src->cls == RegClass::SGPR) ||
+                  (op == Op::V_MOV_B32 && inst.size() == 4 && dst->cls == RegClass::VGPR))) {
+        proven = dst;
+        all = dst->cls == RegClass::SGPR || (exec == ExecState::Full && all_lanes.contains(*src));
+      }
+    }
+
+    active -= effects.defs;
+    all_lanes -= effects.defs;
+    if (effects.conditional_vgpr_def) {
+      active.erase(*effects.conditional_vgpr_def);
+      all_lanes.erase(*effects.conditional_vgpr_def);
+    }
+    if (writes_exec && op != Op::S_AND_SAVEEXEC_B32 && op != Op::S_AND_SAVEEXEC_B64 &&
+        op != Op::V_CMPX_EQ_U32)
+      active = all_lanes;
+    if (proven) {
+      active.expand(*proven);
+      if (all)
+        all_lanes.expand(*proven);
+    }
+  }
+};
+
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              InputProgram &program, RegisterSet &used, const InputLimits &limits,
                              InputError &error) {
@@ -118,6 +169,11 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
   for (const BasicBlock *block : ordered.value()) {
     latest_access.emplace(block, std::nullopt);
   }
+  std::vector<BasicBlock *> scope;
+  for (const auto &block : blocks)
+    scope.push_back(block.get());
+  const ExecMaskAnalysis exec(scope, program.wave_size);
+  std::unordered_map<const BasicBlock *, SharedAperture> outgoing;
   size_t instruction_count = 0;
   for (const BasicBlock *block : ordered.value()) {
     if (block->has_implicit_terminator() ||
@@ -125,6 +181,23 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         !block->call_edges().empty()) {
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
+    }
+    SharedAperture aperture;
+    bool first = true;
+    for (const BasicBlock *predecessor : block->predecessors()) {
+      // A deferred backedge cannot inherit first-iteration proofs.
+      const auto it = outgoing.find(predecessor);
+      if (it == outgoing.end()) {
+        aperture = {};
+        break;
+      }
+      if (first)
+        aperture = it->second;
+      else {
+        aperture.active &= it->second.active;
+        aperture.all_lanes &= it->second.all_lanes;
+      }
+      first = false;
     }
     std::optional<uint64_t> latest = latest_access.find(block)->second;
     for (const Instruction &instruction : block->instructions()) {
@@ -138,7 +211,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
       const size_t previous_accesses = program.accesses.size();
       if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
-                                        program.accesses, error)
+                                        program.accesses, error, &aperture.active)
               .failed()) {
         return Result::failure();
       }
@@ -154,6 +227,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         latest = access;
       }
       const InstDefUse effects(instruction, program.wave_size);
+      aperture.transfer(instruction, effects, exec.before(instruction));
       used |= effects.uses;
       used |= effects.defs;
       const std::optional<int64_t> branch = instruction.branch_offset_bytes();
@@ -168,6 +242,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         program.exit_offsets.push_back(offset);
       }
     }
+    outgoing.emplace(block, std::move(aperture));
     for (const BasicBlock *successor : block->successors()) {
       // The deferred self-edge starts another repeated epoch if the later
       // barrier gate qualifies it; propagate this epoch's maximum only to exits.

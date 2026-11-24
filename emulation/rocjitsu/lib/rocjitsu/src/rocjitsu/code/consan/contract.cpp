@@ -78,7 +78,8 @@ void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(static_cast<uint32_t>(site.analysis));
   encoder.u32(static_cast<uint32_t>(site.record));
   // The original single-range encoding wrote zero in this word.
-  encoder.u32((static_cast<uint32_t>(site.lds_ranges.shape) << 16) |
+  encoder.u32((static_cast<uint32_t>(site.origin) << 24) |
+              (static_cast<uint32_t>(site.lds_ranges.shape) << 16) |
               (uint32_t{site.lds_ranges.offset1} << 8) | site.lds_ranges.offset0);
   encoder.u32(static_cast<uint32_t>(site.access));
   encoder.u32(site.width);
@@ -104,7 +105,8 @@ bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
       !decoder.u32(site.probe_size) || !decoder.u32(site.first_slot)) {
     return false;
   }
-  site.lds_ranges = {.shape = static_cast<LdsRangeShape>(ranges >> 16),
+  site.origin = static_cast<AccessOrigin>(ranges >> 24);
+  site.lds_ranges = {.shape = static_cast<LdsRangeShape>((ranges >> 16) & 0xff),
                      .offset0 = static_cast<uint8_t>(ranges),
                      .offset1 = static_cast<uint8_t>(ranges >> 8)};
   site.analysis = static_cast<AnalysisKind>(analysis);
@@ -159,7 +161,13 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
       0xff, 0xa2, 0xcf, 0xe2, 0xf3, 0x2b, 0xb4, 0x29, 0xc7, 0x23, 0x4b,
       0x13, 0x17, 0x87, 0x26, 0x0f, 0x4d, 0xfa, 0x19, 0xe6, 0x15,
   };
-  const bool admits_atomics = manifest.options == mvp_options_digest();
+  constexpr Digest kNativeAtomics = {
+      0x9d, 0x20, 0x4e, 0x58, 0xc8, 0xf7, 0x59, 0x94, 0x98, 0xf9, 0x43,
+      0xf5, 0x88, 0x81, 0x05, 0x51, 0x49, 0x7b, 0x7c, 0xed, 0xc3, 0xa9,
+      0x22, 0xd4, 0x08, 0x2a, 0x48, 0x51, 0x1b, 0x62, 0x88, 0x2e,
+  };
+  const bool admits_flat = manifest.options == mvp_options_digest();
+  const bool admits_atomics = admits_flat || manifest.options == kNativeAtomics;
   const bool admits_bytes = admits_atomics || manifest.options == kOrdinaryLds;
   const bool admits_b96 = admits_bytes || manifest.options == kB96Widths;
   const TargetProfile *target = target_profile(manifest.target);
@@ -273,9 +281,13 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
         site.access == AccessKind::Read || site.access == AccessKind::Write ||
         (site.access == AccessKind::Atomic && admits_atomics &&
          ranges.shape == LdsRangeShape::Single && (site.width == 4 || site.width == 8));
+    const bool valid_origin = site.origin == AccessOrigin::Native ||
+                              (site.origin == AccessOrigin::GroupFlat && admits_flat &&
+                               target->id == 950 && site.access == AccessKind::Read &&
+                               site.width == 4 && ranges.shape == LdsRangeShape::Single);
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
-        !valid_ranges || !valid_access ||
+        !valid_ranges || !valid_access || !valid_origin ||
         (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
          (!admits_b96 || site.width != 12) && (!admits_bytes || site.width != 1)) ||
         site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||
