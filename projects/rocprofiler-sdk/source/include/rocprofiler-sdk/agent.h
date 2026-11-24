@@ -58,6 +58,14 @@ typedef union
 } HSA_GFXIP_VERSION;
 #endif
 
+// rocprofiler_agent_v0_t::sdma_fw_version is an HSA_ENGINE_VERSION, and every
+// hsakmt header defines that type, so it cannot be redefined here the way
+// HSA_ENGINE_ID and HSA_GFXIP_VERSION are. Its layout comes from the hsakmt
+// header on the include path: uCodeSDMA:10, uCodeCompute:16 and Reserved:6 when
+// HSAKMT_HAS_SPLIT_GFXIP is defined, uCodeSDMA:10, uCodeRes:10 and Reserved:12
+// in older headers. A library and the clients that read its agents must be
+// built against hsakmt headers that agree on HSAKMT_HAS_SPLIT_GFXIP.
+
 ROCPROFILER_EXTERN_C_INIT
 
 /**
