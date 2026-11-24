@@ -229,8 +229,9 @@ protected:
     return amdgpu::VmAccessOutcome::Complete;
   }
 
-  amdgpu::MemoryAccessCompletion complete_access(Instruction &, amdgpu::Wavefront &,
-                                                 amdgpu::MemoryAccessDeferredCompletion) override {
+  amdgpu::MemoryAccessCompletion
+  complete_access(Instruction &, amdgpu::Wavefront &,
+                  const amdgpu::MemoryAccessCompletionFactory &) override {
     return amdgpu::MemoryAccessCompletion::Complete;
   }
 };

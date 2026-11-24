@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "util/diagnostic.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -40,8 +42,13 @@ struct DispatchResult {
 /// @brief Select a target from an exact selector ID, or no target for an unassigned ID.
 [[nodiscard]] std::optional<FuzzTarget> selected_target(uint8_t selector);
 /// @brief Dispatch one input, excluding its selector from the destination payload.
-[[nodiscard]] std::optional<DispatchResult> run_input(std::span<const uint8_t> input);
+/// @details Invalid multiplexer sizes and harness failures return failure and emit
+/// a diagnostic. An unassigned selector returns a successful empty optional.
+util::FailureOr<std::optional<DispatchResult>> run_input(std::span<const uint8_t> input,
+                                                         util::DiagnosticEmitter diagnostic = {});
 /// @brief Structured multiplexer seeds, with at least one for every registered target.
-[[nodiscard]] std::vector<std::vector<uint8_t>> seed_corpus();
+/// @details Harness setup or generation failures return failure and emit a diagnostic.
+util::FailureOr<std::vector<std::vector<uint8_t>>>
+seed_corpus(util::DiagnosticEmitter diagnostic = {});
 
 } // namespace rocjitsu::multiplexer_fuzz
