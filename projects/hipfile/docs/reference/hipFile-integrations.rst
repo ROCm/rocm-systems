@@ -1,6 +1,6 @@
 .. meta::
    :description: Frameworks and applications that use hipFile for GPU-direct I/O
-   :keywords: hipFile, integrations, LMCache, fastsafetensors, rocAL, PyTorch, fio, IOR, GDS, ROCm, AMD
+   :keywords: hipFile, integrations, LMCache, NIXL, fastsafetensors, rocAL, PyTorch, fio, IOR, GDS, ROCm, AMD
 
 *******************************************
 Frameworks and applications using hipFile
@@ -14,6 +14,13 @@ LMCache
 `LMCache <https://docs.lmcache.ai/index.html>`_ is a KV cache layer for LLM serving. It offloads KV cache chunks to CPU memory, local disk, or remote storage. Its GDS storage backend reads and writes those chunks directly between GPU memory and storage.
 
 Set the ``gds_backend`` configuration key to ``hipfile`` or set the ``LMCACHE_GDS_BACKEND`` environment variable to ``hipfile``.  See the `LMCache GDS backend documentation <https://docs.lmcache.ai/kv_cache/storage_backends/gds.html>`_ for more information.
+
+NIXL
+====
+
+`NIXL <https://github.com/ai-dynamo/nixl>`_ is NVIDIA's Inference Xfer Library, which moves data such as KV cache between memory and storage for distributed LLM inference. Its ``AIS`` storage backend is the ROCm counterpart to its ``GDS`` backend. It runs ``hipFileRead()`` and ``hipFileWrite()`` on a pool of worker threads to move data directly between GPU memory and files.
+
+To build the backend, pass ``-Drocm_path=/opt/rocm`` (or your ROCm install prefix) to ``meson setup`` when configuring NIXL. To use it, request the ``AIS`` backend from your NIXL agent: call ``nixlAgent::createBackend()`` with ``"AIS"`` in C++, or ``create_backend("AIS")`` or ``nixl_agent_config(backends=["UCX", "AIS"])`` in Python. The backend only supports GPU memory buffers. See the `NIXL AIS plugin documentation <https://github.com/ai-dynamo/nixl/blob/main/src/plugins/rocm_ais/README.md>`_ for more information.
 
 fastsafetensors
 ===============
