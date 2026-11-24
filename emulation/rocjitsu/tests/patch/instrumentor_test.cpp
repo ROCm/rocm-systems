@@ -4328,6 +4328,8 @@ TEST(InstrumentorEntryPrologue, StubAtTheEdgeOfBranchRangeIsAccepted) {
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
 
+  EXPECT_FALSE(result.trampoline_error);
+
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const auto stub = test::patched_entry_text_offset(patched);
@@ -4338,6 +4340,7 @@ TEST(InstrumentorEntryPrologue, StubAtTheEdgeOfBranchRangeIsAccepted) {
 TEST(InstrumentorEntryPrologue, StubPaddedOutOfBranchRangeFailsClosed) {
   auto result = patch_kernel_of_size(130816);
   ASSERT_FALSE(result.errors.empty());
+  EXPECT_EQ(result.trampoline_error, TrampolineBuildErrorCode::UnsupportedControlTransferRange);
   EXPECT_NE(result.errors.front().find("out of branch range of the kernel entry"),
             std::string::npos)
       << result.errors.front();

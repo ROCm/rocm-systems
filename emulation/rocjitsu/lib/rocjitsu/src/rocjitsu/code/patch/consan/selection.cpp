@@ -46,6 +46,8 @@ std::string_view reason_name(InputErrorCode code) {
     return "unsupported_instruction";
   case InputErrorCode::UnsupportedFlow:
     return "unsupported_flow";
+  case InputErrorCode::UnsupportedControlTransferRange:
+    return "unsupported_control_transfer_range";
   case InputErrorCode::DecodeFailure:
     return "decode_failure";
   case InputErrorCode::ResourceLimit:
@@ -96,8 +98,7 @@ FailureOr<PreparationResult> prepare_image_best_effort(std::span<const uint8_t> 
                                                        InputError &error, ScopeKind scope) {
   error = {};
   const InputLimits limits;
-  if (entries.empty() || entries.size() > kImageEntryLimit ||
-      original.size() > limits.image_bytes / entries.size()) {
+  if (entries.size() > kImageEntryLimit || original.size() > limits.image_bytes) {
     error = {.code = InputErrorCode::ResourceLimit,
              .text_offset = {},
              .message = "selected input copies exceed bounded image analysis budget"};
@@ -139,6 +140,19 @@ FailureOr<PreparationResult> prepare_image_best_effort(std::span<const uint8_t> 
   if (inventory.failed()) {
     error = {
         .code = InputErrorCode::InvalidImage, .text_offset = {}, .message = diagnostic.message()};
+    return Result::failure();
+  }
+  std::vector<std::string_view> automatic_entries;
+  if (entries.empty()) {
+    automatic_entries.reserve(inventory.value().entries.size());
+    for (const ImageEntryFacts &entry : inventory.value().entries)
+      automatic_entries.push_back(entry.binding.name);
+    entries = automatic_entries;
+  }
+  if (original.size() > limits.image_bytes / entries.size()) {
+    error = {.code = InputErrorCode::ResourceLimit,
+             .text_offset = {},
+             .message = "selected input copies exceed bounded image analysis budget"};
     return Result::failure();
   }
   for (const std::string_view entry : entries) {
@@ -200,9 +214,34 @@ FailureOr<PreparationResult> prepare_image_best_effort(std::span<const uint8_t> 
   if (!selected.empty()) {
     FailureOr<PreparedImageArtifact> artifact =
         prepare_image(original, target, selected, error, scope);
-    if (artifact.failed())
-      return Result::failure();
-    result.artifact = std::move(artifact.value());
+    if (artifact.succeeded()) {
+      result.artifact = std::move(artifact.value());
+    } else {
+      if (error.code != InputErrorCode::UnsupportedControlTransferRange)
+        return Result::failure();
+      std::vector<std::string_view> accepted;
+      for (EntryPreparation &entry : result.entries) {
+        if (!entry.instrumented)
+          continue;
+        accepted.push_back(entry.entry);
+        InputError candidate_error;
+        FailureOr<PreparedImageArtifact> candidate =
+            prepare_image(original, target, accepted, candidate_error, scope);
+        if (candidate.succeeded()) {
+          result.artifact = std::move(candidate.value());
+          continue;
+        }
+        if (candidate_error.code != InputErrorCode::UnsupportedControlTransferRange) {
+          error = std::move(candidate_error);
+          return Result::failure();
+        }
+        accepted.pop_back();
+        entry.instrumented = false;
+        entry.reason = std::move(candidate_error);
+        util::Logger::consan("retaining native entry ", entry.entry, ": ", entry.reason.message);
+      }
+      error = {};
+    }
   }
   if (result.artifact) {
     for (const EntryPreparation &entry : result.entries) {

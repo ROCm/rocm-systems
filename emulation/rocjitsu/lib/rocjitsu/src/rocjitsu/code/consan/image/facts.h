@@ -55,7 +55,7 @@ public:
 /// @brief Owning facts for one coherent prepared image and explicit selection.
 /// @details Entries are strictly ordered by original descriptor offset. Common
 /// fields also describe native rows, which deliberately have no detector facts.
-/// Selected entries must share one qualified scope; mixed scopes are rejected.
+/// Selected entries may mix qualified LDS scopes, but cannot mix LDS and trace.
 class ImageFacts {
 public:
   ImageIdentity original;
@@ -78,7 +78,10 @@ selection_profile_digest(std::span<const EntryKey> selected_keys,
 [[nodiscard]] Digest selection_profile_digest(std::span<const EntryKey> selected_keys,
                                               ScopeKind scope, const Digest &options);
 
-/// @brief Return the common selected scope; mixed or missing scopes are invalid.
+/// @brief Hash selected keys and their actual scopes; homogeneous images retain their digest.
+[[nodiscard]] Digest image_selection_profile_digest(const ImageFacts &image);
+
+/// @brief Return a unique selected scope, or nullopt for mixed/missing scopes.
 [[nodiscard]] std::optional<ScopeKind> selected_scope(const ImageFacts &image);
 
 [[nodiscard]] const ImageEntryFacts *find_image_entry(const ImageFacts &image, EntryKey key);

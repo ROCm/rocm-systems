@@ -11,6 +11,7 @@
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/patch/consan/probes.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/scoped_cfg_edges.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -389,16 +390,9 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
     return program.kernel.descriptor_file_offset;
   });
   const InputProgram &first = programs.front();
-  const ScopeKind scope = program_scope(first);
   for (const InputProgram &program : programs) {
     if (program.wave_size != first.wave_size) {
       return reject(error, "selected entries have inconsistent wave modes");
-    }
-    if (program_scope(program) != scope) {
-      error = {.code = InputErrorCode::UnsupportedEntry,
-               .text_offset = {},
-               .message = "selected entries have inconsistent analysis scopes"};
-      return Result::failure();
     }
   }
   const std::span<const uint8_t> probe_image = lds_probe_image(first.target->id, first.wave_size);
@@ -435,9 +429,14 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
   }
   InstrumentedCodeObject output = instrumentor.patch();
   if (!output.errors.empty() || output.entries.size() != programs.size()) {
-    return reject(error, "whole-image callable DBI lowering: " +
-                             (output.errors.empty() ? std::string("missing entry attribution")
-                                                    : output.errors.front()));
+    (void)reject(error, "whole-image callable DBI lowering: " +
+                            (output.errors.empty() ? std::string("missing entry attribution")
+                                                   : output.errors.front()));
+    if (!output.errors.empty() &&
+        output.trampoline_error == TrampolineBuildErrorCode::UnsupportedControlTransferRange) {
+      error.code = InputErrorCode::UnsupportedControlTransferRange;
+    }
+    return Result::failure();
   }
   PreparedImageArtifact artifact;
   artifact.image = std::move(output.elf_bytes);
@@ -464,7 +463,6 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
   facts.code_object_abi = 5;
   facts.original_text_bytes = original_text.size();
   facts.prepared_text_bytes = prepared_text.size();
-  std::vector<EntryKey> selected_keys;
   for (const KernelDescriptorInfo &kernel : original_kernels) {
     // Native names also appear in the image-level JSON disposition table.
     if (!util::is_valid_utf8(kernel.kernel_name)) {
@@ -514,7 +512,6 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
       }
       row.binding = manifest.entry;
       row.selected = std::move(manifest);
-      selected_keys.push_back(row.key);
     } else {
       row.binding = {.name = kernel.kernel_name,
                      .original_descriptor_offset = row.key,
@@ -564,8 +561,7 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
     facts.entries.push_back(std::move(row));
   }
   std::ranges::sort(facts.entries, {}, &ImageEntryFacts::key);
-  std::ranges::sort(selected_keys);
-  facts.selection_profile = selection_profile_digest(selected_keys, scope);
+  facts.selection_profile = image_selection_profile_digest(facts);
   util::StringDiagnostic contract_error;
   if (verify_artifact_images(facts, original, artifact.image, contract_error.emitter()).failed()) {
     return reject(error, contract_error.message());

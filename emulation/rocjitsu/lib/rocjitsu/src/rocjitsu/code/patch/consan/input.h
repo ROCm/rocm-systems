@@ -27,6 +27,7 @@ enum class InputErrorCode {
   UnsupportedSynchronization,
   UnsupportedInstruction,
   UnsupportedFlow,
+  UnsupportedControlTransferRange,
   DecodeFailure,
   ResourceLimit,
 };
@@ -85,7 +86,7 @@ struct InputProgram {
 
 /// @brief Build an owning, qualified input program for the bounded native LDS profile.
 /// @details A closed acyclic CFG, or a qualified single-block barrier loop, admits an explicit
-/// integer/argument/output instruction subset. Unsupported memory or sync is a
+/// bounded native-LDS application instruction subset. Unsupported memory or sync is a
 /// preparation failure, never an omitted operation interpreted as no ordering.
 /// The profile must match a supported table entry; copies/temporaries are valid.
 /// A successful result retains the static entry, independent of caller lifetime.

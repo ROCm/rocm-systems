@@ -1193,6 +1193,20 @@ TEST_F(ConSanPrepareCoverage, PartialCoverageMatchesStrictSupportedSubsetAndReta
   EXPECT_EQ(util::Logger::group_name(util::Logger::GROUP_CONSAN), "CONSAN");
 }
 
+TEST_F(ConSanPrepareCoverage, EmptySelectionAttemptsEveryOriginalEntry) {
+  const FailureOr<PreparationResult> result =
+      prepare_image_best_effort(original_, *target_profile("gfx1250"), {}, error_);
+  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.value().artifact);
+  ASSERT_EQ(result.value().entries.size(), 3u);
+  EXPECT_EQ(result.value().entries[0].entry, "mk_a");
+  EXPECT_EQ(result.value().entries[1].entry, "mk_b");
+  EXPECT_EQ(result.value().entries[2].entry, "mk_c");
+  EXPECT_TRUE(result.value().entries[0].instrumented);
+  EXPECT_TRUE(result.value().entries[1].instrumented);
+  EXPECT_FALSE(result.value().entries[2].instrumented);
+}
+
 TEST_F(ConSanPrepareCoverage, AllUnsupportedRetainsOriginalIdentityWithoutInventingFacts) {
   const std::array<std::string_view, 1> requested = {"mk_c"};
   const FailureOr<PreparationResult> result =
@@ -1213,7 +1227,6 @@ TEST_F(ConSanPrepareCoverage, InvalidSelectionAndImageNeverBecomeOrdinarySkips) 
   const TargetProfile &target = *target_profile("gfx1250");
   const std::array<std::string_view, 2> duplicate = {"mk_a", "mk_a"};
   const std::array<std::string_view, 2> missing = {"mk_c", "missing"};
-  EXPECT_TRUE(prepare_image_best_effort(original_, target, {}, error_).failed());
   EXPECT_TRUE(prepare_image_best_effort(original_, target, duplicate, error_).failed());
   EXPECT_TRUE(prepare_image_best_effort(original_, target, missing, error_).failed());
   const std::array<std::string_view, 1> requested = {"mk_c"};
@@ -1543,7 +1556,7 @@ TEST(ConSanPrepareImageScopes, WholeImageKeepsPerEntryLoopCompletionAndWorkgroup
 #endif
 
 #ifdef CONSAN_MULTI_ENTRY_MIXED_FIXTURE
-TEST(ConSanPrepareImageScopes, MixedSelectedScopesRejectWhileHomogeneousSubsetsRemainValid) {
+TEST(ConSanPrepareImageScopes, MixedLdsScopesPreserveEachEntryWhileHomogeneousSubsetsRemainValid) {
   std::ifstream file(CONSAN_MULTI_ENTRY_MIXED_FIXTURE, std::ios::binary);
   const std::vector<uint8_t> original = {std::istreambuf_iterator<char>(file),
                                          std::istreambuf_iterator<char>()};
@@ -1551,9 +1564,21 @@ TEST(ConSanPrepareImageScopes, MixedSelectedScopesRejectWhileHomogeneousSubsetsR
   const TargetProfile &target = *target_profile("gfx1250");
   const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
   InputError error;
-  EXPECT_TRUE(prepare_image(original, target, selected, error).failed());
-  EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry);
-  EXPECT_EQ(error.message, "selected entries have inconsistent analysis scopes");
+  const FailureOr<PreparedImageArtifact> mixed = prepare_image(original, target, selected, error);
+  ASSERT_TRUE(mixed.succeeded()) << error.message;
+  EXPECT_FALSE(selected_scope(mixed.value().facts));
+  for (const ImageEntryFacts &entry : mixed.value().facts.entries) {
+    if (!entry.selected)
+      continue;
+    EXPECT_EQ(entry.selected->scope, entry.binding.name == "mk_a"
+                                         ? ScopeKind::NativeLdsWorkgroupBarrier
+                                         : ScopeKind::NativeLdsNoSynchronization);
+  }
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(mixed.value().facts);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), mixed.value().facts);
   for (const std::string_view name : selected) {
     const std::array<std::string_view, 1> subset = {name};
     const FailureOr<PreparedImageArtifact> artifact =

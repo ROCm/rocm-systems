@@ -77,7 +77,9 @@ The three-stage split has three purposes:
 
 ### Offline preparation
 
-`rj_consan_prepare` classifies requested entries independently. For the LDS
+`rj_consan_prepare` classifies requested entries independently. With no `--entry`
+options it inventories and attempts every entry in the original image. Repeated
+`--entry` options restrict preparation to that explicit subset. For the LDS
 profile, it first decodes the complete reachable code and checks its memory
 semantics. An entry proven to have no LDS memory accesses needs no probes,
 even when its ABI cannot be instrumented. Fixed LDS allocation alone is not a
@@ -119,13 +121,25 @@ requirement; a blocked entry fails preparation before publishing an artifact.
 The strict C++ `prepare_image()` API retains its existing behavior;
 `prepare_image_best_effort()` returns the owning coverage report and optional
 artifact. Binary rewriting and preservation validation use the same strict
-implementation for all entries that pass qualification.
+implementation for all entries that pass qualification. If the combined set
+exceeds the typed hardware branch-reach limit, best-effort preparation retries
+entries in requested order, retaining the most recent fully validated artifact
+and leaving an incompatible candidate native with its owning limit reason.
+This is a compilation capacity decision; arbitrary rewrite, preservation, and
+identity failures still fail the whole preparation. The strict API never retries
+or publishes a partial selection.
 
 Coverage degradation emits one warning summary, including with the default
 log-groups-OFF build. Per-entry qualification details use the compile-time
 `CONSAN` log group (`-DRJ_LOG_GROUPS=CONSAN`); the structured report is always
 written regardless of logging configuration. Intentionally unrequested entries
 do not count as skipped and do not generate degradation warnings.
+
+An image can contain multiple qualified LDS scopes: each entry retains its own
+no-synchronization, workgroup-barrier, or barrier-loop facts. Its selection
+identity includes the per-entry scopes. Analysis renders an explicit
+`native_lds_single_range_mixed_scopes` scope for these images. Mixing execution-trace and LDS
+entries in one selected image remains invalid.
 
 The compiler inventories the exact original image, qualifies each selected entry,
 and plans its probes, bootstrap and resources. One transactional rewrite produces
@@ -421,9 +435,10 @@ instruction facts, runs the checks, and emits JSON findings and coverage. The
 capture owns the evidence needed for replay; analysis needs neither the
 original code-object files nor live HSA state.
 
-A prepared image's selected entries share one qualified scope; native entries
-have no analysis facts. Mixed selected LDS/trace scopes and mixed barrier/loop
-scopes are rejected before publication. The shared contract retains LDS scopes
+Each selected entry retains its qualified scope; native entries have no
+analysis facts. Selected LDS entries may use different no-synchronization,
+barrier, and barrier-loop scopes in one image. Mixing selected LDS and execution
+trace scopes is rejected before publication. The shared contract retains LDS scopes
 1 (no synchronization), 2 (workgroup barrier), and 3 (bounded barrier loop), with
 execution trace assigned scope 4. Readers interpret each scope's row fields
 independently; trace counters are never barrier completion evidence.

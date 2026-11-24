@@ -1896,8 +1896,10 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
 std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologue(
     const std::vector<KernelDescriptorInfo> &kernels, std::optional<uint32_t> kernel_sgpr_count,
     const std::vector<BasicBlock *> &scope, const std::vector<ProbeCallable> &probes,
-    const std::vector<ProbeClobberSummary> &summaries, uint64_t cave_offset,
-    std::string *error_out) {
+    const std::vector<ProbeClobberSummary> &summaries, uint64_t cave_offset, std::string *error_out,
+    TrampolineBuildErrorCode *error_code) {
+  if (error_code)
+    *error_code = TrampolineBuildErrorCode::InvalidPlan;
   // DBI does not support multiple kernels, so neither does the prologue. Every
   // site that can ask for the storage passes an argument, and that path already
   // requires a single kernel to bound VGPR selection; this gate reports it
@@ -2057,9 +2059,12 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
           {.source_index = source_index, .sgpr = destination, .source_class = source_class});
     }
   }
-  const uint64_t branch_pc = patch.stub_offset + patch.words.size() * sizeof(uint32_t);
-  const auto simm16 = compute_sopp_branch_simm16(branch_pc, entry_offset);
+  EntryPrologueErrorCode branch_error = EntryPrologueErrorCode::InvalidPlan;
+  const std::optional<int16_t> simm16 =
+      plan_dbi_entry_branch(patch.stub_offset, patch.words.size(), entry_offset, &branch_error);
   if (!simm16) {
+    if (error_code && branch_error == EntryPrologueErrorCode::UnsupportedControlTransferRange)
+      *error_code = TrampolineBuildErrorCode::UnsupportedControlTransferRange;
     report(error_out, ("the entry-prologue stub is out of branch range of the kernel entry; the "
                        "entry prologue is required by " +
                        entry_storage_reader_list(probes))
@@ -2073,6 +2078,8 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
     return std::nullopt;
   }
   patch.words.push_back(branch.value());
+  if (error_code)
+    *error_code = TrampolineBuildErrorCode::None;
   return patch;
 }
 
@@ -3799,6 +3806,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     if (!planned.errors.empty()) {
       result.errors = std::move(planned.errors);
       result.edit_error = std::move(planned.edit_error);
+      result.trampoline_error = planned.trampoline_error;
       return result;
     }
     cursor = plans[index].cave_end;
@@ -3815,16 +3823,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     }
     for (const AppliedSite &site : plan.applied) {
       if (site.site->kind == InstrumentationKind::KernelEntry) {
-        if (!plan.prologue) {
+        if (!plan.prologue || plan.prologue->words.empty()) {
           result.errors.emplace_back("kernel entry callback has no entry stub");
           return result;
         }
-        const uint64_t branch_pc =
-            plan.prologue->stub_offset + (plan.prologue->words.size() - 1) * sizeof(uint32_t);
+        EntryPrologueErrorCode branch_error = EntryPrologueErrorCode::InvalidPlan;
         const std::optional<int16_t> displacement =
-            compute_sopp_branch_simm16(branch_pc, site.trampoline_offset);
+            plan_dbi_entry_branch(plan.prologue->stub_offset, plan.prologue->words.size() - 1,
+                                  site.trampoline_offset, &branch_error);
         if (!displacement) {
           result.errors.emplace_back("kernel entry callback is outside its stub's branch range");
+          if (result.errors.size() == 1 &&
+              branch_error == EntryPrologueErrorCode::UnsupportedControlTransferRange)
+            result.trampoline_error = TrampolineBuildErrorCode::UnsupportedControlTransferRange;
           return result;
         }
         const util::FailureOr<uint32_t> branch = build_s_branch(*displacement, arch_);
@@ -4364,10 +4375,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       sites, [](const auto &site) { return site.kind == InstrumentationKind::KernelEntry; });
   if (probes_read_entry_storage(resolved.probes) || has_entry_callback) {
     std::string err;
+    TrampolineBuildErrorCode entry_error = TrampolineBuildErrorCode::InvalidPlan;
     entry_patch = plan_entry_prologue(kernels, kernel_sgpr_count, liveness_scope, resolved.probes,
-                                      probe_summaries, cave_cursor, &err);
+                                      probe_summaries, cave_cursor, &err, &entry_error);
     if (!entry_patch) {
       result.errors.push_back(std::move(err));
+      if (result.errors.size() == 1 &&
+          entry_error == TrampolineBuildErrorCode::UnsupportedControlTransferRange)
+        result.trampoline_error = entry_error;
       return result;
     }
     entry_storage_base = entry_patch->storage_base;
@@ -4397,6 +4412,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
+  size_t range_errors = 0;
   // Allocate offsets for each site. Trampoline size is highly dependent on the
   // plan (inlined assembly? spills? arguments passed?) so set up the plan first.
   // Then build the trampoline based on the plan.
@@ -4404,6 +4420,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     const uint64_t trampoline_offset = cave_cursor;
     std::string err;
     std::optional<TrampolineBytes> bytes;
+    TrampolineBuildErrorCode build_error = TrampolineBuildErrorCode::InvalidPlan;
     AppliedSite record{&site, trampoline_offset, {}};
 
     // If this site calls a probe, then we need to know what registers it will
@@ -4665,7 +4682,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // Get trampoline from TrampolineBuilder
-      bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+      bytes = TrampolineBuilder::emit_probe_call(plan, &err, &build_error);
       if (plan.returns_to_kernel) {
         record.return_target = plan.return_target;
       }
@@ -4689,13 +4706,15 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.push_back(std::move(err));
         continue;
       }
-      bytes = TrampolineBuilder::build(plan, &err);
+      bytes = TrampolineBuilder::build(plan, &err, &build_error);
       if (plan.returns_to_kernel) {
         record.return_target = plan.return_target;
       }
     }
 
     if (!bytes) {
+      if (build_error == TrampolineBuildErrorCode::UnsupportedControlTransferRange)
+        ++range_errors;
       result.errors.push_back(std::move(err));
       continue;
     }
@@ -4708,6 +4727,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
   // All-or-nothing: bail before mutating the patcher if any site failed.
   if (!result.errors.empty()) {
+    if (range_errors == result.errors.size()) {
+      result.trampoline_error = TrampolineBuildErrorCode::UnsupportedControlTransferRange;
+    }
     return result;
   }
 
@@ -4744,12 +4766,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   anchor_edits.reserve(applied.size());
   for (const AppliedSite &applied_site : applied) {
     if (applied_site.site->kind == InstrumentationKind::KernelEntry) {
-      const uint64_t branch_pc =
-          entry_patch->stub_offset + (entry_patch->words.size() - 1) * sizeof(uint32_t);
+      if (!entry_patch || entry_patch->words.empty()) {
+        result.errors.emplace_back("kernel-entry callback has no entry stub");
+        return result;
+      }
+      EntryPrologueErrorCode branch_error = EntryPrologueErrorCode::InvalidPlan;
       const std::optional<int16_t> target =
-          compute_sopp_branch_simm16(branch_pc, applied_site.trampoline_offset);
+          plan_dbi_entry_branch(entry_patch->stub_offset, entry_patch->words.size() - 1,
+                                applied_site.trampoline_offset, &branch_error);
       if (!target) {
         result.errors.emplace_back("kernel-entry callback is outside the stub's branch range");
+        if (result.errors.size() == 1 &&
+            branch_error == EntryPrologueErrorCode::UnsupportedControlTransferRange)
+          result.trampoline_error = TrampolineBuildErrorCode::UnsupportedControlTransferRange;
         return result;
       }
       auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };

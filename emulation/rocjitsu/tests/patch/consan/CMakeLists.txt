@@ -83,6 +83,84 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
     list(APPEND _fixtures ${_fixture_dir}/renamed.hsaco)
     include(target_fixtures.cmake)
     include(multi_entry.cmake)
+    set(_composition_object ${_fixture_dir}/compilation-limits.o)
+    set(_composition_image ${_fixture_dir}/compilation-limits.hsaco)
+    add_custom_command(
+        OUTPUT ${_composition_object}
+        COMMAND
+            ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp
+            -target amdgcn-amd-amdhsa -mcpu=gfx1250 -mcode-object-version=5
+            -mno-wavefrontsize64 -c
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/compilation_limits.s -o
+            ${_composition_object}
+        DEPENDS fixtures/compilation_limits.s ${AMDCXX}
+        VERBATIM
+    )
+    add_custom_command(
+        OUTPUT ${_composition_image}
+        COMMAND
+            ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_composition_object} -o
+            ${_composition_image}
+        DEPENDS ${_composition_object}
+        VERBATIM
+    )
+    set(_composition_prologue_object ${_fixture_dir}/compilation-prologue.o)
+    set(_composition_prologue_image ${_fixture_dir}/compilation-prologue.hsaco)
+    add_custom_command(
+        OUTPUT ${_composition_prologue_object}
+        COMMAND
+            ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp
+            -target amdgcn-amd-amdhsa -mcpu=gfx1250 -mcode-object-version=5
+            -mno-wavefrontsize64 -DCONSAN_COMPOSITION_SITES=1
+            -DCONSAN_COMPOSITION_PADDING_WORDS=32768 -c
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/compilation_limits.s -o
+            ${_composition_prologue_object}
+        DEPENDS fixtures/compilation_limits.s ${AMDCXX}
+        VERBATIM
+    )
+    add_custom_command(
+        OUTPUT ${_composition_prologue_image}
+        COMMAND
+            ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared
+            ${_composition_prologue_object} -o ${_composition_prologue_image}
+        DEPENDS ${_composition_prologue_object}
+        VERBATIM
+    )
+    set(_composition_split_prologue_object
+        ${_fixture_dir}/compilation-split-prologue.o
+    )
+    set(_composition_split_prologue_image
+        ${_fixture_dir}/compilation-split-prologue.hsaco
+    )
+    add_custom_command(
+        OUTPUT ${_composition_split_prologue_object}
+        COMMAND
+            ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp
+            -target amdgcn-amd-amdhsa -mcpu=gfx1250 -mcode-object-version=5
+            -mno-wavefrontsize64 -DCONSAN_COMPOSITION_SITES=1
+            -DCONSAN_COMPOSITION_GAP_WORDS=32768 -c
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/compilation_limits.s -o
+            ${_composition_split_prologue_object}
+        DEPENDS fixtures/compilation_limits.s ${AMDCXX}
+        VERBATIM
+    )
+    add_custom_command(
+        OUTPUT ${_composition_split_prologue_image}
+        COMMAND
+            ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared
+            ${_composition_split_prologue_object} -o
+            ${_composition_split_prologue_image}
+        DEPENDS ${_composition_split_prologue_object}
+        VERBATIM
+    )
+    add_custom_target(
+        consan_composition_fixture
+        DEPENDS
+            ${_composition_image}
+            ${_composition_prologue_image}
+            ${_composition_split_prologue_image}
+    )
+    add_dependencies(consan_multi_entry_fixture consan_composition_fixture)
     target_sources(consan_input_test PRIVATE target_test.cpp)
     add_custom_target(consan_original_fixtures DEPENDS ${_fixtures})
     add_dependencies(consan_input_test consan_original_fixtures)
@@ -127,6 +205,17 @@ set(RJ_CONSAN_TEST_ARTIFACT_ROOT
     "Directory for preserved ConSan integration evidence"
 )
 if(TARGET consan_original_fixtures)
+    add_test(
+        NAME ConSanPrepareCli.CompositionCapacity
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/prepare_cli_composition_test.py
+            --prepare $<TARGET_FILE:rj_consan_prepare> --fixture
+            ${_composition_image} --prologue-fixture
+            ${_composition_prologue_image} --split-prologue-fixture
+            ${_composition_split_prologue_image} --root
+            ${RJ_CONSAN_TEST_ARTIFACT_ROOT}
+    )
     add_test(
         NAME ConSanPrepareCli.BestEffortCoverage
         COMMAND

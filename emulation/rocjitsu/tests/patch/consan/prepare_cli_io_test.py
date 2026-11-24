@@ -26,13 +26,59 @@ def main():
     print(f'evidence: {directory}', flush=True)
     for name in ('distant-entry', 'dense-sites'):
         original = fixture.parent / 'targets/gfx1100/wave32' / f'native-{name}.hsaco'
+        if name == 'dense-sites':
+            native = directory / 'dense-sites-native'
+            native_command = [
+                str(prepare),
+                str(original),
+                'gfx1100',
+                str(native),
+                '--entry',
+                'lds_producer_consumer',
+            ]
+            native_result = subprocess.run(
+                native_command, capture_output=True, text=True, timeout=60, check=False
+            )
+            native_record = {
+                'command': native_command,
+                'exit_status': native_result.returncode,
+                'stdout': native_result.stdout,
+                'stderr': native_result.stderr,
+            }
+            (directory / 'dense-sites-native.json').write_text(
+                json.dumps(native_record, indent=2) + '\n'
+            )
+            assert native_result.returncode == 0, native_record
+            report = json.loads((native / 'preparation.json').read_text())
+            assert (
+                report['outcome'] == 'native_only'
+                and report['requested_coverage'] == 'not_performed'
+            ), report
+            assert (report['requested'], report['instrumented'], report['skipped']) == (
+                1,
+                0,
+                1,
+            ), report
+            assert (
+                report['entries'][0]['reason_code']
+                == 'unsupported_control_transfer_range'
+            ), report
+            assert (native / 'original.hsaco').read_bytes() == original.read_bytes()
+            assert not any(
+                (native / artifact).exists()
+                for artifact in ('ready', 'facts.bin', 'prepared.hsaco')
+            )
         destination = directory / name
+        # This rejection control explicitly requires every requested entry;
+        # best-effort capacity fallback is checked independently above.
         command = [
             str(prepare),
             str(original),
             'gfx1100',
-            'lds_producer_consumer',
             str(destination),
+            '--entry',
+            'lds_producer_consumer',
+            '--require-all',
         ]
         result = subprocess.run(
             command, capture_output=True, text=True, timeout=60, check=False

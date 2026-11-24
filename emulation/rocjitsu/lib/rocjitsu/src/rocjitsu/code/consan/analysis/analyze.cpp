@@ -56,7 +56,7 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   result.execution_conditions = capture.header.execution_conditions;
   result.target = capture.header.image.target;
   result.wave_size = capture.header.image.wave_size;
-  result.scope = *selected_scope(capture.header.image);
+  result.scope = selected_scope(capture.header.image);
   result.coverage_complete = !capture.executions.empty();
   std::map<uint32_t, uint32_t> generations;
   for (const CapturedExecution &execution : capture.executions) {

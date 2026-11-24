@@ -20,6 +20,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -654,6 +655,67 @@ TEST(PlanDbiEntryPrologue, PropagatesStorageAndWordFailures) {
                                        /*kernel_sgpr_count=*/32, link_pair(), &error)
                    .has_value());
   EXPECT_FALSE(error.empty());
+}
+
+TEST(PlanDbiEntryBranch, IncludesTheWordIndexAndResetsTheErrorOnSuccess) {
+  EntryPrologueErrorCode error = EntryPrologueErrorCode::UnsupportedControlTransferRange;
+  const std::optional<int16_t> nearby = plan_dbi_entry_branch(0x100, 3, 0x114, &error);
+  ASSERT_TRUE(nearby.has_value());
+  EXPECT_EQ(*nearby, 1);
+  EXPECT_EQ(error, EntryPrologueErrorCode::None);
+
+  // The signed displacement limits apply after the architectural PC+4 bias.
+  const std::optional<int16_t> forward = plan_dbi_entry_branch(0, 0, 131072, &error);
+  ASSERT_TRUE(forward.has_value());
+  EXPECT_EQ(*forward, std::numeric_limits<int16_t>::max());
+  EXPECT_EQ(error, EntryPrologueErrorCode::None);
+  const std::optional<int16_t> backward = plan_dbi_entry_branch(131068, 0, 0, &error);
+  ASSERT_TRUE(backward.has_value());
+  EXPECT_EQ(*backward, std::numeric_limits<int16_t>::min());
+  EXPECT_EQ(error, EntryPrologueErrorCode::None);
+
+  EXPECT_EQ(plan_dbi_entry_branch(0, 1, 8), 0);
+}
+
+TEST(PlanDbiEntryBranch, ClassifiesOnlyValidOutOfReachDisplacementsAsCapacity) {
+  EntryPrologueErrorCode error = EntryPrologueErrorCode::None;
+  EXPECT_FALSE(plan_dbi_entry_branch(0, 0, 131076, &error).has_value());
+  EXPECT_EQ(error, EntryPrologueErrorCode::UnsupportedControlTransferRange);
+  error = EntryPrologueErrorCode::None;
+  EXPECT_FALSE(plan_dbi_entry_branch(131072, 0, 0, &error).has_value());
+  EXPECT_EQ(error, EntryPrologueErrorCode::UnsupportedControlTransferRange);
+}
+
+TEST(PlanDbiEntryBranch, KeepsMalformedCoordinatesAndOverflowDistinctFromCapacity) {
+  struct Coordinates {
+    uint64_t stub_offset;
+    std::size_t word_index;
+    uint64_t target;
+  };
+  constexpr uint64_t kMaxUnsigned = std::numeric_limits<uint64_t>::max();
+  constexpr uint64_t kMaxSigned = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  const std::array<Coordinates, 8> malformed = {{
+      {.stub_offset = 1, .word_index = 0, .target = 4},
+      {.stub_offset = 0, .word_index = 0, .target = 1},
+      {.stub_offset = kMaxUnsigned - 3, .word_index = 0, .target = 0},
+      {.stub_offset = 0, .word_index = 0, .target = kMaxUnsigned - 3},
+      {.stub_offset = kMaxSigned - 3, .word_index = 0, .target = 0},
+      {.stub_offset = kMaxSigned - 7, .word_index = 1, .target = 0},
+      {.stub_offset = 4, .word_index = std::numeric_limits<std::size_t>::max(), .target = 0},
+      {.stub_offset = 4,
+       .word_index = std::numeric_limits<std::size_t>::max() / 4 + 1,
+       .target = 0},
+  }};
+  for (const Coordinates &coordinates : malformed) {
+    SCOPED_TRACE(coordinates.stub_offset);
+    SCOPED_TRACE(coordinates.word_index);
+    SCOPED_TRACE(coordinates.target);
+    EntryPrologueErrorCode error = EntryPrologueErrorCode::UnsupportedControlTransferRange;
+    EXPECT_FALSE(plan_dbi_entry_branch(coordinates.stub_offset, coordinates.word_index,
+                                       coordinates.target, &error)
+                     .has_value());
+    EXPECT_EQ(error, EntryPrologueErrorCode::InvalidPlan);
+  }
 }
 
 } // namespace

@@ -2750,6 +2750,112 @@ TEST_F(ConSanAnalysis, UnexecutedSelectedSiblingKeepsProvidedEntryCoverageIncomp
   ASSERT_EQ(result.value().executions.size(), 1u);
 }
 
+TEST_F(ConSanAnalysis, MixedLdsScopesReplayWithPerEntryOrderingAndRenderIdentity) {
+  access(0, 0, 1);
+  access(1, 1, 1);
+  barrier();
+
+  ImageEntryFacts sibling = test::multi_entry_header().image.entries[1];
+  Manifest &unsynchronized = *sibling.selected;
+  unsynchronized.target = capture_.header.image.target;
+  unsynchronized.sites[0].access = AccessKind::Write;
+  // Keep the sibling's prepared sites clear of the first entry's barrier probe.
+  for (SiteFacts &site : unsynchronized.sites) {
+    site.prepared_guest_offset += 128;
+    site.probe_offset += 128;
+  }
+  capture_.header.image.entries.push_back(std::move(sibling));
+  capture_.header.image.selection_profile = image_selection_profile_digest(capture_.header.image);
+  ASSERT_FALSE(selected_scope(capture_.header.image));
+  const Manifest *second = selected_manifest(capture_.header.image, 192);
+  ASSERT_NE(second, nullptr);
+  CapturedExecution execution = test::execution(*second, 2, 2);
+  const FailureOr<LaunchLayout> layout =
+      plan_launch(*second, execution.dimensions, execution.group_bytes, 0);
+  ASSERT_TRUE(layout.succeeded());
+  ASSERT_EQ(layout.value().wave_count, 2u);
+  // Each execution uses its own scope-dependent row layout.
+  EXPECT_LT(layout.value().row_stride, stride_);
+  stride_ = layout.value().row_stride;
+  for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave)
+    wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
+                    wire::kRowEntered | wire::kRowExited);
+  capture_.executions.push_back(std::move(execution));
+  access(0, 0, 1, 0, 1, 0, 1);
+  access(1, 1, 1, 0, 1, 0, 1);
+
+  // Encode directly: the single-scope fixture helper refreshes a homogeneous digest.
+  util::StringDiagnostic error;
+  CaptureEncoder encoder;
+  FailureOr<std::vector<uint8_t>> bytes = encoder.start(capture_.header, error.emitter());
+  ASSERT_TRUE(bytes.succeeded()) << error.message();
+  for (const CapturedExecution &captured : capture_.executions) {
+    const FailureOr<std::vector<uint8_t>> frame = encoder.append(captured, error.emitter());
+    ASSERT_TRUE(frame.succeeded()) << error.message();
+    bytes.value().insert(bytes.value().end(), frame.value().begin(), frame.value().end());
+  }
+  const FailureOr<std::vector<uint8_t>> end = encoder.finish(error.emitter());
+  ASSERT_TRUE(end.succeeded()) << error.message();
+  bytes.value().insert(bytes.value().end(), end.value().begin(), end.value().end());
+  const FailureOr<Capture> decoded = decode_capture(bytes.value(), error.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error.message();
+  EXPECT_EQ(decoded.value().header, capture_.header);
+  ASSERT_EQ(decoded.value().executions.size(), capture_.executions.size());
+  for (size_t index = 0; index < capture_.executions.size(); ++index) {
+    const CapturedExecution &before = capture_.executions[index];
+    const CapturedExecution &after = decoded.value().executions[index];
+    EXPECT_EQ(after.serial, before.serial);
+    EXPECT_EQ(after.entry_key, before.entry_key);
+    EXPECT_EQ(after.context, before.context);
+    EXPECT_EQ(after.arguments, before.arguments);
+    EXPECT_EQ(after.report, before.report);
+  }
+  const Manifest *barrier_facts = selected_manifest(decoded.value().header.image, 128);
+  const Manifest *no_sync_facts = selected_manifest(decoded.value().header.image, 192);
+  ASSERT_NE(barrier_facts, nullptr);
+  ASSERT_NE(no_sync_facts, nullptr);
+  EXPECT_EQ(barrier_facts->scope, ScopeKind::NativeLdsWorkgroupBarrier);
+  EXPECT_EQ(no_sync_facts->scope, ScopeKind::NativeLdsNoSynchronization);
+  EXPECT_FALSE(selected_scope(decoded.value().header.image));
+
+  const FailureOr<LdsRaceResult> result = analyze_capture(decoded.value(), {}, error.emitter());
+  ASSERT_TRUE(result.succeeded()) << error.message();
+  EXPECT_FALSE(result.value().scope);
+  EXPECT_TRUE(result.value().coverage_complete);
+  EXPECT_TRUE(result.value().provided_entry_coverage_complete);
+  EXPECT_EQ(result.value().ordered_pairs, 1u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 1u);
+  EXPECT_EQ(result.value().ordering_unresolved_pairs, 0u);
+  ASSERT_EQ(result.value().executions.size(), 2u);
+  const LdsRaceExecutionResult &ordered = result.value().executions[0];
+  EXPECT_EQ(ordered.entry_key, 128u);
+  EXPECT_EQ(ordered.valid_observations, 2u);
+  EXPECT_EQ(ordered.ordered_pairs, 1u);
+  EXPECT_EQ(ordered.cross_wave_pairs, 0u);
+  EXPECT_EQ(ordered.required_barrier_waves, 2u);
+  EXPECT_EQ(ordered.completed_barrier_waves, 2u);
+  EXPECT_TRUE(ordered.issues.empty());
+  ASSERT_EQ(ordered.ordered_examples.size(), 1u);
+  EXPECT_EQ(ordered.ordered_examples.front().ordering, LdsRaceOrdering::Ordered);
+  const LdsRaceExecutionResult &racy = result.value().executions[1];
+  EXPECT_EQ(racy.entry_key, 192u);
+  EXPECT_EQ(racy.valid_observations, 2u);
+  EXPECT_EQ(racy.ordered_pairs, 0u);
+  EXPECT_EQ(racy.cross_wave_pairs, 1u);
+  EXPECT_EQ(racy.required_barrier_waves, 0u);
+  EXPECT_EQ(racy.completed_barrier_waves, 0u);
+  EXPECT_TRUE(racy.issues.empty());
+  ASSERT_EQ(racy.cross_wave_examples.size(), 1u);
+  EXPECT_EQ(racy.cross_wave_examples.front().ordering, LdsRaceOrdering::Unordered);
+  const std::string rendered = render_lds_race_analysis(result.value());
+  EXPECT_NE(rendered.find("\"scope\":\"native_lds_single_range_mixed_scopes\""), std::string::npos);
+  EXPECT_NE(rendered.find("\"verdict\":\"findings\""), std::string::npos);
+  EXPECT_NE(rendered.find("\"serial\":1,\"entry_key\":128,\"entry\":\"synthetic_codec_fixture\""),
+            std::string::npos);
+  EXPECT_NE(rendered.find("\"serial\":2,\"entry_key\":192,\"entry\":\"second_codec_fixture\""),
+            std::string::npos);
+}
+
 TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {
   capture_.header = test::multi_entry_header();
   capture_.executions.clear();

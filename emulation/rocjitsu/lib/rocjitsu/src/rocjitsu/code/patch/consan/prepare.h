@@ -52,9 +52,10 @@ prepare_image(std::span<const uint8_t> original, const TargetProfile &target,
               std::span<const std::string_view> entries, InputError &error,
               ScopeKind scope = ScopeKind::NativeLdsNoSynchronization);
 
-/// @brief Retain unsupported requested entries as native, with owning reasons.
+/// @brief Qualify every image entry by default, retaining unsupported entries as native.
 /// @details Invalid images/selections, exhausted budgets and failed rewriting
-/// remain errors. Supported entries undergo the same strict transactional
+/// remain errors. Empty entries selects the complete inventory; explicit names
+/// limit the request. Supported entries undergo the same strict transactional
 /// lowering and preservation checks as prepare_image().
 [[nodiscard]] FailureOr<PreparationResult>
 prepare_image_best_effort(std::span<const uint8_t> original, const TargetProfile &target,
