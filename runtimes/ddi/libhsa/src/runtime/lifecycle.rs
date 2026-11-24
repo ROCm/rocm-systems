@@ -648,13 +648,13 @@ pub(crate) fn enter_delegated_tool_cleanup(generation: u64) -> Result<ApiLeaseSc
 
 #[cfg(test)]
 #[allow(clippy::panic, clippy::unwrap_used)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use rocddi::session::SessionState;
     use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
 
     /// Builds a generation without discovery or native device acquisition.
-    fn state_without_devices(session: Session) -> HsaState {
+    pub(in crate::runtime) fn state_without_devices(session: Session) -> HsaState {
         let health = Arc::new(GenerationHealth::new());
         let inflight = Arc::new(InFlightTracker::new_process());
         inflight.open(1);
