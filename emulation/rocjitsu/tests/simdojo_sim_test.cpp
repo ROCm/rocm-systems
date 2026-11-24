@@ -2511,11 +2511,18 @@ TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
     tag->coherence_epoch = 17;
 
     cache.invalidate_all();
+    // Full invalidation is lazy: the retained storage keeps its old fields,
+    // but no accessor reaches it and the next fill starts from clean metadata.
     EXPECT_FALSE(cache.lookup(addr, nullptr, round + 1));
-    EXPECT_FALSE(tag->valid);
-    EXPECT_FALSE(tag->dirty);
-    EXPECT_EQ(tag->coherence, CoherenceState::INVALID);
-    EXPECT_EQ(tag->coherence_epoch, 0u);
+    EXPECT_EQ(cache.peek(addr, round + 1), nullptr);
+    uint32_t dirty_lines = 0;
+    cache.for_each_dirty([&](CacheTag &, uint64_t, uint8_t *) { ++dirty_lines; });
+    EXPECT_EQ(dirty_lines, 0u);
+    auto *refilled = cache.allocate(addr, round + 1);
+    EXPECT_EQ(refilled, tag);
+    EXPECT_FALSE(refilled->dirty);
+    EXPECT_EQ(refilled->coherence, CoherenceState::INVALID);
+    EXPECT_EQ(refilled->coherence_epoch, 0u);
     cache.invalidate_all();
   }
 }
@@ -2523,7 +2530,6 @@ TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
 TEST(CacheMaintenanceTest, FullInvalidationVisitsSparseAndBoundarySets) {
   Cache<6, 32, 2> cache;
   constexpr std::array<uint32_t, 5> sets{0, 7, 8, 24, 31};
-  std::array<CacheTag *, sets.size()> retained{};
   for (uint32_t round = 0; round != 3; ++round) {
     for (size_t index = 0; index != sets.size(); ++index) {
       const uint64_t address = uint64_t{sets[index]} * 64;
@@ -2531,17 +2537,24 @@ TEST(CacheMaintenanceTest, FullInvalidationVisitsSparseAndBoundarySets) {
       tag->dirty = true;
       tag->coherence_epoch = 17;
       tag->coherence = CoherenceState::MODIFIED;
-      retained[index] = tag;
       if (index % 2 == 0)
         cache.invalidate(address, round);
     }
     cache.invalidate_all();
+    uint32_t dirty_lines = 0, valid_lines = 0;
+    cache.for_each_dirty([&](CacheTag &, uint64_t, uint8_t *) { ++dirty_lines; });
+    cache.for_each_valid_line([&](CacheTag &, uint64_t, uint8_t *) { ++valid_lines; });
+    EXPECT_EQ(dirty_lines, 0u);
+    EXPECT_EQ(valid_lines, 0u);
     for (size_t index = 0; index != sets.size(); ++index) {
-      EXPECT_FALSE(cache.lookup(uint64_t{sets[index]} * 64, nullptr, round));
-      EXPECT_FALSE(retained[index]->valid);
-      EXPECT_FALSE(retained[index]->dirty);
-      EXPECT_EQ(retained[index]->coherence_epoch, 0u);
-      EXPECT_EQ(retained[index]->coherence, CoherenceState::INVALID);
+      const uint64_t address = uint64_t{sets[index]} * 64;
+      EXPECT_FALSE(cache.lookup(address, nullptr, round));
+      EXPECT_EQ(cache.peek(address, round), nullptr);
+      EXPECT_EQ(cache.full_set_victim(address), nullptr);
+      auto *refilled = cache.allocate(address, round);
+      EXPECT_FALSE(refilled->dirty);
+      EXPECT_EQ(refilled->coherence_epoch, 0u);
+      EXPECT_EQ(refilled->coherence, CoherenceState::INVALID);
     }
     cache.invalidate_all();
   }
@@ -2706,6 +2719,121 @@ TEST(CacheVmidTest, InvalidateAllVmidsRemovesEveryAliasedLine) {
 
   EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
   EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/2));
+}
+
+TEST(CacheVmidTest, InvalidateAllLazilyReusesStaleWaysWithoutEviction) {
+  TestCache cache;
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(TestCache::LINE_SIZE) * 4;
+  constexpr uint64_t kAddrA = 0x1000;
+  constexpr uint64_t kAddrB = kAddrA + kSetStride;
+  constexpr uint64_t kAddrC = kAddrB + kSetStride;
+
+  cache.allocate(kAddrA, /*vmid=*/1)->dirty = true;
+  cache.allocate(kAddrB, /*vmid=*/2);
+  cache.invalidate_all();
+
+  EXPECT_FALSE(cache.lookup(kAddrA, nullptr, /*vmid=*/1));
+  EXPECT_FALSE(cache.lookup(kAddrB, nullptr, /*vmid=*/2));
+  EXPECT_EQ(cache.peek(kAddrA, /*vmid=*/1), nullptr);
+  EXPECT_EQ(cache.full_set_victim(kAddrC), nullptr);
+
+  // Both ways of the set hold stale lines; the next fill must take one as an
+  // invalid way instead of reporting a (dirty) victim.
+  CacheTag evicted{.valid = 1, .dirty = true};
+  cache.allocate(kAddrC, /*vmid=*/3, &evicted);
+  EXPECT_FALSE(evicted.valid);
+  EXPECT_FALSE(evicted.dirty);
+  EXPECT_TRUE(cache.lookup(kAddrC, nullptr, /*vmid=*/3));
+}
+
+TEST(CacheVmidTest, InvalidateAllHidesStaleLinesFromTraversals) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x2000;
+
+  cache.allocate(kAddr, /*vmid=*/1)->dirty = true;
+  cache.invalidate_all();
+  cache.allocate(kAddr + TestCache::LINE_SIZE, /*vmid=*/1);
+
+  uint32_t dirty = 0, valid = 0;
+  cache.for_each_dirty([&](CacheTag &, uint64_t, uint8_t *) { ++dirty; });
+  cache.for_each_valid_line([&](CacheTag &, uint64_t, uint8_t *) { ++valid; });
+  EXPECT_EQ(dirty, 0u);
+  EXPECT_EQ(valid, 1u);
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+}
+
+TEST(CacheVmidTest, InvalidateAllClearsTokensBeforeGenerationWrap) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x14000;
+
+  cache.allocate(kAddr, /*vmid=*/1);
+  for (uint32_t i = 0; i < UINT16_MAX; ++i)
+    cache.invalidate_all();
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+
+  // One more invalidation lands back on the generation the line was filled in.
+  cache.invalidate_all();
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+  cache.allocate(kAddr, /*vmid=*/1);
+  EXPECT_TRUE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+}
+
+TEST(CacheVmidTest, LazyInvalidateAllWrapsBeforeMaterialization) {
+  using LazyCache = Cache<6, 4, 2, LRUPolicy<4, 2>, /*LazyStorage=*/true>;
+  LazyCache cache;
+  constexpr uint64_t kAddr = 0x3000;
+  for (uint32_t i = 0; i <= UINT16_MAX; ++i)
+    cache.invalidate_all();
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+  cache.allocate(kAddr, /*vmid=*/1);
+  EXPECT_TRUE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+  cache.invalidate_all();
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+}
+
+TEST(CacheVmidTest, VmidInvalidateAllKeepsOtherVmidsAcrossLazyInvalidation) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x4000;
+
+  cache.allocate(kAddr, /*vmid=*/1);
+  cache.invalidate_all();
+  cache.allocate(kAddr, /*vmid=*/1);
+  cache.allocate(kAddr, /*vmid=*/2);
+  cache.invalidate_all(/*vmid=*/1);
+
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+  EXPECT_TRUE(cache.lookup(kAddr, nullptr, /*vmid=*/2));
+}
+
+TEST(CacheVmidTest, EvictedDataIsCopiedOnlyForDirtyVictims) {
+  TestCache cache;
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(TestCache::LINE_SIZE) * 4;
+  constexpr uint64_t kAddrA = 0x5000;
+  constexpr uint64_t kAddrB = kAddrA + kSetStride;
+  constexpr uint64_t kAddrC = kAddrB + kSetStride;
+  constexpr uint64_t kAddrD = kAddrC + kSetStride;
+
+  fill_line_word(cache, kAddrA, /*vmid=*/1, 0x11111111u);
+  fill_line_word(cache, kAddrB, /*vmid=*/1, 0x22222222u);
+
+  std::array<uint8_t, TestCache::LINE_SIZE> evicted_data;
+  evicted_data.fill(0xA5);
+  CacheTag evicted;
+  cache.allocate(kAddrC, /*vmid=*/1, &evicted, evicted_data.data());
+  ASSERT_TRUE(evicted.valid);
+  EXPECT_FALSE(evicted.dirty);
+  EXPECT_TRUE(std::ranges::all_of(evicted_data, [](uint8_t b) { return b == 0xA5; }));
+
+  CacheTag *tag = nullptr;
+  ASSERT_TRUE(cache.lookup(kAddrC, &tag, /*vmid=*/1));
+  tag->dirty = true;
+  // The remaining older line is the clean one; touch it so kAddrC is the victim.
+  const uint64_t survivor = cache.lookup(kAddrA, nullptr, 1) ? kAddrA : kAddrB;
+  ASSERT_TRUE(cache.lookup(survivor, nullptr, /*vmid=*/1));
+  cache.allocate(kAddrD, /*vmid=*/1, &evicted, evicted_data.data());
+  ASSERT_TRUE(evicted.valid);
+  EXPECT_TRUE(evicted.dirty);
+  EXPECT_FALSE(std::ranges::all_of(evicted_data, [](uint8_t b) { return b == 0xA5; }));
 }
 
 TEST(CacheVmidTest, LineDataForReadReturnsMatchingVmidData) {

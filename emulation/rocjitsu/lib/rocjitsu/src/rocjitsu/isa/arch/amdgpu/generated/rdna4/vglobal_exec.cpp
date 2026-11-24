@@ -470,8 +470,10 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
 
 void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
+  if (inst_.scope < 2)
+    return;
   if (auto *l2 = wf.cu().l2())
-    l2->flush_all(wf.process_id());
+    l2->invalidate_for_scope(inst_.scope == 3);
 }
 
 void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }

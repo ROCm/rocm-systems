@@ -41,16 +41,12 @@ template <typename Inst>
 inline void execute_buffer_gl0_inv_mubuf([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
-  if (auto *l2 = wf.cu().l2())
-    l2->flush_all(wf.process_id());
 }
 
 template <typename Inst>
 inline void execute_buffer_gl1_inv_mubuf([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
-  if (auto *l2 = wf.cu().l2())
-    l2->flush_all(wf.process_id());
 }
 
 template <typename Inst>
@@ -337,8 +333,6 @@ inline void execute_s_get_barrier_state_sop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_gl1_inv_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
-  if (auto *l2 = wf.cu().l2())
-    l2->flush_all(wf.process_id());
 }
 
 template <typename Inst>

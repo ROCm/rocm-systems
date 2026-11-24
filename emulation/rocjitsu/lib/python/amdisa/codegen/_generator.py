@@ -9451,6 +9451,20 @@ class CodeGenerator:
                     '  if (auto *l2 = wf.cu().l2())\n'
                     '    l2->invalidate_buffer_scope(inst_.sc0);'
                 )
+            # GL0 is the CU vector L1 and GL1 the shader-array L1; neither
+            # instruction reaches L2 (BUFFER_GL2_INV / BUFFER_WBL2 do).
+            if inst.name in ('BUFFER_GL0_INV', 'BUFFER_GL1_INV', 'S_GL1_INV'):
+                return '  wf.cu().l1_vector().invalidate_all();'
+            # SCOPE (0=CU, 1=SE, 2=DEV, 3=SYS) bounds the invalidated levels;
+            # L2 is only below device scope, and invalidate_for_scope skips
+            # device scope when every CU shares a single L2.
+            if inst.name == 'GLOBAL_INV':
+                return (
+                    '  wf.cu().l1_vector().invalidate_all();\n'
+                    '  if (inst_.scope < 2) return;\n'
+                    '  if (auto *l2 = wf.cu().l2())\n'
+                    '    l2->invalidate_for_scope(inst_.scope == 3);'
+                )
             return (
                 '  wf.cu().l1_vector().invalidate_all();\n'
                 '  if (auto *l2 = wf.cu().l2())\n'

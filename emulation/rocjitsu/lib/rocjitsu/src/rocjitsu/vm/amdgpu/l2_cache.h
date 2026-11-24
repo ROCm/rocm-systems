@@ -444,6 +444,10 @@ public:
 
   /// Apply CDNA4 BUFFER_INV to this XCD's noncoherent lines. Device scope
   /// retains a sole L2. System scope applies regardless of the topology.
+  /// @brief GFX12 GLOBAL_INV at device (false) or system (true) scope.
+  /// @details A device-scope acquire leaves an L2 shared by every CU alone;
+  /// otherwise the whole L2 is written back and discarded.
+  VmAccessOutcome invalidate_for_scope(bool system_scope);
   VmAccessOutcome invalidate_buffer_scope(bool system_scope);
 
   /// @brief Publish and invalidate only the specified address space.
@@ -657,6 +661,9 @@ private:
   std::mutex dirty_bytes_mutex_;
   std::map<std::pair<uint32_t, uint64_t>, DirtyMask> dirty_bytes_;
   std::atomic<bool> has_dirty_lines_{false};
+  // Set when a line may be left SHARED; scoped invalidation must then keep
+  // those lines, otherwise it can discard the whole cache in constant time.
+  std::atomic<bool> may_have_shared_lines_{false};
   std::vector<simdojo::Port *> cpl_ports_;
   struct alignas(64) DiagnosticCounters {
     std::atomic<uint64_t> writes{0};
