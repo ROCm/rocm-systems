@@ -220,6 +220,38 @@ hipError_t ExhaustDeviceVa(ReservedRanges& reserved, void** last_ptr) {
   return status;
 }
 
+// The stream, graph and graph exec a test holds. The destructor releases what is still held and
+// trims graph memory, so a check that throws does not leak them into later tests in the process.
+class GraphResources {
+ public:
+  GraphResources() { HIP_CHECK(hipStreamCreate(&stream)); }
+  GraphResources(const GraphResources&) = delete;
+  GraphResources& operator=(const GraphResources&) = delete;
+  ~GraphResources() {
+    if (exec != nullptr) {
+      (void)hipGraphExecDestroy(exec);
+    }
+    if (graph != nullptr) {
+      (void)hipGraphDestroy(graph);
+    }
+    (void)hipStreamDestroy(stream);
+    (void)hipDeviceGraphMemTrim(0);
+  }
+  // Destroys the graph and its exec, checking both calls.
+  void DestroyGraph() {
+    if (exec != nullptr) {
+      HIP_CHECK(hipGraphExecDestroy(exec));
+      exec = nullptr;
+    }
+    HIP_CHECK(hipGraphDestroy(graph));
+    graph = nullptr;
+  }
+
+  hipStream_t stream = nullptr;
+  hipGraph_t graph = nullptr;
+  hipGraphExec_t exec = nullptr;
+};
+
 bool MemPoolsSupported() {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
@@ -235,7 +267,9 @@ bool MemPoolsSupported() {
  *      is exhausted. The failing call must return hipErrorOutOfMemory and
  *      leave *ptr as nullptr instead of crashing, and the ranges reserved
  *      before it must still be freeable.
- *    - AMD on Windows only: there the range is the PAL SVM range (4 TiB). On
+ *    - AMD on Windows only: there the range is the PAL SVM range (4 TiB), or
+ *      for ROCr on Windows a device heap sized from the GPU's memory, which
+ *      may be smaller than one 256 GiB reservation. On
  *      Linux the ROCr reservation also takes CPU address space, so exhausting
  *      it exhausts the whole process address space, and CUDA does not promise
  *      to clear *ptr on failure.
@@ -266,9 +300,13 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion) {
   REQUIRE(ptr == nullptr);
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorOutOfMemory);
 
-  // Once the ranges are freed the address space is usable again
-  HIP_CHECK(hipMemAddressReserve(&ptr, kExhaustChunkSize, 0, nullptr, 0));
-  HIP_CHECK(hipMemAddressFree(ptr, kExhaustChunkSize));
+  // Once the ranges are freed the address space is usable again. When even the first range did
+  // not fit (ROCr on Windows reserves from a device heap sized from the GPU's memory, 200 GiB on
+  // some GPUs), there is nothing to take back.
+  if (num_reserved > 0) {
+    HIP_CHECK(hipMemAddressReserve(&ptr, kExhaustChunkSize, 0, nullptr, 0));
+    HIP_CHECK(hipMemAddressFree(ptr, kExhaustChunkSize));
+  }
 #endif
 }
 
@@ -297,51 +335,44 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_CaptureMallocAsync) {
   if (!MemPoolsSupported()) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  GraphResources res;
 
   ReservedRanges reserved;
   void* ptr = nullptr;
   if (ExhaustDeviceVa(reserved, &ptr) == hipSuccess) {
     reserved.Free();
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("virtual address space was not exhausted");
   }
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorOutOfMemory);  // clear the failed reserve's error
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(res.stream, hipStreamCaptureModeGlobal));
   void* dev_ptr = reinterpret_cast<void*>(0x1);
-  const hipError_t alloc_status = hipMallocAsync(&dev_ptr, kExhaustChunkSize, stream);
+  const hipError_t alloc_status = hipMallocAsync(&dev_ptr, kExhaustChunkSize, res.stream);
   hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
-  HIP_CHECK(hipStreamIsCapturing(stream, &capture_status));
-  hipGraph_t graph = nullptr;
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipStreamIsCapturing(res.stream, &capture_status));
+  HIP_CHECK(hipStreamEndCapture(res.stream, &res.graph));
   reserved.Free();
 
   REQUIRE(alloc_status == hipErrorOutOfMemory);
   REQUIRE(dev_ptr == nullptr);
   REQUIRE(capture_status == hipStreamCaptureStatusActive);
-  REQUIRE(graph != nullptr);
+  REQUIRE(res.graph != nullptr);
   size_t num_nodes = 1;
-  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+  HIP_CHECK(hipGraphGetNodes(res.graph, nullptr, &num_nodes));
   REQUIRE(num_nodes == 0);
-  HIP_CHECK(hipGraphDestroy(graph));
+  res.DestroyGraph();
 
   // Once the ranges are freed the stream captures and runs a graph allocation again
   constexpr size_t kSmallSize = 1 << 20;
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMallocAsync(&dev_ptr, kSmallSize, stream));
+  HIP_CHECK(hipStreamBeginCapture(res.stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipMallocAsync(&dev_ptr, kSmallSize, res.stream));
   REQUIRE(dev_ptr != nullptr);
-  HIP_CHECK(hipMemsetAsync(dev_ptr, 0, kSmallSize, stream));
-  HIP_CHECK(hipFreeAsync(dev_ptr, stream));
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-  hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipMemsetAsync(dev_ptr, 0, kSmallSize, res.stream));
+  HIP_CHECK(hipFreeAsync(dev_ptr, res.stream));
+  HIP_CHECK(hipStreamEndCapture(res.stream, &res.graph));
+  HIP_CHECK(hipGraphInstantiate(&res.exec, res.graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(res.exec, res.stream));
+  HIP_CHECK(hipStreamSynchronize(res.stream));
+  res.DestroyGraph();
 #endif
 }
 
@@ -371,10 +402,8 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_GraphMemAllocNode) {
   if (!MemPoolsSupported()) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
-  hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
-  hipGraph_t graph = nullptr;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
+  GraphResources res;
+  HIP_CHECK(hipGraphCreate(&res.graph, 0));
 
   hipMemAllocNodeParams alloc_params{};
   alloc_params.poolProps.allocType = hipMemAllocationTypePinned;
@@ -386,8 +415,6 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_GraphMemAllocNode) {
   void* ptr = nullptr;
   if (ExhaustDeviceVa(reserved, &ptr) == hipSuccess) {
     reserved.Free();
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_SKIP_TEST("virtual address space was not exhausted");
   }
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorOutOfMemory);  // clear the failed reserve's error
@@ -399,13 +426,13 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_GraphMemAllocNode) {
     node_params.type = hipGraphNodeTypeMemAlloc;
     node_params.alloc = alloc_params;
     node_params.alloc.dptr = reinterpret_cast<void*>(0x1);
-    status = hipGraphAddNode(&node, graph, nullptr, 0, &node_params);
+    status = hipGraphAddNode(&node, res.graph, nullptr, 0, &node_params);
     dev_ptr = node_params.alloc.dptr;
   }
   SECTION("hipGraphAddMemAllocNode") {
     hipMemAllocNodeParams params = alloc_params;
     params.dptr = reinterpret_cast<void*>(0x1);
-    status = hipGraphAddMemAllocNode(&node, graph, nullptr, 0, &params);
+    status = hipGraphAddMemAllocNode(&node, res.graph, nullptr, 0, &params);
     dev_ptr = params.dptr;
   }
   reserved.Free();
@@ -414,23 +441,19 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Exhaustion_GraphMemAllocNode) {
   REQUIRE(dev_ptr == nullptr);
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorOutOfMemory);
   size_t num_nodes = 1;
-  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+  HIP_CHECK(hipGraphGetNodes(res.graph, nullptr, &num_nodes));
   REQUIRE(num_nodes == 0);
 
   // Once the ranges are freed the graph takes and runs an allocation again
   alloc_params.bytesize = 1 << 20;
-  HIP_CHECK(hipGraphAddMemAllocNode(&node, graph, nullptr, 0, &alloc_params));
+  HIP_CHECK(hipGraphAddMemAllocNode(&node, res.graph, nullptr, 0, &alloc_params));
   REQUIRE(alloc_params.dptr != nullptr);
   hipGraphNode_t free_node = nullptr;
-  HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, &node, 1, alloc_params.dptr));
-  hipGraphExec_t graph_exec = nullptr;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipGraphAddMemFreeNode(&free_node, res.graph, &node, 1, alloc_params.dptr));
+  HIP_CHECK(hipGraphInstantiate(&res.exec, res.graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(res.exec, res.stream));
+  HIP_CHECK(hipStreamSynchronize(res.stream));
+  res.DestroyGraph();
 #endif
 }
 
