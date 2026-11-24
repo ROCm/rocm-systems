@@ -93,8 +93,9 @@ TEST_P(DsAddressEncodedFields, ReplacesSingleAndTwoAddressFieldsLosslessly) {
     const std::optional<std::array<uint32_t, 2>> result =
         amdgpu::replace_ds_address_field(target.id, fixture.source, 6);
     EXPECT_TRUE(result);
-    if (!result)
+    if (!result) {
       continue;
+    }
     EXPECT_EQ(*result, fixture.expected);
     const DecodeResult before = decoder->decode_window(fixture.source);
     const DecodeResult after = decoder->decode_window(*result);
@@ -110,12 +111,14 @@ TEST_P(DsAddressEncodedFields, ReplacesSingleAndTwoAddressFieldsLosslessly) {
     EXPECT_EQ(after.value()->src_operand(0)->encoding_value(), 6);
     ASSERT_EQ(before.value()->num_src_operands(), after.value()->num_src_operands());
     ASSERT_EQ(before.value()->num_dst_operands(), after.value()->num_dst_operands());
-    for (int i = 1; i < before.value()->num_src_operands(); ++i)
+    for (int i = 1; i < before.value()->num_src_operands(); ++i) {
       EXPECT_EQ(before.value()->src_operand(i)->encoding_value(),
                 after.value()->src_operand(i)->encoding_value());
-    for (int i = 0; i < before.value()->num_dst_operands(); ++i)
+    }
+    for (int i = 0; i < before.value()->num_dst_operands(); ++i) {
       EXPECT_EQ(before.value()->dst_operand(i)->encoding_value(),
                 after.value()->dst_operand(i)->encoding_value());
+    }
   }
 }
 

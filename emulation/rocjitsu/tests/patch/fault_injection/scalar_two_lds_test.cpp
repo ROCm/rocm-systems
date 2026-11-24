@@ -10,8 +10,9 @@ namespace {
 class ScalarTwoLds : public ::testing::TestWithParam<test::LdsFormCase> {};
 TEST_P(ScalarTwoLds, ExactAndOrdinalPreserveEveryNonAddressField) {
   for (bool wave32 : {false, true}) {
-    if (wave32 && GetParam().arch != IsaFamily::Rdna4)
+    if (wave32 && GetParam().arch != IsaFamily::Rdna4) {
       continue;
+    }
     SCOPED_TRACE(wave32);
     const test::LdsFormCase &fixture = GetParam();
     SCOPED_TRACE(fixture.form);
@@ -33,8 +34,9 @@ TEST_P(ScalarTwoLds, ExactAndOrdinalPreserveEveryNonAddressField) {
     const uint32_t bound =
         fixture.target == ROCJITSU_CODE_TARGET_GFX1250 ? 64u : (wave32 ? 32u : 16u);
     for (std::optional<uint32_t> value :
-         std::array<std::optional<uint32_t>, 4>{std::nullopt, 2u, bound, 256u})
+         std::array<std::optional<uint32_t>, 4>{std::nullopt, 2u, bound, 256u}) {
       EXPECT_TRUE(apply_lds_wrong_address(source, exact.value(), value, error).failed());
+    }
     EXPECT_TRUE(apply_lds_wrong_address(foreign, exact.value(), 6, error).failed());
     const FailureOr<LdsResult> mutant = apply_lds_wrong_address(source, exact.value(), 6, error);
     ASSERT_TRUE(mutant.succeeded()) << error.message;
@@ -130,8 +132,9 @@ TEST(ScalarTwoLdsControls, UnsupportedAtomicNopAndSplitDoNotBecomeSites) {
     const bool cdna =
         target == ROCJITSU_CODE_TARGET_GFX942 || target == ROCJITSU_CODE_TARGET_GFX950;
     std::vector<uint32_t> words = {cdna ? 0xd8280000u : 0xd8500000u, 0u, 0xd8000004u, 0x00000402u};
-    if (target == ROCJITSU_CODE_TARGET_GFX1250)
+    if (target == ROCJITSU_CODE_TARGET_GFX1250) {
       words.insert(words.end(), {0xd8e00301u, 0x04000002u});
+    }
     const uint64_t offset = words.size() * 4;
     words.insert(words.end(), fixture->words.begin(), fixture->words.end());
     words.push_back(cdna ? 0xbf810000u : 0xbfb00000u);
@@ -277,12 +280,14 @@ TEST(ScalarTwoLdsControls, MixedProfilesKeepSourceOrderAndRewriterSemantics) {
     // Source order deliberately differs from the profile table's order.
     const std::array<test::LdsFormCase, 3> fixtures = {*scalar, b96, basic};
     for (bool wave32 : {false, true}) {
-      if (wave32 && scalar->arch != IsaFamily::Rdna4)
+      if (wave32 && scalar->arch != IsaFamily::Rdna4) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       std::vector<uint32_t> words;
-      for (const test::LdsFormCase &fixture : fixtures)
+      for (const test::LdsFormCase &fixture : fixtures) {
         words.insert(words.end(), fixture.words.begin(), fixture.words.end());
+      }
       words.push_back(cdna ? 0xbf810000u : 0xbfb00000u);
       std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(words, 0, 3, scalar->machine, 3, 3,
                                                                 false, false, false, false, wave32);

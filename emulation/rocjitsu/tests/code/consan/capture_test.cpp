@@ -64,8 +64,9 @@ TEST_F(ConSanCapture, CompleteContainerOwnsFactsArgumentsContextAndRawBytes) {
 }
 
 TEST_F(ConSanCapture, EveryTruncatedPrefixAndTrailingBytesLackACompleteContainer) {
-  for (size_t length = 0; length < bytes_.size(); ++length)
+  for (size_t length = 0; length < bytes_.size(); ++length) {
     EXPECT_TRUE(decode_capture(std::span(bytes_).first(length)).failed()) << length;
+  }
   bytes_.push_back(0);
   EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
 }

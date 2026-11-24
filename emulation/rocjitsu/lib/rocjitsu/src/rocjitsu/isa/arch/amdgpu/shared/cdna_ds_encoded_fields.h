@@ -27,11 +27,13 @@ replace_cdna_ds_write_address(rj_code_target_id_t target, std::span<const uint32
   constexpr uint32_t kDsWriteB32 = 0xd81a0000u;
   constexpr uint32_t kDsWriteB128 = 0xd9be0000u;
   if ((target != ROCJITSU_CODE_TARGET_GFX942 && target != ROCJITSU_CODE_TARGET_GFX950) ||
-      source.size() != 2 || encoded_vgpr > 255)
+      source.size() != 2 || encoded_vgpr > 255) {
     return std::nullopt;
+  }
   const uint32_t format_opcode = source[0] & kFormatOpcodeMask;
-  if (format_opcode != kDsWriteB32 && format_opcode != kDsWriteB128)
+  if (format_opcode != kDsWriteB32 && format_opcode != kDsWriteB128) {
     return std::nullopt;
+  }
   return std::array<uint32_t, 2>{source[0], (source[1] & ~0xffu) | encoded_vgpr};
 }
 

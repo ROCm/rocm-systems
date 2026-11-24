@@ -94,12 +94,14 @@ struct Instrumentor::ResolvedPoints {
 namespace {
 
 rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rocjitsu::IsaFamily arch) {
-  if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
+  if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID) {
     return object.target_id();
+  }
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *descriptor = registry.find(arch);
-  if (descriptor == nullptr)
+  if (descriptor == nullptr) {
     return ROCJITSU_CODE_TARGET_INVALID;
+  }
   const IsaTargetBinding *target = registry.find_default_target(*descriptor);
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
@@ -117,8 +119,9 @@ std::optional<uint64_t> kernarg_preload_firmware_entry(const KernelDescriptorInf
                                                        uint64_t text_size) {
   constexpr uint64_t kFirmwareSkip = 256;
   if (!has_kernarg_preload_firmware_entry(kernel, arch) || kernel.entry_text_offset >= text_size ||
-      text_size - kernel.entry_text_offset <= kFirmwareSkip)
+      text_size - kernel.entry_text_offset <= kFirmwareSkip) {
     return std::nullopt;
+  }
   return kernel.entry_text_offset + kFirmwareSkip;
 }
 
@@ -140,62 +143,77 @@ bool validate_entry_descriptor_symbols(std::span<const uint8_t> image,
     report(error_out, message);
     return false;
   };
-  if (image.size() < sizeof(Elf64_Ehdr))
+  if (image.size() < sizeof(Elf64_Ehdr)) {
     return fail("entry requests require a complete descriptor symbol inventory");
+  }
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
   const std::optional<std::vector<Elf64_Shdr>> sections =
       read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
-  if (!sections)
+  if (!sections) {
     return fail("entry requests require a complete descriptor symbol inventory");
+  }
   for (const Elf64_Shdr &table : *sections) {
-    if (table.sh_type != SHT_SYMTAB && table.sh_type != SHT_DYNSYM)
+    if (table.sh_type != SHT_SYMTAB && table.sh_type != SHT_DYNSYM) {
       continue;
+    }
     if (table.sh_entsize == 0 || table.sh_size % table.sh_entsize != 0 ||
-        table.sh_link >= sections->size())
+        table.sh_link >= sections->size()) {
       return fail("entry requests require a complete descriptor symbol inventory");
+    }
     const std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
         image, table.sh_offset, table.sh_size / table.sh_entsize, table.sh_entsize);
     const Elf64_Shdr &strings = (*sections)[table.sh_link];
     if (!symbols || strings.sh_offset > image.size() ||
-        strings.sh_size > image.size() - strings.sh_offset)
+        strings.sh_size > image.size() - strings.sh_offset) {
       return fail("entry requests require a complete descriptor symbol inventory");
+    }
     for (const Elf64_Sym &symbol : *symbols) {
       const uint8_t binding = elf_symbol_bind(symbol.st_info);
       if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject ||
           (binding != kElfSymbolBindGlobal && binding != kElfSymbolBindWeak) ||
-          symbol.st_shndx == SHN_UNDEF)
+          symbol.st_shndx == SHN_UNDEF) {
         continue;
-      if (symbol.st_name >= strings.sh_size)
+      }
+      if (symbol.st_name >= strings.sh_size) {
         return fail("entry requests require a complete descriptor symbol inventory");
+      }
       const char *name =
           reinterpret_cast<const char *>(image.data() + strings.sh_offset + symbol.st_name);
       const size_t available = strings.sh_size - symbol.st_name;
       const size_t length = strnlen(name, available);
-      if (length == available)
+      if (length == available) {
         return fail("entry requests require a complete descriptor symbol inventory");
+      }
       const std::string_view symbol_name(name, length);
-      if (!symbol_name.ends_with(".kd"))
+      if (!symbol_name.ends_with(".kd")) {
         continue;
-      if (binding == kElfSymbolBindWeak)
+      }
+      if (binding == kElfSymbolBindWeak) {
         return fail("entry requests do not admit weak kernel descriptor symbols");
+      }
       if (symbol.st_shndx >= sections->size() ||
-          symbol.st_size != sizeof(amdhsa::kernel_descriptor_t))
+          symbol.st_size != sizeof(amdhsa::kernel_descriptor_t)) {
         return fail("entry requests require a complete descriptor symbol inventory");
+      }
       const Elf64_Shdr &owner = (*sections)[symbol.st_shndx];
       if (owner.sh_type == SHT_NOBITS || symbol.st_value < owner.sh_addr ||
-          owner.sh_offset > image.size() || owner.sh_size > image.size() - owner.sh_offset)
+          owner.sh_offset > image.size() || owner.sh_size > image.size() - owner.sh_offset) {
         return fail("entry requests require a complete descriptor symbol inventory");
+      }
       const uint64_t delta = symbol.st_value - owner.sh_addr;
-      if (delta > owner.sh_size || symbol.st_size > owner.sh_size - delta)
+      if (delta > owner.sh_size || symbol.st_size > owner.sh_size - delta) {
         return fail("entry requests require a complete descriptor symbol inventory");
+      }
       const uint64_t descriptor_offset = owner.sh_offset + delta;
       const std::span<const KernelDescriptorInfo>::iterator found = std::ranges::find(
           kernels, descriptor_offset, &KernelDescriptorInfo::descriptor_file_offset);
-      if (found == kernels.end())
+      if (found == kernels.end()) {
         return fail("entry requests require a complete descriptor symbol inventory");
-      if (found->kernel_name != symbol_name.substr(0, length - 3))
+      }
+      if (found->kernel_name != symbol_name.substr(0, length - 3)) {
         return fail("entry requests do not admit descriptor aliases with distinct names");
+      }
     }
   }
   return true;
@@ -205,10 +223,12 @@ bool validate_entry_descriptor_symbols(std::span<const uint8_t> image,
 // architectures give that encoding different semantics.
 bool deallocates_vgprs(const Instruction &instruction, rocjitsu::IsaFamily arch) {
   if (arch != rocjitsu::IsaFamily::Cdna5 && arch != rocjitsu::IsaFamily::Rdna3 &&
-      arch != rocjitsu::IsaFamily::Rdna3_5 && arch != rocjitsu::IsaFamily::Rdna4)
+      arch != rocjitsu::IsaFamily::Rdna3_5 && arch != rocjitsu::IsaFamily::Rdna4) {
     return false;
-  if (instruction.mnemonic() != "s_sendmsg" && instruction.mnemonic() != "s_sendmsghalt")
+  }
+  if (instruction.mnemonic() != "s_sendmsg" && instruction.mnemonic() != "s_sendmsghalt") {
     return false;
+  }
   const Operand *message = instruction.src_operand(0);
   constexpr uint32_t kDeallocVgprsMessage = 3;
   // In-tree OPR_SENDMSG.MSG is 9/4/7/7 bits for RDNA3/3.5/4/CDNA5.
@@ -222,9 +242,10 @@ bool deallocates_vgprs(const Instruction &instruction, rocjitsu::IsaFamily arch)
 }
 
 bool uses_dynamic_vgprs(rocjitsu::IsaFamily arch, const amdhsa::kernel_descriptor_t &descriptor) {
-  if (arch == rocjitsu::IsaFamily::Rdna4)
+  if (arch == rocjitsu::IsaFamily::Rdna4) {
     return (descriptor.compute_pgm_rsrc2 & amdhsa::COMPUTE_PGM_RSRC2_GFX120_ENABLE_DYNAMIC_VGPR) !=
            0;
+  }
   return arch == rocjitsu::IsaFamily::Cdna5 &&
          (descriptor.compute_pgm_rsrc3 & amdhsa::COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR) != 0;
 }
@@ -258,8 +279,9 @@ bool has_unavailable_branch_reference(const Instruction &instruction) {
 }
 
 bool reject_unavailable_branch_reference(const Instruction &instruction, TextEditError &error) {
-  if (!has_unavailable_branch_reference(instruction))
+  if (!has_unavailable_branch_reference(instruction)) {
     return false;
+  }
   error = {.code = TextEditErrorCode::UnsupportedReferences,
            .offset = instruction.src_loc(),
            .message = "branch destination metadata is unavailable for " +
@@ -271,31 +293,37 @@ StateWrite
 callable_state_write(const Instruction &inst, std::span<const uint8_t> text,
                      rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<const Instruction *> *preserving_calls = nullptr) {
-  if (!has_callable_state(arch, state))
+  if (!has_callable_state(arch, state)) {
     return StateWrite::Unchanged;
-  if (inst.flags() & INDIRECT_CALL)
+  }
+  if (inst.flags() & INDIRECT_CALL) {
     return preserving_calls != nullptr && preserving_calls->contains(&inst) ? StateWrite::Unchanged
                                                                             : StateWrite::Unsafe;
+  }
   // Descriptor counts prove only dispatch-time storage. No later allocation
   // currently proves that the callback envelope has sufficient VGPRs/scratch.
-  if (state == CallableState::UnavailableStorage)
+  if (state == CallableState::UnavailableStorage) {
     return inst.mnemonic() == "s_alloc_vgpr" || deallocates_vgprs(inst, arch)
                ? StateWrite::Unsafe
                : StateWrite::Unchanged;
+  }
   const bool enables = state == CallableState::GprIndexing
                            ? may_enable_gpr_indexing(inst, text, arch)
                            : may_enable_vskip(inst, text, arch);
-  if (enables)
+  if (enables) {
     return StateWrite::Unsafe;
+  }
   if ((state == CallableState::GprIndexing && inst.mnemonic() == "s_set_gpr_idx_off") ||
-      (state == CallableState::Vskip && inst.mnemonic() == "s_setvskip"))
+      (state == CallableState::Vskip && inst.mnemonic() == "s_setvskip")) {
     return StateWrite::Safe;
+  }
   if (inst.mnemonic() == "s_setreg_b32" || inst.mnemonic() == "s_setreg_imm32_b32") {
     const Operand *hwreg = inst.dst_operand(0);
     if (hwreg != nullptr &&
         amdgpu::hwreg_slice_overlaps_mode_bit(static_cast<uint16_t>(hwreg->encoding_value()),
-                                              state == CallableState::GprIndexing ? 27 : 28))
+                                              state == CallableState::GprIndexing ? 27 : 28)) {
       return StateWrite::Safe;
+    }
   }
   return StateWrite::Unchanged;
 }
@@ -306,8 +334,9 @@ using CalleeReturns = std::unordered_map<const BasicBlock *, std::vector<const I
 bool preserves_helper_link(const Instruction &inst, RegisterRef link, uint32_t ordinary_bound) {
   // A numeric SGPR in the special-register tail can also be defined through a
   // named or implicit operand. A nop preserves either spelling of the link.
-  if (uint32_t{link.index} + link.width > ordinary_bound)
+  if (uint32_t{link.index} + link.width > ordinary_bound) {
     return inst.mnemonic() == "s_nop";
+  }
   return !inst.mnemonic().starts_with("s_movrel") && !InstDefUse(inst, 64).defs.intersects(link);
 }
 
@@ -317,8 +346,9 @@ std::vector<const Instruction *>
 preserving_callee_returns(const BasicBlock &callee, uint16_t return_sreg, uint32_t ordinary_bound,
                           const HelperEntryLinks &entry_links, std::span<const uint8_t> text,
                           rocjitsu::IsaFamily arch, CallableState state) {
-  if (!callee.predecessors().empty())
+  if (!callee.predecessors().empty()) {
     return {};
+  }
   const RegisterRef link = {RegClass::SGPR, return_sreg, 2};
   std::vector<const Instruction *> returns;
   std::vector<const BasicBlock *> ready = {&callee};
@@ -327,28 +357,34 @@ preserving_callee_returns(const BasicBlock &callee, uint16_t return_sreg, uint32
     const BasicBlock *block = ready.back();
     ready.pop_back();
     const Instruction *term = block->terminator();
-    if (term == nullptr || !block->call_edges().empty())
+    if (term == nullptr || !block->call_edges().empty()) {
       return {};
+    }
     const bool is_return = term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64";
     for (const Instruction &inst : block->instructions()) {
       // A descriptor or another callee entry can reach this instruction with
       // a different return link, bypassing the ordinary predecessor list.
-      if (inst.src_loc() != callee.start_offset() && entry_links.contains(inst.src_loc()))
+      if (inst.src_loc() != callee.start_offset() && entry_links.contains(inst.src_loc())) {
         return {};
+      }
       if (inst.mnemonic().starts_with("s_rfe") ||
           callable_state_write(inst, text, arch, state) != StateWrite::Unchanged ||
-          ((!is_return || &inst != term) && !preserves_helper_link(inst, link, ordinary_bound)))
+          ((!is_return || &inst != term) && !preserves_helper_link(inst, link, ordinary_bound))) {
         return {};
+      }
     }
     if (is_return) {
       const Operand *source = term->src_operand(0);
-      if (!block->successors().empty() || source == nullptr || source->to_register_ref() != link)
+      if (!block->successors().empty() || source == nullptr || source->to_register_ref() != link) {
         return {};
+      }
       returns.push_back(term);
       continue;
     }
-    if (block->successor_issue() != BasicBlock::SuccessorIssue::None || block->successors().empty())
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None ||
+        block->successors().empty()) {
       return {};
+    }
     for (const BasicBlock *successor : block->successors()) {
       if (++pending[successor] == successor->predecessors().size()) {
         pending.erase(successor);
@@ -356,8 +392,9 @@ preserving_callee_returns(const BasicBlock &callee, uint16_t return_sreg, uint32
       }
     }
   }
-  if (!pending.empty())
+  if (!pending.empty()) {
     return {};
+  }
   return returns;
 }
 
@@ -368,15 +405,17 @@ std::optional<uint64_t> adjusted_pc_entry_target(const std::array<const Instruct
                                                  uint64_t base, uint16_t link,
                                                  std::span<const KernelDescriptorInfo> kernels) {
   if (tail[0] == nullptr || tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc() ||
-      tail[1]->src_loc() + tail[1]->size() != tail[2]->src_loc())
+      tail[1]->src_loc() + tail[1]->size() != tail[2]->src_loc()) {
     return std::nullopt;
+  }
   const std::string_view low_name = tail[0]->mnemonic();
   const std::string_view high_name = tail[1]->mnemonic();
   const std::string_view ret_name = tail[2]->mnemonic();
   if ((low_name != "s_add_u32" && low_name != "s_add_co_u32") ||
       (high_name != "s_addc_u32" && high_name != "s_add_co_ci_u32") ||
-      (ret_name != "s_setpc_b64" && ret_name != "s_set_pc_i64"))
+      (ret_name != "s_setpc_b64" && ret_name != "s_set_pc_i64")) {
     return std::nullopt;
+  }
   const auto is_link = [](const Operand *operand, uint16_t index, uint8_t width = 1) {
     return operand != nullptr &&
            operand->to_register_ref() == RegisterRef{RegClass::SGPR, index, width};
@@ -384,24 +423,29 @@ std::optional<uint64_t> adjusted_pc_entry_target(const std::array<const Instruct
   const uint16_t high = link + 1;
   if (!is_link(tail[0]->dst_operand(0), link) || !is_link(tail[0]->src_operand(0), link) ||
       !is_link(tail[1]->dst_operand(0), high) || !is_link(tail[1]->src_operand(0), high) ||
-      !is_link(tail[2]->src_operand(0), link, 2))
+      !is_link(tail[2]->src_operand(0), link, 2)) {
     return std::nullopt;
+  }
   const Operand *low_value = tail[0]->src_operand(1);
   const Operand *high_value = tail[1]->src_operand(1);
-  if (low_value == nullptr || high_value == nullptr)
+  if (low_value == nullptr || high_value == nullptr) {
     return std::nullopt;
+  }
   const std::optional<uint64_t> low_constant = low_value->const_value();
   const std::optional<uint64_t> high_constant = high_value->const_value();
-  if (!low_constant || !high_constant || static_cast<uint32_t>(*high_constant) != 0xffffffffu)
+  if (!low_constant || !high_constant || static_cast<uint32_t>(*high_constant) != 0xffffffffu) {
     return std::nullopt;
+  }
   const int64_t delta = static_cast<int32_t>(static_cast<uint32_t>(*low_constant));
-  if (delta >= 0 || base < static_cast<uint64_t>(-delta))
+  if (delta >= 0 || base < static_cast<uint64_t>(-delta)) {
     return std::nullopt;
+  }
   const uint64_t target = base - static_cast<uint64_t>(-delta);
   if (!std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
         return kernel.entry_text_offset == target;
-      }))
+      })) {
     return std::nullopt;
+  }
   return target;
 }
 
@@ -410,32 +454,38 @@ std::optional<uint64_t> callee_reentry_target(const BasicBlock::CallEdge &edge,
                                               rocjitsu::IsaFamily arch,
                                               const HelperEntryLinks *entry_links = nullptr) {
   if (edge.callee == nullptr || edge.continuation == nullptr ||
-      !edge.callee->successors().empty() || !edge.callee->predecessors().empty())
+      !edge.callee->successors().empty() || !edge.callee->predecessors().empty()) {
     return std::nullopt;
+  }
   std::array<const Instruction *, 3> tail = {};
   for (const Instruction &inst : edge.callee->instructions()) {
     if (entry_links != nullptr) {
       const HelperEntryLinks::const_iterator entry = entry_links->find(inst.src_loc());
       if (entry != entry_links->end() &&
-          (inst.src_loc() != edge.callee->start_offset() || entry->second != edge.return_sreg))
+          (inst.src_loc() != edge.callee->start_offset() || entry->second != edge.return_sreg)) {
         return std::nullopt;
+      }
     }
     tail = {tail[1], tail[2], &inst};
   }
   const std::optional<uint64_t> target =
       adjusted_pc_entry_target(tail, edge.continuation->start_offset(), edge.return_sreg, kernels);
-  if (!target)
+  if (!target) {
     return std::nullopt;
+  }
   const uint32_t sgpr_count = AmdGpuCodeObject::min_kernel_sgpr_count(arch, kernels).value_or(0);
   const RegisterRef link = {RegClass::SGPR, edge.return_sreg, 2};
-  if (uint32_t{link.index} + link.width > sgpr_count)
+  if (uint32_t{link.index} + link.width > sgpr_count) {
     return std::nullopt;
+  }
   const uint32_t ordinary_bound = ordinary_sgpr_bound(arch, sgpr_count);
   for (const Instruction &inst : edge.callee->instructions()) {
-    if (&inst == tail[0])
+    if (&inst == tail[0]) {
       break;
-    if (!preserves_helper_link(inst, link, ordinary_bound))
+    }
+    if (!preserves_helper_link(inst, link, ordinary_bound)) {
       return std::nullopt;
+    }
   }
   return target;
 }
@@ -443,18 +493,22 @@ std::optional<uint64_t> callee_reentry_target(const BasicBlock::CallEdge &edge,
 std::optional<uint64_t> static_pc_reentry_target(const BasicBlock &block,
                                                  std::span<const KernelDescriptorInfo> kernels) {
   std::array<const Instruction *, 4> tail = {};
-  for (const Instruction &inst : block.instructions())
+  for (const Instruction &inst : block.instructions()) {
     tail = {tail[1], tail[2], tail[3], &inst};
+  }
   if (tail[0] == nullptr ||
       (tail[0]->mnemonic() != "s_getpc_b64" && tail[0]->mnemonic() != "s_get_pc_i64") ||
-      tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc())
+      tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc()) {
     return std::nullopt;
+  }
   const Operand *destination = tail[0]->dst_operand(0);
-  if (destination == nullptr)
+  if (destination == nullptr) {
     return std::nullopt;
+  }
   const std::optional<RegisterRef> pair = destination->to_register_ref();
-  if (!pair || pair->cls != RegClass::SGPR || pair->width != 2)
+  if (!pair || pair->cls != RegClass::SGPR || pair->width != 2) {
     return std::nullopt;
+  }
   return adjusted_pc_entry_target({tail[1], tail[2], tail[3]}, tail[0]->src_loc() + tail[0]->size(),
                                   pair->index, kernels);
 }
@@ -470,18 +524,21 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
   std::unordered_set<const Instruction *> known_returns;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
-      if (inst.mnemonic().starts_with("s_rfe"))
+      if (inst.mnemonic().starts_with("s_rfe")) {
         return false;
+      }
       if (inst.flags() & INDIRECT_CALL) {
-        if (&inst != block->terminator() || block->call_edges().empty())
+        if (&inst != block->terminator() || block->call_edges().empty()) {
           return false;
+        }
       } else if (callable_state_write(inst, text, arch, state) != StateWrite::Unchanged) {
         return false;
       }
     }
     for (const BasicBlock::CallEdge &edge : block->call_edges()) {
-      if (edge.callee == nullptr)
+      if (edge.callee == nullptr) {
         return false;
+      }
       const CalleeReturns::const_iterator found = preserving_returns.find(edge.callee);
       if (found != preserving_returns.end()) {
         known_returns.insert(found->second.begin(), found->second.end());
@@ -494,12 +551,15 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
   }
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     const BasicBlock::SuccessorIssue issue = block->successor_issue();
-    if (issue == BasicBlock::SuccessorIssue::None)
+    if (issue == BasicBlock::SuccessorIssue::None) {
       continue;
-    if (issue != BasicBlock::SuccessorIssue::IndirectControlFlow)
+    }
+    if (issue != BasicBlock::SuccessorIssue::IndirectControlFlow) {
       return false;
-    if (known_returns.contains(block->terminator()) || static_pc_reentry_target(*block, kernels))
+    }
+    if (known_returns.contains(block->terminator()) || static_pc_reentry_target(*block, kernels)) {
       continue;
+    }
     const std::vector<IndirectCallFixup> &fixups = block->static_indirect_call_fixups();
     if (fixups.empty() || !std::ranges::all_of(fixups, [&](const IndirectCallFixup &fixup) {
           return !fixup.source_incomplete && block->terminator() != nullptr &&
@@ -507,8 +567,9 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
                  std::ranges::any_of(blocks, [&](const std::unique_ptr<BasicBlock> &target) {
                    return target->start_offset() == fixup.source_target_offset;
                  });
-        }))
+        })) {
       return false;
+    }
   }
   return true;
 }
@@ -516,8 +577,9 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
 // Relocation changes the value observed by PC readers. PC restore and set
 // operations remain disallowed separately from ordinary branch metadata.
 [[nodiscard]] bool is_pc_relative_anchor(const Instruction &inst) {
-  if (inst.reads_pc())
+  if (inst.reads_pc()) {
     return true;
+  }
   switch (inst.amdgpu_operation()) {
   case amdgpu::Operation::S_SETPC_B64:
   case amdgpu::Operation::S_SET_PC_I64:
@@ -687,8 +749,9 @@ std::optional<uint8_t> common_wavefront_size(rocjitsu::IsaFamily arch,
   std::optional<uint8_t> common;
   for (const KernelDescriptorInfo &kernel : kernels) {
     const uint8_t wave_size = kernel_wavefront_size(arch, kernel.descriptor);
-    if (common && *common != wave_size)
+    if (common && *common != wave_size) {
       return std::nullopt;
+    }
     common = wave_size;
   }
   return common;
@@ -718,10 +781,12 @@ bool check_probe_special_state(const ProbeClobberSummary &summary, rocjitsu::Isa
 // Check that the probe does not clobber the link pair.
 bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &abi,
                            std::string *error_out) {
-  if (!is_valid_probe_abi(abi))
+  if (!is_valid_probe_abi(abi)) {
     return true; // plan_probe_call rejects an unusable ABI with its own error.
-  if (!summary.ordinary_clobbers.intersects(probe_link_pair(abi)))
+  }
+  if (!summary.ordinary_clobbers.intersects(probe_link_pair(abi))) {
     return true;
+  }
   if (error_out != nullptr) {
     const uint16_t hi = static_cast<uint16_t>(abi.link_pair_base + 1);
     *error_out = "probe body overwrites its own return-link pair s[" +
@@ -767,8 +832,9 @@ bool validate_anchor_bytes(const Instruction &anchor, uint64_t anchor_offset,
 bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
                            std::span<const uint8_t> text_bytes,
                            [[maybe_unused]] rocjitsu::IsaFamily arch, std::string *error_out) {
-  if (!validate_anchor_bytes(anchor, anchor_offset, text_bytes, error_out))
+  if (!validate_anchor_bytes(anchor, anchor_offset, text_bytes, error_out)) {
     return false;
+  }
   constexpr uint64_t kControlFlowFlags =
       BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
   if (anchor.flags() & kControlFlowFlags) {
@@ -872,8 +938,9 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     return std::nullopt;
   }
   if (pt.kind == InstrumentationKind::BeforeInst || pt.kind == InstrumentationKind::AfterInst) {
-    if (!is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out))
+    if (!is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out)) {
       return std::nullopt;
+    }
   } else {
     if (pt.probe_obj == nullptr ||
         !validate_anchor_bytes(anchor, anchor_offset, text_bytes, error_out,
@@ -911,8 +978,9 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
   OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
   util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
-  if (nop.failed())
+  if (nop.failed()) {
     return false;
+  }
   if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
       plan.before_items[0].words[0] != nop.value()) {
     report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
@@ -988,8 +1056,9 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rocjit
   bool ok = true;
   std::string fail;
   spill_set.for_each([&](RegisterRef ref) {
-    if (!ok)
+    if (!ok) {
       return;
+    }
     const std::optional<uint32_t> off = spills.allocate_slot(ref);
     if (!off) {
       fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
@@ -1029,8 +1098,9 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_un
            ("probe-call spill of non-SGPR registers not yet supported:" + non_sgpr).c_str());
     return false;
   }
-  if (spill_set.none())
+  if (spill_set.none()) {
     return true;
+  }
 
   const uint32_t max_offset = max_scratch_offset_bytes(arch);
   if (max_offset == 0) {
@@ -1054,8 +1124,9 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_un
       break;
     }
   }
-  if (!bridge && !vgpr_spills.empty())
+  if (!bridge && !vgpr_spills.empty()) {
     bridge = vgpr_spills.front().reg; // allocated by construction, so in bounds
+  }
   if (!bridge) {
     report(error_out, "probe-call SGPR spill needs a bridge VGPR, but none is dead or already "
                       "spilled within the kernel's allocated VGPRs");
@@ -1065,8 +1136,9 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_un
   bool ok = true;
   std::string fail;
   spill_set.for_each([&](RegisterRef ref) {
-    if (!ok)
+    if (!ok) {
       return;
+    }
     const std::optional<uint32_t> off = spills.allocate_slot(ref);
     if (!off) {
       fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
@@ -1105,8 +1177,9 @@ bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillMana
     report(error_out, ("AccVGPR spill planning received non-AccVGPR registers:" + non_acc).c_str());
     return false;
   }
-  if (spill_set.none())
+  if (spill_set.none()) {
     return true;
+  }
 
   if (!arch_has_accvgpr(arch)) {
     report(error_out, "AccVGPR spilling is only supported on CDNA1-4 targets");
@@ -1138,8 +1211,9 @@ bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillMana
   bool ok = true;
   std::string fail;
   spill_set.for_each([&](RegisterRef ref) {
-    if (!ok)
+    if (!ok) {
       return;
+    }
     const std::optional<uint32_t> off = spills.allocate_slot(ref);
     if (!off) {
       fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
@@ -1181,8 +1255,9 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rocjitsu:
   if (site.kind == InstrumentationKind::ReplaceWithInst) {
     plan.emit_original = false;
     plan.returns_to_kernel = !site.replacement_terminates;
-    if (!site.replacement_words.empty())
+    if (!site.replacement_words.empty()) {
       plan.after_items.push_back({.words = site.replacement_words});
+    }
   }
   return plan;
 }
@@ -1203,8 +1278,9 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rocjitsu:
 bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObject &obj,
                                const KernelDescriptorInfo &kernel, std::string *error_out) {
   for (const auto &section : obj.all_sections()) {
-    if (section->name() != kKernargExtensionMetadataSectionName)
+    if (section->name() != kKernargExtensionMetadataSectionName) {
       continue;
+    }
     report(error_out, ("the code object already carries a " +
                        std::string(kKernargExtensionMetadataSectionName) +
                        " section, and a second one would be unreachable to the loader; "
@@ -1241,11 +1317,13 @@ std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentation
   OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
   util::FailureOr<uint32_t> nop = build_s_nop(0, arch, &error);
-  if (nop.failed())
+  if (nop.failed()) {
     return std::nullopt;
+  }
   TrampolinePlan plan = make_base_plan(site, arch, trampoline_offset);
-  if (site.kind == InstrumentationKind::ReplaceWithInst)
+  if (site.kind == InstrumentationKind::ReplaceWithInst) {
     return plan;
+  }
   plan.before_items = {InlineAsmItem{{nop.value()}}};
   plan.after_items = {};
   plan.emit_original = true;
@@ -1273,30 +1351,35 @@ bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
                                bool allow_implicit_exit = false) {
   if (std::ranges::none_of(reachable, [](const BasicBlock *block) {
         return block->successor_issue() != BasicBlock::SuccessorIssue::None;
-      }))
+      })) {
     return false;
+  }
 
   std::unordered_map<BasicBlock *, uint64_t> incoming;
   std::vector<BasicBlock *> worklist;
   auto merge = [&](BasicBlock *block, uint64_t links) {
-    if (!reachable.contains(block))
+    if (!reachable.contains(block)) {
       return;
+    }
     auto [it, inserted] = incoming.emplace(block, links);
     if (!inserted) {
       links &= it->second;
-      if (it->second == links)
+      if (it->second == links) {
         return;
+      }
       it->second = links;
     }
     worklist.push_back(block);
   };
   merge(&entry, 0);
-  for (uint64_t offset : spec.own_entries)
+  for (uint64_t offset : spec.own_entries) {
     merge(block_for_offset(offsets, offset), 0);
+  }
   const auto pair_bit = [ordinary_sgpr_count](unsigned reg) -> uint64_t {
     // Firmware's aliased scalar tail can also be written by implicit operands.
-    if ((reg & 1u) || reg >= 128 || reg + 1 >= ordinary_sgpr_count)
+    if ((reg & 1u) || reg >= 128 || reg + 1 >= ordinary_sgpr_count) {
       return 0;
+    }
     return uint64_t{1} << (reg / 2);
   };
   while (!worklist.empty()) {
@@ -1304,8 +1387,9 @@ bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
     worklist.pop_back();
     uint64_t links = incoming.at(block);
     for (const Instruction &inst : block->instructions()) {
-      if (!links)
+      if (!links) {
         break;
+      }
       if (inst.mnemonic().starts_with("s_movrel")) {
         links = 0;
         break;
@@ -1313,8 +1397,9 @@ bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
       const InstDefUse effects(inst, 64);
       for (uint64_t pairs = links; pairs; pairs &= pairs - 1) {
         const uint16_t first = 2 * std::countr_zero(pairs);
-        if (effects.defs.intersects(RegisterRef{RegClass::SGPR, first, 2}))
+        if (effects.defs.intersects(RegisterRef{RegClass::SGPR, first, 2})) {
           links &= ~pair_bit(first);
+        }
       }
     }
     const BasicBlock::SuccessorIssue issue = block->successor_issue();
@@ -1324,16 +1409,20 @@ bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
         !proven_reentries.contains(block)) {
       const Instruction *term = block->terminator();
       if (block->successor_issue() != BasicBlock::SuccessorIssue::IndirectControlFlow || !term ||
-          term->mnemonic() != "s_setpc_b64" || !term->num_src_operands())
+          term->mnemonic() != "s_setpc_b64" || !term->num_src_operands()) {
         return true;
+      }
       const auto src = term->src_operand(0)->to_register_ref();
-      if (!src || src->cls != RegClass::SGPR || src->width != 2 || !(links & pair_bit(src->index)))
+      if (!src || src->cls != RegClass::SGPR || src->width != 2 ||
+          !(links & pair_bit(src->index))) {
         return true;
+      }
     }
 
     const auto &calls = block->call_edges();
-    for (BasicBlock *next : block->successors())
+    for (BasicBlock *next : block->successors()) {
       merge(next, calls.empty() ? links : 0);
+    }
     for (const BasicBlock::CallEdge &call : calls) {
       // The callee may clobber any older saved link before it returns.
       merge(call.continuation, 0);
@@ -1355,17 +1444,20 @@ public:
                  const std::unordered_set<const BasicBlock *> &proven_reentries,
                  uint32_t ordinary_sgprs)
       : offsets_(offsets), proven_reentries_(proven_reentries), ordinary_sgprs_(ordinary_sgprs) {
-    for (const std::unique_ptr<BasicBlock> &block : blocks)
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
       decoded_.insert(block.get());
+    }
   }
 
   bool contains_flow(BasicBlock &entry, const KernelScopeSpec &spec) {
-    if (!analyze(entry, std::nullopt))
+    if (!analyze(entry, std::nullopt)) {
       return false;
+    }
     for (uint64_t offset : spec.own_entries) {
       BasicBlock *extra = block_for_offset(offsets_, offset);
-      if (extra == nullptr || extra->start_offset() != offset || !analyze(*extra, std::nullopt))
+      if (extra == nullptr || extra->start_offset() != offset || !analyze(*extra, std::nullopt)) {
         return false;
+      }
     }
     return true;
   }
@@ -1403,9 +1495,11 @@ private:
 
   static void kill(State &state, const RegisterSet &defs,
                    std::optional<uint16_t> preserved_vector = std::nullopt) {
-    for (uint16_t index = 0; index < state.scalar.size(); ++index)
-      if (state.scalar[index] && defs.contains({RegClass::SGPR, index, 1}))
+    for (uint16_t index = 0; index < state.scalar.size(); ++index) {
+      if (state.scalar[index] && defs.contains({RegClass::SGPR, index, 1})) {
         state.scalar[index] = 0;
+      }
+    }
     std::erase_if(state.lanes, [&](const std::pair<const uint32_t, uint8_t> &item) {
       const uint16_t vector = item.first / 64;
       return vector != preserved_vector && defs.contains({RegClass::VGPR, vector, 1});
@@ -1414,20 +1508,23 @@ private:
 
   bool complete_calls(const BasicBlock &block) const {
     const Instruction *term = block.terminator();
-    if (term == nullptr || block.call_edges().empty())
+    if (term == nullptr || block.call_edges().empty()) {
       return false;
+    }
     for (const BasicBlock::CallEdge &edge : block.call_edges()) {
       if (edge.callee == nullptr || edge.continuation == nullptr ||
           !decoded_.contains(edge.callee) || !decoded_.contains(edge.continuation) ||
           edge.source_call_offset != term->src_loc() || edge.return_sreg % 2 ||
-          edge.return_sreg + 1u >= ordinary_sgprs_)
+          edge.return_sreg + 1u >= ordinary_sgprs_) {
         return false;
+      }
       if (edge.kind == BasicBlock::CallEdgeKind::DirectCall) {
         const std::optional<int64_t> delta = term->branch_offset_bytes();
         if (!delta || static_cast<int64_t>(block.end_offset()) + *delta < 0 ||
             static_cast<uint64_t>(static_cast<int64_t>(block.end_offset()) + *delta) !=
-                edge.callee->start_offset())
+                edge.callee->start_offset()) {
           return false;
+        }
       } else {
         const std::vector<IndirectCallFixup> &fixups = block.static_indirect_call_fixups();
         if (fixups.empty() ||
@@ -1447,8 +1544,9 @@ private:
                                   target.callee->start_offset() == fixup.source_target_offset &&
                                   target.return_sreg == fixup.source_return_sreg;
                          });
-            }))
+            })) {
           return false;
+        }
       }
     }
     return true;
@@ -1458,12 +1556,14 @@ private:
     std::unordered_map<uint16_t, std::optional<RegisterSet>> &by_link = summaries_[edge.callee];
     const std::unordered_map<uint16_t, std::optional<RegisterSet>>::const_iterator found =
         by_link.find(edge.return_sreg);
-    if (found != by_link.end())
+    if (found != by_link.end()) {
       return found->second;
+    }
     // Bound recursion as well as cycles; an incomplete summary never grants admission.
     by_link.emplace(edge.return_sreg, std::nullopt);
-    if (active_summaries_ == 64)
+    if (active_summaries_ == 64) {
       return std::nullopt;
+    }
     ++active_summaries_;
     const std::optional<RegisterSet> result = analyze(*edge.callee, edge.return_sreg);
     --active_summaries_;
@@ -1480,8 +1580,9 @@ private:
     std::unordered_map<const BasicBlock *, State> incoming;
     std::vector<const BasicBlock *> work;
     auto merge = [&](const BasicBlock *block, const State &state) {
-      if (block == nullptr || !decoded_.contains(block))
+      if (block == nullptr || !decoded_.contains(block)) {
         return false;
+      }
       auto [position, inserted] = incoming.emplace(block, state);
       bool changed = inserted;
       if (!inserted) {
@@ -1500,8 +1601,9 @@ private:
           return remove;
         });
       }
-      if (changed)
+      if (changed) {
         work.push_back(block);
+      }
       return true;
     };
     merge(&entry, initial);
@@ -1512,16 +1614,19 @@ private:
       State state = incoming.at(block);
       for (const Instruction &inst : block->instructions()) {
         const std::string_view name = inst.mnemonic();
-        if (is_control_flow_transfer(inst) && &inst != block->terminator())
+        if (is_control_flow_transfer(inst) && &inst != block->terminator()) {
           return std::nullopt;
+        }
         // Dynamic register addressing is not represented by these fixed slots.
         if (name.starts_with("s_movrel") || name.starts_with("s_set_gpr_idx") ||
-            name.starts_with("s_setreg"))
+            name.starts_with("s_setreg")) {
           return std::nullopt;
+        }
         const InstDefUse effects(inst, 64);
         RegisterSet defs = effects.defs;
-        if (effects.conditional_vgpr_def)
+        if (effects.conditional_vgpr_def) {
           defs.expand(*effects.conditional_vgpr_def);
+        }
         clobbers |= defs;
         const std::optional<RegisterRef> scalar_dst = reg(inst.dst_operand(0), RegClass::SGPR);
         // WRITELANE's read-modify-write destination is its first decoded source.
@@ -1540,13 +1645,15 @@ private:
             scalar_dst->index + scalar_dst->width <= ordinary_sgprs_ &&
             scalar_src->index + scalar_src->width <= ordinary_sgprs_) {
           copied_width = scalar_dst->width;
-          for (unsigned half = 0; half < copied_width; ++half)
+          for (unsigned half = 0; half < copied_width; ++half) {
             copied[half] = state.scalar[scalar_src->index + half];
+          }
         } else if (name == "v_writelane_b32" && vector_dst && vector_dst->width == 1 &&
                    lane_index) {
           written_lane = slot(*vector_dst, *lane_index);
-          if (scalar_src && scalar_src->width == 1 && scalar_src->index < ordinary_sgprs_)
+          if (scalar_src && scalar_src->width == 1 && scalar_src->index < ordinary_sgprs_) {
             lane_value = state.scalar[scalar_src->index];
+          }
         } else if (name == "v_readlane_b32" && scalar_dst && scalar_dst->width == 1 &&
                    scalar_dst->index < ordinary_sgprs_ && vector_src && vector_src->width == 1 &&
                    lane_index) {
@@ -1558,33 +1665,40 @@ private:
         kill(state, defs, written_lane ? std::optional<uint16_t>(vector_dst->index) : std::nullopt);
         if (written_lane) {
           state.lanes.erase(*written_lane);
-          if (lane_value)
+          if (lane_value) {
             state.lanes.emplace(*written_lane, lane_value);
+          }
         }
-        for (unsigned half = 0; half < copied_width; ++half)
+        for (unsigned half = 0; half < copied_width; ++half) {
           state.scalar[scalar_dst->index + half] = copied[half];
+        }
       }
       const Instruction *term = block->terminator();
-      if (term == nullptr)
+      if (term == nullptr) {
         return std::nullopt;
+      }
       if (term->mnemonic() == "s_setpc_b64") {
         const std::optional<RegisterRef> source = reg(term->src_operand(0), RegClass::SGPR);
         if (link && source && source->width == 2 && source->index + 1u < ordinary_sgprs_ &&
-            state.scalar[source->index] == 1 && state.scalar[source->index + 1] == 2)
+            state.scalar[source->index] == 1 && state.scalar[source->index + 1] == 2) {
           continue;
+        }
       }
       const bool has_calls = !block->call_edges().empty();
       if (is_control_flow_transfer(*term) && !is_program_path_terminator(*term) &&
           !term->branch_offset_bytes() && term->mnemonic() != "s_setpc_b64" && !has_calls &&
-          !proven_reentries_.contains(block))
+          !proven_reentries_.contains(block)) {
         return std::nullopt;
+      }
       if (has_calls) {
-        if (!complete_calls(*block))
+        if (!complete_calls(*block)) {
           return std::nullopt;
+        }
         for (const BasicBlock::CallEdge &edge : block->call_edges()) {
           const std::optional<RegisterSet> summary = callee(edge);
-          if (!summary)
+          if (!summary) {
             return std::nullopt;
+          }
           clobbers |= *summary;
           kill(state, *summary);
         }
@@ -1593,11 +1707,14 @@ private:
       if (issue != BasicBlock::SuccessorIssue::None &&
           issue != BasicBlock::SuccessorIssue::MissingFallthrough &&
           !(issue == BasicBlock::SuccessorIssue::IndirectControlFlow && has_calls) &&
-          !proven_reentries_.contains(block))
+          !proven_reentries_.contains(block)) {
         return std::nullopt;
-      for (const BasicBlock *next : block->successors())
-        if (!merge(next, state))
+      }
+      for (const BasicBlock *next : block->successors()) {
+        if (!merge(next, state)) {
           return std::nullopt;
+        }
+      }
     }
     return clobbers;
   }
@@ -1611,8 +1728,9 @@ bool mode_state_is_preserved_in_closed_text(const std::vector<std::unique_ptr<Ba
                                             CallableState state, uint64_t entry_text_size,
                                             const HelperEntryLinks &entry_links) {
   if (!arch_is_cdna_4_or_lower(arch) ||
-      (state != CallableState::GprIndexing && state != CallableState::Vskip))
+      (state != CallableState::GprIndexing && state != CallableState::Vskip)) {
     return false;
+  }
   std::unordered_set<const BasicBlock *> proven_reentries;
   std::unordered_map<const BasicBlock *, bool> bounded_callees;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1624,41 +1742,49 @@ bool mode_state_is_preserved_in_closed_text(const std::vector<std::unique_ptr<Ba
       // to issue, even when this invocation proves GPR indexing rather than VSKIP.
       const bool skips_lane_saves =
           state == CallableState::GprIndexing && may_enable_vskip(inst, text, arch);
-      if (enables || skips_lane_saves || inst.mnemonic().starts_with("s_rfe"))
+      if (enables || skips_lane_saves || inst.mnemonic().starts_with("s_rfe")) {
         return false;
+      }
       if ((inst.flags() & INDIRECT_CALL) &&
-          (&inst != block->terminator() || block->call_edges().empty()))
+          (&inst != block->terminator() || block->call_edges().empty())) {
         return false;
+      }
     }
-    if (static_pc_reentry_target(*block, kernels))
+    if (static_pc_reentry_target(*block, kernels)) {
       proven_reentries.insert(block.get());
+    }
     for (const BasicBlock::CallEdge &edge : block->call_edges()) {
-      if (edge.callee == nullptr)
+      if (edge.callee == nullptr) {
         continue;
+      }
       bool &bounded = bounded_callees.try_emplace(edge.callee, true).first->second;
       bounded = bounded && callee_reentry_target(edge, kernels, arch, &entry_links).has_value();
     }
   }
   // A computed return can depend on the caller's continuation. Every call
   // into the block must establish a bounded destination.
-  for (const auto &[callee, bounded] : bounded_callees)
-    if (bounded)
+  for (const auto &[callee, bounded] : bounded_callees) {
+    if (bounded) {
       proven_reentries.insert(callee);
+    }
+  }
   const BlockOffsetIndex offsets = build_block_offset_index(blocks);
   const BlockPositionIndex positions = build_block_position_index(blocks);
   for (const KernelDescriptorInfo &kernel : kernels) {
     BasicBlock *entry = block_for_offset(offsets, kernel.entry_text_offset);
     const std::optional<uint32_t> count =
         AmdGpuCodeObject::min_kernel_sgpr_count(arch, std::span(&kernel, 1));
-    if (entry == nullptr || !count)
+    if (entry == nullptr || !count) {
       return false;
+    }
     KernelScopeSpec spec;
     if (has_kernarg_preload_firmware_entry(kernel, arch)) {
       const std::optional<uint64_t> firmware =
           kernarg_preload_firmware_entry(kernel, arch, entry_text_size);
       BasicBlock *extra = firmware ? block_for_offset(offsets, *firmware) : nullptr;
-      if (extra == nullptr || extra->start_offset() != *firmware)
+      if (extra == nullptr || extra->start_offset() != *firmware) {
         return false;
+      }
       spec.own_entries.insert(*firmware);
     }
     const std::vector<BasicBlock *> reached =
@@ -1670,8 +1796,9 @@ bool mode_state_is_preserved_in_closed_text(const std::vector<std::unique_ptr<Ba
     if (kernel_has_unknown_target(*entry, spec, offsets, reachable, ordinary, proven_reentries,
                                   true)) {
       ClosedCallFlow calls(blocks, offsets, proven_reentries, ordinary);
-      if (!calls.contains_flow(*entry, spec))
+      if (!calls.contains_flow(*entry, spec)) {
         return false;
+      }
     }
   }
   return !kernels.empty();
@@ -1700,12 +1827,14 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
           kernarg_preload_firmware_entry(kernel, rocjitsu::IsaFamily::Cdna3, source_text_size);
       BasicBlock *extra = firmware ? block_for_offset(offsets, *firmware) : nullptr;
       missing_firmware_entry = extra == nullptr || extra->start_offset() != *firmware;
-      if (!missing_firmware_entry)
+      if (!missing_firmware_entry) {
         spec.own_entries.insert(*firmware);
+      }
     }
     std::vector<BasicBlock *> reached;
-    if (entry)
+    if (entry) {
       reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
+    }
     const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
     const bool incomplete =
         !entry || missing_firmware_entry ||
@@ -1713,13 +1842,16 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                   cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count)));
     for (const auto &site : sites) {
       if (site.is_probe_call() &&
-          (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
+          (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset)))) {
         owners[site.anchor_offset].push_back(count);
+      }
     }
   }
-  for (const auto &site : sites)
-    if (site.is_probe_call() && !owners.contains(site.anchor_offset))
+  for (const auto &site : sites) {
+    if (site.is_probe_call() && !owners.contains(site.anchor_offset)) {
       owners.emplace(site.anchor_offset, all_counts);
+    }
+  }
   return owners;
 }
 
@@ -1728,10 +1860,12 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
 [[nodiscard]] std::string entry_storage_reader_list(const std::vector<ProbeCallable> &probes) {
   std::string names;
   for (const ProbeCallable &probe : probes) {
-    if (!std::any_of(probe.arg_sources.begin(), probe.arg_sources.end(), reads_entry_storage))
+    if (!std::any_of(probe.arg_sources.begin(), probe.arg_sources.end(), reads_entry_storage)) {
       continue;
-    if (!names.empty())
+    }
+    if (!names.empty()) {
       names += ", ";
+    }
     names += "'" + probe.symbol + "'";
   }
   return names;
@@ -1774,11 +1908,14 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
 
   std::string err;
   RegisterSet reserved;
-  if (!compute_probe_reserved_registers(probes, summaries, reserved, error_out))
+  if (!compute_probe_reserved_registers(probes, summaries, reserved, error_out)) {
     return std::nullopt;
-  if (options_.register_growth)
-    for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
+  }
+  if (options_.register_growth) {
+    for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg) {
       reserved.expand(RegisterRef{RegClass::SGPR, reg, 1});
+    }
+  }
 
   // Reserve scalar sources before the wrapper prologue chooses its scratch:
   // a requested entry input can otherwise be dead to the original guest CFG.
@@ -1791,8 +1928,8 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
           ? std::max(std::min(options_.register_growth->sgprs, original_scalar_bound),
                      kernel_descriptor_initial_sgpr_count(arch_, kernel.descriptor))
           : original_scalar_bound;
-  for (const InstrumentationPoint &point : points_)
-    for (const ProbeArgValue &arg : point.probe_args)
+  for (const InstrumentationPoint &point : points_) {
+    for (const ProbeArgValue &arg : point.probe_args) {
       if (arg.source == ProbeArgSource::EntrySgpr) {
         if (arg.register_index >= scalar_bound) {
           report(error_out, "entry SGPR capture exceeds the original guest allocation");
@@ -1800,11 +1937,14 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
         }
         reserved.expand(RegisterRef{RegClass::SGPR, arg.register_index, 1});
       }
+    }
+  }
 
   std::optional<DbiEntryProloguePlan> planned;
-  if (probes_read_entry_storage(probes))
+  if (probes_read_entry_storage(probes)) {
     planned = plan_dbi_entry_prologue(KernelBlockScope(scope), kernel.descriptor, arch_,
                                       *kernel_sgpr_count, reserved, &err);
+  }
   if (probes_read_entry_storage(probes) && !planned) {
     // Every rejection the planner reports is a property of the kernel, so its
     // message alone does not say why this kernel was asked to carry a prologue
@@ -1836,11 +1976,12 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
         options_.register_growth ? std::min(options_.register_growth->vgprs, original_vector_bound)
                                  : original_vector_bound;
     std::vector<std::pair<RegClass, uint16_t>> sources;
-    for (const InstrumentationPoint &point : points_)
+    for (const InstrumentationPoint &point : points_) {
       for (const ProbeArgValue &arg : point.probe_args) {
         const std::optional<RegClass> source_class = entry_register_class(arg.source);
-        if (!source_class)
+        if (!source_class) {
           continue;
+        }
         if (arg.source == ProbeArgSource::EntryTtmp &&
             arg.register_index >= REGISTER_SET_MAX_TTMPS) {
           report(error_out, "entry TTMP capture exceeds the trap-temporary register file");
@@ -1852,9 +1993,11 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
           return std::nullopt;
         }
         const std::pair<RegClass, uint16_t> source = {*source_class, arg.register_index};
-        if (std::ranges::find(sources, source) == sources.end())
+        if (std::ranges::find(sources, source) == sources.end()) {
           sources.push_back(source);
+        }
       }
+    }
     if (sources.size() > 2) {
       report(error_out, "the entry snapshot has room for at most two register values");
       return std::nullopt;
@@ -1874,8 +2017,9 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
             source_class == RegClass::TTMP ? amdgpu::kTtmpSelectorFirst + source_index
                                            : source_index,
             arch_, &error);
-        if (word.failed())
+        if (word.failed()) {
           return std::nullopt;
+        }
         patch.words.push_back(word.value());
       } else {
         util::StringDiagnostic lane_error;
@@ -1905,8 +2049,9 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
   util::FailureOr<uint32_t> branch = build_s_branch(*simm16, arch_, &error);
-  if (branch.failed())
+  if (branch.failed()) {
     return std::nullopt;
+  }
   patch.words.push_back(branch.value());
   return patch;
 }
@@ -1928,10 +2073,12 @@ public:
     for (const KernelDescriptorInfo &kernel : kernels) {
       entries.insert(kernel.entry_text_offset);
       entry_links.emplace(kernel.entry_text_offset, std::nullopt);
-      if (uses_dynamic_vgprs(arch, kernel.descriptor))
+      if (uses_dynamic_vgprs(arch, kernel.descriptor)) {
         dynamic_entries.insert(kernel.entry_text_offset);
-      if (!has_kernarg_preload_firmware_entry(kernel, arch))
+      }
+      if (!has_kernarg_preload_firmware_entry(kernel, arch)) {
         continue;
+      }
       const std::optional<uint64_t> firmware =
           kernarg_preload_firmware_entry(kernel, arch, entry_text_size);
       // An appended replacement cave cannot supply a missing source entry.
@@ -1947,17 +2094,20 @@ public:
     std::vector<const BasicBlock *> dynamic_roots;
     std::vector<const BasicBlock *> static_roots;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
-      if (dynamic_entries.contains(block->start_offset()))
+      if (dynamic_entries.contains(block->start_offset())) {
         dynamic_roots.push_back(block.get());
-      else if (entries.contains(block->start_offset()))
+      } else if (entries.contains(block->start_offset())) {
         static_roots.push_back(block.get());
+      }
       for (const BasicBlock::CallEdge &edge : block->call_edges()) {
-        if (edge.callee == nullptr)
+        if (edge.callee == nullptr) {
           continue;
+        }
         const auto [entry, inserted] =
             entry_links.try_emplace(edge.callee->start_offset(), edge.return_sreg);
-        if (!inserted && entry->second != edge.return_sreg)
+        if (!inserted && entry->second != edge.return_sreg) {
           entry->second.reset();
+        }
       }
       for (const Instruction &inst : block->instructions()) {
         states_.try_emplace(&inst);
@@ -1973,12 +2123,15 @@ public:
       while (!work.empty()) {
         const BasicBlock *block = work.back();
         work.pop_back();
-        if (!reachable.insert(block).second)
+        if (!reachable.insert(block).second) {
           continue;
+        }
         work.insert(work.end(), block->successors().begin(), block->successors().end());
-        for (const BasicBlock::CallEdge &edge : block->call_edges())
-          if (edge.callee != nullptr)
+        for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+          if (edge.callee != nullptr) {
             work.push_back(edge.callee);
+          }
+        }
       }
     };
     // A dynamic wave's initial allocation can be smaller than the descriptor
@@ -1990,18 +2143,22 @@ public:
     visit(dynamic_roots);
     for (const BasicBlock *block : reachable) {
       unknown_dynamic_target |= block->successor_issue() != BasicBlock::SuccessorIssue::None;
-      for (const Instruction &inst : block->instructions())
+      for (const Instruction &inst : block->instructions()) {
         states_.at(&inst) = dynamic_storage;
+      }
     }
-    if (unknown_dynamic_target)
-      for (auto &[inst, point] : states_)
+    if (unknown_dynamic_target) {
+      for (auto &[inst, point] : states_) {
         point = dynamic_storage;
+      }
+    }
     visit(static_roots);
     for (const CallableState state :
          {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
-      if (has_callable_state(arch, state))
+      if (has_callable_state(arch, state)) {
         analyze_state(blocks, kernels, text, arch, state, entries, reachable, entry_links,
                       entry_text_size);
+      }
     }
   }
 
@@ -2046,28 +2203,33 @@ private:
     const uint32_t ordinary_bound = ordinary_sgpr_bound(arch, sgpr_count);
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
       const HelperEntryLinks::const_iterator entry = entry_links.find(block->start_offset());
-      if (entry == entry_links.end() || !entry->second || uint32_t{*entry->second} + 2 > sgpr_count)
+      if (entry == entry_links.end() || !entry->second ||
+          uint32_t{*entry->second} + 2 > sgpr_count) {
         continue;
+      }
       std::vector<const Instruction *> returns = preserving_callee_returns(
           *block, *entry->second, ordinary_bound, entry_links, text, arch, state);
-      if (!returns.empty())
+      if (!returns.empty()) {
         preserving_returns.emplace(block.get(), std::move(returns));
+      }
     }
     std::unordered_set<const Instruction *> preserving_calls;
     std::unordered_set<const Instruction *> known_returns;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
       if (block->successor_issue() != BasicBlock::SuccessorIssue::None ||
-          block->call_edges().empty())
+          block->call_edges().empty()) {
         continue;
+      }
       if (std::ranges::all_of(block->call_edges(), [&](const BasicBlock::CallEdge &edge) {
             return preserving_returns.contains(edge.callee);
           })) {
         preserving_calls.insert(block->terminator());
-        if (reachable.contains(block.get()))
+        if (reachable.contains(block.get())) {
           for (const BasicBlock::CallEdge &edge : block->call_edges()) {
             const std::vector<const Instruction *> &returns = preserving_returns.at(edge.callee);
             known_returns.insert(returns.begin(), returns.end());
           }
+        }
       }
     }
     // Unknown transfers can introduce incoming MODE/storage state at every
@@ -2096,10 +2258,12 @@ private:
     constexpr uint8_t kSafe = 1;
     constexpr uint8_t kUnsafe = 2;
     const auto transfer = [](uint8_t incoming, StateWrite write) -> uint8_t {
-      if (write == StateWrite::Safe)
+      if (write == StateWrite::Safe) {
         return kSafe;
-      if (write == StateWrite::Unsafe)
+      }
+      if (write == StateWrite::Unsafe) {
         return kUnsafe;
+      }
       return incoming;
     };
     std::unordered_map<const BasicBlock *, BlockState> summaries;
@@ -2109,8 +2273,9 @@ private:
       BlockState &summary = summaries[block];
       for (const Instruction &inst : block->instructions()) {
         const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
-        if (write != StateWrite::Unchanged)
+        if (write != StateWrite::Unchanged) {
           summary.last_write = write;
+        }
       }
     }
     while (!work.empty()) {
@@ -2121,38 +2286,47 @@ private:
       summary.incoming = entries.contains(block->start_offset())
                              ? kSafe
                              : (block->predecessors().empty() ? kUnsafe : 0);
-      for (const BasicBlock *predecessor : block->predecessors())
-        if (reachable.contains(predecessor))
+      for (const BasicBlock *predecessor : block->predecessors()) {
+        if (reachable.contains(predecessor)) {
           summary.incoming |= summaries.at(predecessor).outgoing;
+        }
+      }
       const uint8_t outgoing = transfer(summary.incoming, summary.last_write);
-      if (outgoing == summary.outgoing)
+      if (outgoing == summary.outgoing) {
         continue;
+      }
       summary.outgoing = outgoing;
-      for (const BasicBlock *successor : block->successors())
-        if (reachable.contains(successor) && queued.insert(successor).second)
+      for (const BasicBlock *successor : block->successors()) {
+        if (reachable.contains(successor) && queued.insert(successor).second) {
           work.push_back(successor);
+        }
+      }
     }
     const uint8_t bit = state_bit(state);
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
       const bool is_reachable = reachable.contains(block.get());
       uint8_t current = is_reachable ? summaries.at(block.get()).incoming : 0;
       const auto unsafe = [&](uint8_t value, bool after) {
-        if (!is_reachable)
+        if (!is_reachable) {
           return true;
+        }
         // Falling off the original text cannot enter an earlier observation.
         // Retain the existing stricter AfterInst MODE completeness boundary.
-        if (incomplete || (!storage && after && missing_fallthrough))
+        if (incomplete || (!storage && after && missing_fallthrough)) {
           return !closed_state || (!storage && after);
+        }
         return value == 0 || (value & kUnsafe) != 0;
       };
       for (const Instruction &inst : block->instructions()) {
         PointState &point = states_.at(&inst);
-        if (unsafe(current, false))
+        if (unsafe(current, false)) {
           point.before |= bit;
+        }
         current =
             transfer(current, callable_state_write(inst, text, arch, state, &preserving_calls));
-        if (unsafe(current, true))
+        if (unsafe(current, true)) {
           point.after |= bit;
+        }
       }
     }
   }
@@ -2190,10 +2364,12 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
 
 bool Instrumentor::ensure_source_facts(TextEditError &error) {
   error = {};
-  if (source_facts_)
+  if (source_facts_) {
     return true;
-  if (CheckedTextEdits::validate_source_extent(obj_, error).failed())
+  }
+  if (CheckedTextEdits::validate_source_extent(obj_, error).failed()) {
     return false;
+  }
   std::string decoder_error;
   if (!ensure_decoder(&decoder_error)) {
     error = {.code = TextEditErrorCode::UnsupportedTarget,
@@ -2216,8 +2392,9 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
     // Reuse the boundary index's checked branch math; source admission below
     // rejects its overflow flag before these facts can be used.
     const std::span<const uint64_t> references = boundaries.reference_addresses();
-    if (references.size() != reference_count)
+    if (references.size() != reference_count) {
       facts->flow_edges.push_back({.source = source, .destination = references.back()});
+    }
     const bool unconditional_branch =
         (instruction.flags() & BRANCH) != 0 && (instruction.flags() & COND_BRANCH) == 0;
     const bool can_fall_through = !is_program_path_terminator(instruction) &&
@@ -2226,23 +2403,27 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
                                    indirect_branch_falls_through(instruction));
     const uint64_t size = instruction.size();
     if (can_fall_through && size <= section.size() &&
-        instruction.src_loc() == section.size() - size)
+        instruction.src_loc() == section.size() - size) {
       facts->flow_edges.push_back(
           {.source = source, .destination = section.vaddr() + section.size(), .fallthrough = true});
-    if (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64")
+    }
+    if (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64") {
       facts->pc_reads.push_back(source);
+    }
   };
   const auto decode_section = [&](const Section &section, InstructionBoundaries &boundaries,
                                   bool in_text) {
     const auto fail = [&](TextEditErrorCode code, uint64_t offset, std::string message) {
-      if (!in_text)
+      if (!in_text) {
         message = "executable section " + section.name() + ": " + message;
+      }
       error = {.code = code, .offset = in_text ? offset : 0, .message = std::move(message)};
       return false;
     };
     if (section.data() == nullptr || section.size() % sizeof(uint32_t) != 0 ||
-        section.vaddr() > std::numeric_limits<uint64_t>::max() - section.size())
+        section.vaddr() > std::numeric_limits<uint64_t>::max() - section.size()) {
       return fail(TextEditErrorCode::InvalidImage, 0, "invalid executable extent");
+    }
     const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(section.data()),
                                           section.size() / sizeof(uint32_t));
     size_t cursor = 0;
@@ -2255,24 +2436,28 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       DecodeResult decoded =
           decoder_->decode_window(words.subspan(cursor), cursor * 4, diagnostic.emitter());
       if (decoded.failed() || decoded.value()->size() == 0 || decoded.value()->size() % 4 != 0 ||
-          static_cast<size_t>(decoded.value()->size()) / 4 > words.size() - cursor)
+          static_cast<size_t>(decoded.value()->size()) / 4 > words.size() - cursor) {
         return fail(TextEditErrorCode::InvalidInstruction, cursor * 4,
                     "invalid source instruction: " + diagnostic.message());
-      if (reject_unavailable_branch_reference(*decoded.value(), error))
+      }
+      if (reject_unavailable_branch_reference(*decoded.value(), error)) {
         return fail(error.code, error.offset, std::move(error.message));
+      }
       record_instruction(*decoded.value(), section, boundaries, in_text);
       cursor += static_cast<size_t>(decoded.value()->size()) / sizeof(uint32_t);
     }
-    if (boundaries.reference_overflow())
+    if (boundaries.reference_overflow()) {
       return fail(TextEditErrorCode::UnsupportedReferences, 0, "branch reference overflows");
+    }
     return true;
   };
   const std::span<const uint32_t> text_words(reinterpret_cast<const uint32_t *>(text.data()),
                                              text.size() / sizeof(uint32_t));
   for (size_t cursor = 0; cursor < text_words.size(); ++cursor) {
     const uint64_t byte_offset = cursor * sizeof(uint32_t);
-    if (text_words[cursor] != 0 || !alignment_gaps.contains(byte_offset))
+    if (text_words[cursor] != 0 || !alignment_gaps.contains(byte_offset)) {
       continue;
+    }
     // Qualify alignment with the original CFG, including calls that may return
     // into it. Sources without such gaps retain the linear replacement path.
     std::string cfg_error;
@@ -2288,8 +2473,9 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
     // Own the index rather than borrowing storage from the parent Instrumentor.
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
-        if (reject_unavailable_branch_reference(instruction, error))
+        if (reject_unavailable_branch_reference(instruction, error)) {
           return false;
+        }
         record_instruction(instruction, text, facts->boundaries, true);
       }
     }
@@ -2304,27 +2490,32 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
   std::vector<uint64_t> kernel_entries;
   kernel_entries.reserve(kernels.size());
-  for (const KernelDescriptorInfo &kernel : kernels)
+  for (const KernelDescriptorInfo &kernel : kernels) {
     kernel_entries.push_back(kernel.entry_text_offset);
+  }
   const CodeObjectPatcher patcher(obj_);
   FailureOr<TextEditReferences> references = CheckedTextEdits::collect_references(
       obj_, arch_, facts->boundaries, patcher, kernel_entries, error);
-  if (references.failed())
+  if (references.failed()) {
     return false;
+  }
   facts->references = std::move(references).value();
   // Foreign offsets must not enter the public .text index or be mistaken for
   // replacement anchors. Their references still participate in the shared proof.
   for (const Section *section : obj_.allocated_executable_sections()) {
     // Relocatable sections have independent section-relative coordinates.
-    if (header.e_type == ET_REL || section == &text || section->size() == 0)
+    if (header.e_type == ET_REL || section == &text || section->size() == 0) {
       continue;
+    }
     InstructionBoundaries boundaries;
-    if (!decode_section(*section, boundaries, false))
+    if (!decode_section(*section, boundaries, false)) {
       return false;
+    }
     const std::vector<KernelDescriptorInfo> foreign_kernels = scan_kernel_descriptors(
         image, section->sectionOffset(), section->size(), section->sectionHeaderIndex());
-    for (const KernelDescriptorInfo &kernel : foreign_kernels)
+    for (const KernelDescriptorInfo &kernel : foreign_kernels) {
       facts->foreign_kernel_entries.push_back(section->vaddr() + kernel.entry_text_offset);
+    }
   }
   for (const SourceTextFacts::ControlFlowEdge &edge : facts->flow_edges) {
     if (edge.destination >= text.vaddr() &&
@@ -2332,12 +2523,14 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       error = {.code = TextEditErrorCode::UnsupportedReferences,
                .offset = edge.source.text_offset.value_or(0),
                .message = "control flow targets .text alignment"};
-      if (!edge.source.text_offset)
+      if (!edge.source.text_offset) {
         error.message += " (source VA " + std::to_string(edge.source.address) + ")";
+      }
       return false;
     }
-    if (!edge.fallthrough && !edge.source.text_offset)
+    if (!edge.fallthrough && !edge.source.text_offset) {
       facts->references.branch_addresses.push_back(edge.destination);
+    }
   }
   source_facts_ = std::move(facts);
   return true;
@@ -2348,8 +2541,9 @@ const InstructionBoundaries *Instrumentor::instruction_boundaries(TextEditError 
 }
 
 FailureOr<std::unique_ptr<Instrumentor>> Instrumentor::fork(TextEditError &error) {
-  if (!ensure_source_facts(error))
+  if (!ensure_source_facts(error)) {
     return Result::failure();
+  }
   std::unique_ptr<Instrumentor> child = std::make_unique<Instrumentor>(obj_, arch_, options_);
   child->source_facts_ = source_facts_;
   return child;
@@ -2360,8 +2554,9 @@ bool Instrumentor::ensure_decoder(std::string *error_out) {
     report(error_out, "cannot instrument an invalid code object");
     return false;
   }
-  if (decoder_)
+  if (decoder_) {
     return true;
+  }
   if (arch_ == rocjitsu::IsaFamily::Rv32i || arch_ == rocjitsu::IsaFamily::Rv64i) {
     report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
     return false;
@@ -2395,10 +2590,12 @@ bool Instrumentor::ensure_decoder(std::string *error_out) {
 }
 
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
-  if (blocks_built_)
+  if (blocks_built_) {
     return true;
-  if (!ensure_decoder(error_out))
+  }
+  if (!ensure_decoder(error_out)) {
     return false;
+  }
   util::StringDiagnostic decode_error;
   const AmdGpuCodeObject &analysis = analysis_object_ ? *analysis_object_ : obj_;
   std::vector<uint64_t> kernel_entries;
@@ -2416,8 +2613,9 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       kernel_entries.push_back(kernel.entry_text_offset);
       const std::optional<uint64_t> firmware =
           kernarg_preload_firmware_entry(kernel, arch_, entry_text_size);
-      if (firmware)
+      if (firmware) {
         kernel_entries.push_back(*firmware);
+      }
     }
     std::ranges::sort(kernel_entries);
     kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
@@ -2450,8 +2648,9 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
                                          std::span<const KernelDescriptorInfo> kernels,
                                          std::string *error_out,
                                          std::span<const InstrumentationPoint> observations) {
-  if (liveness_)
+  if (liveness_) {
     return true;
+  }
   if (!ensure_blocks_built(error_out) || obj_.text_sections().size() != 1) {
     report(error_out, "liveness requires one decodable text section");
     return false;
@@ -2479,21 +2678,24 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   } else {
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       scope.push_back(block.get());
-      if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
+      if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset) {
         options.entry_block = block.get();
+      }
     }
   }
   std::vector<AdditionalRegisterUse> uses;
   for (const InstrumentationPoint &point : observations) {
     // KernelEntry probes run only on dispatch, before this CFG. Their arguments
     // must not become reads on guest backedges to the original entry.
-    if (point.probe_obj == nullptr || point.kind == InstrumentationKind::KernelEntry)
+    if (point.probe_obj == nullptr || point.kind == InstrumentationKind::KernelEntry) {
       continue;
+    }
     const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
-    if (anchor != nullptr)
+    if (anchor != nullptr) {
       uses.push_back({.instruction = anchor,
                       .registers = probe_argument_registers(point.probe_args),
                       .after_instruction = point.kind == InstrumentationKind::AfterInst});
+    }
   }
   options.additional_uses = uses;
 
@@ -2503,8 +2705,9 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   // State admission also recognizes computed re-entry. Preserve its actual
   // destination; the call's continuation alone omits values read on re-entry.
   const auto add_entry_edge = [&](BasicBlock *from, std::optional<uint64_t> target) {
-    if (!target)
+    if (!target) {
       return true;
+    }
     const std::vector<BasicBlock *>::const_iterator entry =
         std::ranges::find(scope, *target, &BasicBlock::start_offset);
     if (entry == scope.end()) {
@@ -2515,11 +2718,14 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
     return true;
   };
   for (BasicBlock *block : scope) {
-    if (!add_entry_edge(block, static_pc_reentry_target(*block, kernels)))
+    if (!add_entry_edge(block, static_pc_reentry_target(*block, kernels))) {
       return false;
-    for (const BasicBlock::CallEdge &call : block->call_edges())
-      if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels, arch_)))
+    }
+    for (const BasicBlock::CallEdge &call : block->call_edges()) {
+      if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels, arch_))) {
         return false;
+      }
+    }
   }
 
   // A full-lane definition ends an observed value's live range, but only when
@@ -2532,12 +2738,14 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   for (const KernelDescriptorInfo &kernel : kernels) {
     const std::vector<BasicBlock *>::const_iterator entry =
         std::ranges::find(scope, kernel.entry_text_offset, &BasicBlock::start_offset);
-    if (entry == scope.end())
+    if (entry == scope.end()) {
       can_analyze_exec = false;
-    else
+    } else {
       entries.push_back(*entry);
-    if (!has_kernarg_preload_firmware_entry(kernel, arch_))
+    }
+    if (!has_kernarg_preload_firmware_entry(kernel, arch_)) {
       continue;
+    }
     // Firmware dispatch has clear VSKIP but may have partial EXEC, even though
     // the skipped-prefix boundary is represented in this graph.
     can_analyze_exec = false;
@@ -2546,26 +2754,30 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
     if (firmware) {
       const std::vector<BasicBlock *>::const_iterator extra =
           std::ranges::find(scope, *firmware, &BasicBlock::start_offset);
-      if (extra != scope.end())
+      if (extra != scope.end()) {
         entries.push_back(*extra);
+      }
     }
   }
   for (const BasicBlock *block : scope) {
     if (!block->call_edges().empty() || block->has_implicit_terminator() ||
-        block->successor_issue() != BasicBlock::SuccessorIssue::None)
+        block->successor_issue() != BasicBlock::SuccessorIssue::None) {
       can_analyze_exec = false;
+    }
     for (const Instruction &inst : block->instructions()) {
       if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst) &&
-          !inst.branch_offset_bytes())
+          !inst.branch_offset_bytes()) {
         can_analyze_exec = false;
+      }
     }
   }
   // VSKIP is clear on dispatch. Keep this entry proof separate from EXEC,
   // whose dispatch mask can be partial, and merge it with guest backedges.
   options.vskip_clear_entry_blocks = entries;
   std::unique_ptr<ExecMaskAnalysis> exec;
-  if (can_analyze_exec)
+  if (can_analyze_exec) {
     exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), wave_size, edges, entries);
+  }
   liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size,
                                                  std::move(exec), options, edges);
   return true;
@@ -2594,8 +2806,9 @@ bool Instrumentor::prepare_mutation_analysis(
   }
   const CheckedTextEdits transaction(obj_, *decoder_, source_facts_->boundaries,
                                      source_facts_->references);
-  if (transaction.apply(edits, std::span(text).first(original_size), error).failed())
+  if (transaction.apply(edits, std::span(text).first(original_size), error).failed()) {
     return false;
+  }
   if (!patcher.replace_text(text)) {
     error = {.code = TextEditErrorCode::InvalidImage,
              .offset = 0,
@@ -2646,8 +2859,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     }
     std::vector<CheckedTextEdit> source_edits;
     for (const InstrumentationPoint &point : requests) {
-      if (point.kind != InstrumentationKind::ReplaceWithInst)
+      if (point.kind != InstrumentationKind::ReplaceWithInst) {
         continue;
+      }
       if (!point.replacement) {
         out.errors.emplace_back("ReplaceWithInst requires expected and replacement bytes");
         return out;
@@ -2685,8 +2899,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       return out;
     }
     for (const InstrumentationPoint &point : requests) {
-      if (point.kind != InstrumentationKind::ReplaceWithInst)
+      if (point.kind != InstrumentationKind::ReplaceWithInst) {
         continue;
+      }
       ResolvedInstrumentationSite &site = replacements[replacement_indices.at(point.anchor_offset)];
       const std::vector<uint8_t> &bytes = point.replacement->replacement_bytes;
       if (bytes.size() % sizeof(uint32_t) != 0 ||
@@ -2698,8 +2913,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         return out;
       }
       site.replacement_words.resize(bytes.size() / sizeof(uint32_t));
-      if (!bytes.empty())
+      if (!bytes.empty()) {
         std::memcpy(site.replacement_words.data(), bytes.data(), bytes.size());
+      }
       size_t cursor = 0;
       while (cursor < site.replacement_words.size()) {
         const DecodeResult decoded = decoder_->decode_window(
@@ -2759,8 +2975,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     for (const InstrumentationPoint &point : requests) {
       const std::unordered_map<uint64_t, size_t>::const_iterator replacement =
           replacement_indices.find(point.anchor_offset);
-      if (point.kind != InstrumentationKind::BeforeInst || replacement == replacement_indices.end())
+      if (point.kind != InstrumentationKind::BeforeInst ||
+          replacement == replacement_indices.end()) {
         continue;
+      }
       if (point.replacement || !point.probe_obj || point.probe_symbol.empty() ||
           point.filter_flags) {
         out.errors.emplace_back("same-site observation composition requires a callable BeforeInst");
@@ -2789,8 +3007,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     std::vector<InstrumentationPoint> merged;
     for (const InstrumentationPoint &point : requests) {
       if (point.kind == InstrumentationKind::BeforeInst &&
-          replacement_indices.contains(point.anchor_offset))
+          replacement_indices.contains(point.anchor_offset)) {
         continue;
+      }
       merged.push_back(point);
     }
     requests = std::move(merged);
@@ -2833,21 +3052,25 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         };
         for (const Elf64_Shdr &section : sections) {
           if ((section.sh_flags & SHF_ALLOC) != 0 && section.sh_addr >= text_end &&
-              contains(section.sh_addr, section.sh_size))
+              contains(section.sh_addr, section.sh_size)) {
             return true;
+          }
         }
         for (const Elf64_Phdr &segment : *segments) {
-          if (segment.p_type != PT_LOAD || segment.p_memsz == 0)
+          if (segment.p_type != PT_LOAD || segment.p_memsz == 0) {
             continue;
+          }
           if (segment.p_offset >= file_end) {
-            if (segment.p_vaddr >= text_end && contains(segment.p_vaddr, segment.p_memsz))
+            if (segment.p_vaddr >= text_end && contains(segment.p_vaddr, segment.p_memsz)) {
               return true;
+            }
           } else {
             // Include unsectioned file-backed data and zero-fill after .text.
             const uint64_t insertion_offset = file_end - segment.p_offset;
             if (insertion_offset <= segment.p_filesz &&
-                contains(segment.p_vaddr, segment.p_memsz, insertion_offset))
+                contains(segment.p_vaddr, segment.p_memsz, insertion_offset)) {
               return true;
+            }
           }
         }
         return false;
@@ -2855,16 +3078,18 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       if (retained_pc != source_facts_->pc_reads.end() && storage_moves(std::nullopt)) {
         out.errors.emplace_back(
             "replacement growth cannot preserve retained PC-relative addresses to moved storage");
-        if (!retained_pc->text_offset)
+        if (!retained_pc->text_offset) {
           out.errors.back() += " (source VA " + std::to_string(retained_pc->address) + ")";
+        }
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
                                        .offset = retained_pc->text_offset.value_or(0),
                                        .message = out.errors.back()};
         return out;
       }
       for (uint64_t entry : source_facts_->foreign_kernel_entries) {
-        if (!storage_moves(entry))
+        if (!storage_moves(entry)) {
           continue;
+        }
         out.errors.emplace_back(
             "replacement growth cannot preserve a kernel entry in another executable section "
             "(entry VA " +
@@ -2876,14 +3101,16 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
       for (const SourceTextFacts::ControlFlowEdge &edge : source_facts_->flow_edges) {
         if (is_removed(edge.source) ||
-            storage_moves(edge.source.address) == storage_moves(edge.destination))
+            storage_moves(edge.source.address) == storage_moves(edge.destination)) {
           continue;
+        }
         out.errors.emplace_back(
             edge.fallthrough
                 ? "replacement growth cannot preserve a retained fallthrough edge"
                 : "replacement growth cannot preserve a retained direct branch displacement");
-        if (!edge.source.text_offset)
+        if (!edge.source.text_offset) {
           out.errors.back() += " (source VA " + std::to_string(edge.source.address) + ")";
+        }
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
                                        .offset = edge.source.text_offset.value_or(0),
                                        .message = out.errors.back()};
@@ -2940,8 +3167,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       for (const std::unique_ptr<BasicBlock> &block : blocks_) {
         // The local liveness scope has no external or call/return edge overlay.
         if (block->successor_issue() == BasicBlock::SuccessorIssue::None &&
-            block->call_edges().empty())
+            block->call_edges().empty()) {
           continue;
+        }
         const Instruction *terminator = block->terminator();
         const uint64_t offset =
             terminator && terminator->src_loc() < obj_.text_sections().front()->size()
@@ -2960,8 +3188,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // M0-displaced SGPR accesses are absent from ordinary def/use facts.
     std::vector<BasicBlock *> probe_scope;
     probe_scope.reserve(blocks_.size());
-    for (const std::unique_ptr<BasicBlock> &block : blocks_)
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       probe_scope.push_back(block.get());
+    }
     if (accesses_sgprs_indirectly_via_movrel(KernelBlockScope(probe_scope))) {
       out.errors.emplace_back("probe calls do not support relative SGPR access (s_movrel*)");
       return out;
@@ -3028,17 +3257,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     if (out.kernels.size() == 1) {
       bool has_call = false;
       for (const std::unique_ptr<BasicBlock> &block : blocks_) {
-        for (const Instruction &instruction : block->instructions())
+        for (const Instruction &instruction : block->instructions()) {
           has_call |= (instruction.flags() & INDIRECT_CALL) != 0;
+        }
       }
       if (!has_call) {
         bool bank_analysis_failed = false;
         const bool zero = std::ranges::all_of(requests, [&](const InstrumentationPoint &point) {
-          if (!point.probe_obj)
+          if (!point.probe_obj) {
             return true;
+          }
           const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
-          if (!anchor)
+          if (!anchor) {
             return false;
+          }
           for (amdgpu::VgprMsbRole role : {amdgpu::VgprMsbRole::Src0, amdgpu::VgprMsbRole::Src1,
                                            amdgpu::VgprMsbRole::Src2, amdgpu::VgprMsbRole::Dst}) {
             const util::FailureOr<std::optional<uint8_t>> bank =
@@ -3047,8 +3279,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
               bank_analysis_failed = true;
               return false;
             }
-            if (bank.value() != 0)
+            if (bank.value() != 0) {
               return false;
+            }
           }
           return true;
         });
@@ -3056,8 +3289,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
           out.errors.emplace_back("probe entry VGPR bank liveness is unavailable");
           return out;
         }
-        if (zero)
+        if (zero) {
           probe_entry_state = ProbeEntryState::ZeroVgprBanks;
+        }
       }
     }
   }
@@ -3083,8 +3317,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   auto arg_sources_of = [](const InstrumentationPoint &pt) {
     std::vector<ProbeArgSource> sources;
     sources.reserve(pt.probe_args.size());
-    for (const ProbeArgValue &arg : pt.probe_args)
+    for (const ProbeArgValue &arg : pt.probe_args) {
       sources.push_back(arg.source);
+    }
     return sources;
   };
   std::vector<ProbeKey> probe_keys;
@@ -3095,8 +3330,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                                  std::string &perr) -> std::optional<size_t> {
     const std::vector<ProbeArgSource> sources = arg_sources_of(pt);
     for (size_t i = 0; i < probe_keys.size(); ++i) {
-      if (probe_keys[i].obj != pt.probe_obj || probe_keys[i].symbol != pt.probe_symbol)
+      if (probe_keys[i].obj != pt.probe_obj || probe_keys[i].symbol != pt.probe_symbol) {
         continue;
+      }
       const ProbeCallable &declared = out.probes[i];
       if (static_cast<size_t>(declared.abi.num_arg_vgprs) != pt.probe_args.size()) {
         perr = "probe '" + pt.probe_symbol + "' was already declared with " +
@@ -3132,12 +3368,14 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       return std::nullopt;
     }
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
-    if (!sym)
+    if (!sym) {
       return std::nullopt;
+    }
     auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_,
                                          static_cast<uint8_t>(pt.probe_args.size()), &perr);
-    if (!callable)
+    if (!callable) {
       return std::nullopt;
+    }
     // Inputs the probe reads that its convention does not supply. Typically a
     // value only the kernel prologue produces -- workitem_id_x in v31, say --
     // which a trampoline at an arbitrary site cannot reproduce, so the probe
@@ -3145,8 +3383,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // uninitialized read lands here too, and is equally unusable.
     std::optional<RegisterSet> live_ins = analyze_probe_live_ins(
         *pt.probe_obj, *sym, arch_, callable->abi, *out.wave_size, &perr, probe_entry_state);
-    if (!live_ins)
+    if (!live_ins) {
       return std::nullopt;
+    }
     if (!live_ins->none()) {
       perr = "probe '" + pt.probe_symbol + "' reads " + format_register_set(*live_ins) +
              " before defining it, and its ABI (" + std::to_string(pt.probe_args.size()) +
@@ -3211,11 +3450,12 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
 
     std::string perr;
     std::optional<ResolvedInstrumentationSite> site;
-    if (pt.kind == InstrumentationKind::ReplaceWithInst)
+    if (pt.kind == InstrumentationKind::ReplaceWithInst) {
       site = replacements[replacement_indices.at(pt.anchor_offset)];
-    else
+    } else {
       site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr,
                              setreg_vgpr_msb_fixup);
+    }
     if (!site) {
       out.errors.push_back(std::move(perr));
       continue;
@@ -3266,9 +3506,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
           out.errors.emplace_back("effective anchor is unavailable for callable-state analysis");
           continue;
         }
-        if (!callable_state_analysis_)
+        if (!callable_state_analysis_) {
           callable_state_analysis_ = std::make_unique<CallableStateAnalysis>(
               blocks_, out.kernels, analysis_text_bytes, arch_, text->size());
+        }
         // A scalar anchor does not discharge dependencies left by earlier VALUs.
         // Until spacing is proven, exclude the entire decoded object, including
         // unreachable producers and helper bodies rather than guessing ownership.
@@ -3308,8 +3549,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
             break;
           }
         }
-        if (unsafe_state)
+        if (unsafe_state) {
           continue;
+        }
       }
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
@@ -3324,10 +3566,11 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     offsets.insert(pt.anchor_offset);
   }
 
-  if (out.errors.empty())
+  if (out.errors.empty()) {
     out.sites = std::move(sites);
-  else
+  } else {
     out.probes.clear(); // all-or-nothing: no partial registry on failure.
+  }
   return out;
 }
 
@@ -3459,8 +3702,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
       }
       Instrumentor validator(obj_, arch_);
       validator.planning_descriptor_offset_ = requests[index].descriptor_file_offset;
-      for (InstrumentationPoint &point : entry_points[index])
+      for (InstrumentationPoint &point : entry_points[index]) {
         validator.add_point(std::move(point));
+      }
       ValidationResult validation = validator.validate_points();
       if (!validation.errors.empty()) {
         result.errors = std::move(validation.errors);
@@ -3470,8 +3714,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
                    std::make_move_iterator(validation.sites.end()));
     }
     std::map<std::pair<uint64_t, InstrumentationKind>, size_t> point_positions;
-    for (size_t index = 0; index < points_.size(); ++index)
+    for (size_t index = 0; index < points_.size(); ++index) {
       point_positions.emplace(std::pair{points_[index].anchor_offset, points_[index].kind}, index);
+    }
     std::ranges::sort(sites, [&](const ResolvedInstrumentationSite &first,
                                  const ResolvedInstrumentationSite &second) {
       return point_positions.at({first.anchor_offset, first.kind}) <
@@ -3498,8 +3743,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     planner.planning_descriptor_offset_ = request.descriptor_file_offset;
     planner.planning_cave_offset_ = cursor;
     planner.entry_plan_ = &plans[index];
-    for (InstrumentationPoint &point : entry_points[index])
+    for (InstrumentationPoint &point : entry_points[index]) {
       planner.add_point(std::move(point));
+    }
     InstrumentedCodeObjectDebug planned = planner.patch_with_debug_summaries();
     if (!planned.errors.empty()) {
       result.errors = std::move(planned.errors);
@@ -3559,7 +3805,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
   const std::span<const uint8_t> original_text = patcher.text_bytes();
   std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
   if (!edits.empty()) {
-    for (const std::unique_ptr<BasicBlock> &block : blocks_)
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
         const std::string_view mnemonic = instruction.mnemonic();
         if ((mnemonic.starts_with("s_cbranch_cdbg") || mnemonic == "s_subvector_loop_begin" ||
@@ -3569,6 +3815,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
           return result;
         }
       }
+    }
     std::vector<uint64_t> entries(entry_offsets.begin(), entry_offsets.end());
     TextEditError edit_error;
     const InstructionBoundaries &source_boundaries =
@@ -3594,8 +3841,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     }
   }
   for (const EntryPatchPlan &plan : plans) {
-    for (const ProbeCallable &probe : plan.resolved.probes)
+    for (const ProbeCallable &probe : plan.resolved.probes) {
       append_words(new_text, probe.body_words);
+    }
     if (plan.prologue) {
       if (append_nop_padding(new_text, plan.prologue->padding_bytes, arch_).failed()) {
         result.errors.emplace_back("cannot encode entry alignment padding");
@@ -3603,19 +3851,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
       }
       append_words(new_text, plan.prologue->words);
     }
-    for (const AppliedSite &site : plan.applied)
+    for (const AppliedSite &site : plan.applied) {
       append_words(new_text, site.bytes.trampoline_words);
+    }
   }
   if (!patcher.replace_text(new_text)) {
     result.errors.emplace_back("failed to replace whole-image instrumented text");
     return result;
   }
   if (!extensions.empty()) {
-    for (const std::unique_ptr<Section> &section : obj_.all_sections())
+    for (const std::unique_ptr<Section> &section : obj_.all_sections()) {
       if (section->name() == kKernargExtensionMetadataSectionName) {
         result.errors.emplace_back("input already declares a kernarg extension");
         return result;
       }
+    }
     const std::vector<uint8_t> bytes = serialize_kernarg_extension_metadata(extensions);
     if (!patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, bytes)) {
       result.errors.emplace_back("failed to append entry kernarg extension records");
@@ -3643,8 +3893,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     }
     const KernelDescriptorInfo &kernel = *found;
     amdhsa::kernel_descriptor_t descriptor = kernel.descriptor;
-    if (plan.private_bytes)
+    if (plan.private_bytes) {
       descriptor.private_segment_fixed_size = *plan.private_bytes;
+    }
     plan.resources.kernarg_bytes = descriptor.kernarg_size;
     const bool has_storage = plan.prologue && plan.prologue->storage_base;
     if (has_storage && request.kernarg_binding == DbiKernargBinding::CallerSuppliedWrapper) {
@@ -3804,8 +4055,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
   }
   patched_ = true;
-  if (!options_.entries.empty())
+  if (!options_.entries.empty()) {
     return patch_entries();
+  }
 
   if (options_.preservation == GuestStatePreservation::DeclaredRegisters &&
       !options_.register_growth) {
@@ -3825,12 +4077,15 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     std::string readers;
     for (const InstrumentationPoint &pt : points_) {
       if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
-                       [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
+                       [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); })) {
         continue;
-      if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
+      }
+      if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos) {
         continue;
-      if (!readers.empty())
+      }
+      if (!readers.empty()) {
         readers += ", ";
+      }
       readers += "'" + pt.probe_symbol + "'";
     }
     if (!readers.empty()) {
@@ -3878,8 +4133,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     liveness_scope = reachable_kernel_blocks(blocks_, offsets, positions, *entry, spec);
   } else {
     liveness_scope.reserve(blocks_.size());
-    for (const std::unique_ptr<BasicBlock> &block : blocks_)
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       liveness_scope.push_back(block.get());
+    }
   }
   if (options_.register_growth && kernels.size() != 1) {
     result.errors.emplace_back("register growth needs one kernel with enumerable register uses");
@@ -3941,8 +4197,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   RegisterSet observed_vgprs;
   const uint32_t source_vgpr_bound = std::min(vgpr_bounds.ordinary_bound, 256u);
   for (const ResolvedInstrumentationSite &site : sites) {
-    if (!site.is_probe_call())
+    if (!site.is_probe_call()) {
       continue;
+    }
     for (const ProbeArgValue &arg : site.probe_args) {
       if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index >= source_vgpr_bound) {
         result.errors.emplace_back(
@@ -3968,18 +4225,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   // The site loop indexes this by probe_index, so a short vector would
   // misattribute one probe's clobbers to another.
-  if (!result.errors.empty())
+  if (!result.errors.empty()) {
     return result;
+  }
 
   uint32_t sgpr_save_base = 0;
   uint32_t vgpr_save_base = 0;
   auto include_registers = [&](const RegisterSet &registers) {
     registers.for_each_ordinary([&](RegisterRef reg) {
       const uint32_t end = uint32_t{reg.index} + reg.width;
-      if (reg.cls == RegClass::SGPR)
+      if (reg.cls == RegClass::SGPR) {
         result.resources.sgprs = std::max(result.resources.sgprs, end);
-      if (reg.cls == RegClass::VGPR)
+      }
+      if (reg.cls == RegClass::VGPR) {
         result.resources.vgprs = std::max(result.resources.vgprs, end);
+      }
     });
   };
   RegisterSet guest_registers;
@@ -3995,12 +4255,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     result.resources = {.sgprs = options_.register_growth->sgprs,
                         .vgprs = options_.register_growth->vgprs};
-    for (const BasicBlock *block : liveness_scope)
+    for (const BasicBlock *block : liveness_scope) {
       for (const Instruction &instruction : block->instructions()) {
         const InstDefUse effects(instruction, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
                                  UnknownVgprDefPolicy::ExpandAll);
         guest_registers |= effects.uses | effects.defs;
       }
+    }
     bool invalid = false;
     guest_registers.for_each_ordinary([&](RegisterRef reg) {
       const uint32_t end = uint32_t{reg.index} + reg.width;
@@ -4062,8 +4323,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                         uint32_t{*entry_storage_base} + kDbiEntryStorageRegisters);
       // Aligning entry storage can advance its snapshots past the initial
       // backup base when the original SGPR count is odd.
-      for (const EntryRegisterCapture &capture : entry_patch->captured_registers)
+      for (const EntryRegisterCapture &capture : entry_patch->captured_registers) {
         sgpr_save_base = std::max(sgpr_save_base, uint32_t{capture.sgpr} + 1);
+      }
     }
     cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
   }
@@ -4075,9 +4337,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   std::optional<SpillManager> spills;
 
   std::unordered_map<uint64_t, std::vector<uint32_t>> cdna3_owners;
-  if (arch_ == rocjitsu::IsaFamily::Cdna3 && kernels.size() > 1 && !resolved.probes.empty())
+  if (arch_ == rocjitsu::IsaFamily::Cdna3 && kernels.size() > 1 && !resolved.probes.empty()) {
     cdna3_owners =
         cdna3_probe_sgpr_counts(blocks_, kernels, sites, obj_.text_sections().front()->size());
+  }
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
@@ -4097,8 +4360,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
       const uint32_t default_count = kernel_sgpr_count.value_or(0);
       std::span<const uint32_t> allocations(&default_count, 1);
-      if (!cdna3_owners.empty())
+      if (!cdna3_owners.empty()) {
         allocations = cdna3_owners.at(site.anchor_offset);
+      }
       const uint32_t site_sgpr_count = std::ranges::min(allocations);
       // The kernel must own an ordinary pair throughout the call. On gfx942 an
       // in-bounds pair can still be the physical backing of VCC or FLAT_SCRATCH.
@@ -4199,16 +4463,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       RegisterSet live = *maybe_live.value() | probe_argument_registers(site.probe_args);
       // Including original definitions conservatively covers live-after state:
       // the callback must observe and preserve the relocated instruction's result.
-      if (site.kind == InstrumentationKind::AfterInst)
+      if (site.kind == InstrumentationKind::AfterInst) {
         live |= InstDefUse(*anchor, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
                            UnknownVgprDefPolicy::ExpandAll)
                     .defs;
+      }
       if (options_.register_growth &&
           options_.preservation == GuestStatePreservation::DeclaredRegisters) {
-        for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
+        for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg) {
           live.expand(RegisterRef{RegClass::SGPR, reg, 1});
-        for (uint16_t reg = 0; reg < options_.register_growth->vgprs; ++reg)
+        }
+        for (uint16_t reg = 0; reg < options_.register_growth->vgprs; ++reg) {
           live.expand(RegisterRef{RegClass::VGPR, reg, 1});
+        }
       }
 
       // Set the probe's offset
@@ -4220,8 +4487,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         plan.patch_anchor = false;
         plan.return_target = site.anchor_offset;
       }
-      if (site.kind == InstrumentationKind::KernelExit)
+      if (site.kind == InstrumentationKind::KernelExit) {
         plan.returns_to_kernel = false;
+      }
       // Orchestrator policy: save EXEC/VCC unconditionally so correctness does
       // not depend on complete per-opcode implicit-def coverage. The summary
       // sees decoder-exposed operands; M0 follows touches_m0, which includes
@@ -4239,8 +4507,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // passing the pointer on: the pair has to reach them all, so the envelope
       // has to stay off it everywhere.
       plan.entry_storage_base = entry_storage_base;
-      if (entry_patch)
+      if (entry_patch) {
         plan.entry_register_captures = entry_patch->captured_registers;
+      }
       if (options_.register_growth) {
         const RegisterSet overwritten =
             (summary->ordinary_clobbers | arg_registers(probe.abi)) & live;
@@ -4342,8 +4611,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
       // Get trampoline from TrampolineBuilder
       bytes = TrampolineBuilder::emit_probe_call(plan, &err);
-      if (plan.returns_to_kernel)
+      if (plan.returns_to_kernel) {
         record.return_target = plan.return_target;
+      }
       record.is_probe_call = true;
       record.probe_target_offset = probe.output_text_offset;
       record.link_pair_base = plan.link_pair_base;
@@ -4365,8 +4635,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
       bytes = TrampolineBuilder::build(plan, &err);
-      if (plan.returns_to_kernel)
+      if (plan.returns_to_kernel) {
         record.return_target = plan.return_target;
+      }
     }
 
     if (!bytes) {
@@ -4381,15 +4652,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
 
   // All-or-nothing: bail before mutating the patcher if any site failed.
-  if (!result.errors.empty())
+  if (!result.errors.empty()) {
     return result;
+  }
 
   if (entry_plan_ != nullptr) {
     entry_plan_->kernel = kernels.front();
     entry_plan_->resources = result.resources;
     entry_plan_->guest_registers = guest_registers;
-    if (spills)
+    if (spills) {
       entry_plan_->private_bytes = spills->total_private_bytes();
+    }
     entry_plan_->prologue = std::move(entry_patch);
     entry_plan_->cave_end = cave_cursor;
     entry_plan_->resolved = std::move(resolved);
@@ -4427,8 +4700,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
       const util::DiagnosticEmitter error(record_error);
       const util::FailureOr<uint32_t> branch = build_s_branch(*target, arch_, &error);
-      if (branch.failed())
+      if (branch.failed()) {
         return result;
+      }
       entry_patch->words.back() = branch.value();
     } else {
       anchor_edits.push_back({.offset = applied_site.site->anchor_offset,
@@ -4456,8 +4730,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     std::vector<uint64_t> kernel_entries;
     kernel_entries.reserve(kernels.size());
-    for (const KernelDescriptorInfo &kernel : kernels)
+    for (const KernelDescriptorInfo &kernel : kernels) {
       kernel_entries.push_back(kernel.entry_text_offset);
+    }
     const InstructionBoundaries &source_boundaries =
         source_facts_ ? source_facts_->boundaries : instruction_boundaries_;
     std::optional<TextEditReferences> local_references;
@@ -4482,8 +4757,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   // Append in the laid-out order: probe bodies first (one per distinct probe),
   // then the padding and the entry stub, then the per-site trampolines.
-  for (const ProbeCallable &probe : resolved.probes)
+  for (const ProbeCallable &probe : resolved.probes) {
     append_words(new_text, probe.body_words);
+  }
   if (entry_patch) {
     auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
     const util::DiagnosticEmitter error(record_error);
@@ -4492,8 +4768,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     append_words(new_text, entry_patch->words);
   }
-  for (const auto &a : applied)
+  for (const auto &a : applied) {
     append_words(new_text, a.bytes.trampoline_words);
+  }
   if (!patcher.replace_text(new_text)) {
     result.errors.emplace_back("failed to replace .text with the instrumented code");
     return result;
@@ -4525,8 +4802,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     const KernelDescriptorInfo &kernel = updated_kernels.front();
     amdhsa::kernel_descriptor_t descriptor = kernel.descriptor;
-    if (spills)
+    if (spills) {
       descriptor.private_segment_fixed_size = spills->total_private_bytes();
+    }
     result.resources.kernarg_bytes = descriptor.kernarg_size;
     // A binding authorizes the wrapper needed by entry-storage readers. Calls
     // without that prologue must retain the guest's original kernarg ABI.

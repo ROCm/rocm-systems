@@ -124,8 +124,9 @@ constexpr uint64_t kTailB = 0x18;
 [[nodiscard]] std::vector<uint64_t> start_offsets(const std::vector<BasicBlock *> &blocks) {
   std::vector<uint64_t> offsets;
   offsets.reserve(blocks.size());
-  for (const BasicBlock *block : blocks)
+  for (const BasicBlock *block : blocks) {
     offsets.push_back(block->start_offset());
+  }
   return offsets;
 }
 
@@ -153,8 +154,9 @@ protected:
                                                      const KernelScopeSpec &spec) {
     BasicBlock *entry = block_for_offset(offset_index_, entry_offset);
     EXPECT_NE(entry, nullptr);
-    if (entry == nullptr)
+    if (entry == nullptr) {
       return {};
+    }
     return reachable_kernel_blocks(blocks_, offset_index_, position_index_, *entry, spec);
   }
 
@@ -184,8 +186,9 @@ std::vector<uint32_t> shared_helper_words(bool indirect, bool clobber,
   const uint32_t nop = build_s_nop(0, arch).value();
   const uint32_t end = build_s_endpgm(arch).value();
   const auto caller = [&](uint32_t entry) {
-    if (!indirect)
+    if (!indirect) {
       return std::vector<uint32_t>{build_s_call_b64(30, (512 - entry - 4) / 4, arch).value(), end};
+    }
     return std::vector<uint32_t>{build_s_getpc_b64(8, arch).value(),
                                  build_s_add_u32(8, 8, 255, arch).value(),
                                  512 - entry - 4,
@@ -221,8 +224,9 @@ void add_function_symbol(std::vector<uint8_t> &image, uint64_t offset, bool dyna
     Elf64_Shdr symbols = {};
     const size_t section_offset = header.e_shoff + index * sizeof(Elf64_Shdr);
     std::memcpy(&symbols, image.data() + section_offset, sizeof(symbols));
-    if (symbols.sh_type != SHT_SYMTAB)
+    if (symbols.sh_type != SHT_SYMTAB) {
       continue;
+    }
     const size_t strings_header_offset = header.e_shoff + symbols.sh_link * sizeof(Elf64_Shdr);
     Elf64_Shdr strings = {};
     std::memcpy(&strings, image.data() + strings_header_offset, sizeof(strings));
@@ -247,8 +251,9 @@ void add_function_symbol(std::vector<uint8_t> &image, uint64_t offset, bool dyna
     image.insert(image.end(), names.begin(), names.end());
     symbols.sh_offset = image.size();
     symbols.sh_size = table.size();
-    if (dynamic)
+    if (dynamic) {
       symbols.sh_type = SHT_DYNSYM;
+    }
     image.insert(image.end(), table.begin(), table.end());
     std::memcpy(image.data() + section_offset, &symbols, sizeof(symbols));
     std::memcpy(image.data() + strings_header_offset, &strings, sizeof(strings));
@@ -466,8 +471,9 @@ TEST(KernelOwnershipTest, RejectsUnprovedBuilderEnteringAnotherCallee) {
     words[132] = build_s_setpc_b64(30, kArch).value();
     words[160] = build_s_cbranch_scc0(1);
     words[161] = build_s_setpc_b64(30, kArch).value();
-    if (loop_backedge)
+    if (loop_backedge) {
       words[162] = build_s_cbranch_scc0(-3);
+    }
     words[163] = build_s_setpc_b64(8, kArch).value();
     words[192] = build_s_endpgm(kArch).value();
     const std::array<uint32_t, 2> store =
@@ -520,16 +526,19 @@ TEST(KernelOwnershipTest, SplitPcAdjustmentRequiresMatchingHighHalfAndCarry) {
     words[64] = build_s_endpgm(kArch).value();
     const uint32_t target = test.start == 0 ? 512 : 4;
     words[target / 4] = build_s_endpgm(kArch).value();
-    if (test.start != 0)
+    if (test.start != 0) {
       words[0] = build_s_branch(127, kArch).value();
+    }
     size_t cursor = test.start / 4;
     words[cursor++] = build_s_getpc_b64(8, kArch).value();
     words[cursor++] = pack_sop2(test.low_op, 8, 8, 255);
     words[cursor++] = test.low;
-    if (test.gap)
+    if (test.gap) {
       words[cursor++] = build_s_mov_b32(20, 128, kArch).value();
-    if (test.overwrite_scc)
+    }
+    if (test.overwrite_scc) {
       words[cursor++] = build_s_cmp_lg_u32(128, 129, kArch).value();
+    }
     if (test.finish) {
       words[cursor++] = pack_sop2(test.high_op, 9, 9, 255);
       words[cursor++] = test.high;
@@ -562,14 +571,16 @@ TEST(KernelOwnershipTest, TemporaryPcAdjustmentRequiresProvedSignAndRegisters) {
       words[64] = build_s_endpgm(kArch).value();
       const uint32_t target = negative ? 4 : 512;
       words[target / 4] = build_s_endpgm(kArch).value();
-      if (negative)
+      if (negative) {
         words[0] = build_s_branch(127, kArch).value();
+      }
       size_t cursor = negative ? 128 : 0;
       words[cursor++] = build_s_getpc_b64(8, kArch).value();
       words[cursor++] = pack_sop2(cdna4::kSAddI32Sop2, temporary, 255, 132);
       words[cursor++] = negative ? 0xfffffdfcu : 504;
-      if (subtract)
+      if (subtract) {
         words[cursor++] = pack_sop1(0x30, temporary, temporary);
+      }
       words[cursor++] =
           pack_sop2(subtract ? cdna4::kSSubU32Sop2 : cdna4::kSAddU32Sop2, 8, 8, temporary);
       words[cursor++] =
