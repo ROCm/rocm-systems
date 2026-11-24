@@ -12,6 +12,7 @@ set(UNIT_TEST_SOURCES
     writer_test.cpp
     reader_test.cpp
     rocpd_v3_table_events_test.cpp
+    rocpd_v3_correlated_events_test.cpp
     reader_id_range_test.cpp
     sqlite_backend_impl_test.cpp
     ph_ctx_test.cpp
