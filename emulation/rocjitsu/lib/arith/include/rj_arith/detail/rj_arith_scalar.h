@@ -1023,8 +1023,9 @@ int rj_arith_s_ff0_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // of EXEC, including zero. a is a scalar value; d must always be writable.
 // FP16 reads a's low half, ignores its high half, and zeros d's upper half.
 // Supports ABS_A, NEG_A, OMOD and CLAMP, with ABS before NEG. No half selectors.
-// All FP32 operations and FP16 RCP/RSQ/SQRT support empirical-exact semantics.
-// FP16 EXP/LOG remain loose-only.
+// Every operation supports empirical-exact semantics and Compatibility resolves to
+// mode 2; FP16 EXP/LOG use the VALU EXP/LOG F16 model, which matches the gfx1201
+// V_S_EXP_F16/V_S_LOG_F16 captures (FP16_OVFL saturation, OMOD and CLAMP included).
 // Mode 3 FP status reporting is unsupported. Loose calls leave state unchanged.
 // FP32 always flushes input/output denormals. FP16 follows the guest input/output
 // flush flags and FP16_OVFL. Rounding precedes OMOD; nonzero OMOD flushes tiny
