@@ -45,6 +45,14 @@ int rj_arith_v_mov_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
     }
     return RJ_ARITH_SUCCESS;
   }
+  if (exec_mask == UINT32_MAX) {
+    const uint32_t *src = a[0];
+    uint32_t *dst = d[0];
+    for (int lane = 0; lane < 32; ++lane) {
+      dst[lane] = src[lane];
+    }
+    return RJ_ARITH_SUCCESS;
+  }
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {
       d[0][lane] = a[0][lane];

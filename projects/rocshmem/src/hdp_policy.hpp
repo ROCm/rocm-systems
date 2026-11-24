@@ -185,7 +185,7 @@ class NoHdpPolicy {
  * Select which one of our HDP policies to use at compile time.
  */
 #if defined USE_HDP_FLUSH
-// Only when we are using the IB conduit, we have to use a polling thread to
+// Only when we are using the IB backend, we have to use a polling thread to
 // flush the HDP cache on the GPU's behalf.
 #if defined USE_HDP_FLUSH_HOST_SIDE
 typedef HdpHostSideFlushRocmPolicy HdpPolicy;

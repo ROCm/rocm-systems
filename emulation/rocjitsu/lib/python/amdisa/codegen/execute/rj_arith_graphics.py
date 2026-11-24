@@ -15,6 +15,11 @@ INTERP_NAMES = {
     'V_INTERP_P2_RTZ_F16_F32',
 }
 
+# Architecture suffix of the MULLIT entry points. RDNA3 owns the unsuffixed entry and RDNA4
+# the _gfx12 entry; both accept bit-exact semantics. gfx1250 inherits the same model through a
+# loose-only entry until its captures are reviewed.
+MULLIT_ARCH_SUFFIX = {'rdna3': '', 'rdna4': '_gfx12', 'cdna5': '_gfx1250'}
+
 
 def gen_interp(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
@@ -112,8 +117,7 @@ def gen_mullit(ctx: ExecuteContext) -> str | None:
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    # gfx1250 inherits the same NaN, rounding and OMOD model as gfx12.
-    api = 'rj_arith_v_mullit_f32' + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    api = 'rj_arith_v_mullit_f32' + MULLIT_ARCH_SUFFIX[arch]
     terms = []
     for i, letter in enumerate('ABC'):
         terms += [

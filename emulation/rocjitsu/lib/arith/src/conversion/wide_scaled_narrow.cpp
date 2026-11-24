@@ -5,6 +5,7 @@
 // FP4/FP8/BF8/FP6/BF6 values, sharing format rounding and register staging. Shares finite
 // rounding with FP4 while retaining source interleaving and per-element seeds.
 
+#include "common/exec_mask.h"
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "conversion/scaled_narrow.h"
@@ -31,9 +32,9 @@ template <Source Src> float decode(uint32_t raw, bool flush_input) {
 
 // Scale and pack each active lane. gfx950 FP32 RNE interleaves two 16-register
 // inputs; stochastic FP32 uses one 32-register input. FP16/BF16 occupy 16 A
-// registers. gfx1250 consumes one contiguous source and divides by full FP32
-// scale for 8/16 elements. Staging results before stores permits source/destination overlap.
-template <int Lanes, Source Src, Destination Dst, bool Stochastic, bool FullScale = false>
+// registers. gfx1250 consumes one contiguous source and uses only the scale's
+// exponent field. Staging results before stores permits source/destination overlap.
+template <int Lanes, Source Src, Destination Dst, bool Stochastic, bool Gfx1250 = false>
 int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
@@ -50,20 +51,34 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   constexpr int bits = Dst == Destination::Fp4                                ? 4
                        : (Dst == Destination::Fp6 || Dst == Destination::Bf6) ? 6
                                                                               : 8;
-  constexpr int elements = FullScale ? (bits == 6 ? 16 : 8) : 32;
+  constexpr int elements = Gfx1250 ? (bits == 6 ? 16 : 8) : 32;
   constexpr int words = elements * bits / 32;
-  const uint32_t *scale = Stochastic || (!FullScale && Src == Source::F32) ? c[0] : b[0];
+  const uint32_t *scale = Stochastic || (!Gfx1250 && Src == Source::F32) ? c[0] : b[0];
+  [[maybe_unused]] auto level = flags & RJ_ARITH_CPU_MASK;
+#if defined(RJ_ARITH_HAVE_X86_64_V3) || defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!has_more_than_four_lanes(exec_mask)) {
+    // AVX2 setup needs more active lanes. AVX-512 can amortize its FP6 encoder
+    // on two lanes. Shorter packs benefit when both lanes share a 16-lane chunk.
+    bool use_wide = bits == 6;
+    if constexpr (Lanes == 32 && Gfx1250 && (bits == 4 || !Stochastic || Src == Source::F16)) {
+      use_wide |= !(exec_mask >> 16) || !(exec_mask & 0xffff);
+    }
+    if (!(exec_mask & (exec_mask - 1)) || !use_wide || level < RJ_ARITH_CPU_X86_64_V4) {
+      level = RJ_ARITH_CPU_BASELINE;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    wide_scaled_narrow_x86_64_v4<Dst, Stochastic, FullScale>(
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
+    wide_scaled_narrow_x86_64_v4<Dst, Stochastic, Gfx1250>(
         Lanes, exec_mask, Src, d, a, b, scale, flags & RJ_ARITH_FP16_OVFL,
         flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    wide_scaled_narrow_x86_64_v3<Dst, Stochastic, FullScale>(
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
+    wide_scaled_narrow_x86_64_v3<Dst, Stochastic, Gfx1250>(
         Lanes, exec_mask, Src, d, a, b, scale, flags & RJ_ARITH_FP16_OVFL,
         flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
     return RJ_ARITH_SUCCESS;
@@ -72,12 +87,10 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   const bool flush_input = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   uint32_t result[words][Lanes];
   uint64_t write_mask = exec_mask;
-  for (int lane = 0; lane < Lanes; ++lane) {
-    if (!((exec_mask >> lane) & 1)) {
-      continue;
-    }
+  for (uint64_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctzll(active);
     uint32_t exponent = (scale[lane] >> 23) & 255;
-    if (!FullScale && exponent == 255) {
+    if (!Gfx1250 && exponent == 255) {
       write_mask &= ~(1ULL << lane);
       continue;
     }
@@ -89,7 +102,7 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     for (int element = 0; element < elements; ++element) {
       uint32_t raw;
       if constexpr (Src == Source::F32) {
-        if constexpr (Stochastic || FullScale) {
+        if constexpr (Stochastic || Gfx1250) {
           raw = a[element][lane];
         } else {
           // Index each array before selecting: GCC 13.3 miscompiles indexing
@@ -99,14 +112,11 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
       } else {
         raw = a[element / 2][lane] >> ((element % 2) * 16);
       }
-      float scaled;
-      if constexpr (FullScale) {
-        scaled = decode<Src>(raw, flush_input) / as_float(scale[lane]);
-      } else {
-        scaled = decode<Src>(raw, flush_input) * inverse_scale;
-      }
+      uint32_t scaled = Gfx1250 && exponent == 255
+                            ? kE8M0ScaleNaNBits
+                            : as_bits(decode<Src>(raw, flush_input) * inverse_scale);
       uint32_t value =
-          scaled_narrow_encode<Dst, Stochastic>(as_bits(scaled), seed, flags & RJ_ARITH_FP16_OVFL);
+          scaled_narrow_encode<Dst, Stochastic>(scaled, seed, flags & RJ_ARITH_FP16_OVFL);
       int bit = element * bits, word = bit / 32, shift = bit % 32;
       result[word][lane] |= value << shift;
       if (shift > 32 - bits) {
@@ -118,10 +128,9 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     }
   }
   for (int word = 0; word < words; ++word) {
-    for (int lane = 0; lane < Lanes; ++lane) {
-      if ((write_mask >> lane) & 1) {
-        d[word][lane] = result[word][lane];
-      }
+    for (uint64_t active = write_mask; active; active &= active - 1) {
+      int lane = __builtin_ctzll(active);
+      d[word][lane] = result[word][lane];
     }
   }
   return RJ_ARITH_SUCCESS;

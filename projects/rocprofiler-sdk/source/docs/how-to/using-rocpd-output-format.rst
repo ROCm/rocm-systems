@@ -120,7 +120,7 @@ The command-line options as displayed using ``rocpd convert --help`` are listed 
 .. code-block:: none
 
    usage: rocpd convert [-h] -i INPUT [INPUT ...] -f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]
-                        [-o OUTPUT_FILE] [-d OUTPUT_PATH] [--automerge-limit LIMIT]
+                        [-o OUTPUT_FILE] [-d OUTPUT_DIRECTORY] [--automerge-limit LIMIT]
                         [--kernel-rename]
                         [--agent-index-value {absolute,relative,type-relative}]
                         [--perfetto-backend {inprocess,system}]
@@ -164,7 +164,7 @@ The following table provides a detailed listing of the ``rocpd convert`` command
           <td>Configures the base filename for generated output files (default: out).</td>
         </tr>
         <tr>
-          <td>-d OUTPUT_​PATH, --output-path OUTPUT_​PATH</td>
+          <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
           <td>Specifies the target directory for output file generation (default: ./rocpd-output-data).</td>
         </tr>
         <tr>
@@ -529,6 +529,8 @@ rocpd2summary - statistical analysis tool
 
 - Rank-based analysis: Per-process and per-rank performance breakdowns for MPI applications.
 
+- List of files provided to help map the file to rank number, hostname, and process ID
+
 - Configurable scope: Selective inclusion or exclusion of analysis categories.
 
 **Output format options:**
@@ -543,9 +545,6 @@ rocpd2summary - statistical analysis tool
 
     # HTML report with visualization
     rocpd2summary -i profile.db --format html -d ~/reports/
-
-    # Multiple output formats
-    rocpd2summary -i profile.db --format csv html json
 
 .. _analysis-categories:
 
@@ -594,15 +593,23 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 **Output files:**
 
+- ``files.{format}`` - Maps each profiled process (process ID, hostname, and rank, when by-rank is generated) to the output database name, at profiling time.
+
 - ``kernels_summary.{format}`` - GPU kernel execution summary.
 
 - ``hip_summary.{format}`` - HIP API call statistics.
 
 - ``hsa_summary.{format}`` - HSA runtime API analysis.
 
-- ``memory_summary.{format}`` - Memory operation statistics.
+- ``memory_*_summary.{format}`` - Memory operation statistics, * represents ``copies``, ``allocations``, etc.
 
-- ``markers_summary.{format}`` - Marker event analysis.
+- ``marker_summary.{format}`` - Marker event analysis.
+
+When generating summary-by-rank, the output files will be appended with ``summary_by_rank.{format}``, for example:
+
+- ``kernels_summary_by_rank.{format}`` - GPU kernel execution summary by rank.
+
+- ``hip_summary_by_rank.{format}`` - HIP API call statistics by rank.
 
 Generating performance summary using rocpd
 -------------------------------------------
@@ -749,7 +756,7 @@ In summary, here is how the output generated using ``rocpd summary`` enhances pe
 
 - **Unified summaries:** Provides aggregate statistics across all input databases, showing combined performance metrics.
 
-- **Rankwise summaries:** Generates separate statistical reports for each input database, enabling direct comparison of performance characteristics.
+- **Rankwise summaries:** Generates one table per category (HIP, HSA, etc) with rows per process (or rank if multiprocess run).
 
 - **Comparative metrics:** Highlights performance variations, identifies outliers, and reveals load balancing opportunities.
 
@@ -932,11 +939,11 @@ The following table provides a detailed listing of the ``rocpd merge`` command-l
                 </tr>
                 <tr>
                   <td rowspan="2">Output configuration</td>
-                  <td>-o OUTPUT_FILE``, --output-file OUTPUT_FILE</td>
+                  <td>-o OUTPUT_FILE, --output-file OUTPUT_FILE</td>
                   <td>Sets the base output filename. Default value: merged. The .db extension is added automatically if not provided.</td>
                 </tr>
                 <tr>
-                  <td>-d OUTPUT_PATH``, --output-path OUTPUT_PATH</td>
+                  <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
                   <td>Specifies the output directory path. Default value: ./rocpd-output-data.</td>
                 </tr>
                 <tr>
@@ -1087,7 +1094,7 @@ The following table provides a detailed listing of the ``rocpd package`` command
                   <td>When used with --consolidate, copies database files instead of moving them.</td>
                 </tr>
                 <tr>
-                  <td>-d OUTPUT_PATH, --output-path OUTPUT_PATH</td>
+                  <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
                   <td>Specifies the output folder name. Without --consolidate, creates metadata in current directory. With --consolidate, creates a .rpdb folder with the specified name.
                 </tr>
                 <tr>
@@ -1329,7 +1336,7 @@ The following examples demonstrate how to use the :ref:`rocpd conversion tools <
     rocpd2csv -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o raw_data
 
     # Create summary reports
-    rocpd2summary -i "$PROFILE_DB" --format csv html \
+    rocpd2summary -i "$PROFILE_DB" --format html \
                     -d "$OUTPUT_DIR" -o performance_summary
 
     # Generate interactive trace for detailed investigation
@@ -1398,7 +1405,7 @@ Database schema and views
 
     -- Marker and region data
     SELECT * FROM regions;
-    SELECT * FROM regions_and_samples WHERE category LIKE 'MARKERS_%';
+    SELECT * FROM regions_and_samples WHERE category LIKE 'MARKER_%';
 
 - **Summary and analysis views:**
 
@@ -1718,7 +1725,7 @@ The command-line options as displayed using ``rocpd query --help`` are listed he
 
    usage: rocpd query [-h] -i INPUT [INPUT ...] --query QUERY [--script SCRIPT]
                       [--format {console,csv,html,json,md,pdf,dashboard,clipboard}]
-                      [-o OUTPUT_FILE] [-d OUTPUT_PATH] [--automerge-limit LIMIT]
+                      [-o OUTPUT_FILE] [-d OUTPUT_DIRECTORY] [--automerge-limit LIMIT]
                       [--email-to EMAIL_TO] [--email-from EMAIL_FROM]
                       [--email-subject EMAIL_SUBJECT] [--smtp-server SMTP_SERVER]
                       [--smtp-port SMTP_PORT] [--smtp-user SMTP_USER]
@@ -1769,7 +1776,7 @@ The following table provides a detailed listing of the ``rocpd query`` command-l
             <td>Base filename for exported files.</td>
           </tr>
           <tr>
-            <td>-d OUTPUT_PATH, --output-path OUTPUT_PATH</td>
+            <td>-d OUTPUT_DIRECTORY, --output-directory OUTPUT_DIRECTORY</td>
             <td>Output directory path.</td>
           </tr>
           <tr>

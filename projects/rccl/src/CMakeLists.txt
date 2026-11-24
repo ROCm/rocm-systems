@@ -488,6 +488,7 @@ set(SRC_FILES
   include/trees.h
   include/tuner.h
   include/tuning.h
+  include/tuning_mask.h
   include/utils.h
   include/warp_speed_plan.h
   init.cc
