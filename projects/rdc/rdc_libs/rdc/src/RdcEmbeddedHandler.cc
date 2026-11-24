@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcEmbeddedHandler.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include <algorithm>
@@ -230,7 +231,12 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(
       return RDC_ST_SMI_ERROR;
     }
 
-    strncpy_with_null(p_rdc_compv->version, ver.build, RDC_MAX_VERSION_STR_LENGTH);
+    if (ver.build != nullptr) {
+      strncpy_with_null(p_rdc_compv->version, ver.build, RDC_MAX_VERSION_STR_LENGTH);
+    } else {  // amd-smi always gives a build string; copying from NULL would crash
+      snprintf(p_rdc_compv->version, RDC_MAX_VERSION_STR_LENGTH, "%u.%u.%u", ver.major, ver.minor,
+               ver.release);
+    }
     return RDC_ST_OK;
   } else {
     return RDC_ST_BAD_PARAMETER;
@@ -250,15 +256,16 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_create(rdc_group_type_t type, con
     return status;
   }
 
-  // Add All GPUs to the group
+  // Add all GPUs to the group. A group without one of them is no group of all GPUs: on the
+  // first failure, remove the group and return that failure.
   uint32_t count = 0;
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   status = rdc_device_get_all(gpu_index_list, &count);
-  if (status != RDC_ST_OK) {
-    return status;
-  }
-  for (uint32_t i = 0; i < count; i++) {
+  for (uint32_t i = 0; status == RDC_ST_OK && i < count; i++) {
     status = rdc_group_gpu_add(*p_rdc_group_id, gpu_index_list[i]);
+  }
+  if (status != RDC_ST_OK) {
+    group_settings_->rdc_group_gpu_destroy(*p_rdc_group_id);
   }
 
   return status;

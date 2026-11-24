@@ -1136,7 +1136,7 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedFirstLaneWithoutCompletio
     };
     TestMemoryInstruction instruction(make_state());
     uint32_t callbacks = 0;
-    EXPECT_EQ(pipeline.complete_access(instruction, *wf, [&]() { ++callbacks; }),
+    EXPECT_EQ(pipeline.complete_access(instruction, *wf, [&] { return [&] { ++callbacks; }; }),
               amdgpu::MemoryAccessCompletion::Failed);
     EXPECT_EQ(callbacks, 0u);
     EXPECT_STREQ(wf->instruction_execution_error_detail(), test.diagnostic);

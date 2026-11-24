@@ -1930,7 +1930,7 @@ struct CostTable {
 };
 
 // A general row's mask bit, for the per-call algSelection cases below.
-constexpr uint64_t GeneralBit(int a, int p) { return 1ull << (a * NCCL_NUM_PROTOCOLS + p); }
+constexpr rcclTuningMask GeneralBit(int a, int p) { return rcclTuningMask::bit(a * NCCL_NUM_PROTOCOLS + p); }
 
 ncclTaskColl CostTask(ncclFunc_t f, ncclDataType_t dt = ncclFloat32,
                       ncclDevRedOp_t devOp = ncclDevSum) {
@@ -2236,11 +2236,11 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleCell) {
-  // algMask == 0 is "automatic": the filter must not narrow the default path.
+  // An empty algMask is "automatic": the filter must not narrow the default path.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
-  task.algMask = 0;
+  task.algMask = rcclTuningMask();
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -2256,7 +2256,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelection_LeavesGenera
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
-  task.algMask = 1ull << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+  task.algMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
   task.forceAlgSelection = 1;
   ScriptAllTimes(1.0f);
 
@@ -2291,8 +2291,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_MixedGeneralAndSymmetricSelection_N
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
   task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL) |
-                 (1ull << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LL)) |
-                 (1ull << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LLMC));
+                 rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LL) |
+                 rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LLMC);
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -2341,7 +2341,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowExcludesPatWhenNothing
   CostComm cc(/*nRanks=*/8, /*nNodes=*/8);
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
-  task.algMask = 0;
+  task.algMask = rcclTuningMask();
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 64u << 20, 1, 1, 1,
@@ -2692,6 +2692,48 @@ TEST_F(EnqueueMicrotest, RedOpCreate_NullComm_RejectedByCommCheck) {
 }
 
 // ===========================================================================
+// ncclEnqueueCommCheck -- the comm gate every collective entry point calls first.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_ReadyComm_Succeeds) {
+  RedOpComm rc;
+  EXPECT_EQ(ncclSuccess, ncclEnqueueCommCheck(rc.get(), "AllReduce"));
+}
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_RevokedComm_IsInvalidUsage) {
+  RedOpComm rc;
+  rc.get()->revokedFlag = 1;
+  ncclResult_t r = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    r = ncclEnqueueCommCheck(rc.get(), "AllReduce");
+  });
+  EXPECT_EQ(ncclInvalidUsage, r);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "communicator was revoked")) << "actual log:\n" << log;
+}
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_InitInProgress_IsInvalidArgument) {
+  RedOpComm rc;
+  rc.get()->initState = ncclInProgress;
+  ncclResult_t r = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    r = ncclEnqueueCommCheck(rc.get(), "AllReduce");
+  });
+  EXPECT_EQ(ncclInvalidArgument, r);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "is not ready")) << "actual log:\n" << log;
+}
+
+TEST_F(EnqueueMicrotest, EnqueueCommCheck_AsyncResultInProgress_IsInvalidArgument) {
+  RedOpComm rc;
+  rc.get()->asyncResult = ncclInProgress;
+  ncclResult_t r = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    r = ncclEnqueueCommCheck(rc.get(), "AllReduce");
+  });
+  EXPECT_EQ(ncclInvalidArgument, r);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "is not ready")) << "actual log:\n" << log;
+}
+
+// ===========================================================================
 // rcclEffectiveP2pBatchEnable (enqueue.cc:1169)
 // Four arms gating P2P batching for the whole file. The user override is
 // checked FIRST, so it must win over both the node count and the arch.
@@ -2732,6 +2774,15 @@ void SetParam(const char* key, int64_t v) {
   };
 }
 void SetBatchParam(int64_t v) { SetParam("RCCL_P2P_BATCH_ENABLE", v); }
+// Forces batching on; with thresholdSet false the threshold lookup falls back
+// to its parameter default.
+void SetBatchEnableAndThreshold(int64_t threshold, bool thresholdSet = true) {
+  g_loadParam = [threshold, thresholdSet](const char* env, int64_t deft) {
+    if (std::strcmp(env, "RCCL_P2P_BATCH_ENABLE") == 0) return int64_t(1);
+    if (thresholdSet && std::strcmp(env, "RCCL_P2P_BATCH_THRESHOLD") == 0) return threshold;
+    return deft;
+  };
+}
 }  // namespace
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_UserOverrideWinsOverEverything) {
@@ -2787,27 +2838,19 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942FourNode_ThresholdDefaultVersusSet) {
   // Reaches the enqueue wrapper, which the channel.h tests do not. gfx942 leaves
   // batching off unless RCCL_P2P_BATCH_ENABLE is set, so both cases force it on.
-  // SetParam covers one key; this case has to set the enable and the threshold.
   constexpr ssize_t perPeer = 128 * 1024;
   BatchComm bc(/*nNodes=*/4, "gfx942");
-  auto setEnableAndThreshold = [](int64_t threshold, bool thresholdSet) {
-    g_loadParam = [threshold, thresholdSet](const char* env, int64_t deft) {
-      if (std::strcmp(env, "RCCL_P2P_BATCH_ENABLE") == 0) return int64_t(1);
-      if (thresholdSet && std::strcmp(env, "RCCL_P2P_BATCH_THRESHOLD") == 0) return threshold;
-      return deft;
-    };
-  };
 
-  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/false);
+  SetBatchEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/false);
   EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
 
-  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/true);
+  SetBatchEnableAndThreshold(/*threshold=*/-1);
   EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
 
-  setEnableAndThreshold(/*threshold=*/64 * 1024, /*thresholdSet=*/true);
+  SetBatchEnableAndThreshold(/*threshold=*/64 * 1024);
   EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
 
-  setEnableAndThreshold(/*threshold=*/perPeer, /*thresholdSet=*/true);
+  SetBatchEnableAndThreshold(/*threshold=*/perPeer);
   EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
 }
 
@@ -2820,6 +2863,42 @@ TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx950_UnsetThresholdFollowsNodeCount)
   EXPECT_FALSE(rcclP2pBatchEligible(at16.get(), perPeer, perPeer));
   BatchComm at15(/*nNodes=*/15, "gfx950");
   EXPECT_TRUE(rcclP2pBatchEligible(at15.get(), perPeer, perPeer));
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942_UnsetThresholdStopsFusingMultiMiB) {
+  // Unset threshold on gfx942: fuse up to 1 MiB per peer, not above.
+  SetBatchParam(1);
+  for (int nNodes : {1, 2, 3, 4, 8, 16}) {
+    BatchComm bc(nNodes, "gfx942");
+    for (ssize_t perPeer : {ssize_t(128) << 10, ssize_t(512) << 10, ssize_t(1) << 20}) {
+      EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer)) << "nNodes=" << nNodes << " perPeer=" << perPeer;
+    }
+    for (ssize_t perPeer : {(ssize_t(1) << 20) + 1, ssize_t(8) << 20, ssize_t(32) << 20}) {
+      EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer)) << "nNodes=" << nNodes << " perPeer=" << perPeer;
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942EightNode_ExplicitThresholdStillWins) {
+  constexpr ssize_t perPeer = ssize_t(8) << 20;
+  BatchComm bc(/*nNodes=*/8, "gfx942");
+  SetBatchEnableAndThreshold(perPeer);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+  SetBatchEnableAndThreshold(64 * 1024);
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), 128 * 1024, 128 * 1024));
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_UnsetThresholdOtherArchsKeepNodeScopedCutoff) {
+  // gfx950 keeps 64 KiB at 16+ nodes and no cutoff below that.
+  constexpr ssize_t perPeer = ssize_t(8) << 20;
+  SetBatchParam(1);
+  BatchComm gfx950At8(/*nNodes=*/8, "gfx950");
+  EXPECT_TRUE(rcclP2pBatchEligible(gfx950At8.get(), perPeer, perPeer));
+  BatchComm gfx950At16(/*nNodes=*/16, "gfx950");
+  EXPECT_FALSE(rcclP2pBatchEligible(gfx950At16.get(), 128 * 1024, 128 * 1024));
+  EXPECT_TRUE(rcclP2pBatchEligible(gfx950At16.get(), 64 * 1024, 64 * 1024));
+  BatchComm gfx1250At8(/*nNodes=*/8, "gfx1250");
+  EXPECT_TRUE(rcclP2pBatchEligible(gfx1250At8.get(), perPeer, perPeer));
 }
 
 // ===========================================================================

@@ -3,7 +3,6 @@
 
 #include "compute_unit_test_util.h"
 #include "instruction_failure_test_util.h"
-#include "restore_rounding.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -647,17 +646,6 @@ TEST(ValuFloatingPolicy, PackedF32Mode) {
     util::FailureOr<uint32_t> round_up = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf1);
     ASSERT_TRUE(round_up.succeeded());
     witness("packed_f32_round_up", arch, round_up.value(), 0x3f800001);
-    // Only the unmigrated legacy implementation promises immunity to host rounding.
-    // rj-arith assumes the default host FP environment and never changes it.
-    if (arch == rocjitsu::IsaFamily::Cdna2) {
-      const rocjitsu::test::RestoreRounding restore_rounding;
-      std::fesetround(FE_UPWARD);
-      util::FailureOr<uint32_t> maybe_got = machine.run(words, 0x3f800000, 0x33800000, 0, 0xf0);
-      ASSERT_TRUE(maybe_got.succeeded());
-      const uint32_t got = maybe_got.value();
-      std::fesetround(restore_rounding.saved());
-      witness("packed_f32_host_round", arch, got, 0x3f800000);
-    }
   }
 }
 TEST(ValuFloatingPolicy, PackedF16Clamp) {
@@ -715,60 +703,39 @@ TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = packed_words(arch, cdna5::kVPkFmaF16Vop3p);
     for (uint32_t guest_round = 0; guest_round < 4; ++guest_round) {
-      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-        const rocjitsu::test::RestoreRounding restore_rounding;
-        ASSERT_EQ(std::fesetround(host_round), 0);
-        const uint32_t mode = 0xf0u | (guest_round << 2);
-        util::FailureOr<uint32_t> maybe_cancellation =
-            machine.run(words, 0x3c003c00, 0x3c003c00, 0xbc00bc00, mode);
-        ASSERT_TRUE(maybe_cancellation.succeeded());
-        const uint32_t cancellation = maybe_cancellation.value();
-        util::FailureOr<uint32_t> maybe_mixed_zeros =
-            machine.run(words, 0x80000000, 0x3c003c00, 0x00008000, mode);
-        ASSERT_TRUE(maybe_mixed_zeros.succeeded());
-        const uint32_t mixed_zeros = maybe_mixed_zeros.value();
-        util::FailureOr<uint32_t> maybe_negative_zeros =
-            machine.run(words, 0x80008000, 0x3c003c00, 0x80008000, mode);
-        ASSERT_TRUE(maybe_negative_zeros.succeeded());
-        const uint32_t negative_zeros = maybe_negative_zeros.value();
-        const int restored_round = std::fegetround();
-        std::fesetround(restore_rounding.saved());
-        SCOPED_TRACE(arch);
-        SCOPED_TRACE(guest_round);
-        SCOPED_TRACE(host_round);
-        EXPECT_EQ(cancellation, guest_round == 2 ? 0x80008000u : 0u);
-        EXPECT_EQ(mixed_zeros, guest_round == 2 ? 0x80008000u : 0u);
-        EXPECT_EQ(negative_zeros, 0x80008000u);
-        EXPECT_EQ(restored_round, host_round);
-      }
+      const uint32_t mode = 0xf0u | (guest_round << 2);
+      util::FailureOr<uint32_t> maybe_cancellation =
+          machine.run(words, 0x3c003c00, 0x3c003c00, 0xbc00bc00, mode);
+      ASSERT_TRUE(maybe_cancellation.succeeded());
+      const uint32_t cancellation = maybe_cancellation.value();
+      util::FailureOr<uint32_t> maybe_mixed_zeros =
+          machine.run(words, 0x80000000, 0x3c003c00, 0x00008000, mode);
+      ASSERT_TRUE(maybe_mixed_zeros.succeeded());
+      const uint32_t mixed_zeros = maybe_mixed_zeros.value();
+      util::FailureOr<uint32_t> maybe_negative_zeros =
+          machine.run(words, 0x80008000, 0x3c003c00, 0x80008000, mode);
+      ASSERT_TRUE(maybe_negative_zeros.succeeded());
+      const uint32_t negative_zeros = maybe_negative_zeros.value();
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(guest_round);
+      EXPECT_EQ(cancellation, guest_round == 2 ? 0x80008000u : 0u);
+      EXPECT_EQ(mixed_zeros, guest_round == 2 ? 0x80008000u : 0u);
+      EXPECT_EQ(negative_zeros, 0x80008000u);
     }
   }
 }
 
-TEST(ValuFloatingPolicy, F16Dot2HostContract) {
+TEST(ValuFloatingPolicy, F16Dot2) {
   for (rocjitsu::IsaFamily arch :
        {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> words = rdna4::build_vop3(
         rdna4::kVDot2F16F16Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258});
-    const rocjitsu::test::RestoreRounding restore_rounding;
-    std::fesetround(FE_TONEAREST);
     util::FailureOr<uint32_t> maybe_nearest = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
     ASSERT_TRUE(maybe_nearest.succeeded());
-    const uint32_t nearest = maybe_nearest.value();
-    // Compatibility rounds 1 + 2^-11 + 2^-24 once, just above the FP16
-    // halfway point. Migrated paths require default host controls.
-    witness("dot2_f16_default_host", arch, nearest & 0xffffu, 0x3c01u);
-    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
-    if (arch == rocjitsu::IsaFamily::Rdna3_5) {
-      // This architecture still uses the legacy builtin implementation.
-      std::fesetround(FE_UPWARD);
-      util::FailureOr<uint32_t> maybe_upward = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
-      ASSERT_TRUE(maybe_upward.succeeded());
-      witness("dot2_f16_host_independence", arch, maybe_upward.value(), nearest);
-    }
-    std::fesetround(restore_rounding.saved());
+    // Compatibility rounds 1 + 2^-11 + 2^-24 once, just above the FP16 halfway point.
+    witness("dot2_f16_default_host", arch, maybe_nearest.value() & 0xffffu, 0x3c01u);
   }
 }
 TEST(ValuFloatingPolicy, F32UnaryDenormControls) {

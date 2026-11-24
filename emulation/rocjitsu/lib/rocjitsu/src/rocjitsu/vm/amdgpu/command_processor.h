@@ -125,11 +125,14 @@ public:
   /// @param emit_error Destination for failure diagnostics.
   util::Result set_gws_device(std::shared_ptr<GwsDevice> device,
                               util::DiagnosticEmitter emit_error = {}) {
-    for (ComputeUnitCore *cu : cus_)
-      if (!cu->can_set_gws_device(device))
+    for (ComputeUnitCore *cu : cus_) {
+      if (!cu->can_set_gws_device(device)) {
         return emit_error.emit() << "Cannot replace GWS store with active waves or workgroups";
-    for (ComputeUnitCore *cu : cus_)
+      }
+    }
+    for (ComputeUnitCore *cu : cus_) {
       (void)cu->set_gws_device(device);
+    }
     gws_device_ = std::move(device);
     return util::Result::success();
   }
@@ -137,8 +140,9 @@ public:
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
     // maintenance does not flush the same L2 twice.
-    if (std::ranges::find(l2_caches_, l2) == l2_caches_.end())
+    if (std::ranges::find(l2_caches_, l2) == l2_caches_.end()) {
       l2_caches_.push_back(l2);
+    }
   }
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
   bool packed_tid() const { return packed_tid_; }
@@ -303,8 +307,9 @@ public:
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
-    if (configured_scratch_slots_per_cu_ != 0)
+    if (configured_scratch_slots_per_cu_ != 0) {
       cu->set_scratch_slots_per_cu(configured_scratch_slots_per_cu_);
+    }
     scratch_shader_engine_count_ =
         std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
     scratch_waves_per_se_ =
@@ -314,8 +319,9 @@ public:
     cu->set_gpu_vm(gpu_vm_);
     // Forward the shared GWS store (like set_gpu_vm above) so a CU added after the
     // store was wired joins it too; null leaves the CU on its private default store.
-    if (gws_device_)
+    if (gws_device_) {
       cu->set_gws_device(gws_device_);
+    }
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
     on_cu_pool_ready(cu);
@@ -380,8 +386,9 @@ public:
 
   /// Restore this XCD's sequence before queues can allocate new dispatch ids.
   bool restore_dispatch_id_sequence(uint32_t rank, uint32_t count, uint32_t next) {
-    if (rank >= count || next < rank + 1 || (next - rank - 1) % count != 0)
+    if (rank >= count || next < rank + 1 || (next - rank - 1) % count != 0) {
       return false;
+    }
     dispatch_id_base_ = rank + 1;
     dispatch_id_stride_ = count;
     next_dispatch_id_ = next;
@@ -493,9 +500,10 @@ public:
   [[nodiscard]] size_t polled_kfd_queue_count_for_test() const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     size_t polled = 0;
-    for (const ComputeQueueRecord &queue : compute_queues_)
+    for (const ComputeQueueRecord &queue : compute_queues_) {
       polled +=
           (queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica) ? 1 : 0;
+    }
     return polled;
   }
 
@@ -510,8 +518,9 @@ public:
   /// @param stride Number of participating XCDs.
   /// @returns The next id in the same class.
   [[nodiscard]] static uint32_t step_dispatch_id(uint32_t current, uint32_t base, uint32_t stride) {
-    if (current > std::numeric_limits<uint32_t>::max() - stride)
+    if (current > std::numeric_limits<uint32_t>::max() - stride) {
       return base;
+    }
     return current + stride;
   }
 
@@ -587,8 +596,9 @@ public:
                                                              uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const ComputeQueueRecord *state = find_compute_queue(queue_id, process_id);
-    if (state == nullptr || !state->publication_retry_pending || state->entries.empty())
+    if (state == nullptr || !state->publication_retry_pending || state->entries.empty()) {
       return false;
+    }
     const DispatchEntry &head = state->entries.front();
     return head.fully_completed() && !head.grid_share_published &&
            static_cast<bool>(head.completion_publication.flush_access);
@@ -909,9 +919,10 @@ private:
   /// @brief Return total pending entries across all queues.
   size_t pending_entries() const {
     size_t total = 0;
-    for (const auto &queue : compute_queues_)
+    for (const auto &queue : compute_queues_) {
       total += queue.entries.size() + queue.dispatches.entries.size() +
                queue.commands.submissions.size();
+    }
     return total;
   }
 
@@ -920,9 +931,11 @@ private:
   /// @details Answers whether this CP's lifecycle is anchored by the VM-level
   /// primary, which a fan-out replica does anchor just as its owner does.
   bool has_kfd_queues() const {
-    for (const auto &q : compute_queues_)
-      if (q.uses_kfd_queue_abi || q.doorbell_mode == QueueDoorbellMode::HostPolled)
+    for (const auto &q : compute_queues_) {
+      if (q.uses_kfd_queue_abi || q.doorbell_mode == QueueDoorbellMode::HostPolled) {
         return true;
+      }
+    }
     return false;
   }
 
@@ -933,9 +946,11 @@ private:
   /// to the doorbell monitor must ask this rather than has_kfd_queues(), or a CP
   /// left holding only replicas keeps a monitor alive for a ring it never reads.
   bool polls_kfd_queues() const {
-    for (const auto &q : compute_queues_)
-      if (q.doorbell_mode == QueueDoorbellMode::HostPolled && !q.fanout_replica)
+    for (const auto &q : compute_queues_) {
+      if (q.doorbell_mode == QueueDoorbellMode::HostPolled && !q.fanout_replica) {
         return true;
+      }
+    }
     return false;
   }
 

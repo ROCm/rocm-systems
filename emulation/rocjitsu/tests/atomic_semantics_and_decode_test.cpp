@@ -4,7 +4,6 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "instruction_failure_test_util.h"
-#include "restore_rounding.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna3_5_to_rdna4.h"
@@ -581,15 +580,12 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x00020002u);
     }
-    const rocjitsu::test::RestoreRounding restore_rounding;
-    std::fesetround(FE_UPWARD);
     {
       util::FailureOr<uint32_t> result =
           machine.global(buffer, 0x3c003c00, 0x10001000, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x3c003c00u);
     }
-    std::fesetround(restore_rounding.saved());
     if (arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2)
       continue;
     for (bool bf16 : {false, true}) {
@@ -1063,15 +1059,7 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
       EXPECT_EQ(execute_ds(opcode, 1, 1, 0, mode), denorm_mode == 3 ? 2u : 0u);
       EXPECT_EQ(execute_ds(opcode, 0x00800001, 0x80800000, 0, mode), (denorm_mode & 2) ? 1u : 0u);
     }
-    for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-      const int saved_round = std::fegetround();
-      ASSERT_EQ(std::fesetround(host_round), 0);
-      const uint64_t result = execute_ds(opcode, 0x3f800000, 0x33800000, 0, 0xff);
-      const int restored_round = std::fegetround();
-      std::fesetround(saved_round);
-      EXPECT_EQ(result, 0x3f800000u);
-      EXPECT_EQ(restored_round, host_round);
-    }
+    EXPECT_EQ(execute_ds(opcode, 0x3f800000, 0x33800000, 0, 0xff), 0x3f800000u);
   }
   EXPECT_EQ(execute_ds(18, 1, 0x3f800000, 0, 0), modern_policy() || measured_cdna() ? 0u : 1u);
   EXPECT_EQ(execute_ds(18, 0, 0x80000000, 0, 0xf0), 0x80000000u);
@@ -1452,7 +1440,7 @@ TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
   }
 }
 
-TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndHostRounding) {
+TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndRounding) {
   if (GetParam() == rocjitsu::IsaFamily::Rdna1 || GetParam() == rocjitsu::IsaFamily::Rdna2)
     GTEST_SKIP() << "No F32 atomic add on this ISA";
   for (bool buffer : {false, true}) {
@@ -1465,15 +1453,7 @@ TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndHostRounding) {
                     (source_nan ? source_nan_bits : old_nan) | 0x400000u);
       EXPECT_EQ(execute_memory(buffer, 1, 1, mode), modern_policy() || measured_cdna() ? 2u : 0u);
       EXPECT_EQ(execute_memory(buffer, 0x00800001, 0x80800000, mode), 1u);
-      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-        const int saved_round = std::fegetround();
-        ASSERT_EQ(std::fesetround(host_round), 0);
-        const uint32_t result = execute_memory(buffer, 0x3f800000, 0x33800000, mode);
-        const int restored_round = std::fegetround();
-        std::fesetround(saved_round);
-        EXPECT_EQ(result, 0x3f800000u);
-        EXPECT_EQ(restored_round, host_round);
-      }
+      EXPECT_EQ(execute_memory(buffer, 0x3f800000, 0x33800000, mode), 0x3f800000u);
     }
   }
 }
@@ -1584,12 +1564,8 @@ TEST_P(AtomicPolicyExecutionTest, DsF64AddPreservesDenormalsAndRoundsToNearest) 
               0xfff8000000000000ULL);
     EXPECT_EQ(execute_ds(opcode, 0xfff0000000000000ULL, 0x7ff0000000000000ULL, 0, 0, 8),
               0xfff8000000000000ULL);
-    const int saved_round = std::fegetround();
-    ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
-    const uint64_t result =
-        execute_ds(opcode, 0x3ff0000000000000ULL, 0x3ca0000000000000ULL, 0, 0, 8);
-    std::fesetround(saved_round);
-    EXPECT_EQ(result, 0x3ff0000000000000ULL);
+    EXPECT_EQ(execute_ds(opcode, 0x3ff0000000000000ULL, 0x3ca0000000000000ULL, 0, 0, 8),
+              0x3ff0000000000000ULL);
   }
 }
 

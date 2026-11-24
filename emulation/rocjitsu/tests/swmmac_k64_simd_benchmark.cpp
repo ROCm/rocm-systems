@@ -101,11 +101,13 @@ struct BenchFixture {
     cfg.vgprs_per_wf = mma_test::VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_swmmac_k64_bench", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     wf = cu->dispatch_wf(0, 0, mma_test::SGPRS_PER_WF, mma_test::VGPRS_PER_WF);
-    if (wf)
+    if (wf) {
       vbase = wf->vgpr_alloc().base;
+    }
   }
 
   void seed(uint32_t off, uint32_t regs, Format fmt, uint32_t seed) {
@@ -127,23 +129,28 @@ struct BenchFixture {
   }
 
   void fill(uint32_t off, uint32_t regs, uint32_t word) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         cu->write_vgpr(vbase + off + reg, lane, word);
+      }
+    }
   }
 
   std::vector<uint32_t> snapshot(uint32_t off, uint32_t regs) const {
     std::vector<uint32_t> words(static_cast<size_t>(regs) * WF_SIZE);
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         words[static_cast<size_t>(reg) * WF_SIZE + lane] = cu->read_vgpr(vbase + off + reg, lane);
+      }
+    }
     return words;
   }
 };
 
 double relative_error(float a, float b) {
-  if (!std::isfinite(a) || !std::isfinite(b))
+  if (!std::isfinite(a) || !std::isfinite(b)) {
     return a == b ? 0.0 : INFINITY;
+  }
   return std::abs(static_cast<double>(a) - b) / (std::abs(a) + 1.0e-6);
 }
 
@@ -259,13 +266,15 @@ void benchmark_case(const BenchCase &test) {
 
 TEST(SwmmacK64SimdBenchmark, DecodedF16Bf16Forms) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
+  if (util::native<float>::size() != 16) {
     GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
+  }
 
   for (const auto &test : BENCH_CASES) {
     SCOPED_TRACE(test.label);
     benchmark_case(test);
-    if (testing::Test::HasFatalFailure())
+    if (testing::Test::HasFatalFailure()) {
       return;
+    }
   }
 }

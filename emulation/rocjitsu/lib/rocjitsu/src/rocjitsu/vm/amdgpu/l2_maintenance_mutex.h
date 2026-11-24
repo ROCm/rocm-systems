@@ -115,8 +115,9 @@ private:
 #endif
     auto &counter = readers_[reader_shard()].count;
     for (;;) {
-      while (writer_pending_.load(std::memory_order_acquire))
+      while (writer_pending_.load(std::memory_order_acquire)) {
         writer_pending_.wait(1, std::memory_order_acquire);
+      }
       // The counter increment, gate recheck, writer gate store, and writer
       // counter loads form one total order. Either the writer observes an
       // admitted reader, or that reader observes the closed gate and retries.
@@ -144,8 +145,9 @@ private:
       hooks.before_reader_increment();
       counter.fetch_add(1, std::memory_order_seq_cst);
       acquired = !writer_pending_.load(std::memory_order_seq_cst);
-      if (!acquired)
+      if (!acquired) {
         release_reader(counter);
+      }
     }
 #ifdef ROCJITSU_L2_MUTEX_TSAN
     __tsan_mutex_post_lock(this, flags | (acquired ? 0 : __tsan_mutex_try_lock_failed), 0);
@@ -206,8 +208,9 @@ private:
     // The RMW also orders the decrement before notify_one's waiter-count check;
     // see the library compatibility requirement in reopen_admission().
     if (counter.fetch_sub(1, std::memory_order_seq_cst) == 1 &&
-        writer_pending_.load(std::memory_order_seq_cst))
+        writer_pending_.load(std::memory_order_seq_cst)) {
       counter.notify_one();
+    }
   }
 };
 

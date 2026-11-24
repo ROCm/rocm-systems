@@ -15,8 +15,9 @@ namespace rdna1 {
 
 namespace {
 Operand make_smem_offset(const Smem::OpEncoding *enc) {
-  if (enc->soffset != OPR_SMEM_OFFSET_NULL && enc->soffset != 0x7f)
+  if (enc->soffset != OPR_SMEM_OFFSET_NULL && enc->soffset != 0x7f) {
     return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->soffset));
+  }
   return Operand(32, OperandType::OPR_SIMM32, static_cast<int>(enc->offset));
 }
 } // namespace
@@ -49,8 +50,9 @@ namespace detail {
 DecodeResult decodeSLoadDwordSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadDwordSmem>(opcode);
 }
 } // namespace detail
@@ -85,8 +87,9 @@ DecodeResult decodeSLoadDwordx2Smem(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadDwordx2Smem>(opcode);
 }
 } // namespace detail
@@ -121,8 +124,9 @@ DecodeResult decodeSLoadDwordx4Smem(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadDwordx4Smem>(opcode);
 }
 } // namespace detail
@@ -157,8 +161,9 @@ DecodeResult decodeSLoadDwordx8Smem(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_dwordx8", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadDwordx8Smem>(opcode);
 }
 } // namespace detail
@@ -193,8 +198,9 @@ DecodeResult decodeSLoadDwordx16Smem(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_load_dwordx16", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SLoadDwordx16Smem>(opcode);
 }
 } // namespace detail
@@ -228,8 +234,9 @@ DecodeResult decodeSScratchLoadDwordSmem(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_scratch_load_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SScratchLoadDwordSmem>(opcode);
 }
 } // namespace detail
@@ -264,8 +271,9 @@ DecodeResult decodeSScratchLoadDwordx2Smem(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_scratch_load_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SScratchLoadDwordx2Smem>(opcode);
 }
 } // namespace detail
@@ -300,8 +308,9 @@ DecodeResult decodeSScratchLoadDwordx4Smem(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_scratch_load_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SScratchLoadDwordx4Smem>(opcode);
 }
 } // namespace detail
@@ -335,8 +344,9 @@ DecodeResult decodeSBufferLoadDwordSmem(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_dword", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadDwordSmem>(opcode);
 }
 } // namespace detail
@@ -371,8 +381,9 @@ DecodeResult decodeSBufferLoadDwordx2Smem(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_dwordx2", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadDwordx2Smem>(opcode);
 }
 } // namespace detail
@@ -407,8 +418,9 @@ DecodeResult decodeSBufferLoadDwordx4Smem(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_dwordx4", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadDwordx4Smem>(opcode);
 }
 } // namespace detail
@@ -443,8 +455,9 @@ DecodeResult decodeSBufferLoadDwordx8Smem(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_dwordx8", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadDwordx8Smem>(opcode);
 }
 } // namespace detail
@@ -479,8 +492,9 @@ DecodeResult decodeSBufferLoadDwordx16Smem(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_buffer_load_dwordx16", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBufferLoadDwordx16Smem>(opcode);
 }
 } // namespace detail
@@ -499,8 +513,9 @@ namespace detail {
 DecodeResult decodeSGl1InvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_gl1_inv", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGl1InvSmem>(opcode);
 }
 } // namespace detail
@@ -519,8 +534,9 @@ namespace detail {
 DecodeResult decodeSDcacheInvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_dcache_inv", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SDcacheInvSmem>(opcode);
 }
 } // namespace detail
@@ -541,8 +557,9 @@ namespace detail {
 DecodeResult decodeSMemtimeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_memtime", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMemtimeSmem>(opcode);
 }
 } // namespace detail
@@ -564,8 +581,9 @@ DecodeResult decodeSMemrealtimeSmem(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_memrealtime", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMemrealtimeSmem>(opcode);
 }
 } // namespace detail
@@ -594,8 +612,9 @@ namespace detail {
 DecodeResult decodeSAtcProbeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_atc_probe", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAtcProbeSmem>(opcode);
 }
 } // namespace detail
@@ -625,8 +644,9 @@ DecodeResult decodeSAtcProbeBufferSmem(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_atc_probe_buffer", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAtcProbeBufferSmem>(opcode);
 }
 } // namespace detail
@@ -647,8 +667,9 @@ DecodeResult decodeSGetWaveidInWorkgroupSmem(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Smem::validate_encoding(
       "s_get_waveid_in_workgroup", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGetWaveidInWorkgroupSmem>(opcode);
 }
 } // namespace detail

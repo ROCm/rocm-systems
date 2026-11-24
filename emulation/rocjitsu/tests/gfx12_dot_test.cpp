@@ -83,24 +83,17 @@ public:
   uint32_t base;
 };
 
-TEST(Gfx12Dot, HardwareBitsAreIndependentOfHostFpState) {
+TEST(Gfx12Dot, HardwareBits) {
   HostState restore;
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_INEXACT);
-    for (bool bf16 : {false, true}) {
-      const auto cases = bf16 ? std::span<const Gfx12DotCase>(kGfx12DotBF16Cases)
-                              : std::span<const Gfx12DotCase>(kGfx12DotF16Cases);
-      for (const auto &c : cases) {
-        const uint32_t result =
-            bf16 ? amdgpu::gfx12_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
-                 : amdgpu::gfx12_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
-        EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
-      }
+  for (bool bf16 : {false, true}) {
+    const auto cases = bf16 ? std::span<const Gfx12DotCase>(kGfx12DotBF16Cases)
+                            : std::span<const Gfx12DotCase>(kGfx12DotF16Cases);
+    for (const auto &c : cases) {
+      const uint32_t result =
+          bf16 ? amdgpu::gfx12_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
+               : amdgpu::gfx12_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
+      EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
     }
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
-    EXPECT_EQ(std::fegetround(), round);
   }
 }
 
@@ -503,25 +496,21 @@ TEST(Gfx12Dot, DecodedDot4MatchesNativeFormatAndRoundingCases) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr std::array<uint16_t, 4> ops{rdna4::kVDot4F32Fp8Fp8Vop3p, rdna4::kVDot4F32Fp8Bf8Vop3p,
                                         rdna4::kVDot4F32Bf8Fp8Vop3p, rdna4::kVDot4F32Bf8Bf8Vop3p};
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    for (size_t op = 0; op < ops.size(); ++op) {
-      for (size_t offset = 0; offset < kGfx12Dot4Cases.size(); offset += 32) {
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          const auto &c = kGfx12Dot4Cases[offset + lane];
-          machine.set(0, lane, c.a);
-          machine.set(1, lane, c.b);
-          machine.set(2, lane, c.c);
-        }
-        machine.execute(rdna4::build_vop3p(
-            ops[op],
-            {.vdst = 16, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3}));
-        for (uint32_t lane = 0; lane < 32; ++lane)
-          EXPECT_EQ(machine.get(16, lane), kGfx12Dot4Cases[offset + lane].expected[op])
-              << "op=" << ops[op] << " case=" << offset + lane << " round=" << round;
+  for (size_t op = 0; op < ops.size(); ++op) {
+    for (size_t offset = 0; offset < kGfx12Dot4Cases.size(); offset += 32) {
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        const auto &c = kGfx12Dot4Cases[offset + lane];
+        machine.set(0, lane, c.a);
+        machine.set(1, lane, c.b);
+        machine.set(2, lane, c.c);
       }
+      machine.execute(rdna4::build_vop3p(
+          ops[op],
+          {.vdst = 16, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3}));
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        EXPECT_EQ(machine.get(16, lane), kGfx12Dot4Cases[offset + lane].expected[op])
+            << "op=" << ops[op] << " case=" << offset + lane;
     }
-    EXPECT_EQ(std::fegetround(), round);
   }
 }
 
@@ -610,20 +599,13 @@ TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
   }
 }
 
-TEST(Gfx12Dot4, HardwareArithmeticIgnoresHostFpState) {
+TEST(Gfx12Dot4, HardwareArithmetic) {
   HostState restore;
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_INEXACT);
-    for (const auto &family : kFamilies)
-      for (const auto &sample : family.cases)
-        EXPECT_EQ(dot4(family, sample), sample.expected)
-            << "opcode=" << family.opcode << " rounding=" << round << " A=" << std::hex << sample.a
-            << " B=" << sample.b << " C=" << sample.c;
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
-    EXPECT_EQ(std::fegetround(), round);
-  }
+  for (const auto &family : kFamilies)
+    for (const auto &sample : family.cases)
+      EXPECT_EQ(dot4(family, sample), sample.expected)
+          << "opcode=" << family.opcode << " A=" << std::hex << sample.a << " B=" << sample.b
+          << " C=" << sample.c;
 }
 
 TEST(Gfx12Dot4, DecodedHardwareArithmeticIncludesDppAndOverlappingRegisters) {

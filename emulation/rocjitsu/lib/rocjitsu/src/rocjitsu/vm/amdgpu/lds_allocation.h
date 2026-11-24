@@ -16,8 +16,9 @@ constexpr uint64_t ds_address(uint32_t allocation_base, uint32_t vgpr, uint32_t 
 /// @brief Bytes retained below an exclusive bound, rounded to complete elements.
 constexpr uint64_t whole_element_bytes_in_range(uint64_t address, uint64_t bytes,
                                                 uint64_t element_bytes, uint64_t end) {
-  if (element_bytes == 0)
+  if (element_bytes == 0) {
     return 0;
+  }
   const uint64_t available = address < end ? end - address : 0;
   return std::min(bytes, available / element_bytes * element_bytes);
 }

@@ -212,6 +212,10 @@ struct PcValue {
   /// `s_add_nc_u64` form and the temp-delta patterns that already absorb their own carry never set
   /// this.
   bool pending_high_carry = false;
+  // These constraints validate the sign extension and carry kind represented
+  // by offset; they are meaningful only while pending_high_carry is true.
+  ScalarSop2Op pending_high_operation = ScalarSop2Op::AddcU32;
+  uint32_t pending_high_literal = 0;
 
   friend bool operator==(const PcValue &, const PcValue &) = default;
 };
@@ -349,6 +353,7 @@ struct InstructionFacts {
   std::optional<uint16_t> call_sdst;
   SgprWriteMask written_sgprs;
   bool written_sgprs_computed = false;
+  bool writes_scc = false;
 };
 
 [[nodiscard]] bool is_lane_fixup_consumer(const InstructionFacts &facts) {
@@ -787,6 +792,13 @@ scalar_pc_sreg(rocjitsu::IsaFamily arch, const Instruction &inst, uint32_t word,
     return false;
   if ((word & 0xffu) != 255u)
     return false;
+  // Raw SDST encodings also name special destinations such as NULL, whose
+  // discarded write cannot supply the temporary value used by these patterns.
+  const Operand *destination = inst.dst_operand(0);
+  const std::optional<RegisterRef> ref =
+      destination ? destination->to_register_ref() : std::nullopt;
+  if (!ref || ref->cls != RegClass::SGPR || ref->index != sdst || ref->width != 1)
+    return false;
   literal = literal_word;
   return true;
 }
@@ -818,11 +830,21 @@ scalar_pc_sreg(rocjitsu::IsaFamily arch, const Instruction &inst, uint32_t word,
 }
 
 void record_written_sgpr_ref(InstructionFacts &facts, RegisterRef ref) {
+  facts.writes_scc = facts.writes_scc || ref.cls == RegClass::SCC;
   facts.written_sgprs.expand(ref);
 }
 
 void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
-  // This analysis only needs SGPR defs. Avoid the heavier def-use helper here:
+  // Runtime-relative scalar destinations can overwrite any SGPR, including a
+  // PC-builder register which feeds a recovered transfer.
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic.starts_with("s_movreld") || mnemonic.starts_with("s_movrelsd")) {
+    facts.written_sgprs.expand({RegClass::SGPR, 0, REGISTER_SET_MAX_SGPRS});
+    facts.written_sgprs_computed = true;
+    return;
+  }
+  // This analysis needs SGPR defs and SCC writes that invalidate a pending
+  // carry. Avoid the heavier def-use helper here:
   // computing use sets and vector metadata for every instruction was a major
   // cost on large generated kernels, and none of that information participates
   // in this lattice.
@@ -830,6 +852,7 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
     const Operand *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
+    facts.writes_scc = facts.writes_scc || op->to_special_reg_class() == RegClass::SCC;
     if (auto ref = op->to_register_ref())
       record_written_sgpr_ref(facts, *ref);
   }
@@ -861,6 +884,14 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   ensure_written_sgprs(ctx, index);
   const InstructionFacts &facts = ctx.facts[index];
   facts.written_sgprs.for_each([&](uint16_t sgpr) { state.invalidate_half(sgpr, protected_pair); });
+  if (facts.writes_scc) {
+    const std::vector<uint16_t> pairs = state.active_pairs();
+    for (uint16_t pair : pairs) {
+      const PcValue *value = state.builder(pair);
+      if ((!protected_pair || pair != *protected_pair) && value && value->pending_high_carry)
+        state.invalidate_pair(pair);
+    }
+  }
 }
 
 [[nodiscard]] bool is_unconditional_branch(const Instruction &inst) {
@@ -993,11 +1024,16 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   const uint32_t low_word = ctx.facts[low_index].word;
   const uint32_t high_word = ctx.facts[high_index].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
+  if (temp_sdst == pair_lo || temp_sdst == static_cast<uint16_t>(pair_lo + 1))
+    return std::nullopt;
 
   uint32_t literal = 0;
   if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
                                    text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
                                    *add_i32_opcode, temp_sdst, kInlineInt4, literal))
+    return std::nullopt;
+  const int64_t delta = static_cast<int32_t>(literal + 4u);
+  if (delta < 0)
     return std::nullopt;
   if (!sop2_sreg_inline_to_sreg(low_inst, low_word, *add_u32_opcode, pair_lo, pair_lo, temp_sdst))
     return std::nullopt;
@@ -1007,7 +1043,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     return std::nullopt;
 
   return TempDeltaPattern{
-      .delta = static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
+      .delta = delta,
       .end_offset = high_inst.src_loc() + static_cast<uint64_t>(high_inst.size()),
       .instruction_count = high_index - index + 1,
   };
@@ -1041,11 +1077,16 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   const Instruction &high_inst = *ctx.insts[index + 3];
   const uint32_t temp_word = ctx.facts[index].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
+  if (temp_sdst == pair_lo || temp_sdst == static_cast<uint16_t>(pair_lo + 1))
+    return std::nullopt;
 
   uint32_t literal = 0;
   if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
                                    text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
                                    *add_i32_opcode, temp_sdst, kInlineInt4, literal))
+    return std::nullopt;
+  const int64_t delta = static_cast<int32_t>(literal + 4u);
+  if (delta > 0)
     return std::nullopt;
   if (!sop1_same_sreg(abs_inst, ctx.facts[index + 1].word, amdgpu::Operation::S_ABS_I32, temp_sdst))
     return std::nullopt;
@@ -1058,7 +1099,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     return std::nullopt;
 
   return TempDeltaPattern{
-      .delta = static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
+      .delta = delta,
       .end_offset = high_inst.src_loc() + static_cast<uint64_t>(high_inst.size()),
       .instruction_count = 4,
   };
@@ -1084,8 +1125,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // invalidation path and kills the pair.
   const auto add_u32_opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddU32);
   const auto sub_u32_opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubU32);
-  const auto add_i32_opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddI32);
-  if (!add_u32_opcode || !sub_u32_opcode || !add_i32_opcode)
+  if (!add_u32_opcode || !sub_u32_opcode || value.pending_high_carry)
     return false;
 
   uint32_t literal = 0;
@@ -1094,12 +1134,11 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (sop2_sreg_literal_to_sreg(inst, word, literal_word, *add_u32_opcode, pair_lo, pair_lo,
                                 literal)) {
     delta = static_cast<int64_t>(static_cast<int32_t>(literal));
-  } else if (sop2_sreg_literal_to_sreg(inst, word, literal_word, *add_i32_opcode, pair_lo, pair_lo,
-                                       literal)) {
-    delta = static_cast<int64_t>(static_cast<int32_t>(literal));
+    value.pending_high_operation = ScalarSop2Op::AddcU32;
   } else if (sop2_sreg_literal_to_sreg(inst, word, literal_word, *sub_u32_opcode, pair_lo, pair_lo,
                                        literal)) {
     delta = -static_cast<int64_t>(static_cast<int32_t>(literal));
+    value.pending_high_operation = ScalarSop2Op::SubbU32;
   } else {
     return false;
   }
@@ -1107,25 +1146,22 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   value.offset += delta;
   value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
   value.pending_high_carry = true;
+  value.pending_high_literal = (literal & 0x80000000u) != 0 ? 0xffffffffu : 0;
   return true;
 }
 
 [[nodiscard]] bool apply_high_carry_update(const Instruction &inst, uint32_t word,
                                            std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
                                            uint16_t pair_lo, PcValue &value) {
-  // The high-half carry instruction completes the 64-bit edit. The common
-  // getpc-relative chains use 0 or -1 as the second operand so the high half
-  // only absorbs carry/borrow from the low half. Other high-half edits are not
-  // modeled because they can change the absolute target in ways this pass does
-  // not prove.
-  const auto addc_u32_opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddcU32);
-  const auto subb_u32_opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubbU32);
-  if (!addc_u32_opcode || !subb_u32_opcode)
+  // The high operation must consume the low operation's carry/borrow and use
+  // the sign extension already included in the tracked signed delta.
+  const std::optional<uint32_t> opcode = scalar_sop2_opcode(arch, value.pending_high_operation);
+  if (!value.pending_high_carry || !opcode)
     return false;
 
   const uint16_t pair_hi = static_cast<uint16_t>(pair_lo + 1);
-  if (sop2_sreg_inline_zero_to_sreg(inst, word, *addc_u32_opcode, pair_hi, pair_hi) ||
-      sop2_sreg_inline_zero_to_sreg(inst, word, *subb_u32_opcode, pair_hi, pair_hi)) {
+  if (value.pending_high_literal == 0 &&
+      sop2_sreg_inline_zero_to_sreg(inst, word, *opcode, pair_hi, pair_hi)) {
     value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
     value.pending_high_carry = false;
     return true;
@@ -1133,11 +1169,8 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 
   uint32_t literal = 0;
   const uint32_t literal_word = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
-  if (sop2_sreg_literal_to_sreg(inst, word, literal_word, *addc_u32_opcode, pair_hi, pair_hi,
-                                literal) ||
-      sop2_sreg_literal_to_sreg(inst, word, literal_word, *subb_u32_opcode, pair_hi, pair_hi,
-                                literal)) {
-    if (literal == 0 || literal == 0xffffffffu) {
+  if (sop2_sreg_literal_to_sreg(inst, word, literal_word, *opcode, pair_hi, pair_hi, literal)) {
+    if (literal == value.pending_high_literal) {
       value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
       value.pending_high_carry = false;
       return true;
@@ -1199,9 +1232,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value) {
-  // A recovered target outside the current text section cannot become a local
-  // BasicBlock successor. Drop it here rather than forcing the caller to filter
-  // impossible leaders.
+  // A target outside this section cannot become a local BasicBlock successor.
+  // The emitter must preserve that loss of target-set completeness on any
+  // remaining local targets; another executable section may contain the target.
   if (value.offset < 0 || static_cast<uint64_t>(value.offset) >= ctx.text.size())
     return std::nullopt;
 
@@ -1214,6 +1247,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_call_sreg = pair_lo,
       .source_builder_sreg = value.source_sreg,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
+      .source_incomplete = value.pending_high_carry,
       .source_recovery_contiguous = value.contiguous,
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
@@ -1536,7 +1570,9 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   // the temporary itself is never added to the dataflow state.
   for (uint16_t pair_lo : state.active_pairs()) {
     const PcValue *value = state.builder(pair_lo);
-    if (value == nullptr)
+    // These idioms overwrite SCC before their own low/high adjustment, so
+    // they cannot preserve an earlier low operation's pending carry.
+    if (value == nullptr || value->pending_high_carry)
       continue;
     // The matched idiom's first instruction must start where the recorded range
     // ends, or an unmodeled instruction sits inside the range that the patcher
@@ -1782,9 +1818,12 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
   // setpc/swappc consumer. When @p incomplete, at least one predecessor left the
   // pair unconstrained; the concrete targets are still recorded (for relocation
   // and liveness) but flagged so the translator does not build a direct window.
+  const bool omitted_target = std::ranges::any_of(values, [&](const PcValue &value) {
+    return value.offset < 0 || static_cast<uint64_t>(value.offset) >= ctx.text.size();
+  });
   for (const PcValue &value : values) {
     if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value)) {
-      fixup->source_incomplete = incomplete;
+      fixup->source_incomplete = fixup->source_incomplete || incomplete || omitted_target;
       append_unique_indexed(recovered, recovered_index, *fixup);
     }
   }
@@ -2525,7 +2564,7 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
+  const bool writes_mode = amdgpu::decode_hwreg_slice(hwreg).id == amdgpu::MODE_HWREG;
   if (setreg_vgpr_msb_fixup && writes_mode) {
     if (operation == amdgpu::Operation::S_SETREG_B32) {
       mode = std::nullopt;
@@ -2580,7 +2619,7 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
     enabled = std::nullopt;
     return;
   }
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(hwreg);
   const auto literal = instruction_literal(inst, text);
   enabled = literal
                 ? std::optional<bool>{((*literal >> (kGprIdxEnableBit - slice.begin)) & 1u) != 0}
@@ -3447,7 +3486,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
 void recover_signed_delta_templates(const AnalysisContext &ctx,
                                     const std::vector<AnalysisBlock> &blocks,
                                     std::vector<IndirectCallFixup> &recovered,
-                                    FixupIndex &recovered_index) {
+                                    FixupIndex &recovered_index,
+                                    std::span<const uint64_t> sorted_extra_leaders,
+                                    ExternalEntryPolicy entry_policy) {
   // Some compiler output uses one signed literal template for a PC-relative
   // setpc:
   //
@@ -3476,6 +3517,12 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
   block_by_offset.reserve(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
     block_by_offset.emplace(blocks[block_index].offset, block_index);
+  std::vector<std::vector<size_t>> predecessors(blocks.size());
+  for (size_t source = 0; source < blocks.size(); ++source)
+    for (size_t destination : blocks[source].successors)
+      predecessors[destination].push_back(source);
+  const std::vector<uint8_t> external_entries =
+      explicit_external_entries(blocks, sorted_extra_leaders, entry_policy);
 
   const auto add_i32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddI32);
   if (!add_i32_opcode)
@@ -3527,10 +3574,28 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
     if (!sub_consumer || !add_consumer)
       continue;
 
+    const size_t entry_index = block_by_offset.at(entry.offset);
+    const auto closed_arm = [&](size_t arm) {
+      return !is_external_root(arm, external_entries, predecessors, entry_policy) &&
+             predecessors[arm].size() == 1 && predecessors[arm].front() == entry_index;
+    };
+    // A matching shape cannot determine values supplied by an alternate entry.
+    // Keep its useful edges, but merge loss of completeness monotonically on
+    // later discovery rounds as new incoming edges become known.
+    const Instruction &compare = *ctx.insts[entry.last_index - 1];
+    const uint32_t compare_word = ctx.facts[entry.last_index - 1].word;
+    const bool sign_predicate = term.amdgpu_operation() == amdgpu::Operation::S_CBRANCH_SCC1 &&
+                                compare.amdgpu_operation() == amdgpu::Operation::S_CMP_GE_I32 &&
+                                (compare_word & 0xffu) == tmp_sreg &&
+                                ((compare_word >> 8) & 0xffu) == kInlineInt0;
+    const bool temporary_preserves_pair =
+        tmp_sreg != *pair_lo && tmp_sreg != static_cast<uint16_t>(*pair_lo + 1);
+    const bool incomplete = !sign_predicate || !temporary_preserves_pair ||
+                            !closed_arm(sub_block_it->second) || !closed_arm(add_block_it->second);
+
     const uint64_t getpc_next = getpc_inst.src_loc() + static_cast<uint64_t>(getpc_inst.size());
     PcValue value{
-        .offset = static_cast<int64_t>(getpc_next) +
-                  static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
+        .offset = static_cast<int64_t>(getpc_next) + static_cast<int32_t>(literal + 4u),
         .source_getpc_offset = getpc_inst.src_loc(),
         .source_sreg = *pair_lo,
         .source_recovery_begin_offset = getpc_next,
@@ -3541,10 +3606,12 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
     // replacement: patch_recovered_builder_fixups rewrites it once and requires
     // the duplicate to agree.
     if (auto fixup = fixup_for_value(ctx, sub_consumer->setpc_index, *pair_lo, value)) {
+      fixup->source_incomplete = incomplete;
       fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
       append_unique_indexed(recovered, recovered_index, *fixup);
     }
     if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value)) {
+      fixup->source_incomplete = incomplete;
       fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
       append_unique_indexed(recovered, recovered_index, *fixup);
     }
@@ -3626,7 +3693,8 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
       scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered,
                  iteration_recovered_index, round_builders);
-    recover_signed_delta_templates(ctx, blocks, iteration_recovered, iteration_recovered_index);
+    recover_signed_delta_templates(ctx, blocks, iteration_recovered, iteration_recovered_index,
+                                   sorted_extra_leaders, entry_policy);
 
     if (!pending_consumers.empty()) {
       const auto entry_facts = run_block_dataflow(blocks, pending_consumers, sorted_extra_leaders,

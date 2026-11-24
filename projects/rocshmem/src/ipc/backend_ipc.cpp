@@ -74,7 +74,7 @@ IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
 
   /**
    * Check if num_pes == ipcImpl.shm_size)
-   * All the PEs must be with in a node for IPC conduit
+   * All the PEs must be with in a node for IPC backend
    */
   if(num_pes != ipcImpl.shm_size) {
     LOG_ERROR_EXIT("IPC Backend selected but some PEs are non-local. This is not a supported configuration. "
@@ -98,7 +98,7 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 
   /**
    * Check if num_pes == ipcImpl.shm_size)
-   * All the PEs must be with in a node for IPC conduit
+   * All the PEs must be with in a node for IPC backend
    */
   assert(num_pes == ipcImpl.shm_size);
 

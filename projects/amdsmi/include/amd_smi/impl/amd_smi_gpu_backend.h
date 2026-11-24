@@ -46,6 +46,9 @@ class IGPUBackend {
   virtual amdsmi_status_t GetDriverInfo(amdsmi_driver_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
+  virtual amdsmi_status_t GetDriverInfoV2(amdsmi_driver_info_v2_t*) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
   virtual amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetUuid(unsigned int*, char*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) {

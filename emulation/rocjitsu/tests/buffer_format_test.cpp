@@ -1257,36 +1257,28 @@ TEST_P(BufferFormatExecutionTest, RdnaNarrowTypedStoresBypassDescriptorSwizzle) 
   }
 }
 
-TEST_P(BufferFormatExecutionTest, NormalizedLoadsIgnoreAndRestoreHostRoundingMode) {
-  const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);
+TEST_P(BufferFormatExecutionTest, NormalizedLoads) {
   descriptor(42, 4);
   wf->set_exec(1);
   memory.write32(0x1000, 0x7fff8000);
   auto decoder = Decoder::create(GetParam());
-  for (int mode : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(mode), 0);
-    ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
-    ASSERT_EQ(std::feraiseexcept(FE_INVALID), 0);
-    std::unique_ptr<Instruction> inst;
-    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
-      const auto words =
-          rdna4::build_vbuffer(rdna4::kBufferLoadFormatXyzwVbuffer,
-                               {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
-      inst.reset(decode_valid(*decoder, words.data()));
-    } else {
-      const std::array<uint32_t, 2> words{0xe00c0000u, 0x80010800u};
-      inst.reset(decode_valid(*decoder, words.data()));
-    }
-    ASSERT_NE(inst, nullptr);
-    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
-    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
-    EXPECT_EQ(std::fegetround(), mode);
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INVALID);
-    const std::array<uint32_t, 4> expected{0, 0x3f008081, 0x3f800000, 0x3efefeff};
-    for (uint32_t reg = 0; reg < 4; ++reg)
-      EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 8 + reg, 0), expected[reg]);
+  std::unique_ptr<Instruction> inst;
+  if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
+    const auto words =
+        rdna4::build_vbuffer(rdna4::kBufferLoadFormatXyzwVbuffer,
+                             {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
+    inst.reset(decode_valid(*decoder, words.data()));
+  } else {
+    const std::array<uint32_t, 2> words{0xe00c0000u, 0x80010800u};
+    inst.reset(decode_valid(*decoder, words.data()));
   }
+  ASSERT_NE(inst, nullptr);
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+  ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  const std::array<uint32_t, 4> expected{0, 0x3f008081, 0x3f800000, 0x3efefeff};
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 8 + reg, 0), expected[reg]);
 }
 
 TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBoundaries) {

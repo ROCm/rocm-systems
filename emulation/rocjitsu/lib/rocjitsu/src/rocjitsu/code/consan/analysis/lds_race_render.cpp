@@ -87,7 +87,20 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
               : "native_lds_single_range_no_sync_bounded_1d")
       << "\"" << ",\"run_identity\":\"" << hex_bytes(result.run_identity)
       << "\",\"original_sha256\":\"" << hex_bytes(result.original.sha256)
-      << "\",\"original_bytes\":" << result.original.bytes << ",\"entry\":";
+      << "\",\"original_bytes\":" << result.original.bytes << ",\"selection_profile\":\""
+      << hex_bytes(result.selection_profile) << "\",\"entries\":[";
+  bool first_entry = true;
+  for (const LdsRaceImageEntry &entry : result.entries) {
+    if (!first_entry)
+      out << ',';
+    first_entry = false;
+    out << "{\"entry_key\":" << entry.key << ",\"entry\":";
+    write_json_string(out, entry.name);
+    out << ",\"disposition\":\""
+        << (entry.disposition == EntryDisposition::Selected ? "selected" : "native_uncovered")
+        << "\"}";
+  }
+  out << "],\"entry\":";
   write_json_string(out, result.entry);
   out << ",\"target\":" << result.target << ",\"wave_size\":" << result.wave_size
       << ",\"execution_conditions\":" << result.execution_conditions
@@ -103,8 +116,10 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
     first = false;
     // Once any counter exhausts, do not present the difference of saturating
     // total-loss and address-loss counters as an exact dropped count; emit null.
-    out << "{\"serial\":" << execution.serial
-        << ",\"workgroup_count\":" << execution.workgroup_count
+    out << "{\"serial\":" << execution.serial << ",\"entry_key\":" << execution.entry_key
+        << ",\"entry\":";
+    write_json_string(out, execution.entry);
+    out << ",\"workgroup_count\":" << execution.workgroup_count
         << ",\"waves_per_workgroup\":" << execution.waves_per_workgroup
         << ",\"valid_observations\":" << execution.valid_observations
         << ",\"rejected_records\":" << execution.rejected_records

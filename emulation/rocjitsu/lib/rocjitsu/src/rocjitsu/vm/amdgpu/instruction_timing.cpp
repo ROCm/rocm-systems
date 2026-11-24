@@ -35,8 +35,9 @@ InstructionTiming::classify(std::unique_ptr<const Instruction> inst, uint64_t pc
   assert(inst != nullptr);
   assert((wave_size == 32 || wave_size == 64) && "a wave runs 32 or 64 lanes");
   const ExecutionBlock block = inst->amdgpu_execution_block();
-  if (block == ExecutionBlock::UNKNOWN)
+  if (block == ExecutionBlock::UNKNOWN) {
     return std::nullopt;
+  }
 
   InstructionTiming timing;
   timing.pc = pc;
@@ -49,9 +50,10 @@ InstructionTiming::classify(std::unique_ptr<const Instruction> inst, uint64_t pc
                       block == ExecutionBlock::LDS;
   if (memory) {
     if (const auto *issue = inst->amdgpu_memory_issue_info()) {
-      for (const auto obligation : issue->counter_obligations())
+      for (const auto obligation : issue->counter_obligations()) {
         add_counter(timing.counters, obligation.wait_counter_type(),
                     obligation.counter_increment());
+      }
     } else if (block == ExecutionBlock::SMEM) {
       add_counter(timing.counters, WaitCounterType::KMCNT);
     } else if (block == ExecutionBlock::LDS) {

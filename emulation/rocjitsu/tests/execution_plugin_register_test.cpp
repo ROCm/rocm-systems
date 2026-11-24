@@ -2926,58 +2926,6 @@ public:
   }
 };
 
-TEST(ExecutionPluginTest, ScalarRoundConvertAndPackObserversSeeCallerFpEnvironment) {
-  class ScalarObserver final : public ExecutionPlugin {
-  public:
-    ScalarObserver() : ExecutionPlugin("scalar_fp_observer") {}
-    void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override {
-      reads.push_back(std::fegetround());
-    }
-    void onAmdgpuWriteScalarRegister(const Wavefront *, RegisterRef) override {
-      writes.push_back(std::fegetround());
-    }
-    std::vector<int> reads, writes;
-  };
-  for (auto arch : {rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
-    Wave32PluginFixture fixture(arch);
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    auto owner = std::make_unique<ScalarObserver>();
-    auto *observer = owner.get();
-    fixture.plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    ASSERT_TRUE(fixture.plugin_group->add(std::move(owner)));
-    fixture.cu->set_plugin_group(fixture.plugin_group);
-    auto *wave = fixture.cu->dispatch_wf(0, 0, 104, 32);
-    ASSERT_NE(wave, nullptr);
-    fixture.cu->write_sgpr(wave->sgpr_alloc().base, 0x3fa00000);
-    fixture.cu->write_sgpr(wave->sgpr_alloc().base + 1, 0x40600000);
-    auto decoder = Decoder::create(arch);
-    for (auto words :
-         {rdna4::build_sop1(rdna4::kSCeilF32Sop1, {.ssrc0 = 0, .sdst = 2}),
-          rdna4::build_sop1(rdna4::kSCvtF16F32Sop1, {.ssrc0 = 0, .sdst = 2}),
-          rdna4::build_sop2(rdna4::kSCvtPkRtzF16F32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2})}) {
-      auto decoded = decoder->decode_window(words);
-      ASSERT_TRUE(decoded.succeeded());
-      observer->reads.clear();
-      observer->writes.clear();
-      std::fenv_t saved;
-      ASSERT_EQ(std::fegetenv(&saved), 0);
-      ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
-      const bool succeeded =
-          fixture.cu->execute_instruction(decoded.value().get(), *wave).succeeded();
-      const int after = std::fegetround();
-      std::fesetenv(&saved);
-      EXPECT_TRUE(succeeded);
-      EXPECT_EQ(after, FE_UPWARD);
-      ASSERT_FALSE(observer->reads.empty());
-      ASSERT_FALSE(observer->writes.empty());
-      for (int rounding : observer->reads)
-        EXPECT_EQ(rounding, FE_UPWARD);
-      for (int rounding : observer->writes)
-        EXPECT_EQ(rounding, FE_UPWARD);
-    }
-  }
-}
-
 // Guest rounding is independent of the default host controls seen by register
 // observers. rj-arith may raise sticky flags while leaving those controls intact.
 TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
@@ -3061,7 +3009,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
 
 #if RJ_HOST_ARCH_X86
 // Both VOPD slots expose unchanged default host controls to register observers.
-// Migrated RDNA arithmetic may add sticky flags; legacy CDNA retains isolation.
+// Arithmetic may add sticky flags.
 TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
   struct Case {
     rocjitsu::IsaFamily arch;
@@ -3091,7 +3039,7 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
     const bool uses_arith = test.arch == rocjitsu::IsaFamily::Rdna3 ||
                             test.arch == rocjitsu::IsaFamily::Rdna4 ||
                             test.arch == rocjitsu::IsaFamily::Cdna5;
-    const uint32_t observed_bits = uses_arith ? ~uint32_t(_MM_EXCEPT_MASK) : UINT32_MAX;
+    const uint32_t observed_bits = ~uint32_t(_MM_EXCEPT_MASK);
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(
           std::format("arch={} force_scalar={}", static_cast<int>(test.arch), force_scalar));
