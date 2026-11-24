@@ -111,10 +111,10 @@ RUN if [ -n "${ROCM_VERSION}" ] && [ "${ROCM_VERSION}" != "0.0" ]; then \
                 if [ -d /tmp/rocm-extract/bin ] && [ -d /tmp/rocm-extract/lib ]; then \
                     mv /tmp/rocm-extract /opt/rocm; \
                 else \
-                    rm -rf /tmp/rocm-extract; \
-                fi && \
-                test -d /opt/rocm/bin && \
-                test -d /opt/rocm/lib; \
+                    echo "Error: unexpected TheRock tarball layout (expected bin/ and lib/ at the top level). Extracted:" >&2; \
+                    ls -la /tmp/rocm-extract >&2; \
+                    exit 1; \
+                fi; \
             fi; \
         else \
             ROCM_VERSN=$(( (ROCM_MAJOR*10000)+(ROCM_MINOR*100) )) && \
