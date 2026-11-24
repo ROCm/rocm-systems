@@ -192,7 +192,7 @@ gfx1250 wave32.
 
 Preparation accepts a limited instruction/access subset with no synchronization,
 or qualified full-workgroup barriers on the supported target/wave profiles.
-The relaxed native `ds_add_u32` on gfx950/w64 records a four-byte Atomic access.
+The relaxed native `ds_add_u32` on every supported target and wave size records a four-byte Atomic access.
 The probe captures the effective address and guest EXEC before the original RMW.
 This observation contributes no ordering edge. Other atomic and barrier forms
 require their own qualification. Exact

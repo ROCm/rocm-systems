@@ -107,11 +107,10 @@ struct NativeLdsForm {
   LdsRangeShape shape = LdsRangeShape::Single;
 };
 
-NativeLdsForm native_lds_form(const Instruction &instruction, IsaFamily arch) {
+NativeLdsForm native_lds_form(const Instruction &instruction) {
   switch (instruction.amdgpu_operation()) {
   case amdgpu::Operation::DS_ADD_U32:
-    if (arch == IsaFamily::Cdna4 &&
-        instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Lds &&
+    if (instruction.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Lds &&
         instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic)
       return {.width = 4};
     return {};
@@ -298,7 +297,7 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     return Result::success(); // The complete original group/CFG is qualified below.
   }
   const bool atomic = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic;
-  const NativeLdsForm form = native_lds_form(instruction, arch);
+  const NativeLdsForm form = native_lds_form(instruction);
   if ((instruction.flags() & BARRIER) != 0 || (atomic && form.width == 0) ||
       name.starts_with("s_barrier") || name.starts_with("s_sendmsg")) {
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
@@ -569,7 +568,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
       }
-      if (native_lds_form(instruction, program.target->arch).width != 0) {
+      if (native_lds_form(instruction).width != 0) {
         access_offsets.insert(instruction.src_loc());
       }
     }

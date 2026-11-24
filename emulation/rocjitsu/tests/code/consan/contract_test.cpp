@@ -925,20 +925,23 @@ TEST_F(ConSanContract, GuestMappingsAndReservationsMustBeUnambiguous) {
   EXPECT_TRUE(validate_manifest(manifest, error_.emitter()).failed());
 }
 
-TEST_F(ConSanContract, AtomicAccessRequiresAnAdmittedTargetAndSingleDwordRange) {
+TEST_F(ConSanContract, AtomicAccessRequiresASingleDwordOnSupportedWaves) {
   Manifest manifest = example();
-  manifest.target = 950;
-  manifest.wave_size = 64;
   SiteFacts &site = manifest.sites.front();
   site.access = AccessKind::Atomic;
-  ASSERT_TRUE(validate_manifest(manifest, error_.emitter()).succeeded()) << error_.message();
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave : {32u, 64u}) {
+      manifest.target = target.id;
+      manifest.wave_size = wave;
+      EXPECT_EQ(validate_manifest(manifest).succeeded(), supports_wave(target, wave))
+          << target.name << " wave" << wave;
+    }
+  manifest.target = 950;
+  manifest.wave_size = 64;
   site.width = 8;
   EXPECT_TRUE(validate_manifest(manifest).failed());
   site.width = 4;
   site.lds_ranges.shape = LdsRangeShape::Dual;
-  EXPECT_TRUE(validate_manifest(manifest).failed());
-  site.lds_ranges = {};
-  manifest.target = 942;
   EXPECT_TRUE(validate_manifest(manifest).failed());
 }
 

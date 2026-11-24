@@ -269,10 +269,9 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     } else {
       valid_ranges = valid_ranges && ranges.shape == LdsRangeShape::Single;
     }
-    const bool valid_access =
-        site.access == AccessKind::Read || site.access == AccessKind::Write ||
-        (site.access == AccessKind::Atomic && admits_atomics && target->id == 950 &&
-         ranges.shape == LdsRangeShape::Single && site.width == 4);
+    const bool valid_access = site.access == AccessKind::Read || site.access == AccessKind::Write ||
+                              (site.access == AccessKind::Atomic && admits_atomics &&
+                               ranges.shape == LdsRangeShape::Single && site.width == 4);
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
         !valid_ranges || !valid_access ||

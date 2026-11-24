@@ -1060,6 +1060,24 @@ TEST_F(ConSanAnalysis, MultiWorkgroupReusedStorageNeverJoinsDifferentDispatches)
   EXPECT_TRUE(result.value().coverage_complete);
 }
 
+TEST_F(ConSanAnalysis, AtomicOrdinaryOverlapRequiresACompleteBarrierWitnessToBeOrdered) {
+  test::manifest(capture_.header).sites[0].access = AccessKind::Atomic;
+  access(0, 0, 1);
+  access(1, 1, 1);
+  barrier();
+  for (const bool complete : {true, false}) {
+    if (!complete)
+      wire::write_u32(capture_.executions[0].report, completion(1) + wire::kSyncCommit, 0);
+    const auto result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const auto &execution = result.value().executions.front();
+    EXPECT_EQ(execution.ordered_pairs, complete ? 1u : 0u);
+    EXPECT_EQ(execution.ordering_unresolved_pairs, complete ? 0u : 1u);
+    EXPECT_EQ(execution.cross_wave_pairs, 0u);
+    EXPECT_EQ(execution.coverage_complete, complete);
+  }
+}
+
 TEST_F(ConSanAnalysis, FixedBarrierCertificateOrdersRetainedPairAndSurvivesUnrelatedLocalGap) {
   access(0, 0, 1);
   access(1, 1, 1);

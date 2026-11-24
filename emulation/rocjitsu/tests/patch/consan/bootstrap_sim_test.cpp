@@ -1185,8 +1185,8 @@ void expect_atomic_analysis(const RunResult &run, uint32_t threads, size_t obser
 }
 #endif
 
-TEST_F(ConSanBootstrapSim, AtomicU32ExecutesTheOriginalUpdateOnce) {
-  const test::TargetMode target{"gfx950", 64};
+TEST_P(ConSanTargetSim, AtomicU32ExecutesTheOriginalUpdateOnce) {
+  const test::TargetMode target = GetParam();
   const uint32_t threads = 2 * target.wave_size;
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
   const uint64_t atomic_mask = high | (high >> 1);
@@ -1223,8 +1223,8 @@ TEST_F(ConSanBootstrapSim, AtomicU32ExecutesTheOriginalUpdateOnce) {
 #endif
 }
 
-TEST_F(ConSanBootstrapSim, AtomicU32ConflictsWithOverlappingOrdinaryPeers) {
-  const test::TargetMode target{"gfx950", 64};
+TEST_P(ConSanTargetSim, AtomicU32ConflictsWithOverlappingOrdinaryPeers) {
+  const test::TargetMode target = GetParam();
   const uint32_t threads = 2 * target.wave_size;
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
   for (const auto &[peer, role, offset, pairs] :
