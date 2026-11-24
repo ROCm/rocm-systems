@@ -971,27 +971,27 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
       std::max(kMinNumSlice, std::max(desc.array_size, desc.depth)));
 
   ADDR2_COMPUTE_SURFACE_INFO_INPUT in = {0};
-    in.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_INPUT);
-    in.format = addrlib_format;
-    in.bpp = static_cast<unsigned int>(image_prop.element_size) * 8;
-    in.width = width;
-    in.height = height;
-    in.numSlices = num_slice;
+  in.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_INPUT);
+  in.format = addrlib_format;
+  in.bpp = static_cast<unsigned int>(image_prop.element_size) * 8;
+  in.width = width;
+  in.height = height;
+  in.numSlices = num_slice;
 
-    switch(desc.geometry) {
-    case HSA_EXT_IMAGE_GEOMETRY_1D:
-    case HSA_EXT_IMAGE_GEOMETRY_1DB:
-      in.resourceType = ADDR_RSRC_TEX_1D;
-      break;
-    case HSA_EXT_IMAGE_GEOMETRY_2D:
-    case HSA_EXT_IMAGE_GEOMETRY_2DDEPTH:
-    case HSA_EXT_IMAGE_GEOMETRY_1DA:
-      in.resourceType = ADDR_RSRC_TEX_2D;
-      break;
-    case HSA_EXT_IMAGE_GEOMETRY_3D:
-    case HSA_EXT_IMAGE_GEOMETRY_2DA:
-    case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
-      {
+  switch(desc.geometry) {
+  case HSA_EXT_IMAGE_GEOMETRY_1D:
+  case HSA_EXT_IMAGE_GEOMETRY_1DB:
+    in.resourceType = ADDR_RSRC_TEX_1D;
+    break;
+  case HSA_EXT_IMAGE_GEOMETRY_2D:
+  case HSA_EXT_IMAGE_GEOMETRY_2DDEPTH:
+  case HSA_EXT_IMAGE_GEOMETRY_1DA:
+    in.resourceType = ADDR_RSRC_TEX_2D;
+    break;
+  case HSA_EXT_IMAGE_GEOMETRY_3D:
+  case HSA_EXT_IMAGE_GEOMETRY_2DA:
+  case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
+    {
 	      in.resourceType = ADDR_RSRC_TEX_3D;
 	      /*
 	       * 3D swizzle modes enforce alignment
@@ -1017,57 +1017,57 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
 		      in.flags.view3dAs2dArray = 1;
 
 	      break;
-      }
     }
-    in.flags.texture = 1;
+  }
+  in.flags.texture = 1;
 
-    ADDR2_GET_PREFERRED_SURF_SETTING_INPUT  prefSettingsInput = { 0 };
-    ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = { 0 };
+  ADDR2_GET_PREFERRED_SURF_SETTING_INPUT  prefSettingsInput = { 0 };
+  ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = { 0 };
 
-    prefSettingsInput.size            = sizeof(prefSettingsInput);
-    prefSettingsInput.flags           = in.flags;
-    prefSettingsInput.bpp             = in.bpp;
-    prefSettingsInput.format          = in.format;
-    prefSettingsInput.width           = in.width;
-    prefSettingsInput.height          = in.height;
-    prefSettingsInput.numFrags        = in.numFrags;
-    prefSettingsInput.numSamples      = in.numSamples;
-    prefSettingsInput.numMipLevels    = in.numMipLevels;
-    prefSettingsInput.numSlices       = in.numSlices;
-    prefSettingsInput.resourceLoction = ADDR_RSRC_LOC_UNDEF;
-    prefSettingsInput.resourceType    = in.resourceType;
+  prefSettingsInput.size            = sizeof(prefSettingsInput);
+  prefSettingsInput.flags           = in.flags;
+  prefSettingsInput.bpp             = in.bpp;
+  prefSettingsInput.format          = in.format;
+  prefSettingsInput.width           = in.width;
+  prefSettingsInput.height          = in.height;
+  prefSettingsInput.numFrags        = in.numFrags;
+  prefSettingsInput.numSamples      = in.numSamples;
+  prefSettingsInput.numMipLevels    = in.numMipLevels;
+  prefSettingsInput.numSlices       = in.numSlices;
+  prefSettingsInput.resourceLoction = ADDR_RSRC_LOC_UNDEF;
+  prefSettingsInput.resourceType    = in.resourceType;
 
-    // Disallow all swizzles but linear.
-    if (tileMode == Image::TileMode::LINEAR)
-    {
-      prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
-    }
+  // Disallow all swizzles but linear.
+  if (tileMode == Image::TileMode::LINEAR)
+  {
+    prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
+  }
 
-    prefSettingsInput.forbiddenBlock.micro = 1; // but don't ever allow the 256b swizzle modes
-    prefSettingsInput.forbiddenBlock.var = 1; // and don't allow variable-size block modes
+  prefSettingsInput.forbiddenBlock.micro = 1; // but don't ever allow the 256b swizzle modes
+  prefSettingsInput.forbiddenBlock.var = 1; // and don't allow variable-size block modes
 
-    if (ADDR_OK != Addr2GetPreferredSurfaceSetting(addr_lib_, &prefSettingsInput, &prefSettingsOutput)) {
-      return false;
-    }
+  if (ADDR_OK != Addr2GetPreferredSurfaceSetting(addr_lib_, &prefSettingsInput, &prefSettingsOutput)) {
+    return false;
+  }
 
-    in.swizzleMode = prefSettingsOutput.swizzleMode;
+  in.swizzleMode = prefSettingsOutput.swizzleMode;
 
-    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out2 = {0};
-    out.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_OUTPUT);
-    if (ADDR_OK != Addr2ComputeSurfaceInfo(addr_lib_, &in, &out2)) {
-      return false;
-    }
-    out.pitch = out2.pitch;
-    out.height = out2.height;
-    out.surfSize = out2.surfSize;
-    out.bpp = out2.bpp;
-    out.baseAlign = out2.baseAlign;
-    out.tileIndex = in.swizzleMode;
-    out.sliceSize = out2.sliceSize;
-    return true;
+  ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out2 = {0};
+  out.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_OUTPUT);
+  if (ADDR_OK != Addr2ComputeSurfaceInfo(addr_lib_, &in, &out2)) {
+    return false;
+  }
+  out.pitch = out2.pitch;
+  out.height = out2.height;
+  out.surfSize = out2.surfSize;
+  out.bpp = out2.bpp;
+  out.baseAlign = out2.baseAlign;
+  out.tileIndex = in.swizzleMode;
+  out.sliceSize = out2.sliceSize;
+  return true;
 }
 
 size_t ImageManagerKv::CalWorkingSizeBytes(hsa_ext_image_geometry_t geometry,
