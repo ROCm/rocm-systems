@@ -164,6 +164,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Host-to-container live attach now writes only the counter definitions for the detected GPU architecture into the target. An older container ROCprofiler-SDK no longer aborts on architecture-specific entries such as gfx1250-only `SQG_LEVEL_WGP_ACTIVE` when the host ROCm is newer than the container ROCm.
+
 * Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. These unsupported combinations now report a clear error during option validation.
 
 * Fixed `--torch-trace` errors in models that use lazy layers such as `nn.LazyLinear`.

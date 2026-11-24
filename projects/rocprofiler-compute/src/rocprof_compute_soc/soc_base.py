@@ -43,6 +43,7 @@ from utils.utils_common import (
     canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
+    filter_sdk_config_for_architecture,
     get_arch_alias_to_panel_id,
     is_only_pc_sampling,
     is_tcc_channel_counter,
@@ -425,6 +426,9 @@ class OmniSoC_Base:
             encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
+        gpu_arch = self.get_arch()
+        if gpu_arch:
+            sdk_config = filter_sdk_config_for_architecture(sdk_config, gpu_arch)
         os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
             sdk_config
         )

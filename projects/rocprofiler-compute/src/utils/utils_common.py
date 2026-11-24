@@ -1003,6 +1003,40 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
+def filter_sdk_config_for_architecture(
+    sdk_config: Dict[str, Any], gpu_arch: str
+) -> Dict[str, Any]:
+    """Keep only counter definitions that apply to gpu_arch.
+
+    A counter with several architecture definitions keeps only the matching
+    ones. A counter with no matching definition is dropped. Firmware
+    restrictions that do not list gpu_arch are dropped the same way.
+    """
+    sdk_section = sdk_config.get("rocprofiler-sdk", {})
+    filtered_counters: List[Dict[str, Any]] = []
+    for counter in sdk_section.get("counters", []):
+        matching_definitions = [
+            definition
+            for definition in counter.get("definitions", [])
+            if gpu_arch in definition.get("architectures", [])
+            or not definition.get("architectures")
+        ]
+        if not matching_definitions:
+            continue
+        filtered_counters.append({**counter, "definitions": matching_definitions})
+
+    filtered_sdk = {**sdk_section, "counters": filtered_counters}
+    firmware_restrictions = sdk_section.get("firmware_restrictions")
+    if firmware_restrictions is not None:
+        filtered_sdk["firmware_restrictions"] = [
+            restriction
+            for restriction in firmware_restrictions
+            if gpu_arch in restriction.get("affected_architectures", [])
+            or not restriction.get("affected_architectures")
+        ]
+    return {**sdk_config, "rocprofiler-sdk": filtered_sdk}
+
+
 def create_temp_rocprofiler_metrics_path(
     sdk_config: Dict[str, Any], parent_dir: Path = Path("/tmp")
 ) -> str:

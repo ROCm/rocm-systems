@@ -334,6 +334,7 @@ class RocProfCompute_Base:
             workload_dir=args.output_directory,
             ml_api_trace_enabled=args.trace_ml_api is not None,
             retain_rocpd_output=args.retain_rocpd_output,
+            gpu_arch=self._soc._mspec.gpu_arch,
         )
 
         end_time = time.time()

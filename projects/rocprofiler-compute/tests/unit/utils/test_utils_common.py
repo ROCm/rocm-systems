@@ -1032,6 +1032,102 @@ def test_create_temp_rocprofiler_metrics_path_in_parent_dir(tmp_path):
     assert (metrics_path / "counter_defs.yaml").is_file()
 
 
+def test_filter_sdk_config_for_architecture_keeps_matching_definitions():
+    """Only definitions for the requested GPU architecture remain."""
+    sdk_config = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": "SQ_WAVES",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx942", "gfx950"],
+                            "block": "SQ",
+                            "event": 0,
+                        }
+                    ],
+                },
+                {
+                    "name": "SQG_LEVEL_WGP_ACTIVE",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1250"],
+                            "block": "SQG",
+                            "event": 44,
+                        }
+                    ],
+                },
+                {
+                    "name": "SHARED_MULTI",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1150"],
+                            "block": "GL1C",
+                            "event": 1,
+                        },
+                        {
+                            "architectures": ["gfx1250"],
+                            "block": "GL1C",
+                            "event": 2,
+                        },
+                    ],
+                },
+            ],
+            "firmware_restrictions": [
+                {
+                    "affected_architectures": ["gfx942"],
+                    "reason": "keep",
+                },
+                {
+                    "affected_architectures": ["gfx1250"],
+                    "reason": "drop",
+                },
+            ],
+        }
+    }
+
+    filtered = utils_common.filter_sdk_config_for_architecture(sdk_config, "gfx942")
+    counters = {
+        counter["name"]: counter for counter in filtered["rocprofiler-sdk"]["counters"]
+    }
+
+    assert set(counters) == {"SQ_WAVES"}
+    assert counters["SQ_WAVES"]["definitions"] == [
+        {
+            "architectures": ["gfx942", "gfx950"],
+            "block": "SQ",
+            "event": 0,
+        }
+    ]
+    assert filtered["rocprofiler-sdk"]["firmware_restrictions"] == [
+        {"affected_architectures": ["gfx942"], "reason": "keep"}
+    ]
+
+
+def test_filter_sdk_config_for_architecture_trims_multi_definition_counter():
+    sdk_config = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": "SHARED_MULTI",
+                    "definitions": [
+                        {"architectures": ["gfx1150"], "block": "GL1C", "event": 1},
+                        {"architectures": ["gfx1250"], "block": "GL1C", "event": 2},
+                    ],
+                }
+            ]
+        }
+    }
+
+    filtered = utils_common.filter_sdk_config_for_architecture(sdk_config, "gfx1250")
+    counters = filtered["rocprofiler-sdk"]["counters"]
+
+    assert len(counters) == 1
+    assert counters[0]["definitions"] == [
+        {"architectures": ["gfx1250"], "block": "GL1C", "event": 2}
+    ]
+
+
 # =============================================================================
 # BUILD METRIC DETAILS TESTS
 # =============================================================================

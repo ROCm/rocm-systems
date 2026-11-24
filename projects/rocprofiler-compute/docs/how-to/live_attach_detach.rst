@@ -9,6 +9,13 @@ Dynamic process attachment in ROCm Compute Profiler
 Dynamic process attachment in ROCm Compute Profiler allows coupling with a workload process, without controlling its start or end. The application can already be running before the profiler application is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload.
 
 You can also attach from the host to a process that runs in a container.
+ROCm Compute Profiler finds the container's ROCprofiler-SDK tool library
+automatically, writes counter definitions for the current GPU architecture into
+the target's ``/tmp``, and copies profiling output back to the host workload
+directory after detach. Prefer matching host and container ROCm versions for
+host-to-container attach. When the versions differ, the counter definitions are
+still limited to the detected GPU architecture so architecture-specific entries
+from a newer host build are not sent to an older container library.
 
 A specific attach is not repeatable, and it can only collect the set of counters that the hardware is capable of capturing in a single run. As such, in the current implementation, you must specify a subset of counter groups that can be collected within one run. This can be done either by using the ``--block`` option (for example, --block 3.1.1 5.1.1) or by providing a predefined set through the use of single pass counter collection ``--set``.
 
@@ -46,5 +53,6 @@ The analyze options for Dynamic process attachment are completely compatible wit
   * To enable Dynamic process attachment, you need to have the correct supported version of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` and ``rocprofiler-register``.
   * The process to attach to must run as the same user as ROCm Compute Profiler. For a process in a container, run the container as that user.
   * On many Linux systems, a process can only trace its own child processes. To attach, first run ``sudo sysctl kernel.yama.ptrace_scope=0``. This setting lets processes trace any process of the same user on the whole system.
+  * For host-to-container attach, prefer the same ROCm version on the host and in the container. Counter definitions are filtered to the detected GPU architecture before they are written into the container.
   * To make the Dynamic process attachment feature work, you must use ``--block`` or ``--set`` to limit the number of counter input files to ensure single application run. You can also use "--iteration-multiplexing" to ensure single application run.
   * Due to the limitation of ROCprofiler-SDK, the attach can now only happen before Heterogeneous System Architecture (HSA) initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, such as the function name and other launch parameters. Attaching after this stage misses all crucial information of the HIP kernel and makes it impossible to store the output. This limitation will be solved in later releases of ROCprofiler-SDK.

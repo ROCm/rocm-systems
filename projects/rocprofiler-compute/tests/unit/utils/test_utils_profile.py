@@ -198,7 +198,9 @@ def run_attach(monkeypatch, attach_library, output_dir):
     )
 
 
-def run_prof_attached_to_container(tmp_path, monkeypatch, fake_attach):
+def run_prof_attached_to_container(
+    tmp_path, monkeypatch, fake_attach, gpu_arch="gfx942"
+):
     """Run run_prof in attach mode on process 42 with fake_attach as the attach."""
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
@@ -217,7 +219,9 @@ def run_prof_attached_to_container(tmp_path, monkeypatch, fake_attach):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
-    utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+    utils_profile.run_prof(
+        str(fname), profiler_options, workload_dir, gpu_arch=gpu_arch
+    )
 
 
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
@@ -1084,11 +1088,16 @@ def test_run_prof_live_attach_writes_counter_definitions_to_target_tmp(
         seen["metrics_path"] = new_env["ROCPROFILER_METRICS_PATH"]
         local_metrics_path = target_root / seen["metrics_path"].lstrip("/")
         seen["config_written"] = (local_metrics_path / "config.yaml").is_file()
+        config_text = (local_metrics_path / "config.yaml").read_text(encoding="utf-8")
+        seen["has_gfx1250_only"] = "SQG_LEVEL_WGP_ACTIVE" in config_text
 
-    run_prof_attached_to_container(tmp_path, monkeypatch, fake_attach)
+    run_prof_attached_to_container(
+        tmp_path, monkeypatch, fake_attach, gpu_arch="gfx942"
+    )
 
     assert seen["metrics_path"].startswith("/tmp/rocprof_compute_sdk_config_")
     assert seen["config_written"]
+    assert not seen["has_gfx1250_only"]
     assert list((target_root / "tmp").iterdir()) == []
 
 
