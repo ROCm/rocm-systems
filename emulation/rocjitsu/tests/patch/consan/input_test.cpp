@@ -73,6 +73,30 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
   check({shared, copy, 0xbf840001, clobber}, false); // conditional branch bypasses the clobber
 }
 
+TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndPrivateMappings) {
+  auto image =
+      test::read_fixture(test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap"));
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const std::array<uint32_t, 9> words = {
+      0xbe8401ed, 0x7e060205, 0xdc500ffc, 0x02000002, // private-base pointer, load +4092
+      0xbe8401eb, 0x7e060205, 0xdc500ffc, 0x02000002, // shared-base pointer, identical operation
+      0xbf810000};
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  ASSERT_LE(entry + sizeof(words), image.size());
+  std::memcpy(image.data() + entry, words.data(), sizeof(words));
+  const auto result = prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(result.succeeded()) << error.message;
+  ASSERT_EQ(result.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(result.value().manifest.sites.front().origin, AccessOrigin::GroupFlat);
+  EXPECT_EQ(result.value().manifest.sites.front().original_offset,
+            baseline.value().kernel.entry_text_offset + 24);
+  EXPECT_TRUE(validate_prepared(image, result.value(), error).succeeded()) << error.message;
+}
+
 TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
   const auto decoder = Decoder::create(IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);

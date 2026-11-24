@@ -76,6 +76,9 @@ class AnalysisDriver(Driver):
                     'wide_b8_overlap',
                     'wide_b96_overlap',
                     'flat_load_overlap',
+                    'flat_load_offset',
+                    'flat_store_overlap',
+                    'flat_store_tail',
                     'mixed_overlap',
                     'mixed_b16',
                     'barrier_missing_second',
@@ -230,21 +233,25 @@ class AnalysisDriver(Driver):
                         'ordered' if ordered else 'unordered'
                     )
                     assert finding['lane_pairs'] == 1
-                    native, flat = sorted(
+                    first, second = sorted(
                         (finding['first'], finding['second']),
                         key=lambda endpoint: endpoint['wave'],
                     )
+                    flat = first if case.startswith('flat_store_') else second
                     assert (
-                        native['site'],
-                        native['access'],
-                        flat['site'],
-                        flat['access'],
+                        first['site'],
+                        first['access'],
+                        second['site'],
+                        second['access'],
                     ) == (0, 'write', 1, 'read')
                     assert (
                         flat['origin'] == 'group_flat' and flat['confidence'] == 'exact'
                     )
-                    for endpoint in (native, flat):
-                        assert endpoint['width'] == 4 and endpoint['offset'] == 1020
+                    for endpoint in (first, second):
+                        tail = endpoint['wave'] == 1 and case.endswith('_tail')
+                        assert (endpoint['offset'], endpoint['width']) == (
+                            (1016, 8) if tail else (1020, 4)
+                        )
                         assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
                         assert (
                             endpoint['original_offset']

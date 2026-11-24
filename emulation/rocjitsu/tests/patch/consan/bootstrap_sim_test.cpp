@@ -1176,42 +1176,54 @@ private:
   Masks &masks_;
 };
 
-TEST_F(ConSanBootstrapSim, GroupFlatLoadUsesTheOriginalPointerAndGuestBarrier) {
-  const test::TargetMode target{"gfx950", 64};
+class ConSanGroupFlatSim : public ConSanTargetSim {};
+
+TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
+  const test::TargetMode target = GetParam();
   const uint32_t threads = 2 * target.wave_size;
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
-  for (std::string_view scenario : {"overlap", "adjacent", "ordered", "empty", "oob"}) {
-    SCOPED_TRACE(scenario);
+  const bool cdna =
+      std::string_view(target.target) == "gfx942" || std::string_view(target.target) == "gfx950";
+  for (std::string_view form :
+       {"load-overlap", "load-adjacent", "load-ordered", "load-empty", "load-oob", "load-offset",
+        "load-readread", "store-overlap", "store-adjacent", "store-ordered", "store-tail"}) {
+    const bool store = form.starts_with("store-");
+    const std::string_view scenario = form.substr(form.find('-') + 1);
+    const std::string_view mnemonic = store ? (cdna ? "flat_store_dword" : "flat_store_b32")
+                                            : (cdna ? "flat_load_dword" : "flat_load_b32");
+    SCOPED_TRACE(form);
     const bool ordered = scenario == "ordered";
     const bool empty = scenario == "empty";
     const bool oob = scenario == "oob";
-    const std::string fixture = "width-flat-load-" + std::string(scenario);
+    const std::string fixture = "width-flat-" + std::string(form);
     RunResult before, after;
     GuestIssueTrace::Masks before_masks, after_masks;
-    ASSERT_NO_FATAL_FAILURE(
-        run(fixture, Bootstrap::None, before, target, threads, true, 1, false, 1,
-            std::make_unique<GuestIssueTrace>("flat_load_dword", before_masks)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 1, false,
+                                1, std::make_unique<GuestIssueTrace>(mnemonic, before_masks)));
     ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 1,
                                 false, 1,
-                                std::make_unique<GuestIssueTrace>("flat_load_dword", after_masks)));
+                                std::make_unique<GuestIssueTrace>(mnemonic, after_masks)));
     expect_guest_state(before, after);
     EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 8}));
-    EXPECT_TRUE(before_masks[0].empty());
-    EXPECT_EQ(before_masks[1], empty ? std::vector<uint64_t>{} : std::vector<uint64_t>{high});
+    EXPECT_TRUE(before_masks[store ? 1 : 0].empty());
+    EXPECT_EQ(before_masks[store ? 0 : 1],
+              empty ? std::vector<uint64_t>{} : std::vector<uint64_t>{high});
     EXPECT_EQ(after_masks, before_masks);
     ASSERT_EQ(after.manifest.sites.size(), 2u);
-    EXPECT_EQ(after.manifest.sites[0].access, AccessKind::Write);
+    EXPECT_EQ(after.manifest.sites[0].access,
+              scenario == "readread" ? AccessKind::Read : AccessKind::Write);
     EXPECT_EQ(after.manifest.sites[1].access, AccessKind::Read);
-    EXPECT_EQ(after.manifest.sites[1].origin, AccessOrigin::GroupFlat);
+    EXPECT_EQ(after.manifest.sites[store ? 0 : 1].origin, AccessOrigin::GroupFlat);
     const auto records = published_accesses(after);
     ASSERT_EQ(records.size(), empty ? 1u : 2u);
     for (unsigned wave = 0; wave < records.size(); ++wave) {
-      EXPECT_EQ(after.manifest.sites[wave].width, 4u);
+      EXPECT_EQ(after.manifest.sites[wave].width, wave && scenario == "tail" ? 8u : 4u);
       EXPECT_EQ(records[wave].wave, wave);
       EXPECT_EQ(records[wave].site, wave);
       EXPECT_EQ(records[wave].mask, high);
-      const uint32_t flat_offset = oob ? 1024 : (scenario == "adjacent" ? 1016 : 1020);
-      EXPECT_EQ(records[wave].offset, wave ? flat_offset : 1020u);
+      const uint32_t second_offset =
+          oob ? 1024 : (scenario == "adjacent" || scenario == "tail" ? 1016 : 1020);
+      EXPECT_EQ(records[wave].offset, wave ? second_offset : 1020u);
     }
 #ifdef CONSAN_ANALYZER_ENABLED
     const CapturedExecution execution = {.serial = 41,
@@ -1223,7 +1235,8 @@ TEST_F(ConSanBootstrapSim, GroupFlatLoadUsesTheOriginalPointerAndGuestBarrier) {
     EXPECT_EQ(analysis.coverage_complete, !oob);
     EXPECT_EQ(analysis.rejected_records, oob ? 1u : 0u);
     EXPECT_EQ(analysis.valid_observations, records.size() - (oob ? 1u : 0u));
-    EXPECT_EQ(analysis.cross_wave_pairs, scenario == "overlap" ? 1u : 0u);
+    EXPECT_EQ(analysis.cross_wave_pairs,
+              scenario == "overlap" || scenario == "offset" || scenario == "tail" ? 1u : 0u);
     EXPECT_EQ(analysis.ordered_pairs, ordered ? 1u : 0u);
     EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
 #endif
@@ -1888,6 +1901,8 @@ const auto target_name = [](const auto &info) {
 };
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanTargetSim, ::testing::ValuesIn(test::kTargetModes),
                          target_name);
+INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanGroupFlatSim,
+                         ::testing::ValuesIn(std::span(test::kTargetModes).first(4)), target_name);
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanAtomicF64Sim,
                          ::testing::Values(test::TargetMode{"gfx942", 64},
                                            test::TargetMode{"gfx950", 64},
