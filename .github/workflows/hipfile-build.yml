@@ -232,7 +232,7 @@ jobs:
             /bin/bash -c '
               ctest -V -L "unit" --parallel 8
             '
-      - name: Generate coverage summary (${{ inputs.cxx_compiler }})
+      - name: Generate coverage files (${{ inputs.cxx_compiler }})
         if: ${{ env.AIS_USE_CODE_COVERAGE == 'true' }}
         run: |
           docker exec \
@@ -242,6 +242,15 @@ jobs:
             /bin/bash -c '
               export PATH="/opt/rocm/llvm/bin:${PATH}"
               ../../rocm-systems/projects/hipfile/util/llvm-coverage.sh -b .
+            '
+      - name: Output coverage summary to CI (${{ inputs.cxx_compiler }})
+        if: ${{ env.AIS_USE_CODE_COVERAGE == 'true' }}
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
               printf "# Code Coverage\n"
               printf "\`\`\`\n"
               cat coverage-report.txt
