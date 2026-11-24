@@ -121,7 +121,7 @@ void ExpectGoodSensorsStillRead(const FakeHwmonGpu& gpu) {
 }  // namespace
 
 // The padded sentinel is not a map key; it reads as unsupported, not as an exception.
-TEST(GpuUnit, TempMetricPaddedBaseboardLastIsNotSupported) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricPaddedBaseboardLastIsNotSupported) {
   FakeHwmonGpu gpu;
 
   int64_t temperature = 0;
@@ -132,7 +132,7 @@ TEST(GpuUnit, TempMetricPaddedBaseboardLastIsNotSupported) {
 }
 
 // Control: a real baseboard type is a key (seeded, no hwmon label) and was already NOT_SUPPORTED.
-TEST(GpuUnit, TempMetricSeededButUnlabeledTypeIsNotSupported) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricSeededButUnlabeledTypeIsNotSupported) {
   FakeHwmonGpu gpu;
 
   int64_t temperature = 0;
@@ -143,7 +143,7 @@ TEST(GpuUnit, TempMetricSeededButUnlabeledTypeIsNotSupported) {
 }
 
 // Control: a labelled sensor still reads hwmon, in degrees C.
-TEST(GpuUnit, TempMetricLabeledEdgeReadsHwmon) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricLabeledEdgeReadsHwmon) {
   FakeHwmonGpu gpu;
 
   ExpectGoodSensorsStillRead(gpu);
@@ -151,7 +151,7 @@ TEST(GpuUnit, TempMetricLabeledEdgeReadsHwmon) {
 
 // No temperature type, including every group sentinel and values outside the enum, may surface
 // as an internal exception.
-TEST(GpuUnit, TempMetricNeverReportsInternalException) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricNeverReportsInternalException) {
   FakeHwmonGpu gpu;
 
   DISPLAY_AMDSMI_API("amdsmi_get_temp_metric",
@@ -173,7 +173,7 @@ TEST(GpuUnit, TempMetricNeverReportsInternalException) {
 
 // A metric outside the enum is a bad argument. It used to reach a monitor-file lookup with no
 // valid entry and throw.
-TEST(GpuUnit, TempMetricUnknownMetricIsInvalidArgs) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricUnknownMetricIsInvalidArgs) {
   FakeHwmonGpu gpu;
 
   for (const uint32_t metric : {static_cast<uint32_t>(AMDSMI_TEMP_HIGHEST) + 1, 99U, 0xFFFFFFFFU}) {
@@ -186,7 +186,7 @@ TEST(GpuUnit, TempMetricUnknownMetricIsInvalidArgs) {
 
 // Control: VDDBOARD has no in<N>_label, so it is not a key in the voltage map and was already
 // NOT_SUPPORTED.
-TEST(GpuUnit, VoltMetricUnlabeledTypeIsNotSupported) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__VoltMetricUnlabeledTypeIsNotSupported) {
   FakeHwmonGpu gpu;
 
   int64_t voltage = 0;
@@ -195,7 +195,7 @@ TEST(GpuUnit, VoltMetricUnlabeledTypeIsNotSupported) {
             AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
-TEST(GpuUnit, VoltMetricUnknownMetricIsInvalidArgs) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__VoltMetricUnknownMetricIsInvalidArgs) {
   FakeHwmonGpu gpu;
 
   for (const uint32_t metric : {static_cast<uint32_t>(AMDSMI_VOLT_HIGHEST) + 1, 99U, 0xFFFFFFFFU}) {
@@ -207,13 +207,13 @@ TEST(GpuUnit, VoltMetricUnknownMetricIsInvalidArgs) {
 }
 
 // A temp label the library does not know is ignored; it used to throw out of discovery.
-TEST(GpuUnit, UnrecognizedTempLabelDoesNotBreakDiscovery) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__UnrecognizedTempLabelDoesNotBreakDiscovery) {
   FakeHwmonGpu gpu({{"temp4_label", "hbm\n"}, {"temp4_input", "50000\n"}});
 
   ExpectGoodSensorsStillRead(gpu);
 }
 
-TEST(GpuUnit, UnrecognizedVoltLabelDoesNotBreakDiscovery) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__UnrecognizedVoltLabelDoesNotBreakDiscovery) {
   FakeHwmonGpu gpu({{"in2_label", "vddnb\n"}, {"in2_input", "1\n"}});
 
   ExpectGoodSensorsStillRead(gpu);
@@ -221,7 +221,7 @@ TEST(GpuUnit, UnrecognizedVoltLabelDoesNotBreakDiscovery) {
 
 // temp8 sits between the seeded ranges (GENERAL_LAST is 7, GPUBOARD_NODE_FIRST is 100), so it
 // was never added to the index-to-type map and the lookup during discovery threw.
-TEST(GpuUnit, LabeledTempOutsideSeededRangesDoesNotBreakDiscovery) {
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__LabeledTempOutsideSeededRangesDoesNotBreakDiscovery) {
   FakeHwmonGpu gpu({{"temp8_label", "edge\n"}, {"temp8_input", "50000\n"}});
 
   ExpectGoodSensorsStillRead(gpu);
