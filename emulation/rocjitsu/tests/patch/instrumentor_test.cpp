@@ -176,8 +176,8 @@ TEST(Validator, RejectsNullRawEncoding) {
 }
 
 TEST(Validator, RejectsUnsupportedSize) {
-  static constexpr uint32_t kRaw[3] = {0, 0, 0};
-  TestInstruction anchor("hypothetical_12byte", 12, 0, std::nullopt, kRaw);
+  static constexpr uint32_t kRaw[4] = {};
+  TestInstruction anchor("hypothetical_16byte", 16, 0, std::nullopt, kRaw);
   auto text = dummy_text();
   InstrumentationPoint pt;
   std::string err;
@@ -198,15 +198,15 @@ TEST(Validator, RejectsUnalignedOffset) {
 }
 
 TEST(Validator, RejectsOutOfBoundsOffset) {
-  static constexpr uint32_t kRaw[2] = {0, 0};
-  TestInstruction anchor("buffer_load_dword", 8, 0, std::nullopt, kRaw);
-  auto text = dummy_text(/*size=*/8);
-  InstrumentationPoint pt;
-  std::string err;
-  EXPECT_FALSE(
-      validate_anchor(anchor, /*anchor_offset=*/4, text, pt, rocjitsu::IsaFamily::Cdna4, &err)
-          .has_value());
-  EXPECT_FALSE(err.empty());
+  static constexpr uint32_t kRaw[3] = {};
+  for (const int size : {8, 12}) {
+    SCOPED_TRACE(size);
+    TestInstruction anchor("load", size, 0, std::nullopt, kRaw);
+    const std::vector<uint8_t> text = dummy_text(size);
+    std::string error;
+    EXPECT_FALSE(validate_anchor(anchor, 4, text, {}, rocjitsu::IsaFamily::Rdna4, &error));
+    EXPECT_NE(error.find("extends past end"), std::string::npos) << error;
+  }
 }
 
 TEST(Validator, RejectsOffsetThatWouldOverflow) {
@@ -676,9 +676,7 @@ TEST(Validator, RejectsSClauseAnchor) {
   EXPECT_NE(err.find("s_clause"), std::string::npos) << "error was: " << err;
 }
 
-// Instruction::size() is a signed int; the `size != 4 && size != 8` check must
-// reject negative sizes (which decoders never emit in practice) rather than let
-// them through to the later cast to unsigned, where they would wrap.
+// Reject a negative decoder size before the site records it as unsigned.
 TEST(Validator, RejectsNegativeInstructionSize) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", /*size=*/-4, /*flags=*/0, std::nullopt, &kRaw);
@@ -687,7 +685,7 @@ TEST(Validator, RejectsNegativeInstructionSize) {
   std::string err;
   EXPECT_FALSE(
       is_relocatable_anchor(anchor, /*anchor_offset=*/0, text, rocjitsu::IsaFamily::Cdna4, &err));
-  EXPECT_NE(err.find("size must be 4 or 8"), std::string::npos) << "error was: " << err;
+  EXPECT_NE(err.find("size must be 4, 8 or 12"), std::string::npos) << "error was: " << err;
 }
 
 //==============================================================================
@@ -6179,6 +6177,123 @@ TEST(InstrumentorKernelBoundary, RejectsIncorrectBoundaryOffsetsAndMissingProbes
     const InstrumentedCodeObject missing = missing_probe.patch();
     EXPECT_FALSE(missing.errors.empty());
     EXPECT_TRUE(missing.elf_bytes.empty());
+  }
+}
+
+TEST(InstrumentorProbePatch, CallableSitesReplayAnEntireVflatInstructionOnce) {
+  // Both GFX12 families encode these as three dwords. The nonzero offset lives
+  // in the third word. The RMW count distinguishes replay from omission or duplication.
+  constexpr std::array<uint32_t, 3> add = {0xec0d407cu, 0x01000000u, 0x00000400u};
+  constexpr std::array<uint32_t, 3> store = {0xec06807cu, 0x01000000u, 0x00000800u};
+  constexpr uint32_t address = 0x80000;
+  struct Target {
+    IsaFamily arch;
+    uint32_t machine;
+    std::string_view sim;
+    uint32_t wave;
+  };
+  for (const Target target :
+       {Target{IsaFamily::Rdna4, EF_AMDGPU_MACH_AMDGCN_GFX1201, "rdna4", 32},
+        Target{IsaFamily::Rdna4, EF_AMDGPU_MACH_AMDGCN_GFX1201, "rdna4", 64},
+        Target{IsaFamily::Cdna5, EF_AMDGPU_MACH_AMDGCN_GFX1250, "cdna5", 32}}) {
+    SCOPED_TRACE(target.machine);
+    SCOPED_TRACE(target.wave);
+    const util::FailureOr<std::array<uint32_t, 2>> base =
+        build_v_mov_b32_imm(0, address, target.arch);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, target.arch);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(target.arch);
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+    ASSERT_TRUE(base.succeeded() && ret.succeeded() && end.succeeded() && nop.succeeded());
+    const std::vector<uint32_t> original = {base.value()[0],
+                                            base.value()[1],
+                                            make_mov_vgpr_inline(1, 0),
+                                            make_mov_vgpr_inline(2, 1),
+                                            add[0],
+                                            add[1],
+                                            add[2],
+                                            store[0],
+                                            store[1],
+                                            store[2],
+                                            0xbfc10000u,
+                                            0xbfc60000u,
+                                            end.value()};
+    constexpr uint32_t anchor = 16;
+    const std::vector<uint8_t> image = test::with_resource_metadata(
+        make_amdgpu_kernel_elf(original, 0, 3, target.machine, 3, 0, false, false, false, false,
+                               target.wave == 32),
+        {{"test_kernel", 0, 32, 8, 0}});
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    // Sample the counter in the callback, draining the guest RMW first for
+    // AfterInst. The continuation's store also detects a clobbered guest v2.
+    constexpr uint32_t wait_load = 0xbfc00000u, wait_store = 0xbfc10000u, wait_ds = 0xbfc60000u;
+    const auto probe_base = build_v_mov_b32_imm(4, address, target.arch);
+    ASSERT_TRUE(probe_base.succeeded());
+    const std::vector<uint8_t> probe_image = make_amdgpu_probe_elf(
+        "mark",
+        {probe_base.value()[0], probe_base.value()[1], make_mov_vgpr_inline(5, 0), wait_store,
+         wait_ds, wait_load, 0xec05007cu, 6u,
+         0x00000404u, // flat_load_b32 v6, v[4:5] offset:4
+         wait_load, wait_ds, store[0], 0x03000000u, 0x00000c04u, // store sample at offset:12
+         wait_store, wait_ds, ret.value()},
+        target.machine);
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    const auto check_execution = [&](const std::vector<uint32_t> &code, uint32_t callback_value) {
+      test::DbiSim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(target.sim, target.wave));
+      if (target.wave == 32)
+        sim.set_wave32_dispatch();
+      const std::array<uint32_t, 4> initial = {0xfeedface, 7, 0, 0};
+      const std::array<uint32_t, 4> expected = {0xfeedface, 7 + target.wave, 1, callback_value};
+      sim.write_memory(
+          address, std::span(reinterpret_cast<const uint8_t *>(initial.data()), sizeof(initial)));
+      const std::optional<std::vector<uint8_t>> result =
+          sim.run_and_read_memory(code, 0, address, sizeof(initial));
+      ASSERT_TRUE(result);
+      ASSERT_EQ(result->size(), sizeof(expected));
+      std::array<uint32_t, 4> actual;
+      std::memcpy(actual.data(), result->data(), sizeof(actual));
+      EXPECT_EQ(actual, expected);
+    };
+    ASSERT_NO_FATAL_FAILURE(check_execution(original, 0));
+    for (const InstrumentationKind kind :
+         {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+      SCOPED_TRACE(static_cast<int>(kind));
+      Instrumentor instrumentor(object, target.arch);
+      instrumentor.add_point({.anchor_offset = anchor,
+                              .kind = kind,
+                              .probe_obj = &probe,
+                              .probe_symbol = "mark",
+                              .probe_args = {}});
+      const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 1u);
+      ASSERT_EQ(result.patches.size(), 1u);
+      const InstrumentedSite &site = result.sites.front();
+      EXPECT_EQ(site.original_offset, anchor);
+      EXPECT_EQ(site.original_size, 12u);
+      ASSERT_EQ(site.guest_size, 12u);
+      EXPECT_GT(site.instrumentation_size, 0u);
+      if (kind == InstrumentationKind::BeforeInst)
+        EXPECT_EQ(site.instrumentation_offset + site.instrumentation_size, site.guest_offset);
+      else
+        EXPECT_EQ(site.guest_offset + site.guest_size, site.instrumentation_offset);
+      EXPECT_EQ(result.patches.front().return_target, anchor + site.original_size);
+      const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(patched.is_valid());
+      const std::vector<uint32_t> words = section_words(patched, ".text");
+      ASSERT_EQ(site.guest_offset % 4, 0u);
+      const size_t first = site.guest_offset / 4;
+      ASSERT_GE(words.size(), first + add.size());
+      EXPECT_TRUE(std::equal(add.begin(), add.end(), words.begin() + first));
+      EXPECT_TRUE(std::equal(original.begin(), original.begin() + anchor / 4, words.begin()));
+      EXPECT_EQ(words.at(anchor / 4 + 1), nop.value());
+      EXPECT_EQ(words.at(anchor / 4 + 2), nop.value());
+      EXPECT_TRUE(std::equal(original.begin() + anchor / 4 + 3, original.end(),
+                             words.begin() + anchor / 4 + 3));
+      ASSERT_NO_FATAL_FAILURE(
+          check_execution(words, kind == InstrumentationKind::BeforeInst ? 7 : 7 + target.wave));
+    }
   }
 }
 
