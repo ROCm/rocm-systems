@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/static_tl_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -78,8 +79,9 @@ get_ompt_state_stack()
 {
     // for callbacks that don't have a place to stash context, we assume
     // a per-thread stack. otherwise we stash the saved state in the ompt_data_t field.
-    static thread_local auto _v = tracing::small_vector_t<ompt_save_state*, 8>{};
-    return _v;
+    // Used from callbacks made inside the OpenMP runtime, so not a thread_local with a destructor
+    // (see common::static_tl_object::instance).
+    return common::static_tl_object<tracing::small_vector_t<ompt_save_state*, 8>>::instance();
 }
 
 auto*

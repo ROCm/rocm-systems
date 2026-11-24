@@ -376,11 +376,13 @@ reset_att_dispatch_kernel_iterations()
     att_dispatch_kernel_iterations().wlock([](auto& iterations) { iterations.clear(); });
 }
 
-thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
-thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
-    delete thread_dispatch_rename;
-    thread_dispatch_rename = nullptr;
-}};
+// read from the kernel-dispatch external correlation callback, which runs inside HIP's dispatch,
+// so not a thread_local with a destructor (see common::static_tl_object::instance)
+auto&
+get_thread_dispatch_rename()
+{
+    return common::static_tl_object<kernel_rename_stack_t>::instance();
+}
 
 // any context that needs to support pause/resume functionality should add itself to this list
 auto pause_resume_contexts = context_id_set_t{};
@@ -652,7 +654,7 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
     // Check whether services are enabled
     const bool kernel_rename_service_enabled =
         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
-        thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty();
+        !get_thread_dispatch_rename().empty();
 
     const bool hip_stream_enabled = rocprofiler::tool::stream::stream_stack_not_null();
     const bool hip_graph_enabled  = rocprofiler::tool::graph::graph_stack_not_null();
@@ -664,7 +666,7 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
     // Get value for kernel rename service
     if(kernel_rename_service_enabled)
     {
-        _info->region_id = thread_dispatch_rename->top();
+        _info->region_id = get_thread_dispatch_rename().top();
         if(tool_metadata) tool_metadata->add_external_correlation_id(_info->region_id);
     }
 
@@ -842,8 +844,6 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 data)
 {
-    if(thread_dispatch_rename == nullptr) return;
-
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
         auto* marker_data =
@@ -856,25 +856,25 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
         if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA &&
            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT && marker_data->args.roctxMarkA.message)
         {
-            thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
+            get_thread_dispatch_rename().emplace(tool_metadata->add_kernel_rename_val(
                 add_message(marker_data->args.roctxMarkA.message), record.correlation_id.internal));
         }
         else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA &&
                 record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
                 marker_data->args.roctxThreadRangeA.message)
         {
-            thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
+            get_thread_dispatch_rename().emplace(tool_metadata->add_kernel_rename_val(
                 add_message(marker_data->args.roctxThreadRangeA.message),
                 record.correlation_id.internal));
         }
         else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA &&
                 record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
-            ROCP_FATAL_IF(thread_dispatch_rename->empty())
+            ROCP_FATAL_IF(get_thread_dispatch_rename().empty())
                 << "roctxRangePop invoked more times than roctxRangePush on thread "
                 << rocprofiler::common::get_tid();
 
-            thread_dispatch_rename->pop();
+            get_thread_dispatch_rename().pop();
         }
     }
     else

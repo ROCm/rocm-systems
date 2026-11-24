@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/static_tl_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/defines.hpp"
@@ -440,7 +441,9 @@ get_tls_pair(rocprofiler_callback_phase_t phase)
         tracing::external_correlation_id_map_t external_corr_ids = {};
     };
 
-    static thread_local auto tls  = tls_data{};
+    // ROCr invokes this on its own threads while a kernel waits for scratch, so the data is not a
+    // thread_local with a destructor (see common::static_tl_object::instance)
+    auto&                    tls  = common::static_tl_object<tls_data>::instance();
     static thread_local auto held = false;
 
     if(phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
