@@ -1649,6 +1649,9 @@ private:
   friend class GlobalMemPipeline;
   friend class LocalMemPipeline;
   friend class ScalarMemPipeline;
+  // DS instructions completing their LDS access inside execute_impl() write
+  // results the same way, bypassing instruction observation.
+  friend class LdsInlineAccess;
 };
 
 template <typename Inst> inline void execute_with_empty_memory_mask(Inst &inst, Wavefront &wf) {

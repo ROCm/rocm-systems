@@ -48,9 +48,11 @@
 #include <array>
 #include <bit>
 #include <cassert>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 
 namespace rocjitsu {
@@ -1564,6 +1566,15 @@ void ComputeUnitCore::tick_pipelines() {
     local_mem_pipeline_.tick();
   if (!tensor_dma_pipeline_.empty())
     tensor_dma_pipeline_.tick();
+}
+
+bool ComputeUnitCore::lds_inline_enabled_by_env() {
+  // Read once per process. RJ_DS_INLINE=0 keeps every DS access on the routed path.
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_DS_INLINE");
+    return value == nullptr || std::string_view(value) != "0";
+  }();
+  return enabled;
 }
 
 // GFX11 ISA 3.3.3. Nullify before debugger probes, memory side effects, and writeback.
@@ -3382,8 +3393,18 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   const bool was_in_trap_handler = active->in_trap_handler();
 
   const uint32_t executing_process = active->process_id();
-  const util::Result execution_result =
-      execute_instruction(inst, *active, &execution_failure_detail_);
+  lds_inline_completed_ = nullptr;
+  const util::Result execution_result = [&] {
+    // Inline LDS completion applies to this execution only, even if it throws.
+    // Whether plugins or a debugger forbid it is asked by the DS access itself,
+    // so other instructions only set and clear this flag.
+    struct EndLdsInlineIssue {
+      bool &issue;
+      ~EndLdsInlineIssue() { issue = false; }
+    } end_lds_inline_issue{lds_inline_issue_};
+    lds_inline_issue_ = true;
+    return execute_instruction(inst, *active, &execution_failure_detail_);
+  }();
   if (check_prepared_memory && wait_state)
     wait_state->check_instruction(*inst, *active);
 
@@ -3672,11 +3693,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   if (inst->is_memory_op()) {
     if (!inst->data()) {
       // A memory execute path can intentionally reject an invalid complete
-      // register operand before constructing pipeline state. Treat that as a
-      // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted. Retain the decode for reuse,
-      // including warm LDS-direct entries whose EXEC mask is zero and whose
-      // prior dynamic state is retired.
+      // register operand before constructing pipeline state, or complete inline
+      // via LdsInlineAccess. Retain the decode for reuse via ScopedReturn.
       if (deferred_gds_sources)
         lock_gds_sources(*inst, *active, deferred_gds_sources);
     } else {

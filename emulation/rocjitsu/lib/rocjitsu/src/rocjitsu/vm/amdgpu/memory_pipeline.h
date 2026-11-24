@@ -119,6 +119,15 @@ public:
   VmAccessOutcome issue_deferred(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                  bool routing_observed = false);
 
+  /// @brief Take the instruction that completed synchronously in the last issue.
+  /// @details Ownership passes to the caller, who must destroy or reuse it. Returns
+  /// nullptr when the access was retained, deferred, failed, or recycling is off.
+  /// An instruction nobody takes is destroyed by the next issue or the destructor.
+  [[nodiscard]] Instruction *take_recyclable() {
+    // Asked after every routed memory instruction; most leave nothing here.
+    return recyclable_ ? std::exchange(recyclable_, nullptr) : nullptr;
+  }
+
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
 
@@ -295,6 +304,18 @@ public:
   LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
   /// Capture synchronous indexed GDS errors before its source locks are registered.
   static void capture_gds_violations(VectorMemState &data, const Wavefront &wf);
+
+  /// @brief Perform the LDS reads, writes or atomics of @p d for @p request_lanes.
+  /// @details initiate_access() after its FLAT DDS check. Loads leave their data
+  /// in the response buffers for complete_lds_access().
+  static VmAccessOutcome initiate_lds_access(VectorMemState &d, Wavefront &wf,
+                                             uint64_t request_lanes);
+
+  /// @brief Write the results of initiate_lds_access() back to VGPRs, or to LDS
+  /// for an LDS-destination load, which alone may return Deferred.
+  static MemoryAccessCompletion
+  complete_lds_access(VectorMemState &d, Wavefront &wf,
+                      const MemoryAccessCompletionFactory &take_completion);
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;

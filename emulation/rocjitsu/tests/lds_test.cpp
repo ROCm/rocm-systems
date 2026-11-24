@@ -2,15 +2,77 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_lane_shapes.h"
+#include "rocjitsu/vm/amdgpu/lds_store_plans.h"
+#include "rocjitsu/vm/amdgpu/lds_writeback.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
+#include <cstring>
+#include <random>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace {
 
 using rocjitsu::amdgpu::Lds;
+
+// Model bytes rather than replaying the implementation's lane/element traversal.
+// Neither oracle calls Lds accessors or shares traversal helpers with production.
+std::vector<uint8_t> reference_load(const std::vector<uint8_t> &memory,
+                                    const std::array<uint64_t, 64> &addrs, uint64_t mask,
+                                    uint32_t elem_size, uint32_t num_elems) {
+  const uint32_t stride = elem_size * num_elems;
+  std::vector<uint8_t> result(64 * stride, 0xCC);
+  for (size_t out = 0; out < result.size(); ++out) {
+    const size_t lane = out / stride;
+    if (!(mask >> lane & 1))
+      continue;
+    const size_t within_lane = out % stride;
+    const uint64_t element =
+        uint64_t{static_cast<uint32_t>(addrs[lane])} + (within_lane / elem_size) * elem_size;
+    result[out] =
+        element + elem_size <= memory.size() ? memory[element + within_lane % elem_size] : 0;
+  }
+  return result;
+}
+
+std::vector<uint8_t> reference_store(const std::vector<uint8_t> &memory,
+                                     const std::array<uint64_t, 64> &addrs, uint64_t mask,
+                                     uint32_t elem_size, uint32_t num_elems,
+                                     const std::vector<uint8_t> &src) {
+  const uint32_t stride = elem_size * num_elems;
+  auto result = memory;
+  // For each LDS byte, find the highest active lane with a valid element covering it.
+  // This defines the winner directly, independently of the store traversal order.
+  for (size_t address = 0; address < result.size(); ++address) {
+    for (int lane = 63; lane >= 0; --lane) {
+      if (!(mask >> lane & 1))
+        continue;
+      const uint64_t base = uint64_t{static_cast<uint32_t>(addrs[lane])};
+      if (address < base || address - base >= stride)
+        continue;
+      const size_t within_lane = address - base;
+      const uint64_t element = base + (within_lane / elem_size) * elem_size;
+      if (element + elem_size <= memory.size()) {
+        result[address] = src[lane * stride + within_lane];
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+std::vector<uint8_t> contents(const Lds &lds) {
+  std::vector<uint8_t> bytes(lds.size_bytes());
+  lds.read(0u, bytes.data(), static_cast<uint32_t>(bytes.size()));
+  return bytes;
+}
 
 TEST(LdsTest, ConstructionKeepsLogicalCapacityUnmaterialized) {
   Lds lds(320);
@@ -85,6 +147,650 @@ TEST(LdsTest, WritesGrowBackingAndOutOfBoundsWritesDoNot) {
   Lds untouched(64);
   untouched.write32(static_cast<uint32_t>(untouched.size_bytes() - 2), 0xFFFFFFFFu);
   EXPECT_EQ(untouched.materialized_size_bytes(), 0u);
+}
+
+TEST(LdsTest, ContiguousAndSparseLanesMatchExplicitBytes) {
+  constexpr std::array<uint8_t, 16> initial{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+  constexpr std::array<uint8_t, 16> values{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
+  struct Case {
+    uint64_t mask;
+    std::array<uint8_t, 16> loaded;
+    std::array<uint8_t, 16> stored;
+  };
+  const std::array<Case, 2> cases{{
+      {0b1111, initial, values},
+      {0b1011,
+       {1, 2, 3, 4, 5, 6, 7, 8, 0xCC, 0xCC, 0xCC, 0xCC, 13, 14, 15, 16},
+       {16, 15, 14, 13, 12, 11, 10, 9, 9, 10, 11, 12, 4, 3, 2, 1}},
+  }};
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.mask);
+    Lds lds(1);
+    lds.write(0u, initial.data(), initial.size());
+    std::array<uint64_t, 64> addrs{0, 4, 8, 12};
+    std::array<uint8_t, 64 * 4> loaded;
+    loaded.fill(0xCC);
+    lds.vector_load(addrs.data(), test.mask, 2, 2, loaded.data());
+    std::array<uint8_t, 64 * 4> expected_load;
+    expected_load.fill(0xCC);
+    std::copy(test.loaded.begin(), test.loaded.end(), expected_load.begin());
+    EXPECT_EQ(loaded, expected_load);
+
+    std::array<uint8_t, 64 * 4> src{};
+    std::copy(values.begin(), values.end(), src.begin());
+    lds.vector_store(addrs.data(), test.mask, 2, 2, src.data());
+    std::vector<uint8_t> expected_store(lds.size_bytes(), 0);
+    std::copy(test.stored.begin(), test.stored.end(), expected_store.begin());
+    EXPECT_EQ(contents(lds), expected_store);
+  }
+}
+
+TEST(LdsTest, EmptyMaskLeavesMemoryAndOutputUntouched) {
+  Lds lds(1);
+  std::array<uint64_t, 64> addrs{};
+  std::array<uint8_t, 64 * 4> bytes;
+  bytes.fill(0xCC);
+  const auto expected = bytes;
+  lds.vector_load(addrs.data(), 0, 4, 1, bytes.data());
+  EXPECT_EQ(bytes, expected);
+  lds.vector_store(addrs.data(), 0, 4, 1, bytes.data());
+  EXPECT_EQ(lds.materialized_size_bytes(), 0u);
+  EXPECT_EQ(contents(lds), std::vector<uint8_t>(lds.size_bytes(), 0));
+}
+
+TEST(LdsTest, OverlappingVectorStoresKeepTheHighestLane) {
+  Lds lds(4);
+  std::array<uint64_t, 64> addrs{};
+  std::array<uint32_t, 64> values{};
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    addrs[lane] = 256 + (lane % 4) * 4;
+    values[lane] = 0x1000u + lane;
+  }
+  lds.vector_store(addrs.data(), ~uint64_t{0}, 4, 1,
+                   reinterpret_cast<const uint8_t *>(values.data()));
+  for (uint32_t slot = 0; slot < 4; ++slot)
+    EXPECT_EQ(lds.read32(256 + slot * 4), 0x1000u + 60 + slot);
+}
+
+// Descending lanes are contiguous only out of lane order, and the lane at
+// capacity - 12 holds one element inside capacity and one reaching past it.
+TEST(LdsTest, DescendingLanesAtCapacityKeepPerElementBounds) {
+  Lds lds(1);
+  const uint64_t cap = lds.size_bytes();
+  std::array<uint64_t, 64> addrs{};
+  addrs[0] = cap - 12;
+  addrs[1] = cap - 28;
+  addrs[2] = cap - 44;
+  std::array<uint8_t, 64 * 16> src{};
+  for (size_t i = 0; i < src.size(); ++i)
+    src[i] = static_cast<uint8_t>(i + 1);
+
+  lds.vector_store(addrs.data(), 0b111, 8, 2, src.data());
+  std::vector<uint8_t> expected(cap, 0);
+  std::copy_n(src.begin(), 8, expected.begin() + cap - 12);
+  std::copy_n(src.begin() + 16, 16, expected.begin() + cap - 28);
+  std::copy_n(src.begin() + 32, 16, expected.begin() + cap - 44);
+  EXPECT_EQ(contents(lds), expected);
+
+  // A straddling element must zero-fill even when its in-range prefix is nonzero.
+  lds.write32(static_cast<uint32_t>(cap - 4), 0xA5A5A5A5u);
+  std::array<uint8_t, 64 * 16> loaded;
+  loaded.fill(0xCC);
+  lds.vector_load(addrs.data(), 0b111, 8, 2, loaded.data());
+  auto expected_load = src;
+  std::fill(expected_load.begin() + 8, expected_load.begin() + 16, 0);
+  std::fill(expected_load.begin() + 48, expected_load.end(), 0xCC);
+  EXPECT_EQ(loaded, expected_load);
+}
+
+// vector_load_span() and vector_load32() may write inactive lanes, but every
+// active lane must hold vector_load()'s bytes: whole contiguous waves,
+// independent 16-lane segments, b64 rows where lane l + 16 reads 8 bytes after
+// lane l, broadcast and scattered lanes, at the capacity and the lazy backing,
+// and with offsets that wrap 2^32. The same holds read through vector_load32()'s
+// view, in wave64 and, when the mask allows it, wave32.
+TEST(LdsTest, SpanLoadsMatchVectorLoadOnActiveLanes) {
+  constexpr std::array<std::pair<uint32_t, uint32_t>, 8> kShapes{
+      {{1, 1}, {2, 1}, {4, 1}, {8, 1}, {4, 2}, {4, 3}, {4, 4}, {8, 2}}};
+  std::mt19937_64 rng(0x5ba7c0de);
+  for (int iteration = 0; iteration < 20000; ++iteration) {
+    const auto [elem_size, num_elems] = kShapes[rng() % kShapes.size()];
+    const uint32_t stride = elem_size * num_elems;
+    Lds lds(4);
+    const uint32_t cap = static_cast<uint32_t>(lds.size_bytes());
+    // Back a random prefix (possibly none) with random bytes.
+    std::vector<uint8_t> initial(rng() % 4 == 0 ? 0 : rng() % (cap + 1));
+    for (auto &b : initial)
+      b = static_cast<uint8_t>(rng());
+    if (!initial.empty())
+      lds.write(0u, initial.data(), static_cast<uint32_t>(initial.size()));
+    const uint32_t backed = static_cast<uint32_t>(lds.materialized_size_bytes());
+    const uint32_t edges[] = {0, backed, cap, cap / 2};
+    const auto near_edge = [&] {
+      return edges[rng() % 4] - static_cast<uint32_t>(rng() % (80 * stride)) +
+             static_cast<uint32_t>(rng() % 24);
+    };
+    std::array<uint32_t, 64> target{};
+    switch (rng() % 5) {
+    case 0: { // one contiguous wave
+      const uint32_t base = near_edge();
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        target[lane] = base + lane * stride;
+      break;
+    }
+    case 1: // independent 16-lane segments
+      for (uint32_t segment = 0; segment < 64; segment += 16) {
+        const uint32_t base = rng() % 3 ? near_edge() : static_cast<uint32_t>(rng());
+        for (uint32_t lane = 0; lane < 16; ++lane)
+          target[segment + lane] = base + lane * stride;
+      }
+      break;
+    case 2: // b64-style rows: lane l + 16 reads 8 bytes after lane l, mostly backed
+      for (uint32_t lane = 0; lane < 16; ++lane) {
+        const bool inside = backed >= 16 && rng() % 64 != 0;
+        target[lane] = inside ? static_cast<uint32_t>(rng() % (backed - 15)) : near_edge();
+        target[lane + 16] = target[lane] + 8;
+        target[lane + 32] = near_edge();
+        target[lane + 48] = target[lane + 32] + 8;
+      }
+      break;
+    case 3: { // broadcast
+      const uint32_t base = near_edge();
+      target.fill(base);
+      break;
+    }
+    default: // scattered
+      for (auto &address : target)
+        address = rng() % 8 ? near_edge() : static_cast<uint32_t>(rng());
+      break;
+    }
+    uint64_t mask = rng();
+    switch (rng() % 7) {
+    case 6:
+      mask = 0xFFFF'FFFFull;
+      break; // a 32-lane span, where b64 rows pair up
+    case 0:
+      mask = ~uint64_t{0};
+      break;
+    case 1:
+      mask = 0xFFFF'FFFFull;
+      break;
+    case 2:
+      mask = 0xFFFF'FFFF'FFFFull;
+      break;
+    case 3:
+      mask = uint64_t{1} << (rng() % 64);
+      break;
+    case 4:
+      mask &= rng() & rng();
+      break;
+    default:
+      break;
+    }
+    const uint32_t offsets[] = {0, 37, 0xFFFF'FFF0u};
+    const uint32_t offset = offsets[rng() % 3];
+    std::array<uint32_t, 64> lanes{};
+    std::array<uint64_t, 64> addrs{};
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      lanes[lane] = target[lane] - offset;
+      addrs[lane] = target[lane];
+    }
+    std::vector<uint8_t> expected(64 * stride, 0xCC), span(64 * stride, 0x5A),
+        native(64 * stride, 0xA5);
+    lds.vector_load(addrs.data(), mask, elem_size, num_elems, expected.data());
+    lds.vector_load_span(addrs.data(), mask, elem_size, num_elems, span.data());
+    lds.vector_load32(lanes.data(), offset, mask, elem_size, num_elems, native.data());
+    std::vector<uint8_t> staged64(64 * stride, 0x3C), staged32(64 * stride, 0xC3);
+    const uint8_t *view64[4] = {}, *view32[2] = {};
+    lds.vector_load32<64>(lanes.data(), offset, mask, elem_size, num_elems, staged64.data(),
+                          view64);
+    const bool wave32 = (mask >> 32) == 0;
+    if (wave32)
+      lds.vector_load32<32>(lanes.data(), offset, mask, elem_size, num_elems, staged32.data(),
+                            view32);
+    for (uint64_t active = mask; active; active &= active - 1) {
+      const uint32_t at = static_cast<uint32_t>(std::countr_zero(active)) * stride;
+      ASSERT_TRUE(std::equal(span.begin() + at, span.begin() + at + stride, expected.begin() + at))
+          << "vector_load_span iteration " << iteration << " lane " << at / stride;
+      ASSERT_TRUE(
+          std::equal(native.begin() + at, native.begin() + at + stride, expected.begin() + at))
+          << "vector_load32 iteration " << iteration << " lane " << at / stride;
+      const uint32_t lane = at / stride;
+      const uint8_t *seen = view64[lane / 16] + (lane % 16) * stride;
+      ASSERT_TRUE(std::equal(seen, seen + stride, expected.begin() + at))
+          << "vector_load32 view iteration " << iteration << " lane " << lane;
+      if (wave32) {
+        seen = view32[lane / 16] + (lane % 16) * stride;
+        ASSERT_TRUE(std::equal(seen, seen + stride, expected.begin() + at))
+            << "vector_load32<32> view iteration " << iteration << " lane " << lane;
+      }
+    }
+  }
+}
+
+// Compare the block-copy path with per-element semantics across contiguous,
+// permuted, strided, overlapping, sparse and capacity-crossing operands.
+TEST(LdsTest, VectorAccessesMatchPerElementSemantics) {
+  constexpr std::array<std::pair<uint32_t, uint32_t>, 8> kShapes{
+      {{1, 1}, {2, 1}, {4, 1}, {8, 1}, {4, 2}, {4, 3}, {4, 4}, {8, 2}}};
+  enum class Pattern { Contiguous, Permuted, Descending, Strided, Overlapping };
+  constexpr std::array kPatterns{Pattern::Contiguous, Pattern::Permuted, Pattern::Descending,
+                                 Pattern::Strided, Pattern::Overlapping};
+  std::mt19937_64 rng(0x1d5c0a1e5ce);
+  for (int iteration = 0; iteration < 4000; ++iteration) {
+    const auto [elem_size, num_elems] = kShapes[rng() % kShapes.size()];
+    const uint32_t stride = elem_size * num_elems;
+    Lds lds(2);
+    const uint64_t cap = lds.size_bytes();
+    std::array<uint64_t, 64> addrs{};
+    const Pattern pattern = kPatterns[rng() % kPatterns.size()];
+    const uint64_t window = pattern == Pattern::Overlapping ? 64 : 64 * stride;
+    const uint64_t base =
+        rng() % 2 ? cap - window + rng() % (2 * stride) - stride : rng() % (cap / 2);
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      switch (pattern) {
+      case Pattern::Contiguous:
+        addrs[lane] = base + uint64_t{lane} * stride;
+        break;
+      case Pattern::Permuted: // permuted within groups of eight lanes
+        addrs[lane] = base + uint64_t{(lane & ~7u) | ((lane ^ 5u) & 7u)} * stride;
+        break;
+      case Pattern::Descending:
+        addrs[lane] = base + uint64_t{63 - lane} * stride;
+        break;
+      case Pattern::Strided: // strided with gaps
+        addrs[lane] = base + uint64_t{lane} * stride * 2;
+        break;
+      case Pattern::Overlapping:
+        addrs[lane] = base + rng() % window;
+        break;
+      }
+    }
+    const uint64_t mask = rng() % 3 == 0 ? rng() & rng() : ~uint64_t{0};
+
+    // Leave some iterations unmaterialized so block copies cross the lazy backing.
+    std::vector<uint8_t> initial(cap, 0);
+    if (rng() % 4 != 0) {
+      for (auto &b : initial)
+        b = static_cast<uint8_t>(rng());
+      lds.write(0u, initial.data(), static_cast<uint32_t>(cap));
+    }
+
+    // Test loads before stores so matching load/store mistakes cannot cancel out.
+    std::vector<uint8_t> loaded(64 * stride, 0xCC);
+    lds.vector_load(addrs.data(), mask, elem_size, num_elems, loaded.data());
+    ASSERT_EQ(loaded, reference_load(initial, addrs, mask, elem_size, num_elems))
+        << "initial load iteration " << iteration;
+
+    std::vector<uint8_t> src(64 * stride);
+    for (auto &b : src)
+      b = static_cast<uint8_t>(rng());
+    const auto expected = reference_store(initial, addrs, mask, elem_size, num_elems, src);
+    lds.vector_store(addrs.data(), mask, elem_size, num_elems, src.data());
+    ASSERT_EQ(contents(lds), expected) << "store iteration " << iteration;
+
+    std::fill(loaded.begin(), loaded.end(), 0xCC);
+    lds.vector_load(addrs.data(), mask, elem_size, num_elems, loaded.data());
+    ASSERT_EQ(loaded, reference_load(expected, addrs, mask, elem_size, num_elems))
+        << "load after store iteration " << iteration;
+  }
+}
+
+namespace wb = rocjitsu::amdgpu::lds_writeback;
+
+/// The per-lane writeback the typed ones replace: for each active lane and
+/// destination register, the dword it held before the typed writeback.
+template <wb::DstFormat F>
+void reference_write_back(uint32_t *regs, bool sram_ecc, uint64_t exec,
+                          const uint8_t *const *groups) {
+  const uint32_t copy_size = std::min<uint32_t>(F.elem_size, 4);
+  for (uint64_t active = exec; active; active &= active - 1) {
+    const uint32_t lane = static_cast<uint32_t>(std::countr_zero(active));
+    const uint8_t *source = groups[lane / 16] + (lane % 16) * wb::kStride<F>;
+    for (uint32_t r = 0; r < wb::kRegs<F>; ++r) {
+      uint32_t value = 0;
+      std::memcpy(&value, source + 4 * r, copy_size);
+      if (F.sign_extend && F.elem_size == 1)
+        value = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value)));
+      if (F.sign_extend && F.elem_size == 2)
+        value = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value)));
+      uint32_t &dword = regs[r * 64 + lane];
+      if (F.d16_hi)
+        value = (sram_ecc ? 0 : dword & 0xFFFFu) | value << 16;
+      else if (F.d16_lo)
+        value = (sram_ecc ? 0 : dword & 0xFFFF0000u) | (value & 0xFFFFu);
+      dword = value;
+    }
+  }
+}
+
+/// Both writeback implementations against the reference for one format: whole
+/// destination registers plus a register on either side, wave32 and wave64,
+/// SRAM ECC on and off, groups apart from each other as when read in place.
+template <wb::DstFormat F> void check_write_back_format(std::mt19937_64 &rng) {
+  constexpr uint32_t kRegs = wb::kRegs<F>;
+  for (int iteration = 0; iteration < 3000; ++iteration) {
+    const uint32_t wave = rng() % 2 ? 64 : 32;
+    const bool sram_ecc = rng() % 2;
+    uint64_t exec = rng();
+    switch (rng() % 6) {
+    case 0:
+      exec = ~uint64_t{0};
+      break;
+    case 1:
+      exec = 0;
+      break;
+    case 2:
+      exec = uint64_t{1} << (rng() % 64);
+      break;
+    case 3:
+      exec = 0xFFFF'FFFF'FFFFull;
+      break;
+    case 4:
+      exec &= rng() & rng();
+      break;
+    default:
+      break;
+    }
+    if (wave == 32)
+      exec &= 0xFFFF'FFFFull;
+    std::vector<std::vector<uint8_t>> group_data(4);
+    const uint8_t *groups[4];
+    for (uint32_t g = 0; g < 4; ++g) {
+      group_data[g].resize(16 * wb::kStride<F> + rng() % 64);
+      for (auto &b : group_data[g])
+        b = static_cast<uint8_t>(rng());
+      groups[g] = group_data[g].data() + (group_data[g].size() - 16 * wb::kStride<F>);
+    }
+    // Registers 1..kRegs are the destination; 0 and kRegs + 1 must not change.
+    std::vector<uint32_t> before((kRegs + 2) * 64);
+    for (auto &dword : before)
+      dword = static_cast<uint32_t>(rng());
+    std::vector<uint32_t> expected = before, scalar = before, avx2 = before;
+    reference_write_back<F>(expected.data() + 64, sram_ecc, exec, groups);
+    const auto run = [&](std::vector<uint32_t> &file, auto isa) {
+      uint8_t *dst[kRegs];
+      for (uint32_t r = 0; r < kRegs; ++r)
+        dst[r] = reinterpret_cast<uint8_t *>(file.data() + (r + 1) * 64);
+      wb::write_back_as<F, decltype(isa)::value>(dst, sram_ecc, wave, exec, groups);
+    };
+    run(scalar, std::integral_constant<wb::Isa, wb::Isa::scalar>{});
+    ASSERT_EQ(scalar, expected) << "scalar elem_size " << unsigned(F.elem_size) << " x"
+                                << unsigned(F.num_elems) << " iteration " << iteration;
+#if RJ_HOST_HAS_AVX2
+    run(avx2, std::integral_constant<wb::Isa, wb::Isa::avx2>{});
+    ASSERT_EQ(avx2, expected) << "avx2 elem_size " << unsigned(F.elem_size) << " x"
+                              << unsigned(F.num_elems) << " iteration " << iteration;
+#endif
+  }
+}
+
+// Every DS-load format the generator emits.
+TEST(LdsTest, WritebacksMatchThePerLaneReference) {
+  std::mt19937_64 rng(0x3b17e8a5);
+  check_write_back_format<wb::DstFormat{.elem_size = 4, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 8, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 4, .num_elems = 3}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 4, .num_elems = 4}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1, .sign_extend = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .sign_extend = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1, .d16_lo = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1, .d16_hi = true}>(rng);
+  check_write_back_format<wb::DstFormat{
+      .elem_size = 1, .num_elems = 1, .sign_extend = true, .d16_lo = true}>(rng);
+  check_write_back_format<wb::DstFormat{
+      .elem_size = 1, .num_elems = 1, .sign_extend = true, .d16_hi = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .d16_lo = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .d16_hi = true}>(rng);
+}
+
+namespace st = rocjitsu::amdgpu::lds_store;
+
+/// The plain-store writers against Lds::vector_store, the run walk they
+/// replace, for one format and wave size: the whole LDS (every byte, and the
+/// materialized size) must match after every store.
+template <st::StoreFormat F, uint32_t Wave> void check_store_format(std::mt19937_64 &rng) {
+  constexpr uint32_t kWidth = st::kWidth<F>;
+  constexpr uint32_t kRows = kWidth < 4 ? 1 : kWidth / 4;
+  for (int iteration = 0; iteration < 600; ++iteration) {
+    Lds reference(64), writers(64);
+    const uint32_t cap = static_cast<uint32_t>(reference.size_bytes());
+    // Fully materialized, materialized to 8 KiB, or empty (growth from
+    // nothing); backing grows in 4 KiB granules.
+    const uint32_t materialized[] = {cap, 8192, 0};
+    const uint32_t backed = materialized[rng() % 3];
+    std::vector<uint8_t> initial(backed);
+    for (auto &b : initial)
+      b = static_cast<uint8_t>(rng());
+    if (backed) {
+      reference.write(0u, initial.data(), backed);
+      writers.write(0u, initial.data(), backed);
+    }
+    const uint32_t edges[] = {0, backed, cap, cap / 2};
+    const auto near_edge = [&] {
+      return edges[rng() % 4] - static_cast<uint32_t>(rng() % (80 * kWidth)) +
+             static_cast<uint32_t>(rng() % 24);
+    };
+    std::array<uint32_t, 64> target{};
+    switch (rng() % 6) {
+    case 0: // broadcast
+      target.fill(near_edge());
+      break;
+    case 1: { // one run
+      const uint32_t base = near_edge();
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        target[lane] = base + lane * kWidth;
+      break;
+    }
+    case 2: // 16-lane runs at independent bases
+      for (uint32_t group = 0; group < 64; group += 16) {
+        const uint32_t base = rng() % 3 ? near_edge() : static_cast<uint32_t>(rng());
+        for (uint32_t lane = 0; lane < 16; ++lane)
+          target[group + lane] = base + lane * kWidth;
+      }
+      break;
+    case 3: { // overlapping
+      const uint32_t pivot = near_edge();
+      for (auto &address : target)
+        address = pivot + static_cast<uint32_t>(rng() % 48);
+      break;
+    }
+    case 4: // near the capacity and materialized edges
+      for (auto &address : target)
+        address = near_edge();
+      break;
+    default: // anywhere
+      for (auto &address : target)
+        address = static_cast<uint32_t>(rng());
+      break;
+    }
+    uint64_t exec = 0;
+    switch (rng() % 9) {
+    case 0:
+      exec = ~uint64_t{0};
+      break;
+    case 1:
+      exec = 0xFFFF'FFFFull;
+      break;
+    case 2:
+      exec = 0xFFFF'FFFF'FFFFull;
+      break;
+    case 3:
+      exec = 0xFFFFull;
+      break;
+    case 4:
+      exec = uint64_t{1} << (rng() % 64);
+      break;
+    case 5:
+      exec = 0;
+      break;
+    case 6: // a full wave with one hole
+      exec = ~(uint64_t{1} << (rng() % 64));
+      break;
+    case 7: // two lanes
+      exec = (uint64_t{1} << (rng() % 64)) | (uint64_t{1} << (rng() % 64));
+      break;
+    default:
+      exec = rng();
+      break;
+    }
+    if (Wave == 32)
+      exec &= 0xFFFF'FFFFull;
+    const uint32_t offsets[] = {0, 37, 0xFFFF'FFF0u};
+    const uint32_t offset = offsets[rng() % 3];
+    std::array<uint32_t, 64> addr{};
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      addr[lane] = target[lane] - offset;
+    std::array<std::array<uint32_t, 64>, kRows> rows{};
+    for (auto &row : rows)
+      for (auto &value : row)
+        value = static_cast<uint32_t>(rng());
+
+    // Reference: lane-major payload and 64-bit addresses through the run walk.
+    std::vector<uint8_t> payload(64 * kWidth);
+    std::array<uint64_t, 64> addrs{};
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      addrs[lane] = static_cast<uint32_t>(addr[lane] + offset);
+      if (kWidth >= 4) {
+        for (uint32_t i = 0; i < kRows; ++i)
+          std::memcpy(&payload[lane * kWidth + 4 * i], &rows[i][lane], 4);
+      } else {
+        const uint32_t value = F.d16_hi ? rows[0][lane] >> 16 : rows[0][lane];
+        std::memcpy(&payload[lane * kWidth], &value, kWidth);
+      }
+    }
+    reference.vector_store(addrs.data(), exec, F.elem_size, F.num_elems, payload.data());
+
+    st::StoreRequest request{.addr = addr.data(), .data = {}, .exec = exec, .offset = offset};
+    for (uint32_t i = 0; i < kRows; ++i)
+      request.data[i] = rows[i].data();
+    st::store<F, Wave>(writers, request);
+
+    ASSERT_EQ(writers.materialized_size_bytes(), reference.materialized_size_bytes())
+        << "width " << kWidth << " wave" << Wave << " iteration " << iteration;
+    std::vector<uint8_t> got(cap), want(cap);
+    std::as_const(writers).read(0u, got.data(), cap);
+    std::as_const(reference).read(0u, want.data(), cap);
+    ASSERT_EQ(got, want) << "width " << kWidth << " wave" << Wave << " iteration " << iteration;
+  }
+}
+
+template <st::StoreFormat F> void check_store_format(std::mt19937_64 &rng) {
+  check_store_format<F, 32>(rng);
+  check_store_format<F, 64>(rng);
+}
+
+// Every plain DS-store format the generator emits.
+TEST(LdsTest, PlainStoresMatchVectorStore) {
+  std::mt19937_64 rng(0x570fe5);
+  check_store_format<st::StoreFormat{.elem_size = 4, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 8, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 4, .num_elems = 3}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 4, .num_elems = 4}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 1, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 1, .num_elems = 1, .d16_hi = true}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 2, .num_elems = 1}>(rng);
+  check_store_format<st::StoreFormat{.elem_size = 2, .num_elems = 1, .d16_hi = true}>(rng);
+}
+
+namespace lanes = rocjitsu::amdgpu::lds_shapes::lanes;
+
+/// lanes::scalar against lanes::avx2 for one width: every lane loop the
+/// proofs use must give the same answer on the same lanes.
+template <uint32_t Width>
+void check_lane_loops(const std::array<uint32_t, 64> &v, uint32_t offset) {
+#if RJ_HOST_HAS_AVX2
+  const auto check_span = [&]<uint32_t Span>() {
+    ASSERT_EQ((lanes::scalar::ramps<Width, Span>(v.data())),
+              (lanes::avx2::ramps<Width, Span>(v.data())))
+        << "ramps width " << Width << " span " << Span;
+    ASSERT_EQ(lanes::scalar::all_same<Span>(v.data()), lanes::avx2::all_same<Span>(v.data()))
+        << "all_same span " << Span;
+    ASSERT_EQ(lanes::scalar::max_lane<Span>(v.data(), offset),
+              lanes::avx2::max_lane<Span>(v.data(), offset))
+        << "max_lane span " << Span;
+    for (const uint32_t last : {v[0] + offset, v[Span - 1] + offset, 0x1'0000u, UINT32_MAX})
+      ASSERT_EQ(lanes::scalar::all_at_most<Span>(v.data(), offset, last),
+                lanes::avx2::all_at_most<Span>(v.data(), offset, last))
+          << "all_at_most span " << Span << " last " << last;
+  };
+  check_span.template operator()<16>();
+  check_span.template operator()<32>();
+  check_span.template operator()<48>();
+  check_span.template operator()<64>();
+  ASSERT_EQ(lanes::scalar::columns(v.data()), lanes::avx2::columns(v.data()));
+#else
+  (void)v, (void)offset;
+#endif
+}
+
+// The proofs are written once over lanes::host; this keeps the plain C++ lane
+// loops, which only hosts without AVX2 run, equal to the intrinsics.
+TEST(LdsTest, ScalarLaneLoopsMatchTheIntrinsics) {
+#if !RJ_HOST_HAS_AVX2
+  GTEST_SKIP() << "lanes::avx2 needs an AVX2 build";
+#endif
+  std::mt19937_64 rng(0x1a9e5);
+  for (int iteration = 0; iteration < 20000; ++iteration) {
+    const uint32_t widths[] = {1, 2, 4, 8, 16};
+    const uint32_t width = widths[rng() % 5];
+    std::array<uint32_t, 64> v{};
+    switch (rng() % 5) {
+    case 0: // 16-lane ramps, sometimes with one lane off
+      for (uint32_t group = 0; group < 64; group += 16) {
+        const auto base = static_cast<uint32_t>(rng());
+        for (uint32_t lane = 0; lane < 16; ++lane)
+          v[group + lane] = base + lane * width;
+      }
+      if (rng() % 2)
+        v[rng() % 64] ^= uint32_t{1} << (rng() % 32);
+      break;
+    case 1: // b64 column pairs, sometimes broken
+      for (uint32_t lane = 0; lane < 16; ++lane) {
+        v[lane] = static_cast<uint32_t>(rng());
+        v[lane + 16] = v[lane] + 8;
+      }
+      if (rng() % 2)
+        v[16 + rng() % 16] += 1;
+      break;
+    case 2: // broadcast, sometimes with one lane off
+      v.fill(static_cast<uint32_t>(rng()));
+      if (rng() % 2)
+        v[rng() % 64] += 1;
+      break;
+    case 3: // near 2^32, so adding the offset wraps
+      for (auto &lane : v)
+        lane = UINT32_MAX - static_cast<uint32_t>(rng() % 64);
+      break;
+    default:
+      for (auto &lane : v)
+        lane = static_cast<uint32_t>(rng());
+      break;
+    }
+    const uint32_t offsets[] = {0, 37, 0xFFFF'FFF0u};
+    const uint32_t offset = offsets[rng() % 3];
+    switch (width) {
+    case 1:
+      check_lane_loops<1>(v, offset);
+      break;
+    case 2:
+      check_lane_loops<2>(v, offset);
+      break;
+    case 4:
+      check_lane_loops<4>(v, offset);
+      break;
+    case 8:
+      check_lane_loops<8>(v, offset);
+      break;
+    default:
+      check_lane_loops<16>(v, offset);
+      break;
+    }
+    if (::testing::Test::HasFatalFailure())
+      return;
+  }
 }
 
 } // namespace

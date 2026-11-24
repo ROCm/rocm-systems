@@ -58,6 +58,7 @@ MemoryPipeline::~MemoryPipeline() {
     delete returned_.front().inst;
     returned_.pop();
   }
+  delete recyclable_;
 }
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
@@ -2567,6 +2568,11 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
+  return initiate_lds_access(d, wf, request_lanes);
+}
+
+VmAccessOutcome LocalMemPipeline::initiate_lds_access(VectorMemState &d, Wavefront &wf,
+                                                      uint64_t request_lanes) {
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.ordered_count) {
@@ -2687,7 +2693,12 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
 MemoryAccessCompletion
 LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
                                   const MemoryAccessCompletionFactory &take_completion) {
-  auto &d = *inst.data_as<VectorMemState>();
+  return complete_lds_access(*inst.data_as<VectorMemState>(), wf, take_completion);
+}
+
+MemoryAccessCompletion
+LocalMemPipeline::complete_lds_access(VectorMemState &d, Wavefront &wf,
+                                      const MemoryAccessCompletionFactory &take_completion) {
   if (d.ds2_active && d.is_load) {
     const uint32_t vgpr_count = d.destination_vgpr_count();
     auto &cu = wf.raw_cu();

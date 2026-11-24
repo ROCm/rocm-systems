@@ -1,0 +1,234 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file lds_inline_access_steps.h
+/// @brief The numbered steps of a plain DS load or store on the request path,
+/// as templates over the access direction and the wave size.
+/// @details Included by lds_inline_access.h, so a load's steps are inlined into
+/// its generated handler together with its writeback.
+
+#pragma once
+
+#include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_inline_access.h"
+#include "rocjitsu/vm/amdgpu/lds_store_plans.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+
+#include <algorithm>
+#include <cassert>
+
+namespace rocjitsu {
+namespace amdgpu {
+namespace lds_inline {
+
+/// One VGPR's lanes from raw storage. An unmaterialized register reads as the
+/// shared zero backing, as it does through RegisterAccess.
+inline const uint32_t *vgpr_lanes(const ComputeUnitCore &cu, uint32_t reg) {
+  return reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg));
+}
+
+/// VGPRs one lane's @p stride bytes span: a load's destinations, a store's
+/// payload rows.
+constexpr uint32_t vgpr_count(uint32_t stride) { return std::max(1u, (stride + 3u) / 4u); }
+
+/// 1. Gate: whether @p req may complete here. Nothing has been read or built
+///    yet, so declining costs a few loads and branches, and the handler falls
+///    back to its VectorMemState.
+template <bool IsLoad, bool Dual = false>
+RJ_ALWAYS_INLINE inline bool can_complete_inline(const LdsAccessRequest &req,
+                                                 const ComputeUnitCore &cu, const Wavefront &wf,
+                                                 uint32_t stride) {
+  // 1a. Decided once per execution by the issue loop (observers of the routed
+  //     order, a debugger, RJ_DS_INLINE).
+  if (!cu.completes_lds_inline())
+    return false;
+  // Source registers are read from raw storage. Each case where RegisterAccess
+  // would do more than read them takes the VectorMemState path.
+  //
+  // 1b. Register-read observers expect the notifications RegisterAccess sends.
+  if (cu.observes_register_access())
+    return false;
+  // 1c. The address register comes from the encoding. Outside the issuing wave's
+  //     allocation, raw storage belongs to another wave or lies past the file.
+  if (!cu.owns_vgpr_range(wf, req.addr_vgpr, 1))
+    return false;
+  if constexpr (IsLoad) {
+    // 1d. Loads also write their destination registers (a two-address load,
+    //     two consecutive ranges). Unowned, the VectorMemState path still
+    //     performs the LDS reads and skips the writeback, as the routed path
+    //     does.
+    return cu.owns_vgpr_range(wf, req.dst_vgpr, vgpr_count(stride) * (Dual ? 2 : 1));
+  } else {
+    // 1d. Stores also read their payload registers (a two-address store, two
+    //     independent ranges).
+    return cu.owns_vgpr_range(wf, req.data_vgpr, vgpr_count(stride)) &&
+           (!Dual || cu.owns_vgpr_range(wf, req.data2_vgpr, vgpr_count(stride)));
+  }
+}
+
+/// Steps 2-4 of one load for a wave of @p Wave lanes, after the gate passed.
+/// It stops with the data readable through @p load.group (in @p staging or in
+/// place in LDS) and the writeback's registers and lanes in @p load.
+///
+/// Hazards: every address lane is read here, before any writeback starts (a
+/// two-address load reads both accesses first), so a destination overlapping
+/// the address register is safe.
+template <uint32_t Wave>
+RJ_ALWAYS_INLINE inline void read_steps(const LdsAccessRequest &req, Wavefront &wf,
+                                        ComputeUnitCore &cu, uint32_t offset, uint32_t dst_vgpr,
+                                        uint32_t dst_vgprs, uint8_t *staging, LdsStagedLoad &load) {
+  const uint64_t exec = wf.exec(); // == lane_mask == exec_mask for DS; no lanes past Wave
+
+  // 2. Addresses: lane l reads at (address_lanes[l] + lds_offset) mod 2^32. The
+  //    reader adds the offset only where it needs an address.
+  const uint32_t *address_lanes = vgpr_lanes(cu, req.addr_vgpr);
+  const uint32_t lds_offset = offset + wf.lds_base();
+
+  // 3. LDS -> staging, by address shape (lds_load_plans.h, on the proofs in
+  //    lds_lane_shapes.h): contiguous 16-lane groups are not copied but pointed
+  //    at in place, b64 rows where lane l + 16 follows lane l are read one
+  //    16-byte column per pair, up to four lanes take fixed copies, and other
+  //    dense masks one bounds check, then fixed copies. Lanes not fully backed
+  //    keep Lds' exact rule. The reader may write any lane of the span.
+  wf.lds().vector_load32<Wave>(address_lanes, lds_offset, exec, req.elem_size, req.num_elems,
+                               staging, load.group);
+
+  // 4. The writeback's registers (ownership was checked in 1d) and lanes. The
+  //    caller's typed writeback (lds_writeback.h) stores the active lanes,
+  //    applying sign_extend / d16.
+  for (uint32_t i = 0; i < dst_vgprs; ++i)
+    load.dst[i] = cu.raw_vgpr_data(dst_vgpr + i);
+  load.exec = exec;
+}
+
+} // namespace lds_inline
+
+/// A whole plain load, or both accesses of a two-address one, from the gate
+/// to step 5, all but the writebacks.
+template <bool Dual>
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::read(const Instruction &inst,
+                                                   const LdsAccessRequest &req, Wavefront &wf,
+                                                   uint8_t *staging, LdsStagedLoad *load) {
+  ComputeUnitCore &cu = wf.raw_cu();
+  const uint32_t stride = req.num_elems * req.elem_size;
+  assert(stride != 0 && stride <= kMaxLaneBytes);
+
+  // 1. Gate.
+  if (!lds_inline::can_complete_inline<true, Dual>(req, cu, wf, stride))
+    return false;
+
+  // 2-4, specialized by wave size; a second access reads into the registers
+  // right after the first's.
+  const uint32_t dst_vgprs = lds_inline::vgpr_count(stride);
+  const auto steps = [&]<uint32_t Wave>() RJ_ALWAYS_INLINE {
+    lds_inline::read_steps<Wave>(req, wf, cu, req.offset, req.dst_vgpr, dst_vgprs, staging,
+                                 load[0]);
+    if constexpr (Dual)
+      lds_inline::read_steps<Wave>(req, wf, cu, req.offset2, req.dst_vgpr + dst_vgprs, dst_vgprs,
+                                   staging + 64 * kMaxLaneBytes, load[1]);
+  };
+  if (wf.wf_size() == 32)
+    steps.template operator()<32>();
+  else
+    steps.template operator()<64>();
+
+  // 5. No wait counters (acquire and release would cancel), no routing, no state.
+  //    Register writes bypass instruction write callbacks, as VM completion does.
+  cu.note_lds_inline_completion(inst); // CU caches the decoded instruction
+  return true;
+}
+
+template <lds_writeback::DstFormat F>
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::load(const Instruction &inst,
+                                                   const LdsAccessRequest &req, Wavefront &wf) {
+  // Everything down to the reader's strategies is inlined, so the compiler sees
+  // the whole path: the group pointers stay in registers, and a group read in
+  // place goes from LDS to the destination VGPRs without passing through
+  // staging.
+  alignas(64) uint8_t staging[64 * kMaxLaneBytes];
+  LdsStagedLoad staged;
+  if (!read<false>(inst, req, wf, staging, &staged))
+    return false;
+  // 6. Writeback.
+  lds_writeback::write_back_as<F>(staged.dst, wf.raw_cu().sram_ecc(), wf.wf_size(), staged.exec,
+                                  staged.group);
+  return true;
+}
+
+template <lds_writeback::DstFormat F>
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::load2(const Instruction &inst,
+                                                    const LdsAccessRequest &req, Wavefront &wf) {
+  // Both accesses are read before either is written back: the destination may
+  // overlap the address register.
+  alignas(64) uint8_t staging[2 * 64 * kMaxLaneBytes];
+  LdsStagedLoad staged[2];
+  if (!read<true>(inst, req, wf, staging, staged))
+    return false;
+  // 6. Writebacks, first access first.
+  const bool sram_ecc = wf.raw_cu().sram_ecc();
+  for (const LdsStagedLoad &access : staged)
+    lds_writeback::write_back_as<F>(access.dst, sram_ecc, wf.wf_size(), access.exec, access.group);
+  return true;
+}
+
+/// A whole plain store, or both accesses of a two-address one.
+template <lds_store::StoreFormat F, bool Dual>
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::write(const Instruction &inst,
+                                                    const LdsAccessRequest &req, Wavefront &wf) {
+  ComputeUnitCore &cu = wf.raw_cu();
+  constexpr uint32_t stride = lds_store::kWidth<F>;
+  constexpr uint32_t regs = lds_inline::vgpr_count(stride);
+  assert(req.elem_size * req.num_elems == stride);
+
+  // 1. Gate.
+  if (!lds_inline::can_complete_inline<false, Dual>(req, cu, wf, stride))
+    return false;
+
+  // 2. Addresses and payload: the address VGPR's lanes and the data VGPRs' rows
+  //    as they sit in raw storage; lane l stores at (addr[l] + offset) mod 2^32.
+  //    No LDS write can reach them, so the writer may read them as it goes.
+  const uint32_t *addr = lds_inline::vgpr_lanes(cu, req.addr_vgpr);
+  const uint64_t exec = wf.exec(); // no lanes past the wave
+  const auto request = [&](uint32_t offset, uint32_t data_vgpr) {
+    lds_store::StoreRequest r{
+        .addr = addr, .data = {}, .exec = exec, .offset = offset + wf.lds_base()};
+    for (uint32_t i = 0; i < regs; ++i)
+      r.data[i] = lds_inline::vgpr_lanes(cu, data_vgpr + i);
+    return r;
+  };
+
+  // 3. VGPR rows -> LDS, by EXEC and address shape (lds_store_plans.h): lanes
+  //    in order, so the highest lane wins on overlap; only active lanes are
+  //    written. A two-address store writes its first access for every lane,
+  //    then its second, which therefore wins where they overlap.
+  const auto store = [&]<uint32_t Wave>() RJ_ALWAYS_INLINE {
+    lds_store::store<F, Wave>(wf.lds(), request(req.offset, req.data_vgpr));
+    if constexpr (Dual)
+      lds_store::store<F, Wave>(wf.lds(), request(req.offset2, req.data2_vgpr));
+  };
+  if (wf.wf_size() == 32)
+    store.template operator()<32>();
+  else
+    store.template operator()<64>();
+
+  // 4. As for loads: no wait counters, no routing, no state.
+  cu.note_lds_inline_completion(inst);
+  return true;
+}
+
+template <lds_store::StoreFormat F>
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::store(const Instruction &inst,
+                                                    const LdsAccessRequest &req, Wavefront &wf) {
+  return write<F, false>(inst, req, wf);
+}
+
+template <lds_store::StoreFormat F>
+RJ_ALWAYS_INLINE inline bool LdsInlineAccess::store2(const Instruction &inst,
+                                                     const LdsAccessRequest &req, Wavefront &wf) {
+  return write<F, true>(inst, req, wf);
+}
+
+} // namespace amdgpu
+} // namespace rocjitsu
