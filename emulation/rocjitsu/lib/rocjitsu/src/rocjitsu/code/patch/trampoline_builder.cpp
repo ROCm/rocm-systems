@@ -893,26 +893,30 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     report(error_out, "probe-call emission: argument block does not fit the call ABI");
     return std::nullopt;
   }
-  RegisterSet unavailable_backups = arg_registers(*argument_abi);
+  // These registers hold framework values before the envelope copies guest arguments.
+  RegisterSet overwritten_before_args;
+  for (const SpecialStateSlot &save : plan.special_state_saves) {
+    overwritten_before_args.expand({RegClass::SGPR, save.temp_base, save.width});
+  }
+  if (plan.entry_storage_base) {
+    overwritten_before_args.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
+  }
+  for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
+    overwritten_before_args.expand({RegClass::SGPR, capture.sgpr, 1});
+  }
+
+  RegisterSet unavailable_backups = arg_registers(*argument_abi) | overwritten_before_args;
   unavailable_backups.expand(probe_link_pair(*argument_abi));
   unavailable_backups.expand({RegClass::SGPR, target_lo, 2});
   if (plan.preserve_scc) {
     unavailable_backups.expand({RegClass::SGPR, plan.scc_temp, 1});
-  }
-  for (const SpecialStateSlot &save : plan.special_state_saves) {
-    unavailable_backups.expand({RegClass::SGPR, save.temp_base, save.width});
-  }
-  if (plan.entry_storage_base) {
-    unavailable_backups.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
-  }
-  for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
-    unavailable_backups.expand({RegClass::SGPR, capture.sgpr, 1});
   }
   RegisterSet register_save_destinations;
   if (!validate_register_saves(plan, {}, unavailable_backups, register_save_destinations,
                                error_out)) {
     return std::nullopt;
   }
+  overwritten_before_args |= register_save_destinations;
   for (const RegisterSave &save : plan.register_saves) {
     if (save.cls == RegClass::SGPR) {
       if (!append_scalar(build_s_mov_b32(save.destination, save.source, plan.arch, &error))) {
@@ -1044,6 +1048,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     case ProbeArgSource::AnchorSgpr: {
       if (arg.register_index >= ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count)) {
         report(error_out, "probe-call emission: invalid anchor SGPR");
+        return std::nullopt;
+      }
+      if (overwritten_before_args.intersects(
+              {.cls = RegClass::SGPR, .index = arg.register_index})) {
+        report(error_out, "probe-call emission: anchor SGPR overwritten before argument capture");
         return std::nullopt;
       }
       const auto word = build_v_mov_b32_src(vdst, arg.register_index, plan.arch, &error);
