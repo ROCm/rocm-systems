@@ -51,6 +51,7 @@ constexpr std::string_view kMutationHelp =
     "loads/stores, gfx942/gfx950 wave64 scalar and read2/write2 forms, and\n"
     "gfx1250 wave32 scalar loads/stores. Scalar widths: b32/b64/b96/b128.\n"
     "Two-address widths: b32/b64, including stride64 forms, except on gfx1250.\n"
+    "Selected subword and transpose forms are also supported.\n"
     "See --capabilities for exact forms. It requires a distinct\n"
     "allocated --address-vgpr for mutation.\n"
     "This argument is an encoded selector; allocation uses the address bank.\n"
