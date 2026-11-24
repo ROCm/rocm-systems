@@ -17,17 +17,24 @@ Source: [TheRock python_style_guide.md](https://github.com/ROCm/TheRock/blob/mai
 
 ## Type Hints
 
+Rules in this section and its subsections that name a Python version apply to code that must run
+on Python 3.6.8 (RHEL 8, SLES 15): `py-interface/`, `amdsmi_cli/`, `tests/python/unit/`,
+`tests/python/common/`, `tests/python/test_*.py`, and scripts that `language: system` pre-commit
+hooks run.
+
 - Type hints on **all** function signatures
-- Syntax that is compatible with python 3.6.8+
 - **Never** use `Any` except in rare generic code
-- **Never** use `Optional[T]`, `Union[X, Y]`, `List`, `Dict` — use built-in equivalents
-- **Do NOT** use `from __future__ import annotations`
+- Use `typing` generics (`List[str]`, `Dict[str, int]`, `Tuple[int, ...]`, `Optional[T]`,
+  `Union[X, Y]`), **never** `list[str]` / `dict[str, int]` (3.9+) or `X | None` (3.10+), not even
+  quoted
+- **Do NOT** use `from __future__ import annotations` (a `SyntaxError` on 3.6)
 
 ### Extract Complex Types
 
-- Type appears in multiple signatures → `NamedTuple` or `TypeAlias`
+- Type appears in multiple signatures → `NamedTuple` or a plain alias (`BdfList = List[str]`)
 - Dict/tuple with 3+ fields → `dataclass` or `NamedTuple`
 - If you document what tuple fields mean → use `NamedTuple`
+- No `dataclasses` (3.7+), no `TypeAlias` (3.10+)
 
 ```python
 # Good
@@ -37,7 +44,7 @@ class KpackInfo(NamedTuple):
     kernel_count: int
 
 # Bad
-def get_info() -> tuple[Path, int, int]: ...
+def get_info() -> Tuple[Path, int, int]: ...
 ```
 
 ### Dataclasses Over Tuples
@@ -182,8 +189,9 @@ Changes to `_detect_install_context`, `_build_candidate_paths`, or `_load_librar
 
 When reviewing Python code, verify:
 
-- [ ] Type hints on all functions — modern syntax, no `Any`
-- [ ] No `from __future__ import annotations`
+- [ ] Type hints on all functions, no `Any`
+- [ ] Where Python 3.6.8 must work: `typing` generics, no `from __future__ import annotations`,
+  no `dataclasses`
 - [ ] Complex types extracted to `NamedTuple`/`dataclass`
 - [ ] Specific exception handling — no bare `except Exception`
 - [ ] Fail-fast — no silent `continue` on errors

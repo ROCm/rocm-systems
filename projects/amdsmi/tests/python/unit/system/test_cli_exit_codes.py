@@ -840,7 +840,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
 
         raise_sites = [
             node
-            for node in ast.walk(ast.parse(parser_source.read_text()))
+            for node in ast.walk(ast.parse(parser_source.read_text(encoding="utf-8")))
             if isinstance(node, ast.Call)
             and dotted_name(node.func).endswith("AmdSmiDeviceNotFoundException")
         ]

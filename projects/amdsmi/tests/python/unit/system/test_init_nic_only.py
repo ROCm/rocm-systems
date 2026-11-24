@@ -12,8 +12,6 @@ Loaded with a stubbed ``amdsmi`` so the gate is exercised without a built
 libamd_smi.so or any hardware.
 """
 
-from __future__ import annotations
-
 import importlib.util
 import os
 import sys

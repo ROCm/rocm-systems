@@ -1310,6 +1310,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
     for test_file in (
         "integration_test_output.txt",
         "unit_test_output.txt",
+        "unit_test_py36_output.txt",
         "cli_test_output.txt",
         "abi_compat_output.txt",
     ):

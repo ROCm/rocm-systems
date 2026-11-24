@@ -38,7 +38,7 @@ def _load_summary() -> Any:
         "amdsmi_get_nic_type": lambda handle: 0,
         "amdsmi_get_nic_capability": lambda handle: 0,
     }
-    exec(compile(ast.Module(nodes, []), str(_INTERFACE_PATH), "exec"), namespace)
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(_INTERFACE_PATH), "exec"), namespace)
     return namespace[_FUNCTION_NAME]
 
 

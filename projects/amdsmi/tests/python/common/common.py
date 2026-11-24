@@ -92,8 +92,10 @@ def print_amdsmi_path_help(file=sys.stdout):
     """Print env-var documentation, path remediation guidance, and usage examples for -h output."""
     _script = os.path.basename(sys.argv[0]) or "<script>"
     print("\nAdditional options:", file=file)
+    print("  -k, --keyword PAT    Only run tests whose id contains PAT", file=file)
+    print("                       (*, ? and [...] in PAT are wildcards)", file=file)
     print("  -l, --list           List all available tests and exit", file=file)
-    print("  -x, --exclude PAT    Skip tests whose id contains PAT (inverse of -k)", file=file)
+    print("  -x, --exclude PAT    Skip tests whose id contains PAT (no wildcards)", file=file)
     print(file=file)
     print("Environment variables:", file=file)
     print("  AMDSMI_PATH   Path to amd_smi share dir (overrides ROCM_HOME/ROCM_PATH)", file=file)
@@ -107,7 +109,7 @@ def print_amdsmi_path_help(file=sys.stdout):
     _cmds = [
         (_base + " -l", "list all available tests"),
         (_full + " -v", "run all tests, verbose with print statements (RECOMMENDED)"),
-        (_full + ' -k "test_name" -v', "run only tests matching substring"),
+        (_full + ' -k "test_name" -v', "run only tests whose id contains test_name"),
         (_full + " -x performance -v", "run everything except the performance tests"),
         (_full + " -q", "run all tests, quiet with no print statements"),
     ]
@@ -716,16 +718,21 @@ def print_legend():
 
 
 def print_unittest_help():
-    """Print unittest's -h output with its built-in Examples epilog stripped.
+    """Print unittest's -h output without its -k option and built-in Examples epilog.
 
     unittest (via argparse) appends its own Examples block; we capture stdout,
     remove everything from the last 'Examples:' onward, and reprint — leaving
     our print_amdsmi_path_help() as the sole Examples section at the bottom.
     """
+
+    class _HelpProgram(unittest.TestProgram):
+        # Not None, so unittest (3.7+) leaves out its own -k, which the runner implements.
+        testNamePatterns = ()
+
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
-            unittest.main(argv=[sys.argv[0] or "unit_tests.py", "--help"])
+            _HelpProgram(argv=[sys.argv[0] or "unit_tests.py", "--help"])
     except SystemExit:
         pass
     output = buf.getvalue()
@@ -756,15 +763,16 @@ def make_runner_verbosity(verbose):
 
 
 def _parse_k_pattern(argv=None):
-    """Return the ``-k``/``--keyword`` filter substring from *argv*, or ``None``.
+    """Return the ``-k``/``--keyword`` pattern from *argv*, or ``None``.
 
-    Accepts both the separate ("-k", "pattern") and joined ("-kpattern") forms,
-    matching the spellings unittest itself understands.
+    Accepts "-k PAT", "-kPAT", "--keyword PAT" and "--keyword=PAT".
     """
     argv = sys.argv if argv is None else argv
     for i, arg in enumerate(argv):
         if arg in ("-k", "--keyword") and i + 1 < len(argv):
             return argv[i + 1]
+        if arg.startswith("--keyword="):
+            return arg[len("--keyword=") :]
         if arg.startswith("-k") and arg != "-k":
             return arg[2:]
     return None
@@ -774,12 +782,14 @@ def _parse_x_pattern(argv=None):
     """Return the ``-x``/``--exclude`` filter substring from *argv*, or ``None``.
 
     Tests whose id contains this substring are skipped (the inverse of ``-k``).
-    Accepts both the separate ("-x", "pattern") and joined ("-xpattern") forms.
+    Accepts "-x PAT", "-xPAT", "--exclude PAT" and "--exclude=PAT".
     """
     argv = sys.argv if argv is None else argv
     for i, arg in enumerate(argv):
         if arg in ("-x", "--exclude") and i + 1 < len(argv):
             return argv[i + 1]
+        if arg.startswith("--exclude="):
+            return arg[len("--exclude=") :]
         if arg.startswith("-x") and arg != "-x":
             return arg[2:]
     return None
@@ -794,6 +804,22 @@ def _filter_suite(suite, keep):
         elif keep(test.id()):
             filtered.addTest(test)
     return filtered
+
+
+def _filter_suite_keyword(suite, pattern):
+    """Return a copy of *suite* holding only the tests whose id matches the glob ``*pattern*``.
+
+    A plain *pattern* is therefore a substring match, and ``*``, ``?`` and ``[...]`` in it are
+    wildcards (``test_ttm*``).
+    """
+    glob = f"*{pattern}*"
+
+    def keep(test_id):
+        # A "unittest.loader." id stands for a module that failed to import or skipped itself.
+        # unittest's own -k never drops those, so a filtered run still reports the module.
+        return test_id.startswith("unittest.loader.") or fnmatch.fnmatchcase(test_id, glob)
+
+    return _filter_suite(suite, keep)
 
 
 def _filter_suite_exclude(suite, pattern):
@@ -824,23 +850,17 @@ def run_test_dir(subdir, title, top_level_dir):
         sys.exit(0)
 
     loader = unittest.TestLoader()
-    # -k does substring matching; wrapping in * lets globs (test_ttm*) match too.
-    k_pattern = _parse_k_pattern(argv)
-    if k_pattern:
-        loader.testNamePatterns = [f"*{k_pattern}*"]
-
     suite = loader.discover(
         start_dir=os.path.join(top_level_dir, subdir),
         pattern="test_*.py",
         top_level_dir=top_level_dir,
     )
-    # testNamePatterns is Python 3.7+; 3.6 ignores it and would run every test.
-    if k_pattern and sys.version_info < (3, 7):
-        suite = _filter_suite(
-            suite,
-            lambda test_id: test_id.startswith("unittest.loader.")
-            or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"),
-        )
+
+    # -k/--keyword is applied to the discovered suite rather than through
+    # TestLoader.testNamePatterns, which Python 3.6 does not have.
+    k_pattern = _parse_k_pattern(argv)
+    if k_pattern:
+        suite = _filter_suite_keyword(suite, k_pattern)
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
     # -k), e.g. run everything but the perf suites with `-x performance`.

@@ -44,7 +44,7 @@ def _load_renderer() -> Any:
     renderer = ast.ClassDef(
         name="Renderer", bases=[], keywords=[], body=methods, decorator_list=[], type_params=[]
     )
-    module = ast.fix_missing_locations(ast.Module([renderer], []))
+    module = ast.fix_missing_locations(ast.Module(body=[renderer], type_ignores=[]))
     # The production annotation ``Dict[str, any]`` names the builtin ``any`` and is evaluated
     # when the method is defined, so the namespace has to provide it.
     namespace: Dict[str, Any] = {"re": re, "Dict": Dict, "any": object}
