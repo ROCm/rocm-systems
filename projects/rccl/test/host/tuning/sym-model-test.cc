@@ -504,6 +504,39 @@ TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterOrder) {
   }
 }
 
+// Where the preferred ReduceScatter kernel can't run, the next one takes its range: LD for a grouped launch below the
+// crossover, LL for an unregistered send above it, and TmaLD for a selection that allows it but not LD. A forced
+// choice skips the ordering.
+TEST_F(SymModelTdmTest, Gfx1250PartitionMode_ReduceScatterFallbacks) {
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;  // the fixture's four ranks make two packages
+  constexpr ncclSymkKernelId ll = ncclSymkKernelId_ReduceScatter_LL;
+  constexpr ncclSymkKernelId tmaLd = ncclSymkKernelId_ReduceScatter_TmaLD;
+
+  ncclTuningInput_t grouped = Input(ncclFuncReduceScatter, size_t(256) << 10);
+  grouped.nWorks = 2;
+  EXPECT_EQ(Select(grouped).kernelId, ncclSymkKernelId_ReduceScatter_LD) << "grouped, below the crossover";
+
+  ncclTuningInput_t unregistered = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  unregistered.winRegType = ncclSymSendNonregRecvReg;
+  EXPECT_EQ(Select(unregistered).kernelId, ll) << "unregistered send, above the crossover";
+
+  // Select() ignores the selection, so check the two kernels it allows directly.
+  if (TmaReachableOnThisBuild()) {
+    ncclTuningInput_t tdmOnly = Input(ncclFuncReduceScatter, size_t(512) << 10);
+    tdmOnly.tuningMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ll) |
+                         rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + tmaLd);
+    EXPECT_TRUE(Evaluate(tdmOnly, tmaLd).valid) << "TmaLD takes LD's place";
+    EXPECT_FALSE(Evaluate(tdmOnly, ll).valid);
+  }
+
+  ncclTuningInput_t forced = Input(ncclFuncReduceScatter, size_t(512) << 10);
+  EXPECT_TRUE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~ncclSymkKernelMask(0)));
+  comm_->tuningContext.forced[ncclFuncReduceScatter] = 1;
+  EXPECT_FALSE(rcclSymkReduceScatterYieldsInPartitionMode(&forced, ll, ~ncclSymkKernelMask(0)))
+    << "a forced choice leaves the kernel to the cost model";
+}
+
 // An algorithm selection naming only the TDM hierarchical kernel reaches it without NCCL_SYM_KERNEL.
 TEST_F(SymModelTdmHierTest, SelectionOfOnlyHierTma_KeepsItValid) {
   ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);

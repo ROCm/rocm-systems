@@ -859,7 +859,10 @@ ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*nc
   }
 
   if (ncclSymkHierGroups(comm) == 0) kmask &= ~kernelMask_Hier;
-  if (red != ncclDevSum) kmask &= ~(1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST);
+  // generate.py builds the hierarchical ReduceScatter for sum only, in fp32 and bf16.
+  if (red != ncclDevSum || (ty != ncclFloat32 && ty != ncclBfloat16)) {
+    kmask &= ~(1ull << ncclSymkKernelId_ReduceScatter_HierLsaLDST);
+  }
   return kmask;
 }
 

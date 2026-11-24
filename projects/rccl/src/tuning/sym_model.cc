@@ -67,6 +67,13 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
 
+struct AllowMask {
+  ncclSymkKernelMask bits;
+  bool has(int id) const {
+    return bits >> id & 1;
+  }
+};
+
 // In gfx1250 partition mode AllGather runs LL, then the store kernel, then the hierarchical kernel, each
 // from where it overtakes the one before, unless the user forced the choice. If either of the latter two
 // can't run, the other covers its range. Below the store kernel's threshold the cost model picks LL, and
@@ -83,10 +90,6 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
       (inputs->winRegType != ncclSymSendRegRecvReg && inputs->winRegType != ncclSymSendNonregRecvReg)) {
     return false;
   }
-  struct AllowMask {
-    ncclSymkKernelMask bits;
-    bool has(int id) const { return bits >> id & 1; }
-  };
   const AllowMask allowed{valid_kmask & rcclSymkMaskFromTuning(inputs->tuningMask)};
   int st = allowed.has(vecSt) ? vecSt : tmaSt;
   int hier = allowed.has(vecHier) ? vecHier : tmaHier;
@@ -108,18 +111,21 @@ static bool rcclSymkReduceScatterYieldsInPartitionMode(struct ncclTuningInput_t*
                                                        enum ncclSymkKernelId kernelId, ncclSymkKernelMask valid_kmask) {
   constexpr int ll = ncclSymkKernelId_ReduceScatter_LL;
   constexpr int ld = ncclSymkKernelId_ReduceScatter_LD;
+  constexpr int tmaLd = ncclSymkKernelId_ReduceScatter_TmaLD;
   constexpr int hier = ncclSymkKernelId_ReduceScatter_HierLsaLDST;
   struct ncclComm* comm = inputs->comm;
   if (inputs->func != ncclFuncReduceScatter || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
       comm->tuningContext.forced[inputs->func]) {
     return false;
   }
+  const AllowMask allowed{valid_kmask & rcclSymkMaskFromTuning(inputs->tuningMask)};
   // The same conditions ncclTuningSymkModelSim puts on LL (no grouping) and on the rest (a registered send).
   bool sendReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendRegRecvNonreg;
   bool hierFirst = ncclSymkGfx1250ReduceScatterPrefersHier(comm->nRanks, inputs->nBytes);
-  for (int k : {hierFirst ? hier : ll, ld, hierFirst ? ll : hier}) {
-    if ((valid_kmask >> k & 1) && inputs->tuningMask.test(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + k) &&
-        (k == ll ? inputs->nWorks <= 1 : sendReg)) {
+  // TmaLD stands in for LD where a selection allows only the TDM flat load kernel.
+  int load = allowed.has(ld) ? ld : tmaLd;
+  for (int k : {hierFirst ? hier : ll, load, hierFirst ? ll : hier}) {
+    if (allowed.has(k) && (k == ll ? inputs->nWorks <= 1 : sendReg)) {
       return kernelId != k;
     }
   }
