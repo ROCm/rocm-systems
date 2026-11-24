@@ -12,7 +12,12 @@
 
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
+#include <array>
 #include <cstdint>
+#include <cstdio>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -22,6 +27,50 @@
 #include "test_fixture_utils.h"
 
 namespace {
+
+// TEMP DIAGNOSTIC -- not for commit. Runs the real `amd-smi xgmi` CLI (if
+// findable) and dumps its full stdout+stderr, prefixed so it's easy to grep
+// out of the CI job log alongside the DiscoverGpuCpuLinks() errno tracing in
+// rocm_smi_cpu_link.cc.
+std::string RunCommandCaptureOutput(const std::string& cmd) {
+  std::string full_cmd = cmd + " 2>&1";
+  FILE* pipe = popen(full_cmd.c_str(), "r");
+  if (!pipe) return "<popen failed>";
+  std::array<char, 4096> buf{};
+  std::string out;
+  while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
+    out += buf.data();
+  }
+  int status = pclose(pipe);
+  out += "\n[exit status: " + std::to_string(status) + "]";
+  return out;
+}
+
+TEST(SystemUnit, DebugDumpXgmiCliOutput) {
+  std::array<char, 4096> self_path{};
+  ssize_t len = readlink("/proc/self/exe", self_path.data(), self_path.size() - 1);
+  std::string exe_dir;
+  if (len > 0) {
+    self_path[static_cast<size_t>(len)] = '\0';
+    std::string exe(self_path.data());
+    auto pos = exe.find_last_of('/');
+    if (pos != std::string::npos) exe_dir = exe.substr(0, pos);
+  }
+
+  std::vector<std::string> candidates = {"amd-smi xgmi"};
+  if (!exe_dir.empty()) {
+    // amdsmitst typically lives at <prefix>/share/amd_smi/tests/amdsmitst.
+    candidates.push_back(exe_dir + "/../../../bin/amd-smi xgmi");
+    candidates.push_back(exe_dir + "/../../../../bin/amd-smi xgmi");
+  }
+
+  for (const auto& cmd : candidates) {
+    std::cerr << "[CPU_LINK_DEBUG][xgmi-cli] trying: " << cmd << "\n";
+    std::string out = RunCommandCaptureOutput(cmd);
+    std::cerr << "[CPU_LINK_DEBUG][xgmi-cli] ---- output begin ----\n"
+              << out << "\n[CPU_LINK_DEBUG][xgmi-cli] ---- output end ----\n";
+  }
+}
 
 // MI450-like topology: GPU node 1 has a direct XGMI io_link to CPU node 0.
 TEST(SystemUnit, DiscoverGpuCpuLinksFindsDirectXgmiCpuLink) {
