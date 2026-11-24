@@ -595,6 +595,7 @@ add_executable(
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
+    vmem_lane_address_test.cpp
     buffer_format_test.cpp
     image_access_test.cpp
     image_addressing_test.cpp

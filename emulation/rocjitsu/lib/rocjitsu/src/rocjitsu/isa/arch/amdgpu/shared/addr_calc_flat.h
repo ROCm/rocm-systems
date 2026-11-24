@@ -12,6 +12,7 @@
 ///
 /// Segment encoding: seg==0 → FLAT, seg==1 → SCRATCH, seg==2 → GLOBAL.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_lanes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -20,6 +21,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <optional>
@@ -199,17 +201,13 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     }
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
-      uint64_t vaddr;
-      if (inst.saddr != 0x7F) {
-        vaddr = amdgpu::flat_vector_offset(vaddr_region.lane(0, lane), /*signed_offset=*/false);
-      } else {
-        vaddr = vaddr_region.lane64(0, lane); // 64-bit VGPR pair
-      }
-      d.per_lane_addr[lane] = saddr_val + vaddr + offset;
-    }
+    const uint64_t bias = saddr_val + static_cast<uint64_t>(offset);
+    if (inst.saddr != 0x7F)
+      lane_addresses_u32(vaddr_region.lanes(0).value(), exec, wf.wf_size(), bias,
+                         d.per_lane_addr.data());
+    else
+      lane_addresses_u64(vaddr_region.lanes(0).value(), vaddr_region.lanes(1).value(), exec,
+                         wf.wf_size(), bias, d.per_lane_addr.data());
   } else {
     // FLAT: 64-bit VGPR pair + unsigned 12-bit offset.
     // Real hardware checks the address against private/shared apertures and
@@ -220,6 +218,23 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     // rocm-dbgapi).
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, 2, exec);
+    const FlatPrivateLayout layout = flat_private_layout(wf.cu().arch());
+    if (layout == FlatPrivateLayout::Interleaved && !wf.flat_pointer32()) {
+      lane_addresses_u64(vaddr_region.lanes(0).value(), vaddr_region.lanes(1).value(), exec,
+                         wf.wf_size(), static_cast<uint64_t>(offset), d.per_lane_addr.data());
+      // Only lanes whose upper address word is the private aperture's
+      // translate; without an aperture no lane does.
+      const uint32_t private_hi = wf.private_aperture_base() >> 32;
+      uint64_t private_lanes = 0;
+      if (private_hi)
+        private_lanes = lanes_in_window(d.per_lane_addr.data(), exec, wf.wf_size(), ~uint64_t{0},
+                                        uint64_t{private_hi} << 32);
+      for (; private_lanes; private_lanes &= private_lanes - 1) {
+        const uint32_t lane = std::countr_zero(private_lanes);
+        d.per_lane_addr[lane] = capture_flat_private_address(wf, d, d.per_lane_addr[lane], lane);
+      }
+      return;
+    }
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
