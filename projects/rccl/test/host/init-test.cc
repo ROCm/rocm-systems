@@ -10843,6 +10843,7 @@ struct Tr_AllGatherInfo {
   int p2pnChannelsPerPeer;
   int p2pMaxPeers;
   float minNetBw;
+  int maxDevsPerNic;
   int localNetDeviceCount;
   int localNetCountByBw;
   float localNetBw;

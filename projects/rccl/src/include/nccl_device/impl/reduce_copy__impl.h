@@ -25,10 +25,13 @@
 #include <cuda/std/ranges>
 #endif
 
-#if __CUDA_ARCH__ >= 1000
-// These CCCL headers are needed for the TMA load/store API (sm100+)
+// CCCL headers declare constants referenced by host registration. [RCCL] AMD has no CCCL.
+#if !defined(__HIP_PLATFORM_AMD__) && (!defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 1000)
 #include <cuda/barrier>
 #include <cuda/ptx>
+#endif
+
+#if __CUDA_ARCH__ >= 1000
 #include <utility>
 
 namespace ptx = cuda::ptx;

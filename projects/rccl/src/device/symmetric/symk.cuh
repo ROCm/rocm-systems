@@ -75,11 +75,15 @@ constexpr bool ncclSymkAsyncTile = true;
 constexpr bool ncclSymkAsyncTile = false;
 #endif
 
-#if NCCL_SYMK_ASYNC_TILE
-#if NCCL_SYMK_TILE_TMA
+// CCCL headers declare constants referenced by host registration, so NVIDIA includes them in the
+// host pass as well as on sm_100+. AMD has no CCCL; gfx1250 stages tiles through tdm/tdmCopy.h.
+#if !defined(__HIP_PLATFORM_AMD__) && (!defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 1000)
 #include <cuda/barrier>
 #include <cuda/ptx>
+#endif
 
+#if NCCL_SYMK_ASYNC_TILE
+#if NCCL_SYMK_TILE_TMA
 namespace ptx = cuda::ptx;
 
 using ncclSymkTileBar = cuda::barrier<cuda::thread_scope_block>;

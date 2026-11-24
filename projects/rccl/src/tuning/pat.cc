@@ -51,6 +51,10 @@ ncclResult_t ncclTuningPatModelInit(struct ncclComm* comm, int id, int enabled[N
       continue;
     }
     float busBw = std::min(comm->graphs[algo].bwInter, comm->graphs[algo].bwIntra) * comm->graphs[algo].nChannels;
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+    // [RCCL] AMD compCaps (gfx11xx, gfx1250 -> 125) would match RUBIN_AND_LATER, so this check is NVIDIA-only.
+    if (RUBIN_AND_LATER(comm->minCompCap) && comm->isOneRPN) busBw *= 0.5f;
+#endif
     if (!comm->isOneRPN) {
       if (!ncclNvlsTransportEnabled(comm)) busBw = 0.0f;
       if (busBw > 0.0f) {
