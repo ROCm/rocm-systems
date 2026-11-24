@@ -4466,7 +4466,9 @@ def amdsmi_get_gpu_process_info_self(processor_handle: processor_handle_t) -> Di
 
     info = amdsmi_wrapper.amdsmi_proc_info_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_process_info_self(processor_handle, ctypes.byref(info))
+        _amdsmi_entry_point("amdsmi_get_gpu_process_info_self")(
+            processor_handle, ctypes.byref(info)
+        )
     )
 
     return {

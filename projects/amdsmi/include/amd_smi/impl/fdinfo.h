@@ -6,6 +6,7 @@
 
 #include <sys/types.h>
 
+#include <string>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -27,19 +28,24 @@ amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t& bdf, long pid, uint64_t kn
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
                                      amdsmi_proc_info_t& info, uint64_t kfd_gpu_id);
 
-// Populate `info` with the calling process's usage of the DRM render node whose
-// device number is `render_dev`. Only amdgpu clients whose `/proc/self/fd/<n>`
-// is that character device are counted. Compute partitions share one PCI BDF
-// in fdinfo `drm-pdev` but have their own render node, so they stay separate.
-// Matching the device number rather than the link name also holds when a
-// container exposes the node under a different name. Needs no host PID.
-// KFD-only fields are set to their unavailable sentinels.
-amdsmi_status_t gpuvsmi_get_self_info(dev_t render_dev, amdsmi_proc_info_t& info,
-                                      const char* fdinfo_dir = "/proc/self/fdinfo/",
-                                      const char* fd_dir = "/proc/self/fd/");
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif
+
+// Reads the fdinfo text of `pinned_fd`, a private duplicate of the calling
+// process's descriptor `listed_fd`, into `text`. Returns
+// AMDSMI_STATUS_NOT_FOUND if the descriptor is gone.
+using SelfFdinfoReader = amdsmi_status_t (*)(int listed_fd, int pinned_fd, std::string* text);
+
+// Populate `info` with the calling process's usage of the DRM render node whose
+// device number is `render_dev`. Only amdgpu clients open on that character
+// device are counted. Compute partitions share one PCI BDF in fdinfo
+// `drm-pdev` but have their own render node, so they stay separate. Matching
+// the device number rather than the link name also holds when a container
+// exposes the node under a different name. Needs no host PID. KFD-only fields
+// are set to their unavailable sentinels. A null `read_fdinfo` reads
+// /proc/self/fdinfo.
+amdsmi_status_t gpuvsmi_get_self_info(dev_t render_dev, amdsmi_proc_info_t& info,
+                                      SelfFdinfoReader read_fdinfo = nullptr);
 
 #endif

@@ -12,8 +12,7 @@ namespace {
 std::string g_sysfs_drm_root = "/sys/class/drm";
 std::string g_app_tmp_dir = "/tmp";
 std::string g_kfd_nodes_path_root = "/sys/class/kfd/kfd/topology/nodes";
-std::string g_self_fdinfo_dir = "/proc/self/fdinfo/";
-std::string g_self_fd_dir = "/proc/self/fd/";
+SelfFdinfoReader g_self_fdinfo_reader = nullptr;
 }  // namespace
 
 // The setters are declared only in the tests (test_fixture_utils.h), not in the header above.
@@ -31,12 +30,10 @@ const std::string& AppTmpDir() { return g_app_tmp_dir; }
 
 AMDSMI_TEST_HOOK void SetAppTmpDir(const std::string& dir) { g_app_tmp_dir = dir; }
 
-const std::string& SelfFdinfoDir() { return g_self_fdinfo_dir; }
+const SelfFdinfoReader& SelfFdinfoReaderHook() { return g_self_fdinfo_reader; }
 
-AMDSMI_TEST_HOOK void SetSelfFdinfoDir(const std::string& dir) { g_self_fdinfo_dir = dir; }
-
-const std::string& SelfFdDir() { return g_self_fd_dir; }
-
-AMDSMI_TEST_HOOK void SetSelfFdDir(const std::string& dir) { g_self_fd_dir = dir; }
+AMDSMI_TEST_HOOK void SetSelfFdinfoReaderHook(const SelfFdinfoReader& reader) {
+  g_self_fdinfo_reader = reader;
+}
 
 }  // namespace amd::smi::test_hooks

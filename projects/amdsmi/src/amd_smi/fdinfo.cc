@@ -1,8 +1,11 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "amd_smi/impl/fdinfo.h"
+
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -208,6 +211,8 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   return AMDSMI_STATUS_SUCCESS;
 }
 
+}  // extern "C"
+
 namespace {
 
 bool IsNumericFdName(const char* name) {
@@ -218,9 +223,9 @@ bool IsNumericFdName(const char* name) {
   return true;
 }
 
-amdsmi_status_t ReadFdinfoText(const std::string& path, std::string* text) {
+amdsmi_status_t ReadProcSelfFdinfo(int /*listed_fd*/, int pinned_fd, std::string* text) {
   errno = 0;
-  std::ifstream fdinfo(path);
+  std::ifstream fdinfo("/proc/self/fdinfo/" + std::to_string(pinned_fd));
   if (!fdinfo) {
     if (errno == ENOENT) return AMDSMI_STATUS_NOT_FOUND;
     return AMDSMI_STATUS_FILE_ERROR;
@@ -235,15 +240,56 @@ amdsmi_status_t ReadFdinfoText(const std::string& path, std::string* text) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
+class ScopedFd {
+ public:
+  explicit ScopedFd(int fd) : fd_(fd) {}
+  ~ScopedFd() {
+    if (fd_ >= 0) close(fd_);
+  }
+  ScopedFd(const ScopedFd&) = delete;
+  ScopedFd& operator=(const ScopedFd&) = delete;
+  int get() const { return fd_; }
+
+ private:
+  int fd_;
+};
+
+// Adds descriptor `listed_fd` to `clients` if it is an amdgpu client of
+// `render_dev`. The descriptor is pinned with a duplicate first, so closing and
+// reusing its number cannot pair one file's fdinfo with another's device. Only
+// amdgpu clients are fstat'ed, so an unrelated descriptor on a stale network
+// mount cannot fail the query.
+amdsmi_status_t CollectSelfFd(int listed_fd, dev_t render_dev, SelfFdinfoReader read_fdinfo,
+                              std::map<std::string, amd::smi::DrmClientUsage>* clients) {
+  ScopedFd pinned(fcntl(listed_fd, F_DUPFD_CLOEXEC, 0));
+  if (pinned.get() < 0) {
+    return errno == EBADF ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_FILE_ERROR;
+  }
+
+  std::string text;
+  const amdsmi_status_t read_status = read_fdinfo(listed_fd, pinned.get(), &text);
+  if (read_status == AMDSMI_STATUS_NOT_FOUND) return AMDSMI_STATUS_SUCCESS;
+  if (read_status != AMDSMI_STATUS_SUCCESS) return read_status;
+
+  auto usage = amd::smi::ParseDrmFdinfo(text);
+  if (usage.driver != "amdgpu") return AMDSMI_STATUS_SUCCESS;
+
+  struct stat st{};
+  if (fstat(pinned.get(), &st) != 0) return AMDSMI_STATUS_FILE_ERROR;
+  if (!S_ISCHR(st.st_mode) || st.st_rdev != render_dev) return AMDSMI_STATUS_SUCCESS;
+
+  if (!usage.valid) return AMDSMI_STATUS_UNEXPECTED_DATA;
+  (*clients)[usage.client] = usage;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 }  // namespace
 
 amdsmi_status_t gpuvsmi_get_self_info(dev_t render_dev, amdsmi_proc_info_t& info,
-                                      const char* fdinfo_dir, const char* fd_dir) {
-  if (fdinfo_dir == nullptr || fd_dir == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
+                                      SelfFdinfoReader read_fdinfo) {
+  if (read_fdinfo == nullptr) read_fdinfo = ReadProcSelfFdinfo;
 
-  DIR* d = opendir(fdinfo_dir);
+  DIR* d = opendir("/proc/self/fd");
   if (!d) {
     return (errno == EACCES || errno == EPERM) ? AMDSMI_STATUS_NO_PERM : AMDSMI_STATUS_FILE_ERROR;
   }
@@ -252,27 +298,10 @@ amdsmi_status_t gpuvsmi_get_self_info(dev_t render_dev, amdsmi_proc_info_t& info
   amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
   for (struct dirent* dir; (dir = readdir(d)) != NULL;) {
     if (!IsNumericFdName(dir->d_name)) continue;
-
-    const std::string fd_path = std::string(fd_dir) + dir->d_name;
-    struct stat st{};
-    if (stat(fd_path.c_str(), &st) != 0) {
-      if (errno == ENOENT) continue;  // Descriptor closed between readdir and stat.
-      status = AMDSMI_STATUS_FILE_ERROR;
-      break;
-    }
-    if (!S_ISCHR(st.st_mode) || st.st_rdev != render_dev) continue;
-
-    std::string text;
-    const amdsmi_status_t read_status =
-        ReadFdinfoText(std::string(fdinfo_dir) + dir->d_name, &text);
-    if (read_status == AMDSMI_STATUS_NOT_FOUND) continue;
-    if (read_status != AMDSMI_STATUS_SUCCESS) {
-      status = read_status;
-      break;
-    }
-
-    auto usage = amd::smi::ParseDrmFdinfo(text);
-    if (usage.driver == "amdgpu") clients[usage.client] = usage;
+    const int listed_fd = atoi(dir->d_name);
+    if (listed_fd == dirfd(d)) continue;
+    status = CollectSelfFd(listed_fd, render_dev, read_fdinfo, &clients);
+    if (status != AMDSMI_STATUS_SUCCESS) break;
   }
   closedir(d);
   if (status != AMDSMI_STATUS_SUCCESS) return status;
@@ -300,5 +329,3 @@ amdsmi_status_t gpuvsmi_get_self_info(dev_t render_dev, amdsmi_proc_info_t& info
   info.sdma_usage = std::numeric_limits<uint64_t>::max();
   return AMDSMI_STATUS_SUCCESS;
 }
-
-}  // extern "C"

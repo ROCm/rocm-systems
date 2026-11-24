@@ -2025,7 +2025,7 @@ Field | Description
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_info_self` function:
 
-* `AmdSmiLibraryException`, with `AMDSMI_STATUS_NOT_FOUND` if the calling process has not opened the device, `AMDSMI_STATUS_NOT_SUPPORTED` if the handle has no DRM render node, or `AMDSMI_STATUS_FILE_ERROR` if an fdinfo entry could not be read
+* `AmdSmiLibraryException`, with `AMDSMI_STATUS_NOT_FOUND` if the calling process has not opened the device, `AMDSMI_STATUS_NOT_SUPPORTED` if the handle has no DRM render node, `AMDSMI_STATUS_FILE_ERROR` if an fdinfo entry could not be read, or `AMDSMI_STATUS_UNEXPECTED_DATA` if a client's counters are malformed. `AMDSMI_STATUS_NOT_SUPPORTED` is also raised when the installed library predates this API
 * `AmdSmiParameterException`
 
 Example:

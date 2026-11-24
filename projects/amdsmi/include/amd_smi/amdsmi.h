@@ -8881,7 +8881,9 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
  * opened the device,
  *                            | ::AMDSMI_STATUS_NOT_SUPPORTED if the handle has no DRM render
  * node,
- *                            | ::AMDSMI_STATUS_FILE_ERROR if an fdinfo entry could not be read.
+ *                            | ::AMDSMI_STATUS_FILE_ERROR if an fdinfo entry could not be read,
+ *                            | ::AMDSMI_STATUS_UNEXPECTED_DATA if a client's counters are
+ * malformed.
  */
 amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle processor_handle,
                                                  amdsmi_proc_info_t* info);

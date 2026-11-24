@@ -2,22 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 // Hardware-free coverage for gpuvsmi_get_self_info() and the public
-// amdsmi_get_gpu_process_info_self() wiring. Injects fake /proc/self/fdinfo and
-// /proc/self/fd trees (and, for the public API, FakeKfdTopology + SelfFd* hooks).
-// /dev/null and /dev/zero stand in for two render nodes: the collector matches
-// descriptors by character device number, which a test cannot create for DRM.
+// amdsmi_get_gpu_process_info_self() wiring. Tests open real descriptors and a
+// fake reader supplies their fdinfo text (and, for the public API,
+// FakeKfdTopology + the SelfFdinfoReaderHook). /dev/null and /dev/zero stand
+// in for two render nodes: the collector matches descriptors by character
+// device number, which a test cannot create for DRM.
 
+#include <fcntl.h>
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
 
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
+#include <cstdlib>
 #include <limits>
+#include <map>
 #include <string>
-#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
@@ -26,32 +27,23 @@
 
 namespace {
 
-namespace fs = std::filesystem;
-
 constexpr char kRenderNode[] = "/dev/null";
 constexpr char kSiblingNode[] = "/dev/zero";
 
-class ScopedTempDir {
+class ScopedFd {
  public:
-  ScopedTempDir() {
-    std::string tmpl = (fs::temp_directory_path() / "drm_fdinfo_self_info_XXXXXX").string();
-    std::vector<char> buf(tmpl.begin(), tmpl.end());
-    buf.push_back('\0');
-    if (char* result = mkdtemp(buf.data())) {
-      path_ = result;
-    }
+  explicit ScopedFd(const char* path) : fd_(open(path, O_RDONLY | O_CLOEXEC)) {
+    EXPECT_GE(fd_, 0) << path;
   }
-  ~ScopedTempDir() {
-    if (!path_.empty()) {
-      std::error_code ec;
-      fs::remove_all(path_, ec);
-    }
+  ~ScopedFd() {
+    if (fd_ >= 0) close(fd_);
   }
-  const fs::path& path() const { return path_; }
-  std::string slash_path() const { return path_.string() + "/"; }
+  ScopedFd(const ScopedFd&) = delete;
+  ScopedFd& operator=(const ScopedFd&) = delete;
+  int get() const { return fd_; }
 
  private:
-  fs::path path_;
+  int fd_;
 };
 
 dev_t DeviceNumber(const char* path) {
@@ -60,19 +52,41 @@ dev_t DeviceNumber(const char* path) {
   return st.st_rdev;
 }
 
-void WriteFile(const fs::path& path, const std::string& content) {
-  fs::create_directories(path.parent_path());
-  std::ofstream(path) << content;
+// What the fake reader returns, keyed by the descriptor number the collector
+// listed. Unlisted descriptors read as a non-DRM file.
+struct FakeFdinfo {
+  std::map<int, std::string> text;
+  std::map<int, amdsmi_status_t> status;
+  // After reading, replace the listed descriptor with a duplicate of this one,
+  // as another thread closing it and opening a different file would.
+  std::map<int, int> reuse_as;
+};
+
+FakeFdinfo* g_fake = nullptr;
+
+amdsmi_status_t ReadFakeFdinfo(int listed_fd, int pinned_fd, std::string* text) {
+  EXPECT_NE(listed_fd, pinned_fd);
+  if (auto it = g_fake->status.find(listed_fd); it != g_fake->status.end()) return it->second;
+  auto it = g_fake->text.find(listed_fd);
+  *text = it == g_fake->text.end() ? "pos:\t0\nflags:\t02\n" : it->second;
+  if (auto reuse = g_fake->reuse_as.find(listed_fd); reuse != g_fake->reuse_as.end()) {
+    EXPECT_EQ(dup2(reuse->second, listed_fd), listed_fd);
+  }
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-// fdinfo/<name> holds `fdinfo_body`; fd/<name> links to `target`, as /proc/self/fd does.
-void WriteFdClient(const fs::path& fdinfo_dir, const fs::path& fd_dir, const std::string& name,
-                   const fs::path& target, const std::string& fdinfo_body) {
-  WriteFile(fdinfo_dir / name, fdinfo_body);
-  fs::create_directories(fd_dir);
-  std::error_code ec;
-  fs::create_symlink(target, fd_dir / name, ec);
-  ASSERT_FALSE(ec) << ec.message();
+class ScopedFakeFdinfo {
+ public:
+  ScopedFakeFdinfo() { g_fake = &fake_; }
+  ~ScopedFakeFdinfo() { g_fake = nullptr; }
+  FakeFdinfo* operator->() { return &fake_; }
+
+ private:
+  FakeFdinfo fake_;
+};
+
+amdsmi_status_t GetSelfInfo(const char* render_node, amdsmi_proc_info_t* info) {
+  return gpuvsmi_get_self_info(DeviceNumber(render_node), *info, ReadFakeFdinfo);
 }
 
 // Compute partitions of one GPU all print the same drm-pdev.
@@ -95,21 +109,13 @@ std::string AmdgpuClient(const std::string& client_key, const std::string& vram,
 }  // namespace
 
 TEST(SystemUnit, GetSelfInfoSumsDistinctClients) {
-  ScopedTempDir fdinfo_dir;
-  ScopedTempDir fd_dir;
-  ASSERT_FALSE(fdinfo_dir.path().empty());
-  ASSERT_FALSE(fd_dir.path().empty());
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "3", kRenderNode,
-                AmdgpuClient("1", "10 MiB", /*use_client_id=*/true));
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "4", kRenderNode,
-                AmdgpuClient("2", "6 MiB", /*use_client_id=*/true));
-  WriteFile(fdinfo_dir.path() / "not-an-fd", "pos:\t0\n");
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "5", kRenderNode, "pos:\t0\nflags:\t02\n");
+  ScopedFakeFdinfo fake;
+  ScopedFd a(kRenderNode), b(kRenderNode), other(kRenderNode);
+  fake->text[a.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
+  fake->text[b.get()] = AmdgpuClient("2", "6 MiB", /*use_client_id=*/true);
 
   amdsmi_proc_info_t info{};
-  ASSERT_EQ(gpuvsmi_get_self_info(DeviceNumber(kRenderNode), info, fdinfo_dir.slash_path().c_str(),
-                                  fd_dir.slash_path().c_str()),
-            AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(info.memory_usage.vram_mem, (10ULL << 20) + (6ULL << 20));
   EXPECT_EQ(info.memory_usage.gtt_mem, 2 * (4ULL << 10));
   EXPECT_EQ(info.memory_usage.cpu_mem, 2 * (1ULL << 10));
@@ -124,90 +130,97 @@ TEST(SystemUnit, GetSelfInfoSumsDistinctClients) {
 }
 
 TEST(SystemUnit, GetSelfInfoDedupesDuplicateClientDescriptors) {
-  ScopedTempDir fdinfo_dir;
-  ScopedTempDir fd_dir;
-  ASSERT_FALSE(fdinfo_dir.path().empty());
-  const std::string body = AmdgpuClient("7", "8 MiB", /*use_client_id=*/true);
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "10", kRenderNode, body);
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "11", kRenderNode, body);
+  ScopedFakeFdinfo fake;
+  ScopedFd a(kRenderNode), b(kRenderNode);
+  fake->text[a.get()] = fake->text[b.get()] = AmdgpuClient("7", "8 MiB", /*use_client_id=*/true);
 
   amdsmi_proc_info_t info{};
-  ASSERT_EQ(gpuvsmi_get_self_info(DeviceNumber(kRenderNode), info, fdinfo_dir.slash_path().c_str(),
-                                  fd_dir.slash_path().c_str()),
-            AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(info.memory_usage.vram_mem, 8ULL << 20);
   EXPECT_EQ(info.engine_usage.gfx, 100ULL);
 }
 
 TEST(SystemUnit, GetSelfInfoDedupesByPasidWithoutClientId) {
-  ScopedTempDir fdinfo_dir;
-  ScopedTempDir fd_dir;
-  ASSERT_FALSE(fdinfo_dir.path().empty());
-  const std::string body = AmdgpuClient("32825", "3 MiB", /*use_client_id=*/false);
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "8", kRenderNode, body);
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "9", kRenderNode, body);
+  ScopedFakeFdinfo fake;
+  ScopedFd a(kRenderNode), b(kRenderNode);
+  fake->text[a.get()] = fake->text[b.get()] =
+      AmdgpuClient("32825", "3 MiB", /*use_client_id=*/false);
 
   amdsmi_proc_info_t info{};
-  ASSERT_EQ(gpuvsmi_get_self_info(DeviceNumber(kRenderNode), info, fdinfo_dir.slash_path().c_str(),
-                                  fd_dir.slash_path().c_str()),
-            AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(info.memory_usage.vram_mem, 3ULL << 20);
 }
 
 // Sibling partitions share drm-pdev, so only the render node tells them apart.
 TEST(SystemUnit, GetSelfInfoCountsOnlyTheHandlesRenderNode) {
-  ScopedTempDir fdinfo_dir;
-  ScopedTempDir fd_dir;
-  ASSERT_FALSE(fdinfo_dir.path().empty());
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "3", kRenderNode,
-                AmdgpuClient("1", "10 MiB", /*use_client_id=*/true));
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "4", kSiblingNode,
-                AmdgpuClient("2", "20 MiB", /*use_client_id=*/true));
-  // Not a character device, even though its fdinfo looks like an amdgpu client.
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "5", fdinfo_dir.path() / "3",
-                AmdgpuClient("3", "30 MiB", /*use_client_id=*/true));
+  ScopedFakeFdinfo fake;
+  ScopedFd mine(kRenderNode), sibling(kSiblingNode), not_a_device("/proc/self/stat");
+  fake->text[mine.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
+  fake->text[sibling.get()] = AmdgpuClient("2", "20 MiB", /*use_client_id=*/true);
+  fake->text[not_a_device.get()] = AmdgpuClient("3", "30 MiB", /*use_client_id=*/true);
 
   amdsmi_proc_info_t info{};
-  ASSERT_EQ(gpuvsmi_get_self_info(DeviceNumber(kRenderNode), info, fdinfo_dir.slash_path().c_str(),
-                                  fd_dir.slash_path().c_str()),
-            AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(info.memory_usage.vram_mem, 10ULL << 20);
 
-  ASSERT_EQ(gpuvsmi_get_self_info(DeviceNumber(kSiblingNode), info, fdinfo_dir.slash_path().c_str(),
-                                  fd_dir.slash_path().c_str()),
-            AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(GetSelfInfo(kSiblingNode, &info), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(info.memory_usage.vram_mem, 20ULL << 20);
 }
 
-TEST(SystemUnit, GetSelfInfoReturnsNotFoundWhenNoClients) {
-  ScopedTempDir fdinfo_dir;
-  ScopedTempDir fd_dir;
-  ASSERT_FALSE(fdinfo_dir.path().empty());
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "3", kRenderNode, "pos:\t0\nflags:\t02\n");
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "4", kSiblingNode,
-                AmdgpuClient("1", "10 MiB", /*use_client_id=*/true));
+// The device check must see the same open file the fdinfo came from, even if
+// the descriptor number is reused for another device in between.
+TEST(SystemUnit, GetSelfInfoPinsDescriptorAgainstReuse) {
+  ScopedFakeFdinfo fake;
+  ScopedFd mine(kRenderNode), sibling(kSiblingNode);
+  fake->text[mine.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
+  fake->reuse_as[mine.get()] = sibling.get();
 
   amdsmi_proc_info_t info{};
-  EXPECT_EQ(gpuvsmi_get_self_info(DeviceNumber(kRenderNode), info, fdinfo_dir.slash_path().c_str(),
-                                  fd_dir.slash_path().c_str()),
-            AMDSMI_STATUS_NOT_FOUND);
+  ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.memory_usage.vram_mem, 10ULL << 20);
+}
+
+TEST(SystemUnit, GetSelfInfoReturnsNotFoundWhenNoClients) {
+  ScopedFakeFdinfo fake;
+  ScopedFd non_drm(kRenderNode), sibling(kSiblingNode);
+  fake->text[sibling.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
+
+  amdsmi_proc_info_t info{};
+  EXPECT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_NOT_FOUND);
+}
+
+TEST(SystemUnit, GetSelfInfoSkipsDescriptorClosedDuringRead) {
+  ScopedFakeFdinfo fake;
+  ScopedFd closed(kRenderNode), mine(kRenderNode);
+  fake->status[closed.get()] = AMDSMI_STATUS_NOT_FOUND;
+  fake->text[mine.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
+
+  amdsmi_proc_info_t info{};
+  ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.memory_usage.vram_mem, 10ULL << 20);
 }
 
 TEST(SystemUnit, GetSelfInfoPropagatesReadFailure) {
-  ScopedTempDir fdinfo_dir;
-  ScopedTempDir fd_dir;
-  ASSERT_FALSE(fdinfo_dir.path().empty());
-  // A numeric directory cannot be read as an fdinfo file.
-  ASSERT_TRUE(fs::create_directory(fdinfo_dir.path() / "99"));
-  fs::create_directories(fd_dir.path());
-  std::error_code ec;
-  fs::create_symlink(kRenderNode, fd_dir.path() / "99", ec);
-  ASSERT_FALSE(ec) << ec.message();
+  ScopedFakeFdinfo fake;
+  ScopedFd failing(kRenderNode), mine(kRenderNode);
+  fake->status[failing.get()] = AMDSMI_STATUS_FILE_ERROR;
+  fake->text[mine.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
 
   amdsmi_proc_info_t info{};
-  EXPECT_EQ(gpuvsmi_get_self_info(DeviceNumber(kRenderNode), info, fdinfo_dir.slash_path().c_str(),
-                                  fd_dir.slash_path().c_str()),
-            AMDSMI_STATUS_FILE_ERROR);
+  EXPECT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_FILE_ERROR);
+}
+
+TEST(SystemUnit, GetSelfInfoRejectsInvalidCounters) {
+  ScopedFakeFdinfo fake;
+  ScopedFd mine(kRenderNode), sibling(kSiblingNode);
+  fake->text[mine.get()] = AmdgpuClient("1", "garbage", /*use_client_id=*/true);
+  fake->text[sibling.get()] = AmdgpuClient("2", "20 MiB", /*use_client_id=*/true);
+
+  amdsmi_proc_info_t info{};
+  EXPECT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_UNEXPECTED_DATA);
+  // Bad data on another device does not fail this one.
+  ASSERT_EQ(GetSelfInfo(kSiblingNode, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.memory_usage.vram_mem, 20ULL << 20);
 }
 
 TEST(SystemUnit, GetGpuProcessInfoSelfPublicApi) {
@@ -223,20 +236,15 @@ TEST(SystemUnit, GetGpuProcessInfoSelfPublicApi) {
       "renderD" + std::to_string(kRender) + "/dev",
       std::to_string(major(render_dev)) + ":" + std::to_string(minor(render_dev)) + "\n");
 
-  ScopedTempDir fdinfo_dir;
-  ScopedTempDir fd_dir;
-  ASSERT_FALSE(fdinfo_dir.path().empty());
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "7", kRenderNode,
-                AmdgpuClient("1", "12 MiB", /*use_client_id=*/true));
-  WriteFdClient(fdinfo_dir.path(), fd_dir.path(), "8", kSiblingNode,
-                AmdgpuClient("2", "20 MiB", /*use_client_id=*/true));
+  ScopedFakeFdinfo fake;
+  ScopedFd mine(kRenderNode), sibling(kSiblingNode);
+  fake->text[mine.get()] = AmdgpuClient("1", "12 MiB", /*use_client_id=*/true);
+  fake->text[sibling.get()] = AmdgpuClient("2", "20 MiB", /*use_client_id=*/true);
 
   FakeKfdTopology topology(tree);
-  amd::smi::testing::ScopedOverride<std::string> fdinfo_guard(
-      amd::smi::test_hooks::SelfFdinfoDir, amd::smi::test_hooks::SetSelfFdinfoDir,
-      fdinfo_dir.slash_path());
-  amd::smi::testing::ScopedOverride<std::string> fd_guard(
-      amd::smi::test_hooks::SelfFdDir, amd::smi::test_hooks::SetSelfFdDir, fd_dir.slash_path());
+  amd::smi::testing::ScopedOverride<SelfFdinfoReader> reader_guard(
+      amd::smi::test_hooks::SelfFdinfoReaderHook, amd::smi::test_hooks::SetSelfFdinfoReaderHook,
+      ReadFakeFdinfo);
 
   EXPECT_EQ(amdsmi_get_gpu_process_info_self(topology.handle(kNode), nullptr), AMDSMI_STATUS_INVAL);
 

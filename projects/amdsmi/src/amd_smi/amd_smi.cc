@@ -6407,8 +6407,7 @@ amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle process
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  return gpuvsmi_get_self_info(render_dev, *info, amd::smi::test_hooks::SelfFdinfoDir().c_str(),
-                               amd::smi::test_hooks::SelfFdDir().c_str());
+  return gpuvsmi_get_self_info(render_dev, *info, amd::smi::test_hooks::SelfFdinfoReaderHook());
 }
 
 amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,

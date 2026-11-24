@@ -13,8 +13,10 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_DRM_FDINFO_PARSER_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_DRM_FDINFO_PARSER_H_
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -32,25 +34,52 @@ struct DrmClientUsage {
   uint64_t cpu = 0;   // bytes
   uint64_t gfx_ns = 0;
   uint64_t enc_ns = 0;
+  // False if a counter was present but not a number the kernel would print.
+  bool valid = true;
 };
 
-// Parse "<number>[ <unit>]" as the kernel prints sizes: no unit, KiB, or MiB.
-inline bool ParseDrmSize(const std::string& value, uint64_t* bytes) {
-  std::istringstream in(value);
-  uint64_t number = 0;
-  std::string unit;
-  if (!(in >> number)) return false;
-  in >> unit;
-  if (unit.empty()) {
-    *bytes = number;
-  } else if (unit == "KiB") {
-    *bytes = number << 10;
-  } else if (unit == "MiB") {
-    *bytes = number << 20;
+// Parse "<number>[ <unit>]", requiring the whole string to match. Rejects
+// signs, overflow and trailing text.
+inline bool ParseDrmNumberWithUnit(const std::string& value, uint64_t* number, std::string* unit) {
+  if (value.empty() || value[0] < '0' || value[0] > '9') return false;
+  errno = 0;
+  char* end = nullptr;
+  const unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
+  if (errno == ERANGE) return false;
+  const std::string rest(end);
+  if (rest.empty()) {
+    unit->clear();
+  } else if (rest[0] == ' ' && rest.find(' ', 1) == std::string::npos) {
+    *unit = rest.substr(1);
   } else {
     return false;
   }
+  *number = parsed;
   return true;
+}
+
+// Parse a size as the kernel prints it: no unit, KiB, or MiB.
+inline bool ParseDrmSize(const std::string& value, uint64_t* bytes) {
+  uint64_t number = 0;
+  std::string unit;
+  if (!ParseDrmNumberWithUnit(value, &number, &unit)) return false;
+  unsigned shift = 0;
+  if (unit == "KiB") {
+    shift = 10;
+  } else if (unit == "MiB") {
+    shift = 20;
+  } else if (!unit.empty()) {
+    return false;
+  }
+  if (number > (std::numeric_limits<uint64_t>::max() >> shift)) return false;
+  *bytes = number << shift;
+  return true;
+}
+
+// Parse an engine time, which the kernel prints as "<time> ns".
+inline bool ParseDrmEngineTime(const std::string& value, uint64_t* ns) {
+  std::string unit;
+  return ParseDrmNumberWithUnit(value, ns, &unit) && unit == "ns";
 }
 
 inline DrmClientUsage ParseDrmFdinfo(const std::string& text) {
@@ -66,19 +95,32 @@ inline DrmClientUsage ParseDrmFdinfo(const std::string& text) {
     auto it = fields.find(key);
     return it == fields.end() ? std::string() : it->second;
   };
+  DrmClientUsage usage;
+  // An absent counter reads as 0; a present one must parse.
+  auto counter = [&](const std::string& key, uint64_t* value,
+                     bool (*parse)(const std::string&, uint64_t*)) {
+    *value = 0;
+    auto it = fields.find(key);
+    if (it == fields.end()) return false;
+    if (!parse(it->second, value)) {
+      *value = 0;
+      usage.valid = false;
+    }
+    return true;
+  };
   auto memory = [&](const std::string& region) {
     uint64_t bytes = 0;
-    if (!ParseDrmSize(get("drm-total-" + region), &bytes)) {
-      ParseDrmSize(get("drm-memory-" + region), &bytes);
+    if (!counter("drm-total-" + region, &bytes, ParseDrmSize)) {
+      counter("drm-memory-" + region, &bytes, ParseDrmSize);
     }
     return bytes;
   };
   auto engine_ns = [&](const std::string& engine) {
-    // "<time> ns"
-    return static_cast<uint64_t>(std::strtoull(get("drm-engine-" + engine).c_str(), nullptr, 10));
+    uint64_t ns = 0;
+    counter("drm-engine-" + engine, &ns, ParseDrmEngineTime);
+    return ns;
   };
 
-  DrmClientUsage usage;
   usage.driver = get("drm-driver");
   usage.client = get("drm-client-id");
   if (usage.client.empty()) usage.client = get("pasid");

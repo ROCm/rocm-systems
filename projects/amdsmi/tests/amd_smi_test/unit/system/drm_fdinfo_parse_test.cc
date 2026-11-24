@@ -79,6 +79,29 @@ TEST(SystemUnit, ParseDrmSizeHandlesKernelUnits) {
   EXPECT_EQ(bytes, 5ULL << 20);
   EXPECT_FALSE(amd::smi::ParseDrmSize("", &bytes));
   EXPECT_FALSE(amd::smi::ParseDrmSize("5 PiB", &bytes));
+  EXPECT_FALSE(amd::smi::ParseDrmSize("garbage", &bytes));
+  EXPECT_FALSE(amd::smi::ParseDrmSize("-5", &bytes));
+  EXPECT_FALSE(amd::smi::ParseDrmSize("5 KiB extra", &bytes));
+  EXPECT_FALSE(amd::smi::ParseDrmSize("18446744073709551616", &bytes));
+  EXPECT_FALSE(amd::smi::ParseDrmSize("17592186044416 MiB", &bytes));
+}
+
+// A present counter that does not parse marks the client invalid instead of
+// reading as zero, and does not fall back to the resident drm-memory-*.
+TEST(SystemUnit, ParseDrmFdinfoFlagsInvalidCounters) {
+  const auto bad_total = amd::smi::ParseDrmFdinfo(
+      "drm-driver:\tamdgpu\n"
+      "drm-total-vram:\tgarbage\n"
+      "drm-memory-vram:\t56 KiB\n");
+  EXPECT_FALSE(bad_total.valid);
+  EXPECT_EQ(bad_total.vram, 0ULL);
+
+  const auto bad_engine = amd::smi::ParseDrmFdinfo(
+      "drm-driver:\tamdgpu\n"
+      "drm-engine-gfx:\t12 parsecs\n");
+  EXPECT_FALSE(bad_engine.valid);
+
+  EXPECT_TRUE(amd::smi::ParseDrmFdinfo(kAmdgpuFdinfo).valid);
 }
 
 // Files that are not DRM clients (pipes, sockets) parse to an empty driver.
