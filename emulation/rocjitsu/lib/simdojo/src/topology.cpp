@@ -3,7 +3,10 @@
 
 #include "simdojo/sim/topology.h"
 
+#include "simdojo/sim/protocol_port.h"
+
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <numeric>
 #include <random>
@@ -36,13 +39,7 @@ util::FailureOr<Component *> resolve_comp(CompositeComponent *root, const std::s
   return cur;
 }
 
-Port *find_or_create_port(Component *comp, const std::string &name) {
-  for (auto &p : comp->ports()) {
-    if (p->name() == name) {
-      return p.get();
-    }
-  }
-
+std::unique_ptr<Port> make_inferred_port(Component *comp, const std::string &name) {
   auto dir = PortDirection::OUT;
   auto proto = PortProtocol::UNTYPED;
 
@@ -75,7 +72,7 @@ Port *find_or_create_port(Component *comp, const std::string &name) {
   }
 
   auto pid = static_cast<PortID>(comp->ports().size());
-  return comp->add_port(std::make_unique<Port>(name, pid, comp, dir, proto));
+  return std::make_unique<Port>(name, pid, comp, dir, proto);
 }
 
 util::FailureOr<Port *> resolve_port_impl(CompositeComponent *root, const std::string &path,
@@ -95,19 +92,25 @@ util::FailureOr<Port *> resolve_port_impl(CompositeComponent *root, const std::s
       return p.get();
     }
   }
-  return find_or_create_port(comp, pn);
+  return comp->add_port(make_inferred_port(comp, pn));
 }
 
-void validate_link_ports([[maybe_unused]] Port *src, [[maybe_unused]] Port *dst) {
-  // Validate port protocol compatibility (UNTYPED matches anything).
-  assert((src->protocol() == PortProtocol::UNTYPED || dst->protocol() == PortProtocol::UNTYPED ||
+bool compatible(const Port *src, const Port *dst) {
+  if (!src || !dst) {
+    return false;
+  }
+  if (src->protocol() == PortProtocol::SPECIALIZED ||
+      dst->protocol() == PortProtocol::SPECIALIZED) {
+    const auto *out = dynamic_cast<const ProtocolPort *>(src);
+    const auto *in = dynamic_cast<const ProtocolPort *>(dst);
+    return out && in && !out->link() && !in->link() && out->direction() == PortDirection::OUT &&
+           in->direction() == PortDirection::IN && out->protocol_name() == in->protocol_name() &&
+           out->message_type() == in->message_type();
+  }
+  return (src->protocol() == PortProtocol::UNTYPED || dst->protocol() == PortProtocol::UNTYPED ||
           src->protocol() == dst->protocol()) &&
-         "link endpoints must have compatible protocols");
-  // Validate port direction: link goes from OUT to IN (or UNTYPED).
-  assert((src->direction() == PortDirection::OUT || src->protocol() == PortProtocol::UNTYPED) &&
-         "link source must be an OUT port");
-  assert((dst->direction() == PortDirection::IN || dst->protocol() == PortProtocol::UNTYPED) &&
-         "link destination must be an IN port");
+         (src->direction() == PortDirection::OUT || src->protocol() == PortProtocol::UNTYPED) &&
+         (dst->direction() == PortDirection::IN || dst->protocol() == PortProtocol::UNTYPED);
 }
 
 } // namespace
@@ -126,7 +129,9 @@ util::FailureOr<ClockDomain *> Topology::add_clock_domain(std::string name, uint
 }
 
 Link *Topology::add_link(Port *src, Port *dst, Tick latency, uint32_t weight) {
-  validate_link_ports(src, dst);
+  if (!compatible(src, dst)) {
+    return nullptr;
+  }
 
   auto link = std::make_unique<Link>(next_link_id_++, src, dst, latency);
   link->set_weight(weight);
@@ -139,7 +144,9 @@ Link *Topology::add_link(Port *src, Port *dst, Tick latency, uint32_t weight) {
 
 QueuedLink *Topology::add_queued_link(Port *src, Port *dst, Tick latency, size_t capacity,
                                       uint32_t weight) {
-  validate_link_ports(src, dst);
+  if (!compatible(src, dst)) {
+    return nullptr;
+  }
 
   auto link = std::make_unique<QueuedLink>(next_link_id_++, src, dst, latency, capacity);
   link->set_weight(weight);
@@ -153,6 +160,10 @@ QueuedLink *Topology::add_queued_link(Port *src, Port *dst, Tick latency, size_t
 std::pair<Link *, Link *> Topology::add_bidirectional_link(Port *a_out, Port *b_in, Port *b_out,
                                                            Port *a_in, Tick fwd_latency,
                                                            Tick rev_latency, uint32_t weight) {
+  if (!compatible(a_out, b_in) || !compatible(b_out, a_in) ||
+      (a_out->protocol() == PortProtocol::SPECIALIZED && (a_out == b_out || b_in == a_in))) {
+    return {};
+  }
   Link *fwd = add_link(a_out, b_in, fwd_latency, weight);
   Link *rev = add_link(b_out, a_in, rev_latency, weight);
   return {fwd, rev};
@@ -208,15 +219,38 @@ util::Result Topology::wire_links(const std::vector<LinkSpec> &specs, ExecMode m
   if (!root_) {
     return emit_error.emit() << "wire_links: topology has no root";
   }
+  std::unordered_set<const Port *> claimed;
   for (const auto &ls : specs) {
+    std::array<Port *, 2> ports{};
+    std::array<std::unique_ptr<Port>, 2> inferred;
+    size_t i = 0;
     for (const auto *path : {&ls.src, &ls.dst}) {
-      auto last = path->rfind('.');
+      const auto last = path->rfind('.');
       if (last == std::string::npos) {
         return emit_error.emit() << "Port path needs '.': " << *path;
       }
-      if (resolve_comp(root_.get(), path->substr(0, last), emit_error).failed()) {
+      auto owner = resolve_comp(root_.get(), path->substr(0, last), emit_error);
+      if (owner.failed()) {
         return util::Result::failure();
       }
+      const auto name = path->substr(last + 1);
+      for (const auto &port : owner.value()->ports()) {
+        if (port->name() == name) {
+          ports[i] = port.get();
+          break;
+        }
+      }
+      if (!ports[i]) {
+        inferred[i] = make_inferred_port(owner.value(), name);
+        ports[i] = inferred[i].get();
+      }
+      if (ports[i]->protocol() == PortProtocol::SPECIALIZED && !claimed.insert(ports[i]).second) {
+        return emit_error.emit() << "Port already claimed: " << *path;
+      }
+      ++i;
+    }
+    if (!compatible(ports[0], ports[1])) {
+      return emit_error.emit() << "Incompatible link endpoints: " << ls.src << " -> " << ls.dst;
     }
   }
   for (const auto &ls : specs) {

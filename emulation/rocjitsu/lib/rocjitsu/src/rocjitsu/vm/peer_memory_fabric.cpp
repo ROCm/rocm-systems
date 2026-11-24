@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
+
+#include "simdojo/sim/protocol_port.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -22,7 +24,7 @@
 namespace rocjitsu {
 using amdgpu::VmAccessOutcome;
 
-class FabricEndpoint::Request {
+class PeerMemoryFabric::Request {
 public:
   enum class EffectPhase : uint8_t { Queued, Entered, Committing, Done, Revoked };
 
@@ -58,9 +60,9 @@ public:
   // Protected by State::mutex. A retry may be Queued while its prior target
   // handler still uses request_reservation.
   bool active_handler = false;
-  std::vector<std::byte> payload;
-  std::vector<std::byte> response;
-  std::vector<std::byte> effect_response;
+  std::shared_ptr<const std::vector<std::byte>> payload;
+  std::shared_ptr<const std::vector<std::byte>> response;
+  std::shared_ptr<std::vector<std::byte>> effect_response;
   std::optional<simdojo::BackingLineVersions::ReadStamp> read_stamp;
   std::mutex mutex;
   VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
@@ -72,10 +74,10 @@ public:
   std::atomic<bool> cancelled{false};
 };
 
-class FabricEndpoint::State {
+class PeerMemoryFabric::State {
 public:
   std::mutex mutex;
-  FabricEndpoint *owner = nullptr;
+  PeerMemoryFabric *owner = nullptr;
   bool accepting = false;
   uint64_t generation = 0;
   uint64_t next_id = 0;
@@ -112,39 +114,40 @@ public:
   }
 };
 
-class FabricEndpoint::WireMessage final : public simdojo::Message {
+class PeerMemoryFabric::PeerMemoryMessage final : public simdojo::Message {
 public:
-  WireMessage(uint64_t id, size_t route, size_t position, int step, bool response, bool write,
-              VmAccessOutcome outcome, std::vector<std::byte> bytes)
-      : id(id), route(route), position(position), step(step), response(response), write(write),
-        outcome(outcome), bytes(std::move(bytes)) {
-    header().sequence_num = id;
-    header().op = response ? simdojo::MessageOp::RESPONSE
-                           : (write ? simdojo::MessageOp::WRITE : simdojo::MessageOp::READ);
-    header().size_bytes = static_cast<uint32_t>(this->bytes.size());
+  static constexpr std::string_view protocol_name = "rocjitsu.peer-memory";
+  using Bytes = std::shared_ptr<const std::vector<std::byte>>;
+
+  PeerMemoryMessage(uint64_t request_id, size_t route, size_t position, int step,
+                    simdojo::MessageOp op, VmAccessOutcome outcome, Bytes bytes)
+      : route(route), position(position), step(step), outcome(outcome), bytes(std::move(bytes)) {
+    header().sequence_num = request_id;
+    header().op = op;
+    header().size_bytes = this->bytes ? static_cast<uint32_t>(this->bytes->size()) : 0;
   }
 
-  uint64_t id;
   size_t route;
   size_t position;
   int step;
-  bool response;
-  bool write;
   VmAccessOutcome outcome;
-  std::vector<std::byte> bytes;
+  Bytes bytes;
 };
 
-class FabricEndpoint::Node final : public simdojo::Component {
+class PeerMemoryFabric::Router final : public simdojo::Component {
 public:
-  Node(FabricEndpoint &fabric, std::string endpoint_id, size_t ordinal)
+  Router(PeerMemoryFabric &fabric, std::string endpoint_id, size_t ordinal)
       : Component("endpoint" + std::to_string(ordinal)), fabric_(fabric),
         endpoint_id_(std::move(endpoint_id)) {
     set_weight(0);
   }
 
+  using Output = simdojo::TypedPort<PeerMemoryMessage, simdojo::PortDirection::OUT>;
+  using Input = simdojo::TypedPort<PeerMemoryMessage, simdojo::PortDirection::IN>;
+
   struct EdgePorts {
-    simdojo::Port *out = nullptr;
-    simdojo::Port *in = nullptr;
+    Output *out = nullptr;
+    Input *in = nullptr;
   };
 
   EdgePorts add_edge(const std::string &neighbor) {
@@ -154,22 +157,15 @@ public:
     }
     const auto ordinal = edges_.size();
     const auto out_id = static_cast<simdojo::PortID>(ports().size());
-    auto *out = add_port(std::make_unique<simdojo::Port>("out" + std::to_string(ordinal), out_id,
-                                                         this, simdojo::PortDirection::OUT,
-                                                         simdojo::PortProtocol::MEMORY));
+    auto *out = add_port(std::make_unique<Output>("out" + std::to_string(ordinal), out_id, this));
     const auto in_id = static_cast<simdojo::PortID>(ports().size());
-    auto *in = add_port(std::make_unique<simdojo::Port>("in" + std::to_string(ordinal), in_id, this,
-                                                        simdojo::PortDirection::IN,
-                                                        simdojo::PortProtocol::MEMORY));
-    in->set_handler([this](simdojo::Tick, simdojo::Message *message) {
-      if (auto *wire = dynamic_cast<WireMessage *>(message)) {
-        fabric_.receive(*this, *wire);
-      }
-    });
+    auto *in = add_port(std::make_unique<Input>("in" + std::to_string(ordinal), in_id, this));
+    in->set_handler(
+        [this](simdojo::Tick, PeerMemoryMessage &packet) { fabric_.receive(*this, packet); });
     return edges_.emplace(neighbor, EdgePorts{out, in}).first->second;
   }
 
-  simdojo::Port *out_to(const std::string &neighbor) const {
+  Output *out_to(const std::string &neighbor) const {
     const auto found = edges_.find(neighbor);
     return found == edges_.end() ? nullptr : found->second.out;
   }
@@ -177,18 +173,18 @@ public:
   const std::string &endpoint_id() const { return endpoint_id_; }
 
 private:
-  FabricEndpoint &fabric_;
+  PeerMemoryFabric &fabric_;
   std::string endpoint_id_;
   std::unordered_map<std::string, EdgePorts> edges_;
 };
 
-struct FabricEndpoint::Route {
+struct PeerMemoryFabric::Route {
   uint32_t source_gpu_id = 0;
   uint32_t target_gpu_id = 0;
-  std::vector<Node *> nodes;
+  std::vector<Router *> nodes;
 };
 
-class FabricEndpoint::Operation final : public amdgpu::VmDeferredTransfer {
+class PeerMemoryFabric::Operation final : public amdgpu::VmDeferredTransfer {
 public:
   Operation(std::shared_ptr<State> state, std::shared_ptr<Request> request)
       : state_(std::move(state)), request_(std::move(request)) {}
@@ -230,10 +226,10 @@ public:
       }
     }
     if (request_->outcome == VmAccessOutcome::Complete && !request_->write) {
-      if (result.size() < request_->response.size()) {
+      if (result.size() < request_->response->size()) {
         return VmAccessOutcome::Malformed;
       }
-      std::copy(request_->response.begin(), request_->response.end(), result.begin());
+      std::copy(request_->response->begin(), request_->response->end(), result.begin());
     }
     return request_->outcome;
   }
@@ -258,10 +254,11 @@ public:
       return VmAccessOutcome::Unavailable;
     }
     if (request_->effect_outcome == VmAccessOutcome::Complete && !request_->write) {
-      if (result.size() < request_->effect_response.size()) {
+      if (result.size() < request_->effect_response->size()) {
         return VmAccessOutcome::Malformed;
       }
-      std::copy(request_->effect_response.begin(), request_->effect_response.end(), result.begin());
+      std::copy(request_->effect_response->begin(), request_->effect_response->end(),
+                result.begin());
     }
     return request_->effect_outcome;
   }
@@ -294,10 +291,13 @@ private:
   std::atomic<bool> submitted_{false};
 };
 
-std::unique_ptr<FabricEndpoint>
-FabricEndpoint::create(std::vector<config::SystemPeerRoute> routes,
-                       std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains,
-                       util::DiagnosticEmitter emit_error) {
+PeerMemoryFabric::PeerMemoryFabric(std::vector<config::SystemPeerRoute> routes)
+    : PeerMemoryFabric(std::move(routes), {}) {}
+
+std::unique_ptr<PeerMemoryFabric> PeerMemoryFabric::create(
+    std::vector<config::SystemPeerRoute> routes,
+    std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains,
+    util::DiagnosticEmitter emit_error) {
   std::unordered_set<const amdgpu::DeviceCacheCoherence *> seen_domains;
   for (const std::shared_ptr<amdgpu::DeviceCacheCoherence> &domain : coherence_domains) {
     if (!domain || !seen_domains.insert(domain.get()).second) {
@@ -305,11 +305,11 @@ FabricEndpoint::create(std::vector<config::SystemPeerRoute> routes,
       return nullptr;
     }
   }
-  return std::unique_ptr<FabricEndpoint>(
-      new FabricEndpoint(std::move(routes), std::move(coherence_domains)));
+  return std::unique_ptr<PeerMemoryFabric>(
+      new PeerMemoryFabric(std::move(routes), std::move(coherence_domains)));
 }
 
-FabricEndpoint::FabricEndpoint(
+PeerMemoryFabric::PeerMemoryFabric(
     std::vector<config::SystemPeerRoute> routes,
     std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains)
     : CompositeComponent("fabric"), routes_(std::move(routes)),
@@ -318,12 +318,12 @@ FabricEndpoint::FabricEndpoint(
   inbox_event_.set_handler([this](simdojo::Tick, simdojo::Message *) { service_inbox(); });
 }
 
-FabricEndpoint::~FabricEndpoint() { shutdown(); }
+PeerMemoryFabric::~PeerMemoryFabric() { shutdown(); }
 
 util::Result
-FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
-                                          amdgpu::PreparedWritebackResolver resolver,
-                                          util::DiagnosticEmitter emit_error) {
+PeerMemoryFabric::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
+                                            amdgpu::PreparedWritebackResolver resolver,
+                                            util::DiagnosticEmitter emit_error) {
   if (wired_ || !resolver || domains.size() != coherence_domains_.size()) {
     return emit_error.emit() << "fabric cache writeback domains are incomplete";
   }
@@ -344,12 +344,12 @@ FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain>
   return util::Result::success();
 }
 
-void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
+void PeerMemoryFabric::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
   if (wired_) {
     return;
   }
   wired_ = true;
-  std::unordered_map<std::string, Node *> nodes;
+  std::unordered_map<std::string, Router *> nodes;
   for (const auto &projected : routes_) {
     if (projected.endpoints.size() < 2 ||
         projected.endpoints.size() > config::kMaxPeerRouteEndpoints ||
@@ -368,8 +368,8 @@ void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
     for (const auto &id : projected.endpoints) {
       auto found = nodes.find(id);
       if (found == nodes.end()) {
-        auto child = std::make_unique<Node>(*this, id, nodes.size());
-        Node *node = child.get();
+        auto child = std::make_unique<Router>(*this, id, nodes.size());
+        Router *node = child.get();
         add_child(std::move(child));
         found = nodes.emplace(id, node).first;
       }
@@ -391,8 +391,8 @@ void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
   std::set<std::pair<std::string, std::string>> wired_edges;
   for (const auto &route : wired_routes_) {
     for (size_t i = 1; i < route.nodes.size(); ++i) {
-      Node &a = *route.nodes[i - 1];
-      Node &b = *route.nodes[i];
+      Router &a = *route.nodes[i - 1];
+      Router &b = *route.nodes[i];
       if (!wired_edges.insert(std::minmax(a.endpoint_id(), b.endpoint_id())).second) {
         continue;
       }
@@ -406,7 +406,7 @@ void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
   }
 }
 
-util::Result FabricEndpoint::initialize(util::DiagnosticEmitter) {
+util::Result PeerMemoryFabric::initialize(util::DiagnosticEmitter) {
   std::lock_guard lock(state_->mutex);
   ++state_->generation;
   state_->owner = this;
@@ -414,7 +414,7 @@ util::Result FabricEndpoint::initialize(util::DiagnosticEmitter) {
   return util::Result::success();
 }
 
-void FabricEndpoint::shutdown() {
+void PeerMemoryFabric::shutdown() {
   std::unordered_map<uint64_t, std::shared_ptr<Request>> pending;
   {
     std::lock_guard lock(state_->mutex);
@@ -461,7 +461,7 @@ void FabricEndpoint::shutdown() {
   }
 }
 
-FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_read(
+PeerMemoryFabric::PreparedTransfer PeerMemoryFabric::prepare_read(
     uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
     std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect,
     PreEffectAdmission admit_pre_effect, TraceOrigin trace_origin) {
@@ -470,7 +470,7 @@ FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_read(
                  trace_origin);
 }
 
-FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_write(
+PeerMemoryFabric::PreparedTransfer PeerMemoryFabric::prepare_write(
     uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
     std::span<const std::byte> bytes, std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate,
     EffectAdmission admit_effect, PreEffectAdmission admit_pre_effect, TraceOrigin trace_origin) {
@@ -479,14 +479,14 @@ FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_write(
                  trace_origin);
 }
 
-FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_local_write(
+PeerMemoryFabric::PreparedTransfer PeerMemoryFabric::prepare_local_write(
     uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing, std::span<const std::byte> bytes,
     std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect) {
   return prepare(owner_gpu_id, owner_gpu_id, std::move(backing), bytes, true, true,
                  std::move(effect_gate), std::move(admit_effect), {}, {});
 }
 
-bool FabricEndpoint::can_route(uint32_t requester_gpu_id, uint32_t owner_gpu_id) const {
+bool PeerMemoryFabric::can_route(uint32_t requester_gpu_id, uint32_t owner_gpu_id) const {
   if (requester_gpu_id == owner_gpu_id) {
     return false;
   }
@@ -505,7 +505,7 @@ bool FabricEndpoint::can_route(uint32_t requester_gpu_id, uint32_t owner_gpu_id)
   return found;
 }
 
-FabricEndpoint::PreparedTransfer FabricEndpoint::prepare(
+PeerMemoryFabric::PreparedTransfer PeerMemoryFabric::prepare(
     uint32_t requester_gpu_id, uint32_t owner_gpu_id, amdgpu::GpuBackingRange backing,
     std::span<const std::byte> bytes, bool write, bool local,
     std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect,
@@ -560,9 +560,10 @@ FabricEndpoint::PreparedTransfer FabricEndpoint::prepare(
   request->admit_effect = std::move(admit_effect);
   request->admit_pre_effect = std::move(admit_pre_effect);
   if (write) {
-    request->payload.assign(bytes.begin(), bytes.end());
+    request->payload = std::make_shared<const std::vector<std::byte>>(bytes.begin(), bytes.end());
   } else {
-    request->effect_response.resize(request->backing.storage.extent());
+    request->effect_response =
+        std::make_shared<std::vector<std::byte>>(request->backing.storage.extent());
   }
   {
     std::lock_guard lock(state_->mutex);
@@ -579,7 +580,7 @@ FabricEndpoint::PreparedTransfer FabricEndpoint::prepare(
           .operation = std::make_unique<Operation>(state_, std::move(request))};
 }
 
-void FabricEndpoint::service_inbox() {
+void PeerMemoryFabric::service_inbox() {
   std::deque<std::shared_ptr<Request>> requests;
   {
     std::lock_guard lock(state_->mutex);
@@ -600,26 +601,28 @@ void FabricEndpoint::service_inbox() {
       continue;
     }
     const Route &route = wired_routes_[request->route_index];
-    WireMessage message(request->id, request->route_index, request->source_position, request->step,
-                        false, request->write, VmAccessOutcome::Unavailable, request->payload);
+    PeerMemoryMessage message(request->id, request->route_index, request->source_position,
+                              request->step,
+                              request->write ? simdojo::MessageOp::WRITE : simdojo::MessageOp::READ,
+                              VmAccessOutcome::Unavailable, request->payload);
     send_next(route, message);
   }
 }
 
-void FabricEndpoint::send_next(const Route &route, WireMessage &message) {
+void PeerMemoryFabric::send_next(const Route &route, PeerMemoryMessage &message) {
   const auto next = static_cast<int64_t>(message.position) + message.step;
   if (next < 0 || static_cast<size_t>(next) >= route.nodes.size()) {
-    finish(message.id, VmAccessOutcome::Faulted);
+    finish(message.header().sequence_num, VmAccessOutcome::Faulted);
     return;
   }
-  Node *current = route.nodes[message.position];
-  Node *neighbor = route.nodes[static_cast<size_t>(next)];
-  simdojo::Port *out = current->out_to(neighbor->endpoint_id());
+  Router *current = route.nodes[message.position];
+  Router *neighbor = route.nodes[static_cast<size_t>(next)];
+  auto *out = current->out_to(neighbor->endpoint_id());
   if (!out || !out->link()) {
-    finish(message.id, VmAccessOutcome::Faulted);
+    finish(message.header().sequence_num, VmAccessOutcome::Faulted);
     return;
   }
-  auto next_message = std::make_unique<WireMessage>(message);
+  auto next_message = std::make_unique<PeerMemoryMessage>(message);
   next_message->position = static_cast<size_t>(next);
   // A received packet carries the preceding link's send tick. Every new hop
   // must be stamped at the current owner tick so clocked latency accumulates.
@@ -627,7 +630,7 @@ void FabricEndpoint::send_next(const Route &route, WireMessage &message) {
   out->send(std::move(next_message));
 }
 
-bool FabricEndpoint::retry_request(const std::shared_ptr<Request> &request) noexcept {
+bool PeerMemoryFabric::retry_request(const std::shared_ptr<Request> &request) noexcept {
   try {
     std::lock_guard lock(state_->mutex);
     if (!state_->accepting || state_->owner != this || state_->generation != request->generation ||
@@ -659,39 +662,39 @@ bool FabricEndpoint::retry_request(const std::shared_ptr<Request> &request) noex
   }
 }
 
-void FabricEndpoint::receive(Node &node, WireMessage &message) {
+void PeerMemoryFabric::receive(Router &node, PeerMemoryMessage &message) {
   std::shared_ptr<Request> request;
   {
     std::lock_guard lock(state_->mutex);
-    auto found = state_->pending.find(message.id);
+    auto found = state_->pending.find(message.header().sequence_num);
     if (found == state_->pending.end()) {
       return;
     }
     request = found->second;
     state_->diagnostics.handler_thread = std::this_thread::get_id();
-    if (message.response) {
+    if (message.header().op == simdojo::MessageOp::RESPONSE) {
       ++state_->diagnostics.response_messages;
     } else {
       ++state_->diagnostics.request_messages;
     }
   }
   if (request->cancelled.load(std::memory_order_acquire)) {
-    finish(message.id, VmAccessOutcome::Revoked);
+    finish(message.header().sequence_num, VmAccessOutcome::Revoked);
     return;
   }
   if (message.route != request->route_index || message.route >= wired_routes_.size()) {
-    finish(message.id, VmAccessOutcome::Faulted);
+    finish(message.header().sequence_num, VmAccessOutcome::Faulted);
     return;
   }
   const Route &route = wired_routes_[message.route];
   if (message.position >= route.nodes.size() || route.nodes[message.position] != &node ||
       message.header().completion_status != nullptr || message.payload() != 0 ||
       message.header().addr != 0) {
-    finish(message.id, VmAccessOutcome::Faulted);
+    finish(message.header().sequence_num, VmAccessOutcome::Faulted);
     return;
   }
 
-  if (message.response) {
+  if (message.header().op == simdojo::MessageOp::RESPONSE) {
     if (message.position == request->source_position) {
       {
         std::lock_guard lock(request->mutex);
@@ -705,14 +708,14 @@ void FabricEndpoint::receive(Node &node, WireMessage &message) {
       amdgpu::MemoryIngressPermit reservation;
       {
         std::lock_guard lock(state_->mutex);
-        state_->pending.erase(message.id);
+        state_->pending.erase(message.header().sequence_num);
         reservation = state_->take_idle_reservation(*request);
       }
       state_->finish_reservation_release(reservation);
       return;
     }
     if (message.step != -request->step) {
-      finish(message.id, VmAccessOutcome::Faulted);
+      finish(message.header().sequence_num, VmAccessOutcome::Faulted);
       return;
     }
     send_next(route, message);
@@ -720,7 +723,7 @@ void FabricEndpoint::receive(Node &node, WireMessage &message) {
   }
 
   if (message.step != request->step) {
-    finish(message.id, VmAccessOutcome::Faulted);
+    finish(message.header().sequence_num, VmAccessOutcome::Faulted);
     return;
   }
   if (message.position != request->target_position) {
@@ -731,15 +734,15 @@ void FabricEndpoint::receive(Node &node, WireMessage &message) {
   handle_target(request, &message);
 }
 
-void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
-                                   const WireMessage *message) {
+void PeerMemoryFabric::handle_target(const std::shared_ptr<Request> &request,
+                                     const PeerMemoryMessage *message) {
   // Admit the handler under the endpoint mutex before calling frontend state.
   // Shutdown may retire a request after receive() or service_inbox() selects
   // it but before this handler starts. Count the whole handler so shutdown
   // cannot pass its drain in the gap before the effect guard enters.
   class PreAdmissionGuard {
   public:
-    PreAdmissionGuard(State &state, const FabricEndpoint *owner, const Request &request)
+    PreAdmissionGuard(State &state, const PeerMemoryFabric *owner, const Request &request)
         : state_(state) {
       std::lock_guard lock(state_.mutex);
       if (state_.accepting && state_.owner == owner && state_.generation == request.generation &&
@@ -979,9 +982,10 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
                                                     std::memory_order_acq_rel)) {
           return;
         }
-        const bool complete = request->write
-                                  ? request->backing.storage.write(request->payload)
-                                  : request->backing.storage.read(request->effect_response);
+        const bool complete =
+            request->write
+                ? request->backing.storage.write(message ? *message->bytes : *request->payload)
+                : request->backing.storage.read(*request->effect_response);
         if (complete) {
           if (request->write) {
             writer.advance(request->backing.storage.backing_id(), request->backing.storage.offset(),
@@ -1053,23 +1057,23 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
   // handler still owns the active guard while the release callback runs.
   request->request_reservation.reset();
   VmAccessOutcome effect_outcome;
-  std::vector<std::byte> response;
   const Request::EffectPhase phase = request->phase.load(std::memory_order_acquire);
   effect_outcome =
       phase == Request::EffectPhase::Done ? request->effect_outcome : VmAccessOutcome::Revoked;
-  if (phase == Request::EffectPhase::Done) {
-    response = request->effect_response;
-  }
   if (request->local) {
     finish(request->id, effect_outcome);
   } else {
-    WireMessage reply(message->id, message->route, message->position, -message->step, true,
-                      request->write, effect_outcome, std::move(response));
+    PeerMemoryMessage::Bytes bytes;
+    if (effect_outcome == VmAccessOutcome::Complete) {
+      bytes = request->effect_response;
+    }
+    PeerMemoryMessage reply(request->id, message->route, message->position, -message->step,
+                            simdojo::MessageOp::RESPONSE, effect_outcome, std::move(bytes));
     send_next(wired_routes_[message->route], reply);
   }
 }
 
-void FabricEndpoint::finish(uint64_t request_id, VmAccessOutcome outcome) {
+void PeerMemoryFabric::finish(uint64_t request_id, VmAccessOutcome outcome) {
   std::shared_ptr<Request> request;
   amdgpu::MemoryIngressPermit reservation;
   {
@@ -1098,7 +1102,7 @@ void FabricEndpoint::finish(uint64_t request_id, VmAccessOutcome outcome) {
   }
 }
 
-FabricEndpoint::Diagnostics FabricEndpoint::diagnostics() const {
+PeerMemoryFabric::Diagnostics PeerMemoryFabric::diagnostics() const {
   Diagnostics snapshot;
   {
     std::lock_guard lock(state_->mutex);
@@ -1117,7 +1121,7 @@ FabricEndpoint::Diagnostics FabricEndpoint::diagnostics() const {
   return snapshot;
 }
 
-bool FabricEndpoint::enable_effect_trace(std::size_t capacity) {
+bool PeerMemoryFabric::enable_effect_trace(std::size_t capacity) {
   std::lock_guard lock(state_->mutex);
   if (capacity == 0 || state_->effect_trace_capacity != 0 || state_->diagnostics.submissions != 0 ||
       !state_->pending.empty()) {

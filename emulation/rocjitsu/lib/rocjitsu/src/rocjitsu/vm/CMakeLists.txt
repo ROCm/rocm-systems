@@ -5,7 +5,7 @@ rj_add_object_library(rocjitsu_vm
     soc.cpp
     virtual_machine.cpp
     topology_assembly.cpp
-    fabric_endpoint.cpp
+    peer_memory_fabric.cpp
     rj_vm.cpp
     rj_vm_config.cpp
     amdgpu/partitioning.cpp

@@ -48,7 +48,7 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
-class FabricEndpoint;
+class PeerMemoryFabric;
 class VirtualMachine;
 
 namespace amdgpu {
@@ -857,9 +857,9 @@ private:
   /// endpoint child can be destroyed.
   struct PeerEndpointAccess {
     std::mutex mutex;
-    FabricEndpoint *endpoint = nullptr;
+    PeerMemoryFabric *endpoint = nullptr;
   };
-  void attach_fabric_endpoint(FabricEndpoint *endpoint) {
+  void attach_peer_memory_fabric(PeerMemoryFabric *endpoint) {
     std::lock_guard lock(peer_endpoint_access_->mutex);
     peer_endpoint_access_->endpoint = endpoint;
   }

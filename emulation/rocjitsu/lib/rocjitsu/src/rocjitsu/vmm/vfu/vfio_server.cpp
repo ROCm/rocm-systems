@@ -8,7 +8,7 @@
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/topology_assembly.h"
 #include "rocjitsu/vm/virtual_machine.h"
@@ -369,8 +369,8 @@ int run_vfio_server_impl(const std::string &config_path,
       return 1;
     }
   }
-  if (trace_effects && (machine_ptr->fabric_endpoint() == nullptr ||
-                        !machine_ptr->fabric_endpoint()->enable_effect_trace(200000))) {
+  if (trace_effects && (machine_ptr->peer_memory_fabric() == nullptr ||
+                        !machine_ptr->peer_memory_fabric()->enable_effect_trace(200000))) {
     util::Logger::warn("vfu: cannot enable the bounded fabric effect trace");
     return 1;
   }
@@ -457,7 +457,7 @@ int run_vfio_server_impl(const std::string &config_path,
           loaded.devices.empty() ? loaded.device : loaded.devices[gpu_index];
       if (socket_paths.size() > 1 &&
           !hosts.back()->enable_target_grants(target_grants, static_cast<uint32_t>(gpu_index),
-                                              identity.gpu_id, machine_ptr->fabric_endpoint())) {
+                                              identity.gpu_id, machine_ptr->peer_memory_fabric())) {
         util::Logger::warn("vfu: cannot bind the target-grant server group");
         status = 1;
         break;
@@ -658,8 +658,8 @@ int run_vfio_server_impl(const std::string &config_path,
   // before the engine object later destroys that topology.
   engine_run.stop();
   if (socket_paths.size() > 1) {
-    if (FabricEndpoint *fabric = machine_ptr->fabric_endpoint()) {
-      const FabricEndpoint::Diagnostics diagnostics = fabric->diagnostics();
+    if (PeerMemoryFabric *fabric = machine_ptr->peer_memory_fabric()) {
+      const PeerMemoryFabric::Diagnostics diagnostics = fabric->diagnostics();
       for (const auto &edge : diagnostics.directed_effects) {
         util::Logger::warn(
             std::format("vfu: committed fabric effects {} -> {}: reads={}, writes={}, "

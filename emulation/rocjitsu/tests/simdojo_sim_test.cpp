@@ -7,6 +7,7 @@
 
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/pacing_controller.h"
+#include "simdojo/sim/protocol_port.h"
 #include "simdojo/sim/simulation.h"
 #include "util/spinlock.h"
 
@@ -540,6 +541,42 @@ TEST(TopologyAdmissionTest, InvalidLaterLinkDoesNotCreatePortsOrLinks) {
   EXPECT_FALSE(diagnostic.message().empty());
   EXPECT_TRUE(topology.links().empty());
   EXPECT_EQ(leaf->ports().size(), ports_before);
+}
+
+namespace {
+struct ProbePacket : Message {
+  static constexpr std::string_view protocol_name = "test.probe";
+};
+struct OtherProbePacket : Message {
+  static constexpr std::string_view protocol_name = "test.probe";
+};
+} // namespace
+
+TEST(TopologyAdmissionTest, SpecializedPortsRejectAnIncompatibleBatchBeforePublishing) {
+  Topology topology;
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *leaf = root->add_child(std::make_unique<CounterComponent>("leaf", 0));
+  topology.set_root(std::move(root));
+  auto *out =
+      leaf->add_port(std::make_unique<TypedPort<ProbePacket, PortDirection::OUT>>("out", 0, leaf));
+  auto *in =
+      leaf->add_port(std::make_unique<TypedPort<ProbePacket, PortDirection::IN>>("in", 1, leaf));
+  auto *other = leaf->add_port(
+      std::make_unique<TypedPort<OtherProbePacket, PortDirection::IN>>("other", 2, leaf));
+  const auto port_count = leaf->ports().size();
+  EXPECT_TRUE(topology
+                  .wire_links({{"leaf.new_out", "leaf.new_in"}, {"leaf.out", "leaf.other"}},
+                              ExecMode::FUNCTIONAL)
+                  .failed());
+  EXPECT_EQ(leaf->ports().size(), port_count);
+  EXPECT_TRUE(topology.links().empty());
+  EXPECT_FALSE(topology.add_queued_link(out, other, 1, 4));
+  auto [forward, reverse] = topology.add_bidirectional_link(out, in, out, other, 1, 1);
+  EXPECT_FALSE(forward);
+  EXPECT_FALSE(reverse);
+  ASSERT_TRUE(topology.add_link(out, in, 1));
+  EXPECT_FALSE(topology.add_link(out, in, 1));
+  EXPECT_EQ(out->peer(), in);
 }
 
 TEST(TopologyAdmissionTest, EmptyAssignerPreservesPartitions) {

@@ -8,7 +8,7 @@
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -913,7 +913,7 @@ rj_status_t teardown(rj_daemon_t *daemon) {
     daemon->engine_thread.join();
   }
   if (daemon->trace_fabric_effects) {
-    auto *fabric = daemon->vm->vm ? daemon->vm->vm->fabric_endpoint() : nullptr;
+    auto *fabric = daemon->vm->vm ? daemon->vm->vm->peer_memory_fabric() : nullptr;
     if (!fabric) {
       util::Logger::warn("kfd: fabric effect trace unavailable during teardown");
     } else {
@@ -1076,7 +1076,7 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
   }
 
   if (options && (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) != 0) {
-    auto *fabric = created->vm->vm ? created->vm->vm->fabric_endpoint() : nullptr;
+    auto *fabric = created->vm->vm ? created->vm->vm->peer_memory_fabric() : nullptr;
     const size_t capacity = options->fabric_trace_capacity == 0
                                 ? static_cast<size_t>(RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY)
                                 : options->fabric_trace_capacity;

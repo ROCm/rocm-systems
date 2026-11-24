@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file fabric_endpoint.h
+/// @file peer_memory_fabric.h
 /// @brief Owned local ScaleUp and Infinity Fabric requests and their Simdojo graph.
 
 #pragma once
@@ -40,7 +40,7 @@ namespace rocjitsu {
 /// owner dirty data without guest HDP maintenance. This is a functional
 /// coherence guarantee for UC PCIe peer mappings, not a validation of guest
 /// cache-maintenance ordering or native xGMI/cacheable peer behavior.
-class FabricEndpoint final : public simdojo::CompositeComponent {
+class PeerMemoryFabric final : public simdojo::CompositeComponent {
 public:
   /// @brief Authority retained from owner-thread admission through the effect.
   /// @details A KFD provider may select every live alias of the backing and
@@ -134,20 +134,23 @@ public:
     std::thread::id handler_thread;
   };
 
+  /// Build direct-backing peer routes without SoC cache-coherence domains.
+  explicit PeerMemoryFabric(std::vector<config::SystemPeerRoute> routes);
+
   /// @brief Build local peer routes with optional SoC cache-coherence domains.
   /// @details Distinct, non-null domains are supplied in stable local SoC
   /// order. Each admitted backing effect quiesces all supplied domains on the
   /// fabric owner thread. An empty list retains the manual endpoint's
   /// direct-backing behavior.
   /// @returns Null and emits a diagnostic if the supplied domains are invalid.
-  [[nodiscard]] static std::unique_ptr<FabricEndpoint>
+  [[nodiscard]] static std::unique_ptr<PeerMemoryFabric>
   create(std::vector<config::SystemPeerRoute> routes,
          std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains = {},
          util::DiagnosticEmitter emit_error = {});
-  ~FabricEndpoint() override;
+  ~PeerMemoryFabric() override;
 
-  FabricEndpoint(const FabricEndpoint &) = delete;
-  FabricEndpoint &operator=(const FabricEndpoint &) = delete;
+  PeerMemoryFabric(const PeerMemoryFabric &) = delete;
+  PeerMemoryFabric &operator=(const PeerMemoryFabric &) = delete;
 
   /// Add a separate incoming and outgoing port for every physical edge.
   /// Call once after this component has been attached to the topology root.
@@ -201,14 +204,14 @@ public:
 private:
   friend class VirtualMachine;
 
-  FabricEndpoint(std::vector<config::SystemPeerRoute> routes,
-                 std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains);
+  PeerMemoryFabric(std::vector<config::SystemPeerRoute> routes,
+                   std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains);
 
   class Request;
   class State;
   struct Route;
-  class WireMessage;
-  class Node;
+  class PeerMemoryMessage;
+  class Router;
   class Operation;
 
   [[nodiscard]] PreparedTransfer
@@ -217,11 +220,11 @@ private:
           std::shared_ptr<amdgpu::VmTransferEffectGate> effect_gate, EffectAdmission admit_effect,
           PreEffectAdmission admit_pre_effect, TraceOrigin trace_origin);
   void service_inbox();
-  void receive(Node &node, WireMessage &message);
-  void handle_target(const std::shared_ptr<Request> &request, const WireMessage *message);
+  void receive(Router &node, PeerMemoryMessage &message);
+  void handle_target(const std::shared_ptr<Request> &request, const PeerMemoryMessage *message);
   [[nodiscard]] bool retry_request(const std::shared_ptr<Request> &request) noexcept;
   void finish(uint64_t request_id, amdgpu::VmAccessOutcome outcome);
-  void send_next(const Route &route, WireMessage &message);
+  void send_next(const Route &route, PeerMemoryMessage &message);
   /// Configure the KFD-backed production provider before wiring the endpoint.
   [[nodiscard]] util::Result
   configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,

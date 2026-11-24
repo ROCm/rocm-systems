@@ -24,7 +24,7 @@
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 #include "simdojo/components/backing_store_id.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -3969,18 +3969,18 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
                (!local_write && !endpoint->endpoint->can_route(gpu_id, admission.owner_gpu_id))) {
              return {};
            }
-           FabricEndpoint *const selected_endpoint = endpoint->endpoint;
+           PeerMemoryFabric *const selected_endpoint = endpoint->endpoint;
            auto backing = granted.backing.retain_backing_range();
            const bool cacheable_peer = admission.cacheable;
-           FabricEndpoint::EffectAdmission admit_effect =
+           PeerMemoryFabric::EffectAdmission admit_effect =
                [proc, gpu_id, address, size, alias, endpoint_access, selected_endpoint,
                 effect_access, peer_alias_ingress, peer_line_gate,
                 address_space = std::move(address_space), execution = executing_access,
                 cacheable_peer, local_write,
                 gate](const amdgpu::GpuBackingRange &effect_backing, bool effect_write,
                       amdgpu::MemoryIngressPermit &request_reservation)
-               -> FabricEndpoint::EffectAuthority {
-             FabricEndpoint::EffectAuthority result;
+               -> PeerMemoryFabric::EffectAuthority {
+             PeerMemoryFabric::EffectAuthority result;
              result.outcome = amdgpu::VmAccessOutcome::Revoked;
              if (execution.revoked() || execution.cache_identity() == 0 ||
                  execution.retain_effect_gate() != gate || !effect_backing.storage ||

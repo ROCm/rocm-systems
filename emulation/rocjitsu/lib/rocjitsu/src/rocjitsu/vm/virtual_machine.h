@@ -22,7 +22,7 @@ class Topology;
 
 namespace rocjitsu {
 
-class FabricEndpoint;
+class PeerMemoryFabric;
 
 /// @brief AMDGPU virtual machine modeling a complete SoC hierarchy.
 ///
@@ -70,8 +70,8 @@ public:
   const Config &config() const { return config_; }
 
   SimulatedKfd *driver() { return driver_.get(); }
-  FabricEndpoint *fabric_endpoint() { return fabric_endpoint_; }
-  const FabricEndpoint *fabric_endpoint() const { return fabric_endpoint_; }
+  PeerMemoryFabric *peer_memory_fabric() { return peer_memory_fabric_; }
+  const PeerMemoryFabric *peer_memory_fabric() const { return peer_memory_fabric_; }
   const config::SystemPeerRouteProjection &peer_routes() const { return peer_routes_; }
 
   /// Copy the selected node's executable route projection before LoadedConfig
@@ -90,7 +90,7 @@ private:
   std::vector<SoC *> socs_;
   std::unique_ptr<SimulatedKfd> driver_;
   config::SystemPeerRouteProjection peer_routes_;
-  FabricEndpoint *fabric_endpoint_ = nullptr;
+  PeerMemoryFabric *peer_memory_fabric_ = nullptr;
 };
 
 } // namespace rocjitsu

@@ -530,7 +530,7 @@ add_executable(
     coalesced_lane_runs_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
-    fabric_endpoint_test.cpp
+    peer_memory_fabric_test.cpp
     backing_line_versions_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
