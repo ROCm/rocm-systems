@@ -67,6 +67,17 @@ __device__ __forceinline__ void StorePartial(uint8_t *dst, const void *src, uint
     }
 }
 
+// Reads the first `num_bytes` (at most 16) bytes at `src` into a uint4 whose other bytes are 0. The odd-left YUYV
+// kernels read their source from one pixel before the crop, so in the last block of a row they read only the
+// macropixels holding its pixels: a whole 16-byte block could run past the end of the decoded surface.
+__device__ __forceinline__ uint4 LoadPartialUint4(const uint8_t *src, uint32_t num_bytes) {
+    uint32_t words[4] = {0, 0, 0, 0};
+    for (uint32_t i = 0; i < num_bytes; i++) {
+        words[i >> 2] |= static_cast<uint32_t>(src[i]) << ((i & 3) * 8);
+    }
+    return make_uint4(words[0], words[1], words[2], words[3]);
+}
+
 __global__ void ColorConvertRGBAToRGBBatchedKernel(const RGBAToRGBBatchParams *params, uint32_t n_images) {
     if (hipBlockIdx_z >= n_images) return;
     const RGBAToRGBBatchParams &p = params[hipBlockIdx_z];
@@ -222,13 +233,21 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
         uint32_t dst_y_idx = y * dst_luma_stride_in_bytes + (x << 3);
         uint32_t dst_uv_idx = y * dst_chroma_stride_in_bytes + (x << 2);
 
-        uint4 src = *((uint4 *)(&src_image[src_idx]));
+        uint4 src;
+        if (kOddLeft && p.dst_width - (x << 3) < 8) {
+            // Pixel i of the block is the luma at byte 2 * i + 2, so the last block of a row reads only the
+            // macropixels up to the one holding its last pixel.
+            src = LoadPartialUint4(&src_image[src_idx], ((p.dst_width - (x << 3)) >> 1) * 4 + 4);
+        } else {
+            src = *((uint4 *)(&src_image[src_idx]));
+        }
         uint2 dst_y;
         uint32_t dst_u, dst_v;
 
         if (kOddLeft) {
             // Luma is bytes 2, 4, ..., 16; chroma still comes from the macropixels holding pixels 0, 2, 4 and 6.
-            float y8 = static_cast<float>(src_image[src_idx + 16]);
+            // Byte 16 is the luma of pixel 7, so it is read only when the block has all 8 pixels.
+            float y8 = (p.dst_width - (x << 3) >= 8) ? static_cast<float>(src_image[src_idx + 16]) : 0.0f;
             dst_y.x = hipPack(make_float4(hipUnpack2(src.x), hipUnpack0(src.y), hipUnpack2(src.y), hipUnpack0(src.z)));
             dst_y.y = hipPack(make_float4(hipUnpack2(src.z), hipUnpack0(src.w), hipUnpack2(src.w), y8));
         } else {
