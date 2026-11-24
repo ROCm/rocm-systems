@@ -13,10 +13,16 @@
 #include "gin_sdma_devtime.h"  // shared device-side (wall_clock64) timing scaffold
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
-// v4u / v4u_gptr / RCCL_SYSTEM_SYNCSCOPE / RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS for
+// v4u / RCCL_HAVE_SYS_B128 / RCCL_STORE_B128_SYS for
 // nontemporal system-scope b128 peer stores (the store path LL/host use over xGMI).
 #include "nccl_device/rccl_ptr.h"
 #include "rccl_vector_types.h"
+// RCCL headers installed before RCCL_STORE_B128_SYS was added lack it.
+#ifndef RCCL_HAVE_SYS_B128
+#define RCCL_HAVE_SYS_B128 RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define RCCL_STORE_B128_SYS(ptr, vec)                                          \
+  __builtin_amdgcn_global_store_b128((v4u_gptr)(ptr), (vec), RCCL_SYSTEM_SYNCSCOPE)
+#endif
 #include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
@@ -444,14 +450,14 @@ __device__ void BroadcastLocalCopy(T* dst, const T* src, size_t count, int tid, 
 }
 
 // Streaming peer copy: like BroadcastLocalCopy but the DESTINATION stores use
-// nontemporal system-scope 128-bit writes (__builtin_amdgcn_global_store_b128 with
-// RCCL_SYSTEM_SYNCSCOPE) instead of cached uint4 stores. This is the store path the
-// LL A2A primitive and the host ring use to push xGMI writes at full rate without
-// polluting cache; the source read stays a normal (cached) load since it is local.
+// nontemporal system-scope 128-bit writes (RCCL_STORE_B128_SYS) instead of
+// cached uint4 stores. This is the store path the LL A2A primitive and the
+// host ring use to push xGMI writes at full rate without polluting cache; the
+// source read stays a normal (cached) load since it is local.
 // Falls back to BroadcastLocalCopy when the b128 builtin or 16B alignment is absent.
 template <typename T>
 __device__ void BroadcastPeerCopyStream(T* dst, const T* src, size_t count, int tid, int nthreads) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   const size_t bytes = count * sizeof(T);
   const uintptr_t da = (uintptr_t)dst;
   const uintptr_t sa = (uintptr_t)src;
@@ -462,7 +468,7 @@ __device__ void BroadcastPeerCopyStream(T* dst, const T* src, size_t count, int 
     for (size_t i = tid; i < n4; i += nthreads) {
       union { uint4 u; v4u v; } cv;
       cv.u = s4[i];
-      __builtin_amdgcn_global_store_b128((v4u_gptr)(d4 + i), cv.v, RCCL_SYSTEM_SYNCSCOPE);
+      RCCL_STORE_B128_SYS(d4 + i, cv.v);
     }
     return;
   }

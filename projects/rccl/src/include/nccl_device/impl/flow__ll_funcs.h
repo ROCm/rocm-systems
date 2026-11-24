@@ -99,7 +99,7 @@ NCCL_DEVICE_INLINE T ncclFlowLLLoadData(T* src) {
   } value;
 #if defined(__HIP_PLATFORM_AMD__)
   // [RCCL] Same user-buffer read as Primitives<ProtoLL>::load (src/device/prims_ll.h).
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   if (sizeof(T) == 1) value.u1 = __scoped_atomic_load_n((u8_gptr)src, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   else if (sizeof(T) == 2) value.u2 = __scoped_atomic_load_n((u16_gptr)src, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
   else if (sizeof(T) == 4) value.u4 = __scoped_atomic_load_n((u32_gptr)src, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);

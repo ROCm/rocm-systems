@@ -18,7 +18,7 @@
 
 #define __syncwarp()
 
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
 #define STORE(DST, SRC) \
   { \
     __scoped_atomic_store_n((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \

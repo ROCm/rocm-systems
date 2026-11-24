@@ -67,7 +67,7 @@
 // gfx1250 Simple's start-of-step barrier orders LDS only (stepStartBarrier()). Needs system-scope slot loads, no TDM.
 // -DENABLE_SIMPLE_STORE_FREE_STEP_START=OFF keeps the full-fence barrier.
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START) && \
-  !(defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  !(defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE) && RCCL_HAVE_SYS_B128
 #define RCCL_SIMPLE_STORE_FREE_STEP_START 1
 #else
 #define RCCL_SIMPLE_STORE_FREE_STEP_START 0

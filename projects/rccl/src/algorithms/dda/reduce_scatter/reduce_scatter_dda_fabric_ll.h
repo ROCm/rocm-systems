@@ -142,7 +142,7 @@ __launch_bounds__(512)
       int spins = 0;
       while (true) {
         // Each pass reads every line, sharing one wait; a fresh line cannot change before this call ends.
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
         asm volatile("" ::: "memory");
         v4u got[kDdaLLRsRecvBatch];
 #pragma unroll
@@ -150,7 +150,7 @@ __launch_bounds__(512)
           if (base + i < nRanks) {
             const int peer = (selfRank + base + i) % nRanks;
             const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-            got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+            got[i] = RCCL_LOAD_B128_SYS(src);
           }
         }
         // Keep every load above this point so the flag tests cannot sink one between them.

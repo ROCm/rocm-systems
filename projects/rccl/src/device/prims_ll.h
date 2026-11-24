@@ -90,7 +90,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       v4u v;
       uint32_t w[4];
     } value;
-    value.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+    value.v = RCCL_LOAD_B128_SYS(src);
     line.data1 = value.w[0];
     line.flag1 = value.w[1];
     line.data2 = value.w[2];
@@ -289,7 +289,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     // Sibling DPX partitions share a die, so a plain store can retire into the
     // writer's cache and never reach the peer's poll. One b128 keeps data+flag
     // in a single transaction. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
-    __builtin_amdgcn_global_store_b128((v4u_gptr)dst, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
+    RCCL_STORE_B128_SYS(dst, i4.v4u);
 #else
     // Comm FIFO buffers are uncached. storeLLLine emits a plain 128-bit vector
     // store, or a system-scope release pair on gfx1200/gfx1201.
@@ -319,7 +319,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       uint64_t u8;
     };
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
     if (sizeof(U) == 1)
       u1 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED,
                                   __MEMORY_SCOPE_SYSTEM);
@@ -380,7 +380,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     };
     elt = val;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
     if (sizeof(U) == 1)
       __scoped_atomic_store_n((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED,
                               __MEMORY_SCOPE_SYSTEM);

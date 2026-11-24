@@ -28,7 +28,7 @@ namespace RcclUnitTesting
 
 // This TU is host code, so rccl_ptr.h takes the no-builtins arm. That is the
 // arm prims_simple.h compiles when DWORDX4_INTRINSICS is OFF.
-static_assert(RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS == 0,
+static_assert(RCCL_HAVE_SYS_B128 == 0,
               "host test must compile the no-builtins post-send fence rule");
 
 // Numeric device archs (comm->cudaArch = 100*major + 10*minor).

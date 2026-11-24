@@ -47,7 +47,7 @@ inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1
     v4u v;
     uint64_t u64[2];
   } u;
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
+  u.v = RCCL_LOAD_B128_SYS(ptr);
   v0 = u.u64[0];
   v1 = u.u64[1];
 #else
@@ -81,7 +81,7 @@ inline __device__ void store128Fifo(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   } u;
   u.u64[0] = v0;
   u.u64[1] = v1;
-  __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
+  RCCL_STORE_B128_SYS(ptr, u.v);
 #else
   store128Plain(ptr, v0, v1);
 #endif
@@ -690,7 +690,7 @@ public:
 #if TDM_LL128_ON
     tdmEnable = ncclShmem.comm.tdmLl128Enable;
 #endif
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && RCCL_LL_FIFO_SYS_SCOPE
+#if RCCL_HAVE_SYS_B128 && RCCL_LL_FIFO_SYS_SCOPE
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
     // Cheap fence waits only for this wave's stores. Plain FIFO stores need the full fence before the tail
