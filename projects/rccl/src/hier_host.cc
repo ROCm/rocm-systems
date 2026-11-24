@@ -262,7 +262,20 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   if (h->scratchBytes < scratchBytes) {
     // Every rank grows on the same call, and one that cannot allocate would skip the ReduceScatter its peers wait in.
     ncclResult_t res = reserveScratch(comm, h, scratchBytes);
-    if (!allRanksReady(comm, &res)) return res;
+    if (!allRanksReady(comm, &res)) {
+      // The ranks may now hold scratch of different sizes and would disagree on the next grow, so every rank drops its
+      // scratch and stops using host-hierarchical AllReduce, as after a failed setup.
+      if (h->scratch != nullptr) {
+        if (h->scratchUsed != nullptr) (void)cudaEventSynchronize(h->scratchUsed);
+        (void)ncclCudaFree(h->scratch, comm->memManager);
+        h->scratch = nullptr;
+        h->scratchBytes = 0;
+      }
+      comm->hostHierState = rcclHostHierFailed;
+      ATTN("Host-hierarchical AllReduce: scratch allocation failed on rank %d (%s), using the default path", comm->rank,
+           ncclGetErrorString(res));
+      return res;
+    }
   }
   char* rsOut = static_cast<char*>(h->scratch);
   char* agIn = doInter ? rsOut + stride : rsOut;

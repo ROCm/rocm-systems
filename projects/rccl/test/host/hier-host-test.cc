@@ -322,8 +322,14 @@ TEST_F(HostHierEnsureTest, ScratchGrowthVotesBeforeTheStages) {
   Children children;
   EnsureReady(&hc, &children);
   ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/-1));
-  const std::vector<std::string> grow = {"vote", "ReduceScatter", "AllReduce", "AllGather"};
-  const std::vector<std::string> fits = {"ReduceScatter", "AllReduce", "AllGather"};
+  // The record of scratchUsed after the AllGather is what a later regrow waits on.
+  ScopedHook record(g_hipEventRecord, [&hc](hipEvent_t event, hipStream_t) {
+    const rcclHostHier* h = hc.comm.hostHier;
+    g_log.push_back(h != nullptr && event == h->scratchUsed ? "record scratchUsed" : "record other");
+    return hipSuccess;
+  });
+  const std::vector<std::string> grow = {"vote", "ReduceScatter", "AllReduce", "AllGather", "record scratchUsed"};
+  const std::vector<std::string> fits = {"ReduceScatter", "AllReduce", "AllGather", "record scratchUsed"};
   for (const auto& [count, expected] : {std::make_pair(kSmallCount, grow), std::make_pair(kSmallCount, fits),
                                         std::make_pair(kLargeCount, grow)}) {
     g_log.clear();
@@ -331,6 +337,16 @@ TEST_F(HostHierEnsureTest, ScratchGrowthVotesBeforeTheStages) {
     EXPECT_EQ(expected, g_log) << "count " << count;
   }
   rcclHostHierTeardown(hc.get());
+}
+
+// After a failed grow vote the ranks may hold scratch of different sizes, so each drops its scratch and the comm stops
+// using the path for good.
+void ExpectPathOffAfterFailedGrow(HierComm* hc) {
+  EXPECT_EQ(rcclHostHierFailed, hc->comm.hostHierState);
+  ASSERT_NE(nullptr, hc->comm.hostHier);
+  EXPECT_EQ(nullptr, hc->comm.hostHier->scratch);
+  EXPECT_EQ(0u, hc->comm.hostHier->scratchBytes);
+  EXPECT_EQ(nullptr, rcclHostHierGetLayout(hc->get())) << "later calls take the default path";
 }
 
 TEST_F(HostHierEnsureTest, PeerFailingScratchGrowthLaunchesNothing) {
@@ -341,6 +357,7 @@ TEST_F(HostHierEnsureTest, PeerFailingScratchGrowthLaunchesNothing) {
   EXPECT_EQ(ncclRemoteError, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(),
                                                    nullptr));
   EXPECT_EQ(std::vector<std::string>{"vote"}, g_log);
+  ExpectPathOffAfterFailedGrow(&hc);
   rcclHostHierTeardown(hc.get());
 }
 
@@ -353,6 +370,32 @@ TEST_F(HostHierEnsureTest, ScratchAllocationFailingHereLaunchesNothing) {
   EXPECT_NE(ncclSuccess, rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(),
                                                nullptr));
   EXPECT_EQ(std::vector<std::string>{"vote"}, g_log) << "this rank still votes, then launches nothing";
+  ExpectPathOffAfterFailedGrow(&hc);
+  rcclHostHierTeardown(hc.get());
+}
+
+// A peer fails the vote after this rank grew: this rank frees its new, unused scratch.
+TEST_F(HostHierEnsureTest, PeerFailingRegrowFreesTheScratchHere) {
+  HierComm hc;
+  Children children;
+  EnsureReady(&hc, &children);
+  {
+    ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/-1));
+    ASSERT_EQ(ncclSuccess,
+              rcclHostHierAllReduce(nullptr, nullptr, kSmallCount, ncclFloat32, ncclSum, hc.get(), nullptr));
+  }
+  ScopedHook vote(g_bootstrapAllGather, LoggedVote(/*failingPeer=*/3));
+  ScopedHook release(g_hipFree, [](void* ptr) {
+    g_log.push_back("free");
+    std::free(ptr);  // DefaultHipExtMallocWithFlags allocates with std::malloc
+    return hipSuccess;
+  });
+  g_log.clear();
+  EXPECT_EQ(ncclRemoteError, rcclHostHierAllReduce(nullptr, nullptr, kLargeCount, ncclFloat32, ncclSum, hc.get(),
+                                                   nullptr));
+  const std::vector<std::string> expected = {"free", "vote", "free"};
+  EXPECT_EQ(expected, g_log) << "the outgrown scratch, the vote, then the new scratch nobody used";
+  ExpectPathOffAfterFailedGrow(&hc);
   rcclHostHierTeardown(hc.get());
 }
 
