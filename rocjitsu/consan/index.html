@@ -2462,11 +2462,12 @@ does not substitute for guest synchronization. These scheduling controls provide
 simulator evidence; physical hardware may schedule unsynchronized accesses
 differently.</p>
 <h2 id="fault-injection">Fault injection<a class="headerlink" href="#fault-injection" title="Permanent link">&para;</a></h2>
-<p>The independent offline fault-injection library can remove a qualified complete
-barrier from an AMDGPU code object. It uses Instrumentor's instruction-replacement
-path and does not require the ConSan compiler, runtime, or analyzer. See
-<a href="../fault-injection/">Fault injection</a> for its architecture, library interface,
-current features, target/wave coverage, and limitations.</p>
+<p>The independent offline <code>rj_code_mutate</code> CLI and its fault-injection library can
+remove a qualified complete barrier from an AMDGPU code object. They use
+Instrumentor's instruction-replacement path and do not require the ConSan
+compiler, runtime, or analyzer. See the <a href="../fault-injection/#command-line-usage">command-line usage</a>
+and <a href="../fault-injection/">Fault injection</a> for the library interface, current
+features, target/wave coverage, and limitations.</p>
 <p>Treat the mutant as a new original image: perform a <strong>fresh ConSan prepare</strong>,
 then execution/capture → analyze. Do not reuse pristine prepared artifacts or
 capture bindings. Drop uses branch-to-NOP trampolines, so emitted ELF file
@@ -2485,6 +2486,24 @@ conditional single-block barrier loop, CFG cycles remain rejected. Native LDS
 access PCs must increase along each path within an iteration; the qualified
 loop uses repeated epochs. Mutation admission and detector admission remain
 independent decisions.</p>
+<p>For this example, reuse the paths and plugin environment from
+<a href="#build-and-setup">Build and setup</a>. Replace <code>original.hsaco</code> and <code>my_kernel</code>
+with a <code>gfx1250</code> workload's input and exact entry containing an admitted
+complete barrier:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">consan_mutant</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_example</span><span class="s2">/mutant.hsaco"</span>
+<span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">/tools/rj_code_mutate"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>DropBarrier<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ordinal<span class="w"> </span><span class="m">0</span><span class="w"> </span>--output<span class="w"> </span><span class="s2">"</span><span class="nv">$consan_mutant</span><span class="s2">"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RJ_CONSAN_ARTIFACT_DIR</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_example</span><span class="s2">/mutant-artifact"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RJ_CONSAN_CAPTURE_PATH</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_example</span><span class="s2">/mutant-capture.bin"</span>
+<span class="s2">"</span><span class="nv">$consan_prepare</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$consan_mutant</span><span class="s2">"</span><span class="w"> </span>gfx1250<span class="w"> </span>my_kernel<span class="w"> </span><span class="s2">"</span><span class="nv">$RJ_CONSAN_ARTIFACT_DIR</span><span class="s2">"</span>
+</code></pre></div>
+<p>If preparation admits the mutant, continue with <a href="#2-execution-and-capture">execution and capture</a>
+using the workload's launch code to load <code>consan_mutant</code> and its matching entry.
+Keep the new artifact and capture bindings above, then run the existing
+<a href="#3-offline-diagnosis">offline diagnosis</a> command. The plugin's original image
+is now the mutant; it must not bind the pristine image or its prepared artifact.</p>
 <p>Mutation success reports emission after input qualification. It establishes
 neither execution nor detector qualification: removing a barrier does not prove
 that a race occurs, that a particular execution observes it, or that ConSan

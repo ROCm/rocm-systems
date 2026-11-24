@@ -1287,6 +1287,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#command-line-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-line usage
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1729,6 +1740,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#command-line-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-line usage
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1754,11 +1776,10 @@
 for experiments with synchronization failures. It runs offline on the host:
 callers supply an image, select a qualified operation, and receive a mutant
 image or a typed error. It neither initializes HSA nor dispatches GPU work.</p>
-<p>The current interface is an internal C++ library. A mutation CLI is planned
-separately. Persistent selection files and replay bundles are not provided and
-have no committed delivery scope. ConSan is an optional consumer of the output;
-the library builds and runs its host tests with the ConSan compiler, runtime,
-and analyzer disabled.</p>
+<p>The internal C++ library and <code>rj_code_mutate</code> CLI perform the same mutation.
+ConSan is an optional consumer of the output; both the library and CLI build
+and run host tests with the ConSan compiler, runtime, and analyzer disabled.
+There is no persistent selection, manifest, or replay-bundle format.</p>
 <h2 id="architecture-and-lifetime">Architecture and lifetime<a class="headerlink" href="#architecture-and-lifetime" title="Permanent link">&para;</a></h2>
 <p>This flow shows the current complete-barrier Drop path and its shared DBI
 transaction boundary:</p>
@@ -1860,9 +1881,9 @@ See <a href="../isa-target-providers/">ISA target providers</a> and the
 <td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h">Instrumentor contract</a>, <a href="../dbi-design/">DBI design</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/checked_text_edits_test.cpp">transaction tests</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/instrumentor_replacement_test.cpp">replacement tests</a></td>
 </tr>
 <tr>
-<td>Mutation CLI</td>
-<td>Planned separately; this library does not provide an executable.</td>
-<td>—</td>
+<td>Offline CLI</td>
+<td>Implemented: list current-input sites and emit one complete Drop using the same selector and library.</td>
+<td><a href="#command-line-usage">usage</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tools/rj_code_mutate.cpp">frontend</a>, <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">integration tests</a></td>
 </tr>
 <tr>
 <td>Persistent selection files and replay bundles</td>
@@ -2126,6 +2147,102 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjits
 </code></pre></div>
 <p>These digests document fixture provenance; they are not a production mutation
 request requirement or evidence of physical GPU or detector qualification.</p>
+<h2 id="command-line-usage">Command-line usage<a class="headerlink" href="#command-line-usage" title="Permanent link">&para;</a></h2>
+<p>The mutation library and CLI are included in the normal build. Host integration
+tests require <code>BUILD_TESTING=ON</code>; the mutation tooling does not require the ConSan
+components. From the checkout configured as described in <a href="../building/">Building</a>,
+build the executable and host integration tests:</p>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>--build<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--target<span class="w"> </span>rj_code_mutate<span class="w"> </span>rocjitsu_fault_mutation_cli_tests
+emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span>--help
+emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span>--capabilities
+</code></pre></div>
+<p>List complete logical barriers for one exact kernel entry, then create a new
+mutant file:</p>
+<div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--list
+emulation/rocjitsu/build/tools/rj_code_mutate<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input<span class="w"> </span>original.hsaco<span class="w"> </span>--kernel<span class="w"> </span>my_kernel<span class="w"> </span>--kind<span class="w"> </span>DropBarrier<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ordinal<span class="w"> </span><span class="m">0</span><span class="w"> </span>--output<span class="w"> </span>mutant.hsaco
+</code></pre></div>
+<p>For a <code>gfx1250</code> mutant that meets ConSan's native LDS admission, fresh
+preparation consumes <code>mutant.hsaco</code> as its new original image:</p>
+<div class="highlight"><pre><span></span><code>emulation/rocjitsu/build/tools/rj_consan_prepare<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>mutant.hsaco<span class="w"> </span>gfx1250<span class="w"> </span>my_kernel<span class="w"> </span>mutant-artifact
+</code></pre></div>
+<p>Preparation requires <code>RJ_BUILD_CONSAN_COMPILER=ON</code>. Use the new artifact when
+executing the workload with <code>mutant.hsaco</code>, then capture and analyze normally.
+See the <a href="../consan/#fault-injection">ConSan mutation workflow</a> for fresh artifact
+and capture bindings and links to the existing execution/analysis steps.</p>
+<p><code>--kernel</code> requires the exact descriptor-derived spelling. After shared image
+analysis succeeds, an unknown name reports the descriptor entries in its
+diagnostic. Those names do not promise that each entry passes barrier
+qualification.</p>
+<p><code>DropBarrier</code> is currently the only kind and is also the default. Each listing
+line includes the zero-based logical <code>ordinal</code>, <code>exact</code> first-member byte offset
+relative to <code>.text</code>, concrete target, section index, form, ID, scope, and ordered
+<code>members=offset:size,...</code>. A singleton has one member; a split pair has two.
+Coordinates describe only this input and exact entry. They are not reusable
+handles for another image or legacy physical instruction indices.</p>
+<p>Emission redirects each selected member through a NOP trampoline. The mutant's
+text and ELF layout can grow, and descriptor-relative entry fields can change.
+Reparse the output and list its sites again before selecting another mutation.</p>
+<p>Discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
+instead of assigning them a logical ordinal, including when an admitted user
+barrier follows them. CDNA5 cluster ID -3 remains admitted subject to the
+dispatch assumptions described above; listing or mutation does not establish
+that cluster semantics are active.</p>
+<p>Use <code>--exact TEXT-OFFSET</code> to resolve that coordinate into a context-bound library
+selection. Exact takes precedence over <code>--ordinal</code>, including an out-of-range
+ordinal; invalid exact requests fail without fallback. Without either selector,
+ordinal zero selects the first complete barrier. Numbers accept unsigned decimal
+or <code>0x</code> hexadecimal. <code>--target gfx1250</code>, if supplied, asserts the parsed identity
+and never selects a different decoder. Input ABI and wave admission are the
+library's shared DBI checks, without another CLI version gate.</p>
+<p>The input must be a regular extracted code-object file of 1 through 256 MiB.
+The CLI refuses host executables, bundles, archives, relocatable objects, and
+other inputs rejected by the library. Output creation is exclusive: existing
+files, directories, symlinks and hard links (including input aliases) are
+refused. There is no overwrite flag. A failed write or close removes the
+incomplete new output. This is single-file I/O, without a multi-file publication
+protocol or a crash-durability guarantee.</p>
+<p>Exit status is 0 for successful listing/mutation/help/capabilities, 2 for
+argument, read, admission, selection or mutation errors, and 3 for output I/O
+errors. All successful stdout paths flush and check the stream. A completed
+mutant file remains if writing its subsequent assumptions or summary fails;
+status 3 does not guarantee that no output file exists.
+The executable ignores <code>SIGPIPE</code> and <code>SIGXFSZ</code> where available so closed pipes
+and file-size limits reach these I/O checks and incomplete-file cleanup,
+regardless of the caller's signal dispositions.</p>
+<p>Diagnostics go to stderr. Discovery, selection and mutation failures preserve
+the library's typed error as <code>code=NAME</code> before the explanatory message.
+The code names are <code>BadIdentity</code>, <code>UnsupportedTarget</code>, <code>UnsupportedForm</code>,
+<code>AmbiguousSelection</code>, <code>IncompleteSelection</code>, <code>InvalidParameters</code>,
+<code>ValidationFailure</code>, <code>NoCandidates</code> and <code>OrdinalOutOfRange</code>. Runners can classify
+these errors without matching the English message; argument/read diagnostics
+have no typed library code. Library error offsets do not encode whether a
+location is present, so those diagnostic prefixes omit the numeric field.
+An invalid <code>--exact</code> request has an explicitly known coordinate and reports
+<code>code=InvalidParameters offset=N</code>, including when the requested <code>.text</code> byte
+coordinate is zero. Such requests never fall back to an ordinal.</p>
+<p>Successful mutation prints the kind, concrete target, exact coordinate,
+logical/member counts and output byte count to stdout. It also prints each
+returned library assumption to stderr, prefixed by <code>rj_code_mutate: assumption:</code>,
+including convergence and execution-qualification limits and the clustered
+dispatch requirement when applicable. Failure to write these assumptions
+returns status 3 before printing a success summary. The CLI emits only the
+mutant file and does not load HSA or a capture plugin. Mutation success and the
+capability listing make no execution or detector qualification claim.</p>
+<p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/fault_injection/mutation_cli_test.cpp">CLI tests</a> exercise all ten
+rows above using the built executable, compare library and CLI bytes, decode
+selected members independently, reparse the mutant and check unchanged bytes,
+sibling kernels, deterministic repeat output and rejection/I/O paths. The
+symbol-boundary test checks the actual executable for runtime and execution
+provider dependencies. To run the focused suites:</p>
+<div class="highlight"><pre><span></span><code>ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--show-only<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'</span>
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>emulation/rocjitsu/build<span class="w"> </span>--output-on-failure<span class="w"> </span>--no-tests<span class="o">=</span>error<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-R<span class="w"> </span><span class="s1">'FaultMutationCli|FaultDropBarrier|CheckedTextEdits'</span>
+</code></pre></div>
 
 
 
