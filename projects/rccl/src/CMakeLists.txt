@@ -1898,7 +1898,11 @@ if(ENABLE_ROCSHMEM)
   # --hip-link tells amdclang++ to perform the RDC device-link step as part
   # of the final librccl.so link. With the device linker that link is already
   # --hip-link, and rocSHMEM's device code joins RCCL's in its one image.
-  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  # A static librccl.a already carries all of librocshmem.a in rccl_device.o, so
+  # linking it again would export it to consumers and duplicate its symbols.
+  if(NOT ENABLE_DEVICE_LINKER OR BUILD_SHARED_LIBS)
+    target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  endif()
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
   if(NOT ENABLE_DEVICE_LINKER)
     # Full target IDs, not bare names
