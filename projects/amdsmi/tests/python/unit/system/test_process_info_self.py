@@ -24,15 +24,14 @@ def _load_source_package() -> types.ModuleType:
     return package
 
 
-amdsmi = _load_source_package() if _PACKAGE_DIR.is_dir() else None
+# The installed test tree has no py-interface beside it; test the installed package there.
+if _PACKAGE_DIR.is_dir():
+    amdsmi = _load_source_package()
+else:
+    from common.common import amdsmi
 
 
 class TestProcessInfoSelf(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if amdsmi is None:
-            raise unittest.SkipTest(f"amdsmi py-interface source not found at {_PACKAGE_DIR}")
-
     def test_reports_usage(self) -> None:
         wrapper = amdsmi.amdsmi_wrapper
         handle = wrapper.amdsmi_processor_handle()

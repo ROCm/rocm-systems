@@ -5,8 +5,6 @@
 
 #include <string>
 
-#include "amd_smi/impl/fdinfo.h"
-
 // Test hooks: product code reads these instead of hardcoded paths, so a unit test can point it at a
 // fake. Product code only gets the getters here. The setters are declared in the tests' own
 // test_fixture_utils.h, so product code cannot call them, and every hook is hidden so no shared
@@ -30,9 +28,5 @@ AMDSMI_TEST_HOOK const std::string& KfdNodesPathRoot();
 // "/tmp", with no trailing "/". Real discovery writes them, so a test redirects them to keep from
 // leaving files that a later real run on the same host would read.
 AMDSMI_TEST_HOOK const std::string& AppTmpDir();
-
-// Reader amdsmi_get_gpu_process_info_self() uses for the caller's fdinfo files. Defaults to null,
-// which reads /proc/self/fdinfo; a test supplies fake DRM client text for descriptors it opened.
-AMDSMI_TEST_HOOK const SelfFdinfoReader& SelfFdinfoReaderHook();
 
 }  // namespace amd::smi::test_hooks

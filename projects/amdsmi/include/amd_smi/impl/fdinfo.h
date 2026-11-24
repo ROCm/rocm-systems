@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,10 +33,15 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 }  // extern "C"
 #endif
 
-// Reads the fdinfo text of `pinned_fd`, a private duplicate of the calling
-// process's descriptor `listed_fd`, into `text`. Returns
-// AMDSMI_STATUS_NOT_FOUND if the descriptor is gone.
-using SelfFdinfoReader = amdsmi_status_t (*)(int listed_fd, int pinned_fd, std::string* text);
+// Reads the fdinfo text of the calling process's descriptor `fd` into `text`.
+// Returns AMDSMI_STATUS_NOT_FOUND if the descriptor is gone.
+using SelfFdinfoReader = amdsmi_status_t (*)(int fd, std::string* text);
+
+namespace amd::smi::test_hooks {
+// Reader amdsmi_get_gpu_process_info_self() uses for the caller's fdinfo files. Defaults to null,
+// which reads /proc/self/fdinfo; a test supplies fake DRM client text for descriptors it opened.
+AMDSMI_TEST_HOOK const SelfFdinfoReader& SelfFdinfoReaderHook();
+}  // namespace amd::smi::test_hooks
 
 // Populate `info` with the calling process's usage of the DRM render node whose
 // device number is `render_dev`. Only amdgpu clients open on that character

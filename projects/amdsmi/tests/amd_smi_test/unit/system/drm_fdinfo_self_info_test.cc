@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -52,25 +53,26 @@ dev_t DeviceNumber(const char* path) {
   return st.st_rdev;
 }
 
-// What the fake reader returns, keyed by the descriptor number the collector
-// listed. Unlisted descriptors read as a non-DRM file.
+// What the fake reader returns, keyed by descriptor number. Unlisted
+// descriptors read as a non-DRM file.
 struct FakeFdinfo {
   std::map<int, std::string> text;
   std::map<int, amdsmi_status_t> status;
-  // After reading, replace the listed descriptor with a duplicate of this one,
+  // After the first read, replace the descriptor with a duplicate of this one,
   // as another thread closing it and opening a different file would.
   std::map<int, int> reuse_as;
 };
 
 FakeFdinfo* g_fake = nullptr;
 
-amdsmi_status_t ReadFakeFdinfo(int listed_fd, int pinned_fd, std::string* text) {
-  EXPECT_NE(listed_fd, pinned_fd);
-  if (auto it = g_fake->status.find(listed_fd); it != g_fake->status.end()) return it->second;
-  auto it = g_fake->text.find(listed_fd);
+amdsmi_status_t ReadFakeFdinfo(int fd, std::string* text) {
+  if (auto it = g_fake->status.find(fd); it != g_fake->status.end()) return it->second;
+  auto it = g_fake->text.find(fd);
   *text = it == g_fake->text.end() ? "pos:\t0\nflags:\t02\n" : it->second;
-  if (auto reuse = g_fake->reuse_as.find(listed_fd); reuse != g_fake->reuse_as.end()) {
-    EXPECT_EQ(dup2(reuse->second, listed_fd), listed_fd);
+  if (auto reuse = g_fake->reuse_as.find(fd); reuse != g_fake->reuse_as.end()) {
+    EXPECT_EQ(dup2(reuse->second, fd), fd);
+    g_fake->text[fd] = g_fake->text[reuse->second];
+    g_fake->reuse_as.erase(reuse);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -167,17 +169,76 @@ TEST(SystemUnit, GetSelfInfoCountsOnlyTheHandlesRenderNode) {
   EXPECT_EQ(info.memory_usage.vram_mem, 20ULL << 20);
 }
 
-// The device check must see the same open file the fdinfo came from, even if
-// the descriptor number is reused for another device in between.
-TEST(SystemUnit, GetSelfInfoPinsDescriptorAgainstReuse) {
+// A sibling's descriptor number reused for this render node between the fdinfo
+// read and the device check must not count the sibling's client here.
+TEST(SystemUnit, GetSelfInfoSkipsDescriptorReusedForThisDevice) {
   ScopedFakeFdinfo fake;
   ScopedFd mine(kRenderNode), sibling(kSiblingNode);
   fake->text[mine.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
-  fake->reuse_as[mine.get()] = sibling.get();
+  fake->text[sibling.get()] = AmdgpuClient("2", "20 MiB", /*use_client_id=*/true);
+  fake->reuse_as[sibling.get()] = mine.get();
 
   amdsmi_proc_info_t info{};
   ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(info.memory_usage.vram_mem, 10ULL << 20);
+}
+
+TEST(SystemUnit, GetSelfInfoSkipsDescriptorReusedForAnotherDevice) {
+  ScopedFakeFdinfo fake;
+  ScopedFd mine(kRenderNode), sibling(kSiblingNode);
+  fake->text[mine.get()] = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
+  fake->text[sibling.get()] = AmdgpuClient("2", "20 MiB", /*use_client_id=*/true);
+  fake->reuse_as[mine.get()] = sibling.get();
+
+  amdsmi_proc_info_t info{};
+  EXPECT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_NOT_FOUND);
+}
+
+// Kernels 5.14+ print the open file's inode; it must be the one fstat saw.
+TEST(SystemUnit, GetSelfInfoChecksFdinfoInode) {
+  ScopedFakeFdinfo fake;
+  ScopedFd mine(kRenderNode);
+  struct stat st{};
+  ASSERT_EQ(fstat(mine.get(), &st), 0);
+  const std::string client = AmdgpuClient("1", "10 MiB", /*use_client_id=*/true);
+
+  amdsmi_proc_info_t info{};
+  fake->text[mine.get()] = client + "ino:\t" + std::to_string(st.st_ino) + "\n";
+  ASSERT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.memory_usage.vram_mem, 10ULL << 20);
+
+  fake->text[mine.get()] = client + "ino:\t" + std::to_string(st.st_ino + 1) + "\n";
+  EXPECT_EQ(GetSelfInfo(kRenderNode, &info), AMDSMI_STATUS_NOT_FOUND);
+}
+
+// Closing any descriptor of a file releases the process's POSIX record locks on
+// it, so the scan must not open and close its own descriptors for the files it
+// inspects. Another process checks that the lock is still held.
+TEST(SystemUnit, GetSelfInfoKeepsRecordLocks) {
+  char path[] = "/tmp/amdsmi_self_info_lock_XXXXXX";
+  const int locked = mkstemp(path);
+  ASSERT_GE(locked, 0);
+  unlink(path);
+  struct flock lock{};
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  ASSERT_EQ(fcntl(locked, F_SETLK, &lock), 0);
+
+  amdsmi_proc_info_t info{};
+  EXPECT_EQ(gpuvsmi_get_self_info(DeviceNumber(kRenderNode), info), AMDSMI_STATUS_NOT_FOUND);
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    struct flock probe{};
+    probe.l_type = F_WRLCK;
+    probe.l_whence = SEEK_SET;
+    _exit(fcntl(locked, F_GETLK, &probe) == 0 && probe.l_type == F_WRLCK ? 0 : 1);
+  }
+  int wstatus = 0;
+  ASSERT_EQ(waitpid(child, &wstatus, 0), child);
+  EXPECT_TRUE(WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0) << "record lock was released";
+  close(locked);
 }
 
 TEST(SystemUnit, GetSelfInfoReturnsNotFoundWhenNoClients) {
