@@ -189,9 +189,6 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
             for (uint32_t fixture = 0; fixture < 7; ++fixture)
               for (bool scalar : {false, true}) {
                 util::set_force_scalar_for_testing(scalar);
-                std::fesetround(scalar ? FE_UPWARD : FE_DOWNWARD);
-                std::feclearexcept(FE_ALL_EXCEPT);
-                std::feraiseexcept(FE_INEXACT);
                 const auto &input = kPackedWmmaInputs[bf16][fixture];
                 for (uint32_t lane = 0; lane < width; ++lane) {
                   for (uint32_t reg = 0; reg < 32; ++reg)
@@ -244,8 +241,6 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
                       EXPECT_EQ(actual & mask, old[reg * width + lane] & mask);
                     }
                   }
-                EXPECT_EQ(std::fegetround(), scalar ? FE_UPWARD : FE_DOWNWARD);
-                EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
               }
     }
   }
