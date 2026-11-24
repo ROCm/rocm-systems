@@ -256,6 +256,22 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   free(agents_accessible);
   agents_accessible = nullptr;
 
+  /* An interior address must report the mapping, not the queried pointer.
+   * Callers pair the base with sizeInBytes. */
+  ptrInfo = {};
+  ptrInfo.size = sizeof(ptrInfo);
+  num_agents_accessible = 0;
+  void* interior = reinterpret_cast<uint8_t*>(addrRange) + granule_size;
+  ASSERT_SUCCESS(hsa_amd_pointer_info(interior, &ptrInfo, &malloc, &num_agents_accessible,
+                                      &agents_accessible));
+  ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+  ASSERT_EQ(ptrInfo.hostBaseAddress, addrRange);
+  ASSERT_EQ(ptrInfo.agentBaseAddress, addrRange);
+  ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_mem_handle);
+  ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
+
   // Access to each GPU should be None
   for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
     hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_RW;

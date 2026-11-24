@@ -16,6 +16,7 @@ import glob
 import errno
 import pwd
 import stat
+import warnings
 from typing import List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from enum import Enum
@@ -420,6 +421,37 @@ class AMDSMIHelpers:
             return query(device_handle)
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
+
+    def get_gpu_driver_info(self, device_handle) -> dict:
+        """Driver info with the full version and the driver package.
+
+        An older library or amdsmi package only has amdsmi_get_gpu_driver_info(); its module
+        version then stands in for the full version and no package is reported.
+        """
+        get_driver_info_v2 = getattr(amdsmi_interface, "amdsmi_get_gpu_driver_info_v2", None)
+        if get_driver_info_v2 is None:
+            logging.debug("The amdsmi package has no amdsmi_get_gpu_driver_info_v2()")
+        else:
+            try:
+                return get_driver_info_v2(device_handle)
+            except amdsmi_exception.AmdSmiLibraryException as error:
+                if (
+                    error.get_error_code()
+                    != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    raise
+                logging.debug("amdsmi_get_gpu_driver_info_v2() is not supported, trying v1")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            info = amdsmi_interface.amdsmi_get_gpu_driver_info(device_handle)
+        return {
+            **info,
+            "driver_kernel_version": "N/A",
+            "amdgpu_driver_version": "N/A",
+            "driver_build_version": "N/A",
+            "driver_full_version": info["driver_version"],
+            "driver_package": "N/A",
+        }
 
     def get_gpu_cuid_info(self, device_handle):
         """CUID presentation metadata."""

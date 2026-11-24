@@ -1714,7 +1714,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(version_parser)
 
         # help info
-        gpu_version_help = "Display the current amdgpu driver version"
+        gpu_version_help = "Display the current amdgpu driver version and package"
         cpu_version_help = "Display the current amd_hsmp or hsmp_acpi driver version"
         nic_version_help = "Display the current nic driver version"
 
@@ -1786,7 +1786,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         bus_help = "All bus information"
         vbios_help = "All video bios/IFWI information (if available)"
         limit_help = "All limit metric values (i.e. power and thermal limits)"
-        driver_help = "Displays driver version"
+        driver_help = "Displays driver version and package"
         vram_help = "All vram information"
         cache_help = "All cache information"
         board_help = "All board information"

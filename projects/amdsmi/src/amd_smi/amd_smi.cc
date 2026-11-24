@@ -6540,6 +6540,66 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   return status;
 }
 
+// rpm is slow to start, so the amdgpu-kmod versions of the running kernel are kept. A failed
+// lookup is asked again after kKmodRetryInterval.
+static KmodVersionCache g_kmod_version_cache{kRpmPath};
+
+static std::vector<std::string> amdgpu_kmod_versions(std::string_view release) {
+  return g_kmod_version_cache.versions(release);
+}
+
+amdsmi_status_t amdsmi_get_gpu_driver_info_v2(amdsmi_processor_handle processor_handle,
+                                              amdsmi_driver_info_v2_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+#ifdef ENABLE_WSL_BACKEND
+  // Check feature support before nullptr so NOT_SUPPORTED takes priority over INVAL.
+  if (auto* b = gpu_device->backend()) return b->GetDriverInfoV2(info);
+#endif
+
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  std::memset(info, 0, sizeof(*info));
+
+  amdsmi_driver_info_t base{};
+  status = amdsmi_get_gpu_driver_info(processor_handle, &base);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  std::memcpy(info->driver_version, base.driver_version, sizeof(info->driver_version));
+  std::memcpy(info->driver_date, base.driver_date, sizeof(info->driver_date));
+  std::memcpy(info->driver_name, base.driver_name, sizeof(info->driver_name));
+
+  // The package lookup is best effort: when it fails, the package fields stay empty.
+  utsname uts{};
+  if (uname(&uts) != 0) {
+    uts = utsname{};
+  }
+  status = smi_amdgpu_get_driver_versions(base.driver_version, kAmdgpuDkmsRoot, uts,
+                                          amdgpu_kmod_versions, info);
+
+  const char* package_name = "none";
+  if (info->driver_package == AMDSMI_DRIVER_PACKAGE_DKMS) {
+    package_name = "amdgpu-dkms";
+  } else if (info->driver_package == AMDSMI_DRIVER_PACKAGE_KMOD) {
+    package_name = "amdgpu-kmod";
+  }
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | Driver version: " << info->driver_version << "\n"
+     << " | Driver kernel version: " << info->driver_kernel_version << "\n"
+     << " | amdgpu driver version: " << info->amdgpu_driver_version << "\n"
+     << " | Driver build version: " << info->driver_build_version << "\n"
+     << " | Driver full version: " << info->driver_full_version << "\n"
+     << " | Driver package: " << package_name << "\n"
+     << " | Returning: " << smi_amdgpu_get_status_string(status, false);
+  LOG_INFO(ss);
+  return status;
+}
+
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
                                      amdsmi_pcie_info_t* info) {
   AMDSMI_CHECK_INIT();

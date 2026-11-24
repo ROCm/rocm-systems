@@ -471,32 +471,7 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
         if host_ptr.is_null() {
             return INVALID_ARGUMENT;
         }
-        let Some(index) = runtime
-            .memory_state
-            .locked_allocations
-            .iter()
-            .rposition(|memory| memory.description.host_base == Some(host_ptr as usize))
-        else {
-            return INVALID_ARGUMENT;
-        };
-        if runtime.memory_state.copy_borrowed(
-            runtime.memory_state.locked_allocations[index]
-                .description
-                .agent_base,
-        ) {
-            return OUT_OF_RESOURCES;
-        }
-        let mut memory = runtime.memory_state.locked_allocations.remove(index);
-        match memory.free() {
-            Ok(()) => SUCCESS,
-            Err(error) => {
-                runtime
-                    .memory_state
-                    .locked_allocations
-                    .insert(index, memory);
-                map_error(error)
-            }
-        }
+        runtime.memory_state.unlock_host(host_ptr as usize)
     })
 }
 

@@ -192,7 +192,7 @@ public:
     effect_probe_for_testing_ = std::move(probe);
   }
 
-  void initialize() override;
+  util::Result initialize(util::DiagnosticEmitter = {}) override;
   void shutdown() override;
 
 private:

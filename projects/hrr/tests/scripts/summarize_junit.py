@@ -19,7 +19,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# Display order matches .github/workflows/hrr-ci.yml.
+# Preferred display order for platform and GPU-family result columns.
 COLUMNS = (
     ("unit-ubuntu-24.04.xml", "Unit", "Linux"),
     ("unit-windows-2022.xml", "Unit", "Windows"),

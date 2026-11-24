@@ -77,7 +77,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           CUID_METADATA_STATUS: available
   ```
 
+- **Added `amdsmi_get_gpu_driver_info_v2()` to report the amdgpu driver build and package**.  
+  - Returns the driver name, version and date, plus the installed ``amdgpu-dkms`` or ``amdgpu-kmod`` package and its build, for example ``6.19.14.31400000-2370381``. Also available from Python and Rust.
+
 ### Changed
+
+- **`amd-smi` now shows the driver package build in the amdgpu version**.  
+  - ``amd-smi``, ``amd-smi version`` and ``amd-smi static --driver`` show the version as ``6.19.14.31400000-2370381`` and name the package. Scripts that match the version exactly now see the ``-<build>`` suffix, and the output gains new keys: ``amdgpu_package`` in ``amd-smi version``, ``package`` in ``amd-smi static --driver`` (also a CSV column after ``os_kernel_version``, so the columns that follow it in a combined ``amd-smi static`` CSV move by one), and five fields in the ``amdgpu version`` object of ``amd-smi default --json``.
 
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.
@@ -248,6 +254,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_get_gpu_total_ecc_count()` in the Rust API returning wrong totals**.  
   - The counts were added to uninitialized memory, so the totals could be wrong. The Rust activity, power, clock and per-block ECC queries now also zero their output before the call.
+
+### Upcoming Changes
+
+- **`amdsmi_get_gpu_driver_info()` and `amdsmi_driver_info_t` will be removed in a future major release**.  
+  - Use `amdsmi_get_gpu_driver_info_v2()` and `amdsmi_driver_info_v2_t` instead; they report the same driver name, version, and date. The Python function emits a `DeprecationWarning`.
 
 ## amd_smi_lib for ROCm 10.2.0
 

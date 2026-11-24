@@ -706,12 +706,18 @@ class StaticCommands:
 
                 static_dict["limit"] = limit_info
         if args.driver:
-            driver_info_dict = {"name": "N/A", "version": "N/A", "os_kernel_version": "N/A"}
+            driver_info_dict = {
+                "name": "N/A",
+                "version": "N/A",
+                "os_kernel_version": "N/A",
+                "package": "N/A",
+            }
 
             try:
-                driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(args.gpu)
+                driver_info = self.helpers.get_gpu_driver_info(args.gpu)
                 driver_info_dict["name"] = driver_info["driver_name"]
-                driver_info_dict["version"] = driver_info["driver_version"]
+                driver_info_dict["version"] = driver_info["driver_full_version"]
+                driver_info_dict["package"] = driver_info["driver_package"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug(
                     "Failed to get driver info for gpu %s | %s", gpu_id, e.get_error_info()
@@ -721,6 +727,10 @@ class StaticCommands:
                 driver_info_dict["os_kernel_version"] = os.uname().release
             except (AttributeError, OSError) as e:
                 logging.debug("Failed to get os kernel version for gpu %s | %s", gpu_id, e)
+
+            # JSON and CSV keep the package key so their layout does not depend on the host.
+            if self.logger.is_human_readable_format() and driver_info_dict["package"] == "N/A":
+                del driver_info_dict["package"]
 
             static_dict["driver"] = driver_info_dict
         if args.board:
