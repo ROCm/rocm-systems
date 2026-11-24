@@ -117,7 +117,8 @@ static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gf
 	}
 
 	if (gfxv == GFX_VERSION_GFX1250 ||
-		gfxv == GFX_VERSION_GFX1251) {
+		gfxv == GFX_VERSION_GFX1251 ||
+		HSA_GET_GFX_VERSION_HEX_MAJOR(gfxv) == 13) {
 		bytes_per_wave = 512;  // per HW design; GFX_SHARED__HWREG_SPACE_USED
 	}
 
@@ -144,6 +145,8 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 		vgpr_size = 0x60000;
 	else if (gfxv <= GFX_VERSION_GFX1251)
 		vgpr_size = 0x80000;
+	else if (HSA_GET_GFX_VERSION_HEX_MAJOR(gfxv) == 13)
+		vgpr_size = 0x40000;
 
 	assert(vgpr_size);
 
@@ -158,6 +161,8 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
 		sgpr_size = 0x4000;
 	else if (gfxv <= GFX_VERSION_GFX1251)
 		sgpr_size = 0x8000;
+	else if (HSA_GET_GFX_VERSION_HEX_MAJOR(gfxv) == 13)
+		sgpr_size = 0x4000;
 
 	assert(sgpr_size);
 

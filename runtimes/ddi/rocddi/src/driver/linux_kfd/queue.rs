@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{Ordering, fence};
 
 use super::memory::{BufferKind, DeviceVm, KfdAllocation};
-use super::{errno, error, native_error, os_memory, sys, sysfs, uapi};
+use super::{connection, errno, error, native_error, os_memory, sysfs, uapi};
 use crate::device::gpu::queue::{
     AqlControlLayout, AqlControlRegion, AqlQueueHeader, MAX_PRIVATE_SEGMENT_BYTES,
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
@@ -243,7 +243,7 @@ impl DoorbellMapping {
             .ok_or_else(|| error(ErrorKind::Internal, "doorbell mapping has no storage"))
     }
 
-    fn transfer(&mut self, kfd: &sys::Kfd, map: bool) -> Result<(), Error> {
+    fn transfer(&mut self, kfd: &connection::Kfd, map: bool) -> Result<(), Error> {
         let handle = self
             .handle
             .ok_or_else(|| error(ErrorKind::Internal, "doorbell mapping has no handle"))?;
@@ -274,7 +274,7 @@ impl DoorbellMapping {
         })
     }
 
-    fn rollback_device(&mut self, kfd: &sys::Kfd) -> Result<(), Error> {
+    fn rollback_device(&mut self, kfd: &connection::Kfd) -> Result<(), Error> {
         if self.uncertain {
             return Err(error(
                 ErrorKind::DriverContract,
@@ -427,7 +427,7 @@ impl DoorbellMapping {
         Ok(address)
     }
 
-    fn close(&mut self, kfd: &sys::Kfd) -> Result<(), Error> {
+    fn close(&mut self, kfd: &connection::Kfd) -> Result<(), Error> {
         if let Some(handle) = self.handle {
             for peer in self.peers.iter_mut().rev() {
                 peer.close(handle)?;
@@ -464,7 +464,7 @@ impl Drop for DoorbellMapping {
 }
 
 impl Doorbells {
-    pub(super) fn close(&mut self, kfd: &sys::Kfd) -> Result<(), Error> {
+    pub(super) fn close(&mut self, kfd: &connection::Kfd) -> Result<(), Error> {
         let mapping = self
             .mapping
             .get_mut()
@@ -596,6 +596,7 @@ impl Doorbells {
 }
 
 /// Computed context-save allocation requirements for a compute queue.
+#[derive(Clone, Copy)]
 struct ComputeStorage {
     /// Native context-save extent per XCC.
     context_size: u32,
@@ -1472,6 +1473,24 @@ enum QueueContext {
 }
 
 impl QueueContext {
+    #[allow(unsafe_code)]
+    fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            Self::Native(storage) => storage.diagnostic_memory(),
+            // SAFETY: The owned SVM reservation retains this complete CPU/GPU range.
+            Self::Svm(storage) => unsafe {
+                crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                    self,
+                    storage.address() as u64,
+                    Some(storage.address()),
+                    storage.usable_size() as u64,
+                )
+            },
+        }
+    }
+
     fn address(&self, vm: &Shared<DeviceVm>) -> Result<u64, Error> {
         match self {
             Self::Svm(storage) => Ok(storage.address() as u64),
@@ -1604,6 +1623,8 @@ pub(crate) struct KfdQueue {
     backing: [Option<Owned<KfdAllocation>>; 3],
     /// Compute context backing retained through native destruction.
     context: Option<QueueContext>,
+    /// Exact context geometry accepted at creation.
+    compute: Option<ComputeStorage>,
     /// Additional VMs with mappings of this queue transport.
     peer_mappings: Mutex<Vec<QueuePeerMapping>>,
     /// Read index location within the control allocation.
@@ -1857,6 +1878,7 @@ impl KfdQueue {
             vm,
             backing: [Some(ring), Some(pointers), eop],
             context,
+            compute: request.compute,
             peer_mappings: Mutex::new(Vec::new()),
             read_offset,
             write_offset,
@@ -2238,6 +2260,64 @@ impl KfdQueue {
             ));
         }
         Ok(self.info)
+    }
+
+    #[allow(unsafe_code)]
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        let compute = self
+            .compute
+            .ok_or_else(|| error(ErrorKind::Unsupported, "queue has no CWSR state"))?;
+        self.inactivate()?;
+        let queue_id = self
+            .id
+            .ok_or_else(|| error(ErrorKind::Unsupported, "queue was destroyed"))?;
+        let context = self
+            .context
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Internal, "missing queue context"))?
+            .diagnostic_memory()?;
+        let host = context
+            .host_address
+            .ok_or_else(|| error(ErrorKind::Unsupported, "CWSR is not host visible"))?;
+        let mut args = uapi::QueueWaveState {
+            control_stack_address: host as u64,
+            queue_id,
+            ..uapi::QueueWaveState::default()
+        };
+        // SAFETY: Inactivation succeeded. This exclusive queue borrow retains
+        // the original writable CWSR allocation and excludes native destruction.
+        unsafe { self.vm.kfd().queue_wave_state(&mut args) }
+            .map_err(|source| native_error("AMDKFD_IOC_GET_QUEUE_WAVE_STATE", source))?;
+        if args.control_stack_used_size > compute.control_stack_size
+            || u64::from(args.save_area_used_size) + u64::from(compute.control_stack_size)
+                > u64::from(compute.context_size)
+        {
+            return Err(error(
+                ErrorKind::DriverContract,
+                "wave state exceeds retained context",
+            ));
+        }
+        let ring = self.backing[0]
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Internal, "missing queue ring"))?
+            .diagnostic_memory()?;
+        let control = self.backing[1]
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Internal, "missing queue controls"))?
+            .diagnostic_memory()?;
+        Ok(crate::device::gpu::diagnostic::CoreQueueSnapshot {
+            queue_id,
+            gpu_id: self.vm.gpu_id,
+            queue_type: if self.aql.is_some() { 2 } else { 0 },
+            write_pointer: self.info.write_index_device_address,
+            read_pointer: self.info.read_index_device_address,
+            ring_size_bytes: u32::try_from(self.info.ring_size_bytes)
+                .map_err(|_| error(ErrorKind::DriverContract, "ring size exceeds KFD field"))?,
+            context_size: compute.context_size,
+            memory: [ring, control, context],
+        })
     }
 
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {

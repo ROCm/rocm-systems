@@ -87,7 +87,7 @@ namespace rocjitsu::arith {
 // Requires validated controls and AVX-512; inactive and unselected storage is preserved.
 template <Binary Op, bool Packed>
 void half_binary_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                           uint32_t *d, const uint32_t *a, const uint32_t *b, bool compatibility,
+                           uint32_t *d, const uint32_t *a, const uint32_t *b, bool exact,
                            bool preserve_input_snan, HalfOutputPolicy output) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   const bool saturate = flags & RJ_ARITH_FP16_OVFL;
@@ -119,7 +119,7 @@ void half_binary_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruct
       } else {
         value = add(x, y, rounding);
       }
-      if (compatibility) {
+      if (exact) {
         value = _mm512_mask_mov_ps(value, _mm512_cmp_ps_mask(y, y, _CMP_UNORD_Q), y);
         value = _mm512_mask_mov_ps(value, _mm512_cmp_ps_mask(x, x, _CMP_UNORD_Q), x);
       }
@@ -134,7 +134,7 @@ void half_binary_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruct
                                        _mm512_set1_epi32(0x400));
       }
       if (omod) {
-        if (compatibility && !Packed && !output.scale_before_rounding) {
+        if (exact && !Packed && !output.scale_before_rounding) {
           value = half_input(narrow(value, rounding, saturate), 0, 0);
         }
         auto bits = _mm512_castps_si512(value);

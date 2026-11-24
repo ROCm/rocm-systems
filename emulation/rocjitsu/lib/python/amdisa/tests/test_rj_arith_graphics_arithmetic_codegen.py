@@ -51,7 +51,8 @@ def test_mullit_loose_policy_and_modifiers(arch):
         'CLAMP',
     ):
         assert 'RJ_ARITH_ALU_' + modifier in body
-    assert ('rj_arith_v_mullit_f32_w32_gfx12' in body) == (arch in ('rdna4', 'cdna5'))
+    assert ('rj_arith_v_mullit_f32_w32_gfx12,' in body) == (arch == 'rdna4')
+    assert ('rj_arith_v_mullit_f32_w32_gfx1250' in body) == (arch == 'cdna5')
     assert (
         gen_mullit(
             context('cdna2', 'V_MULLIT_F32', ['d'], ['a', 'b', 'c'], is_vop3=True)
@@ -60,13 +61,16 @@ def test_mullit_loose_policy_and_modifiers(arch):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4'])
 @pytest.mark.parametrize('name', sorted(INTERP_NAMES))
 def test_interp_operand_controls_and_policy(arch, name):
     body = gen_interp(
         context(arch, name, ['d'], ['a', 'b', 'c'], enc_name='ENC_VINTERP')
     )
-    assert 'rj_arith_' + name.lower() + '_w64' in body
+    if arch == 'rdna3_5':
+        assert 'amdgpu::arith::gfx115_interp<' in body and ', uint64_t>' in body
+    else:
+        assert 'rj_arith_' + name.lower() + '_w64' in body
     assert 'arithmetic_flags()' in body
     assert 'reports_state' not in body
     assert 'wait_exp' not in body

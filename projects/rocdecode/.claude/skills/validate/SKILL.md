@@ -8,6 +8,7 @@ allowed-tools:
   - Bash(test/validate.sh *)
   - Bash(test/build_samples.sh *)
   - Bash(nproc)
+  - Bash(grep -h ^ROCM_PATH samples/*/build/CMakeCache.txt)
   - Bash(cmd *)
 ---
 
@@ -16,6 +17,16 @@ if a step fails. Run from the rocDecode project root (the directory containing t
 repo's `build/`, `samples/`, and `test/` directories).
 
 IMPORTANT: Run each command as a SEPARATE Bash tool call. Do not chain commands with && or |.
+
+The skill accepts optional output surface memory type arguments for the conformance phase:
+- `m0`, `m1`, `m2` — run conformance in that memory type: 0 device internal, 1 device
+  copied, 2 host copied. Several can be given to run conformance once per type, e.g.
+  `/validate m0 m1`. Without them, conformance runs in the sample's default (0) as before.
+
+Pass them to `test/validate.sh` in the final step as one comma-separated list in the order
+given, e.g. `/validate m0 m1` → `test/validate.sh --mem-type 0,1`. There is no `m3`: decode
+only returns no frames to check against the reference MD5. CTest runs once either way; the
+memory type applies only to conformance.
 
 First determine the OS and follow the matching section below. Under Git Bash on Windows,
 `uname -s` returns `MINGW64_NT-...`; on Linux it returns `Linux`. The `test/*.sh` scripts
@@ -56,7 +67,7 @@ The `build/` directory is not checked into the repo, so on a fresh checkout it m
 created and configured first. `cmake -B build -DENABLE_EXTENDED_TESTS=ON` is idempotent —
 it creates and configures `build/` if missing, and is a cheap no-op if it is already
 configured. `-DENABLE_EXTENDED_TESTS=ON` enables the additional FFmpeg-based CTest cases
-(the CTest phase covers 6 tests without it, 15 with it); those extra tests are only added
+(the CTest phase covers 7 tests without it, 16 with it); those extra tests are only added
 when FFmpeg is found, so the flag is harmless on machines without FFmpeg.
 
 Run these four commands separately:
@@ -71,13 +82,24 @@ which would otherwise trigger a permission prompt on every run.)
 
 ### Step 3 — Build all sample apps
 
+Stale-build-dir pitfall: each sample caches `ROCM_PATH` on first configure, and
+`test/build_samples.sh` re-runs cmake on the existing `samples/<name>/build` dirs, which
+does not update it. After switching install trees (for example to a newer TheRock build),
+the samples keep building and linking against the old tree, so validation silently tests
+the old library. Run `grep -h ^ROCM_PATH samples/*/build/CMakeCache.txt`; if any line does
+not match `ROCM_PATH`, delete the `samples/*/build` dirs (they are git-ignored build output)
+before building.
+
 Run: `test/build_samples.sh`
 
 ### Step 4 — Run validation
 
-Run: `test/validate.sh`
+Run: `test/validate.sh`, adding `--mem-type <list>` if memory type arguments were given
+(e.g. `test/validate.sh --mem-type 0,1`).
 
-Report the final summary from validate.sh to the user.
+Report the final summary from validate.sh to the user. When memory types were given, the
+conformance phases are labelled per type (e.g. `Conformance VP9 (-m 1)`); report them that
+way.
 
 ---
 
@@ -179,7 +201,8 @@ PATH / `LIBVA_DRIVERS_PATH` setup in the Environment section above.
 
 ### Step 5 — Run validation
 
-Run: `test/validate.sh`
+Run: `test/validate.sh`, adding `--mem-type <list>` if memory type arguments were given
+(e.g. `test/validate.sh --mem-type 0,1`).
 
 On Windows this drives CTest with `ctest -C Release` and launches the conformance script
 with `python` (not `python3`, which is usually the inert Store shim). The conformance

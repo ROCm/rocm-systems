@@ -52,7 +52,9 @@ def pytest_addoption(parser):
         action="store",
         nargs="+",
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
-        help="counters shared by every --pmc group; must be constant across a kernel's passes",
+        help="counters shared by every --pmc group; each one the agent implements must be "
+        "constant across a kernel's passes. A counter that is zero for every dispatch is "
+        "skipped only when every replayed agent is gfx1200 or gfx1201",
     )
     parser.addoption(
         "--expected-dispatch-count",
@@ -74,6 +76,19 @@ def pytest_addoption(parser):
         type=int,
         default=None,
         help="1-based launches of --selected-kernel, among those in the kernel trace, that the kernel filters must select",
+    )
+    parser.addoption(
+        "--expected-pass-counts",
+        action="store",
+        default=None,
+        help="comma-separated number of passes per dispatch, in dispatch_id order, for runs "
+        "where some dispatches are not replayed and so carry fewer passes",
+    )
+    parser.addoption(
+        "--expected-pass-counts-file",
+        action="store",
+        default=None,
+        help="file containing comma-separated per-dispatch pass counts for capability-dependent launches",
     )
     parser.addoption("--n-elems", type=int, default=1048576)
     parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
@@ -114,6 +129,23 @@ def expected_passes(request):
 @pytest.fixture
 def expected_dispatch_count(request):
     return request.config.getoption("--expected-dispatch-count")
+
+
+@pytest.fixture
+def expected_pass_counts(request):
+    raw = request.config.getoption("--expected-pass-counts")
+    path = request.config.getoption("--expected-pass-counts-file")
+    assert (
+        raw is None or path is None
+    ), "specify pass counts directly or by file, not both"
+    if path is not None:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read()
+    if raw is None:
+        return None
+    counts = [int(field) for field in raw.split(",") if field.strip() != ""]
+    assert counts and all(count > 0 for count in counts), "expected positive pass counts"
+    return counts
 
 
 @pytest.fixture

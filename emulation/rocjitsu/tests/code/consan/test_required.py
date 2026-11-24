@@ -18,9 +18,9 @@ from run_required import (
 def paired_registrations():
     tests = []
     for name in sorted(physical_names()):
-        # The validator owns agreement, not the CMake scenario's geometry or
-        # fixture mapping. Use arbitrary shared values instead of repeating it.
-        _, gpu, _, _, _ = name.split('.')
+        # Pin the named workgroup count, but leave fixture and thread mappings
+        # arbitrary instead of repeating CMake's scenario table.
+        gpu = name.split('.')[1]
         command = [
             'python3',
             'driver.py',
@@ -35,6 +35,9 @@ def paired_registrations():
             '--case',
             'shared-fixture',
         ]
+        suffix = name.rsplit('.', 1)[-1]
+        if suffix.startswith('groups'):
+            command.extend(['--workgroups', suffix.removeprefix('groups')])
         tests.append(
             {
                 'name': name,
@@ -68,12 +71,145 @@ def paired_registrations():
     return tests
 
 
+def selected_registrations(tests):
+    available = {test['name']: test for test in tests}
+    return [available.get(name, {'name': name}) for name in required_names()]
+
+
 def set_property(test, name, value):
     test['properties'] = [item for item in test['properties'] if item['name'] != name]
     test['properties'].append({'name': name, 'value': value})
 
 
 class RequiredCoverage(unittest.TestCase):
+    def test_core_multi_workgroup_regressions_cannot_be_omitted(self):
+        expected = {
+            'ConSanHsaPlugin.CompleteWorkgroupsPublishAllRowsAndCaptureTheirFullExtent',
+            'ConSanBoundedLaunch.AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission',
+            'ConSanAnalysis.EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalToWorkgroups',
+            'ConSanAnalysis.EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups',
+            'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
+        }
+        for suffix in (
+            'gfx942Wave64',
+            'gfx950Wave64',
+            'gfx1100Wave32',
+            'gfx1100Wave64',
+            'gfx1201Wave32',
+            'gfx1201Wave64',
+            'gfx1250Wave32',
+        ):
+            expected.add(
+                'ConSanTargets/ConSanTargetStatic.'
+                f'BoundedWorkgroupFixturesRetainQualifiedLdsSites/{suffix}'
+            )
+        required = required_names()
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertIn(name, required)
+                with self.assertRaisesRegex(
+                    ValueError, 'Required ConSan registrations missing'
+                ):
+                    validate_selected([{'name': item} for item in required - {name}])
+
+    def test_multi_workgroup_controls_are_required_for_every_target_and_wave_mode(self):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for prefix, case, groups in (
+                ('Production', 'grouped_race', 16),
+                ('Production', 'grouped_isolation', 4),
+                ('', 'grouped_repeat', 4),
+                ('', 'grouped_missing_id', 4),
+            ):
+                name = (
+                    f'ConSanSim{prefix}E2E.{gpu}.wave{wave_size}'
+                    f'.assembly.{case}.groups{groups}'
+                )
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
+
+    def test_barrier_and_loop_controls_are_required_for_every_target_and_wave_mode(
+        self,
+    ):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for case in (
+                'barrier',
+                'barrier_empty',
+                'barrier_high',
+                'barrier_separated',
+                'barrier_multiple',
+                'barrier_missing_second',
+                'loop_zero',
+                'loop_one',
+                'loop_three',
+                'loop_access_loss',
+                'loop_sync_loss',
+                'loop_no_b0',
+                'loop_no_b0_full_journal',
+                'loop_no_b0_sync_loss',
+                'loop_no_b1',
+                'loop_late',
+            ):
+                name = f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}'
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
+
+    def test_barrier_publication_and_loop_saturation_need_simulator_controls(self):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for case in (
+                'PublicationBarrierBlocksAnEarlyConsumer',
+                'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',
+                'RepeatedBarrierLoopsRetainHighLaneMasks',
+                'SeededNearLimitLoopCountersSaturateWithoutStoppingGuest',
+            ):
+                name = f'ConSanTargets/ConSanTargetSim.{case}/{gpu}Wave{wave_size}'
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
+
     def test_compiled_probe_validation_is_required_for_every_mode(self):
         for name in required_names():
             if name.startswith('ConSanProbeModes/'):
@@ -184,11 +320,68 @@ class RequiredCoverage(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'required simulator twin missing'):
             validate_physical_registrations(tests)
 
+    def test_geometry_suffixes_keep_their_target_and_application_contract(self):
+        tests = paired_registrations()
+        physical = dict(tests[0])
+        twin = dict(tests[1])
+        for test in (physical, twin):
+            test['name'] += '.groups4'
+            test['command'] = [*test['command'], '--workgroups', '4']
+        tests.extend((physical, twin))
+        validate_physical_registrations(tests)
+        twin['command'][-1] = '16'
+        with self.assertRaisesRegex(
+            ValueError, 'command differs from required simulator twin'
+        ):
+            validate_physical_registrations(tests)
+        twin['command'][-1] = '4'
+        set_property(physical, 'RESOURCE_LOCK', ['consan-wrong-target'])
+        with self.assertRaisesRegex(
+            ValueError, 'invalid physical execution properties'
+        ):
+            validate_physical_registrations(tests)
+
+    def test_workgroup_suffix_requires_the_effective_count(self):
+        for groups, arguments, valid in (
+            (16, [], False),
+            (16, ['--workgroups', '4'], False),
+            (16, ['--workgroups=4'], False),
+            (16, ['--workgroups', '16', '--workgroups', '1'], False),
+            (16, ['--workgroups'], False),
+            (16, ['--workgroups', 'invalid'], False),
+            (16, ['--workgroups', '16'], True),
+            (16, ['--workgroups=16'], True),
+            (16, ['--workgroups', '1', '--workgroups', '16'], True),
+            (1, [], True),
+        ):
+            tests = paired_registrations()
+            fixture = 'grouped_disjoint' if groups == 1 else 'grouped_race'
+            suffix = f'.gfx1250.wave32.assembly.{fixture}.groups{groups}'
+            twins = [test for test in tests if test['name'].endswith(suffix)]
+            self.assertEqual(len(twins), 2)
+            for test in twins:
+                command = test['command']
+                index = command.index('--workgroups')
+                del command[index : index + 2]
+                command.extend(arguments)
+            for validate, registrations in (
+                (validate_selected, selected_registrations(tests)),
+                (validate_physical_registrations, tests),
+            ):
+                with self.subTest(
+                    groups=groups, arguments=arguments, validator=validate.__name__
+                ):
+                    if valid:
+                        validate(registrations)
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'workgroups'):
+                            validate(registrations)
+
     def test_missing_or_empty_selection_fails(self):
         for names in (set(), required_names() - {next(iter(required_names()))}):
             with self.assertRaises(ValueError):
                 validate_selected([{'name': name} for name in names])
-        validate_selected([{'name': name} for name in required_names()])
+        validate_selected(selected_registrations(paired_registrations()))
 
     def test_missing_or_skipped_execution_fails(self):
         root = ET.Element('testsuite')

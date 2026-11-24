@@ -3,6 +3,7 @@
 
 #include "capture_fixture.h"
 #include "rocjitsu/code/consan/encoding.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -17,18 +18,18 @@ protected:
   void SetUp() override {
     header_ = test::capture_header();
     CaptureEncoder encoder;
-    FailureOr<std::vector<uint8_t>> prefix = encoder.start(header_, &error_);
-    ASSERT_TRUE(prefix.succeeded()) << error_.message;
+    FailureOr<std::vector<uint8_t>> prefix = encoder.start(header_, error_.emitter());
+    ASSERT_TRUE(prefix.succeeded()) << error_.message();
     FailureOr<std::vector<uint8_t>> frame =
-        encoder.append(test::execution(header_.manifest, 1), &error_);
-    ASSERT_TRUE(frame.succeeded()) << error_.message;
-    FailureOr<std::vector<uint8_t>> end = encoder.finish(&error_);
+        encoder.append(test::execution(header_.manifest, 1), error_.emitter());
+    ASSERT_TRUE(frame.succeeded()) << error_.message();
+    FailureOr<std::vector<uint8_t>> end = encoder.finish(error_.emitter());
     ASSERT_TRUE(end.succeeded());
     bytes_ = prefix.value();
     frame_offset_ = bytes_.size();
     bytes_.insert(bytes_.end(), frame.value().begin(), frame.value().end());
     bytes_.insert(bytes_.end(), end.value().begin(), end.value().end());
-    ASSERT_TRUE(decode_capture(bytes_, &error_).succeeded()) << error_.message;
+    ASSERT_TRUE(decode_capture(bytes_, error_.emitter()).succeeded()) << error_.message();
   }
 
   void reseal(bool frame = false) {
@@ -42,14 +43,14 @@ protected:
   }
 
   CaptureHeader header_;
-  ContractError error_;
+  util::StringDiagnostic error_;
   std::vector<uint8_t> bytes_;
   size_t frame_offset_ = 0;
 };
 
 TEST_F(ConSanCapture, CompleteContainerOwnsFactsArgumentsContextAndRawBytes) {
-  FailureOr<Capture> decoded = decode_capture(bytes_, &error_);
-  ASSERT_TRUE(decoded.succeeded()) << error_.message;
+  FailureOr<Capture> decoded = decode_capture(bytes_, error_.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error_.message();
   ASSERT_EQ(decoded.value().executions.size(), 1u);
   EXPECT_EQ(decoded.value().header, header_);
   const CapturedExecution original = test::execution(header_.manifest, 1);
@@ -66,23 +67,23 @@ TEST_F(ConSanCapture, EveryTruncatedPrefixAndTrailingBytesLackACompleteContainer
   for (size_t length = 0; length < bytes_.size(); ++length)
     EXPECT_TRUE(decode_capture(std::span(bytes_).first(length)).failed()) << length;
   bytes_.push_back(0);
-  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
 }
 
 TEST_F(ConSanCapture, WrongContractChecksumAndMissingFactsAreDistinctFailures) {
   const std::vector<uint8_t> saved = bytes_;
   bytes_[8] ^= 1;
-  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
-  EXPECT_EQ(error_.code, ContractErrorCode::IncompatibleContract);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "capture producer contract mismatch");
   bytes_ = saved;
   bytes_[frame_offset_ + 48] ^= 1;
-  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
-  EXPECT_NE(error_.message.find("checksum"), std::string::npos);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
+  EXPECT_NE(error_.message().find("checksum"), std::string::npos);
   bytes_ = saved;
   wire::write_u64(bytes_, 40, 0);
   reseal();
-  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
-  EXPECT_EQ(error_.code, ContractErrorCode::InvalidEncoding);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
+  EXPECT_EQ(error_.message(), "invalid static-facts framing");
 }
 
 TEST_F(ConSanCapture, ValidChecksumsDoNotBypassExecutionIdentityAndVisibility) {
@@ -92,8 +93,8 @@ TEST_F(ConSanCapture, ValidChecksumsDoNotBypassExecutionIdentityAndVisibility) {
     bytes_ = saved;
     wire::write_u32(bytes_, frame_offset_ + 48 + field, value);
     reseal(true);
-    EXPECT_TRUE(decode_capture(bytes_, &error_).failed()) << field;
-    EXPECT_EQ(error_.message.find("checksum"), std::string::npos) << error_.message;
+    EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed()) << field;
+    EXPECT_EQ(error_.message().find("checksum"), std::string::npos) << error_.message();
   }
 }
 
@@ -102,15 +103,15 @@ TEST_F(ConSanCapture, ValidContainerPreservesMalformedRowsForIndependentDiagnosi
   const FailureOr<std::vector<uint8_t>> prefix = encoder.start(header_);
   CapturedExecution execution = test::execution(header_.manifest, 1);
   wire::write_u32(execution.report, kReportHeaderBytes + wire::kRowStatus, UINT32_MAX);
-  const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, &error_);
-  ASSERT_TRUE(frame.succeeded()) << error_.message;
+  const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, error_.emitter());
+  ASSERT_TRUE(frame.succeeded()) << error_.message();
   const FailureOr<std::vector<uint8_t>> end = encoder.finish();
   ASSERT_TRUE(end.succeeded());
   std::vector<uint8_t> bytes = prefix.value();
   bytes.insert(bytes.end(), frame.value().begin(), frame.value().end());
   bytes.insert(bytes.end(), end.value().begin(), end.value().end());
-  const FailureOr<Capture> decoded = decode_capture(bytes, &error_);
-  ASSERT_TRUE(decoded.succeeded()) << error_.message;
+  const FailureOr<Capture> decoded = decode_capture(bytes, error_.emitter());
+  ASSERT_TRUE(decoded.succeeded()) << error_.message();
   EXPECT_EQ(decoded.value().executions[0].report, execution.report);
 }
 
@@ -118,35 +119,35 @@ TEST_F(ConSanCapture, EndMembershipBoundsAndReservedFieldsAreCheckedBeyondTheChe
   const std::vector<uint8_t> saved = bytes_;
   wire::write_u64(bytes_, bytes_.size() - 64 + 8, 2);
   reseal();
-  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
-  EXPECT_NE(error_.message.find("membership"), std::string::npos);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
+  EXPECT_NE(error_.message().find("membership"), std::string::npos);
   bytes_ = saved;
   wire::write_u64(bytes_, frame_offset_ + 8, UINT64_MAX);
   reseal();
-  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
-  EXPECT_NE(error_.message.find("truncated execution"), std::string::npos);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
+  EXPECT_NE(error_.message().find("truncated execution"), std::string::npos);
   bytes_ = saved;
   bytes_[frame_offset_ + 48 + 136] = 1;
   reseal(true);
-  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
-  EXPECT_NE(error_.message.find("reserved"), std::string::npos);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
+  EXPECT_NE(error_.message().find("reserved"), std::string::npos);
 }
 
 TEST_F(ConSanCapture, BudgetsAreInclusiveAndCountsCannotTriggerUnboundedAllocation) {
   CaptureLimits limits;
   limits.file_bytes = bytes_.size();
-  EXPECT_TRUE(decode_capture(bytes_, &error_, limits).succeeded());
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter(), limits).succeeded());
   --limits.file_bytes;
-  EXPECT_TRUE(decode_capture(bytes_, &error_, limits).failed());
-  EXPECT_EQ(error_.code, ContractErrorCode::ResourceLimit);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter(), limits).failed());
+  EXPECT_EQ(error_.message(), "capture file budget exceeded");
   limits = {};
   limits.executions = 0;
-  EXPECT_TRUE(decode_capture(bytes_, &error_, limits).failed());
-  EXPECT_EQ(error_.code, ContractErrorCode::ResourceLimit);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter(), limits).failed());
+  EXPECT_EQ(error_.message(), "capture execution count exceeds budget");
   limits = {};
   limits.argument_bytes = 15;
-  EXPECT_TRUE(decode_capture(bytes_, &error_, limits).failed());
-  EXPECT_EQ(error_.code, ContractErrorCode::ResourceLimit);
+  EXPECT_TRUE(decode_capture(bytes_, error_.emitter(), limits).failed());
+  EXPECT_EQ(error_.message(), "execution payload exceeds budget");
 }
 
 TEST_F(ConSanCapture, UnsupportedExecutionConditionsRemainRejectedBeyondChecksums) {
@@ -155,34 +156,35 @@ TEST_F(ConSanCapture, UnsupportedExecutionConditionsRemainRejectedBeyondChecksum
     CaptureEncoder encoder;
     CaptureHeader header = header_;
     header.execution_conditions = unsupported;
-    EXPECT_TRUE(encoder.start(header, &error_).failed());
+    EXPECT_TRUE(encoder.start(header, error_.emitter()).failed());
     bytes_ = saved;
     wire::write_u32(bytes_, 48, unsupported);
     wire::write_u32(bytes_, bytes_.size() - 64 + 16, unsupported);
     reseal();
-    EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
-    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
-    EXPECT_EQ(error_.message.find("checksum"), std::string::npos);
+    EXPECT_TRUE(decode_capture(bytes_, error_.emitter()).failed());
+    EXPECT_EQ(error_.message(), "unsupported run execution conditions or missing identity");
+    EXPECT_EQ(error_.message().find("checksum"), std::string::npos);
   }
 }
 
 TEST_F(ConSanCapture, EncoderRequiresOrderedUniqueExecutionsAndIncreasingStorageGenerations) {
   CaptureEncoder encoder;
-  EXPECT_TRUE(encoder.finish(&error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), &error_).failed());
+  EXPECT_TRUE(encoder.finish(error_.emitter()).failed());
+  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), error_.emitter()).failed());
   CaptureHeader invalid = header_;
   invalid.execution_conditions = 0;
-  EXPECT_TRUE(encoder.start(invalid, &error_).failed());
-  EXPECT_TRUE(encoder.start(header_, &error_).succeeded());
-  EXPECT_TRUE(encoder.start(header_, &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2), &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), &error_).succeeded());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2), &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2, 2), &error_).succeeded());
-  EXPECT_TRUE(encoder.finish(&error_).succeeded());
-  EXPECT_TRUE(encoder.finish(&error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 3, 3), &error_).failed());
+  EXPECT_TRUE(encoder.start(invalid, error_.emitter()).failed());
+  EXPECT_TRUE(encoder.start(header_, error_.emitter()).succeeded());
+  EXPECT_TRUE(encoder.start(header_, error_.emitter()).failed());
+  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2), error_.emitter()).failed());
+  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), error_.emitter()).succeeded());
+  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), error_.emitter()).failed());
+  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2), error_.emitter()).failed());
+  EXPECT_TRUE(
+      encoder.append(test::execution(header_.manifest, 2, 2), error_.emitter()).succeeded());
+  EXPECT_TRUE(encoder.finish(error_.emitter()).succeeded());
+  EXPECT_TRUE(encoder.finish(error_.emitter()).failed());
+  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 3, 3), error_.emitter()).failed());
 }
 
 } // namespace

@@ -65,7 +65,6 @@ uint32_t fma(uint32_t a, uint32_t b, uint32_t c, uint32_t result, uint32_t round
   if (invalid_product || opposite_infinities)
     causes |= kInvalid;
   if (x < Fmt::kInfinity && y < Fmt::kInfinity && z < Fmt::kInfinity) {
-    fp_mode::ScopedEnvironment nearest(0);
     const double product = value<Fmt>(a) * value<Fmt>(b);
     const double exact =
         fp_mode::detail::round_to_odd(fp_mode::detail::add_exact(product, value<Fmt>(c)));

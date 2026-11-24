@@ -205,6 +205,7 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
   const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = rocjitsu::arith::resolve_compatibility(
       flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  const bool compatibility_reporting = compatibility && (mode & RJ_ARITH_ALU_CLAMP);
   CompatibilityStatus compatibility_status;
   uint32_t masks[2] = {}, exceptions = 0;
 
@@ -214,6 +215,31 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
     return error;
   }
   const bool report = rocjitsu::arith::reports_fp_status(flags);
+  // Numeric-only waves share one dispatch and one set of SIMD control masks.
+  // DPP and status reporting retain their existing staged half-wave handling.
+#if defined(RJ_ARITH_HAVE_X86_64_V4) || defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (exec_mask && !report && !compatibility_reporting && !(mode >> 32)) {
+    const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      const uint64_t result = rocjitsu::arith::float_compare_x86_64_v4<Bits, Predicate, uint64_t>(
+                                  uint32_t(mode), flush, a, b) &
+                              exec_mask;
+      __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      const uint64_t result = rocjitsu::arith::float_compare_x86_64_v3<Bits, Predicate, uint64_t>(
+                                  uint32_t(mode), flush, a, b) &
+                              exec_mask;
+      __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+  }
+#endif
   if (exec_mask) {
     for (int half = 0; half < 2; ++half) {
       uint64_t half_instruction_flags = mode;
@@ -231,7 +257,7 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
       if (int error = evaluate_wave32<Bits, Predicate>(
               flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, masks + half,
               source_a, source_b, report ? &exceptions : nullptr,
-              compatibility && (mode & RJ_ARITH_ALU_CLAMP) ? &compatibility_status : nullptr)) {
+              compatibility_reporting ? &compatibility_status : nullptr)) {
         return error;
       }
     }

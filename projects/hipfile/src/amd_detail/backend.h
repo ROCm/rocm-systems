@@ -21,8 +21,6 @@
 
 namespace hipFile {
 
-struct AsyncFailoverState;
-
 [[nodiscard]] inline size_t
 getPageSize()
 {
@@ -94,29 +92,6 @@ struct Backend {
     virtual ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                        hoff_t file_offset, hoff_t buffer_offset);
 
-    /// @brief Perform a read or write operation
-    ///
-    /// @param type                      IO type (read/write)
-    /// @param file                      File to read from or write to
-    /// @param buffer                    Buffer to write to or read from
-    /// @param size_p                    Number of bytes to transfer
-    /// @param file_offset_p             Offset from the start of the file
-    /// @param buffer_offset_p           Offset from the start of the buffer
-    /// @param [out] bytes_transferred_p Number of bytes transferred
-    /// @param stream                    Stream to perform the operation on
-    virtual void async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
-                          size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
-                          ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream) = 0;
-
-    /// @brief Enqueue the async IO work for this backend onto the stream.
-    ///
-    /// @param failover Shared failover coordination, or nullptr when the IO does not
-    ///                 participate in failover.
-    virtual void enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
-                                size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
-                                ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
-                                std::shared_ptr<AsyncFailoverState> failover) = 0;
-
     /// @brief Callback when Driver state refcount reaches zero, allowing the backend to perform any necessary
     /// cleanup.
     virtual void driver_state_teardown()
@@ -148,10 +123,6 @@ struct BackendWithFallback : public Backend {
     ssize_t io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                hoff_t file_offset, hoff_t buffer_offset) override final;
 
-    void async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t *size_p,
-                  hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
-                  std::shared_ptr<IStream> stream) override final;
-
     /// @brief Register a Backend to retry a failed IO operation.
     ///
     /// @param backend Backend to retry a failed IO operation.
@@ -167,6 +138,9 @@ protected:
     ///
     /// @return True if this BackendWithFallback can retry the IO, else False.
     virtual bool is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const = 0;
+
+    /// @brief Hook called when the IO will be retried by the fallback backend
+    virtual void on_fallback() const = 0;
 
 private:
     std::shared_ptr<Backend> fallback_backend;

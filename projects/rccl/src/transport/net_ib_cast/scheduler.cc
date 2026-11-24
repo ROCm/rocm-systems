@@ -1,4 +1,5 @@
 #include "common_cast.h"
+#include "net_ib_cast_inspect.h"
 #include <algorithm>
 extern int64_t ncclParamIbCastQpsPerConn();
 
@@ -376,6 +377,8 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int* startQpIndex
   *wrrSched = false;
 
   if (!parms->enable) {
+    // Scheduler off: use the static QP selection, bypassing WRR.
+    nqps = IbCastCommBaseGetDefaultNqpsPerRequest(req->base);
     qpIndex = req->id % req->base->nqps;
     goto exit;
   }
@@ -474,6 +477,17 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
   out->splitData = base->schedParms.splitData;
   out->splitDataMin = base->schedParms.splitDataMin;
 
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGdrFlushGetScratch(void* recvComm, int dev, int** hostMem, int** gpuMem) {
+  static_assert(offsetof(struct ncclIbRecvComm, base) == 0,
+                "base must be the first member of ncclIbRecvComm");
+  if (recvComm == NULL || hostMem == NULL || gpuMem == NULL) return ncclInvalidArgument;
+  struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  if (dev < 0 || dev >= comm->base.vProps.ndevs) return ncclInvalidArgument;
+  *hostMem = &comm->gpuFlushHostMem;
+  *gpuMem = comm->devs[dev].gpuFlush.gpuFlushGpuMem;
   return ncclSuccess;
 }
 

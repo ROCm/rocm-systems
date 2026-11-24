@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 #include <optional>
@@ -11,7 +12,7 @@
 namespace rocjitsu::amdgpu {
 /// @brief Tiling identity shared with the device configuration exposed to ROCr.
 struct ImageAddressConfig {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID; ///< Addressing generation.
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid; ///< Addressing generation.
   uint32_t gb_addr_config = 0; ///< GB_ADDR_CONFIG value shared with KFD and DRM.
 };
 
@@ -20,20 +21,24 @@ inline constexpr uint32_t kMaxImageMipLevels = 17;
 
 /// @brief Addressing shape of an image and its mip chain.
 struct ImageLayout {
-  uint32_t width = 1;  ///< Level-zero width in texels.
-  uint32_t height = 1; ///< Level-zero height; one for 1D images.
-  uint32_t depth = 1;  ///< Level-zero depth or the number of array layers.
-  uint32_t pitch =
-      0; ///< Encoded texel pitch for single-level linear/GFX9 tiled images.
-         ///< Zero means no encoded pitch; mip chains and GFX10+ tiled modes use native packing.
+  uint32_t width = 1;         ///< Level-zero width in texels.
+  uint32_t height = 1;        ///< Level-zero height; one for 1D images.
+  uint32_t depth = 1;         ///< Level-zero depth or the number of array layers.
+  uint32_t pitch = 0;         ///< Explicit texel pitch, or zero for native packing. GFX11/12 linear
+                              ///< non-array 2D mips shrink from the level-zero storage width.
   uint32_t element_bytes = 0; ///< Storage bytes per texel.
   uint32_t swizzle_mode = 0;  ///< Generation-specific descriptor swizzle encoding.
   uint32_t dimensions = 2;    ///< Spatial dimensions, excluding array layers.
   uint32_t mip_levels = 1;    ///< Number of levels in the backing allocation.
+  uint32_t samples = 1;       ///< Physical fragments per texel (GFX10 2D MSAA).
 };
 
 /// @brief Default tiling identity for a standalone CU without a device description.
-ImageAddressConfig default_image_address_config(rj_code_arch_t arch);
+ImageAddressConfig default_image_address_config(rocjitsu::IsaFamily arch);
+
+/// @brief Check a linear row pitch, allowing hardware-qualified rounding on gfx1100 and gfx1201.
+bool supports_linear_image_pitch(rocjitsu::IsaFamily arch, uint32_t width, uint32_t pitch,
+                                 uint32_t element_bytes);
 
 /// @brief Resolve a single-sample thin-image view once before processing its texels.
 class ImageAddressing {
@@ -48,7 +53,7 @@ public:
   /// @brief Check coordinates against the selected mip view, preserving array layers.
   bool contains(uint32_t x, uint32_t y, uint32_t z) const;
   /// @brief Address a texel whose coordinates satisfy contains().
-  uint64_t byte_offset(uint32_t x, uint32_t y, uint32_t z) const;
+  uint64_t byte_offset(uint32_t x, uint32_t y, uint32_t z, uint32_t sample = 0) const;
 
 private:
   ImageAddressing() = default;

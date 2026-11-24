@@ -13,6 +13,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 
@@ -28,16 +29,16 @@ constexpr bool gws_has_addr(GwsOp op) {
 }
 
 /// @brief Whether @p arch is a GFX9 (CDNA1-3) target.
-constexpr bool gws_is_gfx9(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3;
+constexpr bool gws_is_gfx9(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+         arch == rocjitsu::IsaFamily::Cdna3;
 }
 
 /// @brief DS opcode for GWS @p op on @p arch.
 /// @details The six GWS ops are contiguous from SEMA_RELEASE_ALL: GFX9 (CDNA1-3)
 /// starts that block at 152, GFX10/11 (RDNA1-3.5) at 24. This is the single source
 /// of truth for the map (so, e.g., CDNA3 SEMA_V/SEMA_P/BARRIER are 154/156/157).
-constexpr uint16_t gws_opcode(rj_code_arch_t arch, GwsOp op) {
+constexpr uint16_t gws_opcode(rocjitsu::IsaFamily arch, GwsOp op) {
   const uint16_t base = gws_is_gfx9(arch) ? 152 : 24;
   switch (op) {
   case GwsOp::kReleaseAll:

@@ -71,11 +71,15 @@ class MemoryFragment : public TestBase {
                              bool grant_cpu, hsa_agent_t cpu_agent, bool light);
 
   // GPU->CPU coherence worker for a single "under test" pool. When grant_cpu
-  // is set (device memory), CPU access to the fragment is requested. Kernel
-  // arguments come from kernarg_pool when it is set, otherwise from the CPU
-  // agent's kernarg pool.
-  void FragmentCoherenceOnPool(const char* label, hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
-                               hsa_amd_memory_pool_t under_test_pool, bool grant_cpu,
+  // is set (device memory), CPU access to the fragment is requested.
+  // num_elements ints are allocated and updated by the GPU; a system buffer
+  // above one fragment block is a dedicated allocation, not a fragment.
+  // Kernel arguments come from kernarg_pool when it is set, otherwise from the
+  // CPU agent's kernarg pool.
+  void FragmentCoherenceOnPool(const char* label, hsa_agent_t cpuAgent,
+                               hsa_agent_t gpuAgent,
+                               hsa_amd_memory_pool_t under_test_pool,
+                               bool grant_cpu, int num_elements,
                                hsa_amd_memory_pool_t kernarg_pool = {0});
 };
 

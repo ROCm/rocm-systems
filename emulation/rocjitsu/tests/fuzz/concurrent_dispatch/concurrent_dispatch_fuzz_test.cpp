@@ -3,6 +3,7 @@
 
 #include "concurrent_dispatch_fuzz_core.h"
 #include "execution_fuzz_core.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -53,7 +54,7 @@ std::vector<uint8_t> flat_store_input(uint32_t address, uint8_t control = 0,
   input[0] = static_cast<uint8_t>(execution_fuzz::FuzzTarget::Gfx908);
   input[1] = control;
   input[4] = packet_count_selector;
-  append_words(input, build_v_mov_b32_imm(0, address, ROCJITSU_CODE_ARCH_CDNA1).value());
+  append_words(input, build_v_mov_b32_imm(0, address, rocjitsu::IsaFamily::Cdna1).value());
   append_words(input, cdna1::build_vop1(cdna1::kVMovB32Vop1, {.src0 = kInlineZero, .vdst = 1}));
   append_words(input, cdna1::build_vop1(cdna1::kVMovB32Vop1, {.src0 = kInlineZero, .vdst = 2}));
   append_words(input, cdna1::build_flat(cdna1::kFlatStoreDwordFlat,
@@ -141,7 +142,7 @@ TEST(ConcurrentDispatchFuzzTest, CanonicalProgramsUseTargetSpecificFlatBaseAndWa
       expected_words = {0xdcc80000, 0x007d0200, 0xbf8c0000, 0xbbfd0000};
       break;
     case execution_fuzz::FuzzTarget::Gfx1100:
-    case execution_fuzz::FuzzTarget::Gfx1151:
+    case execution_fuzz::FuzzTarget::Gfx1150:
       expected_words = {0xdcd40000, 0x007c0200, 0xbf890000, 0xbc7c0000};
       break;
     case execution_fuzz::FuzzTarget::Gfx1200:
@@ -278,7 +279,10 @@ TEST(ConcurrentDispatchFuzzTest, DataIslandCannotBecomeInstructionStream) {
     const RunStats stats = run_input(input);
     ASSERT_EQ(stats.modes, 2u);
     EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
-    EXPECT_EQ(stats.fatal_exit_modes, 0u);
+    // VMID 0 has no VM fault reporter and this queue has no exception status
+    // address, so the fetch fault cannot reach an owner; the engine fails
+    // rather than leave the completion signal pending.
+    EXPECT_EQ(stats.fatal_exit_modes, stats.modes);
     EXPECT_EQ(stats.completed_modes, 0u);
   }
 }

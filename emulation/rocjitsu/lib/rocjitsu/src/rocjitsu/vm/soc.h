@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -52,10 +53,10 @@ class SoC : public simdojo::CompositeComponent, private amdgpu::ComputeQueueBind
 public:
   /// @brief Configuration for an AMDGPU SoC.
   struct Config {
-    rj_code_arch_t arch;     ///< ISA architecture.
-    uint32_t num_xcds;       ///< Number of Accelerator Complex Dies.
-    uint32_t num_iods = 0;   ///< Number of I/O Dies (0 = no IOD modeling).
-    amdgpu::Xcd::Config xcd; ///< Config applied to each XCD.
+    rocjitsu::IsaFamily arch; ///< ISA architecture.
+    uint32_t num_xcds;        ///< Number of Accelerator Complex Dies.
+    uint32_t num_iods = 0;    ///< Number of I/O Dies (0 = no IOD modeling).
+    amdgpu::Xcd::Config xcd;  ///< Config applied to each XCD.
     simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL; ///< Execution mode.
     uint32_t scratch_slots_per_cu = 0; ///< Zero preserves the CU execution-slot default.
   };
@@ -63,12 +64,15 @@ public:
   /// @brief Construct a named SoC from configuration.
   /// @param name Human-readable name (e.g., "mi300x").
   /// @param config SoC configuration parameters.
-  SoC(std::string name, const Config &config);
+  /// @param emit_error Destination for failure diagnostics.
+  /// @returns Null if a child configuration is rejected; emits the reason.
+  static std::unique_ptr<SoC> create(std::string name, const Config &config,
+                                     util::DiagnosticEmitter emit_error = {});
 
   /// @brief Construct an empty SoC (children added externally by the config loader).
   /// @param arch Architecture selecting ISA and SDMA packet semantics.
   explicit SoC(std::string name, amdgpu::GpuMemory *memory = nullptr,
-               rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID);
+               rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid);
   ~SoC() override;
 
   /// @brief Release queue-owned GPU VM state while adopted child components live.
@@ -122,13 +126,14 @@ public:
   /// @brief Set the architecture, or return failure while copy queues exist.
   /// @details Rejection preserves both the architecture and the SDMA dialect.
   /// Failure diagnostics are discarded when the emitter is omitted.
-  util::Result set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {});
-  rj_code_arch_t arch() const { return arch_; }
+  util::Result set_arch(rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error = {});
+  rocjitsu::IsaFamily arch() const { return arch_; }
   void set_exec_mode(simdojo::ExecMode mode) { exec_mode_ = mode; }
   simdojo::ExecMode exec_mode() const { return exec_mode_; }
 
   /// @brief Wire topology links between XCDs, IODs, and memory.
-  void initialize() override;
+  /// @returns Failure with a diagnostic if cache maintenance has no backing memory.
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override;
 
   /// @brief Return the number of XCDs.
   /// @returns Number of Accelerator Complex Dies.
@@ -304,6 +309,8 @@ public:
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
 private:
+  util::Result configure(const Config &config, util::DiagnosticEmitter emit_error);
+
   friend class test::SoCTestAccess;
 
   void apply_dispatch_threads();
@@ -318,7 +325,7 @@ private:
   const simdojo::CompositeComponent *component_root_ = this;
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
-  rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch_ = rocjitsu::IsaFamily::Invalid;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   std::shared_ptr<amdgpu::DeviceCacheCoherence> cache_coherence_ =
       std::make_shared<amdgpu::DeviceCacheCoherence>();
