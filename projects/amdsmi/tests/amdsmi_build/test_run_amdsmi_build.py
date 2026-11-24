@@ -13,6 +13,7 @@ Run with:  python3 -m unittest discover -s projects/amdsmi/tests/amdsmi_build
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 import tempfile
 import textwrap
@@ -270,6 +271,69 @@ class SummarizeTests(unittest.TestCase):
             self.assertIn("lines not shown", text)
 
     def test_excerpt_of_a_short_log_is_the_whole_log(self):
+        self.assertEqual(rab._excerpt("a\nb\nc"), "```\na\nb\nc\n```")
+
+    def test_gtest_assertion_above_a_failed_line_is_kept(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            noise = "".join(f"[       OK ] Suite.Test{i} (1 ms)\n" for i in range(500))
+            failure = (
+                "src/foo_test.cc:123: Failure\n"
+                "Expected equality of these values:\n"
+                "  GetValue()\n"
+                "    Which is: 1\n"
+                "  2\n"
+                "[  FAILED  ] Suite.Broken (3 ms)\n"
+            )
+            (results / "amdsmi_tests.log").write_text(noise + failure + noise + "Exit code: 1\n")
+            summary = results / "summary.md"
+            rab.summarize_results(results, "TestOS", summary)
+            text = summary.read_text()
+            self.assertIn("src/foo_test.cc:123: Failure", text)
+            self.assertIn("Which is: 1", text)
+            self.assertIn("[  FAILED  ] Suite.Broken", text)
+            self.assertNotIn("Suite.Test3 ", text)
+
+    def test_unittest_traceback_under_a_fail_line_is_kept(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            sep = "=" * 70 + "\n"
+            dash = "-" * 70 + "\n"
+            first = (
+                sep + "FAIL: test_a (mod.Case.test_a)\n" + dash
+                + "Traceback (most recent call last):\n"
+                + '  File "tests/test_mod.py", line 9, in test_a\n'
+                + "    self.assertEqual(1, 2)\n"
+                + "AssertionError: 1 != 2\n\n"
+            )
+            # A deep traceback pushes the first failure out of the last 40 lines.
+            deep = "".join(f'  File "lib/deep.py", line {n}, in f{n}\n    f{n + 1}()\n' for n in range(30))
+            second = (
+                sep + "ERROR: test_b (mod.Case.test_b)\n" + dash
+                + "Traceback (most recent call last):\n" + deep
+                + "RecursionError: maximum depth\n\n"
+            )
+            progress = "".join(f"test_{i} ... ok\n" for i in range(300))
+            (results / "integration_test_output.txt").write_text(
+                progress + first + second + "Ran 300 tests\n\nFAILED (failures=1, errors=1)\nExit code: 1\n"
+            )
+            summary = results / "summary.md"
+            rab.summarize_results(results, "TestOS", summary)
+            text = summary.read_text()
+            self.assertIn('File "tests/test_mod.py", line 9, in test_a', text)
+            self.assertIn("AssertionError: 1 != 2", text)
+            self.assertIn("RecursionError: maximum depth", text)
+            self.assertNotIn("test_3 ... ok", text)
+
+    def test_context_stays_within_the_size_budget(self):
+        block = "".join(f"detail line {k} " + "x" * 300 + "\n" for k in range(6))
+        log = "".join(block + f"[  FAILED  ] Suite.Test{i}\n" for i in range(100))
+        excerpt = rab._excerpt(log, re.compile(r"\[  FAILED  \]"), before=6)
+        self.assertLess(len(excerpt), rab.SUMMARY_MAX_CHARS + 25_000)
+        self.assertIn("[  FAILED  ] Suite.Test0", excerpt)
+        self.assertIn("detail line 5", excerpt)
+
+    def test_excerpt_with_no_context_arguments_is_unchanged(self):
         self.assertEqual(rab._excerpt("a\nb\nc"), "```\na\nb\nc\n```")
 
 

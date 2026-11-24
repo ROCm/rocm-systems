@@ -1247,28 +1247,49 @@ def _fenced(text: str) -> str:
 SUMMARY_TAIL_LINES = 40
 SUMMARY_MAX_MATCHES = 60
 SUMMARY_MAX_LINE = 400
+SUMMARY_MAX_CHARS = 20000
 
 
-def _excerpt(text: str, pattern=None, head: int = 0) -> str:
+def _excerpt(text: str, pattern=None, head: int = 0, before: int = 0, after: int = 0) -> str:
     """Short, fenced view of a log: the first *head* lines, up to
-    SUMMARY_MAX_MATCHES lines matching *pattern* (the failing tests), and the
-    last SUMMARY_TAIL_LINES lines. A whole log can pass GitHub's 1024k step
-    summary limit, which drops the summary of every stage after it; the full
-    logs stay in the uploaded test-results artifact.
+    SUMMARY_MAX_MATCHES lines matching *pattern* (the failing tests) with
+    *before* and *after* lines of context around each, and the last
+    SUMMARY_TAIL_LINES lines. The context carries where and why a test failed
+    (a gtest assertion prints above its FAILED line, a unittest traceback below
+    its FAIL line). Context is added only while the excerpt stays within
+    SUMMARY_MAX_CHARS, so a log full of failures still fits: a whole log can pass
+    GitHub's 1024k step summary limit, which drops the summary of every stage
+    after it. The full logs stay in the uploaded test-results artifact.
     """
     lines = text.splitlines()
+
+    def clip(ln: str) -> str:
+        return ln if len(ln) <= SUMMARY_MAX_LINE else ln[:SUMMARY_MAX_LINE] + "..."
+
     keep = set(range(min(head, len(lines))))
     keep.update(range(max(0, len(lines) - SUMMARY_TAIL_LINES), len(lines)))
+    used = sum(len(clip(lines[i])) + 1 for i in keep)
     if pattern is not None:
-        matches = [i for i, ln in enumerate(lines) if pattern.search(ln)]
-        keep.update(matches[:SUMMARY_MAX_MATCHES])
+        matches = [i for i, ln in enumerate(lines) if pattern.search(ln)][:SUMMARY_MAX_MATCHES]
+        for i in matches:
+            if i not in keep:
+                keep.add(i)
+                used += len(clip(lines[i])) + 1
+        for i in matches:
+            for j in range(max(0, i - before), min(len(lines), i + after + 1)):
+                if j in keep:
+                    continue
+                cost = len(clip(lines[j])) + 1
+                if used + cost > SUMMARY_MAX_CHARS:
+                    break
+                keep.add(j)
+                used += cost
     out: List[str] = []
     last = -1
     for i in sorted(keep):
         if i > last + 1:
             out.append(f"... ({i - last - 1} lines not shown)")
-        ln = lines[i]
-        out.append(ln if len(ln) <= SUMMARY_MAX_LINE else ln[:SUMMARY_MAX_LINE] + "...")
+        out.append(clip(lines[i]))
         last = i
     if last < len(lines) - 1:
         out.append(f"... ({len(lines) - last - 1} lines not shown)")
@@ -1334,7 +1355,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             count = gtest_fails if gtest_fails else f"exit {rc}"
             title = f"{gtest_fails} failure(s)" if gtest_fails else f"exit {rc}"
             failures.append(f"AMDSMI Tests ({count})")
-            details.append(f"#### AMDSMI Tests \u2014 {title}\n\n" + _excerpt(text, _re.compile(r"\[  FAILED  \]")))
+            details.append(f"#### AMDSMI Tests \u2014 {title}\n\n" + _excerpt(text, _re.compile(r"\[  FAILED  \]"), before=6))
 
     # 4. Python test outputs
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
@@ -1355,7 +1376,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             count = py_fails if py_fails else f"exit {rc}"
             title = f"{py_fails} failure(s)" if py_fails else f"exit {rc}"
             failures.append(f"{name} ({count})")
-            details.append(f"#### {name} \u2014 {title}\n\n" + _excerpt(text, fail_re))
+            details.append(f"#### {name} \u2014 {title}\n\n" + _excerpt(text, fail_re, after=12))
 
     # 4b. standalone NIC suites run next to amdsmitst; they print no FAIL: line the gtest or
     # unittest checks above would match, so the exit code is the only signal.
@@ -1376,7 +1397,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         if crash_re.search(text) or _exit_code(text):
             name = ex_log.replace(".log", "")
             failures.append(f"Example {name}")
-            details.append(f"#### Example {name}\n\n" + _excerpt(text, crash_re))
+            details.append(f"#### Example {name}\n\n" + _excerpt(text, crash_re, before=3, after=3))
 
     # Render. Every failure above drives the exit status.
     if failures:
