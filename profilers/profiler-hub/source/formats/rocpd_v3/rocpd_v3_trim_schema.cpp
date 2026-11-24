@@ -26,9 +26,12 @@ constexpr table_role_t k_roles[] = {
     { "rocpd_memory_copy", row_kind_t::interval },
     { "rocpd_hip_event", row_kind_t::interval },
     { "rocpd_region", row_kind_t::interval },
+    { "rocpd_graph_launch", row_kind_t::interval },
+    { "rocpd_gpu_pc_sample", row_kind_t::sample },
     { "rocpd_sample", row_kind_t::sample },
     { "rocpd_event", row_kind_t::event },
     { "rocpd_arg", row_kind_t::event_child },
+    { "rocpd_blob_event", row_kind_t::event_child },
 };
 
 bool
@@ -138,9 +141,12 @@ private:
                                             std::string_view                       table,
                                             const std::unordered_set<std::string>& tables)
     {
+        // Every table whose event_id points at rocpd_event. Each GPU PC sample has its
+        // own event, and its rocpd_blob_event row hangs off that event.
         const char* sources[] = { "rocpd_kernel_dispatch", "rocpd_memory_allocate",
                                   "rocpd_memory_copy",     "rocpd_hip_event",
-                                  "rocpd_region",          "rocpd_sample" };
+                                  "rocpd_region",          "rocpd_sample",
+                                  "rocpd_graph_launch",    "rocpd_gpu_pc_sample" };
         std::vector<std::string> refs;
         for(const char* source : sources)
         {

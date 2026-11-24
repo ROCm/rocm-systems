@@ -10,6 +10,7 @@
 #include "rocpd_v2_fixture.hpp"
 
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -393,6 +394,112 @@ TEST_F(ph_ctx_test, cancelled_trim_trace_keeps_existing_output)
                                    std::istreambuf_iterator<char>{} };
         EXPECT_EQ(content, "previous output");
     }
+    std::filesystem::remove(trimmed);
+}
+
+namespace
+{
+int64_t
+scalar_int(sqlite3* db, const std::string& sql)
+{
+    sqlite3_stmt* stmt = nullptr;
+    EXPECT_EQ(sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr), SQLITE_OK);
+    int64_t value = -1;
+    if(stmt != nullptr && sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        value = sqlite3_column_int64(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return value;
+}
+}  // namespace
+
+TEST_F(ph_ctx_test, trim_keeps_graph_launch_gpu_pc_sample_and_blob_inside_the_window)
+{
+    auto writer = make_writer();
+    seed_track_with_two_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    // Event 900 belongs to a GPU PC sample inside the window [1000, 2000), event 901
+    // to one outside it. The blob row of each sample hangs off that sample's event.
+    const std::string& uuid = m_uuid;
+    sqlite3*           db   = nullptr;
+    ASSERT_EQ(sqlite3_open(m_db_path.c_str(), &db), SQLITE_OK);
+    try
+    {
+        // The writer does not create these tables, so declare the columns the trim
+        // reads, with the names and types of rocpd_tables.sql.
+        test::exec_sql(
+            db,
+            ("CREATE TABLE rocpd_graph_launch_" + uuid +
+             " (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, nid INTEGER NOT NULL,"
+             " pid INTEGER NOT NULL, \"start\" BIGINT NOT NULL, \"end\" BIGINT NOT NULL,"
+             " graph_exec_id INTEGER NOT NULL, event_id INTEGER);"
+             "CREATE TABLE rocpd_gpu_pc_sample_" +
+             uuid +
+             " (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \"timestamp\" BIGINT NOT "
+             "NULL,"
+             " nid INTEGER NOT NULL, pid INTEGER NOT NULL, event_id INTEGER NOT NULL);"
+             "CREATE TABLE rocpd_blob_event_" +
+             uuid +
+             " (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, nid INTEGER NOT NULL,"
+             " pid INTEGER NOT NULL, event_id INTEGER NOT NULL, schema_id INTEGER NOT "
+             "NULL,"
+             " blob BLOB NOT NULL);")
+                .c_str());
+        test::exec_sql(
+            db,
+            ("INSERT INTO rocpd_event_" + uuid + " (id) VALUES (900), (901);").c_str());
+        test::exec_sql(db,
+                       ("INSERT INTO rocpd_graph_launch_" + uuid +
+                        " (nid, pid, \"start\", \"end\", graph_exec_id, event_id) VALUES"
+                        " (1, 100, 1500, 1600, 1, 900), (1, 100, 5000, 5500, 2, 901);")
+                           .c_str());
+        test::exec_sql(db,
+                       ("INSERT INTO rocpd_gpu_pc_sample_" + uuid +
+                        " (\"timestamp\", nid, pid, event_id) VALUES"
+                        " (1500, 1, 100, 900), (5500, 1, 100, 901);")
+                           .c_str());
+        test::exec_sql(db,
+                       ("INSERT INTO rocpd_blob_event_" + uuid +
+                        " (nid, pid, event_id, schema_id, blob) VALUES"
+                        " (1, 100, 900, 1, x'01'), (1, 100, 901, 1, x'02');")
+                           .c_str());
+    } catch(...)
+    {
+        sqlite3_close(db);
+        throw;
+    }
+    sqlite3_close(db);
+
+    const std::string trimmed = m_db_path + ".trimmed.db";
+    {
+        ph_ctx ctx{ m_db_path };
+        ctx.load();
+        ASSERT_EQ(ctx.trim_trace(1000, 2000, trimmed.c_str(), nullptr),
+                  PH_RESULT_SUCCESS);
+    }
+
+    sqlite3* out = nullptr;
+    ASSERT_EQ(sqlite3_open(trimmed.c_str(), &out), SQLITE_OK);
+    EXPECT_EQ(scalar_int(out,
+                         "SELECT COUNT(*) FROM rocpd_graph_launch_" + uuid +
+                             " WHERE graph_exec_id = 1"),
+              1);
+    EXPECT_EQ(scalar_int(out,
+                         "SELECT COUNT(*) FROM rocpd_graph_launch_" + uuid +
+                             " WHERE graph_exec_id = 2"),
+              0);
+    EXPECT_EQ(scalar_int(out, "SELECT COUNT(*) FROM rocpd_gpu_pc_sample_" + uuid), 1);
+    EXPECT_EQ(scalar_int(out, "SELECT COUNT(*) FROM rocpd_blob_event_" + uuid), 1);
+    EXPECT_EQ(
+        scalar_int(out, "SELECT COUNT(*) FROM rocpd_event_" + uuid + " WHERE id = 900"),
+        1);
+    EXPECT_EQ(
+        scalar_int(out, "SELECT COUNT(*) FROM rocpd_event_" + uuid + " WHERE id = 901"),
+        0);
+    sqlite3_close(out);
     std::filesystem::remove(trimmed);
 }
 
