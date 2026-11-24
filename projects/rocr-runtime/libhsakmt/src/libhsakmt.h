@@ -37,6 +37,36 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <sys/mman.h>
+#include <time.h>
+
+#if defined(__FreeBSD__)
+/* Linux-only flags used by libhsakmt, mapped to their FreeBSD equivalents. */
+/* Overcommit is FreeBSD's default; there is no flag to request it. */
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+/* No transparent huge page advice; 0 is MADV_NORMAL, i.e. no preference. */
+#ifndef MADV_HUGEPAGE
+#define MADV_HUGEPAGE 0
+#endif
+/* No monotonic clock free of NTP slewing; CLOCK_MONOTONIC is the closest. */
+#ifndef CLOCK_MONOTONIC_RAW
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
+#endif
+
+/* Keep [addr, addr + len) out of fork()ed children.  FreeBSD has no
+ * MADV_DONTFORK; minherit(INHERIT_NONE) gives the same result.
+ */
+static inline int hsakmt_madvise_dontfork(void *addr, size_t len)
+{
+#if defined(__FreeBSD__)
+	return minherit(addr, len, INHERIT_NONE);
+#else
+	return madvise(addr, len, MADV_DONTFORK);
+#endif
+}
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
