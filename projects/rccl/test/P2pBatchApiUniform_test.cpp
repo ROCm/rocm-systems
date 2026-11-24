@@ -28,3 +28,13 @@ TEST(P2pBatchApiUniformTests, SendRecvAndVariableSizeCollectivesDoNotFuse)
     EXPECT_FALSE(rcclP2pBatchApiUniform(ncclFuncScatter));
     EXPECT_FALSE(rcclP2pBatchApiUniform(ncclFuncGather));
 }
+
+TEST(P2pBatchApiUniformTests, OnlyFusingTasksUseTheBatchedChannelLayout)
+{
+    // Rounds that never fuse keep their own channels, as with batching off.
+    EXPECT_EQ(rcclP2pTaskBatchLayout(/*p2pBatchEnable=*/1, ncclFuncAlltoAll), 1);
+    EXPECT_EQ(rcclP2pTaskBatchLayout(/*p2pBatchEnable=*/1, ncclFuncAllGather), 1);
+    EXPECT_EQ(rcclP2pTaskBatchLayout(/*p2pBatchEnable=*/1, ncclFuncSend), 0);
+    EXPECT_EQ(rcclP2pTaskBatchLayout(/*p2pBatchEnable=*/1, ncclFuncRecv), 0);
+    EXPECT_EQ(rcclP2pTaskBatchLayout(/*p2pBatchEnable=*/0, ncclFuncAlltoAll), 0);
+}

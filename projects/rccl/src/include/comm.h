@@ -536,6 +536,7 @@ struct ncclKernelPlanner {
 
   struct Peer {
     bool sendSeen, recvSeen;
+    bool sendSeenUnbatched, recvSeenUnbatched;  // tasks on the unbatched layout while batching is on
     bool sendCeSeen, recvCeSeen;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> sendQueue;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> recvQueue;

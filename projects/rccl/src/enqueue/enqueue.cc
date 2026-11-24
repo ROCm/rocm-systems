@@ -1355,15 +1355,20 @@ int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
 
+static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize_t recvBytes) {
+  const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+  ssize_t cutoff = rcclP2pBatchCutoff(gcn, comm->nNodes, sendBytes, recvBytes, (ssize_t)rcclParamP2pBatchThreshold());
+  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes, cutoff);
+}
+
+// Size policy above, plus: every task of the round comes from a rank-uniform collective.
 static bool rcclP2pBatchEligible(struct ncclComm* comm, struct ncclTaskP2p* const* p2pTasks, ssize_t sendBytes,
                                  ssize_t recvBytes) {
   if (p2pTasks[0] == nullptr && p2pTasks[1] == nullptr) return false;
   for (int dir = 0; dir < 2; dir++) {
     if (p2pTasks[dir] != nullptr && !rcclP2pBatchApiUniform(p2pTasks[dir]->collAPI)) return false;
   }
-  const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
-  ssize_t cutoff = rcclP2pBatchCutoff(gcn, comm->nNodes, sendBytes, recvBytes, (ssize_t)rcclParamP2pBatchThreshold());
-  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes, cutoff);
+  return rcclP2pBatchEligible(comm, sendBytes, recvBytes);
 }
 
 bool rcclP2pDirectApi(ncclFunc_t collAPI) {
@@ -1506,7 +1511,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
   // onto the flags-off layout and forced a dual pre-connect. Channel base must
   // also match task_posttuning / init, which have no per-op size.
-  uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm));
+  // With batching on, a round holds one kind of task (isolateP2pCollTasks), so either head picks the layout.
+  struct ncclTaskP2p* layoutTask = p2pTasks[1] ? p2pTasks[1] : p2pTasks[0];
+  uint8_t base = ncclP2pChannelBaseForRound(
+    comm, p2pRound, layoutTask ? rcclP2pTaskBatchLayout(rcclEffectiveP2pBatchEnable(comm), layoutTask->collAPI) : 0);
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
@@ -2006,7 +2014,9 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         if (maxCTAs < MAXCHANNELS) {
           // RCCL: multi-word channel mask, and the same round base / part mapping addP2pToPlan uses.
           struct channelMasks channelMask = plan->channelMask;
-          int base = ncclP2pChannelBaseForRound(comm, *p2pRound, rcclEffectiveP2pBatchEnable(comm));
+          struct ncclTaskP2p* layoutTask = send ? send : recv;
+          int base = ncclP2pChannelBaseForRound(
+            comm, *p2pRound, rcclP2pTaskBatchLayout(rcclEffectiveP2pBatchEnable(comm), layoutTask->collAPI));
           for (int part = 0; part < pairChannelsMax; part++) {
             int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer,
                                                   comm->nNodes, comm->p2pChannelShiftSize);
@@ -2633,7 +2643,11 @@ static bool ncclPlanCanScheduleP2p(struct ncclKernelPlan* plan) {
 
 static void isolateP2pCollTasks(struct ncclComm* comm) {
   auto* planner = &comm->planner;
-  if (!planner->p2pCollNeedsIsolation) return;
+  // With P2P batching on, a round must not pair a collective's task with an explicit send/recv:
+  // the batching decision would then depend on which tasks each rank happens to pair. Both
+  // conditions are the same on every rank (comm-wide flag, collectives called by every rank).
+  bool batchIsolation = planner->p2pCollOpCount != 0 && rcclEffectiveP2pBatchEnable(comm);
+  if (!planner->p2pCollNeedsIsolation && !batchIsolation) return;
   std::vector<ncclTaskP2p*> tasks;
   for (int peer = 0; peer < comm->nRanks; peer++) {
     for (auto* queue : {&planner->peers[peer].sendQueue, &planner->peers[peer].recvQueue}) {
@@ -4200,6 +4214,7 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   p2p->allowUB = allowUB;
   p2p->maxCTAs = MAXCHANNELS;
   p2p->collOpCount = 0;
+  if (collAPI == ncclFuncAllGather || collAPI == ncclFuncReduceScatter) p2p->collOpCount = planner->p2pCollOpCount;
   if (collAPI == ncclFuncAlltoAll || collAPI == ncclFuncGather || collAPI == ncclFuncScatter) {
     p2p->collOpCount = planner->p2pCollOpCount;
     NCCL_CONFIG_SET(p2p, maxCTAs, ncclParamMaxCTAs(), std::min(info->collConfig.maxCTAs, comm->config.maxCTAs),
@@ -4219,10 +4234,16 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   // Mark channels that need pre-connect
   if (comm->rank != peer) {
     int connIndex = rcclP2pTaskConnIndex(comm, collAPI, peer);
-    bool& seen =
-      isSendNotRecv ?
-        (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].sendCeSeen : planner->peers[peer].sendSeen) :
-        (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].recvCeSeen : planner->peers[peer].recvSeen);
+    int p2pBatchEnable = rcclEffectiveP2pBatchEnable(comm);
+    int layout = rcclP2pTaskBatchLayout(p2pBatchEnable, collAPI);
+    // A peer can need both layouts in one group, so track them separately.
+    bool unbatched = connIndex != NCCL_CONN_IDX_P2P_CE && layout != p2pBatchEnable;
+    bool& seen = isSendNotRecv ? (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].sendCeSeen :
+                                  unbatched                         ? planner->peers[peer].sendSeenUnbatched :
+                                                                      planner->peers[peer].sendSeen) :
+                                 (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].recvCeSeen :
+                                  unbatched                         ? planner->peers[peer].recvSeenUnbatched :
+                                                                      planner->peers[peer].recvSeen);
     if (!seen) {
       int nParts = rcclP2pTaskParts(comm, collAPI, peer);
       // planner->peers[peer].send/recvSeen is private to each comm, so we need to set it anyway.
@@ -4233,7 +4254,7 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
       while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
-      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
+      uint8_t base = ncclP2pChannelBaseForRound(comm, round, layout);
       for (int c = 0; c < nParts; c++) {
           int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                                 comm->p2pChannelShiftSize);
@@ -5209,7 +5230,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           return ncclInvalidUsage;
         }
         if (!useSymmetricAlltoAll &&
-            (collAPI == ncclFuncAlltoAll || collAPI == ncclFuncGather || collAPI == ncclFuncScatter)) {
+            (collAPI == ncclFuncAlltoAll || collAPI == ncclFuncGather || collAPI == ncclFuncScatter ||
+             ((collAPI == ncclFuncAllGather || collAPI == ncclFuncReduceScatter) && info->useDirect))) {
           ncclGroupCommJoin(comm, ncclGroupTaskTypeCollective);
           comm->planner.p2pCollOpCount++;
         }

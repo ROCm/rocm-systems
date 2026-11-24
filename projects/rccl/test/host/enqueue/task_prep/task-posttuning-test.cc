@@ -1337,7 +1337,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_SendSide_TakesTheRoundThatSchedul
   TaskPostTuning_P2pScene p2p;
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSend, &base));
 
   EXPECT_EQ(kP2pSendRound, base);
 }
@@ -1346,7 +1346,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_RecvSide_TakesTheRoundThatSchedul
   TaskPostTuning_P2pScene p2p;
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsRecv, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsRecv, ncclFuncRecv, &base));
 
   EXPECT_EQ(kP2pRecvRound, base);
 }
@@ -1358,8 +1358,8 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_EveryPeerInTheSchedule_ResolvesTo
     uint8_t sendBase = kPoisonedBase;
     uint8_t recvBase = kPoisonedBase;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsSend, &sendBase)) << "peer " << peer;
-    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsRecv, &recvBase)) << "peer " << peer;
+    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsSend, ncclFuncSend, &sendBase)) << "peer " << peer;
+    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsRecv, ncclFuncRecv, &recvBase)) << "peer " << peer;
 
     EXPECT_EQ((peer - kP2pRank + kRanks) % kRanks, sendBase) << "peer " << peer;
     EXPECT_EQ((kP2pRank - peer + kRanks) % kRanks, recvBase) << "peer " << peer;
@@ -1376,7 +1376,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_AnyPeer_AsksThisCommForItsEffecti
   });
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSend, &base));
 
   EXPECT_EQ(1, batchEnable.calls);
   EXPECT_EQ(p2p.comm(), seen);
@@ -1391,7 +1391,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_HandBuiltScheduleOmittingThePeer_
   p2p.ScheduleAt(kSpareRound).sendRank = kP2pPeer;
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSend, &base));
 
   EXPECT_EQ(kSpareRound, base);
 }

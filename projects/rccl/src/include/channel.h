@@ -67,13 +67,16 @@ inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvByt
   return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
 }
 
-// Fuse P2P rounds only for collectives whose per-peer sizes are the same on every rank. Each rank decides
-// with its own sendBytes == recvBytes, so for send/recv-based alltoallv (uneven splits, and
-// ncclAllToAllv's send/recv fallback) ranks fuse different rounds and derive different proxy opCounts.
-// Under PXN, the receiver groups receives with the same opCount on a shared recvComm into one network
-// receive, and mismatched batches deadlock it once a transfer outgrows the send window.
+// Fuse only collectives with rank-uniform per-peer sizes; otherwise ranks fuse different rounds
+// and mismatched proxy opCounts deadlock PXN receives.
 inline bool rcclP2pBatchApiUniform(ncclFunc_t collAPI) {
   return collAPI == ncclFuncAlltoAll || collAPI == ncclFuncAllGather || collAPI == ncclFuncReduceScatter;
+}
+
+// Channel layout for a P2P task: the batched layout only for tasks that can fuse, so rounds that never
+// fuse keep their own channels, as with batching off. Both ends of a P2P op use the same collective.
+inline int rcclP2pTaskBatchLayout(int p2pBatchEnable, ncclFunc_t collAPI) {
+  return rcclP2pBatchApiUniform(collAPI) ? p2pBatchEnable : 0;
 }
 
 // Fusion size cutoff. A negative threshold, including an explicit
