@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
+#include <vector>
+
 #include "memcpy2d_tests_common.hh"
 
 #include <hip_test_common.hh>
@@ -127,6 +130,52 @@ HIP_TEST_CASE(Unit_hipMemcpy2D_Negative_Parameters) {
     NegativeTests(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(), src_alloc.pitch(),
                   dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToDevice);
   }
+}
+
+/*
+ * Device-to-device copies whose source and destination start at byte offsets with no common
+ * alignment, with pitches that aren't multiples of 16, sized from 1 KiB per compute unit up, where
+ * the runtime copies 16-byte chunks with unaligned loads. Checks every byte of the destination
+ * allocation against a host reference, including the padding between rows.
+ */
+HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_UnalignedDeviceToDevice) {
+  int computeUnits = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&computeUnits, hipDeviceAttributeMultiprocessorCount, 0));
+  const size_t width = GENERATE(17, 1000, 4097);
+  const size_t scale = GENERATE(1, 4);
+  const auto offsets = GENERATE(table<size_t, size_t>({{7, 11}, {0, 13}, {5, 0}}));
+  const size_t srcOffset = std::get<0>(offsets);
+  const size_t dstOffset = std::get<1>(offsets);
+  const size_t height = scale * computeUnits * 1024 / width + 1;
+  const size_t srcPitch = width + 3;
+  const size_t dstPitch = width + 21;
+  const size_t srcSize = srcOffset + srcPitch * height + 32;
+  const size_t dstSize = dstOffset + dstPitch * height + 32;
+  constexpr uint8_t paddingVal = 0x3C;
+
+  std::vector<uint8_t> src_h(srcSize);
+  for (size_t i = 0; i < srcSize; i++) {
+    src_h[i] = static_cast<uint8_t>(i * 131 + (i >> 9));
+  }
+  LinearAllocGuard<uint8_t> src_d(LinearAllocs::hipMalloc, srcSize);
+  LinearAllocGuard<uint8_t> dst_d(LinearAllocs::hipMalloc, dstSize);
+  HIP_CHECK(hipMemcpy(src_d.ptr(), src_h.data(), srcSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(dst_d.ptr(), paddingVal, dstSize));
+
+  HIP_CHECK(hipMemcpy2D(dst_d.ptr() + dstOffset, dstPitch, src_d.ptr() + srcOffset, srcPitch, width,
+                        height, hipMemcpyDeviceToDevice));
+
+  std::vector<uint8_t> dst_h(dstSize);
+  HIP_CHECK(hipMemcpy(dst_h.data(), dst_d.ptr(), dstSize, hipMemcpyDeviceToHost));
+  std::vector<uint8_t> expected(dstSize, paddingVal);
+  for (size_t row = 0; row < height; row++) {
+    std::copy_n(src_h.begin() + srcOffset + row * srcPitch, width,
+                expected.begin() + dstOffset + row * dstPitch);
+  }
+  const auto mismatch = std::mismatch(dst_h.begin(), dst_h.end(), expected.begin());
+  INFO("width " << width << " height " << height << " offsets " << srcOffset << "/" << dstOffset
+                << ": first mismatch at byte " << (mismatch.first - dst_h.begin()));
+  REQUIRE(mismatch.first == dst_h.end());
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy2D_Capture) {

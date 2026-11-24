@@ -250,6 +250,36 @@ emitted bytes afresh; pristine facts cannot be attached to a different source.
 
 ### Key design constraint
 
+Explicit `InstrumentationOptions::entries` requests plan each selected descriptor's
+reachable code, register preservation, bootstrap and resource changes separately,
+then commit one combined original-text edit transaction. Every selected or native
+entry must have a closed, disjoint scope. Explicit-entry requests support
+observations; combining them with `ReplaceWithInst` is rejected because a
+replacement could invalidate ownership proved from the original CFG. Replacement
+requests without explicit entries retain their existing support.
+Kernarg-preloaded siblings are rejected:
+their additional firmware entry is outside this bounded ownership model. Validation
+records retain caller insertion order, including a `KernelEntry` callback and an
+ordinary point sharing the same source offset.
+
+Explicit-entry requests require `.text` to be the sole allocated executable
+section, including unmaterialized executable ranges. Otherwise native code
+outside the decoded CFG could enter a selected scope without its dispatch
+bootstrap or resource allocation.
+
+Descriptor ownership also requires a complete symbol inventory: weak `.kd`
+definitions and distinct names aliasing one descriptor are rejected before
+planning. Identical name/location records in `.symtab` and `.dynsym` remain
+valid. Program-path terminators, including ROCr's non-returning `s_trap 2`, end
+the ownership scope. Other unknown PC-writing branch targets are rejected for
+native siblings even when only a `KernelEntry` callback is requested.
+
+For explicit requests, look up `InstrumentedCodeObject::entries` by
+`InstrumentedEntry::original_descriptor_offset` and read that entry's `resources`,
+including `kernarg_bytes` for its wrapper size. Entries are sorted by original
+descriptor offset, independently of request order. The top-level `resources`
+field is zero on this path, including a single selected entry.
+
 Callable `AfterInst` requires an ordinary relocatable anchor and a supported
 post-anchor state. Pre-anchor liveness alone cannot justify a callback after
 the instruction; addressing and storage must be valid at the observation point.

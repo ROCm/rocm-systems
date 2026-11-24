@@ -48,6 +48,8 @@ struct LdsRaceIntegrityIssue {
 
 struct LdsRaceExecutionResult {
   uint64_t serial = 0;
+  EntryKey entry_key = 0;
+  std::string entry = {};
   uint32_t workgroup_count = 1;
   uint32_t waves_per_workgroup = 0;
   uint64_t valid_observations = 0;
@@ -86,10 +88,21 @@ struct LdsRaceExecutionResult {
   bool operator==(const LdsRaceExecutionResult &) const = default;
 };
 
+class LdsRaceImageEntry {
+public:
+  EntryKey key = 0;
+  std::string name;
+  EntryDisposition disposition = EntryDisposition::Native;
+  bool operator==(const LdsRaceImageEntry &) const = default;
+};
+
 struct LdsRaceResult {
   std::array<uint8_t, 16> run_identity{};
   ImageIdentity original;
+  // Single-entry convenience; image entries are authoritative for multiple entries.
   std::string entry;
+  std::vector<LdsRaceImageEntry> entries;
+  Digest selection_profile{};
   uint32_t execution_conditions = 0;
   uint32_t target = 0;
   uint32_t wave_size = 0;

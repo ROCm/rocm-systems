@@ -27,6 +27,8 @@ performance:
   Performance_hipMemcpyAsync_HostToHost: *level_stress
   Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess: *level_stress
   Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess: *level_stress
+  Performance_hipMemcpyAsync_PinnedSynchronized: *level_stress
+  Performance_hipMemcpyAsync_HostToDevice_DependentKernel: *level_stress
   Performance_hipMemcpyWithStream_DeviceToHost: *level_stress
   Performance_hipMemcpyWithStream_HostToDevice: *level_stress
   Performance_hipMemcpyWithStream_HostToHost: *level_stress
@@ -87,6 +89,7 @@ performance:
       reason: "AIRUNTIME-2744 - failing in PSDB; needs to be re-triaged."
   Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess: *level_stress
   Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess: *level_stress
+  Performance_hipMemcpy2DAsync_DeviceToDevice_Padded: *level_stress
   Performance_hipMemcpy2DToArray_HostToDevice:
     <<: *level_stress
     tags: [image]
@@ -143,6 +146,7 @@ performance:
   Performance_hipMemcpy3DAsync_HostToHost: *level_stress
   Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess: *level_stress
   Performance_hipMemcpy3DAsync_DeviceToDevice_EnablePeerAccess: *level_stress
+  Performance_hipMemcpy3DAsync_DeviceToDevice_Padded: *level_stress
   Performance_hipMemset: *level_stress
   Performance_hipMemsetAsync: *level_stress
   Performance_hipMemsetD8: *level_stress
@@ -169,8 +173,10 @@ performance:
       reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
   Performance_hipMemset2D: *level_stress
   Performance_hipMemset2DAsync: *level_stress
+  Performance_hipMemset2DAsync_Padded: *level_stress
   Performance_hipMemset3D: *level_stress
   Performance_hipMemset3DAsync: *level_stress
+  Performance_hipMemset3DAsync_Padded: *level_stress
   Performance_hipStreamWaitEvent: *level_stress
   Performance_hipStreamGetFlags: *level_stress
   Performance_hipStreamGetPriority: *level_stress

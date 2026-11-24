@@ -99,15 +99,13 @@ inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, 
 /// Guest rounding is ignored; FP16_OVFL controls finite overflow.
 template <bool Logarithm>
 inline float log_exp_f16(float x, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
-  fp_mode::ScopedEnvironment environment(0);
   return detail::log_exp_f16_nearest<Logarithm>(x, denorm_mode, fp16_ovfl, quiet_snan);
 }
 
-/// @brief Evaluate a native batch with one saved host floating-point environment.
+/// @brief Evaluate a native batch lane by lane.
 template <bool Logarithm>
 inline util::native<float> log_exp_f16_simd(util::native<float> x, uint32_t denorm_mode,
                                             bool fp16_ovfl, bool quiet_snan) {
-  fp_mode::ScopedEnvironment environment(0);
   return util::map_native_convert_scalar<float, float>(x, [=](float lane) {
     return detail::log_exp_f16_nearest<Logarithm>(lane, denorm_mode, fp16_ovfl, quiet_snan);
   });

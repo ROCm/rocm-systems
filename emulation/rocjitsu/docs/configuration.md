@@ -434,12 +434,12 @@ rocjitsu responsibilities.
 
 Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
 guest rounding and denormal controls; integer WMMA does not accept those controls.
-rj-arith never explicitly changes host FP controls. It assumes the default host FP
-environment: round-to-nearest, FTZ/DAZ disabled, and exceptions masked. In local mode,
-the executable must satisfy this precondition too: linking with `-ffast-math` can
-enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky exception flags. Compatibility deliberately
-does not retain legacy host-environment isolation; nondefault host controls are
-outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
+rocjitsu, including rj-arith, assumes the default host FP environment: round-to-nearest,
+FTZ/DAZ disabled, and exceptions masked. rj-arith never explicitly changes host FP
+controls. In local mode, the executable must satisfy this precondition too: linking with
+`-ffast-math` can enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky
+exception flags. Nondefault host controls are outside the contract in every semantics
+mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
 

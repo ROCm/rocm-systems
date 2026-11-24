@@ -14,6 +14,7 @@
 #include "common/validation.h"
 #include "conversion/conversion32.h"
 #include "conversion/float_conversion.h"
+#include "fp/rounding_status.h"
 #include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/fp_status.h"
 #include "scalar/gfx1150_policy.h"
@@ -123,17 +124,23 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) 
   return RJ_ARITH_SUCCESS;
 }
 
-// Reproduce the inherited gfx12 scalar conversion causes, without host FP-state changes.
+// Reproduce the scalar conversion causes, without host FP-state changes. gfx12 uses the
+// shared hardware rule; Inherited keeps gfx1150 on the stored-result rule.
 // Packed RTZ conversion deliberately leaves FP status unchanged on gfx12.
-template <Convert Op, bool FractionalInexact = false>
+template <Convert Op, bool FractionalInexact = false, bool Inherited = false>
 uint32_t conversion_causes(uint64_t flags, uint32_t a, uint32_t result) {
   using namespace rocjitsu::arith;
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   if constexpr (Op == Convert::PackedHalfRtz) {
     return 0;
   } else if constexpr (Op == Convert::SignedToFloat || Op == Convert::UnsignedToFloat) {
+    // Every 32-bit integer is exact in FP64; only INEXACT can occur.
     const double exact = Op == Convert::SignedToFloat ? double(int32_t(a)) : double(a);
-    return scalar_result_causes<false>(exact, result, rounding);
+    if constexpr (Inherited) {
+      return scalar_result_causes<false>(exact, result, rounding);
+    } else {
+      return a ? rounding_causes<false>(double_bits(exact), result, rounding) : 0;
+    }
   } else {
     constexpr bool half = Op == Convert::HalfToFloat || Op == Convert::HighHalfToFloat;
     constexpr uint32_t normal = half ? 0x400 : 0x800000;
@@ -159,8 +166,12 @@ uint32_t conversion_causes(uint64_t flags, uint32_t a, uint32_t result) {
           causes |= RJ_ARITH_EXCEPTION_INEXACT;
         }
       }
-    } else if (__builtin_isfinite(exact)) {
-      causes |= scalar_result_causes<!half>(exact, result, rounding);
+    } else if constexpr (Inherited) {
+      if (__builtin_isfinite(exact)) {
+        causes |= scalar_result_causes<!half>(exact, result, rounding);
+      }
+    } else if (__builtin_isfinite(exact) && exact != 0) {
+      causes |= rounding_causes<!half>(double_bits(exact), result, rounding);
     }
     return causes;
   }
@@ -248,10 +259,10 @@ int run_gfx1150(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
   }
   if (compatibility) {
     if constexpr (Op == Convert::PackedHalfRtz) {
-      *status |= conversion_causes<Convert::FloatToHalf>(flags, a, *d & 0xffff) |
-                 conversion_causes<Convert::FloatToHalf>(flags, b, *d >> 16);
+      *status |= conversion_causes<Convert::FloatToHalf, false, true>(flags, a, *d & 0xffff) |
+                 conversion_causes<Convert::FloatToHalf, false, true>(flags, b, *d >> 16);
     } else {
-      *status |= conversion_causes<Op, true>(flags, a, *d);
+      *status |= conversion_causes<Op, true, true>(flags, a, *d);
     }
   }
   return RJ_ARITH_SUCCESS;
