@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -91,7 +92,8 @@ util::Result write_input(const std::filesystem::path &path, std::span<const uint
   const bool written = std::fwrite(input.data(), 1, input.size(), stream) == input.size();
   const int close_result = std::fclose(stream);
   std::error_code publish_error;
-  // A hard link publishes the complete file without replacing an existing replay.
+  // A hard link publishes the complete file without replacing an existing
+  // replay.
   if (written && close_result == 0)
     std::filesystem::create_hard_link(temporary, path, publish_error);
   std::error_code cleanup_error;
@@ -139,7 +141,10 @@ CliStatus emit_seeds(const std::filesystem::path &directory, util::DiagnosticEmi
   }
   if (create_directory(directory, diagnostic).failed())
     return CliStatus::Failed;
-  const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
+  const util::FailureOr<std::vector<std::vector<uint8_t>>> generated = seed_corpus(diagnostic);
+  if (generated.failed())
+    return CliStatus::Failed;
+  const std::vector<std::vector<uint8_t>> &seeds = generated.value();
   for (std::size_t index = 0; index < seeds.size(); ++index)
     if (write_input(directory / std::format("seed-{:04}.bin", index), seeds[index], diagnostic)
             .failed())
@@ -197,7 +202,8 @@ void accumulate_stats(RunStats &total, const RunStats &stats) {
 
 void usage(std::ostream &stream) {
   stream << "Usage: rj_concurrent_dispatch_fuzz --input FILE\n"
-            "       rj_concurrent_dispatch_fuzz --random COUNT [--seed N] --output DIRECTORY\n"
+            "       rj_concurrent_dispatch_fuzz --random COUNT [--seed N] "
+            "--output DIRECTORY\n"
             "       rj_concurrent_dispatch_fuzz --emit-seeds DIRECTORY\n"
             "       rj_concurrent_dispatch_fuzz --afl\n";
 }
@@ -215,14 +221,16 @@ int run_afl() {
   while (__AFL_LOOP(1000)) {
     const std::size_t size = __AFL_FUZZ_TESTCASE_LEN;
     if (size > 0 && size <= kMaxInputSize)
-      (void)run_input(std::span<const uint8_t>(buffer, size));
+      if (run_input(std::span<const uint8_t>(buffer, size)).failed())
+        std::abort();
   }
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
   return 0;
 #else
-  std::cerr << "rj_concurrent_dispatch_fuzz requires an AFL++ compiler wrapper for --afl\n";
+  std::cerr << "rj_concurrent_dispatch_fuzz requires an AFL++ compiler wrapper "
+               "for --afl\n";
   return 2;
 #endif
 }
@@ -307,8 +315,10 @@ int main(int argc, char **argv) {
       const CliStatus status = read_input(input_path, input, diagnostic.emitter());
       if (status != CliStatus::Succeeded)
         return report(status);
-      const RunStats stats = run_input(input);
-      print_stats(stats);
+      const util::FailureOr<RunStats> stats = run_input(input, diagnostic.emitter());
+      if (stats.failed())
+        return fail(diagnostic.message());
+      print_stats(stats.value());
       return 0;
     }
 
@@ -317,12 +327,19 @@ int main(int argc, char **argv) {
     RunStats total;
     for (uint64_t index = 0; index < *cases; ++index) {
       const uint64_t seed = seed_start + index;
-      const std::vector<uint8_t> input = random_input(seed);
+      const util::FailureOr<std::vector<uint8_t>> generated =
+          random_input(seed, diagnostic.emitter());
+      if (generated.failed())
+        return fail(diagnostic.message());
+      const std::vector<uint8_t> &input = generated.value();
       const std::filesystem::path replay =
           std::filesystem::path(output_path) / std::format("failure-seed-{}.bin", seed);
       if (write_input(replay, input, diagnostic.emitter()).failed())
         return fail(diagnostic.message());
-      accumulate_stats(total, run_input(input));
+      const util::FailureOr<RunStats> stats = run_input(input, diagnostic.emitter());
+      if (stats.failed())
+        return fail(diagnostic.message());
+      accumulate_stats(total, stats.value());
       std::error_code error;
       std::filesystem::remove(replay, error);
       if (error)
