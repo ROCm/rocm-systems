@@ -87,9 +87,10 @@ TEST(VectorBuilder, BuildVMovB32Src) {
 // A literal source needs a trailing word this encoder cannot return, so it is
 // rejected rather than encoded into an instruction that reads whatever follows.
 TEST(VectorBuilder, BuildVMovB32SrcRejectsLiteralSource) {
-  for (const rocjitsu::IsaFamily arch : kAmdGpuArchs)
+  for (const rocjitsu::IsaFamily arch : kAmdGpuArchs) {
     EXPECT_TRUE(build_v_mov_b32_src(0, kVectorSrcLiteral, arch).failed())
         << "arch " << static_cast<int>(arch);
+  }
   EXPECT_TRUE(
       build_v_mov_b32_src(0, cdna5::OPR_SRC_SRC_LITERAL64, rocjitsu::IsaFamily::Cdna5).failed());
 }

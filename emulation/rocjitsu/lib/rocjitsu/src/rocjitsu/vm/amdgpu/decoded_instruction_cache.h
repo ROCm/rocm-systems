@@ -63,8 +63,9 @@ public:
       from_pc_slot_ = false;
       auto &shared = entries_->slots[entries_->content_slots[content_index(words)]];
       if (shared.instruction && shared.vmid == vmid &&
-          std::equal(words.begin(), words.end(), shared.words.begin()))
+          std::equal(words.begin(), words.end(), shared.words.begin())) {
         return std::move(shared.instruction);
+      }
     }
     from_pc_slot_ = false;
     return decode_miss(decoder, words, emit_error, enabled);
@@ -74,12 +75,14 @@ public:
   /// own it, and tensor DMA retains its continuation outside this cache.
   [[gnu::always_inline]] void return_completed(uint64_t pc, uint32_t vmid, Words words,
                                                DecodeResult &decoded) {
-    if (decoded.failed())
+    if (decoded.failed()) {
       return;
+    }
     auto &instruction = decoded.value();
     if (instruction->amdgpu_memory_addressing() != MemoryAddressing::Tensor &&
-        !instruction->data() && !borrows_fetch_buffer(*instruction, words))
+        !instruction->data() && !borrows_fetch_buffer(*instruction, words)) {
       put(pc, vmid, words, instruction, from_pc_slot_);
+    }
   }
 
   /// @brief Drop entries before replacing the decoder/target, or destroying this CU.
@@ -117,8 +120,9 @@ private:
   // Keep allocation and decoder setup out of the per-instruction cache-hit path.
   RJ_NOINLINE DecodeResult decode_miss(Decoder &decoder, Words words,
                                        const DecodeErrorEmitter &emit_error, bool enabled) {
-    if (enabled && !entries_)
+    if (enabled && !entries_) {
       entries_ = std::make_unique<Table>();
+    }
     Instruction::ScopedHeapAllocation heap_allocation;
     return decoder.decode(words.data(), emit_error);
   }
@@ -133,8 +137,9 @@ private:
                                   std::unique_ptr<Instruction> &instruction,
                                   bool from_pc_slot = false) {
     // A callback can clear the table during issue.
-    if (!entries_)
+    if (!entries_) {
       return;
+    }
     const auto slot = pc_index(pc);
     auto &entry = entries_->slots[slot];
     // An instruction taken from this PC's slot goes back where its key still
@@ -147,8 +152,9 @@ private:
       entry.instruction = std::move(instruction);
       return;
     }
-    if (entry.instruction)
+    if (entry.instruction) {
       evict(entry);
+    }
     entry.vmid = vmid;
     std::copy(words.begin(), words.end(), entry.words.begin());
     entry.instruction = std::move(instruction);

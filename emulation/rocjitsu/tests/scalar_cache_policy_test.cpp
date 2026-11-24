@@ -50,8 +50,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
 
   void issue(uint32_t op, bool glc, uint64_t address, uint32_t records = 0xffffffffu) {
@@ -154,42 +155,51 @@ TEST_F(ScalarCachePolicyTest, GlcLoadsRefetchWarmScalarAndL2Lines) {
     SCOPED_TRACE(op);
     const uint32_t words = 1u << op;
     const uint64_t address = 0x103c + op * 0x100;
-    for (uint32_t i = 0; i < words; ++i)
+    for (uint32_t i = 0; i < words; ++i) {
       memory.write32(address + 4 * i, 100 + i);
+    }
     ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-    for (uint32_t i = 0; i < words; ++i)
+    for (uint32_t i = 0; i < words; ++i) {
       EXPECT_EQ(result(i), 100 + i);
+    }
 
     for (uint32_t version : {200u, 300u}) {
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         memory.write32(address + 4 * i, version + i);
+      }
       if (version == 200) {
         ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-        for (uint32_t i = 0; i < words; ++i)
+        for (uint32_t i = 0; i < words; ++i) {
           EXPECT_EQ(result(i), 100 + i);
+        }
       }
       ASSERT_NO_FATAL_FAILURE(issue(op, true, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(result(i), version + i);
+      }
     }
   }
 }
 
 TEST_F(ScalarCachePolicyTest, GlcBufferLoadsRefreshOnlyInBoundsWords) {
   constexpr uint64_t address = 0x203c;
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     memory.write32(address + 4 * i, 100 + i);
+  }
   ASSERT_NO_FATAL_FAILURE(issue(/*s_buffer_load_dwordx4=*/10, false, address, /*records=*/12));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     memory.write32(address + 4 * i, 200 + i);
+  }
   ASSERT_NO_FATAL_FAILURE(issue(10, true, address, 12));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(result(i), i < 3 ? 200 + i : 0);
+  }
 
   const auto transactions = l2.backing_read_transactions();
   ASSERT_NO_FATAL_FAILURE(issue(10, true, /*unmapped base=*/0, /*records=*/0));
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     EXPECT_EQ(result(i), 0u);
+  }
   EXPECT_EQ(l2.backing_read_transactions(), transactions);
 }
 
@@ -201,11 +211,13 @@ TEST_F(ScalarCachePolicyTest, GlcStoresDoNotLeavePersistentScalarCopies) {
       SCOPED_TRACE(testing::Message() << "op=" << op << " glc=" << glc);
       const uint32_t words = 1u << op;
       const uint64_t address = 0x303c + op * 0x200 + uint32_t{glc} * 0x100;
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         memory.write32(address + 4 * i, 100 + i);
+      }
       ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         cu->write_sgpr(wave->sgpr_alloc().base + 32 + i, 200 + i);
+      }
       ASSERT_NO_FATAL_FAILURE(issue(/*s_store_dword[xN]=*/16 + op, glc, address));
       for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(memory.read32(address + 4 * i), 200 + i);
@@ -215,8 +227,9 @@ TEST_F(ScalarCachePolicyTest, GlcStoresDoNotLeavePersistentScalarCopies) {
                   amdgpu::VmAccessOutcome::Complete);
       }
       ASSERT_NO_FATAL_FAILURE(issue(op, false, address));
-      for (uint32_t i = 0; i < words; ++i)
+      for (uint32_t i = 0; i < words; ++i) {
         EXPECT_EQ(result(i), (glc ? 300 : 200) + i);
+      }
     }
   }
 }

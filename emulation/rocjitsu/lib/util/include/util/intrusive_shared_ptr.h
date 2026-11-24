@@ -51,8 +51,9 @@ public:
   }
 
   ~IntrusiveSharedPtr() {
-    if (ptr_)
+    if (ptr_) {
       ptr_->release_ref();
+    }
   }
 
   [[nodiscard]] T *get() const noexcept { return ptr_; }
@@ -76,8 +77,9 @@ private:
   explicit IntrusiveSharedPtr(T *ptr) noexcept : ptr_(ptr) {}
 
   void retain() noexcept {
-    if (ptr_)
+    if (ptr_) {
       ptr_->add_ref();
+    }
   }
 
   T *ptr_ = nullptr;
@@ -100,8 +102,9 @@ private:
 
   void add_ref() const noexcept { refs_.fetch_add(1, std::memory_order_relaxed); }
   void release_ref() const noexcept {
-    if (refs_.fetch_sub(1, std::memory_order_acq_rel) == 1)
+    if (refs_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
       delete static_cast<const Derived *>(this);
+    }
   }
 
   mutable std::atomic<uint32_t> refs_{1};
@@ -171,8 +174,9 @@ private:
 
   void add_ref() const noexcept { ++refs_; }
   void release_ref() const noexcept {
-    if (--refs_ == 0)
+    if (--refs_ == 0) {
       delete this;
+    }
   }
 
   mutable uint32_t refs_{1};

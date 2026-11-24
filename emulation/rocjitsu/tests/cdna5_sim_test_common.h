@@ -200,10 +200,11 @@ inline void step_until_halted(simdojo::SimulationEngine &engine, amdgpu::Compute
                               uint32_t max_steps = 10000) {
   bool saw_work = false;
   for (uint32_t i = 0; i < max_steps && engine.step(); ++i) {
-    if (cu.has_active_wfs())
+    if (cu.has_active_wfs()) {
       saw_work = true;
-    else if (saw_work)
+    } else if (saw_work) {
       return;
+    }
   }
 }
 
@@ -211,9 +212,11 @@ inline void step_until_xcd_halted(Gfx1250Sim &sim, uint32_t max_steps = 10000) {
   auto any_active = [&]() {
     for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
       auto *se = sim.xcd()->shader_engine(se_idx);
-      for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx)
-        if (se->compute_unit(cu_idx)->has_active_wfs())
+      for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+        if (se->compute_unit(cu_idx)->has_active_wfs()) {
           return true;
+        }
+      }
     }
     return false;
   };
@@ -224,8 +227,9 @@ inline void step_until_xcd_halted(Gfx1250Sim &sim, uint32_t max_steps = 10000) {
       saw_work = true;
       continue;
     }
-    if (saw_work)
+    if (saw_work) {
       return;
+    }
   }
 }
 
@@ -242,8 +246,9 @@ inline const test::WavefrontSnapshot *dispatch_one_wave(Gfx1250Sim &sim, const u
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, 32, 32);
   step_until_halted(*sim.engine, *sim.cu());
-  if (sim.snapshot->snapshots().size() == before)
+  if (sim.snapshot->snapshots().size() == before) {
     return nullptr;
+  }
   return &sim.snapshot->snapshots().back();
 }
 
@@ -304,8 +309,9 @@ constexpr std::array<uint32_t, 3> make_vopd3_pair(VopdSlot x, VopdSlot y, uint8_
 template <size_t N>
 void append_instruction(std::vector<uint32_t> &code, const std::array<uint32_t, N> &words) {
   // Avoid GCC 13's null-range warning when inserting into an empty vector.
-  for (uint32_t word : words)
+  for (uint32_t word : words) {
     code.push_back(word);
+  }
 }
 
 inline void append_instruction(std::vector<uint32_t> &code, uint32_t word) { code.push_back(word); }
@@ -321,14 +327,16 @@ inline uint32_t read_wave_sgpr(const amdgpu::ComputeUnitCore &cu, const amdgpu::
 }
 
 inline void write_global_u32(amdgpu::GpuMemory &memory, uint64_t addr, uint32_t value) {
-  for (uint32_t byte = 0; byte < 4; ++byte)
+  for (uint32_t byte = 0; byte < 4; ++byte) {
     memory.write8(addr + byte, static_cast<uint8_t>(value >> (byte * 8)));
+  }
 }
 
 inline uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
   uint32_t value = 0;
-  for (uint32_t byte = 0; byte < 4; ++byte)
+  for (uint32_t byte = 0; byte < 4; ++byte) {
     value |= static_cast<uint32_t>(memory.read8(addr + byte)) << (byte * 8);
+  }
   return value;
 }
 

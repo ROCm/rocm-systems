@@ -74,8 +74,9 @@ public:
   globalLoadWithObligations(int wave, int vgprBase, int numRegs,
                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                             uint64_t exec = 0) {
-    if (!exec)
+    if (!exec) {
       exec = defaultExec_;
+    }
     const MemoryOrderClass memoryOrder = memoryOrderForObligations(counterObligations);
     std::vector<uint32_t> registers(numRegs);
     for (int i = 0; i < numRegs; ++i) {
@@ -98,10 +99,12 @@ public:
         waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT).succeeded());
     ldsAddrs.resize(waveSize_, 0);
     // Validate each active lane's write against outstanding reads, as the plugin does.
-    for (int lane = 0; lane < waveSize_; ++lane)
-      if (exec & (1ULL << lane))
+    for (int lane = 0; lane < waveSize_; ++lane) {
+      if (exec & (1ULL << lane)) {
         detector_->validateWrite(static_cast<int>(ldsAddrs[lane]), WaveId{wave}, lane, bytesPerLane,
                                  memoryOrder);
+      }
+    }
     waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_LDS,
                                    /*registers=*/{}, exec, waveSize_, ldsAddrs, bytesPerLane,
                                    /*byteMask=*/0xF,
@@ -208,15 +211,17 @@ public:
     for (const auto &range : ranges) {
       const auto bytes = static_cast<int>(
           detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));
-      if (bytes == 0)
+      if (bytes == 0) {
         continue;
+      }
       const int addr = static_cast<int>(range.address);
-      if (type == MemoryEventType::GLOBAL_TO_LDS)
+      if (type == MemoryEventType::GLOBAL_TO_LDS) {
         detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes,
                                  MemoryOrderClass::UNORDERED);
-      else
+      } else {
         detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes,
                                 MemoryOrderClass::UNORDERED);
+      }
     }
     const std::array obligations{amdgpu::MemoryCounterObligation{counter, order}};
     waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations, order);
@@ -337,11 +342,13 @@ public:
   void barrier() {
     const BarrierRoundId round = workgroupRound(nextWorkgroupGeneration_++);
     const std::vector<int> members = liveWaves();
-    for (int wave : members)
+    for (int wave : members) {
       signal(wave, round);
+    }
     completeRound(round, members);
-    for (int wave : members)
+    for (int wave : members) {
       waitPassed(wave, round);
+    }
   }
 
   // -- Split barriers (s_barrier_signal / s_barrier_wait) --
@@ -367,8 +374,9 @@ public:
   /// completed.
   void completeRound(BarrierRoundId round, const std::vector<int> &armed) {
     std::vector<WaveId> ids;
-    for (int wave : armed)
+    for (int wave : armed) {
       ids.push_back(WaveId{wave});
+    }
     detector_->barrierRoundCompleted(round, ids, round.barrier == kWorkgroupBarrier);
   }
 
@@ -385,8 +393,9 @@ public:
                          amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterType::STORECNT,
                          amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT,
                          amdgpu::WaitCounterType::TENSORCNT, amdgpu::WaitCounterType::ASYNCCNT,
-                         amdgpu::WaitCounterType::SAMPLECNT})
+                         amdgpu::WaitCounterType::SAMPLECNT}) {
       wait.add(counter, 0);
+    }
     waves_[wave]->dispatch(wait);
     detector_->waveEnded(WaveId{wave});
     ended_[wave] = true;
@@ -417,8 +426,9 @@ public:
     // writes of the cell, and never against reads of it.
     detector_->validateRead(cell, WaveId{wave}, lane, kBarrierCellBytes, order, kBarrierCellBytes);
     if (tensor) {
-      if (const EventId transfer = std::exchange(tensorTransfers_[wave], {}); transfer.isValid())
+      if (const EventId transfer = std::exchange(tensorTransfers_[wave], {}); transfer.isValid()) {
         detector_->attachBarrierArrive(transfer, static_cast<uint32_t>(cell));
+      }
     } else {
       IntervalSet intervals;
       intervals.append(cell, cell + kBarrierCellBytes);
@@ -533,8 +543,9 @@ public:
 
   bool hasTtmpRace(int reg) const {
     for (const auto &v : violations_) {
-      if (v.space == RaceViolation::Space::TTMP && v.index == reg)
+      if (v.space == RaceViolation::Space::TTMP && v.index == reg) {
         return true;
+      }
     }
     return false;
   }
@@ -565,9 +576,11 @@ public:
 private:
   std::vector<int> liveWaves() const {
     std::vector<int> live;
-    for (int wave = 0; wave < static_cast<int>(waves_.size()); ++wave)
-      if (!ended_[wave])
+    for (int wave = 0; wave < static_cast<int>(waves_.size()); ++wave) {
+      if (!ended_[wave]) {
         live.push_back(wave);
+      }
+    }
     return live;
   }
 
@@ -581,13 +594,15 @@ private:
     for (const auto &range : ranges) {
       const auto bytes = static_cast<int>(
           detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));
-      if (bytes == 0)
+      if (bytes == 0) {
         continue;
+      }
       const int addr = static_cast<int>(range.address);
-      if (type == MemoryEventType::GLOBAL_TO_LDS)
+      if (type == MemoryEventType::GLOBAL_TO_LDS) {
         detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
-      else
+      } else {
         detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
+      }
     }
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};

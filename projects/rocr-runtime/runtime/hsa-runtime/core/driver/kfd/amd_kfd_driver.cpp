@@ -348,18 +348,31 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     bool useSubAlloc = subAllocEnabled;
     useSubAlloc &=
         ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
+    // A system request larger than a fragment block is never recycled: it gets
+    // a block of its own, rounded up to a block multiple, that is discarded on
+    // free. Give it a dedicated allocation of the requested size instead, as
+    // with the fragment allocator disabled. That allocation takes the caller's
+    // flags: a restricted request is CPU-only until
+    // hsa_amd_agents_allow_access, where a fragment block is mapped to all
+    // GPUs when the block is created. Local memory keeps its block-multiple
+    // sizing.
+    useSubAlloc &= !(m_region.IsSystem() && size > m_region.fragment_block_size());
 
     if (useSubAlloc) {
-      mem = m_region.fragment_alloc(size);
+      // recycled is true when mem may hold data from a previously freed
+      // fragment or a cached block. A new block is a dedicated allocation, and
+      // like every dedicated system allocation its pages come zeroed from the
+      // OS (an anonymous mapping or a new kernel BO); clearing it would only
+      // fault those pages in.
+      bool recycled = false;
+      mem = m_region.fragment_alloc(size, &recycled);
 
-      // Suballocated fragments may hold stale data from previously freed
-      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
-      // kernel pages. Zero system-memory fragments so callers that rely on a
-      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
-      // buffer used as an atomic accumulator) behave as they do with a
-      // dedicated BO. Local (device) memory is not host-writable here and is
-      // left untouched (matching pre-existing VRAM suballocation behavior).
-      if (m_region.IsSystem()) {
+      // Zero recycled system fragments so callers that rely on a freshly
+      // allocated buffer being zero-initialized (e.g. an hipHostMalloc buffer
+      // used as an atomic accumulator) behave as they do with a dedicated BO.
+      // Local (device) memory is not host-writable here and is left untouched
+      // (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem() && recycled) {
         memset(mem, 0, size);
       }
 

@@ -96,14 +96,16 @@ constexpr LogRecordSimArch kRdna4{"rdna4", rocjitsu::IsaFamily::Rdna4,
 std::vector<uint8_t> make_wrapper_image(uint64_t buffer_addr) {
   const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
   const auto layout = make_kernarg_extension_layout(kGuestKernargSize, payloads);
-  if (!layout)
+  if (!layout) {
     return {};
+  }
   const std::vector<uint8_t> guest_kernargs(kGuestKernargSize, 0x5A);
   const KernargExtensionPayloadWrite payload{&buffer_addr, sizeof(buffer_addr)};
   std::vector<uint8_t> wrapper(layout->wrapper_size, 0);
   if (!write_kernarg_extension_wrapper(wrapper, *layout, guest_kernargs.data(), kGuestKernargPtr,
-                                       std::span{&payload, 1}))
+                                       std::span{&payload, 1})) {
     return {};
+  }
   return wrapper;
 }
 
@@ -369,8 +371,9 @@ protected:
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
     EXPECT_EQ(drained.header.write_ptr, kTrips);
     ASSERT_EQ(drained.records.size(), kTrips);
-    for (const RjLogRecord &record : drained.records)
+    for (const RjLogRecord &record : drained.records) {
       expect_record(record, launch_mask(), /*site=*/4, t_.wave_size, /*writer_lane=*/0);
+    }
   }
 
   // Two sites share one copied body; each passes its own offset, and the

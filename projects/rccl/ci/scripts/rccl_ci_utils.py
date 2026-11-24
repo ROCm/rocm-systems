@@ -9,6 +9,7 @@ import smtplib
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from email.mime.text import MIMEText
 from pathlib import Path
 
@@ -464,15 +465,20 @@ def send_email_report(
     )
 
 
+def github_run_url() -> str:
+    """Return the URL of the current GitHub Actions run, or "" outside Actions."""
+    server = os.environ.get("GITHUB_SERVER_URL", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    return f"{server}/{repo}/actions/runs/{run_id}" if server else ""
+
+
 def send_teams_webhook(
     report: str, webhook_url: str, status: str, subject_prefix: str
 ) -> None:
     """Send the summary report to a Microsoft Teams channel via webhook."""
     color = "Good" if status == "PASSED" else "Attention"
-    run_url = os.environ.get("GITHUB_SERVER_URL", "")
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    run_id = os.environ.get("GITHUB_RUN_ID", "")
-    actions_url = f"{run_url}/{repo}/actions/runs/{run_id}" if run_url else ""
+    actions_url = github_run_url()
 
     facts = [{"title": "Status", "value": status}]
     if actions_url:
@@ -521,3 +527,110 @@ def send_teams_webhook(
             log.info("Teams webhook sent (HTTP %d)", resp.status)
     except Exception as e:
         log.warning("Failed to send Teams webhook: %s", e)
+
+
+class _ErrorLog(logging.Handler):
+    """Keep the most recent ERROR messages logged while a harness sets up."""
+
+    def __init__(self, limit: int = 5) -> None:
+        super().__init__(level=logging.ERROR)
+        self.limit = limit
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:
+            self.handleError(record)
+            return
+        self.messages = (self.messages + [message])[-self.limit:]
+
+
+class SetupFailureReport:
+    """Send a FAILED report when a harness stops before its tests run.
+
+    A harness's main() reports only after its tests finish, so a setup step
+    that calls sys.exit() or raises would end the job with no summary, email,
+    or Teams message. Wrap main() with run(), call step() before each setup
+    step, and call tests_started() once the test process has launched. If
+    main() stops before that, run() reports the step and the errors logged
+    so far, then re-raises. A harness that sends its own report for a setup
+    failure calls failure_reported() first, so the failure is reported once.
+    """
+
+    def __init__(self, subject_prefix: str) -> None:
+        self.subject_prefix = subject_prefix
+        self.notify_email = ""
+        self.notify_webhook = ""
+        self.current_step = ""
+        self.setup_done = False
+        self.already_reported = False
+        self._errors = _ErrorLog()
+
+    def notify(self, email: str, webhook: str, subject_prefix: str = "") -> None:
+        self.notify_email = email
+        self.notify_webhook = webhook
+        if subject_prefix:
+            self.subject_prefix = subject_prefix
+
+    def step(self, name: str) -> None:
+        self.current_step = name
+
+    def tests_started(self) -> None:
+        self.setup_done = True
+
+    def failure_reported(self) -> None:
+        """Record that the harness has already reported this failure itself."""
+        self.already_reported = True
+
+    def run(self, main: Callable[[], None]) -> None:
+        root = logging.getLogger()
+        root.addHandler(self._errors)
+        try:
+            main()
+        except SystemExit as exc:
+            if exc.code not in (0, None):
+                self._report(f"exited with status {exc.code}")
+            raise
+        except Exception as exc:
+            self._report(f"{type(exc).__name__}: {exc}")
+            raise
+        finally:
+            root.removeHandler(self._errors)
+
+    def _report(self, cause: str) -> None:
+        # Before the first step the notify targets may not be known yet (for
+        # example, an argparse error); once the tests launch, the harness
+        # reports the result itself.
+        if self.setup_done or self.already_reported or not self.current_step:
+            return
+        lines = [
+            f"{self.subject_prefix}: FAILED before any tests ran",
+            "",
+            f"Failed step: {self.current_step}",
+            f"Cause:       {cause}",
+        ]
+        if self._errors.messages:
+            lines += ["", "Errors logged:"]
+            lines += [f"  {message}" for message in self._errors.messages]
+        run_url = github_run_url()
+        if run_url:
+            lines += ["", f"Run: {run_url}"]
+        report = "\n".join(lines)
+        log.error("\n%s", report)
+        channels: list[tuple[str, Callable[[], None]]] = [
+            ("GitHub summary", lambda: write_github_summary(report)),
+        ]
+        if self.notify_email:
+            channels.append(("email", lambda: send_email_report(
+                report, self.notify_email, "FAILED", subject_prefix=self.subject_prefix)))
+        if self.notify_webhook:
+            channels.append(("Teams", lambda: send_teams_webhook(
+                report, self.notify_webhook, "FAILED", subject_prefix=self.subject_prefix)))
+        # Try every channel even if one fails, and never let a reporting
+        # problem replace the original failure.
+        for name, send in channels:
+            try:
+                send()
+            except Exception:
+                log.exception("Could not send the setup failure report to %s", name)

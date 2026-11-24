@@ -44,8 +44,9 @@ inline HostAccessGuardState &host_access_guard_state() {
 /// @param[in] fault_address si_addr, kept for classifying the refusal.
 inline void divert_host_fault_to_guard(int signal, const void *fault_address) {
   HostAccessGuardState &state = host_access_guard_state();
-  if (!state.armed)
+  if (!state.armed) {
     return;
+  }
   state.armed = false;
   state.fault_address = fault_address;
   // The handler runs with this signal blocked, and siglongjmp here does not
@@ -155,8 +156,9 @@ template <typename F> [[nodiscard]] inline bool with_host_access_guard(F &&acces
   // savemask 0 on purpose: saving the signal mask costs a sigprocmask syscall
   // on every armed access, which is the cost this whole mechanism exists to
   // avoid. The handler restores what needs restoring instead.
-  if (sigsetjmp(host_access_guard_state().landing, /*savemask=*/0) != 0)
+  if (sigsetjmp(host_access_guard_state().landing, /*savemask=*/0) != 0) {
     return false;
+  }
   host_access_guard_state().armed = true;
 #endif
   access();

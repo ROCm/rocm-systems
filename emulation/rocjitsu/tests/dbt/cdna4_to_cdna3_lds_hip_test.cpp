@@ -309,8 +309,9 @@ __global__ void lds_zero_kernarg_dispatch_ptr_kernel() {
                :
                : "s"(dispatch_ptr_lo)
                : "memory");
-  if (dispatch_ptr == 0)
+  if (dispatch_ptr == 0) {
     value ^= 0xdead0000u;
+  }
   asm volatile("ds_write_b32 %0, %1\n"
                "s_waitcnt lgkmcnt(0)\n"
                :
@@ -540,23 +541,29 @@ __global__ void lds_static64_dynamic64_dispatch_ptr_kernel(uint32_t *__restrict_
                : "memory");
 
   uint32_t status = 0;
-  if (dispatch_ptr == 0)
+  if (dispatch_ptr == 0) {
     status |= 1u;
-  if (static_read != static_value)
+  }
+  if (static_read != static_value) {
     status |= 2u;
-  if (dynamic_read != dynamic_value)
+  }
+  if (dynamic_read != dynamic_value) {
     status |= 4u;
-  if (static_imm_read != static_imm_value)
+  }
+  if (static_imm_read != static_imm_value) {
     status |= 8u;
-  if (dynamic_imm_read != dynamic_imm_value)
+  }
+  if (dynamic_imm_read != dynamic_imm_value) {
     status |= 16u;
+  }
   status_out[index] = status;
 }
 
 std::vector<uint32_t> make_input(size_t count, uint32_t salt) {
   std::vector<uint32_t> values(count);
-  for (size_t i = 0; i < values.size(); ++i)
+  for (size_t i = 0; i < values.size(); ++i) {
     values[i] = 0x9e370000u ^ salt ^ static_cast<uint32_t>(i * 2654435761u);
+  }
   return values;
 }
 
@@ -584,8 +591,9 @@ void run_unary_kernel(void (*kernel)(const uint32_t *, uint32_t *),
 
   uint32_t mismatches = 0;
   for (size_t i = 0; i < actual.size(); ++i) {
-    if (actual[i] == expected_output[i])
+    if (actual[i] == expected_output[i]) {
       continue;
+    }
     if (mismatches < 8) {
       ADD_FAILURE() << "mismatch at i=" << i << ": got=0x" << std::hex << actual[i]
                     << " expected=0x" << expected_output[i] << std::dec;
@@ -613,8 +621,9 @@ void run_output_kernel(void (*kernel)(uint32_t *), const std::vector<uint32_t> &
 
   uint32_t mismatches = 0;
   for (size_t i = 0; i < actual.size(); ++i) {
-    if (actual[i] == expected_output[i])
+    if (actual[i] == expected_output[i]) {
       continue;
+    }
     if (mismatches < 8) {
       ADD_FAILURE() << "mismatch at i=" << i << ": got=0x" << std::hex << actual[i]
                     << " expected=0x" << expected_output[i] << std::dec;
@@ -668,10 +677,12 @@ template <bool TouchHighSgpr> void run_static_dynamic_dispatch_ptr_kernel() {
 
   uint32_t failures = 0;
   for (size_t i = 0; i < status.size(); ++i) {
-    if (status[i] == 0)
+    if (status[i] == 0) {
       continue;
-    if (failures < 8)
+    }
+    if (failures < 8) {
       ADD_FAILURE() << "status failure at i=" << i << ": 0x" << std::hex << status[i] << std::dec;
+    }
     ++failures;
   }
   EXPECT_EQ(failures, 0u) << failures << " static+dynamic LDS status failures";
@@ -709,8 +720,9 @@ TEST(HipLdsCopyDbtTest, LargeStaticLdsMultiBlockHighOffset) {
 TEST(HipLdsCopyDbtTest, LargeStaticLdsCrossWaveExchangeHighOffset) {
   const std::vector<uint32_t> input = make_input(kBlockSize, 0x606u);
   std::vector<uint32_t> expected(input.size());
-  for (int tid = 0; tid < kBlockSize; ++tid)
+  for (int tid = 0; tid < kBlockSize; ++tid) {
     expected[tid] = input[tid ^ 64];
+  }
   run_unary_kernel(lds_cross_wave_exchange_high_kernel, input, expected);
 }
 
@@ -720,8 +732,9 @@ TEST(HipLdsCopyDbtTest, LargeStaticLdsB128ReverseHighOffset) {
   for (int tid = 0; tid < kBlockSize; ++tid) {
     const int source = tid * 4;
     const int target = (kBlockSize - 1 - tid) * 4;
-    for (int lane = 0; lane < 4; ++lane)
+    for (int lane = 0; lane < 4; ++lane) {
       expected[source + lane] = input[target + lane];
+    }
   }
   run_unary_kernel(lds_b128_reverse_high_kernel, input, expected);
 }
@@ -732,8 +745,9 @@ TEST(HipLdsCopyDbtTest, LargeStaticLdsB128ReverseImmediateOffset) {
   for (int tid = 0; tid < kBlockSize; ++tid) {
     const int source = tid * 4;
     const int target = (kBlockSize - 1 - tid) * 4;
-    for (int lane = 0; lane < 4; ++lane)
+    for (int lane = 0; lane < 4; ++lane) {
       expected[source + lane] = input[target + lane];
+    }
   }
   run_unary_kernel(lds_b128_reverse_immediate_offset_kernel, input, expected);
 }

@@ -32,8 +32,9 @@ StaticBarrierMember make_barrier_member(const Instruction &instruction) {
 std::optional<StaticBarrierPolicy> static_barrier_policy(rj_code_target_id_t target,
                                                          const IsaTargetRegistry &registry) {
   const IsaTargetDescriptor *family = registry.find(target);
-  if (!family || !registry.find_target(target))
+  if (!family || !registry.find_target(target)) {
     return std::nullopt;
+  }
   static constexpr std::array<uint32_t, 2> rdna_waves = {32, 64};
   static constexpr std::array<uint32_t, 1> wave32 = {32};
   static constexpr std::array<uint32_t, 1> wave64 = {64};
@@ -68,9 +69,10 @@ qualify_static_barriers(std::span<BasicBlock *const> blocks, rj_code_target_id_t
                         const InstructionBoundaries &boundaries, StaticBarrierError &error) {
   error = {};
   const std::optional<StaticBarrierPolicy> policy = static_barrier_policy(target);
-  if (!policy)
+  if (!policy) {
     return reject(error, StaticBarrierErrorCode::UnsupportedForm, 0,
                   "target has no complete-barrier mutation policy");
+  }
   std::vector<StaticBarrier> barriers;
   for (BasicBlock *block : blocks) {
     // Pairing must stop at a block boundary, even when the next block is adjacent.
@@ -80,20 +82,24 @@ qualify_static_barriers(std::span<BasicBlock *const> blocks, rj_code_target_id_t
       // BARRIER is a coarse flag: decoded init/join currently omit it. Keep the
       // canonical-name guard so unsupported lifecycle/state forms cannot silently
       // pass as ordinary instructions; exact form checks below decide admission.
-      if (name.find("barrier") == std::string_view::npos && !instruction.is_barrier())
+      if (name.find("barrier") == std::string_view::npos && !instruction.is_barrier()) {
         continue;
+      }
       const uint64_t offset = instruction.src_loc();
       const InstructionBoundaries::Entry *boundary = boundaries.find(offset);
-      if (!boundary || !std::cmp_equal(boundary->size, instruction.size()))
+      if (!boundary || !std::cmp_equal(boundary->size, instruction.size())) {
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "barrier does not match the full-text instruction boundaries");
-      if (boundary->clause_member || boundary->clause || instruction.size() != 4)
+      }
+      if (boundary->clause_member || boundary->clause || instruction.size() != 4) {
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "barrier must be a complete instruction outside clauses");
+      }
       if (policy->form == StaticBarrierForm::FullSingleton) {
-        if (name != "s_barrier")
+        if (name != "s_barrier") {
           return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                         "only full s_barrier is qualified for this family");
+        }
         barriers.push_back({.form = StaticBarrierForm::FullSingleton,
                             .block_offset = block->start_offset(),
                             .barrier_id = -1,
@@ -101,49 +107,57 @@ qualify_static_barriers(std::span<BasicBlock *const> blocks, rj_code_target_id_t
                             .members = {make_barrier_member(instruction)}});
         continue;
       }
-      if (name != "s_barrier_signal" && name != "s_barrier_wait")
+      if (name != "s_barrier_signal" && name != "s_barrier_wait") {
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "only builtin immediate signal/wait pairs are qualified");
+      }
       const Operand *operand = instruction.src_operand(0);
-      if (!operand)
+      if (!operand) {
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "barrier instruction has no decoded source operand");
+      }
       int32_t id = 0;
       if (name == "s_barrier_signal") {
         const std::optional<uint64_t> value = operand->const_value();
-        if (!value)
+        if (!value) {
           return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                         "named, dynamic and literal barrier operands are outside this profile");
+        }
         // The decoder sign-extends inline integer constants in its scalar carrier.
         const int64_t constant = static_cast<int64_t>(*value);
-        if (constant >= 0 || !std::in_range<int32_t>(constant))
+        if (constant >= 0 || !std::in_range<int32_t>(constant)) {
           return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                         "named, dynamic and literal barrier operands are outside this profile");
+        }
         id = static_cast<int32_t>(constant);
       } else {
         id = static_cast<int16_t>(operand->encoding_value());
       }
-      if (id == -2 || id == -4)
+      if (id == -2 || id == -4) {
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "trap-only barrier IDs are not user-kernel mutation candidates");
+      }
       const std::span<const StaticBarrierBuiltin>::iterator builtin =
           std::ranges::find(policy->builtins, id, &StaticBarrierBuiltin::id);
-      if (builtin == policy->builtins.end())
+      if (builtin == policy->builtins.end()) {
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "barrier ID is not a supported user barrier for this family");
+      }
       if (name == "s_barrier_signal") {
-        if (pending)
+        if (pending) {
           return reject(error, StaticBarrierErrorCode::IncompleteBarrier, offset,
                         "interleaved or repeated signal before completing wait");
+        }
         pending = StaticBarrier{.form = StaticBarrierForm::BuiltinSplitPair,
                                 .block_offset = block->start_offset(),
                                 .barrier_id = id,
                                 .scope = builtin->scope,
                                 .members = {make_barrier_member(instruction)}};
       } else {
-        if (!pending || pending->barrier_id != id)
+        if (!pending || pending->barrier_id != id) {
           return reject(error, StaticBarrierErrorCode::IncompleteBarrier, offset,
                         "wait has no matching same-block signal");
+        }
         // Only the admitted signal above creates pending; input mismatches have
         // already returned a diagnostic. Its single member is an internal invariant.
         assert(pending->members.size() == 1);
@@ -152,9 +166,10 @@ qualify_static_barriers(std::span<BasicBlock *const> blocks, rj_code_target_id_t
         pending.reset();
       }
     }
-    if (pending)
+    if (pending) {
       return reject(error, StaticBarrierErrorCode::IncompleteBarrier,
                     pending->members.front().offset, "signal has no completing same-block wait");
+    }
   }
   return barriers;
 }
