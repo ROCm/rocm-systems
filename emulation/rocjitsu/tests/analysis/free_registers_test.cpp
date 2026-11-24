@@ -18,8 +18,9 @@ namespace {
 
 [[nodiscard]] RegisterSet sgprs(std::initializer_list<uint16_t> indices) {
   RegisterSet set;
-  for (uint16_t index : indices)
+  for (uint16_t index : indices) {
     set.expand(RegisterRef{RegClass::SGPR, index, 1});
+  }
   return set;
 }
 
@@ -61,8 +62,9 @@ TEST(FreeRegisters, SearchStartPastBoundFindsNothing) {
 
 TEST(FreeRegisters, FullSetFindsNothing) {
   RegisterSet all;
-  for (uint16_t i = 0; i < 16; ++i)
+  for (uint16_t i = 0; i < 16; ++i) {
     all.expand(RegisterRef{RegClass::SGPR, i, 1});
+  }
   EXPECT_EQ(find_free_run(all, RegClass::SGPR, 1, 0, 1, 16), std::nullopt);
 }
 

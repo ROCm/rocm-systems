@@ -36,10 +36,12 @@ Agents agents(std::string_view target) {
       [](hsa_agent_t agent, void *data) {
         auto &result = *static_cast<Agents *>(data);
         hsa_device_type_t type = {};
-        if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS)
+        if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) {
           return HSA_STATUS_SUCCESS;
-        if (type == HSA_DEVICE_TYPE_CPU)
+        }
+        if (type == HSA_DEVICE_TYPE_CPU) {
           result.cpu = agent;
+        }
         if (type == HSA_DEVICE_TYPE_GPU) {
           hsa_isa_t isa = {};
           uint32_t bytes = 0;
@@ -53,8 +55,9 @@ Agents agents(std::string_view target) {
               if (identity.starts_with(prefix)) {
                 identity.remove_prefix(prefix.size());
                 identity = identity.substr(0, identity.find(':'));
-                if (identity == result.target)
+                if (identity == result.target) {
                   result.gpu = agent;
+                }
               }
             }
           }
@@ -104,35 +107,41 @@ struct Entry {
 
 int run(int argc, char **argv) {
   if (argc != 3 ||
-      (std::string_view(argv[2]) != "baseline" && std::string_view(argv[2]) != "instrumented"))
+      (std::string_view(argv[2]) != "baseline" && std::string_view(argv[2]) != "instrumented")) {
     return 3;
+  }
   const bool instrumented = std::string_view(argv[2]) == "instrumented";
-  if (hsa_init() != HSA_STATUS_SUCCESS)
+  if (hsa_init() != HSA_STATUS_SUCCESS) {
     return 20;
+  }
   // Agent enumeration requires a live HSA runtime.
   const Agents initialized = agents("gfx1250");
-  if (!initialized.cpu.handle || !initialized.gpu.handle)
+  if (!initialized.cpu.handle || !initialized.gpu.handle) {
     return 77;
+  }
   void *plugin = nullptr;
   rj_consan_finish_fn finish = nullptr;
   rj_consan_drain_fn drain = nullptr;
   rj_consan_statistics_fn statistics = nullptr;
   if (instrumented) {
     const char *path = std::getenv("RJ_CONSAN_PLUGIN_PATH");
-    if (path)
+    if (path) {
       plugin = ::dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+    }
     if (plugin) {
       finish = reinterpret_cast<rj_consan_finish_fn>(::dlsym(plugin, "rj_consan_finish"));
       drain = reinterpret_cast<rj_consan_drain_fn>(::dlsym(plugin, "rj_consan_drain"));
       statistics =
           reinterpret_cast<rj_consan_statistics_fn>(::dlsym(plugin, "rj_consan_get_statistics"));
     }
-    if (!finish || !drain || !statistics || drain() != 0)
+    if (!finish || !drain || !statistics || drain() != 0) {
       return 3;
+    }
   }
   const auto require = [](hsa_status_t status, const char *operation) {
-    if (status == HSA_STATUS_SUCCESS)
+    if (status == HSA_STATUS_SUCCESS) {
       return true;
+    }
     std::cerr << operation << " failed: " << uint32_t(status) << '\n';
     return false;
   };
@@ -157,17 +166,21 @@ int run(int argc, char **argv) {
                "executable") ||
       !require(hsa_executable_load_agent_code_object(executable, initialized.gpu, reader, nullptr,
                                                      nullptr),
-               "whole-image load"))
+               "whole-image load")) {
     result = 20;
-  else
+  } else {
     ++loads;
-  if (descriptor >= 0)
+  }
+  if (descriptor >= 0) {
     ::close(descriptor);
-  if (result == 0 && !require(hsa_executable_freeze(executable, nullptr), "freeze"))
+  }
+  if (result == 0 && !require(hsa_executable_freeze(executable, nullptr), "freeze")) {
     result = 20;
+  }
   for (Entry &entry : entries) {
-    if (result != 0)
+    if (result != 0) {
       break;
+    }
     hsa_executable_symbol_t symbol = {};
     uint32_t argument_bytes = 0, group_bytes = 0, private_bytes = 0;
     if (!require(
@@ -201,8 +214,9 @@ int run(int argc, char **argv) {
   }
   if (result == 0 &&
       (entries[0].kernel == entries[1].kernel || entries[0].kernel == entries[2].kernel ||
-       entries[1].kernel == entries[2].kernel))
+       entries[1].kernel == entries[2].kernel)) {
     result = 20;
+  }
   const hsa_amd_memory_pool_t pool = fine_pool(initialized.cpu);
   if (result == 0 &&
       (!pool.handle ||
@@ -213,8 +227,9 @@ int run(int argc, char **argv) {
        !require(hsa_amd_agents_allow_access(1, &initialized.gpu, nullptr, output), "out access") ||
        !require(hsa_queue_create(initialized.gpu, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0,
                                  0, &queue),
-                "queue")))
+                "queue"))) {
     result = 20;
+  }
   const std::array<uint32_t, 4> order = {0, 1, 2, 0};
   const std::array<uint32_t, 4> seeds = {7, 23, 55, 39};
   constexpr uint32_t kGuard = 0xdeadbeef;
@@ -234,8 +249,9 @@ int run(int argc, char **argv) {
     } else {
       std::memcpy(arguments, &output, sizeof(output));
       std::memcpy(static_cast<uint8_t *>(arguments) + 16, &seed, sizeof(seed));
-      if (index == 1)
+      if (index == 1) {
         std::memcpy(static_cast<uint8_t *>(arguments) + 24, &bias, sizeof(bias));
+      }
     }
     std::fill_n(static_cast<uint32_t *>(output), 4, kGuard);
     const uint64_t write_index = hsa_queue_add_write_index_relaxed(queue, 1);
@@ -259,9 +275,10 @@ int run(int argc, char **argv) {
     hsa_signal_value_t value = 1;
     const std::chrono::steady_clock::time_point deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(20);
-    while (value == 1 && std::chrono::steady_clock::now() < deadline)
+    while (value == 1 && std::chrono::steady_clock::now() < deadline) {
       value = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, 1000000,
                                         HSA_WAIT_STATE_BLOCKED);
+    }
     if (value == 1) {
       std::cerr << "completion timeout; retaining live dispatch resources\n";
       ::_exit(24);
@@ -276,8 +293,9 @@ int run(int argc, char **argv) {
     const uint32_t expected_first = seed + (index == 1 ? bias : 0);
     const uint32_t expected_second = expected_first + (index == 2 ? 2 : 1);
     const std::array<uint32_t, 4> expected = {expected_first, expected_second, kGuard, kGuard};
-    if (actual != expected)
+    if (actual != expected) {
       result = 23;
+    }
     std::cout << "{\"ordinal\":" << ordinal + 1 << ",\"entry\":\"" << entry.name
               << "\",\"native\":" << (index == 2 ? "true" : "false")
               << ",\"kernarg_bytes\":" << entry.argument_bytes
@@ -285,35 +303,46 @@ int run(int argc, char **argv) {
               << ",\"group_bytes\":" << entry.group_bytes << ",\"completion\":" << value
               << ",\"output\":[" << actual[0] << ',' << actual[1] << ',' << actual[2] << ','
               << actual[3] << "]}\n";
-    if (drain && drain() != 0)
+    if (drain && drain() != 0) {
       result = 22;
-    if (!require(hsa_signal_destroy(signal), "completion release"))
+    }
+    if (!require(hsa_signal_destroy(signal), "completion release")) {
       result = 22;
+    }
     signal = {};
   }
   const int finish_status = finish ? finish() : 0;
-  if (finish_status != 0 && result == 0)
+  if (finish_status != 0 && result == 0) {
     result = 22;
+  }
   const rj_consan_statistics stats = statistics ? statistics() : rj_consan_statistics{};
-  if (signal.handle && !require(hsa_signal_destroy(signal), "signal cleanup") && result == 0)
+  if (signal.handle && !require(hsa_signal_destroy(signal), "signal cleanup") && result == 0) {
     result = 22;
-  if (queue && !require(hsa_queue_destroy(queue), "queue cleanup") && result == 0)
+  }
+  if (queue && !require(hsa_queue_destroy(queue), "queue cleanup") && result == 0) {
     result = 22;
+  }
   if (reader.handle && !require(hsa_code_object_reader_destroy(reader), "reader cleanup") &&
-      result == 0)
+      result == 0) {
     result = 22;
+  }
   if (executable.handle && !require(hsa_executable_destroy(executable), "executable cleanup") &&
-      result == 0)
+      result == 0) {
     result = 22;
+  }
   if (arguments && !require(hsa_amd_memory_pool_free(arguments), "arguments cleanup") &&
-      result == 0)
+      result == 0) {
     result = 22;
-  if (output && !require(hsa_amd_memory_pool_free(output), "output cleanup") && result == 0)
+  }
+  if (output && !require(hsa_amd_memory_pool_free(output), "output cleanup") && result == 0) {
     result = 22;
-  if (!require(hsa_shut_down(), "shutdown") && result == 0)
+  }
+  if (!require(hsa_shut_down(), "shutdown") && result == 0) {
     result = 22;
-  if (plugin)
+  }
+  if (plugin) {
     ::dlclose(plugin);
+  }
   std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
             << ",\"loads\":" << loads << ",\"completed\":" << completed
             << ",\"submitted\":" << stats.submitted << ",\"forwarded\":" << stats.forwarded

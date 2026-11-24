@@ -66,8 +66,9 @@ enum class FmaOperation : uint32_t {
 
 template <FmaOperation operation, typename Inst>
 uint32_t arithmetic_flags(const Inst &inst, amdgpu::Wavefront &wave, const rocjitsu::Operand &rhs) {
-  if (wave.dx10_clamp())
+  if (wave.dx10_clamp()) {
     return 0;
+  }
   uint32_t absolute = 0, negate = 0, omod = 0;
   if constexpr (requires { inst.inst_.omod; }) {
     absolute = inst.inst_.abs;
@@ -87,8 +88,9 @@ uint32_t arithmetic_flags(const Inst &inst, amdgpu::Wavefront &wave, const rocji
     const uint32_t lhs = read(inst.src0, 0);
     const uint32_t second = read(rhs, 1);
     uint32_t addend = 0;
-    if constexpr (operation == FmaOperation::Fma)
+    if constexpr (operation == FmaOperation::Fma) {
       addend = read(inst.src2, 2);
+    }
     const auto in = dual_fma_inputs(static_cast<uint32_t>(operation), lhs, second, addend);
     const uint32_t result = evaluate_fma(in, wave, omod != 0);
     causes |= fma_flags(in, result, wave);

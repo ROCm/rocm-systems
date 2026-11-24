@@ -30,8 +30,9 @@ class IdentityTranslator final : public AddressSpaceTranslator {
 public:
   VmTranslationResult translate(uint64_t address, std::size_t size,
                                 VmAccessKind /*access*/) const override {
-    if (size == 0)
+    if (size == 0) {
       return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -156,11 +157,13 @@ public:
       std::unique_lock lock(control_->mutex);
       control_->entered = true;
       control_->condition.notify_all();
-      if (control_->block)
+      if (control_->block) {
         control_->condition.wait(lock, [this] { return control_->released; });
+      }
     }
-    if (control_->result == FactoryControl::Result::Reject)
+    if (control_->result == FactoryControl::Result::Reject) {
       return {};
+    }
     return {.status = QueueBindingCreateStatus::Bound,
             .binding = std::make_unique<TestQueueBinding>(control_->binding)};
   }
@@ -173,8 +176,9 @@ template <typename Predicate>
 bool wait_until(Predicate predicate, std::chrono::milliseconds timeout = 2s) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (!predicate()) {
-    if (std::chrono::steady_clock::now() >= deadline)
+    if (std::chrono::steady_clock::now() >= deadline) {
       return false;
+    }
     std::this_thread::yield();
   }
   return true;
@@ -327,8 +331,9 @@ TEST_F(GpuQueueRegistryTest, CloseWaitsForAnAdmittedProducerSubmission) {
   auto submit =
       std::async(std::launch::async, [&] { return registry_.submit_producer(handle, 17); });
   const bool entered = control->wait_for_submit(2s);
-  if (!entered)
+  if (!entered) {
     control->release_submit();
+  }
   ASSERT_TRUE(entered);
 
   auto close = std::async(std::launch::async, [&] {
@@ -360,8 +365,9 @@ TEST_F(GpuQueueRegistryTest, CloseWaitsForAnAdmittedReconfiguration) {
         {.ring_base_address = 0x1000, .ring_size_bytes = 4096, .scheduling_percentage = 100});
   });
   const bool entered = control->wait_for_reconfigure(2s);
-  if (!entered)
+  if (!entered) {
     control->release_reconfigure();
+  }
   ASSERT_TRUE(entered);
 
   auto close = std::async(std::launch::async, [&] {
@@ -384,8 +390,9 @@ TEST_F(GpuQueueRegistryTest, CloseAllFencesAndRollsBackAnInFlightRegistration) {
     return registry_.register_queue(request(std::make_shared<TestQueueFactory>(blocked)));
   });
   const bool factory_entered = blocked->wait_for_entry(2s);
-  if (!factory_entered)
+  if (!factory_entered) {
     blocked->release();
+  }
   ASSERT_TRUE(factory_entered);
 
   const uint64_t initial_epoch = registry_.lifecycle_epoch();

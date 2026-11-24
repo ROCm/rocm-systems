@@ -88,8 +88,9 @@ public:
 
   void execute_and_route(std::unique_ptr<Instruction> instruction, amdgpu::Wavefront &wave) {
     EXPECT_TRUE(execute_instruction(instruction.get(), wave).succeeded());
-    if (instruction->is_memory_op())
+    if (instruction->is_memory_op()) {
       route_memory_inst(instruction, wave);
+    }
   }
 };
 
@@ -164,8 +165,9 @@ TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
   wave->set_exec(kArchitecturalExec);
   write_wave_sgpr(*compute_unit, *wave, 0, static_cast<uint32_t>(kBaseAddress));
   write_wave_sgpr(*compute_unit, *wave, 1, static_cast<uint32_t>(kBaseAddress >> 32));
-  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
     compute_unit->write_vgpr(wave->vgpr_alloc().base, lane, lane * 16);
+  }
 
   const auto words =
       cdna5::build_vglobal(cdna5::kGlobalLoadTr4B64Vglobal, {.saddr = 0, .vdst = 8, .vaddr = 0});
@@ -1532,8 +1534,9 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   constexpr uint32_t kStoreVgpr = 12;
   constexpr std::array<uint32_t, 4> kInitial = {0x101u, 0x102u, 0x103u, 0x104u};
   constexpr std::array<uint32_t, 4> kStored = {0x201u, 0x202u, 0x203u, 0x204u};
-  for (uint32_t i = 0; i < kInitial.size(); ++i)
+  for (uint32_t i = 0; i < kInitial.size(); ++i) {
     sim.memory->write32(kAddr + i * sizeof(uint32_t), kInitial[i]);
+  }
 
   // gfx1250 NUM_RECORDS is a 45-bit byte count split across SRD words 1-3.
   constexpr uint64_t kNumRecords = 10;
@@ -1544,8 +1547,9 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
       static_cast<uint32_t>(kNumRecords >> 7),
       static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu),
   };
-  for (uint32_t i = 0; i < resource.size(); ++i)
+  for (uint32_t i = 0; i < resource.size(); ++i) {
     cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+  }
 
   cdna5::VbufferMachineInst machine{};
   machine.vdata = kLoadVgpr;
@@ -1564,8 +1568,9 @@ TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 2, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 3, 0), 0u);
 
-  for (uint32_t i = 0; i < kStored.size(); ++i)
+  for (uint32_t i = 0; i < kStored.size(); ++i) {
     cu->write_vgpr(wf->vgpr_alloc().base + kStoreVgpr + i, 0, kStored[i]);
+  }
   machine.vdata = kStoreVgpr;
   auto *store =
       new cdna5::BufferStoreB128Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
@@ -1638,18 +1643,21 @@ TEST(Gfx1250ExecutionTest, VbufferRawBoundsDistinguishWholeAndCrossingAccesses) 
               static_cast<uint32_t>(bound >> 7),
               static_cast<uint32_t>((bound >> 39) & 0x3Fu) | (raw_stride << 12),
           };
-          for (uint32_t i = 0; i < resource.size(); ++i)
+          for (uint32_t i = 0; i < resource.size(); ++i) {
             cu->write_sgpr(sbase + kResourceSgpr + i, resource[i]);
+          }
           cu->write_sgpr(sbase + kSoffsetSgpr, offsets.scalar);
           cu->write_vgpr(vbase + kAddressVgpr, 0, offsets.vector);
           cu->write_vgpr(vbase + kAddressVgpr, kLastLane, offsets.vector + 4);
           cu->write_vgpr(vbase + kAddressVgpr, 1, offsets.vector + 256);
-          for (uint32_t i = 0; i <= width; ++i)
+          for (uint32_t i = 0; i <= width; ++i) {
             sim.memory->write32(kBaseAddress + start + i * 4, 0x100u + i);
+          }
           sim.memory->write32(kBaseAddress + start + 256, kUntouched);
           for (uint32_t i = 0; i < width; ++i) {
-            for (uint32_t lane : {0u, 1u, kLastLane})
+            for (uint32_t lane : {0u, 1u, kLastLane}) {
               cu->write_vgpr(vbase + kDataVgpr + i, lane, kUntouched);
+            }
           }
 
           const uint32_t valid_first =
@@ -1683,8 +1691,9 @@ TEST(Gfx1250ExecutionTest, VbufferRawBoundsDistinguishWholeAndCrossingAccesses) 
             // an illegal write from the overlapping, crossing access.
             for (uint32_t lane : {0u, kLastLane}) {
               SCOPED_TRACE(testing::Message() << "store lane=" << lane);
-              for (uint32_t i = 0; i <= width; ++i)
+              for (uint32_t i = 0; i <= width; ++i) {
                 sim.memory->write32(kBaseAddress + start + i * 4, 0x100u + i);
+              }
               wf->set_exec(uint64_t{1} << lane);
               auto store =
                   std::make_unique<Store>(reinterpret_cast<const cdna5::MachineInst *>(&machine));
@@ -1744,8 +1753,9 @@ TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
       static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu) | (kRawStride << 12) |
           (kStrideScaleEncoding << 26) | (1u << 29),
   };
-  for (uint32_t i = 0; i < resource.size(); ++i)
+  for (uint32_t i = 0; i < resource.size(); ++i) {
     cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+  }
   cu->write_sgpr(wf->sgpr_alloc().base + kSoffsetSgpr, 4);
 
   const uint32_t vbase = wf->vgpr_alloc().base;
@@ -1756,10 +1766,12 @@ TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
 
   constexpr std::array<uint32_t, 3> kLane0Initial = {0x101u, 0x102u, 0x103u};
   constexpr std::array<uint32_t, 3> kLane1Initial = {0x201u, 0x202u, 0x203u};
-  for (uint32_t i = 0; i < kLane0Initial.size(); ++i)
+  for (uint32_t i = 0; i < kLane0Initial.size(); ++i) {
     sim.memory->write32(kAddr + 4 + i * sizeof(uint32_t), kLane0Initial[i]);
-  for (uint32_t i = 0; i < kLane1Initial.size(); ++i)
+  }
+  for (uint32_t i = 0; i < kLane1Initial.size(); ++i) {
     sim.memory->write32(kAddr + 28 + i * sizeof(uint32_t), kLane1Initial[i]);
+  }
 
   cdna5::VbufferMachineInst machine{};
   machine.rsrc = kResourceSgpr;
@@ -1785,8 +1797,9 @@ TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
       new cdna5::BufferLoadB96Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
   b96_load->execute_impl(*wf);
   pipeline.issue(b96_load, *wf);
-  for (uint32_t i = 0; i < kLane0Initial.size(); ++i)
+  for (uint32_t i = 0; i < kLane0Initial.size(); ++i) {
     EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr + i, 0), kLane0Initial[i]);
+  }
   EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr, 1), kLane1Initial[0]);
   EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr + 1, 1), 0u);
   EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr + 2, 1), 0u);
@@ -1803,8 +1816,9 @@ TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
   b96_store->execute_impl(*wf);
   pipeline.issue(b96_store, *wf);
 
-  for (uint32_t i = 0; i < kLane0Stored.size(); ++i)
+  for (uint32_t i = 0; i < kLane0Stored.size(); ++i) {
     EXPECT_EQ(sim.memory->read32(kAddr + 4 + i * sizeof(uint32_t)), kLane0Stored[i]);
+  }
   EXPECT_EQ(sim.memory->read32(kAddr + kStride + 12), kLane1Stored[0]);
   EXPECT_EQ(sim.memory->read32(kAddr + kStride + 16), kLane1Initial[1]);
   EXPECT_EQ(sim.memory->read32(kAddr + kStride + 20), kLane1Initial[2]);
@@ -1831,8 +1845,9 @@ TEST(Gfx1250ExecutionTest, NonReturningVbufferB64AtomicHonorsWholePayloadBounds)
         static_cast<uint32_t>(num_records >> 7),
         static_cast<uint32_t>((num_records >> 39) & 0x3Fu),
     };
-    for (uint32_t i = 0; i < resource.size(); ++i)
+    for (uint32_t i = 0; i < resource.size(); ++i) {
       cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+    }
   };
 
   cu->write_vgpr(wf->vgpr_alloc().base + kDataVgpr, 0, static_cast<uint32_t>(kAddend));
@@ -1884,8 +1899,9 @@ TEST(Gfx1250ExecutionTest, ReturningVbufferAtomicIgnoresNonBufferResourceType) {
       static_cast<uint32_t>(kNumRecords >> 7),
       static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu) | (kNonBufferType << 30),
   };
-  for (uint32_t i = 0; i < resource.size(); ++i)
+  for (uint32_t i = 0; i < resource.size(); ++i) {
     cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+  }
   sim.memory->write32(kAddr, kInitialMemory);
   cu->write_vgpr(wf->vgpr_alloc().base + kDataVgpr, 0, kDataSentinel);
 
@@ -2326,8 +2342,9 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
   };
 
   run_case(true);
-  if constexpr (util::has_stdx_simd && !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS)
+  if constexpr (util::has_stdx_simd && !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
     run_case(false);
+  }
 }
 
 TEST(Gfx1250LiteralOperandTest, ScalarFmaLiteralOrder) {
@@ -2438,8 +2455,9 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
   };
 
   run_case(true);
-  if constexpr (util::has_stdx_simd)
+  if constexpr (util::has_stdx_simd) {
     run_case(false);
+  }
 }
 
 using PackedU64Pair = std::array<uint64_t, 2>;
@@ -2534,33 +2552,36 @@ uint64_t read_wmma_f64_word_pair(const amdgpu::ComputeUnitCore &cu, const amdgpu
 // into two 32-bit VGPRs.
 void write_wmma_f64_ab(amdgpu::ComputeUnitCore &cu, const amdgpu::Wavefront &wf,
                        uint32_t first_vgpr, const WmmaF64InputMatrix &matrix) {
-  for (uint32_t outer = 0; outer < 16; ++outer)
+  for (uint32_t outer = 0; outer < 16; ++outer) {
     for (uint32_t k = 0; k < 4; ++k) {
       const uint32_t lane = outer + 16u * (k / 2u);
       const uint32_t vgpr = first_vgpr + 2u * (k % 2u);
       write_wmma_f64_word_pair(cu, wf, vgpr, lane, matrix[outer * 4 + k]);
     }
+  }
 }
 
 void write_wmma_f64_cd(amdgpu::ComputeUnitCore &cu, const amdgpu::Wavefront &wf,
                        uint32_t first_vgpr, const WmmaF64OutputMatrix &matrix) {
-  for (uint32_t row = 0; row < 16; ++row)
+  for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       const uint32_t lane = col + 16u * (row / 8u);
       const uint32_t vgpr = first_vgpr + 2u * (row % 8u);
       write_wmma_f64_word_pair(cu, wf, vgpr, lane, matrix[row * 16 + col]);
     }
+  }
 }
 
 WmmaF64OutputMatrix read_wmma_f64_cd(const amdgpu::ComputeUnitCore &cu, const amdgpu::Wavefront &wf,
                                      uint32_t first_vgpr) {
   WmmaF64OutputMatrix matrix{};
-  for (uint32_t row = 0; row < 16; ++row)
+  for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       const uint32_t lane = col + 16u * (row / 8u);
       const uint32_t vgpr = first_vgpr + 2u * (row % 8u);
       matrix[row * 16 + col] = read_wmma_f64_word_pair(cu, wf, vgpr, lane);
     }
+  }
   return matrix;
 }
 
@@ -2587,14 +2608,16 @@ std::unique_ptr<Instruction> decode_gfx1251_wmma(Decoder &decoder,
 WmmaF64OutputMatrix reference_wmma_f64(const WmmaF64InputMatrix &a, const WmmaF64InputMatrix &b,
                                        const WmmaF64OutputMatrix &c) {
   WmmaF64OutputMatrix result{};
-  for (uint32_t row = 0; row < 16; ++row)
+  for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       uint64_t acc = c[row * 16 + col];
-      for (uint32_t k = 0; k < 4; ++k)
+      for (uint32_t k = 0; k < 4; ++k) {
         acc = amdgpu::fp_mode::fma_f64(a[row * 4 + k], b[col * 4 + k], acc,
                                        /*round_mode=*/0, /*denorm_mode=*/3);
+      }
       result[row * 16 + col] = acc;
     }
+  }
   return result;
 }
 
@@ -2616,15 +2639,21 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesPublicLaneAndRegisterMapping) {
   WmmaF64InputMatrix a{};
   WmmaF64InputMatrix b{};
   WmmaF64OutputMatrix c{};
-  for (uint32_t row = 0; row < 16; ++row)
-    for (uint32_t k = 0; k < 4; ++k)
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t k = 0; k < 4; ++k) {
       a[row * 4 + k] = bits(static_cast<double>(1u + row + 2u * k));
-  for (uint32_t col = 0; col < 16; ++col)
-    for (uint32_t k = 0; k < 4; ++k)
+    }
+  }
+  for (uint32_t col = 0; col < 16; ++col) {
+    for (uint32_t k = 0; k < 4; ++k) {
       b[col * 4 + k] = bits(static_cast<double>((1u + col) * (1u + k)));
-  for (uint32_t row = 0; row < 16; ++row)
-    for (uint32_t col = 0; col < 16; ++col)
+    }
+  }
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
       c[row * 16 + col] = bits(static_cast<double>(1000u + 16u * row + col));
+    }
+  }
 
   auto decoder =
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
@@ -2708,8 +2737,9 @@ TEST(Gfx1251F64WmmaExecutionTest, StagesAllInputsBeforeOverlappingDestinationWri
     a[i] = bits(static_cast<double>(i + 1));
     b[i] = bits(static_cast<double>(2u * i + 1u));
   }
-  for (uint32_t i = 0; i < c.size(); ++i)
+  for (uint32_t i = 0; i < c.size(); ++i) {
     c[i] = bits(static_cast<double>(i + 3));
+  }
   const WmmaF64OutputMatrix expected = reference_wmma_f64(a, b, c);
 
   auto decoder =
@@ -2746,8 +2776,9 @@ TEST(Gfx1251F64WmmaExecutionTest, RejectsNonFullExecBeforeReadingOrWritingRegist
   a.fill(bits(2.0));
   b.fill(bits(3.0));
   c.fill(bits(-5.0));
-  for (uint32_t i = 0; i < initial.size(); ++i)
+  for (uint32_t i = 0; i < initial.size(); ++i) {
     initial[i] = 0xdead000000000000ULL + i;
+  }
 
   auto decoder =
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
@@ -2838,8 +2869,9 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesEveryPublicLlvmModifierAndInlineForm) 
     ASSERT_NE(decoded->execute, nullptr);
     EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     const WmmaF64OutputMatrix result = read_wmma_f64_cd(*cu, *wf, 8);
-    for (uint32_t i = 0; i < result.size(); ++i)
+    for (uint32_t i = 0; i < result.size(); ++i) {
       EXPECT_EQ(result[i], form.expected) << i;
+    }
   }
 }
 
@@ -2888,8 +2920,9 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesLegalInlineAccumulators) {
     ASSERT_NE(decoded, nullptr);
     EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     const WmmaF64OutputMatrix result = read_wmma_f64_cd(*cu, *wf, 32);
-    for (uint32_t i = 0; i < result.size(); ++i)
+    for (uint32_t i = 0; i < result.size(); ++i) {
       EXPECT_EQ(result[i], test_case.expected) << i;
+    }
   }
 }
 
@@ -3260,8 +3293,9 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesEveryPublicLlvmSourceF
     };
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
     for (uint32_t source = 0; source < 3; ++source) {
-      if (!(form.literal_mask & (1u << source)))
+      if (!(form.literal_mask & (1u << source))) {
         continue;
+      }
       const Operand *literal_operand = decoded->src_operand(source);
       ASSERT_NE(literal_operand, nullptr);
       EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*literal_operand, 0),
@@ -3305,8 +3339,9 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
     write_vgpr_packed_u64(*cu, *wf, 8, 0, kMultiplicand);
     write_vgpr_packed_u64(*cu, *wf, 12, 0, kMultiplier);
     write_vgpr_packed_u64(*cu, *wf, 16, 0, kAddend);
-    if (test_case.name != "vdst")
+    if (test_case.name != "vdst") {
       write_vgpr_packed_u64(*cu, *wf, 254, 0, test_case.boundary_source);
+    }
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
@@ -3672,12 +3707,15 @@ TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesEveryPublicLlvmSource
   write_sgpr_packed_u64(*cu, *wf, 12, {bits(7.0), bits(8.0)});
 
   const auto reference = [](std::string_view operation, double lhs, double rhs) {
-    if (operation == "add")
+    if (operation == "add") {
       return lhs + rhs;
-    if (operation == "mul")
+    }
+    if (operation == "mul") {
       return lhs * rhs;
-    if (operation == "max-num")
+    }
+    if (operation == "max-num") {
       return std::fmax(lhs, rhs);
+    }
     return std::fmin(lhs, rhs);
   };
   for (const auto &operation : kOperations) {
@@ -3698,8 +3736,9 @@ TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesEveryPublicLlvmSource
       EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
       if (form.literal != 0u) {
         for (uint32_t source = 0; source < 2; ++source) {
-          if (form.name != "shared-literal" && source != (form.name == "literal-vgpr" ? 0u : 1u))
+          if (form.name != "shared-literal" && source != (form.name == "literal-vgpr" ? 0u : 1u)) {
             continue;
+          }
           const Operand *literal_operand = decoded->src_operand(source);
           ASSERT_NE(literal_operand, nullptr);
           EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*literal_operand, 0), bits(101.0));
@@ -4434,10 +4473,11 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesSgpr104CompositeInEveryPackedU64Posi
 
   for (const auto &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
-    if (test_case.is_lshl_add)
+    if (test_case.is_lshl_add) {
       write_vgpr_packed_u32(*cu, *wf, 12, 0, {1u, 2u});
-    else
+    } else {
       write_vgpr_packed_u64(*cu, *wf, 12, 0, {3u, 7u});
+    }
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
@@ -4935,8 +4975,9 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
       {0xcc7e4004u, 0x1c41db08u}, // private_base
       {0xcc7e4004u, 0x1c41dd08u}, // private_limit
   }};
-  for (const auto &words : kInvalidRawWords)
+  for (const auto &words : kInvalidRawWords) {
     EXPECT_EQ(decode_valid(*decoder, words.data()), nullptr);
+  }
 
   constexpr std::array<std::array<uint32_t, 2>, 3> kValidRawB64Words{{
       {0xcc7e4004u, 0x1c41cd08u}, // flat_scratch
@@ -5213,10 +5254,12 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
     write_sgpr_packed_u64(*cu, *wf, 16, kSgprSrc2WithPoison);
     // The public inline/literal-src0 vectors use v[8:9] for their shifts.
     // The final literal-src2 vector uses v[16:17] for its shifts.
-    if (test_case.name == "inline-vgpr-vgpr" || test_case.name == "literal-vgpr-vgpr")
+    if (test_case.name == "inline-vgpr-vgpr" || test_case.name == "literal-vgpr-vgpr") {
       write_vgpr_packed_u32(*cu, *wf, 8, 0, {3u, 4u});
-    if (test_case.name == "vgpr-vgpr-literal")
+    }
+    if (test_case.name == "vgpr-vgpr-literal") {
       write_vgpr_packed_u32(*cu, *wf, 16, 0, {4u, 4u});
+    }
     write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
 
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
@@ -5312,8 +5355,9 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsOverlappingSourcesBeforeWritingDestinat
 }
 
 TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "requires stdx SIMD";
+  }
 
   ForceScalarGuard force_scalar_guard;
   util::set_force_scalar_for_testing(false);
@@ -5346,16 +5390,18 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     fields.src1 = 258;
     fields.src2 = 260;
     fields.opsel_hi = 3;
-    if (test_case.literal_source == 0)
+    if (test_case.literal_source == 0) {
       fields.src0 = 255;
-    else if (test_case.literal_source == 1)
+    } else if (test_case.literal_source == 1) {
       fields.src1 = 255;
-    else
+    } else {
       fields.src2 = 255;
+    }
 
     auto base = cdna5::build_vop3p(test_case.opcode, fields);
-    if (test_case.operation == Operation::Fma)
+    if (test_case.operation == Operation::Fma) {
       base[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
+    }
     const std::array words{base[0], base[1], kLiteral};
     auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
@@ -5586,8 +5632,9 @@ TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
                              : test_case.operation == Operation::Mul ? cdna5::kVPkMulF32Vop3p
                                                                      : cdna5::kVPkAddF32Vop3p,
                              fields);
-      if (test_case.op_sel_hi_2 != 0u)
+      if (test_case.op_sel_hi_2 != 0u) {
         words[0] |= uint32_t{1} << 14;
+      }
       auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
@@ -5969,14 +6016,16 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
                   (old & ~(0xFFu << shift)) | (static_cast<uint32_t>(value) << shift));
   };
 
-  for (uint32_t reg = 0; reg < 64; ++reg)
-    for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t reg = 0; reg < 64; ++reg) {
+    for (uint32_t lane = 0; lane < 32; ++lane) {
       cu.write_vgpr(base + reg, lane, 0);
+    }
+  }
 
   std::array<std::array<uint8_t, 64>, 16> compressed_a{};
   std::array<std::array<uint8_t, 128>, 16> dense_b{};
   std::array<std::array<uint32_t, 2>, 16 * 32> selectors{};
-  for (uint32_t row = 0; row < 16; ++row)
+  for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t group = 0; group < 32; ++group) {
       const auto pair = kPairs[(row * 5u + group * 7u + group * group) % kPairs.size()];
       selectors[row * 32 + group] = pair;
@@ -5996,8 +6045,9 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
         cu.write_vgpr(base + kIndex + word, index_lane, old | ((pair[which] & 3u) << shift));
       }
     }
+  }
 
-  for (uint32_t k = 0; k < 128; ++k)
+  for (uint32_t k = 0; k < 128; ++k) {
     for (uint32_t col = 0; col < 16; ++col) {
       const uint8_t value = static_cast<uint8_t>(1u + ((k * 5u + col * 3u) % 11u));
       dense_b[col][k] = value;
@@ -6005,26 +6055,31 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
       const uint32_t slot = (k & 31u) + 32u * (k >> 6);
       write_byte(kB, lane, slot, value);
     }
+  }
 
   std::array<uint32_t, 16 * 16> expected{};
-  for (uint32_t row = 0; row < 16; ++row)
+  for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       uint32_t sum = 0;
-      for (uint32_t group = 0; group < 32; ++group)
+      for (uint32_t group = 0; group < 32; ++group) {
         for (uint32_t which = 0; which < 2; ++which) {
           const uint32_t ck = 2u * group + which;
           const uint32_t k = 4u * group + selectors[row * 32 + group][which];
           sum += static_cast<uint32_t>(compressed_a[row][ck]) * dense_b[col][k];
         }
+      }
       expected[row * 16 + col] = sum;
     }
+  }
 
   for (bool force_scalar : {true, false}) {
     SCOPED_TRACE(force_scalar ? "scalar" : "simd");
     util::set_force_scalar_for_testing(force_scalar);
-    for (uint32_t reg = 0; reg < 8; ++reg)
-      for (uint32_t lane = 0; lane < 32; ++lane)
+    for (uint32_t reg = 0; reg < 8; ++reg) {
+      for (uint32_t lane = 0; lane < 32; ++lane) {
         cu.write_vgpr(base + kAcc + reg, lane, 0);
+      }
+    }
 
     auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     const auto words = cdna5::build_vop3p(
@@ -6034,12 +6089,13 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
 
-    for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t row = 0; row < 16; ++row) {
       for (uint32_t col = 0; col < 16; ++col) {
         const auto out = amdgpu::wmma_output_loc_32<16, 16>(row, col);
         EXPECT_EQ(cu.read_vgpr(base + kAcc + out.reg, out.lane), expected[row * 16 + col])
             << "row=" << row << " col=" << col;
       }
+    }
   }
 }
 
@@ -6059,10 +6115,12 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128SignsAndClamp) {
           cu.write_vgpr(base + reg, lane, 0x80808080U);
           cu.write_vgpr(base + 40 + reg, lane, signs ? 0 : INT32_MAX);
         }
-        for (uint32_t reg = 16; reg < 32; ++reg)
+        for (uint32_t reg = 16; reg < 32; ++reg) {
           cu.write_vgpr(base + reg, lane, 0xffffffffU);
-        for (uint32_t reg = 56; reg < 58; ++reg)
+        }
+        for (uint32_t reg = 56; reg < 58; ++reg) {
           cu.write_vgpr(base + reg, lane, 0x44444444U);
+        }
       }
       const auto words = cdna5::build_vop3p(
           cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
@@ -6122,8 +6180,9 @@ TEST(Gfx1250ExecutionTest, PermlaneShufflesSelectSourceAtGroupBoundaries) {
   auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t base = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t lane = 0; lane < 32; ++lane) {
     cu->write_vgpr(base, lane, 1000 + lane);
+  }
 
   struct Case {
     uint16_t opcode;
@@ -6153,12 +6212,14 @@ TEST(Gfx1250ExecutionTest, PermlaneShufflesSelectSourceAtGroupBoundaries) {
     SCOPED_TRACE(inst->mnemonic());
     wf->set_exec(1u << test.lane);
     write_wave_sgpr(*cu, *wf, 4, test.selector);
-    for (uint32_t lane = 0; lane < 32; ++lane)
+    for (uint32_t lane = 0; lane < 32; ++lane) {
       cu->write_vgpr(base + 1, lane, 0xdeadbeef);
+    }
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t lane = 0; lane < 32; ++lane)
+    for (uint32_t lane = 0; lane < 32; ++lane) {
       EXPECT_EQ(cu->read_vgpr(base + 1, lane), lane == test.lane ? 1000 + test.source : 0xdeadbeef)
           << "width=" << test.width << " lane=" << lane << " selector=" << test.selector;
+    }
   }
 }
 
@@ -6188,8 +6249,9 @@ TEST(Gfx1250ExecutionTest, Perlane64CompatibilityEncodingDecodesAndIsWave32Nop) 
 
   // The instruction swaps Wave64 halves; on gfx1250's Wave32 it is a NOP,
   // including for active lanes and a partial EXEC mask.
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(base, lane), 0xA5A50000u | lane) << "lane " << lane;
+  }
 }
 
 TEST(Gfx1250ExecutionTest, RelativeSourceDestinationOperationsUsePackedM0Offsets) {
@@ -6454,8 +6516,9 @@ TEST(Gfx1250ExecutionTest, FusedOperationsHonorF16F64ModeControls) {
   constexpr uint64_t kHalfUlpAtOne = std::bit_cast<uint64_t>(0x1p-53);
   constexpr uint64_t kNextAfterOne = kOne + 1;
   constexpr uint64_t expected_f64[] = {kOne, kNextAfterOne, kOne, kOne};
-  for (uint32_t round = 0; round < 4; ++round)
+  for (uint32_t round = 0; round < 4; ++round) {
     EXPECT_EQ(run_fmamk(kOne, kHalfUlpAtOne, kOne, (round << 2) | (3u << 6)), expected_f64[round]);
+  }
 
   constexpr uint64_t kMinF64 = 1u;
   EXPECT_EQ(run_fmamk(kMinF64, kOne, 0, 3u << 6), kMinF64);
@@ -6523,8 +6586,9 @@ TEST(Gfx1250ExecutionTest, FusedOperationsHonorF16F64ModeControls) {
   };
 
   constexpr uint16_t expected_f16[] = {0x3C00u, 0x3C01u, 0x3C00u, 0x3C00u};
-  for (uint32_t round = 0; round < 4; ++round)
+  for (uint32_t round = 0; round < 4; ++round) {
     EXPECT_EQ(run_f16(0x3C00u, 0x1000u, 0x3C00u, (round << 2) | (3u << 6)), expected_f16[round]);
+  }
 
   EXPECT_EQ(run_f16(0x0001u, 0x3C00u, 0, 3u << 6), 0x0001u);
   EXPECT_EQ(run_f16(0x0001u, 0x3C00u, 0, 2u << 6), 0x0000u);
@@ -6544,12 +6608,14 @@ TEST(Gfx1250ExecutionTest, FusedOperationsHonorF16F64ModeControls) {
     inst.execute_impl(*wf);
     return static_cast<uint16_t>(cu->read_vgpr(base + 3, 0));
   };
-  for (uint32_t round = 0; round < 4; ++round)
+  for (uint32_t round = 0; round < 4; ++round) {
     EXPECT_EQ(run_fma_f16(0x3C00u, 0x1000u, 0x3C00u, (round << 2) | (3u << 6)),
               expected_f16[round]);
+  }
   constexpr uint16_t expected_f16_denorm[] = {0, 0, 0, 1};
-  for (uint32_t denorm = 0; denorm < 4; ++denorm)
+  for (uint32_t denorm = 0; denorm < 4; ++denorm) {
     EXPECT_EQ(run_fma_f16(1, 0x3C00u, 0, denorm << 6), expected_f16_denorm[denorm]);
+  }
 
   auto run_fmac_f16_vop2 = [&](uint16_t src0, uint16_t src1, uint16_t accumulator, uint32_t mode) {
     cu->write_vgpr(base + 0, 0, src0);
@@ -6792,8 +6858,9 @@ TEST(Gfx1250ExecutionTest, PermPk16OperationsWriteAllPackedResultWords) {
                                           {.vdst = 14, .src0 = 256, .src1 = 257, .src2 = 260});
   cdna5::VPermPk16B8U4Vop3 b8(b8_words.data());
   b8.execute_impl(*wf);
-  for (uint32_t word = 0; word < 4; ++word)
+  for (uint32_t word = 0; word < 4; ++word) {
     EXPECT_EQ(read(14 + word), 0x5A5A5A5Au) << "word " << word;
+  }
 
   auto reference = [](uint32_t elem_bits, std::span<const uint32_t> table, uint64_t selectors) {
     std::array<uint32_t, 4> packed{};
@@ -6803,13 +6870,15 @@ TEST(Gfx1250ExecutionTest, PermPk16OperationsWriteAllPackedResultWords) {
       const uint32_t source_word = source_bit / 32;
       const uint32_t source_shift = source_bit % 32;
       uint64_t pair = table[source_word];
-      if (source_word + 1 < table.size())
+      if (source_word + 1 < table.size()) {
         pair |= static_cast<uint64_t>(table[source_word + 1]) << 32;
+      }
       const uint32_t value = (pair >> source_shift) & ((1u << elem_bits) - 1u);
       const uint32_t dest_bit = i * elem_bits;
       packed[dest_bit / 32] |= value << (dest_bit % 32);
-      if (dest_bit % 32 + elem_bits > 32)
+      if (dest_bit % 32 + elem_bits > 32) {
         packed[dest_bit / 32 + 1] |= value >> (32 - dest_bit % 32);
+      }
     }
     return packed;
   };
@@ -6826,8 +6895,9 @@ TEST(Gfx1250ExecutionTest, PermPk16OperationsWriteAllPackedResultWords) {
   cdna5::VPermPk16B6U4Vop3 b6_nonuniform(b6_nonuniform_words.data());
   b6_nonuniform.execute_impl(*wf);
   const auto expected6 = reference(6, table6, selectors);
-  for (uint32_t word = 0; word < 3; ++word)
+  for (uint32_t word = 0; word < 3; ++word) {
     EXPECT_EQ(read(10 + word), expected6[word]) << "b6 word " << word;
+  }
 
   constexpr std::array<uint32_t, 4> table8 = {0x89ABCDEFu, 0x01234567u, 0x76543210u, 0xFEDCBA98u};
   write(0, table8[2]);
@@ -6839,8 +6909,9 @@ TEST(Gfx1250ExecutionTest, PermPk16OperationsWriteAllPackedResultWords) {
   cdna5::VPermPk16B8U4Vop3 b8_nonuniform(b8_nonuniform_words.data());
   b8_nonuniform.execute_impl(*wf);
   const auto expected8 = reference(8, table8, selectors);
-  for (uint32_t word = 0; word < 4; ++word)
+  for (uint32_t word = 0; word < 4; ++word) {
     EXPECT_EQ(read(14 + word), expected8[word]) << "b8 word " << word;
+  }
 }
 
 TEST(Gfx1250ExecutionTest, QsadAndMqsadUseFourSlidingWindowsAndMaskedReferenceBytes) {
@@ -7022,9 +7093,10 @@ TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRule
   mullit.execute_impl(*wf);
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 2, 0), std::bit_cast<uint32_t>(0.0f));
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 2, 1), std::bit_cast<uint32_t>(-12.0f));
-  for (uint32_t lane = 2; lane < 7; ++lane)
+  for (uint32_t lane = 2; lane < 7; ++lane) {
     EXPECT_EQ(cu->read_vgpr(vgpr_base + 2, lane), std::bit_cast<uint32_t>(negative_max))
         << "lane " << lane;
+  }
 
   wf->set_exec(0x3u);
   write_f32(0, 0, quiet_nan);

@@ -39,8 +39,9 @@ util::FailureOr<std::vector<uint8_t>> read_input(const std::filesystem::path &pa
   }
   std::vector<uint8_t> input(static_cast<std::size_t>(stream.tellg()));
   stream.seekg(0);
-  if (!stream.read(reinterpret_cast<char *>(input.data()), input.size()))
+  if (!stream.read(reinterpret_cast<char *>(input.data()), input.size())) {
     return diagnostic.emit() << "cannot read input";
+  }
   return input;
 }
 
@@ -49,8 +50,9 @@ util::Result write_input(const std::filesystem::path &path, std::span<const uint
   std::ofstream stream(path, std::ios::binary | std::ios::trunc);
   stream.write(reinterpret_cast<const char *>(input.data()), input.size());
   stream.close();
-  if (!stream)
+  if (!stream) {
     return diagnostic.emit() << "cannot write fuzz seed";
+  }
   return util::Result::success();
 }
 
@@ -60,22 +62,27 @@ util::Result emit_seeds(const std::filesystem::path &directory,
                         util::DiagnosticEmitter diagnostic) {
   std::error_code error;
   const bool exists = std::filesystem::exists(directory, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot inspect seed destination: " << error.message();
+  }
   if (exists) {
     const bool empty = std::filesystem::is_empty(directory, error);
-    if (error || !empty)
+    if (error || !empty) {
       return diagnostic.emit() << "seed destination must be an empty directory";
+    }
     const bool is_directory = std::filesystem::is_directory(directory, error);
-    if (error || !is_directory)
+    if (error || !is_directory) {
       return diagnostic.emit() << "seed destination must be an empty directory";
+    }
   }
   std::filesystem::create_directories(directory, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot create seed directory: " << error.message();
+  }
   const util::FailureOr<std::vector<std::vector<uint8_t>>> maybe_seeds = seed_corpus(diagnostic);
-  if (maybe_seeds.failed())
+  if (maybe_seeds.failed()) {
     return util::Result::failure();
+  }
   const auto &seeds = maybe_seeds.value();
   std::map<FuzzTarget, std::size_t> emitted_counts;
   for (const std::vector<uint8_t> &seed : seeds) {
@@ -84,11 +91,13 @@ util::Result emit_seeds(const std::filesystem::path &directory,
     assert(target && "multiplexer fuzz seed registry is inconsistent");
     std::string filename(target_name(*target));
     std::size_t &count = emitted_counts[*target];
-    if (count != 0)
+    if (count != 0) {
       filename += "-" + std::to_string(count);
+    }
     ++count;
-    if (write_input(directory / (filename + ".bin"), seed, diagnostic).failed())
+    if (write_input(directory / (filename + ".bin"), seed, diagnostic).failed()) {
       return util::Result::failure();
+    }
   }
   std::cout << "wrote " << seeds.size() << " multiplexer fuzz seeds to " << directory << '\n';
   return util::Result::success();
@@ -96,8 +105,9 @@ util::Result emit_seeds(const std::filesystem::path &directory,
 
 std::string_view target_name(FuzzTarget target) {
   for (const TargetDescriptor &descriptor : targets()) {
-    if (descriptor.id == target)
+    if (descriptor.id == target) {
       return descriptor.name;
+    }
   }
   assert(false && "multiplexer fuzz target registry is inconsistent");
   std::abort();
@@ -122,8 +132,9 @@ int run_afl() {
   // prevents one target's lazy initialization and helper threads from making
   // another target's coverage depend on dispatch order.
   if (size > 0 && size <= kMaxInputSize &&
-      run_input(std::span<const uint8_t>(buffer, size)).failed())
+      run_input(std::span<const uint8_t>(buffer, size)).failed()) {
     std::abort();
+  }
   return 0;
 #else
   std::cerr << "rj_fuzz requires an AFL++ compiler wrapper for --afl\n";
@@ -137,13 +148,13 @@ int main(int argc, char **argv) {
   std::string seed_directory;
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
-    if (argument == "--afl")
+    if (argument == "--afl") {
       afl = true;
-    else if (argument == "--input" && index + 1 < argc)
+    } else if (argument == "--input" && index + 1 < argc) {
       input = argv[++index];
-    else if (argument == "--emit-seeds" && index + 1 < argc)
+    } else if (argument == "--emit-seeds" && index + 1 < argc) {
       seed_directory = argv[++index];
-    else if (argument == "--help") {
+    } else if (argument == "--help") {
       usage(std::cout);
       return 0;
     } else {
@@ -159,8 +170,9 @@ int main(int argc, char **argv) {
     return 2;
   }
   // Let simulator failures and sanitizer findings reach AFL++ directly.
-  if (afl)
+  if (afl) {
     return run_afl();
+  }
 
   util::StringDiagnostic diagnostic;
   const auto fail = [&] {
@@ -168,17 +180,20 @@ int main(int argc, char **argv) {
     return 1;
   };
   if (!seed_directory.empty()) {
-    if (emit_seeds(seed_directory, diagnostic.emitter()).failed())
+    if (emit_seeds(seed_directory, diagnostic.emitter()).failed()) {
       return fail();
+    }
     return 0;
   }
   const util::FailureOr<std::vector<uint8_t>> bytes = read_input(input, diagnostic.emitter());
-  if (bytes.failed())
+  if (bytes.failed()) {
     return fail();
+  }
   const util::FailureOr<std::optional<DispatchResult>> maybe_result =
       run_input(bytes.value(), diagnostic.emitter());
-  if (maybe_result.failed())
+  if (maybe_result.failed()) {
     return fail();
+  }
   const std::optional<DispatchResult> &result = maybe_result.value();
   if (!result) {
     std::cout << "{\"target\":\"unassigned\",\"work_units\":0}\n";

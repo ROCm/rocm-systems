@@ -19,8 +19,9 @@ Port *Component::add_port(std::unique_ptr<Port> port) {
 
 Port *Component::find_port(PortID port_id) const {
   for (auto &p : ports_) {
-    if (p->port_id() == port_id)
+    if (p->port_id() == port_id) {
       return p.get();
+    }
   }
   return nullptr;
 }
@@ -45,8 +46,9 @@ void CompositeComponent::adopt_children(CompositeComponent &donor) {
 
 Component *CompositeComponent::find_child(const std::string &name) const {
   for (auto &c : children_) {
-    if (c->name() == name)
+    if (c->name() == name) {
       return c.get();
+    }
   }
   return nullptr;
 }
@@ -68,8 +70,9 @@ uint32_t CompositeComponent::num_descendants() const {
   for (auto &child : children_) {
     count++;
     auto *composite = dynamic_cast<const CompositeComponent *>(child.get());
-    if (composite != nullptr)
+    if (composite != nullptr) {
       count += composite->num_descendants();
+    }
   }
   return count;
 }
@@ -86,8 +89,9 @@ void Link::send(std::unique_ptr<Message> msg) {
     // in future clocked-mode configurations where LBTS synchronization is needed.
     msg->set_latency(latency_);
     Event *port_event = dst_->recv_event();
-    if (port_event->has_handler())
+    if (port_event->has_handler()) {
       port_event->execute(/*timestamp=*/0, msg.get());
+    }
     return;
   }
 

@@ -88,8 +88,9 @@ bool admitted_instruction(const Instruction &instruction) {
   // first word has bit 31 clear; literals and DPP extensions do not change it.
   // SDWA has the same base format but was never part of this admission set.
   if (instruction.raw_encoding() == nullptr || instruction.size() < 4 ||
-      (instruction.raw_encoding()[0] & (uint32_t{1} << 31)) != 0)
+      (instruction.raw_encoding()[0] & (uint32_t{1} << 31)) != 0) {
     return false;
+  }
   amdgpu::RegisterModifiers modifiers;
   instruction.amdgpu_register_modifiers(modifiers);
   return !modifiers.sdwa;
@@ -133,21 +134,24 @@ uint32_t native_lds_width(const Instruction &instruction) {
 
 Result qualify_lds_race_entry(const InputProgram &program, InputError &error) {
   const uint32_t group_bytes = program.kernel.descriptor.group_segment_fixed_size;
-  if (group_bytes < 4 || group_bytes > 65536)
+  if (group_bytes < 4 || group_bytes > 65536) {
     return reject_instruction(error, InputErrorCode::UnsupportedEntry,
                               "native LDS requires an LDS extent in [4, 65536] bytes");
+  }
   return Result::success();
 }
 
 Result qualify_lds_race_block(const BasicBlock &block, InputError &error) {
   // Defer the conditional self-loop to whole-program barrier qualification.
-  for (const BasicBlock *successor : block.successors())
+  for (const BasicBlock *successor : block.successors()) {
     if ((successor != &block && successor->start_offset() <= block.start_offset()) ||
-        (successor == &block && block.successors().size() != 2))
+        (successor == &block && block.successors().size() != 2)) {
       return reject_instruction(
           error, InputErrorCode::UnsupportedFlow,
           "only a conditional single-block backedge can enter barrier qualification",
           block.start_offset());
+    }
+  }
   return Result::success();
 }
 
@@ -158,39 +162,48 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
   // every other edge must form a DAG. This ordering alone does not admit a loop.
   std::unordered_map<const BasicBlock *, size_t> incoming;
   incoming.reserve(blocks.size());
-  for (const std::unique_ptr<BasicBlock> &block : blocks)
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
     incoming.emplace(block.get(), 0);
+  }
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const BasicBlock *successor : block->successors()) {
-      if (successor == block.get() && block->successors().size() == 2)
+      if (successor == block.get() && block->successors().size() == 2) {
         continue;
+      }
       const std::unordered_map<const BasicBlock *, size_t>::iterator edge =
           incoming.find(successor);
-      if (edge == incoming.end())
+      if (edge == incoming.end()) {
         return reject_instruction(error, InputErrorCode::UnsupportedFlow,
                                   "CFG successor leaves the selected entry", block->start_offset());
+      }
       ++edge->second;
     }
   }
   std::vector<const BasicBlock *> ready;
   ready.reserve(blocks.size());
-  for (const std::unique_ptr<BasicBlock> &block : blocks)
-    if (incoming.find(block.get())->second == 0)
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    if (incoming.find(block.get())->second == 0) {
       ready.push_back(block.get());
+    }
+  }
   for (size_t index = 0; index < ready.size(); ++index) {
     for (const BasicBlock *successor : ready[index]->successors()) {
-      if (successor == ready[index] && ready[index]->successors().size() == 2)
+      if (successor == ready[index] && ready[index]->successors().size() == 2) {
         continue;
+      }
       size_t &count = incoming.find(successor)->second;
-      if (--count == 0)
+      if (--count == 0) {
         ready.push_back(successor);
+      }
     }
   }
   if (ready.size() != blocks.size()) {
-    for (const std::unique_ptr<BasicBlock> &block : blocks)
-      if (incoming.find(block.get())->second != 0)
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      if (incoming.find(block.get())->second != 0) {
         return reject_instruction(error, InputErrorCode::UnsupportedFlow,
                                   "MVP does not admit CFG cycles", block->start_offset());
+      }
+    }
   }
   return ready;
 }
@@ -204,29 +217,34 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
   const uint64_t offset = instruction.src_loc();
   if ((uses_split_workgroup_barrier(arch) && (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
                                               operation == amdgpu::Operation::S_BARRIER_WAIT)) ||
-      (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER))
+      (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
+  }
   if ((instruction.flags() & BARRIER) != 0 ||
       instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic ||
-      name.starts_with("s_barrier") || name.starts_with("s_sendmsg"))
+      name.starts_with("s_barrier") || name.starts_with("s_sendmsg")) {
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "unmodeled synchronization: " + std::string(name), offset);
+  }
   const uint32_t width = native_lds_width(instruction);
   if ((addressing == amdgpu::MemoryAddressing::Lds || addressing == amdgpu::MemoryAddressing::Gds ||
        addressing == amdgpu::MemoryAddressing::DirectLds) &&
-      width == 0)
+      width == 0) {
     return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                               "unsupported LDS form: " + std::string(name), offset);
-  if (width == 0 && !admitted_instruction(instruction))
+  }
+  if (width == 0 && !admitted_instruction(instruction)) {
     return reject_instruction(error, InputErrorCode::UnsupportedInstruction,
                               "instruction outside MVP: " + std::string(name), offset);
+  }
   if (width != 0) {
     // CDNA3/4 place GDS at bit 16; RDNA and CDNA5 use bit 17.
     const uint32_t gds_bit =
         (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) ? 16 : 17;
-    if (instruction.size() != 8 || (instruction.raw_encoding()[0] & (1u << gds_bit)) != 0)
+    if (instruction.size() != 8 || (instruction.raw_encoding()[0] & (1u << gds_bit)) != 0) {
       return reject_instruction(error, InputErrorCode::UnsupportedAccess, "non-native LDS form",
                                 offset);
+    }
     const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
     const Operand *address = instruction.src_operand(0);
     const Operand *value = read ? instruction.dst_operand(0) : instruction.src_operand(1);
@@ -237,9 +255,10 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     const uint32_t value_words = std::max(width / 4, 1u);
     if (!address_reg || !value_reg || address_reg->width != 1 || value_reg->width != value_words ||
         address_reg->index >= allocated_vgprs ||
-        uint32_t{value_reg->index} + value_words > allocated_vgprs)
+        uint32_t{value_reg->index} + value_words > allocated_vgprs) {
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "LDS operands exceed allocation", offset);
+    }
     accesses.push_back(
         {.site = static_cast<uint32_t>(accesses.size()),
          .original_offset = offset,
@@ -263,13 +282,15 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
       instructions.push_back(&instruction);
       if (instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER ||
           instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_SIGNAL ||
-          instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_WAIT)
+          instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_WAIT) {
         ++members;
+      }
     }
     for (size_t index = 0; index < instructions.size(); ++index) {
       if (instructions[index]->amdgpu_operation() !=
-          (split ? amdgpu::Operation::S_BARRIER_SIGNAL : amdgpu::Operation::S_BARRIER))
+          (split ? amdgpu::Operation::S_BARRIER_SIGNAL : amdgpu::Operation::S_BARRIER)) {
         continue;
+      }
       size_t wait_index = index;
       bool intervening_memory_or_barrier = false;
       if (split) {
@@ -277,8 +298,9 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
         while (wait_index < instructions.size() &&
                instructions[wait_index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_WAIT) {
           const Instruction &instruction = *instructions[wait_index];
-          if (instruction.is_memory_op() || instruction.is_barrier())
+          if (instruction.is_memory_op() || instruction.is_barrier()) {
             intervening_memory_or_barrier = true;
+          }
           ++wait_index;
         }
       }
@@ -286,12 +308,13 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
       // which must not make an undrained guest barrier qualify.
       if (index == 0 || wait_index == instructions.size() || intervening_memory_or_barrier ||
           instructions[index - 1]->size() != 4 || instructions[index]->size() != 4 ||
-          instructions[wait_index]->size() != 4)
+          instructions[wait_index]->size() != 4) {
         return reject_instruction(
             error, InputErrorCode::UnsupportedSynchronization,
             "requires original LDS drain/barrier groups without intervening memory "
             "operations or barriers",
             instructions[index]->src_loc());
+      }
       const Instruction &drain = *instructions[index - 1];
       bool valid_group = false;
       if (split) {
@@ -328,12 +351,13 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
             amdgpu::decode_legacy_waitcnt(drain.raw_encoding()[0] & 0xffff, arch).lgkmcnt == 0 &&
             instructions[index]->raw_encoding()[0] == build_sopp_encoding(arch, opcode, 0).value();
       }
-      if (!valid_group)
+      if (!valid_group) {
         return reject_instruction(
             error, InputErrorCode::UnsupportedSynchronization,
             "requires an original zero LDS drain and canonical full-workgroup "
             "barrier identity",
             instructions[index]->src_loc());
+      }
       barrier_blocks.push_back(block);
       program.barriers.push_back(
           BarrierFacts{.original_drain = instructions[index - 1]->src_loc(),
@@ -344,68 +368,83 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
   // One block containing every group gives each completed loop cycle the same
   // group order, allowing a retained phase ordinal to identify its occurrence.
   const BasicBlock *loop = nullptr;
-  for (const BasicBlock *block : blocks)
-    for (const BasicBlock *successor : block->successors())
+  for (const BasicBlock *block : blocks) {
+    for (const BasicBlock *successor : block->successors()) {
       if (successor == block) {
-        if (loop || block->successors().size() != 2 || members == 0)
+        if (loop || block->successors().size() != 2 || members == 0) {
           return reject_instruction(error, InputErrorCode::UnsupportedFlow,
                                     "requires one conditional single-block barrier loop");
+        }
         loop = block;
       }
+    }
+  }
   if (loop) {
-    if (std::ranges::any_of(barrier_blocks, [&](const BasicBlock *block) { return block != loop; }))
+    if (std::ranges::any_of(barrier_blocks,
+                            [&](const BasicBlock *block) { return block != loop; })) {
       return reject_instruction(error, InputErrorCode::UnsupportedFlow,
                                 "all repeated barrier groups must belong to the single loop block");
+    }
     program.repeated = true;
   }
-  if (members == 0)
+  if (members == 0) {
     return Result::success();
-  if (program.maximum_workgroup_size <= program.wave_size)
+  }
+  if (program.maximum_workgroup_size <= program.wave_size) {
     return reject_instruction(
         error, InputErrorCode::UnsupportedEntry,
         "barrier profile requires a maximum workgroup size permitting two waves");
+  }
   if (members != (split ? 2u : 1u) * program.barriers.size() || program.barriers.empty() ||
-      program.barriers.size() > kSyncCapacity)
+      program.barriers.size() > kSyncCapacity) {
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "incomplete or repeated workgroup barrier group");
+  }
   // For the acyclic profile, deleting the group block must leave no path
   // from the hardware entry to an exit. This also rejects divergent bypasses;
   // scalar barriers themselves execute independently of the current EXEC.
   const auto entry =
       std::ranges::find(blocks, program.kernel.entry_text_offset, &BasicBlock::start_offset);
-  if (entry == blocks.end())
+  if (entry == blocks.end()) {
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "missing barrier entry");
+  }
   // A preheader may bypass the loop for zero iterations. Do not require loop
   // groups to dominate exits or infer uniform trip counts; classification needs
   // actual matching completion witnesses from every required wave.
-  if (!program.repeated)
+  if (!program.repeated) {
     for (const BasicBlock *barrier_block : barrier_blocks) {
       std::vector<const BasicBlock *> pending{*entry};
       std::set<const BasicBlock *> visited;
       while (!pending.empty()) {
         const BasicBlock *block = pending.back();
         pending.pop_back();
-        if (block == barrier_block || !visited.insert(block).second)
+        if (block == barrier_block || !visited.insert(block).second) {
           continue;
-        if (block->successors().empty())
+        }
+        if (block->successors().empty()) {
           return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                                     "workgroup barrier does not converge on every exit",
                                     block->start_offset());
-        for (const BasicBlock *successor : block->successors())
+        }
+        for (const BasicBlock *successor : block->successors()) {
           pending.push_back(successor);
+        }
       }
     }
+  }
   std::ranges::sort(program.barriers, {}, &BarrierFacts::original_signal);
   return Result::success();
 }
 
 FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error, bool has_barriers) {
-  if (sites > ContractLimits{}.sites)
+  if (sites > ContractLimits{}.sites) {
     return reject(error, "no bounded LDS report-row layout");
+  }
   const uint64_t stride = report_row_bytes(sites, has_barriers);
-  if (stride > ContractLimits{}.report_bytes - kReportHeaderBytes)
+  if (stride > ContractLimits{}.report_bytes - kReportHeaderBytes) {
     return reject(error, "no bounded LDS report-row layout");
+  }
   return static_cast<uint32_t>(stride);
 }
 
@@ -414,16 +453,19 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
                                   std::span<const uint8_t> prepared_text, InputError &error) {
   std::set<uint64_t> barrier_offsets;
   std::set<uint64_t> access_offsets;
-  for (BasicBlock *block : blocks)
+  for (BasicBlock *block : blocks) {
     for (const Instruction &instruction : block->instructions()) {
       const amdgpu::Operation operation = instruction.amdgpu_operation();
       if (operation == amdgpu::Operation::S_BARRIER ||
           operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
-          operation == amdgpu::Operation::S_BARRIER_WAIT)
+          operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
-      if (native_lds_width(instruction) != 0)
+      }
+      if (native_lds_width(instruction) != 0) {
         access_offsets.insert(instruction.src_loc());
+      }
     }
+  }
   std::set<uint64_t> expected_barriers;
   for (const BarrierFacts &barrier : manifest.barriers) {
     expected_barriers.insert(barrier.prepared_signal);
@@ -431,18 +473,23 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
     if (std::memcmp(program.image.data() + program.text_file_offset + barrier.original_signal,
                     prepared_text.data() + barrier.prepared_signal, 4) != 0 ||
         std::memcmp(program.image.data() + program.text_file_offset + barrier.original_wait,
-                    prepared_text.data() + barrier.prepared_wait, 4) != 0)
+                    prepared_text.data() + barrier.prepared_wait, 4) != 0) {
       return reject(error, "final reachable barrier operations differ from original group");
+    }
   }
-  if (barrier_offsets != expected_barriers)
+  if (barrier_offsets != expected_barriers) {
     return reject(error, "final reachable barrier multiplicity differs from original");
-  if (access_offsets.size() != manifest.sites.size())
+  }
+  if (access_offsets.size() != manifest.sites.size()) {
     return reject(error, "final reachable guest access multiplicity differs from original");
-  for (const SiteFacts &site : manifest.sites)
+  }
+  for (const SiteFacts &site : manifest.sites) {
     if (!access_offsets.contains(site.prepared_guest_offset) ||
         std::memcmp(program.image.data() + program.text_file_offset + site.original_offset,
-                    prepared_text.data() + site.prepared_guest_offset, 8) != 0)
+                    prepared_text.data() + site.prepared_guest_offset, 8) != 0) {
       return reject(error, "final guest LDS operation/map differs from original bytes");
+    }
+  }
   return Result::success();
 }
 

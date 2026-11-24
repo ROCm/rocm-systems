@@ -35,6 +35,7 @@
 * Building hipFile with GCC 15 or later no longer warns about every line indented with spaces. The build now uses `-Wleading-whitespace=spaces`, which warns about tabs in indentation, instead of `-Wleading-whitespace=tabs`.
 * Optimized builds now correctly enable `_FORTIFY_SOURCE=3` for hipFile when compiling with `-O2`, `-O3`, or `-Os` (i.e., the `Release`, `RelWithDebInfo`, and `MinSizeRel` build types). This applies when using Clang, or GCC 12 or later. Previously, the build checked the wrong CMake variable to detect the build type's optimization level, so `_FORTIFY_SOURCE` only activated when `-O2`, `-O3`, or `-Os` appeared directly in `CMAKE_CXX_FLAGS`.  This also meant multi-config generators (e.g., Ninja Multi-Config) were never handled. The check now runs per-configuration, covering all standard optimized build types and multi-config generators. With Clang and glibc 2.40 or later, fortified builds turn off `-Wused-but-marked-unused`, which glibc's fortified `printf`-family functions trigger.
 * `hipFileReadAsync()` and `hipFileWriteAsync()` on the null stream now finish the transfer before returning, as documented. Previously, they queued the transfer and returned before it finished.
+* The bandwidth reported by `ais-stats` and the Stats API (`hipFileGetStatsL1()`/`hipFileGetStatsL3()`, `read_bw_bytes_per_sec`/`write_bw_bytes_per_sec`) is now derived from the elapsed wall-clock time during which I/O was in flight, rather than the sum of the per-operation latencies. When several threads issue I/O concurrently, their operations overlap in time, as such, the old sum-of-latencies denominator understated the reported bandwidth by roughly the number of concurrent threads. Latency is unchanged. The per-size-bucket bandwidth histogram in the `ais-stats` report remains derived from per-operation latency and reflects per-I/O throughput, not aggregate concurrency. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
 
 ### Removed
 
@@ -42,7 +43,6 @@
 
 ### Known issues
 
-* The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
 * Asynchronous transfers on an unregistered stream, or on any stream on a device that doesn't support stream wait values, run one at a time, because the ROCm runtime runs stream host functions on a single thread, and a running transfer also delays host functions queued on other streams. Register a stream on a wait-value-capable device to avoid this.
 * A hipFile call that uses the fallback path can hang if the application has blocked one of its own greatest-priority HIP streams until that call returns. Don't block a greatest-priority stream on hipFile I/O.
 

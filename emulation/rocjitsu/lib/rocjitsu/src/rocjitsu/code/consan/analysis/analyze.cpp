@@ -9,8 +9,9 @@
 namespace rocjitsu::consan {
 FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisOptions &options,
                                          util::DiagnosticEmitter diagnostic) {
-  if (validate_image_facts(capture.header.image, diagnostic).failed())
+  if (validate_image_facts(capture.header.image, diagnostic).failed()) {
     return Result::failure();
+  }
   // Native names are also rendered as image dispositions, without detector facts.
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
     if (!util::is_valid_utf8(entry.binding.name)) {
@@ -33,11 +34,13 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   result.run_identity = capture.header.run_identity;
   result.original = capture.header.image.original;
   result.selection_profile = capture.header.image.selection_profile;
-  for (const ImageEntryFacts &entry : capture.header.image.entries)
+  for (const ImageEntryFacts &entry : capture.header.image.entries) {
     result.entries.push_back(
         {.key = entry.key, .name = entry.binding.name, .disposition = entry.disposition});
-  if (result.entries.size() == 1)
+  }
+  if (result.entries.size() == 1) {
     result.entry = result.entries.front().name;
+  }
   result.execution_conditions = capture.header.execution_conditions;
   result.target = capture.header.image.target;
   result.wave_size = capture.header.image.wave_size;

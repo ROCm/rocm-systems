@@ -50,8 +50,9 @@ protected:
     const ImageEntryFacts *first_selected = nullptr;
     for (const ImageEntryFacts &entry : image_facts_.entries) {
       argument_extent_ = std::max<size_t>(argument_extent_, entry.binding.original_kernarg_bytes);
-      if (entry.selected && first_selected == nullptr)
+      if (entry.selected && first_selected == nullptr) {
         first_selected = &entry;
+      }
     }
     ASSERT_NE(first_selected, nullptr);
     ASSERT_LE(argument_extent_, arguments_.size());
@@ -123,13 +124,15 @@ protected:
       unload_();
       EXPECT_EQ(core_.hsa_code_object_reader_create_from_memory_fn, create_reader);
     }
-    if (library_)
+    if (library_) {
       ::dlclose(library_);
+    }
     for (const auto &[name, value] : environment_) {
-      if (value)
+      if (value) {
         (void)::setenv(name.c_str(), value->c_str(), 1);
-      else
+      } else {
         (void)::unsetenv(name.c_str());
+      }
     }
     if (!preserve_ && !directory_.empty()) {
       std::error_code ignored;
@@ -193,24 +196,26 @@ protected:
       return callback(hsa_agent_t{2}, data);
     };
     core_.hsa_agent_get_info_fn = [](hsa_agent_t agent, hsa_agent_info_t attribute, void *value) {
-      if (attribute == HSA_AGENT_INFO_DEVICE)
+      if (attribute == HSA_AGENT_INFO_DEVICE) {
         *static_cast<hsa_device_type_t *>(value) =
             agent.handle == 1 ? HSA_DEVICE_TYPE_GPU : HSA_DEVICE_TYPE_CPU;
-      else if (attribute == HSA_AGENT_INFO_ISA)
+      } else if (attribute == HSA_AGENT_INFO_ISA) {
         *static_cast<hsa_isa_t *>(value) = {3};
-      else
+      } else {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       return HSA_STATUS_SUCCESS;
     };
     core_.hsa_isa_get_info_alt_fn = [](hsa_isa_t, hsa_isa_info_t attribute, void *value) {
       const std::string name =
           "amdgcn-amd-amdhsa--gfx" + std::to_string(current_->image_facts_.target);
-      if (attribute == HSA_ISA_INFO_NAME_LENGTH)
+      if (attribute == HSA_ISA_INFO_NAME_LENGTH) {
         *static_cast<uint32_t *>(value) = static_cast<uint32_t>(name.size() + 1);
-      else if (attribute == HSA_ISA_INFO_NAME)
+      } else if (attribute == HSA_ISA_INFO_NAME) {
         std::memcpy(value, name.c_str(), name.size() + 1);
-      else
+      } else {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       return HSA_STATUS_SUCCESS;
     };
     amd_.hsa_amd_agent_iterate_memory_pools_fn =
@@ -219,14 +224,15 @@ protected:
         };
     amd_.hsa_amd_memory_pool_get_info_fn = [](hsa_amd_memory_pool_t,
                                               hsa_amd_memory_pool_info_t attribute, void *value) {
-      if (attribute == HSA_AMD_MEMORY_POOL_INFO_SEGMENT)
+      if (attribute == HSA_AMD_MEMORY_POOL_INFO_SEGMENT) {
         *static_cast<uint32_t *>(value) = 0;
-      else if (attribute == HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS)
+      } else if (attribute == HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS) {
         *static_cast<uint32_t *>(value) = 3;
-      else if (attribute == HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED)
+      } else if (attribute == HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED) {
         *static_cast<bool *>(value) = true;
-      else
+      } else {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       return HSA_STATUS_SUCCESS;
     };
     amd_.hsa_amd_memory_pool_allocate_fn = allocate;
@@ -263,8 +269,9 @@ protected:
     hsa_queue_t *queue = nullptr;
     if (core_.hsa_queue_create_fn({1}, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
                                   &queue) != HSA_STATUS_SUCCESS ||
-        queue != &queue_)
+        queue != &queue_) {
       return false;
+    }
     const hsa_status_t status = amd_signal
                                     ? amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &signal_)
                                     : core_.hsa_signal_create_fn(1, 0, nullptr, &signal_);
@@ -406,8 +413,9 @@ protected:
     const std::span<const uint8_t> bytes = current_->readers_.at(reader.handle);
     ++current_->load_calls_;
     current_->loaded_image_.assign(bytes.begin(), bytes.end());
-    if (current_->load_status_ != HSA_STATUS_SUCCESS)
+    if (current_->load_status_ != HSA_STATUS_SUCCESS) {
       current_->partial_load_bytes_ = bytes;
+    }
     return current_->load_status_;
   }
   static hsa_status_t symbol_info(hsa_executable_symbol_t symbol,
@@ -417,40 +425,45 @@ protected:
       current_->symbol_query_entered_.set_value();
       current_->resume_symbol_query_.wait();
     }
-    if (symbol.handle < 10 || symbol.handle - 10 >= current_->image_facts_.entries.size())
+    if (symbol.handle < 10 || symbol.handle - 10 >= current_->image_facts_.entries.size()) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
     const size_t index = symbol.handle - 10;
     const ImageEntryFacts &entry = current_->image_facts_.entries[index];
-    if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT)
+    if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT) {
       *static_cast<uint64_t *>(value) = 0x123400 + index * 0x100;
-    else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE) {
+    } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE) {
       uint32_t bytes = entry.binding.original_kernarg_bytes;
       if (entry.selected) {
         const std::optional<KernargExtensionLayout> layout =
             make_kernarg_extension_layout(bytes, kContextPointerPayloads);
-        if (!layout)
+        if (!layout) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
         bytes = layout->wrapper_size;
       }
       *static_cast<uint32_t *>(value) = bytes;
-    } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT)
+    } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT) {
       *static_cast<uint32_t *>(value) = 16;
-    else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE)
+    } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE) {
       *static_cast<uint32_t *>(value) = entry.binding.prepared_group_bytes;
-    else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE)
+    } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE) {
       *static_cast<uint32_t *>(value) = entry.binding.prepared_private_bytes;
-    else
+    } else {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
     return HSA_STATUS_SUCCESS;
   }
   static hsa_status_t allocate(hsa_amd_memory_pool_t, size_t bytes, uint32_t, void **memory) {
     std::lock_guard lock(current_->fake_mutex_);
     current_->last_allocation_bytes_ = bytes;
-    if (++current_->allocation_calls_ == current_->fail_allocation_)
+    if (++current_->allocation_calls_ == current_->fail_allocation_) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
     *memory = std::aligned_alloc(64, (bytes + 63) & ~size_t{63});
-    if (!*memory)
+    if (!*memory) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
     current_->allocations_[*memory] = bytes;
     return HSA_STATUS_SUCCESS;
   }
@@ -458,8 +471,9 @@ protected:
     std::lock_guard lock(current_->fake_mutex_);
     // Normal launches may replace report_; only the armed, single-launch
     // finish test needs to inspect it here.
-    if (current_->allocations_.erase(memory) != 1)
+    if (current_->allocations_.erase(memory) != 1) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
     std::free(memory);
     return HSA_STATUS_SUCCESS;
   }
@@ -467,8 +481,9 @@ protected:
                                    void *(*)(size_t), uint32_t *, hsa_agent_t **) {
     const uintptr_t base = reinterpret_cast<uintptr_t>(current_->arguments_.data());
     const uintptr_t address = reinterpret_cast<uintptr_t>(pointer);
-    if (address < base || address >= base + current_->arguments_.size())
+    if (address < base || address >= base + current_->arguments_.size()) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
     info->size = sizeof(*info);
     info->type = HSA_EXT_POINTER_TYPE_HSA;
     info->agentBaseAddress = info->hostBaseAddress = current_->arguments_.data();
@@ -479,8 +494,9 @@ protected:
   static hsa_status_t create_signal(hsa_signal_value_t value, uint32_t, const hsa_agent_t *,
                                     hsa_signal_t *signal) {
     std::lock_guard lock(current_->fake_mutex_);
-    if (current_->fail_proxy_ && current_->signal_.handle != 0)
+    if (current_->fail_proxy_ && current_->signal_.handle != 0) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
     signal->handle = ++current_->next_signal_;
     current_->signal_values_[signal->handle] = value;
     return HSA_STATUS_SUCCESS;
@@ -497,8 +513,9 @@ protected:
     current_->amd_signal_consumers_ = consumers;
     current_->amd_signal_agents_ = agents;
     current_->amd_signal_attributes_ = attributes;
-    if (current_->amd_signal_status_ != HSA_STATUS_SUCCESS)
+    if (current_->amd_signal_status_ != HSA_STATUS_SUCCESS) {
       return current_->amd_signal_status_;
+    }
     return create_signal(value, consumers, agents, signal);
   }
   static hsa_signal_value_t load_signal(hsa_signal_t signal) {
@@ -556,8 +573,9 @@ protected:
         EXPECT_EQ(load_signal(dependency), 0);
       }
     }
-    if (barrier.completion_signal.handle != 0)
+    if (barrier.completion_signal.handle != 0) {
       store_signal(barrier.completion_signal, load_signal(barrier.completion_signal) - 1);
+    }
   }
 
   static void packet_writer(const void *packets, uint64_t count) {
@@ -574,8 +592,9 @@ protected:
       EXPECT_EQ(state.published_.completion_signal.handle, state.signal_.handle);
       // Native publication can reenter the API without the runtime lock held.
       EXPECT_EQ(state.statistics_().native_submitted, 1u);
-      if (state.auto_complete_)
+      if (state.auto_complete_) {
         store_signal(state.published_.completion_signal, 0);
+      }
       return;
     }
     const std::optional<KernargExtensionLayout> layout = make_kernarg_extension_layout(
@@ -597,8 +616,9 @@ protected:
     // bytes without diagnosing them. No ISA executes in this fake-API unit test.
     wire::write_u32(std::span(state.report_, state.report_bytes_),
                     kReportHeaderBytes + wire::kRowStatus, state.row_status_);
-    if (state.auto_complete_)
+    if (state.auto_complete_) {
       store_signal(state.published_.completion_signal, 0);
+    }
   }
 
   std::vector<uint8_t> read_capture() {
@@ -719,8 +739,9 @@ TEST_F(ConSanMultiEntryHsaPlugin, SelectedEntriesAndNativeSiblingPreserveBinding
     if (index == 2) {
       EXPECT_EQ(std::memcmp(&published_, &original, sizeof(original)), 0);
     }
-    if (ordinal + 1 < order.size())
+    if (ordinal + 1 < order.size()) {
       next_signal();
+    }
   }
   EXPECT_EQ(statistics_().submitted, 3u);
   EXPECT_EQ(statistics_().forwarded, 3u);
@@ -814,8 +835,9 @@ TEST_F(ConSanMultiEntryHsaPlugin, LastEntryQueryFailurePublishesNoEarlierBinding
   installed_ = false;
   core_.hsa_executable_symbol_get_info_fn =
       [](hsa_executable_symbol_t symbol, hsa_executable_symbol_info_t attribute, void *value) {
-        if (symbol.handle == 12)
+        if (symbol.handle == 12) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
         return symbol_info(symbol, attribute, value);
       };
   installed_ = load_(&table_, 0, 0, nullptr);
@@ -868,27 +890,31 @@ protected:
           if (core_.hsa_code_object_reader_create_from_memory_fn(original_.data(), original_.size(),
                                                                  &reader_) != HSA_STATUS_SUCCESS ||
               core_.hsa_executable_load_agent_code_object_fn({7}, {1}, reader_, nullptr, nullptr) !=
-                  HSA_STATUS_SUCCESS)
+                  HSA_STATUS_SUCCESS) {
             std::_Exit(81);
+          }
           std::promise<void> resume;
           resume_symbol_query_ = resume.get_future().share();
           std::future<void> entered = symbol_query_entered_.get_future();
           std::future<hsa_status_t> frozen = std::async(
               std::launch::async, [&] { return core_.hsa_executable_freeze_fn({7}, nullptr); });
-          if (entered.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+          if (entered.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
             std::_Exit(82);
+          }
           const bool interrupted = finish_during_query
                                        ? finish_() != 0
                                        : core_.hsa_executable_destroy_fn({7}) == HSA_STATUS_SUCCESS;
           resume.set_value();
           const hsa_status_t status = frozen.get();
-          if (!finish_during_query)
+          if (!finish_during_query) {
             (void)finish_();
+          }
           const bool no_capture =
               std::filesystem::is_empty(directory_) && statistics_().submitted == 0;
           unload_();
-          if (!interrupted || status != HSA_STATUS_ERROR_INVALID_ARGUMENT || !no_capture)
+          if (!interrupted || status != HSA_STATUS_ERROR_INVALID_ARGUMENT || !no_capture) {
             std::_Exit(83);
+          }
           std::_Exit(0);
         },
         ::testing::ExitedWithCode(0), "");
@@ -912,10 +938,11 @@ TEST_F(ConSanHsaPlugin, RuntimeConfigurationRequiresPathsAndIndependentProfile) 
     SCOPED_TRACE(name);
     const std::string saved = std::getenv(name);
     for (const char *value : {static_cast<const char *>(nullptr), ""}) {
-      if (value)
+      if (value) {
         ASSERT_EQ(::setenv(name, value, 1), 0);
-      else
+      } else {
         ASSERT_EQ(::unsetenv(name), 0);
+      }
       installed_ = load_(&table_, 0, 0, nullptr);
       ASSERT_FALSE(installed_);
       EXPECT_EQ(core_.hsa_code_object_reader_create_from_memory_fn, create_reader);
@@ -1361,13 +1388,16 @@ TEST_F(ConSanHsaPlugin, AmdBarriersAfterADispatchRejectionReceiveFailureNotifica
                 HSA_STATUS_SUCCESS);
       packet.dep_signal[0] = signal_;
     }
-    if (batch)
+    if (batch) {
       handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
-    else
-      for (const hsa_barrier_and_packet_t &packet : packets)
+    } else {
+      for (const hsa_barrier_and_packet_t &packet : packets) {
         handler_(&packet, 1, 0, handler_context_, completing_barrier_writer);
-    for (const hsa_barrier_and_packet_t &packet : packets)
+      }
+    }
+    for (const hsa_barrier_and_packet_t &packet : packets) {
       EXPECT_EQ(load_signal(packet.completion_signal), -1);
+    }
   }
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_NE(finish_(), 0);
@@ -1647,13 +1677,16 @@ TEST_F(ConSanHsaPlugin, BarriersAfterADispatchRejectionReceiveFailureNotificatio
                 HSA_STATUS_SUCCESS);
       packet.dep_signal[0] = signal_;
     }
-    if (batch)
+    if (batch) {
       handler_(packets.data(), packets.size(), 0, handler_context_, completing_barrier_writer);
-    else
-      for (const hsa_barrier_and_packet_t &packet : packets)
+    } else {
+      for (const hsa_barrier_and_packet_t &packet : packets) {
         handler_(&packet, 1, 0, handler_context_, completing_barrier_writer);
-    for (const hsa_barrier_and_packet_t &packet : packets)
+      }
+    }
+    for (const hsa_barrier_and_packet_t &packet : packets) {
       EXPECT_EQ(load_signal(packet.completion_signal), -1);
+    }
   }
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_EQ(statistics_().submitted, 0u);

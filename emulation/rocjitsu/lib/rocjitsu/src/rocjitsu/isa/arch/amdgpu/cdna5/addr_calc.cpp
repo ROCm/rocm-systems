@@ -40,8 +40,9 @@ bool has_saddr(uint32_t saddr) { return saddr != OPR_SREG_NULL; }
 bool has_smem_offset(uint32_t soffset) { return soffset != OPR_SMEM_OFFSET_NULL; }
 
 std::optional<uint32_t> read_sreg_m0_operand(amdgpu::Wavefront &wf, uint32_t operand) {
-  if (operand <= amdgpu::kModernM0Selector)
+  if (operand <= amdgpu::kModernM0Selector) {
     return amdgpu::try_read_scalar_selector(wf, operand);
+  }
   // Preserve the category used by the CU's catch for the previous unsupported-
   // operand exception. This describes simulator support, not hardware validity.
   wf.report_instruction_execution_error(
@@ -50,12 +51,14 @@ std::optional<uint32_t> read_sreg_m0_operand(amdgpu::Wavefront &wf, uint32_t ope
 }
 
 std::optional<uint64_t> read_sreg64_operand(amdgpu::Wavefront &wf, uint32_t operand) {
-  if (operand <= amdgpu::kModernNullSelector)
+  if (operand <= amdgpu::kModernNullSelector) {
     return amdgpu::try_read_scalar_selector64(wf, operand);
+  }
   auto lo = read_sreg_m0_operand(wf, operand);
   auto hi = read_sreg_m0_operand(wf, operand + 1);
-  if (!lo || !hi)
+  if (!lo || !hi) {
     return std::nullopt;
+  }
   return static_cast<uint64_t>(*lo) | (static_cast<uint64_t>(*hi) << 32);
 }
 
@@ -96,8 +99,9 @@ uint64_t swizzled_buffer_offset(uint32_t index, uint32_t stride, uint32_t voffse
 }
 
 bool byte_range_exceeds(int64_t offset, uint32_t size, uint64_t bound) {
-  if (offset < 0)
+  if (offset < 0) {
     return true;
+  }
   uint64_t unsigned_offset = static_cast<uint64_t>(offset);
   return unsigned_offset > bound || size > bound - unsigned_offset;
 }
@@ -116,8 +120,9 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     d.exec_mask = amdgpu::wave32_exec_all_if_nonzero(d.exec_mask);
     d.lane_mask = d.exec_mask;
   }
-  if (d.transpose && !d.exec_mask)
+  if (d.transpose && !d.exec_mask) {
     return;
+  }
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
@@ -132,8 +137,9 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
   amdgpu::RegisterAccess regs(cu);
   auto vaddr_region = regs.read_vgpr_region(vbase, saddr_present ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint64_t vaddr;
     if (saddr_present) {
       // The VGPR half of a GLOBAL saddr address is a SIGNED 32-bit offset on
@@ -195,27 +201,31 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   assert(access_size_bytes != 0);
   const uint32_t sbase_sel = inst.sbase * 2;
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
-  if (!base)
+  if (!base) {
     return std::nullopt;
+  }
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
   // CDNA5 section 8.1.1 allows negative ordinary-load offsets, but not buffer IOFFSET.
-  if (buffer_load && off < 0)
+  if (buffer_load && off < 0) {
     wf.report_undefined_behavior("negative scalar-buffer load immediate");
+  }
   const uint64_t align_mask = std::min<uint64_t>(access_size_bytes, 4u) - 1;
   const uint32_t scale = inst.scale_offset && !buffer_load ? access_size_bytes : 1;
   off &= ~static_cast<int64_t>(align_mask);
   if (has_smem_offset(inst.soffset)) {
     auto soffset = read_sreg_m0_operand(wf, inst.soffset);
-    if (!soffset)
+    if (!soffset) {
       return std::nullopt;
+    }
     off += (static_cast<uint64_t>(*soffset) * scale) & ~align_mask;
   }
   if (buffer_load) {
     auto word2 = amdgpu::try_read_scalar_selector(wf, sbase_sel + 2);
     auto word3 = amdgpu::try_read_scalar_selector(wf, sbase_sel + 3);
-    if (!word2 || !word3)
+    if (!word2 || !word3) {
       return std::nullopt;
+    }
     const auto resource =
         decode_buffer_resource(uint32_t(*base), uint32_t(*base >> 32), *word2, *word3);
     // Scalar loads ignore STRIDE_SCALE; CDNA5 uses a 57-bit base and 45-bit size.
@@ -242,12 +252,14 @@ uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wa
   // The VGPR operand is 32 bits, so adding IOFFSET wraps before the LDS bounds check. This
   // matters when code materializes (address - IOFFSET) in the VGPR, for example -64 + 64.
   uint32_t relative_addr = lds_operand + static_cast<uint32_t>(signed_ioffset(inst.ioffset));
-  if (static_cast<uint64_t>(relative_addr) + access_size_bytes > wf.lds_size())
+  if (static_cast<uint64_t>(relative_addr) + access_size_bytes > wf.lds_size()) {
     return amdgpu::kInvalidLdsAddress;
+  }
 
   uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
-  if (absolute_addr >= UINT32_MAX)
+  if (absolute_addr >= UINT32_MAX) {
     return amdgpu::kInvalidLdsAddress;
+  }
   return static_cast<uint32_t>(absolute_addr);
 }
 
@@ -257,8 +269,9 @@ AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgp
   // the bounds check.
   const uint32_t relative_addr = lds_operand + static_cast<uint32_t>(signed_ioffset(inst.ioffset));
   const uint64_t lds_size = wf.lds_size();
-  if (relative_addr >= lds_size || access_size_bytes == 0)
+  if (relative_addr >= lds_size || access_size_bytes == 0) {
     return {};
+  }
   // The ISA specifies out-of-range LDS behavior for async loads only (CDNA5 ISA
   // 3.3.3). As a modeling choice, an async store reads every byte of its source
   // inside the allocation, and zeros past it, so a race detector tracks every
@@ -266,8 +279,9 @@ AsyncLdsSource async_lds_lane_source(const VglobalMachineInst &inst, const amdgp
   const auto bytes =
       static_cast<uint32_t>(std::min<uint64_t>(access_size_bytes, lds_size - relative_addr));
   const uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
-  if (bytes == 0 || absolute_addr + bytes > UINT32_MAX)
+  if (bytes == 0 || absolute_addr + bytes > UINT32_MAX) {
     return {};
+  }
   return {.address = static_cast<uint32_t>(absolute_addr), .bytes = bytes};
 }
 
@@ -293,13 +307,15 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   uint32_t scale = 1;
   if (inst.sve) {
     vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
-    if (inst.scale_offset)
+    if (inst.scale_offset) {
       scale = scaled_vaddr_factor(d);
+    }
   }
   amdgpu::RegisterAccess regs(cu);
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.sve)
+  if (inst.sve) {
     vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
+  }
   constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
   const uint32_t lane_count = wf.wf_size();
   d.scratch_swizzle = true;
@@ -307,8 +323,9 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   d.scratch_lane_mask = exec;
   d.scratch_addr_stride = lane_count * kScratchInterleave;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint64_t vaddr = 0;
     if (inst.sve) {
       const int32_t voffset = static_cast<int32_t>(vaddr_region->lane(0, lane));
@@ -358,8 +375,9 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   }
   int32_t ioff = signed_ioffset(inst.ioffset);
   uint32_t vbase = 0;
-  if (inst.idxen || inst.offen)
+  if (inst.idxen || inst.offen) {
     vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
+  }
   const auto address_regs =
       amdgpu::addr_calc::read_buffer_address_registers(regs, vbase, inst.idxen, inst.offen, exec);
   assert(d.elem_size != 0 && d.num_elems != 0);
@@ -377,8 +395,9 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
       (exec == UINT32_MAX || exec == UINT64_MAX)) {
     const uint64_t bias = uint64_t{soffset_val} + static_cast<uint32_t>(ioff);
     uint64_t bound = resource.num_records;
-    if (resource.oob_select)
+    if (resource.oob_select) {
       bound = std::min<uint64_t>(bound, resource.stride);
+    }
     const unsigned lanes = exec == UINT32_MAX ? 32 : 64;
     d.lane_mask = 0;
     if (bias <= bound && d.elem_size <= bound - bias) {
@@ -396,8 +415,9 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     d.element_lane_masks.assign(1, d.lane_mask);
     return;
   }
-  if (!resource.swizzle_enabled)
+  if (!resource.swizzle_enabled) {
     d.element_lane_masks.assign(d.num_elems, exec);
+  }
   // For a crossing raw vector access, keep a DWORD when its end + 4 <= NUM_RECORDS
   // (Triton PR 12512). This differs from the exact per-DWORD check in CDNA5 ISA 9.4.1.
   // gfx1250 loads confirm the crossing rule for B64 with 4 bytes left and B128
@@ -408,8 +428,9 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   const uint32_t access_size = d.elem_size * d.num_elems;
   d.lane_mask = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
     const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     if (resource.swizzle_enabled) {
@@ -444,13 +465,15 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
         oob = oob ||
               byte_range_exceeds(record_offset + component_offset, d.elem_size, resource.stride);
       }
-      if (oob)
+      if (oob) {
         d.element_lane_masks[elem] &= ~(uint64_t{1} << lane);
-      else
+      } else {
         d.lane_mask |= uint64_t{1} << lane;
+      }
     }
-    if (!(d.lane_mask & (uint64_t{1} << lane)))
+    if (!(d.lane_mask & (uint64_t{1} << lane))) {
       d.per_lane_addr[lane] = 0;
+    }
   }
 }
 
@@ -466,12 +489,14 @@ void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront
   amdgpu::RegisterAccess::VgprReadRegion addr_region =
       regs.read_vgpr_region(addr_base, 1, lane_mask);
   auto maybe_addresses = addr_region.lanes();
-  if (maybe_addresses.failed())
+  if (maybe_addresses.failed()) {
     return;
+  }
   const std::span<const uint32_t> addresses = maybe_addresses.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(lane_mask & (1ULL << lane)))
+    if (!(lane_mask & (1ULL << lane))) {
       continue;
+    }
     d.per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), addresses[lane], offset);
   }
 }

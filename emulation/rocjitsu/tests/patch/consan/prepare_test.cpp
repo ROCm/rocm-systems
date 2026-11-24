@@ -85,8 +85,9 @@ TEST_F(ConSanPrepareImage, WholeImageHasIndependentEntryPlansAndNativeSibling) {
   AmdGpuCodeObject object(artifact.value().image.data(), artifact.value().image.size());
   bool extensions_found = false;
   for (const std::unique_ptr<Section> &section : object.all_sections()) {
-    if (section->name() != kKernargExtensionMetadataSectionName)
+    if (section->name() != kKernargExtensionMetadataSectionName) {
       continue;
+    }
     const std::optional<std::vector<KernargExtensionMetadata>> records =
         parse_kernarg_extension_metadata(
             {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
@@ -148,9 +149,11 @@ TEST_F(ConSanPrepareImage, SelectedCodeCanBranchPastNativeEntries) {
       const AmdGpuCodeObject prepared(changed.data(), changed.size());
       changed[prepared.text_sections().front()->sectionOffset() + island.prepared_offset] ^= 1;
       facts.prepared.sha256 = digest(changed);
-      for (ImageEntryFacts &row : facts.entries)
-        if (row.selected)
+      for (ImageEntryFacts &row : facts.entries) {
+        if (row.selected) {
           row.selected->prepared = facts.prepared;
+        }
+      }
       EXPECT_TRUE(
           verify_artifact_images(facts, original_, changed, contract_error.emitter()).failed());
       EXPECT_EQ(contract_error.message(), "native entry body changed");
@@ -175,8 +178,9 @@ TEST_F(ConSanPrepareImage, SelectionOrderIsCanonicalAndSingleSubsetPreservesOthe
         prepare_image(original_, *target_profile("gfx1250"), selected, error_);
     ASSERT_TRUE(subset.succeeded()) << name << ": " << error_.message;
     EXPECT_NE(subset.value().facts.selection_profile, first.value().facts.selection_profile);
-    for (const ImageEntryFacts &entry : subset.value().facts.entries)
+    for (const ImageEntryFacts &entry : subset.value().facts.entries) {
       EXPECT_EQ(entry.disposition == EntryDisposition::Selected, entry.binding.name == name);
+    }
   }
 }
 
@@ -246,10 +250,13 @@ TEST(ConSanPrepareImagePcReads, RejectsNativePcRelativeGlobalStore) {
   ASSERT_TRUE(blocks.succeeded());
   ASSERT_GT(blocks.value().size(), 1u);
   std::optional<uint64_t> pc_read_offset;
-  for (const std::unique_ptr<BasicBlock> &block : blocks.value())
-    for (const Instruction &instruction : block->instructions())
-      if (instruction.reads_pc())
+  for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+    for (const Instruction &instruction : block->instructions()) {
+      if (instruction.reads_pc()) {
         pc_read_offset = instruction.src_loc();
+      }
+    }
+  }
   ASSERT_TRUE(pc_read_offset);
   const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
   InputError error;
@@ -570,8 +577,9 @@ TEST_F(ConSanPrepare, EntryPrologueOffsetsMustMatchTheRuntimeWrapper) {
   AmdGpuCodeObject object(artifact.value().image.data(), artifact.value().image.size());
   bool found = false;
   for (const std::unique_ptr<Section> &section : object.all_sections()) {
-    if (section->name() != kKernargExtensionMetadataSectionName)
+    if (section->name() != kKernargExtensionMetadataSectionName) {
       continue;
+    }
     const std::optional<std::vector<KernargExtensionMetadata>> records =
         parse_kernarg_extension_metadata(
             {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
@@ -599,14 +607,16 @@ TEST_F(ConSanPrepare, EntryNamesMustBeUsableByTheShippedJsonAnalyzer) {
   for (const bool valid : {false, true}) {
     std::string name(original_name);
     name[0] = valid ? '\xc3' : '\xff';
-    if (valid)
+    if (valid) {
       name[1] = '\xa9';
+    }
     std::vector<uint8_t> image = original_;
     size_t replacements = 0;
     for (std::vector<uint8_t>::iterator position = image.begin();;) {
       position = std::search(position, image.end(), original_name.begin(), original_name.end());
-      if (position == image.end())
+      if (position == image.end()) {
         break;
+      }
       std::memcpy(&*position, name.data(), name.size());
       position += name.size();
       ++replacements;

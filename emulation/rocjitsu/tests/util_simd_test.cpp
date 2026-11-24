@@ -83,10 +83,11 @@ TEST(UtilSimd, Bf16PackingMatchesEveryHalfAndRandomTies) {
     for (uint32_t bits = 0; bits < 65536; bits += U::size()) {
       U raw([&](auto i) { return uint32_t(((bits + i) << 16) | (uint32_t(rng()) & 0xffffu)); });
       U actual = util::pack_bf16_simd(raw, overflow);
-      for (unsigned i = 0; i < U::size(); ++i)
+      for (unsigned i = 0; i < U::size(); ++i) {
         ASSERT_EQ(actual[i],
                   util::f32_to_bf16_rne_mode(std::bit_cast<float>(uint32_t(raw[i])), overflow))
             << raw[i];
+      }
     }
   }
 }
@@ -131,11 +132,13 @@ TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
 TEST(UtilSimd, Load_Contiguous_U32) {
   SKIP_IF_NO_SIMD();
   alignas(util::native<uint32_t>) uint32_t src[kW];
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     src[i] = static_cast<uint32_t>(0xDEAD'0000u + i);
+  }
   auto v = util::load<uint32_t>(src);
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     EXPECT_EQ(v[i], src[i]) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, Load_Contiguous_F32) {
@@ -147,16 +150,18 @@ TEST(UtilSimd, Load_Contiguous_F32) {
     src[i] = std::bit_cast<uint32_t>(expected[i]);
   }
   auto v = util::load<float>(src);
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     EXPECT_EQ(v[i], expected[i]) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, Broadcast_U32) {
   SKIP_IF_NO_SIMD();
   constexpr uint32_t kBits = 0xCAFEBABEu;
   auto v = util::broadcast<uint32_t>(kBits);
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     EXPECT_EQ(v[i], kBits) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, Broadcast_F32) {
@@ -164,8 +169,9 @@ TEST(UtilSimd, Broadcast_F32) {
   constexpr float kVal = -3.14159f;
   const uint32_t bits = std::bit_cast<uint32_t>(kVal);
   auto v = util::broadcast<float>(bits);
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     EXPECT_EQ(v[i], kVal) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
@@ -177,9 +183,10 @@ TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
     const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
     for (uint64_t bits = 0; bits <= full; ++bits) {
       const auto mask = util::simd_mask_from_bits<Simd>(bits);
-      for (std::size_t i = 0; i < W; ++i)
+      for (std::size_t i = 0; i < W; ++i) {
         ASSERT_EQ(static_cast<bool>(mask[i]), ((bits >> i) & 1u) != 0)
             << "width " << W << ", bits " << bits << ", lane " << i;
+      }
       ASSERT_EQ(util::simd_mask_to_bits(mask), bits) << "width " << W << ", bits " << bits;
     }
     EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<Simd>(~uint64_t{0})), full)
@@ -202,8 +209,9 @@ TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
   const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
   for (uint64_t bits = 0; bits <= full; ++bits) {
     const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
-    for (std::size_t i = 0; i < FallbackSimd::size(); ++i)
+    for (std::size_t i = 0; i < FallbackSimd::size(); ++i) {
       ASSERT_EQ(mask[i], ((bits >> i) & 1u) != 0) << "bits " << bits << ", lane " << i;
+    }
     ASSERT_EQ(util::simd_mask_to_bits(mask), bits);
   }
   EXPECT_EQ(util::simd_mask_to_bits(util::simd_mask_from_bits<FallbackSimd>(~uint64_t{0})), full);
@@ -218,21 +226,24 @@ TEST(UtilSimd, MaskBitsExpandToOrderedZeroOneLanes) {
   const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
   for (uint64_t bits = 0; bits <= full; ++bits) {
     const auto lanes = util::simd_u32_lanes_from_bits(bits);
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       ASSERT_EQ(lanes[i], static_cast<uint32_t>((bits >> i) & 1u))
           << "bits " << bits << ", lane " << i;
+    }
   }
   const auto high_bits = util::simd_u32_lanes_from_bits(~uint64_t{0});
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     EXPECT_EQ(high_bits[i], 1u) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, MaskedStore_FullMask) {
   SKIP_IF_NO_SIMD();
   alignas(util::native<uint32_t>) uint32_t dst[kW] = {};
   alignas(util::native<uint32_t>) uint32_t src[kW];
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     src[i] = 0xA5A5'0000u + i;
+  }
   auto v = util::load<uint32_t>(src);
   const uint64_t full = util::mask<uint64_t>(static_cast<int>(kW));
   util::masked_store<uint32_t>(dst, v, full);
@@ -250,14 +261,16 @@ TEST(UtilSimd, MaskedStore_PartialMask) {
   auto v = util::load<uint32_t>(src);
   // 0xA... pattern: enable every other lane starting from bit 1.
   uint64_t mask = 0;
-  for (std::size_t i = 1; i < kW; i += 2)
+  for (std::size_t i = 1; i < kW; i += 2) {
     mask |= (1ULL << i);
+  }
   util::masked_store<uint32_t>(dst, v, mask);
   for (std::size_t i = 0; i < kW; ++i) {
-    if (mask & (1ULL << i))
+    if (mask & (1ULL << i)) {
       EXPECT_EQ(dst[i], src[i]) << "lane " << i << " should be written";
-    else
+    } else {
       EXPECT_EQ(dst[i], 0x1111'1111u) << "lane " << i << " should be preserved";
+    }
   }
 }
 
@@ -271,20 +284,23 @@ TEST(UtilSimd, MaskedStore_EmptyMask) {
   }
   auto v = util::load<uint32_t>(src);
   util::masked_store<uint32_t>(dst, v, 0ULL);
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     EXPECT_EQ(dst[i], 0xDEAD'BEEFu) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, BlitToBuffer_F32) {
   SKIP_IF_NO_SIMD();
   alignas(util::native<float>) uint32_t src[kW];
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     src[i] = std::bit_cast<uint32_t>(2.0f * static_cast<float>(i) + 0.5f);
+  }
   auto v = util::load<float>(src);
   alignas(util::native<float>) uint32_t buf[util::native<float>::size()] = {};
   util::blit_to_buffer<float>(buf, v);
-  for (std::size_t i = 0; i < kW; ++i)
+  for (std::size_t i = 0; i < kW; ++i) {
     EXPECT_EQ(buf[i], src[i]) << "lane " << i;
+  }
 }
 
 // --- narrow32 prims (native_width64-wide 32-bit lanes) for the f64<->32-bit
@@ -300,43 +316,50 @@ TEST(UtilSimd, LoadNarrow_RoundTrip_F32) {
     src[i] = std::bit_cast<uint32_t>(expected[i]);
   }
   auto v = util::load_narrow<float>(src);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     EXPECT_EQ(v[i], expected[i]) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, BroadcastNarrow_I32) {
   SKIP_IF_NO_SIMD();
   constexpr int32_t kVal = -123456789;
   auto v = util::broadcast_narrow<int32_t>(std::bit_cast<uint32_t>(kVal));
-  for (std::size_t i = 0; i < util::native_width64; ++i)
+  for (std::size_t i = 0; i < util::native_width64; ++i) {
     EXPECT_EQ(v[i], kVal) << "lane " << i;
+  }
 }
 
 TEST(UtilSimd, MaskedStoreNarrow_FullAndPartial) {
   SKIP_IF_NO_SIMD();
   constexpr std::size_t W = util::native_width64;
   alignas(util::narrow32<int32_t>) int32_t vals[W];
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     vals[i] = static_cast<int32_t>(i) - 3;
+  }
   util::narrow32<int32_t> v(vals, util::stdx::vector_aligned);
 
   uint32_t dst_full[W] = {};
   util::masked_store_narrow<int32_t>(dst_full, v, util::mask<uint64_t>(static_cast<int>(W)));
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     EXPECT_EQ(dst_full[i], std::bit_cast<uint32_t>(vals[i])) << "full lane " << i;
+  }
 
   uint32_t dst_part[W];
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     dst_part[i] = 0x1111'1111u;
+  }
   uint64_t mask = 0;
-  for (std::size_t i = 1; i < W; i += 2)
+  for (std::size_t i = 1; i < W; i += 2) {
     mask |= (1ULL << i);
+  }
   util::masked_store_narrow<int32_t>(dst_part, v, mask);
   for (std::size_t i = 0; i < W; ++i) {
-    if (mask & (1ULL << i))
+    if (mask & (1ULL << i)) {
       EXPECT_EQ(dst_part[i], std::bit_cast<uint32_t>(vals[i])) << "part write lane " << i;
-    else
+    } else {
       EXPECT_EQ(dst_part[i], 0x1111'1111u) << "part preserve lane " << i;
+    }
   }
 }
 
@@ -346,20 +369,24 @@ TEST(UtilSimd, NarrowBridgeCast_DoubleToFromB32) {
   // f64 -> f32: a direct static_simd_cast between native<double> and
   // narrow32<float> is the cvt_f32_f64 bridge; matches a per-lane (float)cast.
   alignas(util::native<double>) double in[W];
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     in[i] = 0.1 * static_cast<double>(i) - 1.3 + 1e30;
+  }
   util::native<double> d(in, util::stdx::vector_aligned);
   auto f = util::stdx::static_simd_cast<util::narrow32<float>>(d);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     EXPECT_EQ(f[i], static_cast<float>(in[i])) << "f64->f32 lane " << i;
+  }
   // i32 -> f64: the cvt_f64_i32 bridge (exact widening).
   alignas(util::narrow32<int32_t>) int32_t iv[W];
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     iv[i] = static_cast<int32_t>(i) * -1000003;
+  }
   util::narrow32<int32_t> ni(iv, util::stdx::vector_aligned);
   auto dd = util::stdx::static_simd_cast<util::native<double>>(ni);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     EXPECT_EQ(dd[i], static_cast<double>(iv[i])) << "i32->f64 lane " << i;
+  }
 }
 
 TEST(UtilSimd, ForceScalar_StableAcrossThreadsWithinImage) {
@@ -400,17 +427,19 @@ TEST(UtilSimd, ForceScalar_EnvContract) {
 
   for (const EnvCase &test_case : kCases) {
     SCOPED_TRACE(test_case.value ? test_case.value : "<unset>");
-    if (test_case.value == nullptr)
+    if (test_case.value == nullptr) {
       ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
-    else
+    } else {
       ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", test_case.value, 1), 0);
+    }
     EXPECT_EQ(util::detail::init_force_scalar(), test_case.expected);
   }
 
-  if (was_set)
+  if (was_set) {
     ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", saved_value.c_str(), 1), 0);
-  else
+  } else {
     ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
+  }
 }
 
 // Positive control for the test seam. Without this, a setter that did nothing
@@ -456,8 +485,9 @@ void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   std::mt19937 rng(0xA17C0DEu);
   for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
     alignas(V) float in[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       in[i] = std::bit_cast<float>(static_cast<uint32_t>(rng()));
+    }
     V v(in, util::stdx::element_aligned);
     alignas(V) float out[W];
     vector_fn(v).copy_to(out, util::stdx::element_aligned);
@@ -472,18 +502,20 @@ void expect_simd_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
 
 TEST(UtilSimd, Exp2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  for (bool quiet_snan : {false, true})
+  for (bool quiet_snan : {false, true}) {
     expect_simd_bit_exact(
         [quiet_snan](float x) { return util::amdgpu_exp_f32(x, quiet_snan); },
         [quiet_snan](util::native<float> v) { return util::exp_f32_simd(v, quiet_snan); });
+  }
 }
 
 TEST(UtilSimd, Log2_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
-  for (bool quiet_snan : {false, true})
+  for (bool quiet_snan : {false, true}) {
     expect_simd_bit_exact(
         [quiet_snan](float x) { return util::amdgpu_log_f32(x, quiet_snan); },
         [quiet_snan](util::native<float> v) { return util::log_f32_simd(v, quiet_snan); });
+  }
 }
 
 // Toolchain guard for the ternary VOP2 FMA/MAC/MAD SIMD fast path
@@ -522,8 +554,10 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
     util::native_fma(va, vb, vc).copy_to(native_out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i) {
       if (is_nan_bits(std::bit_cast<uint32_t>(a[i])) ||
-          is_nan_bits(std::bit_cast<uint32_t>(b[i])) || is_nan_bits(std::bit_cast<uint32_t>(c[i])))
+          is_nan_bits(std::bit_cast<uint32_t>(b[i])) ||
+          is_nan_bits(std::bit_cast<uint32_t>(c[i]))) {
         continue; // NaN-input payload divergence is accepted
+      }
       const float s = std::fma(a[i], b[i], c[i]);
       ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(stdx_out[i]))
           << "stdx::fma divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
@@ -562,8 +596,10 @@ TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
     util::stdx::fma(va, vb, vc).copy_to(out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i) {
       if (is_nan_bits(std::bit_cast<uint64_t>(a[i])) ||
-          is_nan_bits(std::bit_cast<uint64_t>(b[i])) || is_nan_bits(std::bit_cast<uint64_t>(c[i])))
+          is_nan_bits(std::bit_cast<uint64_t>(b[i])) ||
+          is_nan_bits(std::bit_cast<uint64_t>(c[i]))) {
         continue; // NaN-input payload divergence is accepted
+      }
       const double s = std::fma(a[i], b[i], c[i]);
       ASSERT_EQ(std::bit_cast<uint64_t>(s), std::bit_cast<uint64_t>(out[i]))
           << "divergent at iter " << iter << " lane " << i << std::hex << " a=0x"
@@ -589,16 +625,18 @@ void expect_f64_unary_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
   std::mt19937_64 rng(0xD06F64ull);
   for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
     alignas(V) double a[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       a[i] = std::bit_cast<double>(rng());
+    }
     V va(a, util::stdx::element_aligned);
     alignas(V) double out[W];
     vector_fn(va).copy_to(out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i) {
       const double s = scalar_fn(a[i]);
       const uint64_t su = std::bit_cast<uint64_t>(s), ou = std::bit_cast<uint64_t>(out[i]);
-      if (is_nan_bits(su) || is_nan_bits(ou))
+      if (is_nan_bits(su) || is_nan_bits(ou)) {
         continue; // NaN-result payload divergence is accepted
+      }
       ASSERT_EQ(su, ou) << "divergent at iter " << iter << " lane " << i << std::hex << " in=0x"
                         << std::bit_cast<uint64_t>(a[i]);
     }
@@ -635,13 +673,15 @@ TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
   using V = util::native<float>;
   for (unsigned start = 0; start < std::size(cases); ++start) {
     std::array<uint32_t, V::size()> input_bits;
-    for (unsigned lane = 0; lane < V::size(); ++lane)
+    for (unsigned lane = 0; lane < V::size(); ++lane) {
       input_bits[lane] = cases[(start + lane) % std::size(cases)][0];
+    }
     const V input = util::load<float>(input_bits.data());
     const V result = util::rcp_f32_simd(input);
-    for (unsigned lane = 0; lane < V::size(); ++lane)
+    for (unsigned lane = 0; lane < V::size(); ++lane) {
       EXPECT_EQ(std::bit_cast<uint32_t>(float(result[lane])),
                 cases[(start + lane) % std::size(cases)][1]);
+    }
   }
 }
 
@@ -684,10 +724,12 @@ void expect_minmax_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
     alignas(V) float a[W], b[W];
     for (std::size_t i = 0; i < W; ++i) {
       uint32_t ra = rng(), rb = rng();
-      if ((rng() & 7u) == 0u)
+      if ((rng() & 7u) == 0u) {
         ra &= 0x80000000u; // force +/-0
-      if ((rng() & 7u) == 0u)
+      }
+      if ((rng() & 7u) == 0u) {
         rb &= 0x80000000u;
+      }
       a[i] = std::bit_cast<float>(ra);
       b[i] = std::bit_cast<float>(rb);
     }
@@ -696,10 +738,12 @@ void expect_minmax_bit_exact(ScalarFn scalar_fn, VectorFn vector_fn) {
     vector_fn(va, vb).copy_to(out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i) {
       const uint32_t ua = std::bit_cast<uint32_t>(a[i]), ub = std::bit_cast<uint32_t>(b[i]);
-      if (is_nan_bits(ua) || is_nan_bits(ub))
+      if (is_nan_bits(ua) || is_nan_bits(ub)) {
         continue; // NaN-input payload divergence is accepted
-      if (is_zero_bits(ua) && is_zero_bits(ub))
+      }
+      if (is_zero_bits(ua) && is_zero_bits(ub)) {
         continue; // signed-zero tie: -0/+0 sign difference is accepted
+      }
       const float s = scalar_fn(a[i], b[i]);
       ASSERT_EQ(std::bit_cast<uint32_t>(s), std::bit_cast<uint32_t>(out[i]))
           << "divergent at iter " << iter << " lane " << i << std::hex << " a=0x" << ua << " b=0x"
@@ -733,8 +777,9 @@ TEST(UtilSimd, F16ToF32_VectorMatchesScalar_Exhaustive) {
   constexpr std::size_t W = util::native_width_v<uint32_t>;
   for (uint32_t base = 0; base < 65536u; base += static_cast<uint32_t>(W)) {
     alignas(V) uint32_t in[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       in[i] = base + static_cast<uint32_t>(i); // f16 bits 0..65535 (all)
+    }
     V v(in, util::stdx::element_aligned);
     util::native<float> rv = util::f16_to_f32_simd(v);
     alignas(util::native<float>) float out[W];
@@ -755,8 +800,9 @@ TEST(UtilSimd, F16RoundTripPreservesEveryEncoding) {
   constexpr std::size_t W = util::native_width_v<uint32_t>;
   for (uint32_t base = 0; base < 65536u; base += static_cast<uint32_t>(W)) {
     uint32_t input[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       input[i] = base + static_cast<uint32_t>(i);
+    }
     const V encoded(input, util::stdx::element_aligned);
     const auto promoted = util::f16_to_f32_simd(encoded);
     const V nearest = util::f32_to_f16_simd(promoted);
@@ -779,8 +825,9 @@ TEST(UtilSimd, F32ToF16_VectorMatchesScalar_Sweep) {
   // hitting every exponent and a spread of mantissas, incl. NaN/Inf/denormal.
   for (uint64_t u = 0; u < 0x100000000ULL; u += 997ULL * W) {
     alignas(V) float in[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       in[i] = std::bit_cast<float>(static_cast<uint32_t>(u + 997ULL * i));
+    }
     V v(in, util::stdx::element_aligned);
     util::native<uint32_t> rv = util::f32_to_f16_simd(v);
     alignas(util::native<uint32_t>) uint32_t out[W];
@@ -798,8 +845,9 @@ TEST(UtilSimd, F32ToF16Rtz_VectorMatchesScalar_Sweep) {
   constexpr std::size_t W = util::native_width_v<float>;
   for (uint64_t u = 0; u < 0x100000000ULL; u += 997ULL * W) {
     alignas(V) float in[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       in[i] = std::bit_cast<float>(static_cast<uint32_t>(u + 997ULL * i));
+    }
     V v(in, util::stdx::element_aligned);
     util::native<uint32_t> rv = util::f32_to_f16_rtz_simd(v);
     alignas(util::native<uint32_t>) uint32_t out[W];
@@ -818,8 +866,9 @@ TEST(UtilSimd, F32ToF16Mode_VectorMatchesScalar_Sweep) {
   for (bool fp16_ovfl : {false, true}) {
     for (uint64_t u = 0; u < 0x100000000ULL; u += 997ULL * W) {
       alignas(V) float in[W];
-      for (std::size_t i = 0; i < W; ++i)
+      for (std::size_t i = 0; i < W; ++i) {
         in[i] = std::bit_cast<float>(static_cast<uint32_t>(u + 997ULL * i));
+      }
       V v(in, util::stdx::element_aligned);
       util::native<uint32_t> rv = util::f32_to_f16_mode_simd(v, fp16_ovfl);
       alignas(util::native<uint32_t>) uint32_t out[W];
@@ -855,17 +904,21 @@ inline uint64_t bits_of(double v) { return std::bit_cast<uint64_t>(v); }
 
 // Scalar references — literally the generated VOP3 body's inner expression.
 template <typename T> T scalar_ieee_maximum(T a, T b) {
-  if (std::isnan(a) || std::isnan(b))
+  if (std::isnan(a) || std::isnan(b)) {
     return std::numeric_limits<T>::quiet_NaN();
-  if (a == b)
+  }
+  if (a == b) {
     return std::signbit(a) ? b : a;
+  }
   return a > b ? a : b;
 }
 template <typename T> T scalar_ieee_minimum(T a, T b) {
-  if (std::isnan(a) || std::isnan(b))
+  if (std::isnan(a) || std::isnan(b)) {
     return std::numeric_limits<T>::quiet_NaN();
-  if (a == b)
+  }
+  if (a == b) {
     return std::signbit(a) ? a : b;
+  }
   return a < b ? a : b;
 }
 
@@ -930,8 +983,8 @@ TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
   using V = util::native<float>;
   constexpr std::size_t W = V::size();
   const auto grid = ieee_minmax_grid<float>();
-  for (float cv : grid)
-    for (float bv : grid)
+  for (float cv : grid) {
+    for (float bv : grid) {
       for (float av : grid) {
         alignas(V) float a_[W], b_[W], c_[W];
         for (std::size_t i = 0; i < W; ++i) {
@@ -950,28 +1003,34 @@ TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
               << "av=" << av << " bv=" << bv << " cv=" << cv << " lane=" << i;
         }
       }
+    }
+  }
 }
 
 // --- Normalized pack-convert lanes (v_cvt_pk[_]norm_{i16,u16}_*) -------------
 
 int16_t scalar_cvt_pknorm_i16(float f) {
-  if (std::isnan(f))
+  if (std::isnan(f)) {
     return 0;
+  }
   double scaled = std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0);
   double lower = std::floor(scaled);
   double fraction = scaled - lower;
-  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0)) {
     lower += 1.0;
+  }
   return static_cast<int16_t>(lower);
 }
 uint16_t scalar_cvt_pknorm_u16(float f) {
-  if (std::isnan(f))
+  if (std::isnan(f)) {
     return 0;
+  }
   double scaled = std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0);
   double lower = std::floor(scaled);
   double fraction = scaled - lower;
-  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0)) {
     lower += 1.0;
+  }
   return static_cast<uint16_t>(lower);
 }
 
@@ -981,8 +1040,9 @@ TEST(UtilSimd, RoundToNearestEven) {
   EXPECT_EQ(util::round_to_nearest_even(-16383.5f), -16384.0f);
   util::native<float> input(32767.5f);
   auto result = util::round_to_nearest_even_simd(input);
-  for (std::size_t lane = 0; lane < result.size(); ++lane)
+  for (std::size_t lane = 0; lane < result.size(); ++lane) {
     EXPECT_EQ(result[lane], 32768.0f);
+  }
 }
 
 template <typename Float> void check_rndne() {
@@ -1001,15 +1061,19 @@ template <typename Float> void check_rndne() {
       inputs.push_back(std::bit_cast<Bits>(value) + 1);
     }
   }
-  for (Bits bits : {Bits(1), kInfinity, kInfinity | Bits(0x123), kInfinity | kQuiet | Bits(0x456)})
+  for (Bits bits :
+       {Bits(1), kInfinity, kInfinity | Bits(0x123), kInfinity | kQuiet | Bits(0x456)}) {
     inputs.push_back(bits);
+  }
   const size_t positives = inputs.size();
-  for (size_t i = 0; i < positives; ++i)
+  for (size_t i = 0; i < positives; ++i) {
     inputs.push_back(inputs[i] | (Bits(1) << (sizeof(Bits) * 8 - 1)));
+  }
   // Include broad exponent/fraction coverage in addition to exact boundaries.
   std::mt19937_64 rng(0x11939);
-  for (unsigned i = 0; i < 2048; ++i)
+  for (unsigned i = 0; i < 2048; ++i) {
     inputs.push_back(static_cast<Bits>(rng()));
+  }
   std::vector<Bits> expected;
   for (Bits bits : inputs) {
     const Bits magnitude = bits & ~(Bits(1) << (sizeof(Bits) * 8 - 1));
@@ -1050,8 +1114,9 @@ TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
                                        std::numeric_limits<float>::quiet_NaN()}};
   for (float fv : grid) {
     alignas(V) float fb[W];
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       fb[i] = fv;
+    }
     V f(fb, util::stdx::vector_aligned);
     auto ri = util::cvt_pknorm_i16_f32_simd(f);
     auto ru = util::cvt_pknorm_u16_f32_simd(f);

@@ -58,37 +58,45 @@ template <typename Fmt> struct Ref {
   static L overflow(bool negative, const om::Policy &p) {
     bool infinite =
         p.round_mode == 0 || (p.round_mode == 1 && !negative) || (p.round_mode == 2 && negative);
-    if (Fmt::kWidth == 16 && p.fp16_ovfl)
+    if (Fmt::kWidth == 16 && p.fp16_ovfl) {
       infinite = false;
+    }
     const L m = infinite ? Fmt::kInfinity : Fmt::kInfinity - 1;
     return negative ? (m | Fmt::kSign) : m;
   }
 
   static L scale(L x, const om::Policy &p) {
-    if (p.omod == 0 || exponent(x) == static_cast<int>(Fmt::kExponentMax))
+    if (p.omod == 0 || exponent(x) == static_cast<int>(Fmt::kExponentMax)) {
       return x;
-    if (exponent(x) == 0)
+    }
+    if (exponent(x) == 0) {
       return 0;
+    }
     const bool negative = (x & Fmt::kSign) != 0;
     const double factor = p.omod == 1 ? 2.0 : p.omod == 2 ? 4.0 : 0.5;
     const double input_magnitude = magnitude(x);
     const double min_normal = std::ldexp(1.0, 1 - kBias);
     // input * factor < min_normal, checked before host rounding can occur.
-    if (input_magnitude < min_normal / factor)
+    if (input_magnitude < min_normal / factor) {
       return negative ? Fmt::kSign : 0;
+    }
     const double scaled_magnitude = input_magnitude * factor;
-    if (scaled_magnitude > magnitude(Fmt::kInfinity - 1))
+    if (scaled_magnitude > magnitude(Fmt::kInfinity - 1)) {
       return overflow(negative, p);
+    }
     return encode(scaled_magnitude) | (negative ? Fmt::kSign : 0);
   }
 
   static L clamp(L x, const om::Policy &p) {
-    if (!p.clamp)
+    if (!p.clamp) {
       return x;
-    if ((x & Fmt::kMagnitude) > Fmt::kInfinity)
+    }
+    if ((x & Fmt::kMagnitude) > Fmt::kInfinity) {
       return p.clamp_nan_to_zero ? 0 : x;
-    if ((x & Fmt::kSign) != 0 || x == 0)
+    }
+    if ((x & Fmt::kSign) != 0 || x == 0) {
       return 0;
+    }
     const L one = static_cast<L>(kBias) << Fmt::kMantissaBits;
     return x > one ? one : x;
   }
@@ -99,12 +107,17 @@ template <typename Fmt> struct Ref {
 /// Every combination of OMOD, CLAMP, NaN clamping, rounding mode and FP16_OVFL.
 std::vector<om::Policy> policies() {
   std::vector<om::Policy> result;
-  for (uint32_t omod = 0; omod < 4; ++omod)
-    for (const bool clamp : {false, true})
-      for (const bool nan_to_zero : {false, true})
-        for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
-          for (const bool fp16_ovfl : {false, true})
+  for (uint32_t omod = 0; omod < 4; ++omod) {
+    for (const bool clamp : {false, true}) {
+      for (const bool nan_to_zero : {false, true}) {
+        for (uint32_t round_mode = 0; round_mode < 4; ++round_mode) {
+          for (const bool fp16_ovfl : {false, true}) {
             result.push_back({omod, clamp, nan_to_zero, round_mode, fp16_ovfl});
+          }
+        }
+      }
+    }
+  }
   return result;
 }
 
@@ -116,12 +129,13 @@ template <typename Fmt> std::vector<typename Fmt::Lane> specials() {
   const L bias = top >> 1;
   std::vector<L> values;
   for (const L e :
-       {L{0}, L{1}, L{2}, L{3}, bias - 1, bias, bias + 1, top - 3, top - 2, top - 1, top})
+       {L{0}, L{1}, L{2}, L{3}, bias - 1, bias, bias + 1, top - 3, top - 2, top - 1, top}) {
     for (const L significand : {L{0}, L{1}, Ref<Fmt>::kMant >> 1, Fmt::kQuiet, Ref<Fmt>::kMant}) {
       const L x = (e << Fmt::kMantissaBits) | significand;
       values.push_back(x);
       values.push_back(x | Fmt::kSign);
     }
+  }
   return values;
 }
 
@@ -129,32 +143,37 @@ template <typename Fmt> std::vector<typename Fmt::Lane> specials_and_random() {
   using L = typename Fmt::Lane;
   std::vector<L> values = specials<Fmt>();
   std::mt19937_64 rng(0x0aad);
-  for (int i = 0; i < 20000; ++i)
+  for (int i = 0; i < 20000; ++i) {
     values.push_back(static_cast<L>(rng()) & Fmt::kBits);
+  }
   return values;
 }
 
 template <typename Fmt> void expect_matches_reference(typename Fmt::Lane x) {
-  for (const om::Policy &p : policies())
+  for (const om::Policy &p : policies()) {
     ASSERT_EQ(om::apply<Fmt>(x, p), Ref<Fmt>::apply(x, p))
         << std::hex << "x 0x" << x << std::dec << " omod " << p.omod << " clamp " << p.clamp
         << " nan_to_zero " << p.clamp_nan_to_zero << " round " << p.round_mode << " fp16_ovfl "
         << p.fp16_ovfl;
+  }
 }
 
 TEST(OutputModifierTest, F16EveryEncodingMatchesReference) {
-  for (uint32_t x = 0; x <= 0xffffu; ++x)
+  for (uint32_t x = 0; x <= 0xffffu; ++x) {
     expect_matches_reference<fmt::F16>(x);
+  }
 }
 
 TEST(OutputModifierTest, F32MatchesReference) {
-  for (const uint32_t x : specials_and_random<fmt::F32>())
+  for (const uint32_t x : specials_and_random<fmt::F32>()) {
     expect_matches_reference<fmt::F32>(x);
+  }
 }
 
 TEST(OutputModifierTest, F64MatchesReference) {
-  for (const uint64_t x : specials_and_random<fmt::F64>())
+  for (const uint64_t x : specials_and_random<fmt::F64>()) {
     expect_matches_reference<fmt::F64>(x);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,13 +322,15 @@ template <typename Fmt, typename V> void expect_simd_matches_scalar() {
   constexpr std::size_t W = V::size();
   std::vector<L> values = specials_and_random<Fmt>();
   values.resize(values.size() - values.size() % W);
-  for (const om::Policy &p : policies())
+  for (const om::Policy &p : policies()) {
     for (std::size_t base = 0; base < values.size(); base += W) {
       const V r = om::apply<Fmt>(V(values.data() + base, util::stdx::element_aligned), p);
-      for (std::size_t i = 0; i < W; ++i)
+      for (std::size_t i = 0; i < W; ++i) {
         ASSERT_EQ(L(r[i]), om::apply<Fmt>(values[base + i], p))
             << std::hex << "x 0x" << values[base + i] << std::dec << " omod " << p.omod;
+      }
     }
+  }
 }
 #endif
 

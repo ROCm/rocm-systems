@@ -59,6 +59,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed `rocattach` not unmapping the environment and tool-path buffers in the target when the attach call in the target reported failure.
 - Fixed the rocprofv3 tool library aborting on reattach after it disabled thread trace or kernel replay because the running rocprofiler-sdk does not support them, and fixed counter collection using kernel replay passes when kernel replay is unsupported.
 - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
+- Fixed a hang when a library that contains HIP code is loaded with `dlopen` while a HIP call on another thread loads a code object, with a tool that uses code object tracing active (such as PyTorch's Kineto integration). The code object load callback took glibc's `dl_load_lock` while HIP held its code object lock, the reverse of the order `dlopen` takes them.
 - Fixed `rocpd` summary never producing the marker summary (marker_summary), including with --region-categories MARKER.
 
 ### Known issues
@@ -203,7 +204,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Resolved issues
 
   - Improved `rocpd` time-window validation to clamp overlapping ranges, account for all timed tables, and report invalid input without tracebacks.
-
+  - `rocprofv3 --kernel-replay-beta-enabled` given without `--replay-mode kernel` is now rejected instead of ignored. The flag acknowledges that kernel replay is a beta feature; it does not select it. Its name reads as if it did, so a command line carrying only the acknowledgement silently ran application replay, and the counter values that produces are indistinguishable from replayed ones.
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
   - Fixed memory write-bandwidth telemetry reporting N/A on gfx1250 (MI455X) by adding the missing `WRITE_SIZE` derived counter, computed from the `GL2C_WRITE_SECTORS` hardware counter. The read-side `FETCH_SIZE` counter was already defined for gfx1250 while the write side was not, so downstream consumers such as the memory write-bandwidth field exposed through RDC reported N/A.

@@ -99,8 +99,9 @@ std::vector<uint8_t> make_gfx1250_two_kernel_barrier_elf(
   for (const KernelDescriptorInfo &kernel : kernels) {
     amdhsa::kernel_descriptor_t descriptor = kernel.descriptor;
     descriptor.kernel_code_properties |= amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
-    if (kernel.kernel_name == "test_kernel1")
+    if (kernel.kernel_name == "test_kernel1") {
       descriptor.kernel_code_entry_byte_offset += kSecondEntryByteOffset;
+    }
     std::memcpy(image.data() + kernel.descriptor_file_offset, &descriptor, sizeof(descriptor));
   }
   return image;
@@ -455,8 +456,9 @@ TEST_P(FaultDropBarrierFamily, PreservesAdditionalExecutableSection) {
   image.insert(image.begin() + sibling_offset, sibling_bytes,
                sibling_bytes + sizeof(sibling_words));
   for (Elf64_Shdr &shifted : sections) {
-    if (shifted.sh_offset >= sibling_offset)
+    if (shifted.sh_offset >= sibling_offset) {
       shifted.sh_offset += sizeof(sibling_words);
+    }
   }
   const size_t sibling_index = sections.size();
   sections.push_back(sibling);
@@ -648,8 +650,9 @@ TEST_P(FaultDropBarrierFamily, StaticBarrierInLoopAndFamilySpecificForms) {
 
 TEST(FaultDropBarrier, RejectsUndecodableUnselectedRdnaPadding) {
   for (const DropTargetRow &row : kDropRows) {
-    if (row.arch != IsaFamily::Rdna4)
+    if (row.arch != IsaFamily::Rdna4) {
       continue;
+    }
     std::vector<uint8_t> image = make_barrier_elf_for_target(row, make_barrier_words(row), true);
     const AmdGpuCodeObject source(image.data(), image.size());
     const uint32_t invalid = 0;
@@ -839,11 +842,11 @@ TEST_P(FaultDropBarrierRdna3, SelectionCannotReplayChangedWaveEntryOrTarget) {
     amdhsa::kernel_descriptor_t descriptor = {};
     const uint64_t offset = inventory.value().owner().descriptor_file_offset;
     std::memcpy(&descriptor, changed.data() + offset, sizeof(descriptor));
-    if (mode == 0)
+    if (mode == 0) {
       descriptor.kernel_code_properties ^= amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
-    else if (mode == 1)
+    } else if (mode == 1) {
       descriptor.kernel_code_entry_byte_offset += 4;
-    else {
+    } else {
       Elf64_Ehdr header = {};
       std::memcpy(&header, changed.data(), sizeof(header));
       header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1200;
@@ -994,8 +997,9 @@ TEST(FaultDropBarrier, ExactSelectionRejectsDuplicateNames) {
   EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
   const CodeObjectPatcher patcher(context.source());
   for (const Elf64_Shdr &section : patcher.section_headers()) {
-    if (section.sh_type != SHT_SYMTAB)
+    if (section.sh_type != SHT_SYMTAB) {
       continue;
+    }
     Elf64_Sym first_symbol = {}, second_symbol = {};
     std::memcpy(&first_symbol, image.data() + section.sh_offset + sizeof(Elf64_Sym),
                 sizeof(first_symbol));
@@ -1046,8 +1050,9 @@ TEST(FaultDropBarrier, IndependentSiblingMalformedDescriptorCannotDisappearFromO
   const AmdGpuCodeObject object(image.data(), image.size());
   const CodeObjectPatcher patcher(object);
   for (const Elf64_Shdr &section : patcher.section_headers()) {
-    if (section.sh_type != SHT_SYMTAB)
+    if (section.sh_type != SHT_SYMTAB) {
       continue;
+    }
     Elf64_Sym symbol = {};
     const uint64_t offset = section.sh_offset + 2 * sizeof(symbol);
     std::memcpy(&symbol, image.data() + offset, sizeof(symbol));
@@ -1100,9 +1105,11 @@ TEST(FaultDropBarrier, PreservesUnselectedSectionButRejectsActualTextRelocations
   extra.sh_type = SHT_RELA;
   extra.sh_info = inventory.value().section().index;
   extra.sh_entsize = sizeof(Elf64_Rela);
-  for (size_t index = 0; index < sections.size(); ++index)
-    if (sections[index].sh_type == SHT_SYMTAB)
+  for (size_t index = 0; index < sections.size(); ++index) {
+    if (sections[index].sh_type == SHT_SYMTAB) {
       extra.sh_link = index;
+    }
+  }
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
   std::memcpy(image.data() + header.e_shoff + (sections.size() - 1) * sizeof(extra), &extra,
@@ -1266,8 +1273,9 @@ TEST(FaultDropBarrier, OutOfRangeSecondMemberRejectsDropWithoutPublishingMutatio
   // Inspect the shared emission boundary too: a failure publishes neither an
   // ELF nor success records; repeated applies above retain the source.
   Instrumentor instrumentor(context.source(), kArch);
-  for (const StaticBarrierMember &member : selection.barrier().members)
+  for (const StaticBarrierMember &member : selection.barrier().members) {
     add_replacement(instrumentor, member);
+  }
   const InstrumentedCodeObjectDebug rejected = instrumentor.patch_with_debug_summaries();
   ASSERT_EQ(rejected.errors.size(), 1u);
   EXPECT_EQ(rejected.errors.front(), "relocation trampoline return branch exceeds s_branch simm16");
@@ -1289,15 +1297,18 @@ struct FixtureFileRange {
 std::optional<FixtureFileRange> fixture_file_range(const std::vector<uint8_t> &image,
                                                    FixtureLoadRange range) {
   const AmdGpuCodeObject source(image.data(), image.size());
-  if (!source.is_valid() || source.text_sections().size() != 1)
+  if (!source.is_valid() || source.text_sections().size() != 1) {
     return std::nullopt;
+  }
   const Section &text = *source.text_sections().front();
-  if (range == FixtureLoadRange::Text)
+  if (range == FixtureLoadRange::Text) {
     return FixtureFileRange{.offset = text.sectionOffset(), .size = text.size()};
+  }
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
-  if (kernels.size() != 1)
+  if (kernels.size() != 1) {
     return std::nullopt;
+  }
   return FixtureFileRange{.offset = kernels.front().descriptor_file_offset,
                           .size = sizeof(amdhsa::kernel_descriptor_t)};
 }
@@ -1305,25 +1316,29 @@ std::optional<FixtureFileRange> fixture_file_range(const std::vector<uint8_t> &i
 std::optional<size_t> load_segment_index(const std::vector<uint8_t> &image,
                                          FixtureLoadRange range) {
   const std::optional<FixtureFileRange> requested = fixture_file_range(image, range);
-  if (!requested)
+  if (!requested) {
     return std::nullopt;
+  }
   const uint64_t file_offset = requested->offset;
   const uint64_t size = requested->size;
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
   const std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
-  if (!segments)
+  if (!segments) {
     return std::nullopt;
+  }
   std::optional<size_t> found;
   for (size_t index = 0; index < segments->size(); ++index) {
     const Elf64_Phdr &segment = (*segments)[index];
-    if (segment.p_type != PT_LOAD || file_offset < segment.p_offset)
+    if (segment.p_type != PT_LOAD || file_offset < segment.p_offset) {
       continue;
+    }
     const uint64_t delta = file_offset - segment.p_offset;
     if (delta <= segment.p_filesz && size <= segment.p_filesz - delta) {
-      if (found)
+      if (found) {
         return std::nullopt;
+      }
       found = index;
     }
   }
@@ -1394,9 +1409,10 @@ void append_disjoint_load(std::vector<uint8_t> &image, FixtureFileRange file_ran
     }
   }
   // The fixture reserves space before its first payload for one more program header.
-  if (prepend)
+  if (prepend) {
     std::memmove(image.data() + header.e_phoff + sizeof(added), image.data() + header.e_phoff,
                  size_t{header.e_phnum} * sizeof(added));
+  }
   std::memcpy(image.data() + (prepend ? header.e_phoff : next_header_offset), &added,
               sizeof(added));
   ++header.e_phnum;
@@ -1453,10 +1469,11 @@ TEST(FaultDropBarrier, RejectsMissingOrNonExecutableTextLoad) {
     SCOPED_TRACE(missing);
     std::vector<uint8_t> image = make_gfx1250_barrier_elf();
     edit_segment(image, FixtureLoadRange::Text, [&](Elf64_Phdr &segment) {
-      if (missing)
+      if (missing) {
         segment.p_type = PT_NOTE;
-      else
+      } else {
         segment.p_flags &= ~PF_X;
+      }
     });
     expect_load_mapping_rejection(image);
   }
@@ -1664,11 +1681,13 @@ void append_descriptor_relocation(std::vector<uint8_t> &image, std::string_view 
   for (size_t index = 0; index < sections.size(); ++index) {
     const Elf64_Shdr &section = sections[index];
     if (section.sh_type == SHT_NOBITS || (section.sh_flags & SHF_ALLOC) == 0 ||
-        descriptor->descriptor_file_offset < section.sh_offset)
+        descriptor->descriptor_file_offset < section.sh_offset) {
       continue;
+    }
     const uint64_t delta = descriptor->descriptor_file_offset - section.sh_offset;
-    if (delta > section.sh_size || sizeof(descriptor->descriptor) > section.sh_size - delta)
+    if (delta > section.sh_size || sizeof(descriptor->descriptor) > section.sh_size - delta) {
       continue;
+    }
     ASSERT_FALSE(owner_index);
     owner_index = index;
     descriptor_address = section.sh_addr + delta;
@@ -1678,16 +1697,18 @@ void append_descriptor_relocation(std::vector<uint8_t> &image, std::string_view 
   std::optional<size_t> symbol_index;
   for (size_t index = 0; index < sections.size(); ++index) {
     const Elf64_Shdr &section = sections[index];
-    if (section.sh_type != SHT_SYMTAB)
+    if (section.sh_type != SHT_SYMTAB) {
       continue;
+    }
     const std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
         image, section.sh_offset, section.sh_size / sizeof(Elf64_Sym), section.sh_entsize);
     ASSERT_TRUE(symbols);
     for (size_t symbol = 0; symbol < symbols->size(); ++symbol) {
       if ((*symbols)[symbol].st_shndx != *owner_index ||
           (*symbols)[symbol].st_value != descriptor_address ||
-          (*symbols)[symbol].st_size != sizeof(descriptor->descriptor))
+          (*symbols)[symbol].st_size != sizeof(descriptor->descriptor)) {
         continue;
+      }
       ASSERT_FALSE(symbol_index);
       symtab_index = index;
       symbol_index = symbol;
@@ -1705,8 +1726,9 @@ void append_descriptor_relocation(std::vector<uint8_t> &image, std::string_view 
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
   ASSERT_TRUE(std::ranges::any_of(*segments, [&](const Elf64_Phdr &segment) {
-    if (segment.p_type != PT_LOAD || *place < segment.p_vaddr)
+    if (segment.p_type != PT_LOAD || *place < segment.p_vaddr) {
       return false;
+    }
     const uint64_t delta = *place - segment.p_vaddr;
     return delta <= segment.p_memsz && write_size <= segment.p_memsz - delta;
   })) << "the complete relocation write must fit a loaded range";
@@ -2112,8 +2134,9 @@ TEST(FaultDropBarrier, RejectsAliasedEntryOwnersAndMalformedOmittedDescriptor) {
     const AmdGpuCodeObject object(image.data(), image.size());
     const CodeObjectPatcher patcher(object);
     for (const Elf64_Shdr &section : patcher.section_headers()) {
-      if (section.sh_type != SHT_SYMTAB)
+      if (section.sh_type != SHT_SYMTAB) {
         continue;
+      }
       for (size_t ordinal = 1; ordinal <= 2; ++ordinal) {
         Elf64_Sym symbol = {};
         std::memcpy(&symbol, image.data() + section.sh_offset + ordinal * sizeof(symbol),

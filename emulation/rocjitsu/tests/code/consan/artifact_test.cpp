@@ -33,9 +33,11 @@ protected:
     const std::optional<std::vector<Elf64_Shdr>> sections =
         read_elf_table<Elf64_Shdr>(original_, header.e_shoff, header.e_shnum, header.e_shentsize);
     ASSERT_TRUE(sections);
-    for (const Elf64_Shdr &section : *sections)
-      if ((section.sh_flags & (SHF_EXECINSTR | SHF_ALLOC)) == (SHF_EXECINSTR | SHF_ALLOC))
+    for (const Elf64_Shdr &section : *sections) {
+      if ((section.sh_flags & (SHF_EXECINSTR | SHF_ALLOC)) == (SHF_EXECINSTR | SHF_ALLOC)) {
         text_ = section;
+      }
+    }
     ASSERT_GT(text_.sh_size, 0u);
     const std::vector<KernelDescriptorInfo> kernels =
         scan_kernel_descriptors(original_, text_.sh_offset, text_.sh_size);
@@ -95,9 +97,11 @@ protected:
         entry.selected = std::move(manifest);
       } else {
         uint64_t end = text_.sh_size;
-        for (const KernelDescriptorInfo &other : kernels)
-          if (other.entry_text_offset > kernel.entry_text_offset)
+        for (const KernelDescriptorInfo &other : kernels) {
+          if (other.entry_text_offset > kernel.entry_text_offset) {
             end = std::min(end, other.entry_text_offset);
+          }
+        }
         entry.native_code = {{.original_offset = kernel.entry_text_offset,
                               .prepared_offset = kernel.entry_text_offset,
                               .bytes = end - kernel.entry_text_offset}};
@@ -258,8 +262,9 @@ TEST_F(ConSanArtifact, DescriptorDiscoveryDeduplicationCannotHideAnExtraAlias) {
   ASSERT_TRUE(sections);
   bool added = false;
   for (Elf64_Shdr &section : *sections) {
-    if (section.sh_type != SHT_SYMTAB)
+    if (section.sh_type != SHT_SYMTAB) {
       continue;
+    }
     std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
         image, section.sh_offset, section.sh_size / sizeof(Elf64_Sym), section.sh_entsize);
     ASSERT_TRUE(symbols);
@@ -267,10 +272,12 @@ TEST_F(ConSanArtifact, DescriptorDiscoveryDeduplicationCannotHideAnExtraAlias) {
     const std::vector<uint8_t> saved_strings(image.begin() + strings.sh_offset,
                                              image.begin() + strings.sh_offset + strings.sh_size);
     Elf64_Sym alias = {};
-    for (const Elf64_Sym &symbol : *symbols)
+    for (const Elf64_Sym &symbol : *symbols) {
       if (symbol.st_size == 64 && elf_symbol_type(symbol.st_info) == kElfSymbolTypeObject &&
-          elf_symbol_bind(symbol.st_info) == kElfSymbolBindGlobal)
+          elf_symbol_bind(symbol.st_info) == kElfSymbolBindGlobal) {
         alias = symbol;
+      }
+    }
     ASSERT_EQ(alias.st_size, 64u);
     alias.st_name = saved_strings.size();
     constexpr std::string_view kAlias = "unexpected_alias.kd";
@@ -336,8 +343,9 @@ TEST_F(ConSanArtifact, UnalignedElfTablesRemainReadableWithoutRelaxingEntrySizes
   const std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(sections && segments);
-  while (image.size() % 8 != 1)
+  while (image.size() % 8 != 1) {
     image.push_back(0);
+  }
   header.e_shoff = image.size();
   image.resize(image.size() + sections->size() * sizeof(Elf64_Shdr));
   std::memcpy(image.data() + header.e_shoff, sections->data(),
@@ -354,10 +362,11 @@ TEST_F(ConSanArtifact, UnalignedElfTablesRemainReadableWithoutRelaxingEntrySizes
       << error_.message();
   for (const bool section_table : {true, false}) {
     Elf64_Ehdr invalid = header;
-    if (section_table)
+    if (section_table) {
       invalid.e_shentsize += 8;
-    else
+    } else {
       invalid.e_phentsize += 8;
+    }
     std::memcpy(image.data(), &invalid, sizeof(invalid));
     rehash();
     EXPECT_TRUE(verify_artifact_images(manifest(), original_, image, error_.emitter()).failed());
@@ -377,8 +386,9 @@ TEST_F(ConSanArtifact, ChecksummedEntryCoverageCannotSubstituteForTheWholeExecut
       const size_t offset = header.e_phoff + index * sizeof(Elf64_Phdr);
       Elf64_Phdr segment{};
       std::memcpy(&segment, image.data() + offset, sizeof(segment));
-      if (segment.p_type != PT_LOAD || (segment.p_flags & PF_X) == 0)
+      if (segment.p_type != PT_LOAD || (segment.p_flags & PF_X) == 0) {
         continue;
+      }
       segment.p_filesz = manifest().entry.prepared_entry_offset + retained_after_entry;
       ASSERT_LT(segment.p_filesz, segment.p_memsz);
       // Keep the remaining memory extent: zero-filled executable memory is
