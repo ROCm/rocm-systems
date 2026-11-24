@@ -50,6 +50,21 @@
 #include <linux/limits.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(__FreeBSD__)
+#include <link.h>
+// <link.h> only pulls in sys/link_elf.h; the Elf*_ types come from <elf.h>.
+#include <elf.h>
+#include <limits.h>
+#include <sys/mman.h>
+#include <unistd.h>
+// glibc's <link.h> supplies ElfW(); FreeBSD's does not.
+#if !defined(ElfW)
+#if defined(__LP64__)
+#define ElfW(type) Elf64_##type
+#else
+#define ElfW(type) Elf32_##type
+#endif
+#endif
 #elif defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #include <cstdint>

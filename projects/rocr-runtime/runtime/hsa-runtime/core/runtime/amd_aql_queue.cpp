@@ -42,7 +42,7 @@
 
 #include "core/inc/amd_aql_queue.h"
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -723,13 +723,13 @@ void AqlQueue::FreeQueueMemory() {
 }
 
 void AqlQueue::CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const {
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 #if !defined(HAVE_MEMFD_CREATE)
   shm_unlink(ring_buf_shm_path);
 #endif
   close(fd);
 #else
-  assert(false && "Function only needed on Linux.");
+  assert(false && "Function only needed on Linux and FreeBSD.");
 #endif
 }
 

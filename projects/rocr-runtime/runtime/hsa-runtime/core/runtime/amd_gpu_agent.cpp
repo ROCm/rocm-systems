@@ -81,7 +81,7 @@
 #include "amd_trap_handler_v2.h"
 #include "amd_blit_shaders_v2.h"
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 // libdrm headers
 #include <xf86drm.h>
 #include <amdgpu.h>
@@ -284,7 +284,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
                              : HSA_AMD_COHERENCY_TYPE_NONCOHERENT);
 
   max_queues_ = core::Runtime::runtime_singleton_->flag().max_queues();
-#if !defined(HSA_LARGE_MODEL) || !defined(__linux__)
+#if !defined(HSA_LARGE_MODEL) || !(defined(__linux__) || defined(__FreeBSD__))
   if (max_queues_ == 0) {
     max_queues_ = 10;
   }
@@ -670,7 +670,7 @@ void GpuAgent::InitScratchPool() {
   queue_scratch_len_ = AlignUp(32 * 64 * num_cu * scratch_per_thread_, 65536);
   size_t max_scratch_len = queue_scratch_len_ * max_queues_;
 
-#if defined(HSA_LARGE_MODEL) && defined(__linux__)
+#if defined(HSA_LARGE_MODEL) && (defined(__linux__) || defined(__FreeBSD__))
   // For 64-bit linux use max queues unless otherwise specified
   if ((max_scratch_len == 0) || (max_scratch_len > MaxScratchDevice())) {
     max_scratch_len = MaxScratchDevice();  // 4GB per XCC aperture max

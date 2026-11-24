@@ -58,7 +58,7 @@
 #include <shared_mutex>
 #include <random>
 #include <cinttypes>
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <sys/un.h>
 #include <xf86drm.h>
 #include <amdgpu.h>

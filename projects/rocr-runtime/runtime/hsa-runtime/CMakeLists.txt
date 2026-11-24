@@ -137,20 +137,38 @@ set_property(TARGET  ${CORE_RUNTIME_TARGET} PROPERTY OUTPUT_NAME ${CORE_RUNTIME_
 
 ## Compiler preproc definitions.
 if (UNIX)
-  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" __linux__ HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
+  ## Sources select their OS-specific code on the compiler's own platform macro,
+  ## so do not hand them __linux__ when building for something else.  FreeBSD
+  ## needs no define of its own: clang predefines __FreeBSD__ as the major
+  ## version, and redefining it here would break system-header version checks.
+  if (CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+    set(OS_DEFS "")
+  else()
+    set(OS_DEFS __linux__)
+  endif()
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" ${OS_DEFS} HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
   ROCR_BUILD_ID="${PACKAGE_VERSION_STRING}-${VERSION_JOB}-${VERSION_HASH}" )
 
   ## Check for memfd_create syscall
   include(CheckSymbolExists)
-  CHECK_SYMBOL_EXISTS ( "__NR_memfd_create" "sys/syscall.h" HAVE_MEMFD_CREATE )
-  if ( HAVE_MEMFD_CREATE )
+  ## Linux exposes memfd_create() as a raw syscall number, FreeBSD only as the
+  ## libc wrapper declared in <sys/mman.h>; either one is enough.
+  CHECK_SYMBOL_EXISTS ( "__NR_memfd_create" "sys/syscall.h" HAVE_MEMFD_CREATE_SYSCALL )
+  CHECK_SYMBOL_EXISTS ( "memfd_create" "sys/mman.h" HAVE_MEMFD_CREATE_LIBC )
+  if ( HAVE_MEMFD_CREATE_SYSCALL OR HAVE_MEMFD_CREATE_LIBC )
     target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_MEMFD_CREATE )
   endif()
 
   ## Check for _GNU_SOURCE pthread extensions
   set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-  CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "pthread.h" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
-  CHECK_SYMBOL_EXISTS ( "pthread_rwlockattr_setkind_np" "pthread.h" HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+  ## FreeBSD declares the _np pthread extensions in <pthread_np.h>, not <pthread.h>.
+  if (CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+    set(PTHREAD_NP_HEADERS "pthread.h;pthread_np.h")
+  else()
+    set(PTHREAD_NP_HEADERS "pthread.h")
+  endif()
+  CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "${PTHREAD_NP_HEADERS}" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
+  CHECK_SYMBOL_EXISTS ( "pthread_rwlockattr_setkind_np" "${PTHREAD_NP_HEADERS}" HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
   unset(CMAKE_REQUIRED_DEFINITIONS)
   if ( HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
     target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
@@ -297,14 +315,26 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_aie_code.cpp)
 
 if(UNIX)
-  set(SRC_OS core/util/lnx/os_linux.cpp
-	     core/runtime/thunk_loader_linux.cpp
-	     libamdhsacode/lnx/amd_core_dump.cpp)
-  set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
-               core/runtime/amd_aie_agent.cpp
-               core/runtime/amd_aie_kmq_queue.cpp
-               core/runtime/amd_aie_umq_queue.cpp
-               core/runtime/amd_aie_elf.cpp)
+  if(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+    ## thunk_loader_linux.cpp is shared: its only Linux-specific step, probing
+    ## /dev/dxg for WSL, simply finds nothing on FreeBSD.
+    set(SRC_OS core/util/freebsd/os_freebsd.cpp
+	       core/runtime/thunk_loader_linux.cpp
+	       libamdhsacode/lnx/amd_core_dump.cpp)
+    ## XDNA/AIE (NPU) support is Linux-only: there is no FreeBSD amdxdna driver,
+    ## so the discovery pass would only scan /dev/accel/* and find nothing.  The
+    ## matching call sites are guarded by __linux__ (see DiscoverAie()).
+    set(SRC_XDNA)
+  else()
+    set(SRC_OS core/util/lnx/os_linux.cpp
+	       core/runtime/thunk_loader_linux.cpp
+	       libamdhsacode/lnx/amd_core_dump.cpp)
+    set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
+                 core/runtime/amd_aie_agent.cpp
+                 core/runtime/amd_aie_kmq_queue.cpp
+                 core/runtime/amd_aie_umq_queue.cpp
+                 core/runtime/amd_aie_elf.cpp)
+  endif()
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
   set(SRC_OS core/util/win/os_win.cpp

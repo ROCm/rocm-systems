@@ -85,7 +85,15 @@
 #define _write write
 #define _lseek lseek
 #define _ftruncate ftruncate
+#if defined(__FreeBSD__)
+// FreeBSD's sendfile(2) can only write into a socket, so it cannot copy between
+// two regular files the way Linux's can.  copy_file_range(2) performs the same
+// in-kernel copy and reports partial progress identically, so shim it in behind
+// the same name the USE_MEMFILE build above redirects.
+#define sendfile(o, i, p, s) copy_file_range((i), (p), (o), NULL, (s), 0)
+#else
 #include <sys/sendfile.h>
+#endif
 #else
 #define _ftruncate _chsize
 #endif // !_WIN32

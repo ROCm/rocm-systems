@@ -48,7 +48,7 @@
 #include <optional>
 #include <regex>
 #include <string>
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <link.h>
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
@@ -110,7 +110,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 ROCPROFILER_REGISTER_DEFINE_IMPORT(hsa, ROCP_REG_VERSION)
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 const char rocrbuildid[] __attribute__((used)) = "ROCR BUILD ID: " STRING(ROCR_BUILD_ID);
 #else
 #include "loader/executable.hpp"
@@ -2823,8 +2823,15 @@ Runtime::Runtime()
   g_use_mwaitx = true;
   g_use_yielding_poll = false;
   g_use_clflushopt = false;
-  ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
-                       r_debug::RT_CONSISTENT, 0};
+  // Assigned field by field rather than brace-initialised: glibc types r_brk
+  // and r_ldbase as integers while FreeBSD types them as a function pointer and
+  // a void*, so no single braced initialiser is valid on both.
+  ::_amdgpu_r_debug.r_version = 11;
+  ::_amdgpu_r_debug.r_map = nullptr;
+  ::_amdgpu_r_debug.r_brk =
+      reinterpret_cast<decltype(::_amdgpu_r_debug.r_brk)>(&_loader_debug_state);
+  ::_amdgpu_r_debug.r_state = r_debug::RT_CONSISTENT;
+  ::_amdgpu_r_debug.r_ldbase = 0;
   log_file = stderr;
 }
 
@@ -2859,7 +2866,7 @@ hsa_status_t Runtime::Load() {
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
   }
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   if (!thunkLoader_->CheckThunkAbi()) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -2922,8 +2929,9 @@ hsa_status_t Runtime::Load() {
   // Initialize IPC support mode
   InitIPCDmaBufSupport();
 
-  // Load svm profiler (Linux-only: relies on KFD SMI events via poll/eventfd)
-#if defined(__linux__)
+  // Load svm profiler (needs KFD SMI events via poll/eventfd, which both Linux
+  // and FreeBSD provide)
+#if defined(__linux__) || defined(__FreeBSD__)
   svm_profile_.reset(new AMD::SvmProfileControl);
 #else
   if (!flag_.svm_profile().empty()) {
@@ -3115,7 +3123,7 @@ void Runtime::CheckVirtualMemApiSupport() {
   if (kfd_version.KernelInterfaceMajorVersion > 1 ||
       (kfd_version.KernelInterfaceMajorVersion == 1 &&
        kfd_version.KernelInterfaceMinorVersion >= 15)) {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
     char* error;
 
     fn_amdgpu_device_get_fd = (int (*)(HsaAMDGPUDeviceHandle device_handle))dlsym(
@@ -3148,7 +3156,7 @@ void Runtime::InitIPCDmaBufSupport() {
 
   GetSystemInfo(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED, &dmabuf_supported);
   if (!dmabuf_supported) return;
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   char* error;
   fn_amdgpu_device_get_fd = (int (*)(HsaAMDGPUDeviceHandle device_handle))dlsym(
       thunkLoader()->IsDXG() ? thunkLoader()->ThunkHandle() : RTLD_DEFAULT, "amdgpu_device_get_fd");
@@ -3232,9 +3240,16 @@ void Runtime::LoadTools() {
   if (tool_names != "") {
     names = parse_tool_names(std::move(tool_names));
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__FreeBSD__)
+    // issetugid() is FreeBSD's equivalent of glibc's AT_SECURE: it reports
+    // whether the process started with elevated privileges, which already
+    // subsumes the euid/egid comparisons below.
+    const bool secure = issetugid() != 0;
+#else
     const bool secure =
         (geteuid() != getuid()) || (getegid() != getgid()) || (getauxval(AT_SECURE) != 0);
+#endif
     if (secure) {
       if (!names.empty() && flag().report_tool_load_failures())
         fprintf(stderr,
@@ -4062,7 +4077,7 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
 hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
                                       uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                       hsa_signal_t completion_signal) {
-#if !defined(__linux__)
+#if !defined(__linux__) && !defined(__FreeBSD__)
   return HSA_STATUS_ERROR;
 #else
   const size_t kPageSize = os::PageSize();
@@ -4223,7 +4238,7 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
                                                  uint32_t num_dep_signals,
                                                  const hsa_signal_t* dep_signals,
                                                  hsa_signal_t completion_signal) {
-#if !defined(__linux__)
+#if !defined(__linux__) && !defined(__FreeBSD__)
   return HSA_STATUS_ERROR;
 #else
   const size_t kPageSize = os::PageSize();
@@ -4409,7 +4424,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
     // Hint to enable THP for large host allocations which can help in performance gain
     constexpr size_t kLargePageSize = 2 * 1024 * 1024;
     if (size >= kLargePageSize) {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
       if (madvise(aligned, size, MADV_HUGEPAGE))
         debug_warning(false && "madvise with MADV_HUGEPAGE failed");
 #endif

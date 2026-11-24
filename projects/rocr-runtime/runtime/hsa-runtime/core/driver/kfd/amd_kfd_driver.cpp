@@ -49,7 +49,7 @@
 
 #include <cstring>
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
     #include <amdgpu_drm.h>
 #endif
 
@@ -576,7 +576,7 @@ hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
       }
       return HSA_STATUS_SUCCESS;
     }
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
     if (handle.dmabuf_fd != -1) {
       *dmabuf_fd = handle.dmabuf_fd;
       return HSA_STATUS_SUCCESS;
@@ -772,7 +772,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
   core::DriverMemoryHandle targetHandle = {};
   hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
                                         &source_handle, mem);
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   rocr::os::DmaBufClose(&source_fd);
 #endif
   if (ret != HSA_STATUS_SUCCESS)
@@ -783,7 +783,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   /*
    * Keep the original KFD allocation alive in handle->vaddr; DestroyMemoryHandle releases it.
    *

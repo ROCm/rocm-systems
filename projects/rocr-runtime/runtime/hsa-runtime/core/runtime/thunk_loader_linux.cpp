@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-// Linux-specific ThunkLoader implementation
+// Linux and FreeBSD ThunkLoader implementation
 
 #include "core/runtime/thunk_loader_platform.h"
 #include "core/inc/runtime.h"
@@ -12,6 +12,7 @@
 #include <hsakmt/rocdxg_version.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <xf86drm.h>
 
 #define ROCR_ROCDXG_STR2(v) #v
 #define ROCR_ROCDXG_STR(v) ROCR_ROCDXG_STR2(v)
