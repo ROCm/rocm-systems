@@ -5,10 +5,11 @@
 
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 
+#include "util/shared_memory.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
-#include <cstring>
 #include <fcntl.h>
 #include <limits>
 #include <sys/eventfd.h>
@@ -770,9 +771,9 @@ VfioTargetGrants::PrepareResult VfioTargetGrants::prepare(uint32_t requester,
 void VfioTargetGrants::PreparedSegment::copy(std::span<std::byte> bytes, bool to_guest) const {
   assert(bytes.size() == length && mapped_bytes != nullptr && owner_lease);
   if (to_guest) {
-    std::memmove(mapped_bytes.get(), bytes.data(), length);
+    util::store_once(mapped_bytes.get(), bytes.data(), length);
   } else {
-    std::memmove(bytes.data(), mapped_bytes.get(), length);
+    util::load_once(bytes.data(), mapped_bytes.get(), length);
   }
 }
 

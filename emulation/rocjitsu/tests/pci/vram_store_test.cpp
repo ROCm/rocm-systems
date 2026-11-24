@@ -5,11 +5,13 @@
 
 #include <gtest/gtest.h>
 
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,6 +21,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -70,7 +73,19 @@ void overlay(std::vector<std::byte> &model, std::span<const std::byte> bytes, ui
 /// inside the window, a range past it, and the boundary between the two.
 class VramStorePlainAccess : public ::testing::Test {
 protected:
-  void SetUp() override { ASSERT_TRUE(vram_.usable()); }
+  void SetUp() override {
+    ASSERT_TRUE(vram_.usable());
+    void *mapped =
+        ::mmap(nullptr, kApertureBytes, PROT_READ | PROT_WRITE, MAP_SHARED, vram_.fd(), 0);
+    ASSERT_NE(mapped, MAP_FAILED);
+    peer_window_ = std::span(static_cast<std::byte *>(mapped), kApertureBytes);
+  }
+
+  void TearDown() override {
+    if (!peer_window_.empty()) {
+      ::munmap(peer_window_.data(), peer_window_.size());
+    }
+  }
 
   /// @brief Read memory through the shared descriptor, as a transport's client
   ///        that was handed it would.
@@ -97,7 +112,7 @@ protected:
       return descriptor_result << ", through the descriptor";
     }
     ::testing::AssertionResult mapping_result =
-        same_bytes(vram_.aperture(), model.first(kApertureBytes));
+        same_bytes(peer_window_, model.first(kApertureBytes));
     if (!mapping_result) {
       return mapping_result << ", through the mapping";
     }
@@ -105,6 +120,9 @@ protected:
   }
 
   rocjitsu::VramStore vram_{"plain-access-vram", kMemoryBytes, kApertureBytes};
+  /// @brief This test's own mapping of the aperture, as a peer handed the
+  ///        descriptor would make. Only for use while no other thread runs.
+  std::span<std::byte> peer_window_;
 };
 
 TEST_F(VramStorePlainAccess, WordsInsideTheApertureRoundTripAtEveryAlignment) {
@@ -167,7 +185,7 @@ TEST_F(VramStorePlainAccess, BuffersOfEveryShortLengthAndAlignmentRoundTripInsid
 TEST_F(VramStorePlainAccess, ReadsInsideTheApertureObserveStoresMadeByAPeer) {
   constexpr uint64_t kMappedStoreAt = 0x503;
   const std::vector<std::byte> mapped_store = patterned_bytes(37, 1);
-  std::ranges::copy(mapped_store, vram_.aperture().begin() + kMappedStoreAt);
+  std::ranges::copy(mapped_store, peer_window_.begin() + kMappedStoreAt);
   std::vector<std::byte> observed(mapped_store.size());
   ASSERT_TRUE(vram_.read_all(observed, kMappedStoreAt));
   EXPECT_TRUE(same_bytes(observed, mapped_store));
@@ -382,7 +400,37 @@ TEST(VramStoreUnusable, RefusesEveryPlainAccess) {
   }
 }
 
+/// @brief Rounds in a race whose store is exactly the contended word.
 constexpr uint32_t kExchangeRaceRounds = 20000;
+
+/// @brief Rounds in a race whose store runs on past the contended word.
+/// @details A store that repeated a write is caught only in a round where the
+/// exchange lands between the two writes, which is a small fraction of the
+/// rounds even with the word placed to favour it. There are enough rounds that
+/// a whole run seldom misses.
+constexpr uint32_t kLongStoreExchangeRaceRounds = 100000;
+
+/// @brief How long a race goes on for when its rounds are not finished sooner.
+/// @details On an idle host they are, many times over. Two threads that share
+/// their processors with other busy processes hand a round over only once per
+/// scheduler time slice, and the same rounds would then take minutes.
+constexpr std::chrono::seconds kExchangeRaceTimeLimit{5};
+
+/// @brief Rounds a race has to get through in that time to have tested anything.
+constexpr uint32_t kFewestExchangeRaceRounds = 16;
+
+/// @brief Offset of a four-byte word that is the last of its cache line.
+/// @details Where the races below put the contended word when the store under
+/// test is longer than the word. A store that repeated a write would then
+/// repeat one that crosses into the next line. Such a store needs both lines,
+/// so the exchanging processor, which needs only the first, gets in between two
+/// of them far more often than between two stores that stay inside one line. A
+/// repeat inside one line is so rarely separated that a test relying on it
+/// passes nearly every run against a store that is wrong.
+constexpr uint64_t last_word_of_the_line_at(uint64_t line_offset) {
+  constexpr uint64_t kCacheLineBytes = 64;
+  return line_offset + kCacheLineBytes - sizeof(uint32_t);
+}
 
 /// @brief Set by the exchanging thread on the value a plain store left.
 constexpr uint64_t kExchangedMark = 1;
@@ -417,7 +465,9 @@ struct ExchangeRaceTally {
 ///
 /// A correct store passes every time. One that repeats a write is caught only
 /// in the rounds where the exchange happens to land between the writes, which
-/// is why there are many rounds.
+/// is why there are many rounds. The race ends early, with the rounds it got
+/// through, once @ref kExchangeRaceTimeLimit has passed, and fails if those
+/// are fewer than @ref kFewestExchangeRaceRounds.
 ///
 /// The threads hand rounds to each other through atomics alone and, the plain
 /// store under test aside, reach the word only through the store's atomic
@@ -426,10 +476,12 @@ struct ExchangeRaceTally {
 /// @param[in] vram Store holding the contended word.
 /// @param[in] word_offset Offset of the contended word, inside the aperture.
 /// @param[in] width Width of the contended word in bytes, four or eight.
+/// @param[in] rounds Number of rounds to race.
 /// @param[in] store_plain Stores the given value over the contended word with
 ///            a plain write, returning what the store returned.
 ExchangeRaceTally
 race_plain_store_against_exchange(rocjitsu::VramStore &vram, uint64_t word_offset, uint32_t width,
+                                  uint32_t rounds,
                                   const std::function<bool(uint64_t)> &store_plain) {
   // Retrying without a pause keeps an attempt in flight when the plain store
   // lands; yielding now and then keeps a single-processor host from spending a
@@ -439,14 +491,15 @@ race_plain_store_against_exchange(rocjitsu::VramStore &vram, uint64_t word_offse
   std::atomic<uint32_t> stored_round{0};
   std::atomic<uint32_t> exchanged_round{0};
   std::atomic<uint32_t> missed_exchanges{0};
+  std::atomic<bool> race_is_over{false};
 
   std::jthread exchanger([&] {
-    for (uint32_t round = 1; round <= kExchangeRaceRounds; ++round) {
+    for (uint32_t round = 1; round <= rounds; ++round) {
       const uint64_t plain = plain_value_of(round, width);
       bool exchanged = false;
       bool store_had_returned = false;
       uint32_t attempts = 0;
-      while (!exchanged && !store_had_returned) {
+      while (!exchanged && !store_had_returned && !race_is_over.load()) {
         // Sampled before the attempt: only an attempt that begins after the
         // plain store has returned is certain to find its value, so only such
         // an attempt failing ends the round as a miss.
@@ -458,6 +511,10 @@ race_plain_store_against_exchange(rocjitsu::VramStore &vram, uint64_t word_offse
           std::this_thread::yield();
         }
       }
+      // Stopped while waiting for a store that is not going to be made.
+      if (!exchanged && !store_had_returned) {
+        break;
+      }
       if (!exchanged) {
         missed_exchanges.fetch_add(1);
       }
@@ -466,7 +523,10 @@ race_plain_store_against_exchange(rocjitsu::VramStore &vram, uint64_t word_offse
   });
 
   ExchangeRaceTally tally;
-  for (uint32_t round = 1; round <= kExchangeRaceRounds; ++round) {
+  uint32_t rounds_raced = 0;
+  const auto deadline = std::chrono::steady_clock::now() + kExchangeRaceTimeLimit;
+  for (uint32_t round = 1; round <= rounds && std::chrono::steady_clock::now() < deadline;
+       ++round) {
     const uint64_t plain = plain_value_of(round, width);
     if (!store_plain(plain)) {
       ++tally.refused_stores;
@@ -480,8 +540,13 @@ race_plain_store_against_exchange(rocjitsu::VramStore &vram, uint64_t word_offse
     if (!settled.has_value() || settled->value != (plain | kExchangedMark)) {
       ++tally.undone_exchanges;
     }
+    rounds_raced = round;
   }
+  race_is_over.store(true);
   exchanger.join();
+  ::testing::Test::RecordProperty("rounds", std::to_string(rounds_raced));
+  EXPECT_GE(rounds_raced, kFewestExchangeRaceRounds)
+      << "too few rounds to have tested the store against a concurrent compare/exchange";
   tally.missed_exchanges = missed_exchanges.load();
   return tally;
 }
@@ -489,7 +554,7 @@ race_plain_store_against_exchange(rocjitsu::VramStore &vram, uint64_t word_offse
 TEST_F(VramStorePlainAccess, PlainWordStoreDoesNotUndoAConcurrentCompareExchange) {
   constexpr uint64_t kWordOffset = 0x100;
   const ExchangeRaceTally tally = race_plain_store_against_exchange(
-      vram_, kWordOffset, sizeof(uint32_t),
+      vram_, kWordOffset, sizeof(uint32_t), kExchangeRaceRounds,
       [this](uint64_t plain) { return vram_.write(kWordOffset, static_cast<uint32_t>(plain)); });
   EXPECT_EQ(tally.refused_stores, 0u);
   EXPECT_EQ(tally.missed_exchanges, 0u);
@@ -499,7 +564,7 @@ TEST_F(VramStorePlainAccess, PlainWordStoreDoesNotUndoAConcurrentCompareExchange
 TEST_F(VramStorePlainAccess, PlainQuadwordStoreDoesNotUndoAConcurrentCompareExchange) {
   constexpr uint64_t kWordOffset = 0x180;
   const ExchangeRaceTally tally = race_plain_store_against_exchange(
-      vram_, kWordOffset, sizeof(uint64_t), [this](uint64_t plain) {
+      vram_, kWordOffset, sizeof(uint64_t), kExchangeRaceRounds, [this](uint64_t plain) {
         return vram_.write_all(std::as_bytes(std::span(&plain, 1)), kWordOffset);
       });
   EXPECT_EQ(tally.refused_stores, 0u);
@@ -507,27 +572,69 @@ TEST_F(VramStorePlainAccess, PlainQuadwordStoreDoesNotUndoAConcurrentCompareExch
   EXPECT_EQ(tally.undone_exchanges, 0u);
 }
 
+TEST_F(VramStorePlainAccess, PlainStoreAcrossACacheLineDoesNotUndoACompareExchangeOnItsFirstWord) {
+  // Eight bytes that begin on the contended word and end in the next line: the
+  // store is as long as a quadword but aligned only for a word.
+  constexpr uint64_t kWordOffset = last_word_of_the_line_at(0x100);
+  const ExchangeRaceTally tally = race_plain_store_against_exchange(
+      vram_, kWordOffset, sizeof(uint32_t), kLongStoreExchangeRaceRounds, [this](uint64_t plain) {
+        const std::array<uint32_t, 2> buffer{static_cast<uint32_t>(plain), 0x3333cccc};
+        return vram_.write_all(std::as_bytes(std::span(buffer)), kWordOffset);
+      });
+  EXPECT_EQ(tally.refused_stores, 0u);
+  EXPECT_EQ(tally.missed_exchanges, 0u);
+  EXPECT_EQ(tally.undone_exchanges, 0u);
+}
+
 TEST_F(VramStorePlainAccess, PlainBufferStoreDoesNotUndoACompareExchangeOnAWordItCovers) {
-  // The buffer carries one word either side of the contended one, so that word
-  // is stored along with its neighbours rather than on its own.
-  constexpr uint64_t kWordOffset = 0x208;
+  // The buffer carries one word before the contended one and two after it, so
+  // that word is stored along with its neighbours rather than on its own, and
+  // the buffer crosses from the contended word's cache line into the next.
+  constexpr uint64_t kWordOffset = last_word_of_the_line_at(0x200);
   constexpr uint32_t kWordBefore = 0xaaaa5555;
   constexpr uint32_t kWordAfter = 0x3333cccc;
   const ExchangeRaceTally tally = race_plain_store_against_exchange(
-      vram_, kWordOffset, sizeof(uint32_t), [this](uint64_t plain) {
-        const std::array<uint32_t, 3> buffer{kWordBefore, static_cast<uint32_t>(plain), kWordAfter};
+      vram_, kWordOffset, sizeof(uint32_t), kLongStoreExchangeRaceRounds, [this](uint64_t plain) {
+        const std::array<uint32_t, 4> buffer{kWordBefore, static_cast<uint32_t>(plain), kWordAfter,
+                                             kWordAfter};
         return vram_.write_all(std::as_bytes(std::span(buffer)), kWordOffset - sizeof(uint32_t));
       });
   EXPECT_EQ(tally.refused_stores, 0u);
   EXPECT_EQ(tally.missed_exchanges, 0u);
   EXPECT_EQ(tally.undone_exchanges, 0u);
 
-  uint32_t word_before = 0;
-  uint32_t word_after = 0;
-  ASSERT_TRUE(vram_.read(kWordOffset - sizeof(uint32_t), word_before));
-  ASSERT_TRUE(vram_.read(kWordOffset + sizeof(uint32_t), word_after));
-  EXPECT_EQ(word_before, kWordBefore);
-  EXPECT_EQ(word_after, kWordAfter);
+  std::array<uint32_t, 4> settled{};
+  ASSERT_TRUE(
+      vram_.read_all(std::as_writable_bytes(std::span(settled)), kWordOffset - sizeof(uint32_t)));
+  EXPECT_EQ(settled[0], kWordBefore);
+  EXPECT_EQ(settled[2], kWordAfter);
+  EXPECT_EQ(settled[3], kWordAfter);
+}
+
+TEST_F(VramStorePlainAccess, PlainStoreAcrossTheApertureEndDoesNotUndoACompareExchangeInsideIt) {
+  // The contended word is the last of the aperture. The store begins on the
+  // word before it and runs on into memory that is reached by file offset, so
+  // it is served in two parts, and the part inside the aperture has to be
+  // stored as a store wholly inside it is.
+  constexpr uint64_t kWordOffset = kApertureBytes - sizeof(uint32_t);
+  constexpr uint32_t kWordBefore = 0xaaaa5555;
+  constexpr uint32_t kWordAfter = 0x3333cccc;
+  const ExchangeRaceTally tally = race_plain_store_against_exchange(
+      vram_, kWordOffset, sizeof(uint32_t), kLongStoreExchangeRaceRounds, [this](uint64_t plain) {
+        const std::array<uint32_t, 4> buffer{kWordBefore, static_cast<uint32_t>(plain), kWordAfter,
+                                             kWordAfter};
+        return vram_.write_all(std::as_bytes(std::span(buffer)), kWordOffset - sizeof(uint32_t));
+      });
+  EXPECT_EQ(tally.refused_stores, 0u);
+  EXPECT_EQ(tally.missed_exchanges, 0u);
+  EXPECT_EQ(tally.undone_exchanges, 0u);
+
+  std::array<uint32_t, 4> settled{};
+  ASSERT_TRUE(
+      vram_.read_all(std::as_writable_bytes(std::span(settled)), kWordOffset - sizeof(uint32_t)));
+  EXPECT_EQ(settled[0], kWordBefore);
+  EXPECT_EQ(settled[2], kWordAfter);
+  EXPECT_EQ(settled[3], kWordAfter);
 }
 
 TEST_F(VramStorePlainAccess, PlainStoresBesideAWordDoNotDisturbCompareExchangesOnIt) {
@@ -683,6 +790,119 @@ TEST_F(VramStorePlainAccess, ThreadsOnDisjointRangesCompleteAndAgree) {
     overlay(model, patterned_bytes(kRangeBytes, range_seed(owner, kRounds)), kRangeStarts[owner]);
   }
   EXPECT_TRUE(memory_matches(model));
+}
+
+// Dispatch threads reach the same aperture bytes with every accessor at once,
+// and at whatever widths the guest's code uses. Every accessor is meant to go
+// through util/shared_memory.h, which makes no plain access. A plain load or
+// store put back on the mapped path races the other accessors here, and a
+// ThreadSanitizer build reports it. In any build the test also checks what an
+// aligned access promises: that it never sees part of a store.
+TEST_F(VramStorePlainAccess, OverlappingAccessesOfEveryKindAndWidthNeverSplitAnAlignedWord) {
+  constexpr uint64_t kQuadword = 0x100;
+  constexpr uint64_t kHighWord = kQuadword + sizeof(uint32_t);
+  constexpr uint32_t kRounds = 20000;
+  // Every value stored repeats one 16-bit pattern in each of its 16-bit lanes,
+  // and every store covers whole aligned 32-bit words. So a 32-bit word that
+  // was loaded whole has two equal lanes whichever stores it fell between.
+  const auto lanes16 = [](uint32_t round) {
+    return uint64_t{round & 0xffffu} * 0x0001000100010001u;
+  };
+  const auto word_is_whole = [](uint64_t word) {
+    return (word & 0xffffu) == ((word >> 16) & 0xffffu);
+  };
+  const auto quadword_is_whole = [&](uint64_t quadword) {
+    return word_is_whole(quadword & 0xffffffffu) && word_is_whole(quadword >> 32);
+  };
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint32_t> refused{0};
+  std::atomic<uint32_t> split{0};
+  const auto count_unless = [](std::atomic<uint32_t> &counter, bool ok) {
+    if (!ok) {
+      counter.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  std::vector<std::jthread> threads;
+  // Plain 32-bit reads of both words, and a misaligned one that promises nothing.
+  threads.emplace_back([&] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      uint32_t low = 0;
+      uint32_t high = 0;
+      uint32_t straddling = 0;
+      count_unless(refused, vram_.read(kQuadword, low) && vram_.read(kHighWord, high) &&
+                                vram_.read(kQuadword + 1, straddling));
+      count_unless(split, word_is_whole(low) && word_is_whole(high));
+    }
+  });
+  // Buffer reads: the quadword alone, and a longer span that covers it.
+  threads.emplace_back([&] {
+    std::array<uint64_t, 3> wide{};
+    while (!stop.load(std::memory_order_relaxed)) {
+      uint64_t quadword = 0;
+      count_unless(refused,
+                   vram_.read_all(std::as_writable_bytes(std::span(&quadword, 1)), kQuadword) &&
+                       vram_.read_all(std::as_writable_bytes(std::span(wide)),
+                                      kQuadword - sizeof(uint64_t)));
+      count_unless(split, quadword_is_whole(quadword) && quadword_is_whole(wide[1]));
+    }
+  });
+  // Atomic loads at each width.
+  threads.emplace_back([&] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      const auto half = vram_.atomic_load(kQuadword + 2, sizeof(uint16_t));
+      const auto word = vram_.atomic_load(kHighWord, sizeof(uint32_t));
+      const auto quadword = vram_.atomic_load(kQuadword, sizeof(uint64_t));
+      count_unless(refused, half && word && quadword);
+      if (word && quadword) {
+        count_unless(split, word_is_whole(word->value) && quadword_is_whole(quadword->value));
+      }
+    }
+  });
+  // Compare/exchange at both widths, always to another whole value.
+  threads.emplace_back([&] {
+    uint32_t round = 0x4000;
+    while (!stop.load(std::memory_order_relaxed)) {
+      ++round;
+      const auto word = vram_.atomic_load(kHighWord, sizeof(uint32_t));
+      const auto quadword = vram_.atomic_load(kQuadword, sizeof(uint64_t));
+      if (!word || !quadword) {
+        count_unless(refused, false);
+        continue;
+      }
+      count_unless(refused, vram_.compare_exchange(kHighWord, sizeof(uint32_t), word->value,
+                                                   lanes16(round) & 0xffffffffu) &&
+                                vram_.compare_exchange(kQuadword, sizeof(uint64_t), quadword->value,
+                                                       lanes16(round + 1)));
+    }
+  });
+  // Atomic stores at both widths.
+  threads.emplace_back([&] {
+    uint32_t round = 0x8000;
+    while (!stop.load(std::memory_order_relaxed)) {
+      ++round;
+      count_unless(refused, vram_.atomic_store(kQuadword, sizeof(uint32_t), lanes16(round)) &&
+                                vram_.atomic_store(kQuadword, sizeof(uint64_t), lanes16(round)));
+    }
+  });
+
+  // Plain stores: a word, the quadword as a buffer, and a longer buffer that
+  // starts in the word before it.
+  for (uint32_t round = 1; round <= kRounds; ++round) {
+    const uint64_t value = lanes16(round);
+    const std::array<uint32_t, 4> wide{static_cast<uint32_t>(value), static_cast<uint32_t>(value),
+                                       static_cast<uint32_t>(value), static_cast<uint32_t>(value)};
+    count_unless(refused,
+                 vram_.write(kHighWord, static_cast<uint32_t>(value)) &&
+                     vram_.write_all(std::as_bytes(std::span(&value, 1)), kQuadword) &&
+                     vram_.write_all(std::as_bytes(std::span(wide)), kQuadword - sizeof(uint32_t)));
+  }
+  stop.store(true);
+  threads.clear();
+
+  EXPECT_EQ(refused.load(), 0u);
+  EXPECT_EQ(split.load(), 0u) << "an aligned load saw part of a store";
 }
 
 } // namespace

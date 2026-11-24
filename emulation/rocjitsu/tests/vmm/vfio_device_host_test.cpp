@@ -28,6 +28,7 @@
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 #include "rocjitsu/vmm/vfu/vfio_target_grants.h"
 #include "util/diagnostic.h"
+#include "util/shared_memory.h"
 #include "vfio_user_client.h"
 
 #include "simdojo/sim/simulation.h"
@@ -75,6 +76,7 @@ extern "C" {
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <future>
 #include <limits>
 #include <memory>
@@ -738,8 +740,8 @@ TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
   ASSERT_EQ(::ftruncate(backing, kWindowSize), 0);
   void *mapping = ::mmap(nullptr, kWindowSize, PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
   ASSERT_NE(mapping, MAP_FAILED);
-  auto *value = static_cast<uint64_t *>(mapping);
-  std::atomic_ref<uint64_t>(*value).store(7, std::memory_order_release);
+  auto *const value = static_cast<std::byte *>(mapping);
+  util::shared_store<uint64_t>(value, 7);
   ASSERT_TRUE(client.dma_map(kGuestAddress, kWindowSize, backing, 0));
 
   const simdojo::DmaAtomicLoadResult loaded =
@@ -752,14 +754,14 @@ TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
   EXPECT_EQ(loaded16.value, 7u);
   EXPECT_EQ(served.host().atomic_store(kGuestAddress, sizeof(uint64_t), 11),
             simdojo::DmaAccessOutcome::Complete);
-  EXPECT_EQ(std::atomic_ref<uint64_t>(*value).load(std::memory_order_acquire), 11u);
+  EXPECT_EQ(util::shared_load<uint64_t>(value), 11u);
 
   const simdojo::DmaAtomicCompareExchangeResult exchanged =
       served.host().compare_exchange(kGuestAddress, sizeof(uint64_t), 11, 13);
   EXPECT_EQ(exchanged.outcome, simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(exchanged.observed, 11u);
   EXPECT_TRUE(exchanged.exchanged);
-  EXPECT_EQ(std::atomic_ref<uint64_t>(*value).load(std::memory_order_acquire), 13u);
+  EXPECT_EQ(util::shared_load<uint64_t>(value), 13u);
 
   const simdojo::DmaAtomicCompareExchangeResult mismatch =
       served.host().compare_exchange(kGuestAddress, sizeof(uint64_t), 11, 17);
@@ -3297,6 +3299,11 @@ public:
   [[nodiscard]] bool usable() const { return view_ != nullptr; }
   [[nodiscard]] int fd() const { return file_.get(); }
 
+  /// @brief This test's own address for the byte at @p file_offset.
+  /// @details For reaching the file the way the guest does: through a mapping
+  /// the host knows nothing about, with no lock of the host's held.
+  [[nodiscard]] std::byte *guest_view(std::size_t file_offset) { return view_ + file_offset; }
+
   /// @brief What the file should hold from @p file_offset, given the writes
   /// recorded so far.
   [[nodiscard]] std::vector<std::byte> expected(std::size_t file_offset, std::size_t length) const {
@@ -3517,6 +3524,184 @@ private:
   std::shared_ptr<Gate> gate_ = std::make_shared<Gate>();
   bool released_ = false;
 };
+
+/// @brief Rounds in one race between a plain guest write and an exchange.
+/// @details A write that stores a word twice is caught only in a round where
+/// the exchange lands between the two stores, which is a small fraction of the
+/// rounds even with the contended word placed to favour it. There are enough
+/// rounds that a whole run seldom misses.
+constexpr uint32_t kExchangeRaceRounds = 200000;
+
+/// @brief How long a race goes on for when its rounds are not finished sooner.
+/// @details On an idle host they are, many times over. Two threads that share
+/// their processors with other busy processes hand a round over only once per
+/// scheduler time slice, and the same rounds would then take minutes.
+constexpr std::chrono::seconds kExchangeRaceTimeLimit{5};
+
+/// @brief Rounds a race has to get through in that time to have tested anything.
+constexpr uint32_t kFewestExchangeRaceRounds = 16;
+
+/// @brief Offset of a word that is the last of its cache line.
+/// @details A write that starts here and is longer than the word crosses into
+/// the next line. If it repeated a store, it would repeat one that needs both
+/// lines, and the exchanging processor, which needs only the first, gets in
+/// between two of those far more often than between two stores that stay
+/// inside one line. A repeat inside one line is so rarely separated that a
+/// test relying on it passes nearly every run against a write that is wrong,
+/// which is why no race here writes just the contended word.
+constexpr std::size_t kLastWordOfALine = 0x400 - sizeof(uint32_t);
+
+/// @brief Set by the exchanging thread on the value a plain write left.
+constexpr uint64_t kExchangedMark = 1;
+
+/// @brief The value the plain write of @p round leaves in the contended word.
+/// @details Different in every round and never carrying the mark, so that an
+/// exchange can only succeed against the write of its own round and what it
+/// leaves is told apart from what the write left.
+constexpr uint64_t plain_value_of(uint32_t round, uint32_t width) {
+  const uint64_t low_half = uint64_t{round} << 1;
+  return width == sizeof(uint64_t) ? (low_half << 32) | low_half : low_half;
+}
+
+struct ExchangeRaceTally {
+  /// Plain writes that did not complete.
+  uint32_t refused_writes = 0;
+  /// Rounds in which no exchange found the plain value, though it began after
+  /// the plain write had returned.
+  uint32_t missed_exchanges = 0;
+  /// Rounds that did not settle on the exchanged value.
+  uint32_t undone_exchanges = 0;
+};
+
+/// @brief One compare/exchange on the contended word: true when it exchanged
+/// the first value for the second.
+using ExchangeWord = std::function<bool(uint64_t, uint64_t)>;
+
+/// @brief Exchange a word of guest memory the way another device thread does.
+ExchangeWord exchange_through_host(rocjitsu::VfioDeviceHost &host, uint64_t word_address,
+                                   uint32_t width) {
+  return [&host, word_address, width](uint64_t expected, uint64_t desired) {
+    const simdojo::DmaAtomicCompareExchangeResult result =
+        host.compare_exchange(word_address, width, expected, desired);
+    return result.outcome == simdojo::DmaAccessOutcome::Complete && result.exchanged;
+  };
+}
+
+/// @brief Exchange a word of guest memory the way the guest does: on its own
+/// mapping of the file, holding nothing the host could wait for.
+ExchangeWord exchange_as_guest(std::byte *word, uint32_t width) {
+  return [word, width](uint64_t expected, uint64_t desired) {
+    return util::shared_compare_exchange_word(word, width, expected, desired);
+  };
+}
+
+/// @brief One atomic load of the contended word, empty when it was refused.
+using LoadWord = std::function<std::optional<uint64_t>()>;
+
+LoadWord load_through_host(rocjitsu::VfioDeviceHost &host, uint64_t word_address, uint32_t width) {
+  return [&host, word_address, width]() -> std::optional<uint64_t> {
+    const simdojo::DmaAtomicLoadResult loaded = host.atomic_load(word_address, width);
+    if (loaded.outcome != simdojo::DmaAccessOutcome::Complete) {
+      return std::nullopt;
+    }
+    return loaded.value;
+  };
+}
+
+LoadWord load_as_guest(const std::byte *word, uint32_t width) {
+  return [word, width]() -> std::optional<uint64_t> { return util::shared_load_word(word, width); };
+}
+
+/// @brief Race one plain guest write per round against a compare/exchange on a
+///        word that the write covers.
+///
+/// @details Each round the calling thread writes a fresh value and a second
+/// thread, already retrying, exchanges that value for a marked one as soon as
+/// it appears. Nothing else writes the word, so the round has to settle on the
+/// marked value. A write that stored the word more than once would, when the
+/// exchange lands between two of its stores, put the unmarked value back.
+///
+/// A correct write passes every time. One that repeats a store is caught only
+/// in the rounds where the exchange happens to land between the stores, which
+/// is why there are many rounds. The race ends early, with the rounds it got
+/// through, once @ref kExchangeRaceTimeLimit has passed, and fails if those
+/// are fewer than @ref kFewestExchangeRaceRounds.
+///
+/// The threads hand rounds to each other through atomics alone and, the plain
+/// write under test aside, reach the word only through atomic accesses while
+/// both are running.
+///
+/// @param[in] width Width of the contended word in bytes, four or eight.
+/// @param[in] write_plain Writes the given value over the contended word with
+///            a plain guest write, returning its outcome.
+/// @param[in] exchange Exchanges one value of the contended word for another.
+/// @param[in] load_settled Loads the contended word once a round is over.
+ExchangeRaceTally race_guest_write_against_exchange(
+    uint32_t width, const std::function<simdojo::DmaAccessOutcome(uint64_t)> &write_plain,
+    const ExchangeWord &exchange, const LoadWord &load_settled) {
+  // Retrying without a pause keeps an attempt in flight when the plain write
+  // lands; yielding now and then keeps a single-processor host from spending a
+  // whole time slice on retries that cannot succeed until the other thread runs.
+  constexpr uint32_t kAttemptsBetweenYields = 64;
+
+  std::atomic<uint32_t> written_round{0};
+  std::atomic<uint32_t> exchanged_round{0};
+  std::atomic<uint32_t> missed_exchanges{0};
+  std::atomic<bool> race_is_over{false};
+
+  std::jthread exchanger([&] {
+    for (uint32_t round = 1; round <= kExchangeRaceRounds; ++round) {
+      const uint64_t plain = plain_value_of(round, width);
+      bool exchanged = false;
+      bool write_had_returned = false;
+      uint32_t attempts = 0;
+      while (!exchanged && !write_had_returned && !race_is_over.load()) {
+        // Sampled before the attempt: only an attempt that begins after the
+        // plain write has returned is certain to find its value, so only such
+        // an attempt failing ends the round as a miss.
+        write_had_returned = written_round.load() >= round;
+        exchanged = exchange(plain, plain | kExchangedMark);
+        if (!exchanged && ++attempts % kAttemptsBetweenYields == 0) {
+          std::this_thread::yield();
+        }
+      }
+      // Stopped while waiting for a write that is not going to be made.
+      if (!exchanged && !write_had_returned) {
+        break;
+      }
+      if (!exchanged) {
+        missed_exchanges.fetch_add(1);
+      }
+      exchanged_round.store(round);
+    }
+  });
+
+  ExchangeRaceTally tally;
+  uint32_t rounds_raced = 0;
+  const auto deadline = std::chrono::steady_clock::now() + kExchangeRaceTimeLimit;
+  for (uint32_t round = 1;
+       round <= kExchangeRaceRounds && std::chrono::steady_clock::now() < deadline; ++round) {
+    const uint64_t plain = plain_value_of(round, width);
+    if (write_plain(plain) != simdojo::DmaAccessOutcome::Complete) {
+      ++tally.refused_writes;
+    }
+    written_round.store(round);
+    while (exchanged_round.load() < round) {
+      std::this_thread::yield();
+    }
+    if (load_settled() != (plain | kExchangedMark)) {
+      ++tally.undone_exchanges;
+    }
+    rounds_raced = round;
+  }
+  race_is_over.store(true);
+  exchanger.join();
+  testing::Test::RecordProperty("rounds", std::to_string(rounds_raced));
+  EXPECT_GE(rounds_raced, kFewestExchangeRaceRounds)
+      << "too few rounds to have tested the write against a concurrent compare/exchange";
+  tally.missed_exchanges = missed_exchanges.load();
+  return tally;
+}
 
 } // namespace
 
@@ -4140,6 +4325,244 @@ TEST(VfioDeviceHostGuestMemory, CompletesCopiesWhileTheServingThreadIsBusy) {
   }
   EXPECT_TRUE(backing.matches_expectation())
       << "concurrent copies left something other than each thread's last write";
+}
+
+// A guest write that lands in a mapped window holds no lock that an atomic
+// access to the same word waits for: another device thread's compare/exchange
+// takes the library's lock, which the write does not, and the guest's own takes
+// none at all. So the write must store each byte once. libc memcpy does not
+// promise that, and commonly copies a short span as two stores that overlap, so
+// an exchange that lands between the two is put back.
+void expect_no_exchange_undone(const ExchangeRaceTally &tally) {
+  EXPECT_EQ(tally.refused_writes, 0u);
+  EXPECT_EQ(tally.missed_exchanges, 0u);
+  EXPECT_EQ(tally.undone_exchanges, 0u)
+      << "a guest write stored a word again after a compare/exchange had replaced it";
+}
+
+class VfioDeviceHostGuestExchangeRace : public testing::Test {
+protected:
+  static constexpr uint64_t kGuestAddress = 0x660000;
+
+  void SetUp() override {
+    ASSERT_TRUE(backing_.usable());
+    ASSERT_TRUE(served_.start());
+    ASSERT_TRUE(served_.attach(client_));
+    ASSERT_TRUE(client_.dma_map(kGuestAddress, host_page_size(), backing_.fd(), 0));
+  }
+
+  /// @brief A plain guest write, at @p address, of @p length bytes that begin
+  /// with the value it is given.
+  [[nodiscard]] std::function<simdojo::DmaAccessOutcome(uint64_t)> write_at(uint64_t address,
+                                                                            std::size_t length) {
+    return [this, address, length](uint64_t plain) {
+      std::array<uint64_t, 2> buffer{plain, 0x0123456789abcdef};
+      return served_.host().write_outcome(address, std::as_bytes(std::span(buffer)).first(length));
+    };
+  }
+
+  GuestBacking backing_{host_page_size()};
+  ServedDevice served_;
+  rocjitsu::test::VfioUserClient client_;
+};
+
+TEST_F(VfioDeviceHostGuestExchangeRace,
+       WriteAcrossACacheLineDoesNotUndoAnotherDeviceThreadsCompareExchange) {
+  constexpr uint64_t kWord = kGuestAddress + kLastWordOfALine;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kWord, 2 * sizeof(uint32_t)),
+      exchange_through_host(served_.host(), kWord, sizeof(uint32_t)),
+      load_through_host(served_.host(), kWord, sizeof(uint32_t))));
+}
+
+TEST_F(VfioDeviceHostGuestExchangeRace, WriteAcrossACacheLineDoesNotUndoTheGuestsCompareExchange) {
+  constexpr uint64_t kWord = kGuestAddress + kLastWordOfALine;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kWord, 2 * sizeof(uint32_t)),
+      exchange_as_guest(backing_.guest_view(kLastWordOfALine), sizeof(uint32_t)),
+      load_through_host(served_.host(), kWord, sizeof(uint32_t))));
+}
+
+TEST_F(VfioDeviceHostGuestExchangeRace,
+       BufferWriteDoesNotUndoTheGuestsCompareExchangeOnAWordItCovers) {
+  // The buffer carries one word before the contended one and two after it, so
+  // that word is stored along with its neighbours rather than on its own.
+  constexpr uint64_t kWord = kGuestAddress + kLastWordOfALine;
+  constexpr uint32_t kWordBefore = 0xaaaa5555;
+  constexpr uint32_t kWordAfter = 0x3333cccc;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t),
+      [this](uint64_t plain) {
+        const std::array<uint32_t, 4> buffer{kWordBefore, static_cast<uint32_t>(plain), kWordAfter,
+                                             kWordAfter};
+        return served_.host().write_outcome(kWord - sizeof(uint32_t),
+                                            std::as_bytes(std::span(buffer)));
+      },
+      exchange_as_guest(backing_.guest_view(kLastWordOfALine), sizeof(uint32_t)),
+      load_through_host(served_.host(), kWord, sizeof(uint32_t))));
+
+  std::array<uint32_t, 4> settled{};
+  ASSERT_EQ(served_.host().read_outcome(kWord - sizeof(uint32_t),
+                                        std::as_writable_bytes(std::span(settled))),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(settled[0], kWordBefore);
+  EXPECT_EQ(settled[2], kWordAfter);
+  EXPECT_EQ(settled[3], kWordAfter);
+}
+
+// The mapped path and the atomic accessors reach the same guest words from
+// different device threads with no lock in common. Both are meant to go
+// through util/shared_memory.h, which makes no plain access. A plain load or
+// store put back on either path races the other here, and only a
+// ThreadSanitizer build, configured with ROCJITSU_ENABLE_VFIO=ON so that it
+// compiles this file, reports it. Any other build checks no more than that an
+// aligned read never sees part of a write or an exchange, which a plain read
+// of one word would not either.
+TEST_F(VfioDeviceHostGuestExchangeRace,
+       OverlappingGuestAccessesOfEveryKindNeverSplitAnAlignedWord) {
+  constexpr uint64_t kQuadword = kGuestAddress + 0x100;
+  constexpr uint64_t kHighWord = kQuadword + sizeof(uint32_t);
+  constexpr uint32_t kRounds = 20000;
+  const auto lanes16 = [](uint32_t round) {
+    return uint64_t{round & 0xffffu} * 0x0001000100010001u;
+  };
+  const auto word_is_whole = [](uint64_t word) {
+    return (word & 0xffffu) == ((word >> 16) & 0xffffu);
+  };
+  const auto quadword_is_whole = [&](uint64_t quadword) {
+    return word_is_whole(quadword & 0xffffffffu) && word_is_whole(quadword >> 32);
+  };
+  rocjitsu::VfioDeviceHost &host = served_.host();
+  constexpr auto kComplete = simdojo::DmaAccessOutcome::Complete;
+  // The backing starts out patterned, so make the words whole before any
+  // thread looks at them.
+  const std::array<uint64_t, 3> whole{};
+  ASSERT_EQ(host.write_outcome(kQuadword - sizeof(uint64_t), std::as_bytes(std::span(whole))),
+            kComplete);
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint32_t> refused{0};
+  std::atomic<uint32_t> split{0};
+  const auto count_unless = [](std::atomic<uint32_t> &counter, bool ok) {
+    if (!ok) {
+      counter.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  std::vector<std::jthread> threads;
+  threads.emplace_back([&] {
+    std::array<uint64_t, 3> wide{};
+    while (!stop.load(std::memory_order_relaxed)) {
+      uint32_t high = 0;
+      uint64_t quadword = 0;
+      count_unless(
+          refused,
+          host.read_outcome(kHighWord, std::as_writable_bytes(std::span(&high, 1))) == kComplete &&
+              host.read_outcome(kQuadword, std::as_writable_bytes(std::span(&quadword, 1))) ==
+                  kComplete &&
+              host.read_outcome(kQuadword - sizeof(uint64_t),
+                                std::as_writable_bytes(std::span(wide))) == kComplete);
+      count_unless(split, word_is_whole(high) && quadword_is_whole(quadword) &&
+                              quadword_is_whole(wide[1]));
+    }
+  });
+  threads.emplace_back([&] {
+    uint32_t round = 0x4000;
+    while (!stop.load(std::memory_order_relaxed)) {
+      ++round;
+      const auto half = host.atomic_load(kQuadword + 2, sizeof(uint16_t));
+      const auto word = host.atomic_load(kHighWord, sizeof(uint32_t));
+      const auto quadword = host.atomic_load(kQuadword, sizeof(uint64_t));
+      count_unless(refused, half.outcome == kComplete && word.outcome == kComplete &&
+                                quadword.outcome == kComplete);
+      count_unless(split, word_is_whole(word.value) && quadword_is_whole(quadword.value));
+      count_unless(
+          refused,
+          host.compare_exchange(kHighWord, sizeof(uint32_t), word.value,
+                                lanes16(round) & 0xffffffffu)
+                      .outcome == kComplete &&
+              host.compare_exchange(kQuadword, sizeof(uint64_t), quadword.value, lanes16(round + 1))
+                      .outcome == kComplete &&
+              host.atomic_store(kQuadword, sizeof(uint32_t), lanes16(round + 2)) == kComplete &&
+              host.atomic_store(kQuadword, sizeof(uint64_t), lanes16(round + 3)) == kComplete);
+    }
+  });
+
+  for (uint32_t round = 1; round <= kRounds; ++round) {
+    const uint64_t value = lanes16(round);
+    const uint32_t word = static_cast<uint32_t>(value);
+    const std::array<uint32_t, 4> wide{word, word, word, word};
+    count_unless(
+        refused,
+        host.write_outcome(kHighWord, std::as_bytes(std::span(&word, 1))) == kComplete &&
+            host.write_outcome(kQuadword, std::as_bytes(std::span(&value, 1))) == kComplete &&
+            host.write_outcome(kQuadword - sizeof(uint32_t), std::as_bytes(std::span(wide))) ==
+                kComplete);
+  }
+  stop.store(true);
+  threads.clear();
+
+  EXPECT_EQ(refused.load(), 0u);
+  EXPECT_EQ(split.load(), 0u) << "an aligned read saw part of a write";
+}
+
+// A function bound to target grants never takes the mapped path. It copies
+// guest RAM through the library's scatter list and a peer's BAR through the
+// grant's mapping of the owner's backing, in both cases under locks that
+// neither the guest nor the owning device takes. Those copies must store each
+// byte once for the same reason the mapped path must.
+class VfioTargetGrantsExchangeRace : public testing::Test {
+protected:
+  void SetUp() override {
+    ASSERT_TRUE(pair_.built());
+    ASSERT_TRUE(pair_.attach(requester_, owner_));
+  }
+
+  /// @brief A plain write by the requesting function, at @p address, of eight
+  /// bytes that begin with the value it is given.
+  [[nodiscard]] std::function<simdojo::DmaAccessOutcome(uint64_t)> write_at(uint64_t address) {
+    return [this, address](uint64_t plain) {
+      const std::array<uint32_t, 2> buffer{static_cast<uint32_t>(plain), 0x3333cccc};
+      return pair_.requester_host().write_outcome(address, std::as_bytes(std::span(buffer)));
+    };
+  }
+
+  MappedGrantPair pair_{/*seal_owner=*/true};
+  rocjitsu::test::VfioUserClient requester_;
+  rocjitsu::test::VfioUserClient owner_;
+};
+
+TEST_F(VfioTargetGrantsExchangeRace, WriteToGuestRamDoesNotUndoTheGuestsCompareExchange) {
+  // Clear of the peer BAR, which the fixture programs at 0x30000000.
+  constexpr uint64_t kGuestAddress = 0x1100'0000;
+  GuestBacking backing(host_page_size());
+  ASSERT_TRUE(backing.usable());
+  ASSERT_TRUE(requester_.dma_map(kGuestAddress, host_page_size(), backing.fd(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester_));
+
+  std::byte *const word = backing.guest_view(kLastWordOfALine);
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kGuestAddress + kLastWordOfALine),
+      exchange_as_guest(word, sizeof(uint32_t)), load_as_guest(word, sizeof(uint32_t))));
+}
+
+TEST_F(VfioTargetGrantsExchangeRace, WriteToAPeerBarDoesNotUndoACompareExchangeOnItsBacking) {
+  constexpr uint64_t kPeerBar = 0x3000'0000;
+  constexpr std::size_t kWindowSize = 0x1000;
+  ASSERT_TRUE(requester_.dma_map(kPeerBar, kWindowSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester_));
+
+  // The owning device and its guest reach the backing through mappings of
+  // their own, as this one is.
+  void *const mapped =
+      ::mmap(nullptr, kWindowSize, PROT_READ | PROT_WRITE, MAP_SHARED, pair_.owner().fd(), 0);
+  ASSERT_NE(mapped, MAP_FAILED);
+  std::byte *const word = static_cast<std::byte *>(mapped) + kLastWordOfALine;
+  expect_no_exchange_undone(race_guest_write_against_exchange(
+      sizeof(uint32_t), write_at(kPeerBar + kLastWordOfALine),
+      exchange_as_guest(word, sizeof(uint32_t)), load_as_guest(word, sizeof(uint32_t))));
+  EXPECT_EQ(pair_.owner().bar_calls(), 0u) << "the write went through the BAR callback";
+  ASSERT_EQ(::munmap(mapped, kWindowSize), 0);
 }
 
 // The library unmaps a window as soon as it has told the host the window is

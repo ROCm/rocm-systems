@@ -10,7 +10,7 @@
 
 #include "util/bit.h"
 #include "util/log.h"
-#include "util/store_once.h"
+#include "util/shared_memory.h"
 
 // libvfio-user's headers pull in <stdint.h>, <sys/uio.h> and others before
 // opening their own linkage block, so those are included first here, outside the
@@ -119,14 +119,14 @@ public:
     if (offset != offset_ || result.size() != length_ || bytes_ == nullptr) {
       return false;
     }
-    std::memmove(result.data(), bytes_.get(), length_);
+    util::load_once(result.data(), bytes_.get(), length_);
     return true;
   }
   [[nodiscard]] bool write(uint64_t offset, std::span<const std::byte> source) noexcept override {
     if (offset != offset_ || source.size() != length_ || bytes_ == nullptr) {
       return false;
     }
-    std::memmove(bytes_.get(), source.data(), length_);
+    util::store_once(bytes_.get(), source.data(), length_);
     return true;
   }
 
@@ -156,10 +156,11 @@ struct PreparedMappedSpan {
     auto *cursor = static_cast<std::byte *>(data);
     for (std::size_t index = 0; index < segment_count; ++index) {
       const iovec &segment = segments[index];
+      auto *const guest = static_cast<std::byte *>(segment.iov_base);
       if (to_guest) {
-        std::memcpy(segment.iov_base, cursor, segment.iov_len);
+        util::store_once(guest, cursor, segment.iov_len);
       } else {
-        std::memcpy(cursor, segment.iov_base, segment.iov_len);
+        util::load_once(cursor, guest, segment.iov_len);
       }
       cursor += segment.iov_len;
     }
@@ -1218,7 +1219,7 @@ bool VfioDeviceHost::copy_mapped_window(uint64_t guest_phys, void *data, std::si
     // undo it.
     util::store_once(host, static_cast<const std::byte *>(data), length);
   } else {
-    std::memcpy(data, host, length);
+    util::load_once(static_cast<std::byte *>(data), host, length);
   }
   return true;
 }
@@ -1313,17 +1314,8 @@ simdojo::DmaAtomicLoadResult VfioDeviceHost::atomic_load(uint64_t guest_phys, ui
     return {.outcome = simdojo::DmaAccessOutcome::Faulted};
   }
 
-  uint64_t value = 0;
-  if (width == sizeof(uint64_t)) {
-    value = std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(segment.iov_base))
-                .load(std::memory_order_acquire);
-  } else if (width == sizeof(uint32_t)) {
-    value = std::atomic_ref<uint32_t>(*static_cast<uint32_t *>(segment.iov_base))
-                .load(std::memory_order_acquire);
-  } else {
-    value = std::atomic_ref<uint16_t>(*static_cast<uint16_t *>(segment.iov_base))
-                .load(std::memory_order_acquire);
-  }
+  const uint64_t value =
+      util::shared_load_word(static_cast<const std::byte *>(segment.iov_base), width);
   vfu_sgl_put(ctx_, sgl, &segment, 1);
   return {.outcome = simdojo::DmaAccessOutcome::Complete, .value = value};
 }
@@ -1363,13 +1355,7 @@ simdojo::DmaAccessOutcome VfioDeviceHost::atomic_store(uint64_t guest_phys, uint
     return simdojo::DmaAccessOutcome::Faulted;
   }
 
-  if (width == sizeof(uint64_t)) {
-    std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(segment.iov_base))
-        .store(value, std::memory_order_release);
-  } else {
-    std::atomic_ref<uint32_t>(*static_cast<uint32_t *>(segment.iov_base))
-        .store(static_cast<uint32_t>(value), std::memory_order_release);
-  }
+  util::shared_store_word(static_cast<std::byte *>(segment.iov_base), width, value);
   vfu_sgl_put(ctx_, sgl, &segment, 1);
   return simdojo::DmaAccessOutcome::Complete;
 }
@@ -1416,20 +1402,8 @@ simdojo::DmaAtomicCompareExchangeResult VfioDeviceHost::compare_exchange(uint64_
       .observed = expected,
       .exchanged = false,
   };
-  if (width == sizeof(uint64_t)) {
-    uint64_t observed = expected;
-    result.exchanged = std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(segment.iov_base))
-                           .compare_exchange_strong(observed, desired, std::memory_order_acq_rel,
-                                                    std::memory_order_acquire);
-    result.observed = observed;
-  } else {
-    uint32_t observed = static_cast<uint32_t>(expected);
-    result.exchanged =
-        std::atomic_ref<uint32_t>(*static_cast<uint32_t *>(segment.iov_base))
-            .compare_exchange_strong(observed, static_cast<uint32_t>(desired),
-                                     std::memory_order_acq_rel, std::memory_order_acquire);
-    result.observed = observed;
-  }
+  result.exchanged = util::shared_compare_exchange_word(static_cast<std::byte *>(segment.iov_base),
+                                                        width, result.observed, desired);
   vfu_sgl_put(ctx_, sgl, &segment, 1);
   return result;
 }
