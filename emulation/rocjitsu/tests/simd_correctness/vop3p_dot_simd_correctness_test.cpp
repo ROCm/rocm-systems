@@ -132,8 +132,9 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     cfg.lds_size_kb = 64;
     std::unique_ptr<amdgpu::ComputeUnitCore> cu;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot_int", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return {};
+    }
     auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     EXPECT_NE(wf, nullptr);
@@ -154,8 +155,9 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     wf->set_exec(exec);
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     delete inst;
     return out;
   };
@@ -186,9 +188,11 @@ TEST(Vop3pDotIntSimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kIntCases)
-    for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (const auto &c : kIntCases) {
+    for (uint32_t clamp = 0; clamp < 2; ++clamp) {
       check_int_case(c, /*exec=*/~0ULL, clamp);
+    }
+  }
 }
 
 TEST(Vop3pDotIntSimdCorrectness, PartialExec) {
@@ -196,9 +200,11 @@ TEST(Vop3pDotIntSimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kIntCases)
-    for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (const auto &c : kIntCases) {
+    for (uint32_t clamp = 0; clamp < 2; ++clamp) {
       check_int_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL, clamp);
+    }
+  }
 }
 
 // The RDNA4 ISA manual says integer DOT4 ignores CLAMP, but gfx1201 hardware
@@ -221,8 +227,9 @@ uint32_t run_modern_dot4(rocjitsu::IsaFamily arch, uint32_t opcode, uint32_t src
   cfg.lds_size_kb = 64;
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot4_policy", cfg, &gpu_mem, &l2);
-  if (!cu)
+  if (!cu) {
     return {};
+  }
   auto decoder = Decoder::create(arch);
   amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   EXPECT_NE(wf, nullptr);
@@ -330,8 +337,9 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     cfg.lds_size_kb = 64;
     std::unique_ptr<amdgpu::ComputeUnitCore> cu;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot_f16", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return {};
+    }
     auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     EXPECT_NE(wf, nullptr);
@@ -356,8 +364,9 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     wf->set_exec(exec);
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     delete inst;
     return out;
   };
@@ -376,8 +385,9 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
       if (active) {
         auto h = half_bits(lane, rot);
         bool skip = is_f16_nan(h[0]) || is_f16_nan(h[1]) || is_f16_nan(h[2]) || is_f16_nan(h[3]);
-        if (skip)
+        if (skip) {
           continue;
+        }
         EXPECT_EQ(scalar_out[lane], simd_out[lane])
             << "v_dot2_f32_f16 neg=" << neg << " neg_hi=" << neg_hi << " clamp=" << clamp
             << " rot=" << rot << " lane " << lane << ": SIMD path diverged from scalar body";
@@ -398,10 +408,13 @@ TEST(Vop3pDotF16SimdCorrectness, FullExecAllModifiers) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (uint32_t neg = 0; neg < 8; ++neg)
-    for (uint32_t neg_hi = 0; neg_hi < 4; ++neg_hi)
-      for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (uint32_t neg = 0; neg < 8; ++neg) {
+    for (uint32_t neg_hi = 0; neg_hi < 4; ++neg_hi) {
+      for (uint32_t clamp = 0; clamp < 2; ++clamp) {
         check_f16_case(/*exec=*/~0ULL, neg, neg_hi, clamp);
+      }
+    }
+  }
 }
 
 TEST(Vop3pDotF16SimdCorrectness, PartialExec) {

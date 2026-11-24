@@ -336,8 +336,9 @@ TEST(Cdna1Decode, InterpolationSeparatesAttributeChannelAndHalf) {
       ASSERT_TRUE(result.succeeded());
       std::string expected = "v_interp_p1ll_f16 v5, v2, attr7.";
       expected += "xyzw"[channel];
-      if (high)
+      if (high) {
         expected += " high";
+      }
       EXPECT_EQ(result.value()->disassemble(), expected);
     }
   }

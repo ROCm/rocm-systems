@@ -99,8 +99,9 @@ const std::array<float, 16> kInputs = {{
 }};
 
 uint16_t cvt_i16(float f) {
-  if (std::isnan(f))
+  if (std::isnan(f)) {
     return 0;
+  }
   return static_cast<uint16_t>(static_cast<int16_t>(std::clamp(f, -32768.0f, 32767.0f)));
 }
 uint16_t cvt_u16(float f) {
@@ -120,13 +121,15 @@ uint32_t golden(bool is_u16, float f0, float f1) {
 double round_nearest_even_golden(double value) {
   double lower = std::floor(value);
   double fraction = value - lower;
-  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0)) {
     lower += 1.0;
+  }
   return lower;
 }
 uint16_t cvt_norm_i16(float f) {
-  if (std::isnan(f))
+  if (std::isnan(f)) {
     return 0;
+  }
   return static_cast<uint16_t>(static_cast<int16_t>(
       round_nearest_even_golden(std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0))));
 }
@@ -159,8 +162,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_cvt_pk_f32", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -183,8 +187,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -203,8 +208,9 @@ void check_op(uint32_t opcode, bool is_u16, uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -304,8 +310,9 @@ void check_cvt_pk_norm_i16(uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t vb = fx.wf->vgpr_alloc().base;
@@ -321,8 +328,9 @@ void check_cvt_pk_norm_i16(uint64_t exec) {
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = fx.cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     delete inst;
     return out;
   };

@@ -50,8 +50,9 @@ constexpr bool graphics_sample_has_fixed_lod(bool query, bool lod_warning, uint3
 
 constexpr bool graphics_image_needs_gradients(bool query, unsigned maximum_mip, unsigned dim,
                                               bool gather, uint32_t sampler_filter) {
-  if (query || maximum_mip)
+  if (query || maximum_mip) {
     return true;
+  }
   // Gather fixes both XY filters to linear. Cube uses non-anisotropic XY filtering.
   const unsigned mask = dim == 3 ? 1 : 3;
   const unsigned mag = (sampler_filter >> 20) & mask;
@@ -114,8 +115,9 @@ constexpr bool image_is_1d_or_2d_sample(uint32_t dim) {
 
 /// Array resources need a layer operand, and cube faces require the cube DIM.
 constexpr bool image_dim_has_resource_layer(uint32_t dim, uint32_t type) {
-  if ((dim == kImageDimCube) != (type == kImageCube))
+  if ((dim == kImageDimCube) != (type == kImageCube)) {
     return false;
+  }
   return !image_coordinate_shape(type, true).layered || dim == kImageDimCube ||
          dim == kImageDim2dMsaaArray || dim == kImageDim1dArray || dim == kImageDim2dArray ||
          dim == kImageDim3d;
@@ -154,8 +156,9 @@ inline uint32_t image_coordinate_register_count(uint32_t dim, bool a16) {
 /// @brief Return candidate consecutive selectors, validated by their consumer.
 inline ImageAddressRegisters contiguous_image_address_registers(uint32_t first) {
   ImageAddressRegisters registers;
-  for (uint32_t i = 0; i < registers.size(); ++i)
+  for (uint32_t i = 0; i < registers.size(); ++i) {
     registers[i] = first + i;
+  }
   return registers;
 }
 
@@ -166,8 +169,9 @@ inline ImageAddressRegisters mimg_image_address_registers(uint32_t extension_wor
                                                           bool extend_last, uint32_t first,
                                                           const uint32_t *raw_encoding) {
   auto registers = contiguous_image_address_registers(first);
-  if (!extension_words)
+  if (!extension_words) {
     return registers;
+  }
   for (uint32_t i = 1; i < registers.size(); ++i) {
     const uint32_t word = (i - 1) / 4;
     registers[i] = word < extension_words ? (raw_encoding[2 + word] >> (8 * ((i - 1) % 4))) & 0xffu
@@ -209,8 +213,9 @@ inline constexpr uint32_t kGfx11BvhResourceType = 8;
 
 /// Return the inclusive last node index for a GFX11 BVH resource.
 constexpr std::optional<uint64_t> gfx11_bvh_last_node(uint32_t word2, uint32_t word3) {
-  if ((word3 >> 28) != kGfx11BvhResourceType)
+  if ((word3 >> 28) != kGfx11BvhResourceType) {
     return std::nullopt;
+  }
   return word2 | (uint64_t{word3 & 0x3ff} << 32);
 }
 
@@ -221,8 +226,9 @@ constexpr bool gfx11_bvh_pointer_flags_enabled(uint32_t word3) { return word3 & 
 /// @details When the descriptor disables pointer_flags, nonzero bits 63:54 reject the pointer.
 /// Instance and procedural nodes do not fetch. A Box32 needs two slots.
 constexpr bool bvh_node_can_load(uint64_t pointer, uint64_t last_node, bool pointer_flags) {
-  if (!pointer_flags && pointer >> 54)
+  if (!pointer_flags && pointer >> 54) {
     return false;
+  }
   const auto type = gfx11_bvh_node_type(pointer);
   const uint64_t index = gfx11_bvh_node_index(pointer);
   return type <= Gfx11BvhNodeType::Box32 &&
@@ -246,15 +252,17 @@ constexpr uint32_t bvh_address_words(bool wide, bool a16) {
 /// points to the third encoding word.
 inline ImageAddressRegisters gfx11_bvh_registers(bool wide, bool a16, uint32_t first,
                                                  const uint32_t *nsa) {
-  if (!nsa)
+  if (!nsa) {
     return contiguous_image_address_registers(first);
+  }
   ImageAddressRegisters registers{};
   const auto widths = gfx11_bvh_group_widths(wide, a16);
   unsigned word = 0;
   for (unsigned group = 0; group < widths.size(); ++group) {
     const unsigned start = group ? (*nsa >> ((group - 1) * 8)) & 255 : first;
-    for (unsigned i = 0; i < widths[group]; ++i)
+    for (unsigned i = 0; i < widths[group]; ++i) {
       registers[word++] = start + i;
+    }
   }
   return registers;
 }
@@ -269,8 +277,9 @@ inline ImageAddressRegisters gfx12_image_address_registers(const ImageMachineIns
     registers[4] = inst.vaddr4;
     last = 4;
   }
-  for (uint32_t i = last + 1; i < registers.size(); ++i)
+  for (uint32_t i = last + 1; i < registers.size(); ++i) {
     registers[i] = registers[last] + i - last;
+  }
   return registers;
 }
 

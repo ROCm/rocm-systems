@@ -136,13 +136,15 @@ struct MemoryIssueInfo {
       case WaitCounterType::VSCNT:
       case WaitCounterType::LOADCNT:
       case WaitCounterType::STORECNT:
-        if (!vmem)
+        if (!vmem) {
           continue;
+        }
         break;
       case WaitCounterType::LGKMCNT:
       case WaitCounterType::DSCNT:
-        if (!lds)
+        if (!lds) {
           continue;
+        }
         break;
       default:
         break;

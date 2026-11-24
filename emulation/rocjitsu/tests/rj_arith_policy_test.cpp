@@ -58,8 +58,9 @@ TEST(ArithPolicyTest, ConfigurationNamesMapDirectlyToArithSemantics) {
 }
 
 TEST(ArithPolicyTest, RejectsUnknownReservedAndRemovedNames) {
-  for (auto name : {"typo", "exact_empirical", "bit_exact_empirical_fp_status", "4", "7", ""})
+  for (auto name : {"typo", "exact_empirical", "bit_exact_empirical_fp_status", "4", "7", ""}) {
     EXPECT_TRUE(parse_arithmetic_policy(name).failed());
+  }
 }
 
 } // namespace

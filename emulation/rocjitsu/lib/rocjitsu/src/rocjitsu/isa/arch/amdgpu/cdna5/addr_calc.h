@@ -85,10 +85,12 @@ void ds_calculate_addresses_all_lanes(const VdsMachineInst &inst, amdgpu::Wavefr
                                       amdgpu::VectorMemState &d);
 
 inline amdgpu::Mtype mtype_from_bits(bool sc0, bool sc1) {
-  if (sc1)
+  if (sc1) {
     return amdgpu::Mtype::UC;
-  if (sc0)
+  }
+  if (sc0) {
     return amdgpu::Mtype::CC;
+  }
   return amdgpu::Mtype::RW;
 }
 

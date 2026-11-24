@@ -45,8 +45,9 @@ inline uint32_t image_polygon_norm(int32_t first_component, int32_t second_compo
 
 /// @brief Convert an aligned footprint norm to signed 1/256 LOD units.
 inline int32_t image_footprint_logarithm(uint32_t footprint_norm, int exponent) {
-  if (footprint_norm == 0)
+  if (footprint_norm == 0) {
     return kZeroGradientLodFixed;
+  }
   const uint32_t leading_bit = std::bit_width(footprint_norm) - 1;
   const uint32_t denominator = 1u << leading_bit;
   const uint32_t fraction = (footprint_norm - denominator) * 1024;
@@ -76,25 +77,28 @@ inline double image_gradient_lod(std::array<double, 3> screen_dx, std::array<dou
   std::array<double, 3> largest_gradient{};
   for (uint32_t coordinate = 0; coordinate < dimensions; ++coordinate) {
     for (uint32_t gradient_index : {coordinate, coordinate + 3}) {
-      if (std::isnan(gradients[gradient_index]))
+      if (std::isnan(gradients[gradient_index])) {
         gradients[gradient_index] = 0;
-      else if (std::isinf(gradients[gradient_index]))
+      } else if (std::isinf(gradients[gradient_index])) {
         gradients[gradient_index] =
             std::copysign(double(std::numeric_limits<float>::max()), gradients[gradient_index]);
+      }
     }
     largest_gradient[coordinate] =
         std::max(std::abs(gradients[coordinate]), std::abs(gradients[coordinate + 3]));
   }
   if (std::all_of(largest_gradient.begin(), largest_gradient.end(),
-                  [](double magnitude) { return magnitude == 0; }))
+                  [](double magnitude) { return magnitude == 0; })) {
     return double(max_anisotropy ? kMinimumAnisotropicLodFixed : kZeroGradientLodFixed) /
            kImageLodFractionScale;
+  }
   std::array<int, 3> exponents{};
   std::array<double, 6> scaled{};
   int exponent = std::numeric_limits<int>::min();
   for (uint32_t coordinate = 0; coordinate < dimensions; ++coordinate) {
-    if (largest_gradient[coordinate] == 0)
+    if (largest_gradient[coordinate] == 0) {
       continue;
+    }
     int coordinate_exponent;
     std::frexp(largest_gradient[coordinate], &coordinate_exponent);
     const int extent_exponent = std::bit_width(extents[coordinate]) - 1;
@@ -113,11 +117,13 @@ inline double image_gradient_lod(std::array<double, 3> screen_dx, std::array<dou
   }
   std::array<int32_t, 6> fixed{};
   for (uint32_t coordinate = 0; coordinate < dimensions; ++coordinate) {
-    if (largest_gradient[coordinate] == 0)
+    if (largest_gradient[coordinate] == 0) {
       continue;
-    for (uint32_t gradient_index : {coordinate, coordinate + 3})
+    }
+    for (uint32_t gradient_index : {coordinate, coordinate + 3}) {
       fixed[gradient_index] = static_cast<int32_t>(
           std::floor(std::ldexp(scaled[gradient_index], exponents[coordinate] - exponent) + 0.5));
+    }
   }
   uint32_t footprint_norm;
   if (dimensions == 3) {

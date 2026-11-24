@@ -105,8 +105,9 @@ enum class RegClass : uint8_t {
 [[nodiscard]] constexpr uint8_t widest_special_reg_class() {
   uint8_t widest = 0;
   for (unsigned v = 0; v <= 0xFF; ++v) {
-    if (is_special_reg_class(static_cast<RegClass>(v)))
+    if (is_special_reg_class(static_cast<RegClass>(v))) {
       widest = static_cast<uint8_t>(v);
+    }
   }
   return widest;
 }
@@ -147,8 +148,9 @@ template <> struct WordOps<RegisterSetWordType::StandardUint64> {
   }
   template <size_t NumWords> static size_t count_bits(const Word (&words)[NumWords]) {
     size_t count = 0;
-    for (Word word : words)
+    for (Word word : words) {
       count += std::popcount(word);
+    }
     return count;
   }
 };
@@ -203,8 +205,9 @@ template <> struct WordOps<RegisterSetWordType::Avx2M256> {
   template <size_t NumWords> static size_t count_bits(const Word (&words)[NumWords]) {
     // Keep counts in SIMD lanes across words, reducing to a scalar only once.
     Word numBitsPerLane = _mm256_setzero_si256();
-    for (Word word : words)
+    for (Word word : words) {
       numBitsPerLane = _mm256_add_epi64(numBitsPerLane, word_count_lanes(word));
+    }
     return sum_count_lanes(numBitsPerLane);
   }
 };
@@ -237,9 +240,11 @@ template <RegisterSetWordType wordType> struct WordArrayOps final : WordOps<word
   }
 
   template <size_t Words> static bool words_equal(const Word (&a)[Words], const Word (&b)[Words]) {
-    for (size_t i = 0; i < Words; ++i)
-      if (!word_equal(a[i], b[i]))
+    for (size_t i = 0; i < Words; ++i) {
+      if (!word_equal(a[i], b[i])) {
         return false;
+      }
+    }
     return true;
   }
   // Visit a nonempty, in-bounds bit range. Stop when an operation returns a
@@ -254,18 +259,22 @@ template <RegisterSetWordType wordType> struct WordArrayOps final : WordOps<word
     if (firstBitInWord != 0) {
       const size_t endBitInWord = std::min(kWordBits, endBit - word * kWordBits);
       const Word mask = word_range(firstBitInWord, endBitInWord);
-      if (operation.partial_word(words[word], mask) != Operation::kContinue)
+      if (operation.partial_word(words[word], mask) != Operation::kContinue) {
         return !Operation::kContinue;
-      if (endBitInWord < kWordBits)
+      }
+      if (endBitInWord < kWordBits) {
         return Operation::kContinue;
+      }
       ++word;
     }
 
     // Middle loop: full words.
     const size_t endWord = endBit / kWordBits;
-    for (; word < endWord; ++word)
-      if (operation.full_word(words[word]) != Operation::kContinue)
+    for (; word < endWord; ++word) {
+      if (operation.full_word(words[word]) != Operation::kContinue) {
         return !Operation::kContinue;
+      }
+    }
 
     // Epilogue: final partial word.
     const size_t endBitInWord = endBit % kWordBits;
@@ -307,18 +316,21 @@ template <RegisterSetWordType wordType> struct WordArrayOps final : WordOps<word
   template <size_t CapacityBits, size_t NumWords, typename Update>
   static void update_range(Word (&words)[NumWords], size_t startBit, size_t numBits,
                            Update update) {
-    if (numBits == 0)
+    if (numBits == 0) {
       return;
-    if (startBit >= CapacityBits)
+    }
+    if (startBit >= CapacityBits) {
       return;
+    }
     const size_t endBit = startBit + std::min(numBits, CapacityBits - startBit);
     visit_range(words, startBit, endBit, UpdateWords<Update>{update});
   }
   template <size_t CapacityBits, size_t NumWords>
   static void set_range(Word (&words)[NumWords], size_t startBit, size_t numBits) {
     if (numBits == 1) {
-      if (startBit < CapacityBits)
+      if (startBit < CapacityBits) {
         word_set_bit(words[startBit / kWordBits], startBit % kWordBits);
+      }
       return;
     }
     update_range<CapacityBits>(words, startBit, numBits, word_or);
@@ -326,51 +338,62 @@ template <RegisterSetWordType wordType> struct WordArrayOps final : WordOps<word
   template <size_t CapacityBits, size_t NumWords>
   static void reset_range(Word (&words)[NumWords], size_t startBit, size_t numBits) {
     if (numBits == 1) {
-      if (startBit < CapacityBits)
+      if (startBit < CapacityBits) {
         word_reset_bit(words[startBit / kWordBits], startBit % kWordBits);
+      }
       return;
     }
     update_range<CapacityBits>(words, startBit, numBits, word_and_not);
   }
   template <size_t CapacityBits, size_t NumWords>
   static bool contains_range(const Word (&words)[NumWords], size_t startBit, size_t numBits) {
-    if (startBit >= CapacityBits || numBits > CapacityBits - startBit)
+    if (startBit >= CapacityBits || numBits > CapacityBits - startBit) {
       return false;
-    if (numBits == 1)
+    }
+    if (numBits == 1) {
       return word_test_bit(words[startBit / kWordBits], startBit % kWordBits);
-    if (numBits == 0)
+    }
+    if (numBits == 0) {
       return true;
+    }
     const size_t endBit = startBit + numBits;
 
     return visit_range(words, startBit, endBit, ContainsWords{});
   }
   template <size_t CapacityBits, size_t NumWords>
   static bool intersects_range(const Word (&words)[NumWords], size_t startBit, size_t numBits) {
-    if (numBits == 1)
+    if (numBits == 1) {
       return startBit < CapacityBits &&
              word_test_bit(words[startBit / kWordBits], startBit % kWordBits);
-    if (numBits == 0 || startBit >= CapacityBits)
+    }
+    if (numBits == 0 || startBit >= CapacityBits) {
       return false;
+    }
     const size_t endBit = startBit + std::min(numBits, CapacityBits - startBit);
 
     return visit_range(words, startBit, endBit, IntersectsWords{});
   }
   template <size_t NumWords, typename Operation>
   static void combine(Word (&lhs)[NumWords], const Word (&rhs)[NumWords], Operation operation) {
-    for (size_t word = 0; word < NumWords; ++word)
+    for (size_t word = 0; word < NumWords; ++word) {
       lhs[word] = operation(lhs[word], rhs[word]);
+    }
   }
   template <size_t NumWords> static bool bits_none(const Word (&words)[NumWords]) {
-    for (const Word word : words)
-      if (!word_none(word))
+    for (const Word word : words) {
+      if (!word_none(word)) {
         return false;
+      }
+    }
     return true;
   }
   template <size_t NumWords>
   static bool intersects_bits(const Word (&lhs)[NumWords], const Word (&rhs)[NumWords]) {
-    for (size_t word = 0; word < NumWords; ++word)
-      if (!word_none(word_and(lhs[word], rhs[word])))
+    for (size_t word = 0; word < NumWords; ++word) {
+      if (!word_none(word_and(lhs[word], rhs[word]))) {
         return true;
+      }
+    }
     return false;
   }
 };
@@ -567,8 +590,9 @@ private:
                 break;
               }
             }
-            if (cursor == 64)
+            if (cursor == 64) {
               remaining = 0;
+            }
           }
           while (remaining) {
             unsigned bit = std::countr_zero(remaining);
@@ -597,11 +621,12 @@ private:
           unsigned bit = std::countr_zero(remaining);
           emit_register<cls>(f, static_cast<uint16_t>(word * Ops::kWordBits + bit));
           Word updated = words[word];
-          if (updated == members)
+          if (updated == members) {
             remaining &= remaining - 1;
-          else
+          } else {
             remaining =
                 bit == Ops::kWordBits - 1 ? 0 : updated & (Ops::word_all_bits() << (bit + 1));
+          }
           members = updated;
         }
       }

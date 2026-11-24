@@ -28,10 +28,12 @@ inline int64_t gfx11_sign_extend(uint32_t value, uint32_t bits) {
 }
 
 inline std::optional<uint32_t> gfx11_read_smem_offset(uint32_t soffset, Wavefront &wf) {
-  if (soffset == kModernNullSelector || soffset == 0x7F)
+  if (soffset == kModernNullSelector || soffset == 0x7F) {
     return 0;
-  if (soffset == kModernM0Selector)
+  }
+  if (soffset == kModernM0Selector) {
     return wf.m0();
+  }
   return try_read_scalar_selector(wf, soffset);
 }
 
@@ -40,23 +42,27 @@ std::optional<uint64_t> gfx11_smem_calculate_address(const Encoding &inst, Wavef
                                                      ScalarMemState *state) {
   const uint32_t sbase_sel = inst.sbase * 2;
   auto base = try_read_scalar_selector64(wf, sbase_sel);
-  if (!base)
+  if (!base) {
     return std::nullopt;
+  }
   const int64_t immediate = gfx11_sign_extend(inst.offset, 21);
   auto soffset = gfx11_read_smem_offset(inst.soffset, wf);
-  if (!soffset)
+  if (!soffset) {
     return std::nullopt;
+  }
   const int64_t offset = immediate + *soffset;
   const uint64_t aligned_base = *base & ~uint64_t{3};
   if (smem_is_buffer_load_op(inst.op) || inst.op == 35 /* S_ATC_PROBE_BUFFER */) {
     // ISA 8.1.2 checks the immediate separately even if SOFFSET compensates for it.
-    if (state)
+    if (state) {
       state->memviol = immediate < 0;
+    }
     return scalar_buffer_address(wf, sbase_sel, aligned_base, offset, state,
                                  /*align_mask=*/3, /*size_align_mask=*/0);
   }
-  if (offset < 0)
+  if (offset < 0) {
     wf.report_undefined_behavior("negative combined scalar-memory offset");
+  }
   return aligned_base + (immediate & ~int64_t{3}) + (*soffset & ~uint32_t{3});
 }
 
@@ -69,8 +75,9 @@ void gfx11_flat_calculate_addresses(const Encoding &inst, Wavefront &wf, VectorM
   d.wf_size = wf.wf_size();
   const int64_t offset =
       inst.seg == 0 ? (inst.offset & 0xfffu) : gfx11_sign_extend(inst.offset, 13);
-  if (inst.seg == 0)
+  if (inst.seg == 0) {
     d.flat_aperture_offset = static_cast<int32_t>(offset);
+  }
 
   if (inst.seg == 1) {
     RegisterAccess regs(cu);
@@ -92,8 +99,9 @@ void gfx11_flat_calculate_addresses(const Encoding &inst, Wavefront &wf, VectorM
       vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
     }
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
+      if (!(exec & (1ULL << lane))) {
         continue;
+      }
       uint32_t vaddr = 0;
       if (inst.sve) {
         vaddr = vaddr_region->lane(0, lane);
@@ -119,8 +127,9 @@ void gfx11_flat_calculate_addresses(const Encoding &inst, Wavefront &wf, VectorM
   uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
   auto vaddr_region = regs.read_vgpr_region(vbase, gfx11_has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint64_t vaddr;
     if (gfx11_has_saddr(inst.saddr)) {
       vaddr = vaddr_region.lane(0, lane);
@@ -128,8 +137,9 @@ void gfx11_flat_calculate_addresses(const Encoding &inst, Wavefront &wf, VectorM
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
-    if (inst.seg == 0)
+    if (inst.seg == 0) {
       addr = capture_flat_private_address(wf, d, saddr_val + vaddr, lane, d.flat_aperture_offset);
+    }
     d.per_lane_addr[lane] = addr;
   }
 }

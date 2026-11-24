@@ -216,11 +216,13 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
-    if (plugins)
+    if (plugins) {
       cu->set_plugin_group(std::move(plugins));
+    }
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, wave_size);
   }
 
@@ -247,8 +249,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -296,8 +299,9 @@ public:
 std::map<std::array<uint64_t, 6>, uint64_t>
 observed_coverage(const std::vector<std::array<uint64_t, 7>> &events) {
   std::map<std::array<uint64_t, 6>, uint64_t> coverage;
-  for (const auto &event : events)
+  for (const auto &event : events) {
     coverage[{event[0], event[1], event[3], event[4], 0, event[6] & ~uint64_t(0x3f)}] |= event[2];
+  }
   return coverage;
 }
 
@@ -424,8 +428,9 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -462,11 +467,15 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
 
 // f32 ops: sweep every abs/neg/omod/clamp combination.
 void check_f32_all_mods(const Case &c, uint64_t exec) {
-  for (uint32_t abs = 0; abs < 4; ++abs)   // bits 0,1 = src0,src1
-    for (uint32_t neg = 0; neg < 4; ++neg) // bits 0,1 = src0,src1
-      for (uint32_t omod = 0; omod < 4; ++omod)
-        for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (uint32_t abs = 0; abs < 4; ++abs) {   // bits 0,1 = src0,src1
+    for (uint32_t neg = 0; neg < 4; ++neg) { // bits 0,1 = src0,src1
+      for (uint32_t omod = 0; omod < 4; ++omod) {
+        for (uint32_t clamp = 0; clamp < 2; ++clamp) {
           check(c, abs, neg, omod, clamp, exec);
+        }
+      }
+    }
+  }
 }
 
 TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_FullExec) {
@@ -474,9 +483,11 @@ TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
-    if (c.kind == Kind::F32)
+  for (const auto &c : kCases) {
+    if (c.kind == Kind::F32) {
       check_f32_all_mods(c, /*exec=*/~0ULL);
+    }
+  }
 }
 
 TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_PartialExec) {
@@ -484,9 +495,11 @@ TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
-    if (c.kind == Kind::F32)
+  for (const auto &c : kCases) {
+    if (c.kind == Kind::F32) {
       check_f32_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+    }
+  }
 }
 
 TEST(Vop3BinarySimdCorrectness, F32OmodHonorsOutputDenormAndIeeeMode) {
@@ -528,8 +541,9 @@ TEST(Vop3BinarySimdCorrectness, Int_FullAndPartialExec) {
     return;
   }
   for (const auto &c : kCases) {
-    if (c.kind != Kind::INT)
+    if (c.kind != Kind::INT) {
       continue;
+    }
     check(c, 0, 0, 0, 0, /*exec=*/~0ULL);
     check(c, 0, 0, 0, 0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
   }
@@ -547,8 +561,9 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -574,10 +589,12 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
     const uint16_t a_lo = s0 & 0xFFFFu, a_hi = static_cast<uint16_t>(s0 >> 16);
     const uint16_t b_lo = s1 & 0xFFFFu, b_hi = static_cast<uint16_t>(s1 >> 16);
     bool skip = is_f16_nan(a_lo) || is_f16_nan(a_hi) || is_f16_nan(b_lo) || is_f16_nan(b_hi);
-    if (!skip && c.minmax)
+    if (!skip && c.minmax) {
       skip = (is_f16_zero(a_lo) && is_f16_zero(b_lo)) || (is_f16_zero(a_hi) && is_f16_zero(b_hi));
-    if (skip)
+    }
+    if (skip) {
       continue;
+    }
     EXPECT_EQ(scalar_out[lane], simd_out[lane])
         << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
         << " (exec=0x" << std::hex << exec << "): SIMD path diverged from scalar body, lane "
@@ -586,11 +603,15 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
 }
 
 void check_f16_all_mods(const Case &c, uint64_t exec) {
-  for (uint32_t abs = 0; abs < 4; ++abs)
-    for (uint32_t neg = 0; neg < 4; ++neg)
-      for (uint32_t omod = 0; omod < 4; ++omod)
-        for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (uint32_t abs = 0; abs < 4; ++abs) {
+    for (uint32_t neg = 0; neg < 4; ++neg) {
+      for (uint32_t omod = 0; omod < 4; ++omod) {
+        for (uint32_t clamp = 0; clamp < 2; ++clamp) {
           check_f16(c, abs, neg, omod, clamp, exec);
+        }
+      }
+    }
+  }
 }
 
 TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_FullExec) {
@@ -598,9 +619,11 @@ TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
-    if (c.kind == Kind::F16)
+  for (const auto &c : kCases) {
+    if (c.kind == Kind::F16) {
       check_f16_all_mods(c, /*exec=*/~0ULL);
+    }
+  }
 }
 
 TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_PartialExec) {
@@ -608,9 +631,11 @@ TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
-    if (c.kind == Kind::F16)
+  for (const auto &c : kCases) {
+    if (c.kind == Kind::F16) {
       check_f16_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+    }
+  }
 }
 
 } // namespace

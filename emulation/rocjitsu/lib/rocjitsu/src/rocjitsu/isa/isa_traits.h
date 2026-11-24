@@ -185,10 +185,12 @@ arch_descriptor_sgpr_allocation_limit(rocjitsu::IsaFamily arch) {
   // scratch range in CdnaIsaBase), so they are named here rather than derived.
   constexpr uint32_t kCdnaDescriptorSgprLimit = 112;
   constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
-  if (arch_is_cdna_4_or_lower(arch))
+  if (arch_is_cdna_4_or_lower(arch)) {
     return kCdnaDescriptorSgprLimit;
-  if (arch_is_rdna(arch) || arch == rocjitsu::IsaFamily::Cdna5)
+  }
+  if (arch_is_rdna(arch) || arch == rocjitsu::IsaFamily::Cdna5) {
     return kRdnaDescriptorSgprLimit;
+  }
   return 0;
 }
 

@@ -16,12 +16,13 @@ void record_signaling_compare(Inst &inst, amdgpu::Wavefront &wf) {
     const unsigned lane = std::countr_zero(mask);
     auto is_nan = [&](const Operand &src, unsigned index) {
       typename Format::Lane bits;
-      if constexpr (Format::kWidth == 16)
+      if constexpr (Format::kWidth == 16) {
         bits = amdgpu::read_vop3_true16_src(src, wf, lane, amdgpu::vop3_opsel(inst.inst_), index);
-      else if constexpr (Format::kWidth == 64)
+      } else if constexpr (Format::kWidth == 64) {
         bits = regs.read_lane64(src, lane);
-      else
+      } else {
         bits = regs.read_lane(src, lane);
+      }
       return (bits & Format::kMagnitude) > Format::kInfinity;
     };
     if (is_nan(inst.src0, 0) || is_nan(inst.src1, 1)) {

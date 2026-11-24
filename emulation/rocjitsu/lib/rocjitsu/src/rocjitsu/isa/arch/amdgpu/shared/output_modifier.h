@@ -150,8 +150,9 @@ template <typename Fmt, typename V> constexpr V scale(V bits, const Policy &poli
   static_assert(fp_format::is_lane_v<Fmt, V>);
   using Lane = typename Fmt::Lane;
   using detail::choose;
-  if (policy.omod == 0)
+  if (policy.omod == 0) {
     return bits;
+  }
   const V magnitude = bits & Fmt::kMagnitude;
   const V exponent = magnitude >> Fmt::kMantissaBits;
   V scaled;
@@ -191,8 +192,9 @@ template <typename Fmt, typename V> constexpr V clamp(V bits, const Policy &poli
   static_assert(fp_format::is_lane_v<Fmt, V>);
   using Lane = typename Fmt::Lane;
   using detail::choose;
-  if (!policy.clamp)
+  if (!policy.clamp) {
     return bits;
+  }
   const V magnitude = bits & Fmt::kMagnitude;
   const auto negative = (bits & Fmt::kSign) != Lane{0};
   const auto is_nan = magnitude > Fmt::kInfinity;

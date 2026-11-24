@@ -33,12 +33,15 @@ namespace amdgpu {
 /// @param scope 2-bit scope value (SC1:SC0 or SCOPE field).
 /// @param nt    True if the non-temporal hint is set.
 [[nodiscard]] inline constexpr Mtype mtype_from_scope_nt(uint8_t scope, bool nt) {
-  if (nt)
+  if (nt) {
     return Mtype::NT;
-  if (scope >= 2)
+  }
+  if (scope >= 2) {
     return Mtype::UC;
-  if (scope >= 1)
+  }
+  if (scope >= 1) {
     return Mtype::CC;
+  }
   return Mtype::RW;
 }
 

@@ -33,10 +33,12 @@ inline int gfx115_interp(uint64_t flags, Mask exec, uint64_t modifiers, uint32_t
   const uint32_t *coefficient_data = coefficient.data();
   const uint32_t *addend_data = addend.data();
   flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
-  if constexpr (Rtz)
+  if constexpr (Rtz) {
     flags = (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO;
-  if constexpr (Half)
+  }
+  if constexpr (Half) {
     modifiers |= RJ_ARITH_MIX_F16_A | (P2 ? 0 : RJ_ARITH_MIX_F16_C);
+  }
   const bool high = modifiers & RJ_ARITH_ALU_HIGH_D;
   modifiers &= ~RJ_ARITH_ALU_HIGH_D;
   if constexpr (width == 32) {
@@ -60,28 +62,35 @@ inline void execute_interp(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64
                            uint64_t modifiers, const Operand &destination, const Operand &lhs,
                            const Operand &rhs, const Operand &third) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   const uint64_t quads =
       (exec_mask | (exec_mask >> 1) | (exec_mask >> 2) | (exec_mask >> 3)) & 0x1111111111111111ULL;
-  if (Half && wave.fp16_ovfl())
+  if (Half && wave.fp16_ovfl()) {
     flags |= RJ_ARITH_FP16_OVFL;
+  }
   const bool guest_controls = wave.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
                               wave.cu().arch() == rocjitsu::IsaFamily::Rdna3_5;
-  if (!guest_controls || wave.ieee_mode())
+  if (!guest_controls || wave.ieee_mode()) {
     flags |= RJ_ARITH_FP_IEEE_MODE;
-  if (guest_controls && !wave.dx10_clamp())
+  }
+  if (guest_controls && !wave.dx10_clamp()) {
     flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
   const auto denorm32 = wave.fp_denorm_mode_f32();
   const auto denorm16 = wave.fp_denorm_mode_f16_f64();
   flags |= uint64_t(Half && P2 ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32()) << 24;
-  if (!(denorm32 & 1))
+  if (!(denorm32 & 1)) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
-  if (Half && ((denorm16 ^ denorm32) & 1))
+  }
+  if (Half && ((denorm16 ^ denorm32) & 1)) {
     flags |= denorm16 & 1 ? RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16
                           : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16;
-  if (!((Half && P2 ? denorm16 : denorm32) & 2))
+  }
+  if (!((Half && P2 ? denorm16 : denorm32) & 2)) {
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, lhs, quads << (P2 ? 2 : 1),
                   Half ? (modifiers & RJ_ARITH_ALU_HIGH_A ? 0xc : 0x3) : 0xf);

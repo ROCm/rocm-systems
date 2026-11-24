@@ -116,8 +116,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop_alias_rdna", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -144,8 +145,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     Result res;
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       res.dst[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     res.vcc = wf->vcc();
     return res;
   }
@@ -210,8 +212,9 @@ void check_case(const VopCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint64_t vcc_in, uint32_t rot) -> Fixture::Result {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -273,8 +276,9 @@ TEST(VopAliasRdnaSimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/0x00000000FFFFFFFFULL);
+  }
 }
 
 TEST(VopAliasRdnaSimdCorrectness, PartialExec) {
@@ -282,8 +286,9 @@ TEST(VopAliasRdnaSimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/0x00000000A5A5F0F1ULL);
+  }
 }
 
 } // namespace

@@ -31,12 +31,15 @@ namespace amdgpu {
 /// @param dlc Data Level Coherent.
 /// @param slc System Level Coherent (used as non-temporal hint).
 [[nodiscard]] inline constexpr Mtype mtype_from_flags_gfx10(bool glc, bool dlc, bool slc) {
-  if (slc)
+  if (slc) {
     return Mtype::NT;
-  if (glc && dlc)
+  }
+  if (glc && dlc) {
     return Mtype::UC;
-  if (glc || dlc)
+  }
+  if (glc || dlc) {
     return Mtype::CC;
+  }
   return Mtype::RW;
 }
 

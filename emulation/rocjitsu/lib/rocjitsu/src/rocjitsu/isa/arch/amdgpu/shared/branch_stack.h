@@ -37,22 +37,26 @@ inline constexpr uint32_t kBranchStackDepth = 6;
 /// @details Out-of-allocation SGPR writes are dropped and reads return zero, so
 /// the matching join would resume at address 0 with EXEC cleared.
 inline void check_branch_stack_entry_allocated(const Wavefront &wf, uint32_t physical_sgpr) {
-  if (!wf.sgpr_alloc().contains(physical_sgpr, 4))
+  if (!wf.sgpr_alloc().contains(physical_sgpr, 4)) {
     wf.report_undefined_behavior("branch stack entry lies outside the wave's SGPR allocation");
+  }
 }
 
 /// @brief Push @p entry at MODE.CSP, then increment CSP.
 inline void push_branch_stack(Wavefront &wf, BranchStackEntry entry) {
   const uint32_t csp = wf.cond_stack_ptr();
-  if (csp >= kBranchStackDepth)
+  if (csp >= kBranchStackDepth) {
     wf.report_undefined_behavior("fork pushes past the six-entry branch stack");
+  }
   const uint32_t physical_sgpr = branch_stack_entry_physical_sgpr(wf, csp);
   check_branch_stack_entry_allocated(wf, physical_sgpr);
   RegisterAccess regs(wf);
-  if (regs.write_sgpr64(physical_sgpr, entry.lanes).failed())
+  if (regs.write_sgpr64(physical_sgpr, entry.lanes).failed()) {
     return;
-  if (regs.write_sgpr64(physical_sgpr + 2, entry.resume_pc).failed())
+  }
+  if (regs.write_sgpr64(physical_sgpr + 2, entry.resume_pc).failed()) {
     return;
+  }
   wf.set_cond_stack_ptr(csp + 1);
 }
 
@@ -81,8 +85,9 @@ struct BranchStackAccess {
 /// @details Uses the wave state before the fork executes.
 [[nodiscard]] inline std::optional<BranchStackAccess> fork_stack_access(const Wavefront &wf,
                                                                         uint64_t compare) {
-  if (fork_is_uniform(wf.exec_raw(), compare))
+  if (fork_is_uniform(wf.exec_raw(), compare)) {
     return std::nullopt;
+  }
   return BranchStackAccess{wf.cond_stack_ptr() * 4, /*write=*/true};
 }
 
@@ -91,8 +96,9 @@ struct BranchStackAccess {
 [[nodiscard]] inline std::optional<BranchStackAccess> join_stack_access(const Wavefront &wf,
                                                                         uint32_t saved_csp) {
   const uint32_t csp = wf.cond_stack_ptr();
-  if (csp == saved_csp)
+  if (csp == saved_csp) {
     return std::nullopt;
+  }
   constexpr uint32_t kCspWrapMask = Wavefront::CSP_MASK >> Wavefront::CSP_SHIFT;
   return BranchStackAccess{((csp - 1) & kCspWrapMask) * 4, /*write=*/false};
 }
@@ -113,8 +119,9 @@ struct BranchStackAccess {
   const uint64_t fail = ~compare & exec;
 
   // Case 1: Every lane takes the same route
-  if (fork_is_uniform(exec, compare))
+  if (fork_is_uniform(exec, compare)) {
     return pass == exec ? target : next_pc;
+  }
 
   // Case 2: Run the side with fewer active lanes first (tie is broken by the pass side)
   const bool fail_runs_first = std::popcount(fail) < std::popcount(pass);
@@ -135,11 +142,13 @@ struct BranchStackAccess {
 /// @param next_pc Fall-through PC, the address of the instruction after the join.
 /// @returns Address of the next instruction to execute.
 [[nodiscard]] inline uint64_t cbranch_join(Wavefront &wf, uint32_t saved_csp, uint64_t next_pc) {
-  if (wf.cond_stack_ptr() == saved_csp) // second arrival
+  if (wf.cond_stack_ptr() == saved_csp) { // second arrival
     return next_pc;
+  }
   // Below the saved value, no entry of the matching fork is left to pop.
-  if (wf.cond_stack_ptr() < saved_csp)
+  if (wf.cond_stack_ptr() < saved_csp) {
     wf.report_undefined_behavior("join finds MODE.CSP below its saved value");
+  }
 
   // first arrival
   const BranchStackEntry waiting = pop_branch_stack(wf);

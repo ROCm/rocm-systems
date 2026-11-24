@@ -119,10 +119,11 @@ constexpr auto evaluate(V a, V b, const input_denormal::Policy &policy) {
   b = input_denormal::prepare<Fmt>(b, policy);
   const auto ordered = !(is_nan<Fmt>(a) || is_nan<Fmt>(b));
   const auto holds = ordered && typename Rel::Operation{}(order_key<Fmt>(a), order_key<Fmt>(b));
-  if constexpr (Rel::kNegated)
+  if constexpr (Rel::kNegated) {
     return !holds;
-  else
+  } else {
     return holds;
+  }
 }
 
 /// @brief Evaluate a relation after applying per-source VOP3 modifiers.

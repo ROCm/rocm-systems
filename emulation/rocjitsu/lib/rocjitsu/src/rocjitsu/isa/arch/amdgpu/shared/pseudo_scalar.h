@@ -41,30 +41,34 @@ inline float quiet_nan(float value) {
   uint32_t bits = std::bit_cast<uint32_t>(value);
   // Test signaling NaNs specifically: a general NaN check can become a host
   // floating-point comparison that raises FE_INVALID before the quieting step.
-  if ((bits & 0x7fc00000u) == 0x7f800000u && (bits & 0x003fffffu) != 0)
+  if ((bits & 0x7fc00000u) == 0x7f800000u && (bits & 0x003fffffu) != 0) {
     bits |= 0x00400000u;
+  }
   return std::bit_cast<float>(bits);
 }
 
 inline EvaluationResult apply_output_modifiers(EvaluationResult result, uint32_t omod, bool clamp) {
   const double unmodified_value = result.value;
-  if (omod == 1)
+  if (omod == 1) {
     result.value *= 2.0;
-  else if (omod == 2)
+  } else if (omod == 2) {
     result.value *= 4.0;
-  else if (omod == 3)
+  } else if (omod == 3) {
     result.value *= 0.5;
+  }
 
   if (result.provenance == ResultProvenance::VALUE && std::isfinite(unmodified_value) &&
       unmodified_value != 0.0) {
-    if (std::isinf(result.value))
+    if (std::isinf(result.value)) {
       result.provenance = ResultProvenance::FINITE_OVERFLOW;
-    else if (result.value == 0.0)
+    } else if (result.value == 0.0) {
       result.provenance = ResultProvenance::FINITE_UNDERFLOW;
+    }
   }
 
-  if (omod != 0 && result.value == 0.0 && result.provenance == ResultProvenance::VALUE)
+  if (omod != 0 && result.value == 0.0 && result.provenance == ResultProvenance::VALUE) {
     result.value = 0.0;
+  }
 
   if (clamp) {
     const bool negative_underflow =
@@ -95,29 +99,35 @@ inline uint32_t saturated_f32(EvaluationResult result, uint32_t round_mode) {
 }
 
 inline uint32_t round_f64_to_f32(EvaluationResult result, uint32_t round_mode) {
-  if (result.provenance == ResultProvenance::INVALID_DOMAIN)
+  if (result.provenance == ResultProvenance::INVALID_DOMAIN) {
     return 0xffc00000u;
-  if (result.provenance != ResultProvenance::VALUE)
+  }
+  if (result.provenance != ResultProvenance::VALUE) {
     return saturated_f32(result, round_mode);
+  }
 
   float rounded = static_cast<float>(result.value);
   if ((round_mode & 3u) == 0 || std::isnan(result.value) ||
-      static_cast<double>(rounded) == result.value)
+      static_cast<double>(rounded) == result.value) {
     return std::bit_cast<uint32_t>(rounded);
+  }
 
   switch (round_mode & 3u) {
   case 1:
-    if (static_cast<double>(rounded) < result.value)
+    if (static_cast<double>(rounded) < result.value) {
       rounded = std::nextafter(rounded, std::numeric_limits<float>::infinity());
+    }
     break;
   case 2:
-    if (static_cast<double>(rounded) > result.value)
+    if (static_cast<double>(rounded) > result.value) {
       rounded = std::nextafter(rounded, -std::numeric_limits<float>::infinity());
+    }
     break;
   case 3:
     if ((result.value > 0.0 && static_cast<double>(rounded) > result.value) ||
-        (result.value < 0.0 && static_cast<double>(rounded) < result.value))
+        (result.value < 0.0 && static_cast<double>(rounded) < result.value)) {
       rounded = std::nextafter(rounded, 0.0f);
+    }
     break;
   default:
     break;
@@ -126,22 +136,28 @@ inline uint32_t round_f64_to_f32(EvaluationResult result, uint32_t round_mode) {
 }
 
 inline uint16_t next_up_f16(uint16_t value) {
-  if ((value & 0x7fffu) > 0x7c00u || value == 0x7c00u)
+  if ((value & 0x7fffu) > 0x7c00u || value == 0x7c00u) {
     return value;
-  if (value == 0xfc00u)
+  }
+  if (value == 0xfc00u) {
     return 0xfbffu;
-  if ((value & 0x7fffu) == 0)
+  }
+  if ((value & 0x7fffu) == 0) {
     return 0x0001u;
+  }
   return static_cast<uint16_t>((value & 0x8000u) != 0 ? value - 1u : value + 1u);
 }
 
 inline uint16_t next_down_f16(uint16_t value) {
-  if ((value & 0x7fffu) > 0x7c00u || value == 0xfc00u)
+  if ((value & 0x7fffu) > 0x7c00u || value == 0xfc00u) {
     return value;
-  if (value == 0x7c00u)
+  }
+  if (value == 0x7c00u) {
     return 0x7bffu;
-  if ((value & 0x7fffu) == 0)
+  }
+  if ((value & 0x7fffu) == 0) {
     return 0x8001u;
+  }
   return static_cast<uint16_t>((value & 0x8000u) != 0 ? value + 1u : value - 1u);
 }
 
@@ -156,20 +172,24 @@ inline uint16_t saturated_f16(EvaluationResult result, uint32_t round_mode, bool
 
   const bool rounds_to_infinity = (round_mode & 3u) == 0 || (!negative && (round_mode & 3u) == 1) ||
                                   (negative && (round_mode & 3u) == 2);
-  if (fp16_ovfl || !rounds_to_infinity)
+  if (fp16_ovfl || !rounds_to_infinity) {
     return static_cast<uint16_t>(sign | 0x7bffu);
+  }
   return static_cast<uint16_t>(sign | 0x7c00u);
 }
 
 inline uint16_t round_f64_to_f16(EvaluationResult result, uint32_t round_mode, bool fp16_ovfl) {
-  if (result.provenance == ResultProvenance::INVALID_DOMAIN)
+  if (result.provenance == ResultProvenance::INVALID_DOMAIN) {
     return 0xfe00u;
-  if (result.provenance != ResultProvenance::VALUE)
+  }
+  if (result.provenance != ResultProvenance::VALUE) {
     return saturated_f16(result, round_mode, fp16_ovfl);
+  }
 
   const double value = result.value;
-  if (std::isnan(value) || std::isinf(value))
+  if (std::isnan(value) || std::isinf(value)) {
     return util::f32_to_f16(static_cast<float>(value));
+  }
 
   constexpr double MAX_F16 = 65504.0;
   constexpr double RNE_OVERFLOW_THRESHOLD = 65520.0;
@@ -189,15 +209,17 @@ inline uint16_t round_f64_to_f16(EvaluationResult result, uint32_t round_mode, b
     default:
       break;
     }
-    if (to_infinity && !fp16_ovfl)
+    if (to_infinity && !fp16_ovfl) {
       return negative ? 0xfc00u : 0x7c00u;
+    }
     return negative ? 0xfbffu : 0x7bffu;
   }
 
   const uint16_t candidate = util::f32_to_f16(static_cast<float>(value));
   const double candidate_value = util::f16_to_f32(candidate);
-  if (candidate_value == value)
+  if (candidate_value == value) {
     return candidate;
+  }
 
   const uint16_t lower = candidate_value < value ? candidate : next_down_f16(candidate);
   const uint16_t upper = candidate_value > value ? candidate : next_up_f16(candidate);
@@ -206,10 +228,12 @@ inline uint16_t round_f64_to_f16(EvaluationResult result, uint32_t round_mode, b
   case 0: {
     const double lower_distance = value - util::f16_to_f32(lower);
     const double upper_distance = util::f16_to_f32(upper) - value;
-    if (lower_distance < upper_distance)
+    if (lower_distance < upper_distance) {
       return lower;
-    if (upper_distance < lower_distance)
+    }
+    if (upper_distance < lower_distance) {
       return upper;
+    }
     return (lower & 1u) == 0 ? lower : upper;
   }
   case 1:
@@ -225,10 +249,12 @@ inline uint16_t round_f64_to_f16(EvaluationResult result, uint32_t round_mode, b
 
 inline float apply_source_modifiers(float value, bool absolute, bool negate) {
   uint32_t bits = std::bit_cast<uint32_t>(value);
-  if (absolute)
+  if (absolute) {
     bits &= 0x7fffffffu;
-  if (negate)
+  }
+  if (negate) {
     bits ^= 0x80000000u;
+  }
   return std::bit_cast<float>(bits);
 }
 
@@ -291,11 +317,13 @@ inline uint32_t execute_f32(Operation operation, float source, bool absolute, bo
   detail::EvaluationResult value = detail::apply_output_modifiers(evaluated, omod, clamp);
   // Output scaling is exact in F64. Detect F32 overflow before narrowing,
   // so directed host rounding cannot replace the required infinity with a finite value.
-  if (std::isfinite(value.value) && std::abs(value.value) > std::numeric_limits<float>::max())
+  if (std::isfinite(value.value) && std::abs(value.value) > std::numeric_limits<float>::max()) {
     value.provenance = detail::ResultProvenance::FINITE_OVERFLOW;
+  }
   uint32_t result = detail::round_f64_to_f32(value, 0);
-  if ((result & 0x7f800000u) == 0 && (result & 0x007fffffu) != 0)
+  if ((result & 0x7f800000u) == 0 && (result & 0x007fffffu) != 0) {
     result &= 0x80000000u;
+  }
   return result;
 }
 

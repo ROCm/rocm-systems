@@ -189,7 +189,7 @@ TEST(OperandLayoutTest, DecodedVectorRegistersExcludeScalarAndLiteralSelectors) 
 
 TEST(OperandLayoutTest, DecodedVectorIdentityCoversEverySelectorType) {
   auto check = []<typename Op, typename Type>(Type last_type) {
-    for (int type = 0; type <= static_cast<int>(last_type); ++type)
+    for (int type = 0; type <= static_cast<int>(last_type); ++type) {
       for (int selector = 0; selector < 1024; ++selector) {
         Op operand(64, static_cast<Type>(type), selector);
         auto expected = operand.to_register_ref();
@@ -197,10 +197,12 @@ TEST(OperandLayoutTest, DecodedVectorIdentityCoversEverySelectorType) {
           expected->cls = RegClass::VGPR;
           expected->index += 256;
         }
-        if (expected && expected->cls != RegClass::VGPR)
+        if (expected && expected->cls != RegClass::VGPR) {
           expected.reset();
+        }
         ASSERT_EQ(operand.decoded_vgpr(), expected) << "type=" << type << " selector=" << selector;
       }
+    }
   };
   check.operator()<cdna1::Operand>(cdna1::OperandType::OPR_WAITCNT);
   check.operator()<cdna4::Operand>(cdna4::OperandType::OPR_WAITCNT);
@@ -477,15 +479,17 @@ TEST(DecoderSmokeTest, Gfx90aRejectsUnassignedImageAndFlatEncodings) {
       std::array{0xdd088000u, 0x007f0000u}, // global_atomic_add
       std::array{0xdc504000u, 0x007f0000u}, // scratch_load_dword
   };
-  for (const auto &words : valid)
+  for (const auto &words : valid) {
     EXPECT_TRUE(decoder->decode_window(words).succeeded()) << std::hex << words[0];
+  }
   constexpr std::array invalid = {
       std::array{0xf0000101u, 0x00020000u}, // unassigned MIMG opcode 128
       std::array{0xdd084000u, 0x007f0000u}, // scratch has no atomic_add
       std::array{0xdc50c000u, 0x007f0000u}, // reserved segment 3
   };
-  for (const auto &words : invalid)
+  for (const auto &words : invalid) {
     EXPECT_TRUE(decoder->decode_window(words).failed()) << std::hex << words[0];
+  }
 }
 
 TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
@@ -784,10 +788,10 @@ TEST(DecoderSmokeTest, Gfx1201ImageDataWidthUsesMaskPackingAndStatus) {
       {"sample_cd_cl_g16", rdna4::kImageSampleCDClG16Vsample, false, true, false, true},
   };
   auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
-  for (uint8_t mask : {0, 1, 3, 5, 7, 15})
-    for (uint8_t d16 : {0, 1})
-      for (uint8_t tfe : {0, 1})
-        for (uint8_t lwe : {0, 1})
+  for (uint8_t mask : {0, 1, 3, 5, 7, 15}) {
+    for (uint8_t d16 : {0, 1}) {
+      for (uint8_t tfe : {0, 1}) {
+        for (uint8_t lwe : {0, 1}) {
           for (const auto &tc : cases) {
             SCOPED_TRACE(mask);
             SCOPED_TRACE(d16);
@@ -795,8 +799,9 @@ TEST(DecoderSmokeTest, Gfx1201ImageDataWidthUsesMaskPackingAndStatus) {
             SCOPED_TRACE(tc.name);
             SCOPED_TRACE(lwe);
             // Gather selects one channel but always returns four texels.
-            if (tc.gather && std::popcount(mask) != 1)
+            if (tc.gather && std::popcount(mask) != 1) {
               continue;
+            }
             const auto words =
                 tc.vsample
                     ? rdna4::build_vsample(
@@ -819,6 +824,10 @@ TEST(DecoderSmokeTest, Gfx1201ImageDataWidthUsesMaskPackingAndStatus) {
             EXPECT_EQ(reg->index, 8u);
             EXPECT_EQ(reg->width, registers);
           }
+        }
+      }
+    }
+  }
 }
 
 TEST(DecoderSmokeTest, MultiPixelImageLoadsRetainConservativeDataFootprint) {
@@ -836,8 +845,8 @@ TEST(DecoderSmokeTest, MultiPixelImageLoadsRetainConservativeDataFootprint) {
     SCOPED_TRACE(static_cast<unsigned>(tc.arch));
     SCOPED_TRACE(tc.opcode);
     auto decoder = Decoder::create(tc.arch);
-    for (uint8_t mask : {1, 5})
-      for (uint8_t d16 : {0, 1})
+    for (uint8_t mask : {1, 5}) {
+      for (uint8_t d16 : {0, 1}) {
         for (uint8_t tfe : {0, 1}) {
           SCOPED_TRACE(testing::Message()
                        << "dmask=" << +mask << " d16=" << +d16 << " tfe=" << +tfe);
@@ -857,6 +866,8 @@ TEST(DecoderSmokeTest, MultiPixelImageLoadsRetainConservativeDataFootprint) {
               def_use.defs.contains({RegClass::VGPR, static_cast<uint16_t>(8 + width), 1}));
           EXPECT_TRUE(def_use.has_predicated_def);
         }
+      }
+    }
   }
 }
 
@@ -865,20 +876,22 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
   for (auto arch :
        {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Rdna1,
         rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
-        rocjitsu::IsaFamily::Rdna4})
-    for (bool compare_swap : {false, true})
-      for (bool wide : {false, true})
+        rocjitsu::IsaFamily::Rdna4}) {
+    for (bool compare_swap : {false, true}) {
+      for (bool wide : {false, true}) {
         for (uint8_t return_control = 0;
-             return_control < (arch == rocjitsu::IsaFamily::Rdna4 ? 8 : 2); ++return_control)
+             return_control < (arch == rocjitsu::IsaFamily::Rdna4 ? 8 : 2); ++return_control) {
           for (bool tfe : {false, true}) {
             const bool split = arch == rocjitsu::IsaFamily::Rdna4;
             const uint8_t th = split ? return_control : 0;
             const bool returns =
                 split ? (th & amdgpu::GFX12_TH_ATOMIC_RETURN) != 0 : return_control != 0;
-            if (tfe && !returns)
+            if (tfe && !returns) {
               continue; // Qualify TFE status together with a returned value.
-            if (tfe && arch == rocjitsu::IsaFamily::Cdna2)
+            }
+            if (tfe && arch == rocjitsu::IsaFamily::Cdna2) {
               continue; // This encoding has no TFE field.
+            }
             SCOPED_TRACE(static_cast<unsigned>(arch));
             SCOPED_TRACE(compare_swap);
             SCOPED_TRACE(wide);
@@ -891,8 +904,9 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
             auto assign = [&](auto encoded) { words.assign(encoded.begin(), encoded.end()); };
             auto encode_mimg = [&](auto fields, auto builder, auto opcode) {
               fields.dmask = mask;
-              if constexpr (requires { fields.tfe; })
+              if constexpr (requires { fields.tfe; }) {
                 fields.tfe = tfe;
+              }
               fields.glc = returns;
               fields.vdata = 8;
               assign(builder(opcode, fields));
@@ -966,6 +980,10 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
               EXPECT_EQ(def_use.defs.contains(reg), returns && word < result_words + tfe);
             }
           }
+        }
+      }
+    }
+  }
 }
 
 TEST(Cdna1DecodeTest, PackedImageLoadMasksThePayloadBeforeTfeStatus) {
@@ -1007,11 +1025,12 @@ TEST(DecoderSmokeTest, LegacyImageLoadWidthsUseMaskPackingAndStatus) {
        {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Rdna1,
         rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     auto decoder = Decoder::create(arch);
-    for (uint8_t mask : {1, 3, 9, 15})
-      for (uint8_t d16 : {0, 1})
+    for (uint8_t mask : {1, 3, 9, 15}) {
+      for (uint8_t d16 : {0, 1}) {
         for (uint8_t tfe : {0, 1}) {
-          if (arch == rocjitsu::IsaFamily::Cdna2 && tfe)
+          if (arch == rocjitsu::IsaFamily::Cdna2 && tfe) {
             continue; // This encoding has no TFE field.
+          }
           SCOPED_TRACE(static_cast<unsigned>(arch));
           SCOPED_TRACE(mask);
           SCOPED_TRACE(d16);
@@ -1019,8 +1038,9 @@ TEST(DecoderSmokeTest, LegacyImageLoadWidthsUseMaskPackingAndStatus) {
           auto encode = [&](auto fields, auto builder) {
             fields.dmask = mask;
             fields.d16 = d16;
-            if constexpr (requires { fields.tfe; })
+            if constexpr (requires { fields.tfe; }) {
               fields.tfe = tfe;
+            }
             fields.vdata = 8;
             return builder(0, fields); // IMAGE_LOAD
           };
@@ -1054,6 +1074,8 @@ TEST(DecoderSmokeTest, LegacyImageLoadWidthsUseMaskPackingAndStatus) {
           const unsigned registers = (d16 ? (channels + 1) / 2 : channels) + tfe;
           EXPECT_EQ(decoded.value()->dst_operand(0)->size_bits(), registers * 32);
         }
+      }
+    }
   }
 }
 
@@ -1312,8 +1334,9 @@ TEST(OperandSelectorDecodeTest, RestrictedVectorAndLaneOperandsRejectLiteralMark
 
   const auto expect_rejected = [&](const auto &encoding) {
     std::array<uint32_t, 4> words{};
-    for (size_t i = 0; i < encoding.size(); ++i)
+    for (size_t i = 0; i < encoding.size(); ++i) {
       words[i] = encoding[i];
+    }
     words[encoding.size()] = 7;
     words[encoding.size() + 1] = 0;
     EXPECT_TRUE(decode_fails(*decoder, words.data()));
@@ -1576,8 +1599,9 @@ TEST(Rdna35FuzzDecodeTest, PreservesRoundTripSignificantSyntax) {
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->size(), test.size) << test.disassembly;
     EXPECT_EQ(inst->disassemble(), test.disassembly);
-    for (int word = 0; word < test.size / 4; ++word)
+    for (int word = 0; word < test.size / 4; ++word) {
       EXPECT_EQ(inst->raw_encoding()[word], test.words[word]) << test.disassembly;
+    }
   }
 }
 
@@ -1629,10 +1653,12 @@ TEST(DecoderSmokeTest, InterpP2F16SelectsCoefficientAndDestinationHalvesIndepend
         ASSERT_TRUE(decoded.succeeded());
         const auto &inst = *decoded.value();
         std::string expected = "v_interp_p2_f16 v5, -v2, attr0.x, v3";
-        if (coefficient_high)
+        if (coefficient_high) {
           expected += " high";
-        if (destination_high)
+        }
+        if (destination_high) {
           expected += " op_sel:[0,0,0,1]";
+        }
         EXPECT_EQ(inst.disassemble(), expected);
         ASSERT_EQ(inst.num_dst_operands(), 1u);
         EXPECT_EQ(inst.dst_operand(0)->register_byte_mask(), destination_high ? 0xc : 0x3);
@@ -1740,11 +1766,12 @@ TEST(RdnaMimgDecodeTest, BvhWidthsAndDependenciesIgnoreDimSizing) {
               .nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1, .nsa_word = nsa_word};
           util::StringDiagnostic error;
           auto decoded = [&]() -> DecodeResult {
-            if (arch == rocjitsu::IsaFamily::Rdna3)
+            if (arch == rocjitsu::IsaFamily::Rdna3) {
               return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
                   *decoder, rdna3::build_mimg,
                   bvh64 ? rdna3::kImageBvh64IntersectRayMimg : rdna3::kImageBvhIntersectRayMimg,
                   mimg, error.emitter());
+            }
             return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
                 *decoder, rdna3_5::build_mimg,
                 bvh64 ? rdna3_5::kImageBvh64IntersectRayMimg : rdna3_5::kImageBvhIntersectRayMimg,
@@ -1791,8 +1818,9 @@ TEST(Rdna35MimgDecodeTest, PartialNsaUsesOneExtensionDword) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->size(), 12);
     EXPECT_EQ(inst->disassemble(), test.disassembly);
-    for (int word = 0; word < 3; ++word)
+    for (int word = 0; word < 3; ++word) {
       EXPECT_EQ(inst->raw_encoding()[word], test.words[word]);
+    }
 
     std::unique_ptr<Instruction> next(decode_valid(*decoder, test.words.data() + 3));
     ASSERT_NE(next, nullptr);
@@ -2023,8 +2051,9 @@ TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing
 
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kSeed = 0xC0FFEE00u;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     cu->write_vgpr(vb + 0, lane, kSeed);
+  }
 
   // Fieldless placeholder at encoding 0 (would resolve to v0 if not inert).
   rdna4::Operand vaddr32(32, rdna4::OperandType::OPR_VGPR, 0);
@@ -2038,8 +2067,9 @@ TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing
   std::array<uint32_t, 4> chunk{0x11u, 0x22u, 0x33u, 0x44u};
   amdgpu::RegisterAccess(*wf).read_chunk(vaddr32, 0, static_cast<uint32_t>(chunk.size()),
                                          chunk.data());
-  for (uint32_t v : chunk)
+  for (uint32_t v : chunk) {
     EXPECT_EQ(v, 0u);
+  }
 
   // Writes / chunk-writes leave the seeded register untouched.
   amdgpu::RegisterAccess(*wf).write_scalar(vaddr32, 0xBADBAD00u);
@@ -2047,8 +2077,9 @@ TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing
   const std::array<uint32_t, 4> wvals{1u, 2u, 3u, 4u};
   amdgpu::RegisterAccess(*wf).write_chunk(vaddr32, 0, static_cast<uint32_t>(wvals.size()),
                                           wvals.data(), 0xFull);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(vb + 0, lane), kSeed) << "lane " << lane;
+  }
 
   // Control: an identical but field-bearing v0 DOES write, proving the guard
   // (not the fixture) is what makes the placeholder inert.
@@ -2065,8 +2096,9 @@ TEST(FieldlessOperandDecodeTest, PlaceholderVaddrInertButSimm32StaysValueBearing
   std::array<uint32_t, 4> simm_chunk{0u, 0u, 0u, 0u};
   amdgpu::RegisterAccess(*wf).read_chunk(simm, 0, static_cast<uint32_t>(simm_chunk.size()),
                                          simm_chunk.data());
-  for (uint32_t v : simm_chunk)
+  for (uint32_t v : simm_chunk) {
     EXPECT_EQ(v, 0x1234u);
+  }
 }
 
 std::unique_ptr<Instruction> decode_one(rocjitsu::IsaFamily arch,
@@ -2091,13 +2123,15 @@ TEST(WaveMaskOperandDecodeTest, RdnaVop3SgprPairDestinationsAreWaveMasks) {
       // GFX10+ VOP3: encoding 53 in [31:26], opcode in [25:16].
       const std::array<uint32_t, 4> words{(53u << 26) | (opcode << 16)};
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-      if (inst == nullptr)
+      if (inst == nullptr) {
         continue;
+      }
       for (int i = 0; i < inst->num_dst_operands(); ++i) {
         const Operand *op = inst->dst_operand(i);
         const std::optional<RegisterRef> ref = op != nullptr ? op->to_register_ref() : std::nullopt;
-        if (!ref || ref->cls != RegClass::SGPR || ref->width < 2)
+        if (!ref || ref->cls != RegClass::SGPR || ref->width < 2) {
           continue;
+        }
         reached_compare |= inst->mnemonic() == "v_cmp_eq_u32";
         reached_carry_out |= inst->mnemonic() == "v_add_co_u32";
         EXPECT_TRUE(op->is_wave_mask())
@@ -2127,11 +2161,13 @@ TEST(WaveMaskOperandDecodeTest, Rdna1And2SdwaCompareDestinationFollowsSd) {
         const std::array<uint32_t, 4> words{(0x3Eu << 25) | (opcode << 17) | (2u << 9) | 249u,
                                             0x06060001u | (sd ? (1u << 15) | (2u << 8) : 0u)};
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-        if (inst == nullptr || !inst->mnemonic().ends_with("_sdwa"))
+        if (inst == nullptr || !inst->mnemonic().ends_with("_sdwa")) {
           continue;
+        }
         const bool cmpx = inst->mnemonic().starts_with("v_cmpx_");
-        if (sd && cmpx)
+        if (sd && cmpx) {
           continue;
+        }
         ++checked;
         const Operand *dst = inst->dst_operand(0);
         ASSERT_NE(dst, nullptr) << inst->mnemonic();
@@ -2185,8 +2221,9 @@ TEST(WaveMaskOperandDecodeTest, Gfx1250VopdCndmaskSelectorIsWaveMask) {
     int marked = 0;
     for (int i = 0; i < inst->num_src_operands(); ++i) {
       const Operand *op = inst->src_operand(i);
-      if (op == nullptr || !op->is_wave_mask())
+      if (op == nullptr || !op->is_wave_mask()) {
         continue;
+      }
       ++marked;
       const std::optional<RegisterRef> ref = op->to_register_ref();
       ASSERT_TRUE(ref.has_value());
@@ -2217,15 +2254,18 @@ TEST(WaveMaskOperandDecodeTest, Rdna4MarksOnlyEncodedLaneMasks) {
     ASSERT_NE(inst, nullptr);
     int fieldless_vcc = 0;
     auto expect_unmarked = [&](const Operand *op) {
-      if (op == nullptr || !op->is_fieldless() || op->to_special_reg_class() != RegClass::VCC)
+      if (op == nullptr || !op->is_fieldless() || op->to_special_reg_class() != RegClass::VCC) {
         return;
+      }
       ++fieldless_vcc;
       EXPECT_FALSE(op->is_wave_mask());
     };
-    for (int i = 0; i < inst->num_dst_operands(); ++i)
+    for (int i = 0; i < inst->num_dst_operands(); ++i) {
       expect_unmarked(inst->dst_operand(i));
-    for (int i = 0; i < inst->num_src_operands(); ++i)
+    }
+    for (int i = 0; i < inst->num_src_operands(); ++i) {
       expect_unmarked(inst->src_operand(i));
+    }
     EXPECT_EQ(fieldless_vcc, 1);
   }
 }
@@ -2272,8 +2312,9 @@ TEST(CdnaF16DeclaredLiteralDecodeTest, MasksExtensionToDeclaredOperandWidth) {
     for (uint8_t i = 0; i < inst->num_src_operands(); ++i) {
       const Operand *src = inst->src_operand(i);
       ASSERT_NE(src, nullptr);
-      if (src->name() != "0x3e00")
+      if (src->name() != "0x3e00") {
         continue;
+      }
       found_literal = true;
       EXPECT_EQ(static_cast<uint32_t>(src->encoding_value()), 0x3E00u);
     }
@@ -2425,11 +2466,12 @@ TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
   EXPECT_EQ(inst->num_src_operands(), 2);
   {
     int fieldless_srcs = 0;
-    for (int i = 0; i < inst->num_src_operands(); ++i)
+    for (int i = 0; i < inst->num_src_operands(); ++i) {
       if (inst->src_operand(i)->is_fieldless()) {
         ++fieldless_srcs;
         EXPECT_FALSE(inst->src_operand(i)->to_register_ref());
       }
+    }
     EXPECT_EQ(fieldless_srcs, 1);
   }
 
@@ -2505,15 +2547,17 @@ TEST(InstructionDisassemblyTest, ConcurrentFormattingReturnsIndependentText) {
         }
       });
     }
-    for (auto &thread : threads)
+    for (auto &thread : threads) {
       thread.join();
+    }
 
     text[0].clear();
     EXPECT_EQ(inst->disassemble(), tc.expected);
     inst.reset();
     decoder.reset();
-    for (size_t i = 1; i < thread_count; ++i)
+    for (size_t i = 1; i < thread_count; ++i) {
       EXPECT_EQ(text[i], tc.expected);
+    }
   }
 }
 
@@ -2982,8 +3026,9 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskAfterScalarVccMergeViaCuStep) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(kExecMask);
 
-  for (uint32_t i = 0; i < kWords.size(); ++i)
+  for (uint32_t i = 0; i < kWords.size(); ++i) {
     gpu_mem.write32(i * sizeof(uint32_t), kWords[i]);
+  }
 
   const uint32_t sb = wf->sgpr_alloc().base;
   const uint32_t vb = wf->vgpr_alloc().base;
@@ -3083,8 +3128,9 @@ TEST_P(VopdExecutionFailureTest, UnsupportedSlotCommitsNeitherDestination) {
       wf->set_vcc(0x87654321);
       wf->write_scc(1);
       for (uint32_t lane = 0; lane < 32; ++lane) {
-        for (uint32_t reg = 0; reg < 5; ++reg)
+        for (uint32_t reg = 0; reg < 5; ++reg) {
           cu->write_vgpr(base + reg, lane, 100u * reg + lane);
+        }
       }
       wf->clear_instruction_execution_error();
       ASSERT_NO_THROW(inst->execute(*inst, wf));
@@ -3153,8 +3199,9 @@ TEST(FunctionalSchedulingTest, DebugActiveUsesFairQuantum) {
 
   amdgpu::GpuMemory gpu_mem("functional_debug_mem");
   amdgpu::L2Cache l2("functional_debug_l2");
-  for (uint32_t i = 0; i <= amdgpu::ComputeUnitCore::kDebugFunctionalQuantum; ++i)
+  for (uint32_t i = 0; i <= amdgpu::ComputeUnitCore::kDebugFunctionalQuantum; ++i) {
     gpu_mem.write32(kCodeAddress + i * sizeof(uint32_t), S_NOP);
+  }
   gpu_mem.write32(kCodeAddress +
                       (amdgpu::ComputeUnitCore::kDebugFunctionalQuantum + 1) * sizeof(uint32_t),
                   S_ENDPGM_GFX9);
@@ -3602,11 +3649,12 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   EXPECT_EQ(saddr_inst->num_src_operands(), 3);
   {
     int fieldless_srcs = 0;
-    for (int i = 0; i < saddr_inst->num_src_operands(); ++i)
+    for (int i = 0; i < saddr_inst->num_src_operands(); ++i) {
       if (saddr_inst->src_operand(i)->is_fieldless()) {
         ++fieldless_srcs;
         EXPECT_FALSE(saddr_inst->src_operand(i)->to_register_ref());
       }
+    }
     EXPECT_EQ(fieldless_srcs, 1);
   }
   InstDefUse saddr_def_use(*saddr_inst, 64);
@@ -3650,11 +3698,12 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   EXPECT_EQ(saddr_inst->num_src_operands(), 3);
   {
     int fieldless_srcs = 0;
-    for (int i = 0; i < saddr_inst->num_src_operands(); ++i)
+    for (int i = 0; i < saddr_inst->num_src_operands(); ++i) {
       if (saddr_inst->src_operand(i)->is_fieldless()) {
         ++fieldless_srcs;
         EXPECT_FALSE(saddr_inst->src_operand(i)->to_register_ref());
       }
+    }
     EXPECT_EQ(fieldless_srcs, 1);
   }
   InstDefUse saddr_def_use(*saddr_inst, 64);

@@ -45,8 +45,9 @@ template <bool Bf16> struct Factor {
   bool negative() const { return bits >> 15; }
   unsigned exponent_field() const { return (bits & 0x7fff) >> fraction_bits; }
   uint64_t significand() const {
-    if (exponent_field())
+    if (exponent_field()) {
       return (1u << fraction_bits) | (bits & fraction_mask);
+    }
     return Bf16 ? 0 : bits & fraction_mask;
   }
   int alignment_exponent() const { return int(std::max(exponent_field(), 1u)) - bias; }
@@ -58,18 +59,21 @@ template <bool Bf16> struct Factor {
 };
 
 inline uint64_t shift_round_even(uint64_t value, int shift) {
-  if (shift <= 0)
+  if (shift <= 0) {
     return value << -shift;
-  if (shift >= 64)
+  }
+  if (shift >= 64) {
     return 0;
+  }
   const uint64_t tail = value & ((uint64_t{1} << shift) - 1);
   const uint64_t halfway = uint64_t{1} << (shift - 1);
   return (value >> shift) + (tail > halfway || (tail == halfway && ((value >> shift) & 1)));
 }
 
 inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
-  if (!units)
+  if (!units) {
     return 0;
+  }
   const uint32_t sign = uint32_t((units < 0) != frame_negative) << 31;
   const uint64_t magnitude = units < 0 ? uint64_t(-units) : uint64_t(units);
   const int top = int(std::bit_width(magnitude)) - 1;
@@ -83,10 +87,12 @@ inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
   // Gradual-underflow rounding can incorrectly round a tiny value up to the
   // smallest normal; simply flushing before rounding also disagrees at that
   // boundary when normalization's rounding itself carries into exponent -126.
-  if (exponent < -126)
+  if (exponent < -126) {
     return 0;
-  if (exponent > 127)
+  }
+  if (exponent > 127) {
     return sign | 0x7f800000u;
+  }
   return sign | (uint32_t(exponent + 127) << 23) | (uint32_t(significand) & 0x7fffff);
 }
 } // namespace gfx11_dot2_detail
@@ -106,47 +112,55 @@ inline uint32_t gfx11_dot2_bits(uint16_t src0_lo_bits, uint16_t src1_lo_bits, ui
                                 uint16_t src1_hi_bits, uint32_t acc, bool fp16_ovfl = false) {
   using namespace gfx11_dot2_detail;
   const auto special = [](uint32_t bits) -> uint32_t {
-    if constexpr (Packed)
+    if constexpr (Packed) {
       return dot_packed16::special<Bf16>(bits);
+    }
     return bits;
   };
   const Factor<Bf16> src0_lo{src0_lo_bits}, src1_lo{src1_lo_bits}, src0_hi{src0_hi_bits},
       src1_hi{src1_hi_bits};
   // Lane NaNs and invalid products take precedence over an accumulator NaN.
-  if (src0_lo.nan() || src1_lo.nan() || src0_hi.nan() || src1_hi.nan())
+  if (src0_lo.nan() || src1_lo.nan() || src0_hi.nan() || src1_hi.nan()) {
     return special(kFactorNan);
+  }
   if ((src0_lo.inf() && !src1_lo.significand()) || (src1_lo.inf() && !src0_lo.significand()) ||
-      (src0_hi.inf() && !src1_hi.significand()) || (src1_hi.inf() && !src0_hi.significand()))
+      (src0_hi.inf() && !src1_hi.significand()) || (src1_hi.inf() && !src0_hi.significand())) {
     return special(kInvalidProductNan);
+  }
   bool positive_inf = false;
   bool negative_inf = false;
   const auto add_inf = [&](Factor<Bf16> left, Factor<Bf16> right) {
     if (left.inf() || right.inf()) {
-      if (left.negative() != right.negative())
+      if (left.negative() != right.negative()) {
         negative_inf = true;
-      else
+      } else {
         positive_inf = true;
+      }
     }
   };
   add_inf(src0_lo, src1_lo);
   add_inf(src0_hi, src1_hi);
-  if (positive_inf && negative_inf)
+  if (positive_inf && negative_inf) {
     return special(kInvalidProductNan);
-  if ((acc & 0x7fffffff) > 0x7f800000)
+  }
+  if ((acc & 0x7fffffff) > 0x7f800000) {
     return special(acc | kQuietNanBit);
+  }
   positive_inf |= acc == 0x7f800000;
   negative_inf |= acc == 0xff800000;
-  if (positive_inf || negative_inf)
+  if (positive_inf || negative_inf) {
     return special(positive_inf && negative_inf ? kInvalidProductNan
                    : negative_inf               ? 0xff800000
                                                 : 0x7f800000);
+  }
 
   const Term p0 = src0_lo.product(src1_lo), p1 = src0_hi.product(src1_hi);
   const unsigned acc_exp = (acc >> 23) & 255;
   const Term c{acc_exp ? (acc & 0x7fffff) | 0x800000u : 0, int(acc_exp) - 127 - 23,
                bool(acc >> 31)};
-  if (!(c.significand | p0.significand | p1.significand))
+  if (!(c.significand | p0.significand | p1.significand)) {
     return 0;
+  }
   const int product_grid =
       std::max(p0.significand ? src0_lo.alignment_exponent() + src1_lo.alignment_exponent()
                               : kEmptyExponent,
@@ -167,10 +181,11 @@ inline uint32_t gfx11_dot2_bits(uint16_t src0_lo_bits, uint16_t src1_lo_bits, ui
     total += t.negative != c.negative ? -int64_t(magnitude) - 1 : int64_t(magnitude);
   }
   if constexpr (Packed) {
-    if constexpr (Bf16)
+    if constexpr (Bf16) {
       return pack(total, grid, c.negative) >> 16;
-    else
+    } else {
       return dot_packed16::pack_f16(total, grid, c.negative, fp16_ovfl);
+    }
   }
   return pack(total, grid, c.negative);
 }

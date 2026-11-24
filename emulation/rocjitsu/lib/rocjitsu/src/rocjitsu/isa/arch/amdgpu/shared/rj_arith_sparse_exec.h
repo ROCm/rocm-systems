@@ -27,11 +27,13 @@ inline void exec_swmmac(Wavefront &wave, SwmmacFunction function, uint64_t flags
                         uint64_t instruction_flags, uint32_t destination, uint32_t source_a,
                         uint32_t source_b, uint32_t source_index, uint32_t a_registers,
                         uint32_t b_registers, uint32_t result_registers, uint32_t a_lanes) {
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   // Reject the tied destination before reading it or any other operand.
-  if (!wave.vgpr_alloc().contains(destination, result_registers))
+  if (!wave.vgpr_alloc().contains(destination, result_registers)) {
     return;
+  }
   RegisterAccess registers(wave);
   assert(wave.wf_size() == 32 || wave.wf_size() == 64);
   // Keep the architectural bound visible to the compiler even with assertions disabled.
@@ -55,8 +57,9 @@ inline void exec_swmmac(Wavefront &wave, SwmmacFunction function, uint64_t flags
   std::array<const uint32_t *, 8> c{};
   const uint32_t *index[1];
   if (!read_matrix_pointers(a_region, a.data()) || !read_matrix_pointers(b_region, b.data()) ||
-      !read_matrix_pointers(index_region, index) || !read_matrix_pointers(accumulator, c.data()))
+      !read_matrix_pointers(index_region, index) || !read_matrix_pointers(accumulator, c.data())) {
     return;
+  }
   // The tied accumulator is already observed. rj-arith owns its alias-safe update.
   {
     auto status =
@@ -64,15 +67,17 @@ inline void exec_swmmac(Wavefront &wave, SwmmacFunction function, uint64_t flags
           return function(flags, instruction_flags, d, a.data(), b.data(), index);
         });
     if (status) {
-      if (*status != RJ_ARITH_SUCCESS)
+      if (*status != RJ_ARITH_SUCCESS) {
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      }
       return;
     }
   }
   commit_matrix_result(wave, registers, destination, result_registers, 0xf,
                        [&](uint32_t *const *d) {
-                         for (uint32_t reg = 0; reg < result_registers; ++reg)
+                         for (uint32_t reg = 0; reg < result_registers; ++reg) {
                            std::copy_n(c[reg], lanes, d[reg]);
+                         }
                          return function(flags, instruction_flags, d, a.data(), b.data(), index);
                        });
 }

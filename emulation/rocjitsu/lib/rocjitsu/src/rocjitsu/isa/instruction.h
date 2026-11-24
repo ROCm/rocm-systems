@@ -284,8 +284,9 @@ public:
       alloc_pool_ = nullptr;
     }
     for (auto *scope = ScopedHeapAllocation::active_scope_; scope; scope = scope->previous_scope_) {
-      if (scope->saved_alloc_pool_ != pool)
+      if (scope->saved_alloc_pool_ != pool) {
         continue;
+      }
       scope->saved_alloc_fn_ = nullptr;
       scope->saved_dealloc_fn_ = nullptr;
       scope->saved_alloc_pool_ = nullptr;
@@ -293,8 +294,9 @@ public:
   }
 
   static void *operator new(size_t size) {
-    if (alloc_fn_)
+    if (alloc_fn_) {
       return alloc_fn_(alloc_pool_, size);
+    }
     return ::operator new(size);
   }
 
@@ -353,8 +355,9 @@ public:
   /// @details Published state excludes decoded caching until retire_data().
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) {
-    if (d)
+    if (d) {
       d->active_ = true;
+    }
     data_ = std::move(d);
   }
 
@@ -382,10 +385,11 @@ public:
   /// an already inactive state is harmless, including after an EXEC-zero issue.
   void retire_data() {
     if (data_ && data_->active_) {
-      if (data_->retire_for_reuse())
+      if (data_->retire_for_reuse()) {
         data_->active_ = false;
-      else
+      } else {
         data_.reset();
+      }
     }
   }
 
@@ -446,16 +450,18 @@ public:
   /// @brief Previous decoded instruction in the same basic block.
   /// @returns The preceding instruction, or nullptr at the block boundary.
   [[nodiscard]] const Instruction *previous_instruction() const {
-    if (parent_ == nullptr || prev_ == nullptr || prev_->parent_ != parent_)
+    if (parent_ == nullptr || prev_ == nullptr || prev_->parent_ != parent_) {
       return nullptr;
+    }
     return static_cast<const Instruction *>(prev_);
   }
 
   /// @brief Next decoded instruction in the same basic block.
   /// @returns The following instruction, or nullptr at the block boundary.
   [[nodiscard]] const Instruction *next_instruction() const {
-    if (parent_ == nullptr || next_ == nullptr || next_->parent_ != parent_)
+    if (parent_ == nullptr || next_ == nullptr || next_->parent_ != parent_) {
       return nullptr;
+    }
     return static_cast<const Instruction *>(next_);
   }
 
@@ -498,10 +504,12 @@ public:
 
   /// Size an explicit destination according to the issuing wave's width.
   RegisterRef wave_sized_destination(const Operand &op, RegisterRef ref, uint8_t wave_size) const {
-    if (ref.cls == RegClass::VGPR && wave_size == 64 && (flags_ & COMPACT_WAVE64_MEMORY_RESULT))
+    if (ref.cls == RegClass::VGPR && wave_size == 64 && (flags_ & COMPACT_WAVE64_MEMORY_RESULT)) {
       ref.width /= 2;
-    if (ref.cls == RegClass::VGPR && (flags_ & INCLUDES_UNWRITTEN_LAST_VGPR))
+    }
+    if (ref.cls == RegClass::VGPR && (flags_ & INCLUDES_UNWRITTEN_LAST_VGPR)) {
       --ref.width;
+    }
     return wave_sized_register(op, ref, wave_size);
   }
 
@@ -539,18 +547,24 @@ public:
   /// plugins::classify_instruction() instead.
   [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
     using amdgpu::ExecutionBlock;
-    if (flags_ & LDS)
+    if (flags_ & LDS) {
       return ExecutionBlock::LDS;
-    if (flags_ & VMEM)
+    }
+    if (flags_ & VMEM) {
       return ExecutionBlock::VMEM;
-    if (flags_ & SMEM)
+    }
+    if (flags_ & SMEM) {
       return ExecutionBlock::SMEM;
-    if (writes_pc())
+    }
+    if (writes_pc()) {
       return ExecutionBlock::BRANCH;
-    if (flags_ & SALU)
+    }
+    if (flags_ & SALU) {
       return ExecutionBlock::SALU;
-    if (flags_ & VALU)
+    }
+    if (flags_ & VALU) {
       return ExecutionBlock::VALU;
+    }
     return ExecutionBlock::UNKNOWN;
   }
 
@@ -630,22 +644,26 @@ public:
     bool first = true;
     // TODO: Include explicit fieldless operands (and/or implicit ones too).
     for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
-      if (!should_print_dst_operand(operand_index))
+      if (!should_print_dst_operand(operand_index)) {
         continue;
+      }
       out += (first ? " " : ", ");
       append_dst_operand(out, operand_index);
       first = false;
     }
     for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
-      if (!should_print_src_operand(operand_index))
+      if (!should_print_src_operand(operand_index)) {
         continue;
+      }
       if (omit_repeated_destination_sources_) {
         bool repeats_dst = false;
-        for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+        for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index) {
           repeats_dst |= should_print_dst_operand(dst_index) &&
                          src_operands_[operand_index] == dst_operands_[dst_index];
-        if (repeats_dst)
+        }
+        if (repeats_dst) {
           continue;
+        }
       }
       out += (first ? " " : ", ");
       append_src_operand(out, operand_index);
@@ -678,8 +696,9 @@ protected:
     memory_issue_info_.exec_masked = exec_masked;
     memory_issue_info_.counts_with_empty_exec = counts_with_empty_exec;
     for (const auto obligation : counter_obligations) {
-      if (!obligation.valid())
+      if (!obligation.valid()) {
         continue;
+      }
       if (memory_issue_info_.num_counter_obligations_ ==
           amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS) {
         assert(false && "too many memory counter obligations");

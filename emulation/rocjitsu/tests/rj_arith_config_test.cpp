@@ -39,8 +39,9 @@ protected:
 
   std::string arithmetic_config(const std::string &policy) const {
     auto json = base_config_;
-    if (!policy.empty())
+    if (!policy.empty()) {
       json.insert(json.find('{') + 1, "\"arithmetic\": " + policy + ",");
+    }
     return json;
   }
 

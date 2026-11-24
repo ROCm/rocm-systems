@@ -173,8 +173,9 @@ struct BenchFixture {
     rocjitsu::test::initialize_compute_unit(cu, "cu_smfmac_simd_bench", cfg, &gpu_mem, &l2);
     if (cu) {
       wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-      if (wf)
+      if (wf) {
         vbase = wf->vgpr_alloc().base;
+      }
     }
   }
 
@@ -190,14 +191,16 @@ struct BenchFixture {
           word = pack(gen()) | (static_cast<uint32_t>(pack(gen())) << 16);
         } else {
           const auto pack = [&](float value) {
-            if (fmt == Format::FP8)
+            if (fmt == Format::FP8) {
               return arch == rocjitsu::IsaFamily::Cdna3 ? util::f32_to_fp8_e4m3_fnuz_rne(value)
                                                         : util::f32_to_fp8_e4m3_rne(value);
+            }
             return arch == rocjitsu::IsaFamily::Cdna3 ? util::f32_to_bf8_e5m2_fnuz_rne(value)
                                                       : util::f32_to_bf8_e5m2_rne(value);
           };
-          for (uint32_t byte = 0; byte < 4; ++byte)
+          for (uint32_t byte = 0; byte < 4; ++byte) {
             word |= static_cast<uint32_t>(pack(gen())) << (8 * byte);
+          }
         }
         cu->write_vgpr(vbase + off + reg, lane, word);
       }
@@ -206,9 +209,11 @@ struct BenchFixture {
 
   void seed_accumulator(uint32_t regs, uint32_t seed) {
     mma_test::SmallGen gen(seed);
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         cu->write_vgpr(vbase + D_OFF + reg, lane, std::bit_cast<uint32_t>(gen()));
+      }
+    }
   }
 
   void seed_index() {
@@ -216,32 +221,37 @@ struct BenchFixture {
     constexpr std::array<uint32_t, 6> pairs{0x4, 0x8, 0xC, 0x9, 0xD, 0xE};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       uint32_t word = 0;
-      for (uint32_t nibble = 0; nibble < 8; ++nibble)
+      for (uint32_t nibble = 0; nibble < 8; ++nibble) {
         word |= pairs[(lane + nibble) % pairs.size()] << (4 * nibble);
+      }
       cu->write_vgpr(vbase + INDEX_OFF, lane, word);
     }
   }
 
   std::vector<uint32_t> snapshot(uint32_t regs) const {
     std::vector<uint32_t> words(static_cast<size_t>(regs) * WF_SIZE);
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         words[static_cast<size_t>(reg) * WF_SIZE + lane] = cu->read_vgpr(vbase + D_OFF + reg, lane);
+      }
+    }
     return words;
   }
 
   void restore(const std::vector<uint32_t> &words) {
-    for (size_t i = 0; i < words.size(); ++i)
+    for (size_t i = 0; i < words.size(); ++i) {
       cu->write_vgpr(vbase + D_OFF + static_cast<uint32_t>(i / WF_SIZE),
                      static_cast<uint32_t>(i % WF_SIZE), words[i]);
+    }
   }
 };
 
 std::array<uint32_t, 2> build_words(const Shape &shape, uint16_t opcode) {
   constexpr uint32_t a = 256 + A_OFF, b = 256 + B_OFF, idx = 256 + INDEX_OFF;
-  if (shape.arch == rocjitsu::IsaFamily::Cdna3)
+  if (shape.arch == rocjitsu::IsaFamily::Cdna3) {
     return cdna3::build_vop3p_mfma(opcode,
                                    {.vdst = D_OFF, .acc_cd = 0, .src0 = a, .src1 = b, .src2 = idx});
+  }
   return cdna4::build_vop3p_mfma(opcode,
                                  {.vdst = D_OFF, .acc_cd = 0, .src0 = a, .src1 = b, .src2 = idx});
 }
@@ -290,8 +300,9 @@ void benchmark_case(const Shape &shape, size_t variant) {
   ASSERT_FALSE(execution_failed) << label;
   const auto simd = fx.snapshot(shape.d_regs);
   ASSERT_EQ(scalar.size(), simd.size());
-  for (size_t i = 0; i < scalar.size(); ++i)
+  for (size_t i = 0; i < scalar.size(); ++i) {
     ASSERT_EQ(scalar[i], simd[i]) << label << ": raw F32 mismatch at word " << i;
+  }
 
   const auto time_block = [&](bool force_scalar) {
     util::set_force_scalar_for_testing(force_scalar);
@@ -332,15 +343,17 @@ void benchmark_case(const Shape &shape, size_t variant) {
 
 TEST(SmfmacSimdBenchmark, DecodedF32Forms) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
+  if (util::native<float>::size() != 16) {
     GTEST_SKIP() << "SMFMAC AVX-512 paths require 16-lane native SIMD";
+  }
 
   for (const auto &shape : SHAPES) {
     const size_t variants = shape.fp8 ? 4 : 2;
     for (size_t variant = 0; variant < variants; ++variant) {
       benchmark_case(shape, variant);
-      if (testing::Test::HasFatalFailure())
+      if (testing::Test::HasFatalFailure()) {
         return;
+      }
     }
   }
 }

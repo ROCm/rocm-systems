@@ -106,8 +106,9 @@ struct Fixture {
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
                                             &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -142,8 +143,9 @@ struct Fixture {
                                                     uint32_t rot, uint64_t exec, uint32_t op_sel) {
     auto *typed_inst = dynamic_cast<Inst *>(inst);
     EXPECT_NE(typed_inst, nullptr) << arch.name << " decoded unexpected instruction type";
-    if (typed_inst == nullptr)
+    if (typed_inst == nullptr) {
       return {};
+    }
     seed_inputs(rot, exec);
     EXPECT_TRUE(amdgpu::try_execute_vop3p_mov_b32_simd(*typed_inst, *wf))
         << arch.name << " v_pk_mov_b32_vop3p op_sel=" << op_sel
@@ -213,8 +215,9 @@ void check(uint64_t exec) {
                       uint32_t op_sel) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -328,8 +331,9 @@ TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
                       bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};

@@ -19,14 +19,16 @@ void execute_separately_rounded_mad(Inst &inst, Wavefront &wf, const Operand &ds
   const RegisterAccess regs(wf);
   fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(active & (uint64_t{1} << lane)))
+    if (!(active & (uint64_t{1} << lane))) {
       continue;
+    }
     auto read = [&](const Operand &source, unsigned index) {
       float value = std::bit_cast<float>(regs.read_lane(source, lane));
       if constexpr (requires { inst.inst_.abs; }) {
         // MAC always takes its accumulator directly from the destination.
-        if (&source != &dst)
+        if (&source != &dst) {
           value = source_modifier::apply_to_float(value, index, inst.inst_.abs, inst.inst_.neg);
+        }
       }
       return value;
     };
@@ -36,8 +38,9 @@ void execute_separately_rounded_mad(Inst &inst, Wavefront &wf, const Operand &ds
       const auto omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                 wf.ieee_mode(), inst.inst_.omod);
       result = fp_mode::apply_omod_f32(result, omod, wf.fp_round_mode_f32());
-      if (inst.inst_.clamp)
+      if (inst.inst_.clamp) {
         result = clamp_floating_result(result, wf);
+      }
     }
     sdwa::write_lane<sdwa::ResultFormat::F32>(inst, wf, dst, lane, std::bit_cast<uint32_t>(result));
   }

@@ -35,70 +35,88 @@ constexpr bool is_public_target_key(rj_code_target_id_t key) {
 }
 
 bool contains_id(const IsaTargetDescriptor &descriptor, std::string_view id) {
-  if (descriptor.id == id)
+  if (descriptor.id == id) {
     return true;
+  }
   for (std::string_view alias : descriptor.aliases) {
-    if (alias == id)
+    if (alias == id) {
       return true;
+    }
   }
   return false;
 }
 
 IsaTargetRegistryError validate_descriptor(const IsaTargetDescriptor &descriptor) {
-  if (descriptor.id.empty())
+  if (descriptor.id.empty()) {
     return registry_error("ISA target canonical ID must not be empty");
-  if (descriptor.decoder_factory == nullptr)
+  }
+  if (descriptor.decoder_factory == nullptr) {
     return registry_error("ISA target '" + std::string(descriptor.id) + "' has no decoder factory");
+  }
   for (size_t alias_index = 0; alias_index < descriptor.aliases.size(); ++alias_index) {
     const std::string_view alias = descriptor.aliases[alias_index];
-    if (alias.empty())
+    if (alias.empty()) {
       return registry_error("ISA target '" + std::string(descriptor.id) + "' has an empty alias");
-    if (alias == descriptor.id)
+    }
+    if (alias == descriptor.id) {
       return registry_error(duplicate_message("ID", alias));
+    }
     for (size_t previous_index = 0; previous_index < alias_index; ++previous_index) {
-      if (descriptor.aliases[previous_index] == alias)
+      if (descriptor.aliases[previous_index] == alias) {
         return registry_error(duplicate_message("ID", alias));
+      }
     }
   }
-  if (descriptor.family != rocjitsu::IsaFamily::Invalid && !is_family_key(descriptor.family))
+  if (descriptor.family != rocjitsu::IsaFamily::Invalid && !is_family_key(descriptor.family)) {
     return registry_error("ISA target contains an unallocated ISA family value");
+  }
 
   for (size_t binding_index = 0; binding_index < descriptor.bindings.size(); ++binding_index) {
     const IsaTargetBinding &binding = descriptor.bindings[binding_index];
-    if (!is_public_target_key(binding.public_id))
+    if (!is_public_target_key(binding.public_id)) {
       return registry_error("ISA target contains an unallocated target enum value");
-    if (binding.id.empty())
+    }
+    if (binding.id.empty()) {
       return registry_error("ISA target '" + std::string(descriptor.id) +
                             "' has an empty target ID");
-    if (!contains_id(descriptor, binding.id))
+    }
+    if (!contains_id(descriptor, binding.id)) {
       return registry_error("ISA target '" + std::string(descriptor.id) + "' has target ID '" +
                             std::string(binding.id) + "' that is not an ID or alias");
+    }
 
     for (size_t previous_index = 0; previous_index < binding_index; ++previous_index) {
       const IsaTargetBinding &previous = descriptor.bindings[previous_index];
-      if (previous.public_id == binding.public_id)
+      if (previous.public_id == binding.public_id) {
         return registry_error(
             duplicate_message("concrete target", std::to_string(enum_value(binding.public_id))));
-      if (previous.id == binding.id)
+      }
+      if (previous.id == binding.id) {
         return registry_error(duplicate_message("target ID", binding.id));
-      if (binding.elf_machine != 0 && previous.elf_machine == binding.elf_machine)
+      }
+      if (binding.elf_machine != 0 && previous.elf_machine == binding.elf_machine) {
         return registry_error(
             duplicate_message("GPU ELF machine", std::to_string(binding.elf_machine)));
+      }
     }
   }
-  if (!descriptor.bindings.empty() && descriptor.family == rocjitsu::IsaFamily::Invalid)
+  if (!descriptor.bindings.empty() && descriptor.family == rocjitsu::IsaFamily::Invalid) {
     return registry_error("ISA target '" + std::string(descriptor.id) +
                           "' with target bindings must have an ISA family");
+  }
   if (descriptor.variant_decoder_factory != nullptr) {
-    if (descriptor.default_target == ROCJITSU_CODE_TARGET_INVALID)
+    if (descriptor.default_target == ROCJITSU_CODE_TARGET_INVALID) {
       return registry_error("ISA target '" + std::string(descriptor.id) +
                             "' with a variant decoder factory has no default concrete target");
+    }
     bool found_default = false;
-    for (const IsaTargetBinding &binding : descriptor.bindings)
+    for (const IsaTargetBinding &binding : descriptor.bindings) {
       found_default |= binding.public_id == descriptor.default_target;
-    if (!found_default)
+    }
+    if (!found_default) {
       return registry_error("ISA target '" + std::string(descriptor.id) +
                             "' default concrete target is not one of its bindings");
+    }
   } else if (descriptor.default_target != ROCJITSU_CODE_TARGET_INVALID) {
     return registry_error("ISA target '" + std::string(descriptor.id) +
                           "' has a default concrete target but no variant decoder factory");
@@ -109,34 +127,42 @@ IsaTargetRegistryError validate_descriptor(const IsaTargetDescriptor &descriptor
 IsaTargetRegistryError validate_descriptors(std::span<const IsaTargetDescriptor> descriptors) {
   for (size_t descriptor_index = 0; descriptor_index < descriptors.size(); ++descriptor_index) {
     const IsaTargetDescriptor &descriptor = descriptors[descriptor_index];
-    if (IsaTargetRegistryError error = validate_descriptor(descriptor))
+    if (IsaTargetRegistryError error = validate_descriptor(descriptor)) {
       return error;
+    }
     for (size_t existing_index = 0; existing_index < descriptor_index; ++existing_index) {
       const IsaTargetDescriptor &existing = descriptors[existing_index];
       auto conflicts_with = [&](std::string_view id) {
-        if (contains_id(descriptor, id))
+        if (contains_id(descriptor, id)) {
           return registry_error(duplicate_message("ID", id));
+        }
         return IsaTargetRegistryError{};
       };
-      if (IsaTargetRegistryError error = conflicts_with(existing.id))
+      if (IsaTargetRegistryError error = conflicts_with(existing.id)) {
         return error;
+      }
       for (std::string_view alias : existing.aliases) {
-        if (IsaTargetRegistryError error = conflicts_with(alias))
+        if (IsaTargetRegistryError error = conflicts_with(alias)) {
           return error;
+        }
       }
       // Code-object IDs are IDs or aliases, whose global uniqueness is checked above.
 
-      if (descriptor.family != rocjitsu::IsaFamily::Invalid && existing.family == descriptor.family)
+      if (descriptor.family != rocjitsu::IsaFamily::Invalid &&
+          existing.family == descriptor.family) {
         return registry_error(
             duplicate_message("architecture", std::to_string(enum_value(descriptor.family))));
+      }
       for (const IsaTargetBinding &binding : descriptor.bindings) {
         for (const IsaTargetBinding &existing_binding : existing.bindings) {
-          if (existing_binding.public_id == binding.public_id)
+          if (existing_binding.public_id == binding.public_id) {
             return registry_error(duplicate_message("concrete target",
                                                     std::to_string(enum_value(binding.public_id))));
-          if (binding.elf_machine != 0 && existing_binding.elf_machine == binding.elf_machine)
+          }
+          if (binding.elf_machine != 0 && existing_binding.elf_machine == binding.elf_machine) {
             return registry_error(
                 duplicate_message("GPU ELF machine", std::to_string(binding.elf_machine)));
+          }
         }
       }
     }
@@ -154,44 +180,52 @@ std::span<const IsaTargetDescriptor> IsaTargetRegistry::targets() const {
 }
 
 const IsaTargetDescriptor *IsaTargetRegistry::find(std::string_view id) const {
-  if (!ok())
+  if (!ok()) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &target : targets_) {
-    if (contains_id(target, id))
+    if (contains_id(target, id)) {
       return &target;
+    }
   }
   return nullptr;
 }
 
 const IsaTargetDescriptor *IsaTargetRegistry::find(rocjitsu::IsaFamily family) const {
-  if (!ok() || !is_family_key(family))
+  if (!ok() || !is_family_key(family)) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &target : targets_) {
-    if (target.family == family)
+    if (target.family == family) {
       return &target;
+    }
   }
   return nullptr;
 }
 
 const IsaTargetDescriptor *IsaTargetRegistry::find(rj_code_target_id_t target_id) const {
-  if (!ok())
+  if (!ok()) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &target : targets_) {
     for (const IsaTargetBinding &binding : target.bindings) {
-      if (binding.public_id == target_id)
+      if (binding.public_id == target_id) {
         return &target;
+      }
     }
   }
   return nullptr;
 }
 
 const IsaTargetBinding *IsaTargetRegistry::find_target_by_elf_machine(uint32_t elf_machine) const {
-  if (!ok() || elf_machine == 0)
+  if (!ok() || elf_machine == 0) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &target : targets_) {
     for (const IsaTargetBinding &binding : target.bindings) {
-      if (binding.elf_machine == elf_machine)
+      if (binding.elf_machine == elf_machine) {
         return &binding;
+      }
     }
   }
   return nullptr;
@@ -199,36 +233,42 @@ const IsaTargetBinding *IsaTargetRegistry::find_target_by_elf_machine(uint32_t e
 
 const IsaTargetBinding *
 IsaTargetRegistry::find_target_by_code_object_id(std::string_view id) const {
-  if (!ok())
+  if (!ok()) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &target : targets_) {
     for (const IsaTargetBinding &binding : target.bindings) {
-      if (binding.elf_machine != 0 && binding.id == id)
+      if (binding.elf_machine != 0 && binding.id == id) {
         return &binding;
+      }
     }
   }
   return nullptr;
 }
 
 const IsaTargetBinding *IsaTargetRegistry::find_target(rj_code_target_id_t target_id) const {
-  if (!ok() || !is_public_target_key(target_id))
+  if (!ok() || !is_public_target_key(target_id)) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &target : targets_) {
     for (const IsaTargetBinding &binding : target.bindings) {
-      if (binding.public_id == target_id)
+      if (binding.public_id == target_id) {
         return &binding;
+      }
     }
   }
   return nullptr;
 }
 
 const IsaTargetBinding *IsaTargetRegistry::find_target(std::string_view id) const {
-  if (!ok())
+  if (!ok()) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &target : targets_) {
     for (const IsaTargetBinding &binding : target.bindings) {
-      if (binding.id == id)
+      if (binding.id == id) {
         return &binding;
+      }
     }
   }
   return nullptr;
@@ -236,14 +276,17 @@ const IsaTargetBinding *IsaTargetRegistry::find_target(std::string_view id) cons
 
 const IsaTargetBinding *
 IsaTargetRegistry::find_default_target(const IsaTargetDescriptor &descriptor) const {
-  if (!ok() || descriptor.default_target == ROCJITSU_CODE_TARGET_INVALID)
+  if (!ok() || descriptor.default_target == ROCJITSU_CODE_TARGET_INVALID) {
     return nullptr;
+  }
   for (const IsaTargetDescriptor &registered : targets_) {
-    if (&registered != &descriptor)
+    if (&registered != &descriptor) {
       continue;
+    }
     for (const IsaTargetBinding &binding : registered.bindings) {
-      if (binding.public_id == registered.default_target)
+      if (binding.public_id == registered.default_target) {
         return &binding;
+      }
     }
     return nullptr;
   }

@@ -9,8 +9,9 @@ constinit thread_local const IsaExecutionBackend *detail::active_isa_execution_b
 
 Instruction::ExecuteFn current_instruction_execute(size_t instruction_id) noexcept {
   const IsaExecutionBackend *backend = detail::active_isa_execution_backend;
-  if (backend == nullptr || instruction_id >= backend->instruction_callback_count)
+  if (backend == nullptr || instruction_id >= backend->instruction_callback_count) {
     return nullptr;
+  }
   return backend->instruction_callbacks[instruction_id];
 }
 

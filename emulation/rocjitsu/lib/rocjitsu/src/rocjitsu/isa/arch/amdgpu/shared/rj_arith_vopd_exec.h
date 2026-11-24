@@ -20,8 +20,9 @@ inline int gfx12_compat_dual_mul(const Wavefront &wave, uint64_t flags, uint32_t
                                  uint32_t *result, const uint32_t *a, const uint32_t *b,
                                  uint32_t *causes) {
   const int error = rj_arith_v_dual_mul_f32_w32_gfx12(flags, exec_mask, 0, &result, &a, &b, causes);
-  if (error != RJ_ARITH_SUCCESS)
+  if (error != RJ_ARITH_SUCCESS) {
     return error;
+  }
   using F32 = fp_format::F32;
   for (uint32_t active = exec_mask; active; active &= active - 1) {
     const auto lane = std::countr_zero(active);
@@ -39,20 +40,23 @@ inline int gfx12_compat_dual_mul(const Wavefront &wave, uint64_t flags, uint32_t
 template <int ResultWords = 1, typename Slot, typename Invoke>
 inline void execute_dual_pair(Wavefront &wave, const Slot &x, const Slot &y, Invoke invoke) {
   const uint32_t exec_mask = wave.exec() & wave.vgpr_write_mask();
-  if (!wave.exec())
+  if (!wave.exec()) {
     return;
+  }
   RegisterAccess registers(wave);
   static_assert(ResultWords == 1 || ResultWords == 2);
   std::array<uint32_t, 32 * ResultWords> x_result{}, y_result{};
   uint32_t causes = 0;
   if (invoke(x, registers, exec_mask, x_result.data(), &causes) != RJ_ARITH_SUCCESS ||
       invoke(y, registers, exec_mask, y_result.data(), &causes) != RJ_ARITH_SUCCESS) {
-    if (!wave.instruction_execution_failed())
+    if (!wave.instruction_execution_failed()) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    }
     return;
   }
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   // rj-arith stores register pairs as two lane arrays. Use the observer-aware
   // wide destination view for FP64 slots; ordinary RDNA slots retain 32-bit stores.
   auto commit = [&](const Slot &slot, const auto &result) {
@@ -64,8 +68,9 @@ inline void execute_dual_pair(Wavefront &wave, const Slot &x, const Slot &y, Inv
                   .store_native(
                       lane, util::load64<uint64_t>(result.data() + lane, result.data() + 32 + lane),
                       exec_mask >> lane)
-                  .failed())
+                  .failed()) {
             return false;
+          }
         }
         return true;
       }
@@ -73,13 +78,15 @@ inline void execute_dual_pair(Wavefront &wave, const Slot &x, const Slot &y, Inv
     auto output = registers.write_operand(*slot.dst, exec_mask);
     for (unsigned lane = 0; lane < 32; lane += util::native_width_v<uint32_t>) {
       if (output.store_native(lane, util::load<uint32_t>(result.data() + lane), exec_mask >> lane)
-              .failed())
+              .failed()) {
         return false;
+      }
     }
     return true;
   };
-  if (!commit(x, x_result) || !commit(y, y_result))
+  if (!commit(x, x_result) || !commit(y, y_result)) {
     return;
+  }
   wave.set_trapsts(wave.trapsts() | causes);
   wave.raise_alu_causes(causes);
 }

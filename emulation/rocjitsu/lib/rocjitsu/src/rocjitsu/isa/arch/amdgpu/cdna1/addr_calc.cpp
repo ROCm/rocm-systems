@@ -56,8 +56,9 @@ void ds_calculate_src2_addresses(const DsMachineInst &inst, amdgpu::Wavefront &w
   const auto addresses =
       amdgpu::RegisterAccess(wf).read_vgpr_region(wf.vgpr_alloc().base + addr_reg, 1, d.exec_mask);
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(d.exec_mask & (uint64_t{1} << lane)))
+    if (!(d.exec_mask & (uint64_t{1} << lane))) {
       continue;
+    }
     const uint32_t addr = addresses.lane(0, lane);
     const bool indirect = (immediate & 0x8000u) != 0;
     const uint32_t offset = indirect ? addr >> 17 : immediate;
@@ -69,10 +70,11 @@ void ds_calculate_src2_addresses(const DsMachineInst &inst, amdgpu::Wavefront &w
       continue;
     }
     d.per_lane_addr[lane] = uint64_t{wf.lds_base()} + dst;
-    if (src < 0 || static_cast<uint64_t>(src) + d.elem_size > size)
+    if (src < 0 || static_cast<uint64_t>(src) + d.elem_size > size) {
       d.ds2_oob_lane_mask |= uint64_t{1} << lane;
-    else
+    } else {
       d.ds2_per_lane_addr[lane] = uint64_t{wf.lds_base()} + src;
+    }
   }
 }
 
