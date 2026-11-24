@@ -189,8 +189,9 @@ TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
   const auto count = [](std::string_view text, std::string_view event) {
     size_t occurrences = 0;
     for (size_t offset = 0; (offset = text.find(event, offset)) != std::string_view::npos;
-         offset += event.size())
+         offset += event.size()) {
       ++occurrences;
+    }
     return occurrences;
   };
   const char *valid = R"({"require_all_plugins":true,"plugins":{"good":{}}})";

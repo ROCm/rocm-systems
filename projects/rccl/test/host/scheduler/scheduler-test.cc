@@ -12,6 +12,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -168,6 +169,14 @@ MakeSymmetricTaskList_TuningFindsKernel(int nChannels, int nWarps) {
     return ncclSuccess;
   };
 }
+
+// The in-place test runs on kInPlaceRanks ranks with kInPlaceCount floats per rank, so recvbuff holds
+// kInPlaceRanks slices of kInPlaceSliceBytes each. A count off the 1 KiB sym cell keeps nBytes and the slice size
+// from agreeing by accident.
+constexpr int kInPlaceRanks = 4;
+constexpr size_t kInPlaceCount = 100;
+constexpr size_t kInPlaceSliceBytes = kInPlaceCount * sizeof(float);
+constexpr uintptr_t kInPlaceRecvAddr = 0x100000;
 
 // Unlike ncclMakeSymmetricTaskList (raw list + output param), this takes an already-populated queue directly.
 class SymmetricTaskScheduler_Scene {
@@ -1973,6 +1982,44 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_FalseWh
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead, &scene.needGenkDevComm), ncclSuccess);
   EXPECT_FALSE(capturedNvlsSupport);
+}
+
+// At rank 0 an in-place AllGather also has sendbuff == recvbuff, so only the other ranks pin the rank offset.
+// The cases that stay 0 keep a producer that marks every AllGather, or every batch, in place from passing.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_InPlace_AllGatherFromItsOwnSliceAtEveryRank) {
+  auto tunedInPlace = [](int rank, std::initializer_list<uintptr_t> sendSlices) {
+    MakeSymmetricTaskList_Scene scene;
+    scene.comm->nRanks = kInPlaceRanks;
+    scene.comm->rank = rank;
+    std::vector<ncclTaskColl> tasks(sendSlices.size());
+    int i = 0;
+    for (uintptr_t sendSlice : sendSlices) {
+      tasks[i] = MakeSymmetricTaskList_MakeTask(scene, ncclFuncAllGather, ncclFloat32);
+      tasks[i].count = kInPlaceCount;
+      tasks[i].recvbuff = reinterpret_cast<void*>(kInPlaceRecvAddr + i * 0x100000);
+      tasks[i].sendbuff = reinterpret_cast<void*>(kInPlaceRecvAddr + i * 0x100000 + sendSlice * kInPlaceSliceBytes);
+      if (i > 0) tasks[i - 1].next = &tasks[i];
+      ++i;
+    }
+    int inPlace = -1;
+    ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
+      inPlace = input->inPlace;
+      return ncclSuccess;
+    });
+    struct ncclTaskColl* remainTasksHead = nullptr;
+    EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), tasks.data(), nullptr, &remainTasksHead,
+                                        &scene.needGenkDevComm),
+              ncclSuccess);
+    EXPECT_EQ(tuningHook.calls, 1);
+    return inPlace;
+  };
+
+  for (int rank = 0; rank < kInPlaceRanks; ++rank) {
+    EXPECT_EQ(tunedInPlace(rank, {static_cast<uintptr_t>(rank)}), 1) << "rank " << rank;
+  }
+  EXPECT_EQ(tunedInPlace(2, {1}), 0) << "rank 2 sending from rank 1's slice";
+  EXPECT_EQ(tunedInPlace(2, {0}), 0) << "rank 2 sending from slice 0, the start of recvbuff";
+  EXPECT_EQ(tunedInPlace(2, {2, 2}), 0) << "a batch of two in-place AllGathers is never tuned as in place";
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_CollNetSupportAndRegBuff_WiredFromTheirOwnFakes) {

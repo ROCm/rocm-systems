@@ -51,8 +51,9 @@ inline constexpr uint8_t kCdna3ScalarNull = 0x7F;
 void append_wait_all(std::vector<uint32_t> &words) { Cdna3ScratchEmitter::append_wait(words); }
 
 [[nodiscard]] bool prepend_execz_guard(std::vector<uint32_t> &words) {
-  if (words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+  if (words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
     return false;
+  }
   words.insert(words.begin(),
                cdna3::build_sopp(cdna3::kSCbranchExeczSopp,
                                  {.simm16 = static_cast<uint16_t>(words.size())})[0]);
@@ -67,10 +68,11 @@ void append_memory_instruction(std::vector<uint32_t> &words, const Cdna3VirtualL
                                   .addr = access.address_vgpr,
                                   .saddr = saddr,
                                   .acc = static_cast<uint8_t>(access.acc)};
-  if (access.is_load)
+  if (access.is_load) {
     fields.vdst = access.data_vgpr;
-  else
+  } else {
     fields.data = access.data_vgpr;
+  }
   auto encoded = cdna3::build_flat(access.op, fields);
   encoded[0] |= static_cast<uint32_t>(access.byte_offset & 0x1000u);
   words.insert(words.end(), encoded.begin(), encoded.end());
@@ -157,8 +159,9 @@ bool append_cdna3_virtual_lds_access(std::vector<uint32_t> &words,
   guarded.push_back(build_cdna3_v_readfirstlane_b32(base, temp_lo));
   guarded.push_back(build_cdna3_v_readfirstlane_b32(static_cast<uint8_t>(base + 1), temp_hi));
 
-  if (!prepend_execz_guard(guarded))
+  if (!prepend_execz_guard(guarded)) {
     return false;
+  }
   words.insert(words.end(), guarded.begin(), guarded.end());
   return true;
 }

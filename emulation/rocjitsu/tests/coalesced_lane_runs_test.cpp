@@ -30,16 +30,18 @@ LaneRuns coalesced_runs(std::span<const uint64_t> addrs, uint64_t lane_mask, uin
         runs.push_back(run);
         return runs.size() < stop_after;
       });
-  if (completed)
+  if (completed) {
     *completed = done;
+  }
   return runs;
 }
 
 LaneRuns lane_ordered_runs(std::span<const uint64_t> addrs, uint64_t lane_mask, uint32_t stride) {
   LaneRuns runs;
   for (uint32_t lane = 0; lane < addrs.size(); ++lane) {
-    if (!(lane_mask >> lane & 1))
+    if (!(lane_mask >> lane & 1)) {
       continue;
+    }
     const bool extends =
         !runs.empty() && lane == runs.back().first_lane + runs.back().size / stride &&
         addrs[lane - 1] <= UINT64_MAX - stride && addrs[lane] == addrs[lane - 1] + stride;
@@ -60,15 +62,18 @@ LaneRuns lane_ordered_runs(std::span<const uint64_t> addrs, uint64_t lane_mask, 
 bool operands_overlap_or_wrap(std::span<const uint64_t> addrs, uint64_t lane_mask,
                               uint32_t stride) {
   for (uint32_t lane_a = 0; lane_a < addrs.size(); ++lane_a) {
-    if (!(lane_mask >> lane_a & 1))
+    if (!(lane_mask >> lane_a & 1)) {
       continue;
-    if (addrs[lane_a] > UINT64_MAX - (stride - 1))
+    }
+    if (addrs[lane_a] > UINT64_MAX - (stride - 1)) {
       return true;
+    }
     for (uint32_t lane_b = lane_a + 1; lane_b < addrs.size(); ++lane_b) {
       if ((lane_mask >> lane_b & 1) &&
           (addrs[lane_a] > addrs[lane_b] ? addrs[lane_a] - addrs[lane_b]
-                                         : addrs[lane_b] - addrs[lane_a]) < stride)
+                                         : addrs[lane_b] - addrs[lane_a]) < stride) {
         return true;
+      }
     }
   }
   return false;
@@ -97,8 +102,9 @@ TEST(CoalescedLaneRunsTest, BroadcastLaneOperandsKeepLaneOrderedRuns) {
     for (const uint32_t spacing : {64u, kStride}) {
       SCOPED_TRACE(spacing);
       std::vector<uint64_t> addrs(wf_size);
-      for (uint32_t lane = 0; lane < wf_size; ++lane)
+      for (uint32_t lane = 0; lane < wf_size; ++lane) {
         addrs[lane] = kBase + (lane % 8) * spacing;
+      }
       for (const uint64_t mask : {full, full & ~uint64_t{0x100}, full & 0xf0f0f0f0f0f0f0f0}) {
         SCOPED_TRACE(mask);
         const LaneRuns runs = coalesced_runs(addrs, mask, kStride);
@@ -129,8 +135,9 @@ TEST(CoalescedLaneRunsTest, OverlapFoundAfterSortingKeepsLaneOrderedRuns) {
 TEST(CoalescedLaneRunsTest, ReversedDisjointLanesStillCoalesce) {
   constexpr uint64_t kBase = 0x4000;
   std::array<uint64_t, 32> reversed{};
-  for (uint32_t lane = 0; lane < reversed.size(); ++lane)
+  for (uint32_t lane = 0; lane < reversed.size(); ++lane) {
     reversed[lane] = kBase + (31 - lane) * sizeof(uint32_t);
+  }
   expect_same_runs(coalesced_runs(reversed, 0xffffffff, sizeof(uint32_t)),
                    {{.address = kBase,
                      .lane_mask = 0xffffffff,
@@ -150,8 +157,9 @@ TEST(CoalescedLaneRunsTest, DenseStridePredicateHandlesEveryCountAndUnsignedLimi
       for (const uint64_t base : {uint64_t{0}, uint64_t{1} << 63, UINT64_MAX - extent}) {
         SCOPED_TRACE(::testing::Message() << count << ' ' << stride << ' ' << base);
         std::vector<uint64_t> addrs(count);
-        for (uint32_t lane = 0; lane < count; ++lane)
+        for (uint32_t lane = 0; lane < count; ++lane) {
           addrs[lane] = base + uint64_t{lane} * stride;
+        }
         ASSERT_TRUE(amdgpu::detail::is_strided_lane_addresses(addrs.data(), count, stride));
         for (uint32_t lane = 1; lane < count; ++lane) {
           for (const uint64_t difference : {uint64_t{1}, uint64_t{1} << 32, uint64_t{1} << 63}) {
@@ -161,8 +169,9 @@ TEST(CoalescedLaneRunsTest, DenseStridePredicateHandlesEveryCountAndUnsignedLimi
           }
         }
         if (count > 1 && base == UINT64_MAX - extent) {
-          for (auto &address : addrs)
+          for (auto &address : addrs) {
             ++address;
+          }
           EXPECT_FALSE(amdgpu::detail::is_strided_lane_addresses(addrs.data(), count, stride));
         }
       }
@@ -175,8 +184,9 @@ TEST(CoalescedLaneRunsTest, DenseStridePredicateRespectsUnalignedExactStorage) {
     // A prefix keeps only natural alignment, with no spare element at the end.
     const auto storage = std::make_unique<uint64_t[]>(count + 1);
     uint64_t *const addrs = storage.get() + 1;
-    for (uint32_t lane = 0; lane < count; ++lane)
+    for (uint32_t lane = 0; lane < count; ++lane) {
       addrs[lane] = 0xfffffff0ULL + uint64_t{lane} * 16;
+    }
     EXPECT_TRUE(amdgpu::detail::is_strided_lane_addresses(addrs, count, 16));
     addrs[count - 1] ^= uint64_t{1} << 32;
     EXPECT_FALSE(amdgpu::detail::is_strided_lane_addresses(addrs, count, 16));
@@ -194,8 +204,9 @@ TEST(CoalescedLaneRunsTest, DenseStridedWindowsPreserveRunsAndEarlyStops) {
             SCOPED_TRACE(::testing::Message() << wf_size << ' ' << first << ' ' << count << ' '
                                               << stride << ' ' << base);
             std::vector<uint64_t> addrs(wf_size);
-            for (uint32_t lane = 0; lane < wf_size; ++lane)
+            for (uint32_t lane = 0; lane < wf_size; ++lane) {
               addrs[lane] = base + uint64_t{lane} * stride;
+            }
             const LaneRuns expected{{.address = addrs[first],
                                      .lane_mask = mask,
                                      .first_lane = first,
@@ -225,8 +236,9 @@ TEST(CoalescedLaneRunsTest, DenseStridedWindowsPreserveRunsAndEarlyStops) {
       }
     }
     std::vector<uint64_t> wrapping(wf_size);
-    for (uint32_t lane = 0; lane < wf_size; ++lane)
+    for (uint32_t lane = 0; lane < wf_size; ++lane) {
       wrapping[lane] = UINT64_MAX - 128 + uint64_t{lane} * 16;
+    }
     const uint64_t full = wf_size == 64 ? UINT64_MAX : UINT32_MAX;
     expect_same_runs(coalesced_runs(wrapping, full, 16), lane_ordered_runs(wrapping, full, 16));
   }
@@ -261,13 +273,16 @@ TEST(CoalescedLaneRunsTest, SeededLaneRunsMatchOverlapAndCoverageContracts) {
       const uint64_t jitter = random() % 16 == 0 ? random() % stride : 0;
       addrs[lane] = base + uint64_t{slot} * stride + jitter;
     }
-    if (random() % 4 == 0)
+    if (random() % 4 == 0) {
       std::ranges::sort(addrs);
+    }
     uint64_t mask = random();
-    if (wf_size == 32)
+    if (wf_size == 32) {
       mask &= 0xffffffff;
-    if (random() % 2)
+    }
+    if (random() % 2) {
       mask |= wf_size == 64 ? UINT64_MAX : 0xffffffff;
+    }
     const LaneRuns runs = coalesced_runs(addrs, mask, stride);
     if (operands_overlap_or_wrap(addrs, mask, stride)) {
       expect_same_runs(runs, lane_ordered_runs(addrs, mask, stride));
@@ -296,8 +311,9 @@ TEST(CoalescedLaneRunsTest, SeededLaneRunsMatchOverlapAndCoverageContracts) {
       }
       EXPECT_EQ(supplied, run.size);
     }
-    for (uint32_t lane = 0; lane < wf_size; ++lane)
+    for (uint32_t lane = 0; lane < wf_size; ++lane) {
       EXPECT_EQ(covered[lane], (mask >> lane & 1) ? stride : 0u) << lane;
+    }
   }
 }
 

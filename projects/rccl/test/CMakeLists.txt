@@ -328,6 +328,7 @@ if(BUILD_TESTS)
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
     TransportEncryptionTests.cpp
+    ProxyProtocolTests.cpp
     TopoCpuArchTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp

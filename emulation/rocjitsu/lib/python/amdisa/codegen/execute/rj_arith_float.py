@@ -2221,19 +2221,25 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
         'cdna5',
     ):
         return None
-    api = (
-        'rj_arith_'
-        + mnemonic.lower()
-        + (
+    api = 'rj_arith_' + mnemonic.lower()
+    if mnemonic in BINARY_ARITHMETIC_F16 - {'V_LDEXP_F16'}:
+        # RDNA3 owns the unsuffixed F16 ADD/SUB/SUBREV/MUL entries and RDNA4 the _gfx12 entries;
+        # both accept bit-exact semantics. CDNA3/CDNA4, gfx1250 and RDNA2 call loose-only entries
+        # until their captures are reviewed per instruction.
+        api += {
+            'rdna2': '_gfx10',
+            'rdna3': '',
+            'rdna4': '_gfx12',
+            'cdna3': '_gfx942',
+            'cdna4': '_gfx942',
+            'cdna5': '_gfx1250',
+        }[arch]
+    elif mnemonic == 'V_LDEXP_F16':
+        api += (
             '_gfx12'
-            if arch in ('rdna4', 'cdna5') and mnemonic in BINARY_ARITHMETIC_F16
-            else ''
+            if arch in ('rdna4', 'cdna5')
+            else '_gfx942' if arch.startswith('cdna') else ''
         )
-    )
-    if arch in ('cdna3', 'cdna4') and mnemonic in BINARY_ARITHMETIC_F16:
-        api = 'rj_arith_' + mnemonic.lower() + '_gfx942'
-    if arch == 'cdna5' and mnemonic == 'V_MUL_F16':
-        api = 'rj_arith_v_mul_f16_gfx1250'
     lines = (
         inherited_half_qualification_guard(arch)
         if arch == 'cdna5' and mnemonic == 'V_LDEXP_F16'

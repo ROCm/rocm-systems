@@ -165,7 +165,7 @@ int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t 
     constexpr uint32_t sign = Half ? 0x8000 : 0x80000000;
     constexpr uint32_t one = Half ? 0x3c00 : 0x3f800000;
     const uint32_t c = Op == Binary::Mul ? (a ^ b) & sign : Op == Binary::Sub ? b ^ sign : b;
-    *status |= scalar_fma_causes<Half>(flags, a, Op == Binary::Mul ? b : one, c, *d);
+    *status |= scalar_fma_causes<Half, Gfx1150>(flags, a, Op == Binary::Mul ? b : one, c, *d);
   } else {
     *status |= float_compare_exceptions < Half
                    ? 16

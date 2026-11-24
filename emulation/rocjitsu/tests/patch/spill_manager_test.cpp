@@ -326,27 +326,33 @@ TEST(SpillManager, SlotAddressMatchesFlatScratchFormula) {
 
 TEST(SpillManager, ReserveSet_AddsAllRegisters) {
   RegisterSet set;
-  for (uint16_t i : {0, 2, 5, 11})
+  for (uint16_t i : {0, 2, 5, 11}) {
     set.expand(sgpr(i));
-  for (uint16_t i : {3, 7})
+  }
+  for (uint16_t i : {3, 7}) {
     set.expand(vgpr(i));
+  }
 
   SpillManager m(0, kBigLimit);
   EXPECT_TRUE(m.reserve(set));
   EXPECT_EQ(m.total_private_bytes(), 24u);
 
-  for (uint16_t i : {0, 2, 5, 11})
+  for (uint16_t i : {0, 2, 5, 11}) {
     EXPECT_TRUE(m.offset_for(sgpr(i)).has_value());
-  for (uint16_t i : {3, 7})
+  }
+  for (uint16_t i : {3, 7}) {
     EXPECT_TRUE(m.offset_for(vgpr(i)).has_value());
+  }
 }
 
 TEST(SpillManager, ReserveSet_IsIdempotent) {
   RegisterSet set;
-  for (uint16_t i : {0, 2, 5, 11})
+  for (uint16_t i : {0, 2, 5, 11}) {
     set.expand(sgpr(i));
-  for (uint16_t i : {3, 7})
+  }
+  for (uint16_t i : {3, 7}) {
     set.expand(vgpr(i));
+  }
 
   SpillManager m(0, kBigLimit);
   ASSERT_TRUE(m.reserve(set));
@@ -425,14 +431,16 @@ TEST(SpillManager, AllocateSlotsRollsBackOnPartialOverflow) {
 
 TEST(SpillManager, ReserveRollsBackOnOverflow) {
   RegisterSet set;
-  for (uint16_t i : {0, 1, 2})
+  for (uint16_t i : {0, 1, 2}) {
     set.expand(sgpr(i));
+  }
 
   SpillManager m(0, /*limit=*/8);
   EXPECT_FALSE(m.reserve(set));
   EXPECT_EQ(m.total_private_bytes(), 0u);
-  for (uint16_t i : {0, 1, 2})
+  for (uint16_t i : {0, 1, 2}) {
     EXPECT_EQ(m.offset_for(sgpr(i)), std::nullopt);
+  }
 }
 
 TEST(SpillManager, LimitBoundaryFitsExactly) {
@@ -518,20 +526,23 @@ TEST(SpillManager, ReserveSet_PartialOverlap) {
   SpillManager m(0, kBigLimit);
 
   RegisterSet first;
-  for (uint16_t i : {0, 1})
+  for (uint16_t i : {0, 1}) {
     first.expand(sgpr(i));
+  }
   ASSERT_TRUE(m.reserve(first));
   EXPECT_EQ(m.total_private_bytes(), 8u);
 
   // Superset: 0 and 1 are cached; 2 and 3 are new. Only 8 more bytes expected.
   RegisterSet second;
-  for (uint16_t i : {0, 1, 2, 3})
+  for (uint16_t i : {0, 1, 2, 3}) {
     second.expand(sgpr(i));
+  }
   EXPECT_TRUE(m.reserve(second));
   EXPECT_EQ(m.total_private_bytes(), 16u);
 
-  for (uint16_t i : {0, 1, 2, 3})
+  for (uint16_t i : {0, 1, 2, 3}) {
     EXPECT_TRUE(m.offset_for(sgpr(i)).has_value());
+  }
   // Cached registers kept their original offsets.
   EXPECT_EQ(m.offset_for(sgpr(0)), 0u);
   EXPECT_EQ(m.offset_for(sgpr(1)), 4u);
@@ -579,14 +590,16 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
         break;
       }
     }
-    if (probe)
+    if (probe) {
       break;
+    }
   }
   ASSERT_NE(probe, nullptr);
 
   std::vector<BasicBlock *> scope;
-  for (const auto &b : blocks)
+  for (const auto &b : blocks) {
     scope.push_back(b.get());
+  }
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
   LivenessAnalysis liveness{KernelBlockScope(scope), 64, std::make_unique<ExecMaskAnalysis>(exec)};
   auto maybe_live = liveness.live_before(*probe);
@@ -609,8 +622,9 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   live.for_each([&](RegisterRef r) {
     auto off = m.offset_for(r);
     EXPECT_TRUE(off.has_value()) << "missing offset for live register";
-    if (off.has_value())
+    if (off.has_value()) {
       offsets.push_back(*off);
+    }
   });
   for (size_t i = 0; i < offsets.size(); ++i) {
     for (size_t j = i + 1; j < offsets.size(); ++j) {

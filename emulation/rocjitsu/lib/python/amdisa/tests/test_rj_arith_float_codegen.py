@@ -42,6 +42,11 @@ BYTE_SUFFIX = {
     'cdna3': '',
     'cdna4': '',
     'cdna5': '_gfx12',
+    'cdna1': '',
+    'cdna2': '',
+    'rdna1': '',
+    'rdna2': '',
+    'rdna3_5': '',
 }
 
 FMA64_SUFFIX = {
@@ -51,6 +56,10 @@ FMA64_SUFFIX = {
     'cdna3': '_gfx942',
     'cdna4': '_gfx942',
     'cdna5': '_gfx1250',
+    'cdna1': '_gfx942',
+    'cdna2': '_gfx942',
+    'rdna1': '_gfx942',
+    'rdna3_5': '_gfx942',
 }
 
 
@@ -2207,9 +2216,10 @@ def test_cdna_half_arithmetic_modes_and_destination(arch):
 
     for name in sorted(BINARY_ARITHMETIC_F16):
         body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
-        suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
-        if arch == 'cdna5' and name == 'V_MUL_F16':
-            suffix = '_gfx1250'
+        # gfx1250 F16 arithmetic calls loose-only entries; its LDEXP shares the gfx12 entry.
+        suffix = '_gfx1250' if arch == 'cdna5' else '_gfx942'
+        if arch == 'cdna5' and name == 'V_LDEXP_F16':
+            suffix = '_gfx12'
         for lanes in (32, 64):
             assert f'rj_arith_{name.lower()}_w{lanes}{suffix},' in body
         assert (

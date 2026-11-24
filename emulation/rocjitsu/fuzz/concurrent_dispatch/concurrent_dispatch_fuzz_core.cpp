@@ -73,6 +73,7 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <bit>
 #include <bitset>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -122,9 +123,11 @@ uint8_t input_byte(std::span<const uint8_t> input, std::size_t index) {
 }
 
 template <typename Words> void append_words(std::vector<uint8_t> &bytes, const Words &words) {
-  for (uint32_t word : words)
-    for (unsigned byte = 0; byte < sizeof(word); ++byte)
+  for (uint32_t word : words) {
+    for (unsigned byte = 0; byte < sizeof(word); ++byte) {
       bytes.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+    }
+  }
 }
 
 std::vector<uint8_t> cache_program(execution_fuzz::FuzzTarget target) {
@@ -133,8 +136,9 @@ std::vector<uint8_t> cache_program(execution_fuzz::FuzzTarget target) {
   const util::FailureOr<uint32_t> address_lo = build_v_mov_b32_src(0, 0, arch);
   const util::FailureOr<uint32_t> address_hi = build_v_mov_b32_src(1, 1, arch);
   const util::FailureOr<uint32_t> increment = build_v_mov_b32_src(2, kInlineOne, arch);
-  if (address_lo.failed() || address_hi.failed() || increment.failed())
+  if (address_lo.failed() || address_hi.failed() || increment.failed()) {
     throw std::invalid_argument("invalid concurrent dispatch fuzz architecture");
+  }
   append_words(code, std::array{address_lo.value(), address_hi.value(), increment.value()});
   switch (target) {
   case execution_fuzz::FuzzTarget::Gfx908:
@@ -254,8 +258,9 @@ std::string fuzz_config(execution_fuzz::FuzzTarget target, uint32_t xcd_count) {
   bool first = true;
   const auto append_link = [&](std::string_view source, std::string_view destination,
                                uint32_t latency, uint32_t weight) {
-    if (!first)
+    if (!first) {
       json += ',';
+    }
     first = false;
     json += R"({"src":")";
     json += source;
@@ -300,8 +305,9 @@ struct Scenario {
 std::optional<Scenario> decode_scenario(std::span<const uint8_t> input) {
   const std::optional<execution_fuzz::FuzzTarget> target =
       execution_fuzz::indexed_target(input.front());
-  if (!target)
+  if (!target) {
     return std::nullopt;
+  }
   const uint32_t xcd_count = representative_xcd_count(*target);
   const uint8_t control = input_byte(input, 1);
   return Scenario{
@@ -340,8 +346,9 @@ public:
     } else {
       return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
     }
-    if (!permissions.allows(access))
+    if (!permissions.allows(access)) {
       return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
 
     return {.outcome = amdgpu::VmAccessOutcome::Complete,
             .translation = {.domain = amdgpu::VmMemoryDomain::Local,
@@ -373,8 +380,9 @@ public:
     config.doorbell_va = doorbell_address();
     config.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
     config.xcd_fanout = xcd_fanout;
-    if (cp_->register_queue(std::move(config)) == 0)
+    if (cp_->register_queue(std::move(config)) == 0) {
       throw std::runtime_error("concurrent dispatch fuzz could not register its queue");
+    }
   }
 
   void submit(const hsa_kernel_dispatch_packet_t &packet) {
@@ -459,17 +467,20 @@ public:
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *>) override {
-    if (!barrier_)
+    if (!barrier_) {
       return;
+    }
     std::lock_guard lock(progress_mutex_);
     const std::optional<std::size_t> packet = packet_index(dispatch_id);
     if (!packet) {
       invalid_progress_ = true;
       return;
     }
-    for (std::size_t predecessor = 0; predecessor < *packet; ++predecessor)
-      if (completed_[predecessor].count() != workgroups_)
+    for (std::size_t predecessor = 0; predecessor < *packet; ++predecessor) {
+      if (completed_[predecessor].count() != workgroups_) {
         barrier_violation_ = true;
+      }
+    }
   }
 
   void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override {
@@ -482,8 +493,9 @@ public:
     // The CP notifies the observer before crediting this workgroup toward
     // grid retirement. The signal must still be pending at this point.
     if (memory_.read64(completion_signal_address(*packet) + kSignalValueOffset) !=
-        kPendingSignalValue)
+        kPendingSignalValue) {
       published_early_ = true;
+    }
     completed_[*packet].set(wg_id);
   }
 
@@ -501,8 +513,9 @@ private:
   std::optional<std::size_t> packet_index(uint32_t dispatch_id) const {
     const std::array<uint32_t, kMaxPackets>::const_iterator packet =
         std::ranges::find(dispatch_ids_, dispatch_id);
-    if (dispatch_id == 0 || packet == dispatch_ids_.end())
+    if (dispatch_id == 0 || packet == dispatch_ids_.end()) {
       return std::nullopt;
+    }
     return static_cast<std::size_t>(packet - dispatch_ids_.begin());
   }
 
@@ -528,8 +541,9 @@ void install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario) {
   const uint32_t wave_size = properties.wave_size;
   const std::optional<uint32_t> granule =
       descriptor_vgpr_count_granule_for_wavefront(arch, wave_size);
-  if (!granule)
+  if (!granule) {
     throw std::logic_error("concurrent dispatch fuzz target has no VGPR descriptor granule");
+  }
 
   kernel_descriptor_t descriptor{};
   descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
@@ -539,9 +553,10 @@ void install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario) {
                      KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                      properties.max_addressable_vgprs_per_wf / *granule - 1);
-  if (properties.descriptor_sgpr_count_encoded)
+  if (properties.descriptor_sgpr_count_encoded) {
     RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                        COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, (128 / 8) - 1);
+  }
   set_kernel_descriptor_user_sgpr_count(arch, descriptor, 2);
   memory.load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor),
                     kKernelAddress);
@@ -553,13 +568,15 @@ void install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario) {
 
 std::array<uint8_t, kDataSize> initial_data(std::span<const uint8_t> input) {
   uint64_t seed = 0x2d358dccaa6c78a5ULL;
-  for (uint8_t byte : input)
+  for (uint8_t byte : input) {
     seed = std::rotl(seed ^ byte, 9) * 0x9e3779b97f4a7c15ULL;
+  }
   std::array<uint8_t, kDataSize> data{};
   for (std::size_t offset = 0; offset < data.size(); offset += sizeof(uint64_t)) {
     const uint64_t value = next_random(seed);
-    for (unsigned byte = 0; byte < sizeof(value); ++byte)
+    for (unsigned byte = 0; byte < sizeof(value); ++byte) {
       data[offset + byte] = static_cast<uint8_t>(value >> (8 * byte));
+    }
   }
   return data;
 }
@@ -582,11 +599,13 @@ uint64_t hash_data(const amdgpu::GpuMemory &memory) {
 uint64_t expected_cache_hash(const Scenario &scenario) {
   std::array<uint8_t, kDataSize> data = initial_data(scenario.input);
   uint32_t value = 0;
-  for (unsigned byte = 0; byte < sizeof(value); ++byte)
+  for (unsigned byte = 0; byte < sizeof(value); ++byte) {
     value |= static_cast<uint32_t>(data[byte]) << (8 * byte);
+  }
   value += scenario.packets * scenario.workgroups * scenario.workgroup_size;
-  for (unsigned byte = 0; byte < sizeof(value); ++byte)
+  for (unsigned byte = 0; byte < sizeof(value); ++byte) {
     data[byte] = static_cast<uint8_t>(value >> (8 * byte));
+  }
   return hash_data(data);
 }
 
@@ -639,18 +658,21 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   util::StringDiagnostic diagnostic;
   util::FailureOr<config::LoadedConfig> loaded_result = config::load_config_from_string(
       fuzz_config(scenario.target, scenario.xcd_count), kEmbeddedSchema, diagnostic.emitter());
-  if (loaded_result.failed())
+  if (loaded_result.failed()) {
     throw std::runtime_error("concurrent dispatch fuzz config failed: " + diagnostic.message());
+  }
   config::LoadedConfig loaded = std::move(loaded_result).value();
   SoC *soc = loaded.soc();
   amdgpu::GpuMemory *memory = loaded.memory();
-  if (!soc || !memory || soc->num_xcds() != scenario.xcd_count)
+  if (!soc || !memory || soc->num_xcds() != scenario.xcd_count) {
     throw std::runtime_error("concurrent dispatch fuzz topology is incomplete");
+  }
 
   soc->set_dispatch_threads(mode.dispatch_threads);
   const uint32_t effective_dispatch_threads = soc->dispatch_threads();
-  if (effective_dispatch_threads != mode.dispatch_threads)
+  if (effective_dispatch_threads != mode.dispatch_threads) {
     throw std::runtime_error("concurrent dispatch fuzz topology capped the CPU dispatch pool");
+  }
   const uint32_t engine_threads =
       mode.topology_threads
           ? amdgpu::clamp_xcd_partition_count(soc, static_cast<uint32_t>(soc->num_xcds()))
@@ -658,15 +680,18 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   loaded.engine_config.num_threads = engine_threads;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  if (loaded.wire_links(engine->topology(), diagnostic.emitter()).failed())
+  if (loaded.wire_links(engine->topology(), diagnostic.emitter()).failed()) {
     throw std::runtime_error("concurrent dispatch fuzz link wiring failed: " +
                              diagnostic.message());
+  }
   if (engine_threads > 1 &&
-      !amdgpu::partition_topology_by_xcds(engine->topology(), soc, engine_threads))
+      !amdgpu::partition_topology_by_xcds(engine->topology(), soc, engine_threads)) {
     throw std::runtime_error("concurrent dispatch fuzz could not partition the XCD topology");
-  if (engine->create(diagnostic.emitter()).failed())
+  }
+  if (engine->create(diagnostic.emitter()).failed()) {
     throw std::runtime_error("concurrent dispatch fuzz engine creation failed: " +
                              diagnostic.message());
+  }
 
   install_input_kernel(*memory, scenario);
   const std::array<uint8_t, kDataSize> data = initial_data(scenario.input);
@@ -675,12 +700,14 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
     std::array<uint8_t, sizeof(uint32_t)> sink{};
     for (uint32_t xcd = 0; xcd < soc->num_xcds(); ++xcd) {
       amdgpu::L2Cache *l2 = soc->xcd(xcd)->l2_cache();
-      if (!l2)
+      if (!l2) {
         throw std::runtime_error("concurrent dispatch fuzz target has no L2 cache");
+      }
       for (uint32_t line = 0; line < scenario.prime_lines; ++line) {
         const uint64_t address = kDataBase + line * amdgpu::L2Cache::LINE_SIZE;
-        if (l2->read(address, sink.data(), sink.size()) != amdgpu::VmAccessOutcome::Complete)
+        if (l2->read(address, sink.data(), sink.size()) != amdgpu::VmAccessOutcome::Complete) {
           throw std::runtime_error("concurrent dispatch fuzz could not prime an XCD cache");
+        }
       }
     }
   }
@@ -689,29 +716,35 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   auto physical_memory = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*memory);
   const amdgpu::AddressSpaceHandle fuzz_address_space =
       soc->gpu_vm().register_unrouted_address_space(1, translator, physical_memory);
-  if (!fuzz_address_space)
+  if (!fuzz_address_space) {
     throw std::runtime_error("concurrent dispatch fuzz address-space registration failed");
+  }
 
   auto observer_plugin = std::make_unique<FuzzObserver>(fuzz_address_space, *memory, scenario);
   FuzzObserver *observer = observer_plugin.get();
   auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  if (!plugins->add(std::move(observer_plugin)))
+  if (!plugins->add(std::move(observer_plugin))) {
     throw std::runtime_error("concurrent dispatch fuzz could not attach its observer");
+  }
   soc->set_plugin_group(plugins);
 
   amdgpu::CommandProcessor *owner = soc->assign_queue_owner_cp(scenario.queue_ordinal);
-  if (!owner)
+  if (!owner) {
     throw std::runtime_error("concurrent dispatch fuzz has no queue owner");
+  }
   QueueDriver queue(memory, owner, scenario.queue_ordinal + 1, scenario.xcd_fanout);
   for (uint32_t packet_index = 0; packet_index < scenario.packets; ++packet_index) {
     hsa_kernel_dispatch_packet_t packet{};
     packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
-    if (scenario.barrier && packet_index != 0)
+    if (scenario.barrier && packet_index != 0) {
       packet.header |= 1u << HSA_PACKET_HEADER_BARRIER;
-    if (scenario.agent_acquire)
+    }
+    if (scenario.agent_acquire) {
       packet.header |= HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
-    if (scenario.agent_release)
+    }
+    if (scenario.agent_release) {
       packet.header |= HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
+    }
     packet.setup = 1;
     packet.workgroup_size_x = scenario.workgroup_size;
     packet.workgroup_size_y = 1;
@@ -729,20 +762,25 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   const simdojo::ExitStatus exit = engine->run();
   soc->flush_all();
   std::vector<uint64_t> histogram = soc->dispatched_workgroups_per_xcd();
-  if (histogram.size() != scenario.xcd_count)
+  if (histogram.size() != scenario.xcd_count) {
     throw std::runtime_error("concurrent dispatch fuzz produced an invalid XCD histogram");
+  }
   uint64_t dispatched = 0;
-  for (uint64_t count : histogram)
+  for (uint64_t count : histogram) {
     dispatched += count;
-  if (!observer->valid_progress(scenario.packets))
+  }
+  if (!observer->valid_progress(scenario.packets)) {
     throw std::runtime_error(
         "concurrent dispatch fuzz observed an invalid dispatch or workgroup ID");
-  if (observer->barrier_violation())
+  }
+  if (observer->barrier_violation()) {
     throw std::runtime_error(
         "concurrent dispatch fuzz placed work before its barrier predecessor retired");
-  if (observer->published_early())
+  }
+  if (observer->published_early()) {
     throw std::runtime_error(
         "concurrent dispatch fuzz published completion before workgroup retirement");
+  }
   uint64_t pending_packets = 0;
   uint64_t completed_workgroups = 0;
   for (uint32_t packet_index = 0; packet_index < scenario.packets; ++packet_index) {
@@ -790,8 +828,9 @@ void validate_mode(const Scenario &scenario, const ModeResult &result) {
        (result.completed_workgroups != workgroups || result.dispatched_workgroups != workgroups))) {
     throw std::runtime_error("concurrent dispatch fuzz bookkeeping invariant failed");
   }
-  if (result.terminal_faulted && result.pending_packets == 0)
+  if (result.terminal_faulted && result.pending_packets == 0) {
     throw std::runtime_error("concurrent dispatch fuzz faulted queue published every completion");
+  }
   if (mode_complete(result)) {
     for (uint32_t xcd = 0; xcd < scenario.xcd_count; ++xcd) {
       const uint32_t per_packet = scenario.xcd_fanout
@@ -799,19 +838,21 @@ void validate_mode(const Scenario &scenario, const ModeResult &result) {
                                             (xcd < scenario.workgroups % scenario.xcd_count)
                                       : (xcd == scenario.queue_ordinal ? scenario.workgroups : 0);
       const uint64_t expected = uint64_t{per_packet} * scenario.packets;
-      if (result.dispatched_per_xcd[xcd] != expected)
+      if (result.dispatched_per_xcd[xcd] != expected) {
         throw std::runtime_error(
             std::format("concurrent dispatch fuzz {} placed {} workgroups on XCD {}, expected {}",
                         result.name, result.dispatched_per_xcd[xcd], xcd, expected));
+      }
     }
   }
   if (!detail::primary_lifecycle_is_valid(result.pending_packets == 0, result.terminal_faulted,
-                                          result.exit_cause))
+                                          result.exit_cause)) {
     throw std::runtime_error(std::format(
         "concurrent dispatch fuzz {} primary lifecycle disagrees with {} pending packets "
         "(cause={}, faulted={})",
         result.name, result.pending_packets, static_cast<unsigned>(result.exit_cause),
         result.terminal_faulted));
+  }
 }
 
 bool completed_results_match(const ModeResult &left, const ModeResult &right) {
@@ -824,23 +865,28 @@ bool completed_results_match(const ModeResult &left, const ModeResult &right) {
 }
 
 bool raw_outcomes_match(const ModeResult &left, const ModeResult &right) {
-  if (left.terminal_faulted != right.terminal_faulted)
+  if (left.terminal_faulted != right.terminal_faulted) {
     return false;
+  }
   // Per-mode validation already checked fault teardown and publication.
   // In-flight work may still reach a fatal instruction after the queue faults.
-  if (left.terminal_faulted)
+  if (left.terminal_faulted) {
     return true;
-  if (left.exit_reason != right.exit_reason || left.exit_code != right.exit_code)
+  }
+  if (left.exit_reason != right.exit_reason || left.exit_code != right.exit_code) {
     return false;
+  }
   // Work performed after a fatal request depends on how much of a pooled quantum
   // was already in flight. The fatal classification is the portable outcome.
-  if (left.exit_reason != simdojo::ExitReason::COMPLETED || left.exit_code != 0)
+  if (left.exit_reason != simdojo::ExitReason::COMPLETED || left.exit_code != 0) {
     return true;
+  }
   // Raw kernels can branch on racy data. If either mode is incomplete, its
   // signal and progress can legitimately depend on host scheduling. Completed
   // modes still have to agree on the GPU-visible retirement bookkeeping.
-  if (!mode_complete(left) || !mode_complete(right))
+  if (!mode_complete(left) || !mode_complete(right)) {
     return true;
+  }
   return left.completed_workgroups == right.completed_workgroups &&
          left.dispatched_workgroups == right.dispatched_workgroups;
 }
@@ -885,19 +931,24 @@ bool primary_lifecycle_is_valid(bool published_all_completions, bool terminal_fa
 } // namespace detail
 
 RunStats run_input(std::span<const uint8_t> input) {
-  if (input.empty() || input.size() > kMaxInputSize)
+  if (input.empty() || input.size() > kMaxInputSize) {
     throw std::invalid_argument("concurrent dispatch fuzz input must contain 1..1024 bytes");
+  }
   const std::optional<Scenario> decoded = decode_scenario(input);
-  if (!decoded)
+  if (!decoded) {
     return {.inputs = 1};
+  }
   const Scenario &scenario = *decoded;
 
   std::vector<ModeResult> results;
-  for (const ModeConfig &mode : kModes)
-    if (!mode.topology_threads || scenario.xcd_count > 1)
+  for (const ModeConfig &mode : kModes) {
+    if (!mode.topology_threads || scenario.xcd_count > 1) {
       results.push_back(run_mode(scenario, mode));
-  for (const ModeResult &result : results)
+    }
+  }
+  for (const ModeResult &result : results) {
     validate_mode(scenario, result);
+  }
 
   const ModeResult &serial = results.front();
   const ModeResult &pooled = results.back();
@@ -917,8 +968,9 @@ RunStats run_input(std::span<const uint8_t> input) {
 
   std::string result_description;
   for (const ModeResult &result : results) {
-    if (!result_description.empty())
+    if (!result_description.empty()) {
       result_description += ' ';
+    }
     result_description += std::format("{}=[{}]", result.name, describe_mode(result));
   }
   if (differential &&
@@ -982,16 +1034,18 @@ std::vector<uint8_t> random_input(uint64_t seed) {
   std::vector<uint8_t> input(kGeneratedInputSize);
   for (std::size_t offset = 0; offset < kHeaderSize; offset += sizeof(uint64_t)) {
     const uint64_t value = next_random(seed);
-    for (unsigned byte = 0; byte < sizeof(value); ++byte)
+    for (unsigned byte = 0; byte < sizeof(value); ++byte) {
       input[offset + byte] = static_cast<uint8_t>(value >> (8 * byte));
+    }
   }
   const auto target = static_cast<execution_fuzz::FuzzTarget>(
       original_seed % static_cast<uint8_t>(execution_fuzz::FuzzTarget::Count));
   input[0] = static_cast<uint8_t>(target);
   const std::vector<uint8_t> prefix = cache_program(target);
-  if (prefix.size() > input.size() - kHeaderSize)
+  if (prefix.size() > input.size() - kHeaderSize) {
     throw std::logic_error(
         "concurrent dispatch fuzz canonical kernel exceeds the generated input size");
+  }
   std::copy(prefix.begin(), prefix.end(), input.begin() + kHeaderSize);
   // Keep a regular stream under the differential exact-result oracle. The
   // remaining inputs carry unconstrained target-specific instruction bytes.
@@ -1000,8 +1054,10 @@ std::vector<uint8_t> random_input(uint64_t seed) {
     return input;
   }
   const std::size_t tail_size = input.size() - kHeaderSize - prefix.size();
-  const std::vector<uint8_t> program = execution_fuzz::random_input(
+  const util::FailureOr<std::vector<uint8_t>> maybe_program = execution_fuzz::random_input(
       next_random(seed), tail_size + execution_fuzz::kHeaderSize, target);
+  assert(maybe_program.succeeded());
+  const std::vector<uint8_t> &program = maybe_program.value();
   std::copy(program.begin() + execution_fuzz::kHeaderSize, program.end(),
             input.begin() + kHeaderSize + prefix.size());
   return input;
@@ -1015,8 +1071,9 @@ std::vector<std::vector<uint8_t>> seed_corpus() {
     std::vector<uint8_t> seed(kHeaderSize + sizeof(uint32_t));
     seed[0] = index;
     seed[1] = static_cast<uint8_t>(index & 0xf);
-    if (representative_xcd_count(target) > 1 && (index & 1) != 0)
+    if (representative_xcd_count(target) > 1 && (index & 1) != 0) {
       seed[1] |= kXcdFanoutBit;
+    }
     seed[2] = index;
     seed[3] = index * 3;
     seed[4] = (seed[1] & (kBarrierBit | kXcdFanoutBit)) != 0 ? 1 : 0;

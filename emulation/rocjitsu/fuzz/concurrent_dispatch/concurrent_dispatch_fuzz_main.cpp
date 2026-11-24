@@ -37,25 +37,30 @@ uint64_t parse_uint64(std::string_view text) {
   uint64_t value = 0;
   const std::from_chars_result parsed =
       std::from_chars(text.data(), text.data() + text.size(), value);
-  if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+  if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size()) {
     throw std::invalid_argument("expected an unsigned integer");
+  }
   return value;
 }
 
 std::string parse_path(std::string_view value) {
-  if (value.empty())
+  if (value.empty()) {
     throw std::invalid_argument("expected a nonempty path");
+  }
   return std::string(value);
 }
 
 std::vector<uint8_t> read_input(const std::filesystem::path &path) {
   std::ifstream stream(path, std::ios::binary | std::ios::ate);
-  if (!stream || stream.tellg() <= 0 || stream.tellg() > static_cast<std::streamoff>(kMaxInputSize))
+  if (!stream || stream.tellg() <= 0 ||
+      stream.tellg() > static_cast<std::streamoff>(kMaxInputSize)) {
     throw std::invalid_argument("input has an invalid size");
+  }
   std::vector<uint8_t> input(static_cast<std::size_t>(stream.tellg()));
   stream.seekg(0);
-  if (!stream.read(reinterpret_cast<char *>(input.data()), input.size()))
+  if (!stream.read(reinterpret_cast<char *>(input.data()), input.size())) {
     throw std::runtime_error("cannot read input");
+  }
   return input;
 }
 
@@ -70,35 +75,42 @@ void write_input(const std::filesystem::path &path, std::span<const uint8_t> inp
     const std::string temporary_filename = temporary.string();
     stream = std::fopen(temporary_filename.c_str(), "wbx");
     const int error = errno;
-    if (!stream && error != EEXIST)
+    if (!stream && error != EEXIST) {
       throw std::system_error(error, std::generic_category(), "cannot stage input: " + filename);
+    }
   } while (!stream);
 
   const bool written = std::fwrite(input.data(), 1, input.size(), stream) == input.size();
   const int close_result = std::fclose(stream);
   std::error_code publish_error;
   // A hard link publishes the complete file without replacing an existing replay.
-  if (written && close_result == 0)
+  if (written && close_result == 0) {
     std::filesystem::create_hard_link(temporary, path, publish_error);
+  }
   std::error_code cleanup_error;
   std::filesystem::remove(temporary, cleanup_error);
-  if (cleanup_error)
+  if (cleanup_error) {
     throw std::system_error(cleanup_error, "cannot remove staged input: " + temporary.string());
-  if (!written || close_result != 0)
+  }
+  if (!written || close_result != 0) {
     throw std::runtime_error("cannot write input: " + filename);
-  if (publish_error)
+  }
+  if (publish_error) {
     throw std::system_error(publish_error, "cannot create input: " + filename);
+  }
 }
 
 void emit_seeds(const std::filesystem::path &directory) {
   if (std::filesystem::exists(directory) &&
       (!std::filesystem::is_directory(directory) ||
-       std::filesystem::directory_iterator(directory) != std::filesystem::directory_iterator()))
+       std::filesystem::directory_iterator(directory) != std::filesystem::directory_iterator())) {
     throw std::invalid_argument("seed destination must be an empty directory");
+  }
   std::filesystem::create_directories(directory);
   const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
-  for (std::size_t index = 0; index < seeds.size(); ++index)
+  for (std::size_t index = 0; index < seeds.size(); ++index) {
     write_input(directory / std::format("seed-{:04}.bin", index), seeds[index]);
+  }
   std::cout << "wrote " << seeds.size() << " concurrent-dispatch seeds to " << directory << '\n';
 }
 
@@ -168,8 +180,9 @@ int run_afl() {
 #endif
   while (__AFL_LOOP(1000)) {
     const std::size_t size = __AFL_FUZZ_TESTCASE_LEN;
-    if (size > 0 && size <= kMaxInputSize)
+    if (size > 0 && size <= kMaxInputSize) {
       (void)run_input(std::span<const uint8_t>(buffer, size));
+    }
   }
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -213,17 +226,22 @@ int main(int argc, char **argv) {
     }
 
     const unsigned modes = !input_path.empty() + cases.has_value() + !seed_path.empty() + afl;
-    if (modes != 1)
+    if (modes != 1) {
       throw std::invalid_argument("choose exactly one execution mode");
-    if (cases && *cases == 0)
+    }
+    if (cases && *cases == 0) {
       throw std::invalid_argument("--random requires a positive count");
-    if (cases && output_path.empty())
+    }
+    if (cases && output_path.empty()) {
       throw std::invalid_argument("random mode requires --output DIRECTORY");
-    if (!cases && (!output_path.empty() || first_seed))
+    }
+    if (!cases && (!output_path.empty() || first_seed)) {
       throw std::invalid_argument("--output and --seed require random mode");
+    }
     const uint64_t seed_start = first_seed.value_or(0);
-    if (cases && *cases - 1 > std::numeric_limits<uint64_t>::max() - seed_start)
+    if (cases && *cases - 1 > std::numeric_limits<uint64_t>::max() - seed_start) {
       throw std::invalid_argument("seed range exceeds uint64");
+    }
 
     if (afl) {
       fuzz_loop_running = true;
@@ -254,14 +272,16 @@ int main(int argc, char **argv) {
     print_stats(total);
     return 0;
   } catch (const std::invalid_argument &error) {
-    if (fuzz_loop_running)
+    if (fuzz_loop_running) {
       std::terminate();
+    }
     std::cerr << "rj_concurrent_dispatch_fuzz: " << error.what() << '\n';
     usage(std::cerr);
     return 2;
   } catch (const std::exception &error) {
-    if (fuzz_loop_running)
+    if (fuzz_loop_running) {
       std::terminate();
+    }
     std::cerr << "rj_concurrent_dispatch_fuzz: " << error.what() << '\n';
     return 1;
   }

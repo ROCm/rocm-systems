@@ -19,8 +19,9 @@ namespace {
 
 [[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
   uint32_t word = 0;
-  if (offset + sizeof(word) <= text.size())
+  if (offset + sizeof(word) <= text.size()) {
     std::memcpy(&word, text.data() + offset, sizeof(word));
+  }
   return word;
 }
 
@@ -32,9 +33,10 @@ namespace {
 /// broader semantics so only the exact scoped call-return form matches.
 [[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
   const amdgpu::Operation operation = inst.amdgpu_operation();
-  if (inst.size() != sizeof(uint32_t) ||
-      (operation != amdgpu::Operation::S_SETPC_B64 && operation != amdgpu::Operation::S_SET_PC_I64))
+  if (inst.size() != sizeof(uint32_t) || (operation != amdgpu::Operation::S_SETPC_B64 &&
+                                          operation != amdgpu::Operation::S_SET_PC_I64)) {
     return false;
+  }
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }
 
@@ -65,8 +67,9 @@ function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const
     BasicBlock *block = point.block;
     assert(block != nullptr && "return-block walk stack should contain only decoded blocks");
     if (!allowed_blocks.contains(block) ||
-        !visited.insert({block, point.terminal_return_sreg}).second)
+        !visited.insert({block, point.terminal_return_sreg}).second) {
       continue;
+    }
 
     const Instruction *term = block->terminator();
     // BasicBlock::build() never emits an empty block, so this is an invariant rather than an
@@ -75,15 +78,17 @@ function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const
     // process. A block with no instructions also has no terminator to classify, so there is
     // nothing this walk could have concluded from it anyway.
     assert(term != nullptr && "decoded BasicBlock should contain at least one instruction");
-    if (term == nullptr)
+    if (term == nullptr) {
       continue;
+    }
     if (point.terminal_return_sreg && s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()),
                                                         *point.terminal_return_sreg)) {
       continue;
     }
     if (s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()), return_sreg)) {
-      if (return_set.insert(block).second)
+      if (return_set.insert(block).second) {
         returns.push_back(block);
+      }
       continue;
     }
 
@@ -122,8 +127,9 @@ std::vector<ScopedCfgEdge> scoped_call_liveness_edges(std::span<BasicBlock *cons
       assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
       assert(call.continuation != nullptr &&
              "BasicBlock call edges should always have a continuation");
-      if (!allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation))
+      if (!allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation)) {
         continue;
+      }
 
       edges.push_back({.from = block, .to = call.callee});
       for (BasicBlock *return_block :
@@ -152,15 +158,17 @@ std::unordered_set<uint64_t> scoped_call_return_offsets(std::span<BasicBlock *co
       assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
       assert(call.continuation != nullptr &&
              "BasicBlock call edges should always have a continuation");
-      if (!allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation))
+      if (!allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation)) {
         continue;
+      }
 
       for (BasicBlock *return_block :
            function_return_blocks(*call.callee, call.return_sreg, text, allowed_blocks)) {
         const Instruction *term = return_block->terminator();
         assert(term != nullptr && "function_return_blocks returns non-empty decoded blocks");
-        if (term == nullptr)
+        if (term == nullptr) {
           continue;
+        }
         returns.insert(term->src_loc());
       }
     }

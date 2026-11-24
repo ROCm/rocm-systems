@@ -20,10 +20,12 @@ enum class Mtype : uint8_t {
 
 /// @brief Combine instruction- and page-level MTYPE restrictions.
 inline constexpr Mtype effective_mtype(Mtype instruction_mtype, Mtype pte_mtype) {
-  if (pte_mtype == Mtype::RW || pte_mtype == Mtype::WB)
+  if (pte_mtype == Mtype::RW || pte_mtype == Mtype::WB) {
     return instruction_mtype;
-  if (instruction_mtype == Mtype::NT)
+  }
+  if (instruction_mtype == Mtype::NT) {
     return (pte_mtype < Mtype::RW) ? pte_mtype : Mtype::NT;
+  }
   return (pte_mtype < instruction_mtype) ? pte_mtype : instruction_mtype;
 }
 
