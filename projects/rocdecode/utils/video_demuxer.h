@@ -691,7 +691,7 @@ class VideoDemuxer {
         AVPacket* packet_ = nullptr;
         AVPacket* packet_filtered_ = nullptr;
         AVBSFContext *av_bsf_ctx_ = nullptr;
-        AVCodecID av_video_codec_id_;
+        AVCodecID av_video_codec_id_ = AV_CODEC_ID_NONE;  // stays NONE if the constructor fails
         AVPixelFormat chroma_format_;
         double frame_rate_ = 0.0;
         double avg_frame_rate_ = 0.0;

@@ -709,6 +709,11 @@ int main(int argc, char **argv) {
             return 1;
         }
         VideoDemuxer demuxer(opt.input_path.c_str());
+        // The demuxer logs a failed open or a missing video stream instead of throwing.
+        if (demuxer.GetCodecID() == AV_CODEC_ID_NONE) {
+            std::cerr << "Error: cannot open a video stream in " << opt.input_path << std::endl;
+            return 1;
+        }
         dec.codec = AVCodec2RocDecVideoCodec(demuxer.GetCodecID());
 
         // Skip (exit 77) when the GPU does not support the codec, as the other samples do.
