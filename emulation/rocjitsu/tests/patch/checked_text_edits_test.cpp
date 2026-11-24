@@ -46,8 +46,9 @@ using ReplacementEdit = test::ExpectedReplacement;
 
 rocjitsu::IsaFamily source_architecture(const AmdGpuCodeObject &source) {
   Elf64_Ehdr header = {};
-  if (source.image_size() < sizeof(header))
+  if (source.image_size() < sizeof(header)) {
     return rocjitsu::IsaFamily::Invalid;
+  }
   std::memcpy(&header, source.image_data(), sizeof(header));
   return arch_for_elf_mach(header.e_flags);
 }
@@ -70,10 +71,11 @@ FailureOr<InstrumentedCodeObject> apply_replacements(Instrumentor &instrumentor,
   if (!result.errors.empty()) {
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.sites.empty());
-    if (result.edit_error)
+    if (result.edit_error) {
       error = *result.edit_error;
-    else
+    } else {
       error.message = result.errors.front();
+    }
     return Result::failure();
   }
   EXPECT_FALSE(result.edit_error.has_value());
@@ -102,8 +104,9 @@ constexpr uint32_t kNop1Word = kNop1Encoding.value();
 constexpr uint32_t kEndpgmWord = kEndpgmEncoding.value();
 std::vector<uint8_t> make_instruction_bytes(std::initializer_list<uint32_t> words) {
   std::vector<uint8_t> result(words.size() * 4);
-  if (!result.empty())
+  if (!result.empty()) {
     std::memcpy(result.data(), words.begin(), result.size());
+  }
   return result;
 }
 // gfx1200 / RDNA4, with the kernel entry at .text offset 0. All offsets below
@@ -262,8 +265,9 @@ std::vector<uint8_t> with_relative64_reference(std::vector<uint8_t> image,
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   EXPECT_TRUE(segments);
-  if (!segments)
+  if (!segments) {
     return {};
+  }
   const std::vector<Elf64_Phdr>::iterator data_load =
       std::ranges::find_if(*segments, [](const Elf64_Phdr &segment) {
         return segment.p_type == PT_LOAD && (segment.p_flags & PF_X) == 0;
@@ -272,8 +276,9 @@ std::vector<uint8_t> with_relative64_reference(std::vector<uint8_t> image,
       std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
   EXPECT_NE(data_load, segments->end());
   EXPECT_NE(symbols, sections.end());
-  if (data_load == segments->end() || symbols == sections.end())
+  if (data_load == segments->end() || symbols == sections.end()) {
     return {};
+  }
   const uint32_t symbol_index = static_cast<uint32_t>(symbols - sections.begin());
   const uint64_t data_offset = header.e_shoff;
   const uint64_t data_vaddr = data_load->p_vaddr + data_offset - data_load->p_offset;
@@ -281,8 +286,9 @@ std::vector<uint8_t> with_relative64_reference(std::vector<uint8_t> image,
   const uint64_t rela_vaddr = data_vaddr + sizeof(uint64_t);
   header.e_shoff = rela_offset + sizeof(Elf64_Rela);
   // Keep the section table aligned while admitting one incomplete tail byte.
-  if (trailing_partial_record)
+  if (trailing_partial_record) {
     header.e_shoff += alignof(Elf64_Shdr);
+  }
   image.resize(header.e_shoff);
   const uint64_t slot = 0;
   std::memcpy(image.data() + data_offset, &slot, sizeof(slot));
@@ -361,12 +367,14 @@ testing::AssertionResult matches_checked_output(const AmdGpuCodeObject &source,
                                                 std::span<const ReplacementEdit> edits,
                                                 std::span<const uint8_t> candidate) {
   const std::optional<std::vector<uint8_t>> expected = expected_replacement_image(source, edits);
-  if (!expected)
+  if (!expected) {
     return testing::AssertionFailure() << "test oracle: invalid expected replacement layout";
+  }
   const AmdGpuCodeObject parsed(candidate.data(), candidate.size());
   if (!parsed.is_valid() || parsed.target_id() != source.target_id() ||
-      !std::ranges::equal(*expected, candidate))
+      !std::ranges::equal(*expected, candidate)) {
     return testing::AssertionFailure() << "test oracle: unexpected output bytes or target";
+  }
   return testing::AssertionSuccess();
 }
 
@@ -479,10 +487,11 @@ TEST(CheckedTextEdits, ThreeNonadjacentCompleteExtentsPreserveOtherTextAndDescri
     cave_offset += requests[index].replacement.size() + sizeof(uint32_t);
   }
   EXPECT_EQ(candidate.text_sections().front()->size(), cave_offset);
-  for (const uint64_t control_offset : {4u, 16u, 32u})
+  for (const uint64_t control_offset : {4u, 16u, 32u}) {
     EXPECT_EQ(std::memcmp(emitted_text.data() + control_offset, text.data() + control_offset,
                           sizeof(uint32_t)),
               0);
+  }
   EXPECT_TRUE(test::source_image_matches(object, image));
 }
 
@@ -520,8 +529,9 @@ TEST(CheckedTextEdits, TrampolinePayloadLengthIsIndependentOfCompleteSourceExten
       for (size_t word_count : test_case.body_word_counts) {
         SCOPED_TRACE(word_count);
         std::vector<uint8_t> body(word_count * sizeof(uint32_t));
-        for (size_t word = 0; word < word_count; ++word)
+        for (size_t word = 0; word < word_count; ++word) {
           std::memcpy(body.data() + word * sizeof(uint32_t), &nop_word, sizeof(nop_word));
+        }
         const ReplacementEdit edit = {
             .offset = original.offset, .expected = original.expected, .replacement = body};
         Instrumentor instrumentor(source, test_case.arch);
@@ -715,8 +725,9 @@ std::vector<uint8_t> make_retained_pc_data_elf(const PcDataLayout &layout) {
     symbol.st_value = sections[2].sh_addr;
     test_support::write_elf_struct_for_test(image, symbol_offset, symbol);
   }
-  if (!layout.section_backed)
+  if (!layout.section_backed) {
     sections[2].sh_flags = 0;
+  }
   test_support::write_elf_struct_for_test(image, header.e_shoff + 2 * sizeof(Elf64_Shdr),
                                           sections[2]);
   uint64_t target = sections[2].sh_addr;
@@ -1086,8 +1097,9 @@ TEST(CheckedTextEdits, RejectsRelocationWritesAndInteriorSymbolEndpoints) {
     std::memcpy(&header, image.data(), sizeof(header));
     for (size_t index = 0; index < sections.size(); ++index) {
       const Elf64_Shdr &section = sections[index];
-      if (section.sh_type != SHT_SYMTAB)
+      if (section.sh_type != SHT_SYMTAB) {
         continue;
+      }
       if (mode == 0) {
         // Reuse the allocated descriptor storage for a relocation table.
         const std::vector<Elf64_Shdr>::const_iterator data =
@@ -1195,8 +1207,9 @@ std::vector<uint8_t> with_text_symbol(uint64_t start, uint64_t size, bool reloca
   const std::vector<Elf64_Shdr>::iterator symbols =
       std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
   EXPECT_NE(symbols, sections.end());
-  if (symbols == sections.end())
+  if (symbols == sections.end()) {
     return {};
+  }
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
   if (relocatable) {
@@ -1206,8 +1219,9 @@ std::vector<uint8_t> with_text_symbol(uint64_t start, uint64_t size, bool reloca
     // Drop linked addresses along with the load segments. Otherwise growing
     // .text shifts .rodata without a segment alignment to preserve its layout.
     for (Elf64_Shdr &section : sections) {
-      if ((section.sh_flags & SHF_ALLOC) != 0)
+      if ((section.sh_flags & SHF_ALLOC) != 0) {
         section.sh_addr = 0;
+      }
     }
     // A nonzero section address makes erroneous subtraction observable: the
     // interior label at section offset 12 must not be normalized to offset 4.
@@ -1330,8 +1344,9 @@ TEST(CheckedTextEdits, NonDynamicRelativeReferencesFollowSharedAllocationPolicy)
         relocs.sh_info = static_cast<uint32_t>(data - sections.begin());
       }
       // ET_REL places are relative to sh_info; ET_EXEC keeps the virtual place.
-      if (elf_type == ET_REL)
+      if (elf_type == ET_REL) {
         relocation.r_offset = 0;
+      }
       Elf64_Ehdr header = {};
       std::memcpy(&header, image.data(), sizeof(header));
       header.e_type = elf_type;
@@ -1457,8 +1472,9 @@ TEST(CheckedTextEdits, PreservesAdditionalExecutableSection) {
   image.insert(image.begin() + sibling_offset, sibling_bytes,
                sibling_bytes + sizeof(sibling_words));
   for (Elf64_Shdr &shifted : sections) {
-    if (shifted.sh_offset >= sibling_offset)
+    if (shifted.sh_offset >= sibling_offset) {
       shifted.sh_offset += sizeof(sibling_words);
+    }
   }
   const size_t sibling_index = sections.size();
   sections.push_back(sibling);
@@ -1595,20 +1611,24 @@ std::optional<LoadAliasFixture> make_load_alias_fixture(std::optional<uint64_t> 
       test::make_gfx1200_kernel_elf({kNop0Word, kNop1Word, kNop0Word, kEndpgmWord}, 0);
   const AmdGpuCodeObject original(image.data(), image.size());
   EXPECT_TRUE(original.is_valid());
-  if (!original.is_valid() || original.text_sections().size() != 1)
+  if (!original.is_valid() || original.text_sections().size() != 1) {
     return std::nullopt;
+  }
   const Section &text = *original.text_sections().front();
   EXPECT_TRUE(!same_mapping || text_offset.has_value());
-  if (same_mapping && !text_offset)
+  if (same_mapping && !text_offset) {
     return std::nullopt;
+  }
   const uint64_t file_offset = text_offset ? text.sectionOffset() + *text_offset : 0;
   EXPECT_LE(file_offset, image.size());
   EXPECT_LE(file_size, memory_size);
-  if (file_offset > image.size() || file_size > memory_size)
+  if (file_offset > image.size() || file_size > memory_size) {
     return std::nullopt;
+  }
   EXPECT_LE(file_size, image.size() - file_offset);
-  if (file_size > image.size() - file_offset)
+  if (file_size > image.size() - file_offset) {
     return std::nullopt;
+  }
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
   header.e_ident[EI_DATA] = ELFDATA2LSB;
@@ -1617,15 +1637,17 @@ std::optional<LoadAliasFixture> make_load_alias_fixture(std::optional<uint64_t> 
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   EXPECT_TRUE(segments);
-  if (!segments)
+  if (!segments) {
     return std::nullopt;
+  }
   EXPECT_EQ(segments->size(), 2u);
   EXPECT_EQ(header.e_phentsize, sizeof(Elf64_Phdr));
   const uint64_t new_table_end = header.e_phoff + (segments->size() + 1) * sizeof(Elf64_Phdr);
   EXPECT_LE(new_table_end, text.sectionOffset());
   if (segments->size() != 2 || header.e_phentsize != sizeof(Elf64_Phdr) ||
-      new_table_end > text.sectionOffset())
+      new_table_end > text.sectionOffset()) {
     return std::nullopt;
+  }
   const Elf64_Phdr &owner = segments->front();
   EXPECT_EQ(owner.p_type, PT_LOAD);
   EXPECT_NE(owner.p_flags & PF_X, 0u);
@@ -1649,11 +1671,13 @@ std::optional<LoadAliasFixture> make_load_alias_fixture(std::optional<uint64_t> 
   }
   if (text_offset && file_size != 0) {
     EXPECT_LE(*text_offset, text.size());
-    if (*text_offset > text.size())
+    if (*text_offset > text.size()) {
       return std::nullopt;
+    }
     EXPECT_LE(file_size, text.size() - *text_offset);
-    if (file_size > text.size() - *text_offset)
+    if (file_size > text.size() - *text_offset) {
       return std::nullopt;
+    }
     EXPECT_EQ(std::memcmp(image.data() + alias.p_offset, text.data() + *text_offset,
                           static_cast<size_t>(file_size)),
               0);
@@ -1668,26 +1692,30 @@ std::optional<LoadAliasFixture> make_load_alias_fixture(std::optional<uint64_t> 
               segments->size() * sizeof(Elf64_Phdr));
   const AmdGpuCodeObject mapped(image.data(), image.size());
   EXPECT_TRUE(mapped.is_valid());
-  if (!mapped.is_valid())
+  if (!mapped.is_valid()) {
     return std::nullopt;
+  }
   EXPECT_EQ(mapped.text_sections().size(), 1u);
-  if (mapped.text_sections().size() != 1)
+  if (mapped.text_sections().size() != 1) {
     return std::nullopt;
+  }
   EXPECT_EQ(mapped.text_sections().front()->sectionOffset(), text.sectionOffset());
   EXPECT_EQ(mapped.text_sections().front()->vaddr(), text.vaddr());
   EXPECT_EQ(mapped.text_sections().front()->size(), text.size());
   const std::optional<std::vector<Elf64_Phdr>> readback =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   EXPECT_TRUE(readback);
-  if (!readback)
+  if (!readback) {
     return std::nullopt;
+  }
   EXPECT_EQ(readback->size(), 3u);
   EXPECT_EQ(std::ranges::count(*readback, alias.p_vaddr, &Elf64_Phdr::p_vaddr), 1);
   const std::vector<Elf64_Phdr>::const_iterator actual_alias =
       std::ranges::find(*readback, alias.p_vaddr, &Elf64_Phdr::p_vaddr);
   EXPECT_NE(actual_alias, readback->end());
-  if (actual_alias == readback->end())
+  if (actual_alias == readback->end()) {
     return std::nullopt;
+  }
   EXPECT_EQ(actual_alias->p_type, PT_LOAD);
   EXPECT_EQ(actual_alias->p_flags, 0x4u);
   EXPECT_EQ(actual_alias->p_offset, file_offset);
@@ -1727,10 +1755,11 @@ void expect_load_alias_mapping_preserved(const LoadAliasFixture &fixture,
   const int compared = std::memcmp(result.elf_bytes.data() + alias->p_offset,
                                    fixture.image.data() + fixture.alias.p_offset,
                                    static_cast<size_t>(fixture.alias.p_filesz));
-  if (unchanged_bytes)
+  if (unchanged_bytes) {
     EXPECT_EQ(compared, 0);
-  else
+  } else {
     EXPECT_NE(compared, 0);
+  }
 }
 
 void expect_load_alias_edit_rejected(Instrumentor &instrumentor) {
@@ -1972,13 +2001,15 @@ std::vector<uint8_t> make_external_branch_elf(uint64_t origin, uint64_t destinat
       test::expected_replacement_branch(text_address + 4, origin, arch);
   const std::optional<uint32_t> external_branch =
       test::expected_replacement_branch(origin, destination, arch);
-  if (end.failed() || !entry_branch || !external_branch)
+  if (end.failed() || !entry_branch || !external_branch) {
     return {};
+  }
   std::vector<uint8_t> image =
       make_branch_to_other_section_elf(terminal_text ? end.value() : *entry_branch);
   const AmdGpuCodeObject original(image.data(), image.size());
-  if (!original.is_valid())
+  if (!original.is_valid()) {
     return {};
+  }
   std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
   Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
   const std::array<uint32_t, 3> text_words = {
@@ -2032,13 +2063,15 @@ std::vector<uint8_t> make_foreign_kernel_entry_elf(bool entry_moves, bool descri
   constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
-  if (nop.failed() || end.failed())
+  if (nop.failed() || end.failed()) {
     return {};
+  }
   const std::vector<uint8_t> original =
       test::make_gfx950_two_kernel_elf({nop.value(), end.value()}, 0);
   const AmdGpuCodeObject object(original.data(), original.size());
-  if (!object.is_valid())
+  if (!object.is_valid()) {
     return {};
+  }
   std::vector<Elf64_Shdr> sections = CodeObjectPatcher(object).section_headers();
   Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(original, 0);
   std::vector<std::vector<uint8_t>> contents(sections.size());
@@ -2106,9 +2139,10 @@ std::vector<uint8_t> make_foreign_kernel_entry_elf(bool entry_moves, bool descri
         .p_align = loaded_sections[index] == 2 ? 64u : 0x1000u};
     test_support::write_elf_struct_for_test(image, header.e_phoff + index * sizeof(load), load);
   }
-  for (size_t index = 1; index < sections.size(); ++index)
+  for (size_t index = 1; index < sections.size(); ++index) {
     std::memcpy(image.data() + sections[index].sh_offset, contents[index].data(),
                 contents[index].size());
+  }
   std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   return image;
 }
@@ -2608,8 +2642,9 @@ TEST(CheckedTextEdits, RelocatableForeignBranchesKeepSectionRelativeCoordinates)
   header.e_phoff = 0;
   header.e_phnum = 0;
   for (Elf64_Shdr &section : sections) {
-    if ((section.sh_flags & SHF_ALLOC) != 0)
+    if ((section.sh_flags & SHF_ALLOC) != 0) {
       section.sh_addr = 0;
+    }
   }
   sections[*foreign->sectionHeaderIndex()].sh_size = 12;
   test_support::write_elf_struct_for_test(image, 0x200, *branch);
@@ -2625,8 +2660,9 @@ TEST(CheckedTextEdits, RelocatableForeignBranchesKeepSectionRelativeCoordinates)
   const AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
   ASSERT_EQ(source.allocated_executable_sections().size(), 3u);
-  for (const Section *section : source.allocated_executable_sections())
+  for (const Section *section : source.allocated_executable_sections()) {
     ASSERT_EQ(section->vaddr(), 0u);
+  }
   for (test::FactsRoute route : kFactsRoutes) {
     SCOPED_TRACE(test::facts_route_name(route));
     test::FactsRouteFixture fixture(source, arch);

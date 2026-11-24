@@ -460,8 +460,9 @@ expected_cdna3_dot2_f32_bf16_sequence(uint8_t vdst, uint16_t src0, uint16_t src1
       expected.push_back(
           expect_vop3(cdna3::kVLshlrevB32Vop3, dst, rocjitsu::scalar_positive_inline_u32(16), src));
     }
-    if (negate)
+    if (negate) {
       expected.push_back(expect_vop2(cdna3::kVXorB32Vop2)); // v_xor_b32 literal flips FP32 sign.
+    }
   };
   expect_widen(a_lo, src0, (op_sel & 0x1u) != 0, (neg & 0x1u) != 0);
   expect_widen(b_lo, src1, (op_sel & 0x2u) != 0, (neg & 0x2u) != 0);
@@ -471,9 +472,10 @@ expected_cdna3_dot2_f32_bf16_sequence(uint8_t vdst, uint16_t src0, uint16_t src1
   expected.push_back(expect_vop3(cdna3::kVMulF32Vop3, a_hi, 256 + a_hi, 256 + b_hi));
   expected.push_back(expect_vop3(cdna3::kVAddF32Vop3, a_lo, 256 + a_lo, 256 + a_hi));
   expected.push_back(expect_vop3(cdna3::kVAddF32Vop3, vdst, 256 + a_lo, src2));
-  if (clamp)
+  if (clamp) {
     expected.push_back(
         expect_vop3(cdna3::kVMed3F32Vop3, vdst, 256 + vdst, 128, 242)); // v_med3_f32 clamps [0,1].
+  }
   return expected;
 }
 
@@ -1107,16 +1109,18 @@ std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
 
 bool has_cdna4_to_cdna3_semantic_rule(uint16_t encoding_id, uint16_t opcode) {
   for (const auto &rule : rocjitsu::semantic_expand_rules_cdna4_to_cdna3()) {
-    if (rule.src_encoding_id == encoding_id && rule.src_opcode == opcode)
+    if (rule.src_encoding_id == encoding_id && rule.src_opcode == opcode) {
       return true;
+    }
   }
   return false;
 }
 
 bool has_cdna4_to_cdna3_semantic_rule_case(uint16_t encoding_id, uint16_t opcode) {
   for (const auto &test_case : cdna4_to_cdna3_semantic_rule_cases()) {
-    if (test_case.encoding_id == encoding_id && test_case.opcode == opcode)
+    if (test_case.encoding_id == encoding_id && test_case.opcode == opcode) {
       return true;
+    }
   }
   return false;
 }
@@ -1253,8 +1257,9 @@ void expect_cdna3_text_matches(const rocjitsu::Section &text,
     SCOPED_TRACE(i);
     expect_cdna3_instruction_matches(*actual[i], expected[i]);
   }
-  if (allow_non_nop_tail)
+  if (allow_non_nop_tail) {
     return;
+  }
   for (size_t i = expected.size(); i < actual.size(); ++i) {
     SCOPED_TRACE(i);
     const uint32_t *raw = actual[i]->raw_encoding();
@@ -1284,8 +1289,9 @@ std::optional<uint8_t> find_vop2_literal_add(const uint32_t *words, size_t word_
     rocjitsu::cdna3::Vop2InstLiteralMachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0u && actual.op == 52u && actual.src0 == 0xFFu &&
-        actual.vsrc1 == vsrc1 && actual.simm32 == literal)
+        actual.vsrc1 == vsrc1 && actual.simm32 == literal) {
       return static_cast<uint8_t>(actual.vdst);
+    }
   }
   return std::nullopt;
 }
@@ -1308,8 +1314,10 @@ bool contains_vop3_mov_b32(const uint32_t *words, size_t word_count, uint8_t vds
   for (size_t i = 0; i + 1 < word_count; ++i) {
     rocjitsu::cdna3::Vop3MachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
-    if (actual.encoding == 0x34u && actual.op == 321u && actual.vdst == vdst && actual.src0 == src0)
+    if (actual.encoding == 0x34u && actual.op == 321u && actual.vdst == vdst &&
+        actual.src0 == src0) {
       return true;
+    }
   }
   return false;
 }
@@ -1322,8 +1330,9 @@ bool contains_flat_global_load(const uint32_t *words, size_t word_count, uint8_t
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.vdst == vdst &&
         actual.addr == addr && actual.offset == (offset & 0x0FFFu) &&
         actual.pad_12 == ((offset >> 12) & 0x1u) && actual.sc0 == 1u && actual.sc1 == 0u &&
-        actual.saddr != 0x7Fu)
+        actual.saddr != 0x7Fu) {
       return true;
+    }
   }
   return false;
 }
@@ -1336,8 +1345,9 @@ bool contains_flat_global_load_acc(const uint32_t *words, size_t word_count, uin
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.vdst == vdst &&
         actual.addr == addr && actual.offset == (offset & 0x0FFFu) &&
         actual.pad_12 == ((offset >> 12) & 0x1u) && actual.sc0 == 1u && actual.sc1 == 0u &&
-        actual.acc == 1u && actual.saddr != 0x7Fu)
+        actual.acc == 1u && actual.saddr != 0x7Fu) {
       return true;
+    }
   }
   return false;
 }
@@ -1351,8 +1361,9 @@ std::optional<uint8_t> find_flat_global_load_saddr(const uint32_t *words, size_t
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.vdst == vdst &&
         actual.addr == addr && actual.offset == (offset & 0x0FFFu) &&
         actual.pad_12 == ((offset >> 12) & 0x1u) && actual.sc0 == 1u && actual.sc1 == 0u &&
-        actual.saddr != 0x7Fu)
+        actual.saddr != 0x7Fu) {
       return static_cast<uint8_t>(actual.saddr);
+    }
   }
   return std::nullopt;
 }
@@ -1364,8 +1375,9 @@ bool contains_flat_global_load_addr(const uint32_t *words, size_t word_count, ui
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.addr == addr &&
         actual.offset == (offset & 0x0FFFu) && actual.pad_12 == ((offset >> 12) & 0x1u) &&
-        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu)
+        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu) {
       return true;
+    }
   }
   return false;
 }
@@ -1377,8 +1389,9 @@ std::optional<uint8_t> find_flat_global_load_vdst(const uint32_t *words, size_t 
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.addr == addr &&
         actual.offset == (offset & 0x0FFFu) && actual.pad_12 == ((offset >> 12) & 0x1u) &&
-        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu)
+        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu) {
       return static_cast<uint8_t>(actual.vdst);
+    }
   }
   return std::nullopt;
 }
@@ -1391,8 +1404,9 @@ std::optional<uint8_t> find_flat_global_load_addr_for_vdst(const uint32_t *words
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.vdst == vdst &&
         actual.offset == (offset & 0x0FFFu) && actual.pad_12 == ((offset >> 12) & 0x1u) &&
-        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu)
+        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu) {
       return static_cast<uint8_t>(actual.addr);
+    }
   }
   return std::nullopt;
 }
@@ -1405,8 +1419,9 @@ bool contains_flat_global_store(const uint32_t *words, size_t word_count, uint8_
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.data == data &&
         actual.addr == addr && actual.offset == (offset & 0x0FFFu) &&
         actual.pad_12 == ((offset >> 12) & 0x1u) && actual.sc0 == 1u && actual.sc1 == 0u &&
-        actual.saddr != 0x7Fu)
+        actual.saddr != 0x7Fu) {
       return true;
+    }
   }
   return false;
 }
@@ -1419,8 +1434,9 @@ bool contains_flat_global_store_acc(const uint32_t *words, size_t word_count, ui
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.data == data &&
         actual.addr == addr && actual.offset == (offset & 0x0FFFu) &&
         actual.pad_12 == ((offset >> 12) & 0x1u) && actual.sc0 == 1u && actual.sc1 == 0u &&
-        actual.acc == 1u && actual.saddr != 0x7Fu)
+        actual.acc == 1u && actual.saddr != 0x7Fu) {
       return true;
+    }
   }
   return false;
 }
@@ -1432,8 +1448,9 @@ std::optional<uint8_t> find_flat_global_store_data(const uint32_t *words, size_t
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.addr == addr &&
         actual.offset == (offset & 0x0FFFu) && actual.pad_12 == ((offset >> 12) & 0x1u) &&
-        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu)
+        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu) {
       return static_cast<uint8_t>(actual.data);
+    }
   }
   return std::nullopt;
 }
@@ -1446,8 +1463,9 @@ std::optional<uint8_t> find_flat_global_store_addr_for_data(const uint32_t *word
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.data == data &&
         actual.offset == (offset & 0x0FFFu) && actual.pad_12 == ((offset >> 12) & 0x1u) &&
-        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu)
+        actual.sc0 == 1u && actual.sc1 == 0u && actual.saddr != 0x7Fu) {
       return static_cast<uint8_t>(actual.addr);
+    }
   }
   return std::nullopt;
 }
@@ -1457,8 +1475,9 @@ bool contains_flat_global_store_op(const uint32_t *words, size_t word_count, uin
     rocjitsu::cdna3::FlatMachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.lds == 0u &&
-        actual.saddr != 0x7Fu)
+        actual.saddr != 0x7Fu) {
       return true;
+    }
   }
   return false;
 }
@@ -1468,8 +1487,9 @@ bool contains_flat_global_op_with_null_saddr(const uint32_t *words, size_t word_
     rocjitsu::cdna3::FlatMachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 2u && actual.lds == 0u &&
-        actual.saddr == 0x7Fu)
+        actual.saddr == 0x7Fu) {
       return true;
+    }
   }
   return false;
 }
@@ -1478,8 +1498,9 @@ bool contains_mubuf_lds_op(const uint32_t *words, size_t word_count, uint8_t op)
   for (size_t i = 0; i + 1 < word_count; ++i) {
     rocjitsu::cdna3::MubufMachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
-    if (actual.encoding == 0x38u && actual.op == op && actual.lds != 0u)
+    if (actual.encoding == 0x38u && actual.op == op && actual.lds != 0u) {
       return true;
+    }
   }
   return false;
 }
@@ -1492,8 +1513,9 @@ bool contains_flat_scratch_dword(const uint32_t *words, size_t word_count, uint8
     const uint8_t encoded_vgpr =
         is_load ? static_cast<uint8_t>(actual.vdst) : static_cast<uint8_t>(actual.data);
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 1u && actual.saddr == 0x7Fu &&
-        encoded_vgpr == vgpr && actual.offset == offset)
+        encoded_vgpr == vgpr && actual.offset == offset) {
       return true;
+    }
   }
   return false;
 }
@@ -1506,8 +1528,9 @@ bool contains_flat_scratch_dword_offset(const uint32_t *words, size_t word_count
     if (actual.encoding == 0x37u && actual.op == op && actual.seg == 1u && actual.saddr == 0x7Fu &&
         actual.offset == offset) {
       const bool decoded_load = actual.op == 20u;
-      if (decoded_load == is_load)
+      if (decoded_load == is_load) {
         return true;
+      }
     }
   }
   return false;
@@ -1518,8 +1541,9 @@ bool contains_cdna3_vop1(const uint32_t *words, size_t word_count, uint8_t op, u
   for (size_t i = 0; i < word_count; ++i) {
     rocjitsu::cdna3::Vop1MachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
-    if (actual.encoding == 0x3Fu && actual.op == op && actual.vdst == vdst && actual.src0 == src0)
+    if (actual.encoding == 0x3Fu && actual.op == op && actual.vdst == vdst && actual.src0 == src0) {
       return true;
+    }
   }
   return false;
 }
@@ -1529,8 +1553,9 @@ size_t count_cdna3_vop1_writes(const uint32_t *words, size_t word_count, uint8_t
   for (size_t i = 0; i < word_count; ++i) {
     rocjitsu::cdna3::Vop1MachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
-    if (actual.encoding == 0x3Fu && actual.op == op && actual.vdst == vdst)
+    if (actual.encoding == 0x3Fu && actual.op == op && actual.vdst == vdst) {
       ++count;
+    }
   }
   return count;
 }
@@ -1540,8 +1565,10 @@ bool contains_cdna3_vop3p(const uint32_t *words, size_t word_count, uint8_t op, 
   for (size_t i = 0; i + 1 < word_count; ++i) {
     rocjitsu::cdna3::Vop3pMachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
-    if (actual.encoding == 0x1A7u && actual.op == op && actual.vdst == vdst && actual.src0 == src0)
+    if (actual.encoding == 0x1A7u && actual.op == op && actual.vdst == vdst &&
+        actual.src0 == src0) {
       return true;
+    }
   }
   return false;
 }
@@ -1551,8 +1578,9 @@ std::optional<uint8_t> find_cdna3_vop1_vdst(const uint32_t *words, size_t word_c
   for (size_t i = 0; i < word_count; ++i) {
     rocjitsu::cdna3::Vop1MachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
-    if (actual.encoding == 0x3Fu && actual.op == op && actual.src0 == src0)
+    if (actual.encoding == 0x3Fu && actual.op == op && actual.src0 == src0) {
       return static_cast<uint8_t>(actual.vdst);
+    }
   }
   return std::nullopt;
 }
@@ -1561,8 +1589,9 @@ bool contains_sopp(const uint32_t *words, size_t word_count, uint8_t op) {
   for (size_t i = 0; i < word_count; ++i) {
     rocjitsu::cdna3::SoppMachineInst actual{};
     std::memcpy(&actual, words + i, sizeof(actual));
-    if (actual.encoding == 0x17Fu && actual.op == op)
+    if (actual.encoding == 0x17Fu && actual.op == op) {
       return true;
+    }
   }
   return false;
 }
@@ -1574,8 +1603,9 @@ bool contains_smem_load_dwordx2_with_wait(const uint32_t *words, size_t word_cou
     std::memcpy(&actual, words + i, sizeof(actual));
     if (actual.encoding == 0x30u && actual.op == 1u && actual.sdata == sdata &&
         actual.sbase == (sbase_sgpr / 2u) && actual.imm == 1u && actual.offset == offset &&
-        words[i + 2] == rocjitsu::pack_sopp(cdna3::kSWaitcntSopp, 0))
+        words[i + 2] == rocjitsu::pack_sopp(cdna3::kSWaitcntSopp, 0)) {
       return true;
+    }
   }
   return false;
 }
@@ -1656,12 +1686,14 @@ find_sidecar_metadata_record_for_test(const std::vector<uint8_t> &image,
   rocjitsu::AmdGpuCodeObject translated(image.data(), image.size());
   const auto *section =
       rocjitsu::test_support::find_section(translated, rocjitsu::kSidecarMetadataSectionName);
-  if (section == nullptr)
+  if (section == nullptr) {
     return std::nullopt;
+  }
   const auto parsed = rocjitsu::parse_sidecar_metadata(
       {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
-  if (!parsed)
+  if (!parsed) {
     return std::nullopt;
+  }
   const auto record = std::ranges::find_if(*parsed, [&](const auto &candidate) {
     return candidate.kernel_name == kernel_name &&
            candidate.variant_name == rocjitsu::kVirtualLdsSidecarVariantName;
@@ -1675,12 +1707,14 @@ find_kernarg_extension_record_for_test(const std::vector<uint8_t> &image,
   rocjitsu::AmdGpuCodeObject translated(image.data(), image.size());
   const auto *section = rocjitsu::test_support::find_section(
       translated, rocjitsu::kKernargExtensionMetadataSectionName);
-  if (section == nullptr)
+  if (section == nullptr) {
     return std::nullopt;
+  }
   const auto parsed = rocjitsu::parse_kernarg_extension_metadata(
       {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
-  if (!parsed)
+  if (!parsed) {
     return std::nullopt;
+  }
   const auto record = std::ranges::find_if(*parsed, [&](const auto &candidate) {
     return candidate.kernel_name == kernel_name &&
            candidate.variant_name == rocjitsu::kVirtualLdsSidecarVariantName;
@@ -1691,8 +1725,9 @@ find_kernarg_extension_record_for_test(const std::vector<uint8_t> &image,
 std::optional<rocjitsu::KernargExtensionLayout>
 make_kernarg_extension_layout_for_test(const rocjitsu::KernargExtensionMetadata &metadata) {
   std::vector<rocjitsu::KernargExtensionPayloadLayout> payloads;
-  for (const auto &payload : metadata.payloads)
+  for (const auto &payload : metadata.payloads) {
     payloads.push_back({.size = payload.size, .alignment = payload.alignment});
+  }
   return rocjitsu::make_kernarg_extension_layout(metadata.original_kernarg_size, payloads);
 }
 
@@ -1719,8 +1754,9 @@ std::optional<rocjitsu::test_support::TestKernelDescriptor>
 read_virtual_lds_sidecar_descriptor_for_test(const std::vector<uint8_t> &image,
                                              std::string_view kernel_name = "kernel") {
   const auto record = find_sidecar_metadata_record_for_test(image, kernel_name);
-  if (!record.has_value())
+  if (!record.has_value()) {
     return std::nullopt;
+  }
 
   return read_descriptor_at_loaded_vaddr_for_test(image, record->variant_descriptor_vaddr);
 }
@@ -1736,8 +1772,9 @@ virtual_lds_sidecar_entry_words_for_test(const std::vector<uint8_t> &image,
 
   const auto record = find_sidecar_metadata_record_for_test(image, kernel_name);
   const auto descriptor = read_virtual_lds_sidecar_descriptor_for_test(image, kernel_name);
-  if (!record.has_value() || !descriptor.has_value())
+  if (!record.has_value() || !descriptor.has_value()) {
     return std::nullopt;
+  }
 
   const int64_t entry_delta =
       rocjitsu::test_support::read_kernel_descriptor_entry_offset(&*descriptor);
@@ -1759,8 +1796,9 @@ virtual_lds_sidecar_entry_words_for_test(const std::vector<uint8_t> &image,
   for (const auto *text : translated.text_sections()) {
     const uint64_t text_begin = text->sectionOffset();
     const uint64_t text_end = text_begin + text->size();
-    if (*entry_file_offset < text_begin || *entry_file_offset >= text_end)
+    if (*entry_file_offset < text_begin || *entry_file_offset >= text_end) {
       continue;
+    }
 
     const uint64_t byte_count = text_end - *entry_file_offset;
     return InstructionWordsView{
@@ -1861,8 +1899,9 @@ std::vector<std::unique_ptr<rocjitsu::Instruction>>
 decode_text_instructions(const rocjitsu::Section &text, rocjitsu::IsaFamily arch) {
   std::vector<std::unique_ptr<rocjitsu::Instruction>> decoded;
   auto decoder = rocjitsu::Decoder::create(arch);
-  if (!decoder)
+  if (!decoder) {
     return decoded;
+  }
 
   const auto *words = reinterpret_cast<const rj_code_binary_inst_t *>(text.data());
   const size_t word_count = text.size() / sizeof(rj_code_binary_inst_t);
@@ -1870,8 +1909,9 @@ decode_text_instructions(const rocjitsu::Section &text, rocjitsu::IsaFamily arch
   while (word_offset < word_count) {
     std::unique_ptr<rocjitsu::Instruction> inst(
         decode_valid(*decoder, words + word_offset, word_offset * sizeof(rj_code_binary_inst_t)));
-    if (!inst)
+    if (!inst) {
       break;
+    }
     word_offset += static_cast<size_t>(inst->size()) / sizeof(rj_code_binary_inst_t);
     decoded.push_back(std::move(inst));
   }
@@ -2000,8 +2040,9 @@ TEST(BinaryTranslatorE2E, SkipFailedKernelKeepsIndependentKernelTranslating) {
       translated.text_sections()[0]->size(), rocjitsu::KernelDescriptorTranslationOptions{});
   ASSERT_EQ(infos.size(), 2u);
   std::vector<uint64_t> entries;
-  for (const auto &info : infos)
+  for (const auto &info : infos) {
     entries.push_back(info.entry_text_offset);
+  }
   std::ranges::sort(entries);
   ASSERT_EQ(entries.size(), 2u);
   EXPECT_EQ(entries[0], 0u);
@@ -2151,10 +2192,12 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarPreservesReservedBytesAfterTextGrowth
   const uint64_t reserved1_off =
       rodata->sectionOffset() + offsetof(rocjitsu::test_support::TestKernelDescriptor, reserved1);
   std::array<uint8_t, 20> reserved1_pattern{};
-  for (size_t i = 0; i < reserved1_pattern.size(); ++i)
+  for (size_t i = 0; i < reserved1_pattern.size(); ++i) {
     reserved1_pattern[i] = static_cast<uint8_t>(0xA0 + i);
-  for (size_t i = 0; i < reserved1_pattern.size(); ++i)
+  }
+  for (size_t i = 0; i < reserved1_pattern.size(); ++i) {
     image[reserved1_off + i] = reserved1_pattern[i];
+  }
 
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
@@ -2463,8 +2506,9 @@ TEST(BinaryTranslatorE2E, Gfx1250CompactConditionalLayoutIsIdempotent) {
   words.reserve(kTargetWord + 1);
   words.push_back(
       rocjitsu::pack_sopp(cdna5::kSCbranchExecnzSopp, static_cast<uint16_t>(kTargetWord - 1)));
-  for (size_t i = 1; i < kTargetWord; ++i)
+  for (size_t i = 1; i < kTargetWord; ++i) {
     words.push_back(rocjitsu::pack_sopp(cdna5::kSCbranchScc0Sopp, 0));
+  }
   words.push_back(kGfx1250SEndpgm);
 
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
@@ -2588,8 +2632,9 @@ constexpr uint16_t kKernargReturnSreg = 30;
 [[nodiscard]] rocjitsu::TranslatedCodeObject
 translate_kernarg_fixture(const std::vector<uint32_t> &words, bool enable_kernarg) {
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
-  if (enable_kernarg)
+  if (enable_kernarg) {
     rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+  }
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   EXPECT_TRUE(source.is_valid());
   rocjitsu::BinaryTranslator translator(
@@ -3964,8 +4009,9 @@ TEST(BinaryTranslatorE2E, DuplicatesSharedReachableBlocksPerKernel) {
                                             rocjitsu::KernelDescriptorTranslationOptions{});
   ASSERT_EQ(infos.size(), 2u);
   std::vector<uint64_t> translated_entries;
-  for (const auto &info : infos)
+  for (const auto &info : infos) {
     translated_entries.push_back(info.entry_text_offset);
+  }
   std::ranges::sort(translated_entries);
   ASSERT_EQ(translated_entries[0], 0u);
   ASSERT_GT(translated_entries[1], 2 * sizeof(uint32_t));
@@ -4232,15 +4278,17 @@ TEST(BinaryTranslatorE2E, Cdna4Vop2ReverseShiftsExecuteOnRdna) {
                                   CountCase{255, 0x3118u}, CountCase{128 + 21, 21u}};
       for (const auto &[count, bits] : counts) {
         const bool register_count = count == 256 + count_reg;
-        if (!shift.half && !register_count)
+        if (!shift.half && !register_count) {
           continue;
+        }
         const uint8_t dst = register_count ? count_reg : value_reg;
         SCOPED_TRACE(::testing::Message() << arch << " " << shift.mnemonic << " count=" << count);
         const auto guest =
             cdna4::build_vop2(shift.op, {.src0 = count, .vsrc1 = value_reg, .vdst = dst});
         std::vector<uint32_t> code{guest[0]};
-        if (count == 255)
+        if (count == 255) {
           code.push_back(bits);
+        }
         code.push_back(0xBF810000u);
         const auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(code);
         AmdGpuCodeObject source(image.data(), image.size());
@@ -4262,8 +4310,9 @@ TEST(BinaryTranslatorE2E, Cdna4Vop2ReverseShiftsExecuteOnRdna) {
           cu->write_vgpr(base + count_reg, lane, lane_count(lane));
         }
         for (const auto &inst : decoded) {
-          if (inst->mnemonic() == "s_endpgm")
+          if (inst->mnemonic() == "s_endpgm") {
             break;
+          }
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
         }
         for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
@@ -4272,13 +4321,16 @@ TEST(BinaryTranslatorE2E, Cdna4Vop2ReverseShiftsExecuteOnRdna) {
           const uint32_t mask = shift.half ? 0xffffu : UINT32_MAX;
           const uint32_t src = value & mask;
           uint32_t expected = src >> amount;
-          if (shift.left)
+          if (shift.left) {
             expected = (src << amount) & mask;
-          if (shift.arithmetic)
+          }
+          if (shift.arithmetic) {
             expected =
                 (static_cast<int32_t>(shift.half ? 0xffff0000u | src : src) >> amount) & mask;
-          if (!(active & (uint64_t{1} << lane)))
+          }
+          if (!(active & (uint64_t{1} << lane))) {
             expected = dst == value_reg ? value : lane_count(lane);
+          }
           EXPECT_EQ(cu->read_vgpr(base + dst, lane), expected) << "lane " << lane;
         }
       }
@@ -4369,8 +4421,9 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaNormalizesInlineAndRegisterCounts) {
         cu->write_vgpr(base + 4, lane, lane);
       }
       for (const auto &inst : decoded) {
-        if (inst->mnemonic() == "s_endpgm")
+        if (inst->mnemonic() == "s_endpgm") {
           break;
+        }
         ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded()) << inst->mnemonic();
       }
       for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
@@ -4496,16 +4549,18 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaScratchAvoidsOutstandingMemoryResults
         std::vector<uint32_t> words;
         if (reuse.sgpr) {
           // Name all ordinary SGPR pairs to force the carry into a site-dead pair.
-          for (uint8_t reg = 2; reg < REGISTER_SET_ALLOCATABLE_SGPRS; reg += 2)
+          for (uint8_t reg = 2; reg < REGISTER_SET_ALLOCATABLE_SGPRS; reg += 2) {
             words.push_back(cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = 128, .sdst = reg})[0]);
+          }
         }
         words.insert(words.end(), {sload[0], sload[1], vload[0], vload[1], shift[0], shift[1],
                                    wait[0], 0xBF810000u});
         auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
         const AmdGpuCodeObject source(image.data(), image.size());
         BinaryTranslatorOptions options;
-        if (reuse.vgpr)
+        if (reuse.vgpr) {
           options.debug_min_free_vgpr = pending_vgpr;
+        }
         BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, arch, 0, options);
         auto result = translator.translate(source);
         ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
@@ -4520,14 +4575,16 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaScratchAvoidsOutstandingMemoryResults
         auto count_reg = (*count)->dst_operand(0)->to_register_ref();
         auto carry_reg = (*carry)->dst_operand(1)->to_register_ref();
         ASSERT_TRUE(count_reg && carry_reg);
-        if (reuse.vgpr)
+        if (reuse.vgpr) {
           EXPECT_EQ(count_reg->index, pending_vgpr);
-        else
+        } else {
           EXPECT_GE(count_reg->index, 2u);
-        if (reuse.sgpr)
+        }
+        if (reuse.sgpr) {
           EXPECT_EQ(carry_reg->index, 0u);
-        else
+        } else {
           EXPECT_GE(carry_reg->index, 2u);
+        }
         if (reuse.vgpr || reuse.sgpr) {
           ASSERT_NE(count, decoded.begin());
           EXPECT_EQ((*std::prev(count))->mnemonic(), "s_wait_idle");
@@ -4609,18 +4666,20 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaCarryUsesScalarSgprNotVcc) {
     std::optional<RegisterRef> first_carry;
     unsigned carry_chains = 0;
     for (size_t i = 0; i < decoded.size(); ++i) {
-      if (decoded[i]->mnemonic() != "v_add_co_u32")
+      if (decoded[i]->mnemonic() != "v_add_co_u32") {
         continue;
+      }
       ASSERT_LT(i + 2, decoded.size());
       ASSERT_EQ(decoded[i]->num_dst_operands(), 2);
       const std::optional<RegisterRef> carry = decoded[i]->dst_operand(1)->to_register_ref();
       ASSERT_TRUE(carry.has_value());
       EXPECT_EQ(carry->cls, RegClass::SGPR);
       EXPECT_EQ(carry->width, 2);
-      if (first_carry)
+      if (first_carry) {
         EXPECT_EQ(carry, first_carry);
-      else
+      } else {
         first_carry = carry;
+      }
 
       const auto &wait = decoded[i + 1];
       ASSERT_EQ(wait->mnemonic(), wait_name);
@@ -6709,8 +6768,9 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3KernargPreloadFirmwareEntryKeepsMaskedDefL
     for (size_t i = 0; i + 1 < target_word_count; ++i) {
       rocjitsu::cdna3::Vop3MachineInst v{};
       std::memcpy(&v, target_words + i, sizeof(v));
-      if (v.encoding == 0x34u && v.op == cdna3::kVCvtF16F32Vop3 && v.vdst == vdst)
+      if (v.encoding == 0x34u && v.op == cdna3::kVCvtF16F32Vop3 && v.vdst == vdst) {
         return true;
+      }
     }
     return false;
   };
@@ -7208,9 +7268,11 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3PermlaneSwapPreservesInactiveLanes) {
       for (const uint64_t exec : exec_masks) {
         for (const bool scc : {false, true}) {
           SCOPED_TRACE(::testing::Message() << "exec=" << exec << " scc=" << scc);
-          for (uint8_t reg = 0; reg < 2; ++reg)
-            for (uint32_t lane = 0; lane < 64; ++lane)
+          for (uint8_t reg = 0; reg < 2; ++reg) {
+            for (uint32_t lane = 0; lane < 64; ++lane) {
               cu->write_vgpr(vb + reg, lane, initial(reg, lane));
+            }
+          }
           wf->set_exec(exec);
           wf->write_scc(scc);
           constexpr uint64_t vcc = 0x123456789abcdef0ull;
@@ -7236,8 +7298,9 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3PermlaneSwapPreservesInactiveLanes) {
               const bool output = high ? reg == vdst : reg == vsrc;
               const bool written = output && ((exec >> lane) & 1u);
               const uint32_t peer = lane ^ width;
-              if (written && ((exec >> peer) & 1u) == 0)
+              if (written && ((exec >> peer) & 1u) == 0) {
                 continue;
+              }
               const uint32_t expected =
                   written ? initial(high ? vsrc : vdst, peer) : initial(reg, lane);
               EXPECT_EQ(cu->read_vgpr(vb + reg, lane), expected)
@@ -8255,8 +8318,9 @@ TEST(BinaryTranslatorE2E, DebugContinueAfterFailureCollectsMultipleExpandDiagnos
   std::vector<uint64_t> expand_offsets;
   for (const auto &diagnostic : result.diagnostics) {
     if (diagnostic.kind == rocjitsu::DiagnosticKind::ExpandMissing &&
-        diagnostic.guest_offset.has_value())
+        diagnostic.guest_offset.has_value()) {
       expand_offsets.push_back(*diagnostic.guest_offset);
+    }
   }
   EXPECT_EQ(expand_offsets, (std::vector<uint64_t>{0, 8}));
 }
@@ -8785,10 +8849,11 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, Gfx1250E5m3Operand 
                                                      .src1 = selector(src1, kSrc1Vgpr, kSrc1Sgpr)});
   source_words.push_back(conversion[0]);
   source_words.push_back(conversion[1]);
-  if (src0.kind == Kind::Literal)
+  if (src0.kind == Kind::Literal) {
     source_words.push_back(src0.value);
-  else if (src1.kind == Kind::Literal)
+  } else if (src1.kind == Kind::Literal) {
     source_words.push_back(src1.value);
+  }
   // Readers that keep every ordinary SGPR live, so the expansion has to borrow
   // VGPR carriers and guard them instead of taking scratch SGPRs outright.
   for (uint16_t sgpr = 0; sgpr < live_sgprs; ++sgpr) {
@@ -8842,10 +8907,11 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, Gfx1250E5m3Operand 
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint32_t sb = wf->sgpr_alloc().base;
   const auto place = [&](Gfx1250E5m3Operand operand, uint32_t bank, uint16_t vgpr, uint16_t sgpr) {
-    if (operand.kind == Kind::Vgpr)
+    if (operand.kind == Kind::Vgpr) {
       cu->write_vgpr(vb + (bank << 8) + vgpr, 0, operand.value);
-    else if (operand.kind == Kind::Sgpr)
+    } else if (operand.kind == Kind::Sgpr) {
       cu->write_sgpr(sb + sgpr, operand.value);
+    }
   };
   place(src0, src0_bank, kSrc0Vgpr, kSrc0Sgpr);
   place(src1, src1_bank, kSrc1Vgpr, kSrc1Sgpr);
@@ -8865,8 +8931,9 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, Gfx1250E5m3Operand 
       ADD_FAILURE() << "undecodable replacement word at " << index;
       return std::nullopt;
     }
-    if (std::string_view(inst->mnemonic()) == "s_endpgm")
+    if (std::string_view(inst->mnemonic()) == "s_endpgm") {
       break;
+    }
     // Executing the untranslated conversion would compare the model against
     // itself and pass no matter what the expansion emits.
     if (std::string_view(inst->mnemonic()) == source_mnemonic) {
@@ -9256,8 +9323,9 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
   // regression cannot pass.
   int bfe_count = 0;
   for (const auto &inst : decoded) {
-    if (inst->mnemonic() != "v_bfe_u32")
+    if (inst->mnemonic() != "v_bfe_u32") {
       continue;
+    }
     ++bfe_count;
     const rocjitsu::Operand *offset = inst->src_operand(1);
     ASSERT_NE(offset, nullptr);
@@ -9294,10 +9362,11 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3CompareMasksTargetDeadSgprs) {
       ASSERT_NE(inst->raw_encoding(), nullptr);
       cdna5::Vop3MachineInst encoded{};
       std::memcpy(&encoded, inst->raw_encoding(), sizeof(encoded));
-      if (inst->mnemonic() == "v_cmp_eq_u32")
+      if (inst->mnemonic() == "v_cmp_eq_u32") {
         nan_mask = static_cast<uint16_t>(encoded.vdst);
-      else
+      } else {
         exp31_mask = static_cast<uint16_t>(encoded.vdst);
+      }
     } else if (inst->mnemonic() == "v_cndmask_b32") {
       const rocjitsu::Operand *predicate = inst->src_operand(2);
       ASSERT_NE(predicate, nullptr);
@@ -9375,8 +9444,9 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3SeparatesVectorAndScalarSpillSlots) {
   std::vector<uint32_t> store_offsets;
   std::vector<uint32_t> load_offsets;
   for (const auto &inst : decoded) {
-    if (inst->mnemonic() != "scratch_store_b32" && inst->mnemonic() != "scratch_load_b32")
+    if (inst->mnemonic() != "scratch_store_b32" && inst->mnemonic() != "scratch_load_b32") {
       continue;
+    }
     ASSERT_NE(inst->raw_encoding(), nullptr);
     cdna5::VscratchMachineInst scratch{};
     std::memcpy(&scratch, inst->raw_encoding(), sizeof(scratch));
@@ -9654,8 +9724,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Ds2MovesData1VgprBankToSecondData0Role) {
   // transitions dynamically so the assertion does not depend on absolute offsets.
   std::vector<uint16_t> generated_modes;
   for (size_t index = 0; index < decoded.size(); ++index) {
-    if (decoded[index]->mnemonic() != "s_set_vgpr_msb")
+    if (decoded[index]->mnemonic() != "s_set_vgpr_msb") {
       continue;
+    }
     ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
     const uint16_t imm = static_cast<uint16_t>(decoded[index]->raw_encoding()[0] & 0xffffu);
     // The 0x0010 transition is the copied source s_set_vgpr_msb; the two generated
@@ -9691,8 +9762,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Ds2AdjustsDestinationBankForSecondLoad) {
   // Two generated bank transitions (0x0040, 0x4000), each guarded by s_wait_xcnt.
   std::vector<uint16_t> generated_modes;
   for (size_t index = 0; index < decoded.size(); ++index) {
-    if (decoded[index]->mnemonic() != "s_set_vgpr_msb")
+    if (decoded[index]->mnemonic() != "s_set_vgpr_msb") {
       continue;
+    }
     ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
     ASSERT_GT(index, 0u);
     EXPECT_EQ(decoded[index - 1]->mnemonic(), "s_wait_xcnt");
@@ -9969,8 +10041,9 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
 
   std::vector<const rocjitsu::TranslationRule *> residual_rules;
   for (const rocjitsu::TranslationRule &rule : rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0()) {
-    if (rule.discharge.disposition == rocjitsu::RewriteDischargeDisposition::Checked)
+    if (rule.discharge.disposition == rocjitsu::RewriteDischargeDisposition::Checked) {
       residual_rules.push_back(&rule);
+    }
   }
   ASSERT_EQ(samples.size(), residual_rules.size());
 
@@ -10281,8 +10354,9 @@ TEST(BinaryTranslatorE2E, Gfx1250LowersF16K128Fp8Bf8WmmaThroughF32Scratch) {
     auto after_wait = std::next(matrix, 2);
     ASSERT_LE(std::distance(decoded.begin(), after_wait) + 16,
               std::distance(decoded.begin(), decoded.end()));
-    for (uint16_t slot = 0; slot < 16; ++slot, ++after_wait)
+    for (uint16_t slot = 0; slot < 16; ++slot, ++after_wait) {
       EXPECT_EQ((*after_wait)->mnemonic(), "v_nop_e32");
+    }
     EXPECT_EQ(std::ranges::count_if(decoded,
                                     [](const auto &candidate) {
                                       return candidate->mnemonic() ==
@@ -10397,8 +10471,9 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaUsesAccumulatorBankAsGeneratedSrc0) 
       decode_text_instructions(*translated.text_sections()[0], rocjitsu::IsaFamily::Cdna5);
   std::vector<uint8_t> modes;
   for (const auto &candidate : decoded) {
-    if (candidate->mnemonic() == "s_set_vgpr_msb")
+    if (candidate->mnemonic() == "s_set_vgpr_msb") {
       modes.push_back(static_cast<uint8_t>(candidate->raw_encoding()[0] & 0xffu));
+    }
   }
   ASSERT_GE(modes.size(), 2u);
   EXPECT_EQ(modes[0], 0x10u);
@@ -10589,8 +10664,9 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, text_words + offset));
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
     const std::string_view mnemonic(inst->mnemonic());
-    if (mnemonic == "s_endpgm")
+    if (mnemonic == "s_endpgm") {
       break;
+    }
     EXPECT_NE(mnemonic, "s_set_vgpr_msb") << "bank-0 operands must not need a mode transition";
     EXPECT_NE(mnemonic, "scratch_store_b32") << "the scratch lease must not spill here";
     const size_t words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
@@ -10631,8 +10707,9 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
       uint32_t out = 0;
       for (uint32_t byte = 0; byte < 4; ++byte) {
         uint32_t value = (word >> (byte * 8)) & 0xffu;
-        if ((value & 0x7fu) == 0x7fu)
+        if ((value & 0x7fu) == 0x7fu) {
           value ^= 1u;
+        }
         out |= value << (byte * 8);
       }
       return out;
@@ -10641,44 +10718,58 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
       uint32_t out = 0;
       for (uint32_t half = 0; half < 2; ++half) {
         uint32_t value = (word >> (half * 16)) & 0xffffu;
-        if ((value & 0x7c00u) == 0x7c00u && (value & 0x03ffu) != 0)
+        if ((value & 0x7c00u) == 0x7c00u && (value & 0x03ffu) != 0) {
           value &= 0xfbffu;
+        }
         out |= value << (half * 16);
       }
       return out;
     };
-    for (uint32_t reg = 0; reg < kMatrixARegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 0; reg < kMatrixARegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(vb + kMatrixA + reg, lane, without_fp8_nan(next()));
-    for (uint32_t reg = 0; reg < kMatrixBRegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+      }
+    }
+    for (uint32_t reg = 0; reg < kMatrixBRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(vb + kMatrixB + reg, lane, without_fp8_nan(next()));
-    for (uint32_t reg = 0; reg < kMatrixCRegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+      }
+    }
+    for (uint32_t reg = 0; reg < kMatrixCRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(vb + kMatrixC + reg, lane,
                        accumulator_override != 0 ? accumulator_override : without_f16_nan(next()));
-    if (accumulator_override != 0)
+      }
+    }
+    if (accumulator_override != 0) {
       return;
+    }
     // Packed FP16 pairs: +Inf/-Inf, +MAX/-MAX, +0/-0, denormal/one.
     static constexpr std::array<uint32_t, 4> kSpecials = {0xFC007C00u, 0xFBFF7BFFu, 0x80000000u,
                                                           0x3C000001u};
-    for (uint32_t reg = 0; reg < kMatrixCRegs; ++reg)
-      for (uint32_t i = 0; i < kSpecials.size(); ++i)
+    for (uint32_t reg = 0; reg < kMatrixCRegs; ++reg) {
+      for (uint32_t i = 0; i < kSpecials.size(); ++i) {
         cu->write_vgpr(vb + kMatrixC + reg, i * 7u, kSpecials[i]);
+      }
+    }
   };
 
   auto zero_destination = [&] {
-    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(vb + kDestination + reg, lane, 0u);
+      }
+    }
   };
 
   auto snapshot_destination = [&] {
     std::vector<uint32_t> out;
     out.reserve(kDestinationRegs * lanes);
-    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         out.push_back(cu->read_vgpr(vb + kDestination + reg, lane));
+      }
+    }
     return out;
   };
 
@@ -10717,8 +10808,9 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
 
     EXPECT_EQ(run_a, run_b);
     for (size_t i = 0; i < run_a.size() && run_a != run_b; ++i) {
-      if (run_a[i] == run_b[i])
+      if (run_a[i] == run_b[i]) {
         continue;
+      }
       ADD_FAILURE() << "first divergence at D reg " << (i / lanes) << " lane " << (i % lanes)
                     << ": source=0x" << std::hex << run_a[i] << " lowered=0x" << run_b[i]
                     << std::dec;
@@ -10770,8 +10862,9 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
     return std::ranges::all_of(values, [](uint32_t word) {
       for (uint32_t half = 0; half < 2; ++half) {
         const auto value = static_cast<uint16_t>(word >> (half * 16));
-        if ((value & 0x7C00u) != 0x7C00u || (value & 0x03FFu) == 0)
+        if ((value & 0x7C00u) != 0x7C00u || (value & 0x03FFu) == 0) {
           return false;
+        }
       }
       return true;
     });
@@ -10779,8 +10872,9 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
   EXPECT_TRUE(all_halves_are_nan(nan_source));
   EXPECT_TRUE(all_halves_are_nan(nan_lowered));
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundOffFormClusterLoadForA0) {
@@ -10816,11 +10910,13 @@ TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundOffFormClusterLoadForA0) {
   constexpr uint16_t kInlineZeroOperand = 128;
   bool cleared_m0 = false;
   for (const auto &inst : decoded) {
-    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr)
+    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr) {
       continue;
+    }
     const uint32_t word = inst->raw_encoding()[0];
-    if (((word >> 16) & 0x7fu) == kGfx1250M0Operand && (word & 0xffu) == kInlineZeroOperand)
+    if (((word >> 16) & 0x7fu) == kGfx1250M0Operand && (word & 0xffu) == kInlineZeroOperand) {
       cleared_m0 = true;
+    }
   }
   EXPECT_TRUE(cleared_m0) << "off-form cluster load must still set M0 (125) = inline 0 (128)";
 
@@ -10867,17 +10963,21 @@ TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundSaddrClusterLoadForA0) {
   bool cleared_m0 = false;  // some s_mov writes M0 from inline 0
   bool restored_m0 = false; // some s_mov writes M0 from a non-inline (scratch) source
   for (const auto &inst : decoded) {
-    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr)
+    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr) {
       continue;
+    }
     const uint32_t word = inst->raw_encoding()[0];
     const uint16_t ssrc0 = word & 0xffu;
     const uint16_t sdst = (word >> 16) & 0x7fu;
-    if (ssrc0 == kGfx1250M0Operand)
+    if (ssrc0 == kGfx1250M0Operand) {
       saved_m0 = true;
-    if (sdst == kGfx1250M0Operand && ssrc0 == kInlineZeroOperand)
+    }
+    if (sdst == kGfx1250M0Operand && ssrc0 == kInlineZeroOperand) {
       cleared_m0 = true;
-    if (sdst == kGfx1250M0Operand && ssrc0 != kInlineZeroOperand)
+    }
+    if (sdst == kGfx1250M0Operand && ssrc0 != kInlineZeroOperand) {
       restored_m0 = true;
+    }
   }
   EXPECT_TRUE(saved_m0) << "no s_mov_b32 reads M0 (125) to save it";
   EXPECT_TRUE(cleared_m0) << "no s_mov_b32 sets M0 (125) = inline 0 (128)";
@@ -10921,11 +11021,13 @@ TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadSavesM0AboveVopd3CndmaskSelector) {
   constexpr uint16_t kGfx1250M0Operand = 125;
   std::vector<uint16_t> m0_saves;
   for (const auto &inst : decoded) {
-    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr)
+    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr) {
       continue;
+    }
     const uint32_t word = inst->raw_encoding()[0];
-    if ((word & 0xffu) == kGfx1250M0Operand)
+    if ((word & 0xffu) == kGfx1250M0Operand) {
       m0_saves.push_back(static_cast<uint16_t>((word >> 16) & 0x7fu));
+    }
   }
   EXPECT_EQ(m0_saves, std::vector<uint16_t>{5});
 
@@ -11320,18 +11422,21 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
 
   std::optional<uint64_t> addend;
   for (const rocjitsu::Elf64_Shdr &section : shdrs) {
-    if (section.sh_type != rocjitsu::SHT_RELA)
+    if (section.sh_type != rocjitsu::SHT_RELA) {
       continue;
+    }
     for (size_t i = 0; i < section.sh_size / sizeof(rocjitsu::Elf64_Rela); ++i) {
       rocjitsu::Elf64_Rela rela{};
       std::memcpy(&rela, image.data() + section.sh_offset + i * sizeof(rocjitsu::Elf64_Rela),
                   sizeof(rela));
-      if ((rela.r_info & 0xffffffffu) == rocjitsu::R_AMDGPU_RELATIVE64)
+      if ((rela.r_info & 0xffffffffu) == rocjitsu::R_AMDGPU_RELATIVE64) {
         addend = static_cast<uint64_t>(rela.r_addend);
+      }
     }
   }
-  if (!addend)
+  if (!addend) {
     return {};
+  }
 
   for (const rocjitsu::Elf64_Shdr &section : shdrs) {
     if ((section.sh_flags & rocjitsu::SHF_EXECINSTR) == 0 || *addend < section.sh_addr ||
@@ -12330,11 +12435,11 @@ TEST(BinaryTranslatorE2E, Gfx1250SpillWaitsForOutstandingVgprProducer) {
   std::optional<size_t> wait_idle_index;
   std::optional<size_t> scratch_store_index;
   for (size_t index = 0; index < decoded.size(); ++index) {
-    if (decoded[index]->mnemonic() == "ds_load_b32")
+    if (decoded[index]->mnemonic() == "ds_load_b32") {
       pending_load_index = index;
-    else if (decoded[index]->mnemonic() == "s_wait_idle")
+    } else if (decoded[index]->mnemonic() == "s_wait_idle") {
       wait_idle_index = index;
-    else if (decoded[index]->mnemonic() == "scratch_store_b32") {
+    } else if (decoded[index]->mnemonic() == "scratch_store_b32") {
       scratch_store_index = index;
       ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
       cdna5::VscratchMachineInst scratch{};
@@ -12377,11 +12482,11 @@ TEST(BinaryTranslatorE2E, Gfx1250DeadScratchWaitsForOutstandingVgprProducer) {
   std::optional<size_t> wait_idle_index;
   std::optional<size_t> scratch_write_index;
   for (size_t index = 0; index < decoded.size(); ++index) {
-    if (decoded[index]->mnemonic() == "ds_load_b32")
+    if (decoded[index]->mnemonic() == "ds_load_b32") {
       pending_load_index = index;
-    else if (decoded[index]->mnemonic() == "s_wait_idle")
+    } else if (decoded[index]->mnemonic() == "s_wait_idle") {
       wait_idle_index = index;
-    else if (decoded[index]->mnemonic() == "v_mbcnt_lo_u32_b32") {
+    } else if (decoded[index]->mnemonic() == "v_mbcnt_lo_u32_b32") {
       scratch_write_index = index;
       const rocjitsu::Operand *destination = decoded[index]->dst_operand(0);
       ASSERT_NE(destination, nullptr);
@@ -12426,10 +12531,11 @@ TEST(BinaryTranslatorE2E, Gfx1250AddtidLoadWaitsForOutstandingVgprProducer) {
   std::optional<size_t> wait_idle_index;
   std::optional<size_t> scratch_write_index;
   for (size_t index = 0; index < decoded.size(); ++index) {
-    if (decoded[index]->mnemonic() == "s_wait_idle")
+    if (decoded[index]->mnemonic() == "s_wait_idle") {
       wait_idle_index = index;
-    else if (decoded[index]->mnemonic() == "v_mbcnt_lo_u32_b32")
+    } else if (decoded[index]->mnemonic() == "v_mbcnt_lo_u32_b32") {
       scratch_write_index = index;
+    }
   }
   ASSERT_TRUE(wait_idle_index.has_value());
   ASSERT_TRUE(scratch_write_index.has_value());
@@ -12671,8 +12777,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Iu8WmmaDoesNotCreditVNopsAcrossBlockBoundary) {
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   EXPECT_EQ(target_words[1], source_wmma[0]);
   EXPECT_EQ(target_words[2], source_wmma[1]);
-  for (size_t slot = 0; slot < 18; ++slot)
+  for (size_t slot = 0; slot < 18; ++slot) {
     EXPECT_EQ(target_words[3 + slot], v_nop);
+  }
   EXPECT_EQ(target_words[21], kGfx1250SEndpgm);
 
   rocjitsu::BinaryTranslator verifier(
@@ -12855,16 +12962,17 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorScratchWaitsForOutstandingSgprProducer) {
   std::optional<size_t> wait_idle_index;
   std::optional<size_t> scratch_write_index;
   for (size_t index = 0; index < decoded.size(); ++index) {
-    if (decoded[index]->mnemonic() == "s_load_b32")
+    if (decoded[index]->mnemonic() == "s_load_b32") {
       pending_load_index = index;
-    else if (decoded[index]->mnemonic() == "s_wait_idle")
+    } else if (decoded[index]->mnemonic() == "s_wait_idle") {
       wait_idle_index = index;
-    else if (decoded[index]->mnemonic() == "s_mov_b32") {
+    } else if (decoded[index]->mnemonic() == "s_mov_b32") {
       ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
       cdna5::Sop1MachineInst move{};
       std::memcpy(&move, decoded[index]->raw_encoding(), sizeof(move));
-      if (move.ssrc0 == 0 && move.sdst == 12)
+      if (move.ssrc0 == 0 && move.sdst == 12) {
         scratch_write_index = index;
+      }
     }
   }
   ASSERT_TRUE(pending_load_index.has_value());
@@ -13016,8 +13124,9 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadChecksSaSdstFieldInGuestWait) {
     rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_FALSE(translated.text_sections().empty());
     std::vector<uint32_t> expected = {source_clear[0], source_wait[0]};
-    if (!test_case.drains_sa_sdst)
+    if (!test_case.drains_sa_sdst) {
       expected.push_back(kGfx1250TensorMaskSdstWait[0]);
+    }
     expected.insert(expected.end(), source_tensor.begin(), source_tensor.end());
     expected.push_back(kGfx1250SEndpgm);
     ASSERT_EQ(translated.text_sections()[0]->size(), expected.size() * sizeof(uint32_t));
@@ -13329,8 +13438,9 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsRegularScaleFp4AcrossMForA0) {
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) == 0x35u)
+    if (((words[i] >> 16) & 0xffu) == 0x35u) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u);
   for (uint16_t half = 0; half < 2; ++half) {
@@ -13459,8 +13569,9 @@ TEST(BinaryTranslatorE2E, Gfx1250RegularScaleFp4AcceptsScalarAndInlineScaleSourc
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   size_t prefix_count = 0;
   for (size_t i = 0; i + 1 < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) != 0x35u)
+    if (((words[i] >> 16) & 0xffu) != 0x35u) {
       continue;
+    }
     cdna5::Vop3pMachineInst prefix{};
     std::memcpy(&prefix, words + i, sizeof(prefix));
     EXPECT_EQ(prefix.src0, 4u);
@@ -13494,8 +13605,9 @@ TEST(BinaryTranslatorE2E, Gfx1250RegularScaleFp4AdjustsUpperCAndDestinationBanks
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) == 0x35u)
+    if (((words[i] >> 16) & 0xffu) == 0x35u) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u);
   cdna5::Vop3pMachineInst upper{};
@@ -13539,8 +13651,9 @@ TEST(BinaryTranslatorE2E, Gfx1250RegularScaleFp4AdjustsUpperABank) {
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) == 0x35u)
+    if (((words[i] >> 16) & 0xffu) == 0x35u) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u);
   cdna5::Vop3pMachineInst upper{};
@@ -13614,8 +13727,9 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMOnlyForA0) {
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) == 0x3au)
+    if (((words[i] >> 16) & 0xffu) == 0x3au) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u);
 
@@ -13682,8 +13796,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Scale16Fp4AcceptsScalarAndInlineScaleSources) {
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   size_t prefix_count = 0;
   for (size_t i = 0; i + 1 < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) != 0x3au)
+    if (((words[i] >> 16) & 0xffu) != 0x3au) {
       continue;
+    }
     cdna5::Vop3pMachineInst prefix{};
     std::memcpy(&prefix, words + i, sizeof(prefix));
     EXPECT_EQ(prefix.src0, 4u);
@@ -13813,8 +13928,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Scale16Fp4AdjustsUpperCAndDestinationBanks) {
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) == 0x3au)
+    if (((words[i] >> 16) & 0xffu) == 0x3au) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u);
   cdna5::Vop3pMachineInst upper{};
@@ -13968,8 +14084,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Scale16M32DoesNotNeedScratchWhenVgprsAreFull) {
       ++wait_load_count;
       continue;
     }
-    if (inst->mnemonic() != "scratch_store_b32" && inst->mnemonic() != "scratch_load_b32")
+    if (inst->mnemonic() != "scratch_store_b32" && inst->mnemonic() != "scratch_load_b32") {
       continue;
+    }
     ASSERT_NE(inst->raw_encoding(), nullptr);
     cdna5::VscratchMachineInst scratch{};
     std::memcpy(&scratch, inst->raw_encoding(), sizeof(scratch));
@@ -14102,8 +14219,9 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsStandalone32x16Fp4IntoScaledHalvesForA0) 
   constexpr uint32_t kScalePrefixOp = 0x35;
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < target_word_count; ++i) {
-    if (((target_words[i] >> 16) & 0xffu) == kScalePrefixOp)
+    if (((target_words[i] >> 16) & 0xffu) == kScalePrefixOp) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u) << "each half must carry its own scale prefix";
 
@@ -14167,8 +14285,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4AdjustsUpperABank) {
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) == 0x35u)
+    if (((words[i] >> 16) & 0xffu) == 0x35u) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u);
   // 252 + 8 wraps to 4 in the next bank.
@@ -14181,8 +14300,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4AdjustsUpperABank) {
       decode_text_instructions(*translated.text_sections()[0], rocjitsu::IsaFamily::Cdna5);
   std::vector<uint8_t> modes;
   for (size_t index = 0; index < decoded.size(); ++index) {
-    if (decoded[index]->mnemonic() != "s_set_vgpr_msb")
+    if (decoded[index]->mnemonic() != "s_set_vgpr_msb") {
       continue;
+    }
     ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
     modes.push_back(static_cast<uint8_t>(decoded[index]->raw_encoding()[0] & 0xffu));
     ASSERT_GT(index, 0u);
@@ -14254,8 +14374,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4PreservesInlineMatrixCForA0) 
   const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   std::vector<size_t> pass_offsets;
   for (size_t i = 0; i < word_count; ++i) {
-    if (((words[i] >> 16) & 0xffu) == 0x35u)
+    if (((words[i] >> 16) & 0xffu) == 0x35u) {
       pass_offsets.push_back(i);
+    }
   }
   ASSERT_EQ(pass_offsets.size(), 2u);
   for (const size_t prefix : pass_offsets) {
@@ -14317,8 +14438,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
   for (size_t offset = 0; offset < text_word_count;) {
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, text_words + offset));
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
-    if (std::string_view(inst->mnemonic()) == "s_endpgm")
+    if (std::string_view(inst->mnemonic()) == "s_endpgm") {
       break;
+    }
     EXPECT_NE(std::string_view(inst->mnemonic()), "s_set_vgpr_msb")
         << "bank-0 operands must not need a mode transition";
     const size_t words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
@@ -14358,12 +14480,16 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
       state = state * 1664525u + 1013904223u;
       return state;
     };
-    for (uint32_t reg = 0; reg < kMatrixARegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 0; reg < kMatrixARegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(vb + kMatrixA + reg, lane, next());
-    for (uint32_t reg = 0; reg < kMatrixBRegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+      }
+    }
+    for (uint32_t reg = 0; reg < kMatrixBRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(vb + kMatrixB + reg, lane, next());
+      }
+    }
     for (uint32_t reg = 0; reg < kMatrixCRegs; ++reg) {
       for (uint32_t lane = 0; lane < lanes; ++lane) {
         const uint32_t bits = next();
@@ -14384,17 +14510,21 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
   };
 
   auto zero_destination = [&] {
-    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(vb + kDestination + reg, lane, 0u);
+      }
+    }
   };
 
   auto snapshot_destination = [&] {
     std::vector<uint32_t> out;
     out.reserve(kDestinationRegs * lanes);
-    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         out.push_back(cu->read_vgpr(vb + kDestination + reg, lane));
+      }
+    }
     return out;
   };
 
@@ -14438,14 +14568,17 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
     return (bits & 0x80000000u) != 0u ? ~bits : bits | 0x80000000u;
   };
   for (size_t i = 0; i < run_a.size(); ++i) {
-    if (run_a[i] == run_b[i])
+    if (run_a[i] == run_b[i]) {
       continue;
+    }
     const float unsplit = std::bit_cast<float>(run_a[i]);
     const float split = std::bit_cast<float>(run_b[i]);
-    if (std::isnan(unsplit) && std::isnan(split))
+    if (std::isnan(unsplit) && std::isnan(split)) {
       continue;
-    if (unsplit == split)
+    }
+    if (unsplit == split) {
       continue;
+    }
     ASSERT_TRUE(std::isfinite(unsplit) && std::isfinite(split))
         << "D reg " << (i / lanes) << " lane " << (i % lanes) << ": unsplit=0x" << std::hex
         << run_a[i] << " split=0x" << run_b[i] << std::dec;
@@ -14459,8 +14592,9 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
                          << std::hex << run_a[i] << " split=0x" << run_b[i] << std::dec;
   }
 
-  if (!wf->is_halted())
+  if (!wf->is_halted()) {
     wf->halt();
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250RecoversAddNcU64PcBuilder) {
@@ -14835,8 +14969,9 @@ TEST(BinaryTranslatorE2E, Gfx1250IgnoresLeadingVNopsAcrossABlockBoundary) {
   ASSERT_EQ(decoded.size(), 7u)
       << "the write must receive a fresh pair, not count the skipped ones";
   EXPECT_EQ(decoded[0]->mnemonic(), "s_cbranch_scc0");
-  for (size_t i = 1; i < 5; ++i)
+  for (size_t i = 1; i < 5; ++i) {
     EXPECT_EQ(decoded[i]->mnemonic(), "v_nop_e32") << "at index " << i;
+  }
   ASSERT_NE(decoded[5]->raw_encoding(), nullptr);
   EXPECT_EQ(decoded[5]->raw_encoding()[0], kSetregWaveMode);
   EXPECT_EQ(decoded[6]->mnemonic(), "s_endpgm");
@@ -15550,9 +15685,10 @@ TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange)
   shdrs[5].sh_flags = rocjitsu::SHF_EXECINSTR;
   shdrs[5].sh_addr = fake_exec_vaddr;
   shdrs[5].sh_size = sizeof(uint32_t);
-  for (size_t i = 0; i < shdrs.size(); ++i)
+  for (size_t i = 0; i < shdrs.size(); ++i) {
     rocjitsu::test_support::write_elf_struct_for_test(
         image, ehdr.e_shoff + i * sizeof(rocjitsu::Elf64_Shdr), shdrs[i]);
+  }
 
   rocjitsu::test_support::write_kernel_descriptor_entry_offset(
       image.data() + descriptor_file_offset,
@@ -15590,18 +15726,21 @@ translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words,
       rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Cdna5, 0,
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
-  if (trace_callback)
+  if (trace_callback) {
     translator.set_trace_callback(std::move(trace_callback));
+  }
   auto result = translator.translate(source);
   EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
-  if (!result.ok())
+  if (!result.ok()) {
     return {};
+  }
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   EXPECT_FALSE(translated.text_sections().empty());
-  if (translated.text_sections().empty())
+  if (translated.text_sections().empty()) {
     return {};
+  }
   const auto *section = translated.text_sections()[0];
   const auto *target_words = reinterpret_cast<const uint32_t *>(section->data());
   return std::vector<uint32_t>(target_words, target_words + section->size() / sizeof(uint32_t));
@@ -15624,8 +15763,9 @@ TEST(BinaryTranslatorE2E, Gfx1250RewritesScalarFlatScratchBase64BitSourceForA0) 
   std::optional<TraceClassification> rewrite_trace;
   const auto out = translate_gfx1250_b0_to_a0_words(
       {source[0]}, [&](const rocjitsu::TranslationTraceEvent &event) {
-        if (event.source_words.size() != source.size() || event.source_words[0] != source[0])
+        if (event.source_words.size() != source.size() || event.source_words[0] != source[0]) {
           return;
+        }
         rewrite_trace = {.legalization = event.legalization,
                          .copied_original = event.copied_original,
                          .semantic_lowering = event.semantic_lowering,
@@ -15937,8 +16077,9 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
   for (size_t offset = 0; offset < translated_count;) {
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, translated_words + offset));
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
-    if (std::string_view(inst->mnemonic()) == "s_endpgm")
+    if (std::string_view(inst->mnemonic()) == "s_endpgm") {
       break;
+    }
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }

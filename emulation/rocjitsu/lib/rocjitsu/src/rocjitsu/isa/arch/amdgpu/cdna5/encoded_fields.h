@@ -23,11 +23,13 @@ replace_ds_b32_address(rj_code_target_id_t target, std::span<const uint32_t> sou
   constexpr uint32_t kOpcodeMask = 0xfffc0000u;
   constexpr uint32_t kDsStoreB32 = 0xd8340000u;
   constexpr uint32_t kDsLoadB32 = 0xd8d80000u;
-  if (target != ROCJITSU_CODE_TARGET_GFX1250 || source.size() != 2 || encoded_vgpr > 255)
+  if (target != ROCJITSU_CODE_TARGET_GFX1250 || source.size() != 2 || encoded_vgpr > 255) {
     return std::nullopt;
+  }
   const uint32_t opcode = source[0] & kOpcodeMask;
-  if (opcode != kDsStoreB32 && opcode != kDsLoadB32)
+  if (opcode != kDsStoreB32 && opcode != kDsLoadB32) {
     return std::nullopt;
+  }
   return std::array<uint32_t, 2>{source[0], (source[1] & ~0xffu) | encoded_vgpr};
 }
 

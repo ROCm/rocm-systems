@@ -95,8 +95,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
 
   void execute(uint32_t word) {
@@ -111,8 +112,9 @@ protected:
   }
 
   uint64_t expected_export(const PcExportCase &test) const {
-    if (GetParam().arch == rocjitsu::IsaFamily::Cdna5)
+    if (GetParam().arch == rocjitsu::IsaFamily::Cdna5) {
       return test.signed57;
+    }
     return GetParam().arch == rocjitsu::IsaFamily::Rdna4 ? test.zero48 : test.signed48;
   }
 
@@ -224,14 +226,16 @@ TEST_P(PcExtensionTest, GetpcRoundTripsThroughIndirectBranchesWithLoadBias) {
   };
   wave->set_code_load_bias(kLoadBias);
   for (const PcExportCase &start : starts) {
-    if (start.pc > 0x0000FFFFFFFFFFFFULL && GetParam().arch != rocjitsu::IsaFamily::Cdna5)
+    if (start.pc > 0x0000FFFFFFFFFFFFULL && GetParam().arch != rocjitsu::IsaFamily::Cdna5) {
       continue;
+    }
     SCOPED_TRACE(::testing::Message() << "pc=" << std::hex << start.pc);
     for (bool swap : {false, true}) {
       SCOPED_TRACE(swap);
       for (bool alias : {false, true}) {
-        if (!swap && alias)
+        if (!swap && alias) {
           continue;
+        }
         SCOPED_TRACE(alias);
         wave->pc = start.pc;
         write_pair(4, 0xDEADBEEFDEADBEEFULL);

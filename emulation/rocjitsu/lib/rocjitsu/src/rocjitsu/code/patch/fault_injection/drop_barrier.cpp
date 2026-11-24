@@ -44,23 +44,27 @@ FailureOr<DropBarrierSelection> select_drop_barrier(const FaultBarrierInventory 
                                                     FaultMutationError &error) {
   error = {};
   const std::shared_ptr<const FaultBarrierRecord> &record = inventory.record_;
-  if (!record || record->source.expired())
+  if (!record || record->source.expired()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "expired or unbound inventory");
+  }
   // TODO(hanchung): Add a better barrier-selection heuristic while preserving explicit selection
   // and reproducibility.
   if (selector.exact) {
-    if (selector.exact->record_.lock() != record)
+    if (selector.exact->record_.lock() != record) {
       return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                    "exact selector belongs to another source or kernel");
+    }
     return *selector.exact;
   }
-  if (record->barriers.empty())
+  if (record->barriers.empty()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::NoCandidates,
                                  "no complete qualified barriers");
-  if (selector.ordinal >= record->barriers.size())
+  }
+  if (selector.ordinal >= record->barriers.size()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::OrdinalOutOfRange,
                                  "logical barrier ordinal out of range");
+  }
   DropBarrierSelection selection;
   selection.owner_ = record->owner;
   selection.barrier_ = record->barriers[selector.ordinal];
@@ -77,9 +81,10 @@ std::vector<FaultMutationCapability> fault_mutation_capabilities() {
     for (const IsaTargetBinding &binding : family.bindings) {
       const std::optional<StaticBarrierPolicy> policy =
           static_barrier_policy(binding.public_id, registry);
-      if (!policy || !Decoder::create(registry, binding.public_id))
+      if (!policy || !Decoder::create(registry, binding.public_id)) {
         continue;
-      for (const uint32_t wave : policy->wave_sizes)
+      }
+      for (const uint32_t wave : policy->wave_sizes) {
         capabilities.push_back(
             {.kind = FaultMutationKind::DropBarrier,
              .form = policy->form,
@@ -88,6 +93,7 @@ std::vector<FaultMutationCapability> fault_mutation_capabilities() {
              .wave_size = wave,
              .admission = "shared DBI ELF admission; file-backed text/descriptors; exact kernel; "
                           "independent siblings; closed direct CFG; complete builtin barrier"});
+      }
     }
   }
   return capabilities;
@@ -144,21 +150,24 @@ FailureOr<FaultBarrierInventory> discover_drop_barriers(const FaultMutationConte
   // Preserve header and recipe-policy error precedence before structural analysis.
   const std::span<const uint8_t> image = context.image();
   Elf64_Ehdr header = {};
-  if (validate_fault_mutation_source_header(image, header, error).failed())
+  if (validate_fault_mutation_source_header(image, header, error).failed()) {
     return Result::failure();
+  }
   const rj_code_target_id_t target = context.source().target_id();
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *target_facts = registry.find(target);
   const IsaTargetBinding *binding = registry.find_target(target);
   if (!target_facts || !binding || !static_barrier_policy(target, registry) ||
       (header.e_flags & EF_AMDGPU_MACH) != binding->elf_machine ||
-      (header.e_flags & ~uint32_t{0xfff}) != 0)
+      (header.e_flags & ~uint32_t{0xfff}) != 0) {
     return reject_fault_mutation(
         error, FaultMutationErrorCode::UnsupportedTarget,
         "requires a registered complete-barrier target with matching ELF flags");
+  }
   const FailureOr<const FaultSourceFacts *> facts = context.source_facts(entry, error);
-  if (facts.failed())
+  if (facts.failed()) {
     return Result::failure();
+  }
   std::call_once(context.state_->drop_once, [&] { context.qualify_drop(); });
   // First choose one exact kernel record; ambiguous names never select the first.
   // Logical-barrier ordering and exact-handle precedence apply within that record.
@@ -167,13 +176,15 @@ FailureOr<FaultBarrierInventory> discover_drop_barriers(const FaultMutationConte
       std::ranges::count_if(kernels, [&](const std::shared_ptr<const FaultBarrierRecord> &record) {
         return record->owner.entry == entry;
       });
-  if (matches > 1)
+  if (matches > 1) {
     return reject_fault_mutation(error, FaultMutationErrorCode::AmbiguousSelection,
                                  "exact entry name identifies multiple descriptors");
+  }
   if (entry.empty() || matches == 0) {
     std::string message = "entry must match one exact kernel name; descriptor entries:";
-    for (const std::shared_ptr<const FaultBarrierRecord> &record : kernels)
+    for (const std::shared_ptr<const FaultBarrierRecord> &record : kernels) {
       message += " " + record->owner.entry;
+    }
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity, std::move(message));
   }
   const std::shared_ptr<const FaultBarrierRecord> record = *std::ranges::find_if(
@@ -193,9 +204,10 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
                                                 const DropBarrierSelection &selection,
                                                 FaultMutationError &error) {
   error = {};
-  if (!selection.belongs_to(context))
+  if (!selection.belongs_to(context)) {
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "selection belongs to another or expired source context");
+  }
   const std::shared_ptr<const FaultBarrierRecord> record = selection.record_.lock();
   // Only selection can bind the private record and validated ordinal. The matching
   // live context retains that immutable record throughout apply.
@@ -207,13 +219,15 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
   // admits the immutable source target and initializes the shared source facts.
   assert(target && context.state_->instrumentor);
   FailureOr<std::unique_ptr<Instrumentor>> fork = context.fork_instrumentor(error);
-  if (fork.failed())
+  if (fork.failed()) {
     return Result::failure();
+  }
   std::unique_ptr<Instrumentor> instrumentor = std::move(fork).value();
   const FailureOr<uint32_t> encoded_nop = build_s_nop(0, target->family);
-  if (encoded_nop.failed())
+  if (encoded_nop.failed()) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
                                  "target cannot encode the Drop replacement NOP");
+  }
   const uint32_t nop = encoded_nop.value();
   for (const StaticBarrierMember &member : barrier.members) {
     InstructionReplacement replacement = {.expected_bytes = member.bytes,
@@ -235,8 +249,9 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
   if (!applied.errors.empty()) {
     std::string message;
     for (const std::string &diagnostic : applied.errors) {
-      if (!message.empty())
+      if (!message.empty()) {
         message += "; ";
+      }
       message += diagnostic;
     }
     return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
@@ -249,12 +264,13 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
           "Static mutation affects every executed occurrence of the selected logical barrier.",
           "Same-block membership does not prove barrier convergence.",
           "Execution and detector qualification have not been performed."}};
-  if (barrier.scope == StaticBarrierScope::Cluster)
+  if (barrier.scope == StaticBarrierScope::Cluster) {
     result.assumptions.emplace_back(
         "Cluster barrier -3 assumes a clustered dispatch with multiple workgroups per cluster; "
         "it is inert otherwise. A valid pristine barrier requires exactly one signal per workgroup "
         "after workgroup synchronization, with every wave waiting. Static qualification does not "
         "verify workgroup size or this protocol.");
+  }
   return result;
 }
 

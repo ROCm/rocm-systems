@@ -113,13 +113,17 @@ enum class VmemWriteback : uint8_t { Ordinary, Sample, Bvh, GenericFlat, PointSa
   // writeback path. LLVM's PointSampleAccel rule requires a wait even for a
   // second eligible sample because the two requests can use different paths.
   if (arch == rocjitsu::IsaFamily::Rdna3_5 &&
-      (mnemonic == "image_sample" || mnemonic == "image_sample_l" || mnemonic == "image_sample_lz"))
+      (mnemonic == "image_sample" || mnemonic == "image_sample_l" ||
+       mnemonic == "image_sample_lz")) {
     return VmemWriteback::PointSample;
+  }
   if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
-      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather"))
+      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather")) {
     return VmemWriteback::Sample;
-  if (mnemonic.starts_with("image_bvh"))
+  }
+  if (mnemonic.starts_with("image_bvh")) {
     return VmemWriteback::Bvh;
+  }
   return VmemWriteback::Ordinary;
 }
 
@@ -203,12 +207,14 @@ struct LegacyWaitcnt {
 }
 
 [[nodiscard]] inline LegacyWaitcnt decode_legacy_waitcnt(uint32_t value, rocjitsu::IsaFamily arch) {
-  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) {
     return decode_gfx11_waitcnt(value);
+  }
   LegacyWaitcnt fields = decode_gfx9_waitcnt(value);
   // GFX10 retains the GFX9 positions but widens LGKM to six bits.
-  if (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2)
+  if (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) {
     fields.lgkmcnt = (value >> 8u) & 0x3fu;
+  }
   return fields;
 }
 
@@ -258,32 +264,38 @@ memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   case WaitCounterKind::Load:
     return model == WaitcntModel::SplitGfx12 ? WaitCounterType::LOADCNT : WaitCounterType::VMCNT;
   case WaitCounterKind::Store:
-    if (model == WaitcntModel::LegacyNoVscnt)
+    if (model == WaitcntModel::LegacyNoVscnt) {
       return std::nullopt;
+    }
     return model == WaitcntModel::SplitGfx12 ? WaitCounterType::STORECNT : WaitCounterType::VSCNT;
   case WaitCounterKind::Ds:
     return model == WaitcntModel::SplitGfx12 ? WaitCounterType::DSCNT : WaitCounterType::LGKMCNT;
   case WaitCounterKind::Km:
-    if (model == WaitcntModel::SplitGfx12)
+    if (model == WaitcntModel::SplitGfx12) {
       return WaitCounterType::KMCNT;
+    }
     return std::nullopt;
   case WaitCounterKind::Exp:
     return WaitCounterType::EXPCNT;
   case WaitCounterKind::Async:
-    if (model == WaitcntModel::SplitGfx12)
+    if (model == WaitcntModel::SplitGfx12) {
       return WaitCounterType::ASYNCCNT;
+    }
     return std::nullopt;
   case WaitCounterKind::Bvh:
-    if (model == WaitcntModel::SplitGfx12)
+    if (model == WaitcntModel::SplitGfx12) {
       return WaitCounterType::BVHCNT;
+    }
     return std::nullopt;
   case WaitCounterKind::Sample:
-    if (model == WaitcntModel::SplitGfx12)
+    if (model == WaitcntModel::SplitGfx12) {
       return WaitCounterType::SAMPLECNT;
+    }
     return std::nullopt;
   case WaitCounterKind::Tensor:
-    if (model == WaitcntModel::SplitGfx12)
+    if (model == WaitcntModel::SplitGfx12) {
       return WaitCounterType::TENSORCNT;
+    }
     return std::nullopt;
   default:
     return std::nullopt;

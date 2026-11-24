@@ -14,22 +14,26 @@
 namespace rocjitsu {
 
 TextAlignmentGaps::TextAlignmentGaps(const CodeObject &object, rocjitsu::IsaFamily arch) {
-  if (arch != rocjitsu::IsaFamily::Rdna4 || object.text_sections().size() != 1)
+  if (arch != rocjitsu::IsaFamily::Rdna4 || object.text_sections().size() != 1) {
     return;
+  }
   const auto *elf = dynamic_cast<const AmdGpuCodeObject *>(&object);
-  if (!elf)
+  if (!elf) {
     return;
+  }
   const auto ranges = discover_text_function_symbol_ranges(*elf);
-  if (ranges.empty())
+  if (ranges.empty()) {
     return;
+  }
   const auto *text = object.text_sections().front();
   const std::span bytes(text->data(), text->size());
   uint64_t end = ranges.front().start_offset + ranges.front().size;
   for (const auto &range : std::span(ranges).subspan(1)) {
     if (end < range.start_offset &&
         std::ranges::all_of(bytes.subspan(end, range.start_offset - end),
-                            [](auto byte) { return byte == 0; }))
+                            [](auto byte) { return byte == 0; })) {
       gaps_.push_back({end, range.start_offset});
+    }
     end = std::max(end, range.start_offset + range.size);
   }
 }

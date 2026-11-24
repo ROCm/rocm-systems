@@ -45,9 +45,10 @@ TEST(DenormalTest, FlushValueUsesTheEncoding) {
   using V = util::native<float>;
   V lanes([&](auto i) { return i % 2 == 0 ? -tiny : float(i); });
   const V flushed = flush::flush_value(lanes);
-  for (std::size_t i = 0; i < V::size(); ++i)
+  for (std::size_t i = 0; i < V::size(); ++i) {
     EXPECT_EQ(std::bit_cast<uint32_t>(float(flushed[i])),
               i % 2 == 0 ? 0x80000000u : std::bit_cast<uint32_t>(float(i)));
+  }
 }
 
 // Every class other than a subnormal passes through bit for bit, including NaN
@@ -62,8 +63,9 @@ TEST(DenormalTest, FlushValueSimdKeepsEveryOtherClass) {
   };
   for (const auto &[in, out] : kCases) {
     const V flushed = flush::flush_value(V(std::bit_cast<float>(in)));
-    for (std::size_t i = 0; i < V::size(); ++i)
+    for (std::size_t i = 0; i < V::size(); ++i) {
       EXPECT_EQ(std::bit_cast<uint32_t>(float(flushed[i])), out) << std::hex << in;
+    }
   }
 }
 

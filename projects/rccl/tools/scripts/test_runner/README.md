@@ -454,7 +454,7 @@ Optional:
   --suite-name GLOB[:GLOB…] Run only suites matching any glob pattern; ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'P2P*' = all P2P suites; '*:-NET*' = all except NET)
   --no-build                Skip build step and use existing build
   --skip-tests              Skip test execution (useful with --coverage-report)
-  --coverage-report         Generate coverage; device coverage on ROCm 7.15+, host-only otherwise
+  --coverage-report         Generate coverage; device coverage on ROCm 10.3+, host-only otherwise
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
