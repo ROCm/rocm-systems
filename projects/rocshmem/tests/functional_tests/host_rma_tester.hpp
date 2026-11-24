@@ -63,6 +63,10 @@ class HostRmaTester : public Tester {
   /* Symmetric int counter/flag for int AMO tests (exercises 32-bit kernel path) */
   int *amo_int_buf{nullptr};
 
+  /* Symmetric 8-byte signal word + the value the target fetched (host signal) */
+  uint64_t *sig_buf{nullptr};
+  uint64_t  sig_fetched{0};
+
   /* Symmetric array of longs for wait_until_all/any/some/vector tests */
   static constexpr size_t WAIT_NELEMS = 4;
   long *wait_buf{nullptr};
