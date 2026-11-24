@@ -112,7 +112,9 @@ record_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, 
     if (uniform(repeated) && uniform(record[wire::kRecordCommit / 4]) != 0) {
       wave_state(output).record_loss(lane_id());
     } else if (lane_id() == 0) {
-      const u64 offset = u64{selected} + uniform(immediate);
+      // VFLAT sign-extends its immediate. Native DS offsets are nonnegative.
+      // Widen before adding so bounds checking detects either end wrapping.
+      const u64 offset = u64{selected} + static_cast<long long>(static_cast<int>(uniform(immediate)));
       record[wire::kRecordAnalysis / 4] = u32(rocjitsu::consan::AnalysisKind::LdsRaceDetection);
       record[wire::kRecordKind / 4] = u32(rocjitsu::consan::RecordKind::Access);
       record[wire::kRecordSite / 4] = uniform(site);

@@ -27,7 +27,8 @@ struct NativeLdsAccess {
   uint64_t original_offset = 0;
   AccessKind kind = AccessKind::Read;
   uint16_t address_vgpr = 0;
-  uint16_t immediate_bytes = 0;
+  int32_t immediate_bytes = 0;
+  uint32_t guest_size = 8;
   // Byte count set by decoding; zero is unspecified and cannot qualify a site.
   uint32_t width = 0;
   LdsRangeRecipe lds_ranges{};

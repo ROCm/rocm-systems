@@ -285,16 +285,20 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
         site.origin == AccessOrigin::Native ||
         (site.origin == AccessOrigin::GroupFlat && admits_flat &&
          (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4 ||
-          target->arch == IsaFamily::Rdna3) &&
+          target->arch == IsaFamily::Rdna3 || target->arch == IsaFamily::Rdna4 ||
+          target->arch == IsaFamily::Cdna5) &&
          (site.access == AccessKind::Read || site.access == AccessKind::Write) && site.width == 4 &&
          ranges.shape == LdsRangeShape::Single);
+    const bool wide_flat = site.origin == AccessOrigin::GroupFlat &&
+                           (target->arch == IsaFamily::Rdna4 || target->arch == IsaFamily::Cdna5);
+    const uint32_t guest_size = wide_flat ? 12 : 8;
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
         !valid_ranges || !valid_access || !valid_origin ||
         (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
          (!admits_b96 || site.width != 12) && (!admits_bytes || site.width != 1)) ||
-        site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||
-        (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
+        site.original_size != guest_size || site.prepared_guest_size != guest_size ||
+        site.probe_size == 0 || (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
         (site.prepared_guest_offset % 4) != 0 || (site.probe_offset % 4) != 0 ||
         site.original_offset < previous_original_end ||
         !util::is_range_in_bounds(site.original_offset, site.original_size,

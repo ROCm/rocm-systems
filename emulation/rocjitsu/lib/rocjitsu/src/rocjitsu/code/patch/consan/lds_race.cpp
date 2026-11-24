@@ -326,17 +326,29 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
   }
   if (is_flat_b32(instruction)) {
     const bool rdna = arch == IsaFamily::Rdna3;
+    const bool wide = arch == IsaFamily::Rdna4 || arch == IsaFamily::Cdna5;
     const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
     const uint32_t *words = instruction.raw_encoding();
-    // These generic-address forms have an unsigned 12-bit byte offset. Exclude
-    // target-specific cache, segment, routing, scalar-address and ACC modes.
-    const uint32_t saddr = rdna ? 0x7c : 0;
-    const uint32_t unused_value = read ? 0x0000ff00u : 0xff000000u;
-    if ((!rdna && arch != IsaFamily::Cdna3 && arch != IsaFamily::Cdna4) ||
-        instruction.size() != 8 || (words[0] & 0x0203f000u) || (words[1] & unused_value) ||
-        ((words[1] >> 16) & 0xff) != saddr)
-      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
-                                "unsupported Group-FLAT encoding", offset);
+    int32_t immediate;
+    if (wide) {
+      // VFLAT uses a VGPR pair when SADDR is null. Exclude routing, scale,
+      // cache/scope and reserved bits. The unused load/store value must be zero.
+      const uint32_t value_mask = read ? 0xffu : (0xffu << 23);
+      if (instruction.size() != 12 || (words[0] & 0x00c03fffu) != 0x7c ||
+          (words[1] & ~value_mask) != 0)
+        return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                  "unsupported Group-FLAT encoding", offset);
+      immediate = static_cast<int32_t>(words[2]) >> 8;
+    } else {
+      const uint32_t saddr = rdna ? 0x7c : 0;
+      const uint32_t unused_value = read ? 0x0000ff00u : 0xff000000u;
+      if ((!rdna && arch != IsaFamily::Cdna3 && arch != IsaFamily::Cdna4) ||
+          instruction.size() != 8 || (words[0] & 0x0203f000u) || (words[1] & unused_value) ||
+          ((words[1] >> 16) & 0xff) != saddr)
+        return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                  "unsupported Group-FLAT encoding", offset);
+      immediate = words[0] & 0xfff;
+    }
     const auto address = allocated_vgpr_tuple(instruction.src_operand(0), 2, allocated_vgprs);
     const auto value = allocated_vgpr_tuple(
         read ? instruction.dst_operand(0) : instruction.src_operand(1), 1, allocated_vgprs);
@@ -356,7 +368,8 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                         .original_offset = offset,
                         .kind = read ? AccessKind::Read : AccessKind::Write,
                         .address_vgpr = address->index,
-                        .immediate_bytes = static_cast<uint16_t>(words[0] & 0xfff),
+                        .immediate_bytes = immediate,
+                        .guest_size = static_cast<uint32_t>(instruction.size()),
                         .width = 4,
                         .origin = AccessOrigin::GroupFlat});
     return Result::success();
@@ -664,21 +677,24 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
   for (const SiteFacts &site : manifest.sites) {
     if (access_offsets.erase(site.prepared_guest_offset) != 1 ||
         std::memcmp(program.image.data() + program.text_file_offset + site.original_offset,
-                    prepared_text.data() + site.prepared_guest_offset, 8) != 0) {
+                    prepared_text.data() + site.prepared_guest_offset, site.original_size) != 0) {
       return reject(error, "final guest LDS operation/map differs from original bytes");
     }
   }
   // Uninstrumented private instructions can share an opcode with an observed
   // FLAT site. Check their bytes/multiplicity after consuming the mapped sites.
-  std::multiset<std::array<uint8_t, 8>> private_guests;
+  const bool wide_flat =
+      program.target->arch == IsaFamily::Rdna4 || program.target->arch == IsaFamily::Cdna5;
+  const size_t flat_bytes = wide_flat ? 12 : 8;
+  std::multiset<std::array<uint8_t, 12>> private_guests;
   for (const uint64_t pc : program.non_lds_flat) {
-    std::array<uint8_t, 8> words;
-    std::memcpy(words.data(), program.image.data() + program.text_file_offset + pc, words.size());
+    std::array<uint8_t, 12> words{};
+    std::memcpy(words.data(), program.image.data() + program.text_file_offset + pc, flat_bytes);
     private_guests.insert(words);
   }
   for (const uint64_t pc : access_offsets) {
-    std::array<uint8_t, 8> words;
-    std::memcpy(words.data(), prepared_text.data() + pc, words.size());
+    std::array<uint8_t, 12> words{};
+    std::memcpy(words.data(), prepared_text.data() + pc, flat_bytes);
     const auto found = private_guests.find(words);
     if (found == private_guests.end())
       return reject(error, "unmapped guest FLAT operation differs from the private original");

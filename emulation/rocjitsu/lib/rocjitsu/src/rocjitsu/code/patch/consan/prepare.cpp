@@ -164,7 +164,7 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
           return site.kind == InstrumentationKind::BeforeInst &&
                  site.original_offset == access.original_offset;
         });
-    if (mapping == sites.end() || mapping->guest_size != 8) {
+    if (mapping == sites.end() || mapping->guest_size != access.guest_size) {
       return reject(error, "callable DBI lowering omitted an LDS site mapping");
     }
     manifest.sites.push_back({.id = access.site,
@@ -174,7 +174,7 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
                               .lds_ranges = access.lds_ranges,
                               .origin = access.origin,
                               .original_offset = access.original_offset,
-                              .original_size = 8,
+                              .original_size = access.guest_size,
                               .prepared_guest_offset = mapping->guest_offset,
                               .prepared_guest_size = mapping->guest_size,
                               .probe_offset = mapping->instrumentation_offset,

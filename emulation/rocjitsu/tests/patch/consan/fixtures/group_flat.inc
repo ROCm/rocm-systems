@@ -9,17 +9,34 @@
 #define FLAT_WRITE flat_store_b32
 #endif
 
-#if defined(FLAT_STORE) || defined(FLAT_OFFSET)
+#if defined(FLAT_UNDERFLOW) || (CONSAN_GFX12 && defined(FLAT_OFFSET))
+// Enter with a positive offset beyond the last dword, then return to it.
+#define FLAT_IMMEDIATE -4
+#elif defined(FLAT_STORE) || defined(FLAT_OFFSET) || defined(FLAT_OVERFLOW)
 #define FLAT_IMMEDIATE 4
 #else
 #define FLAT_IMMEDIATE 0
 #endif
+
+.macro flat_wait_memory
+#if CONSAN_GFX12
+  s_wait_loadcnt 0
+  s_wait_storecnt 0
+  s_wait_dscnt 0
+#else
+  s_waitcnt 0
+#endif
+.endm
 
 .macro group_flat_pointer
   // Build the entire pair under the same EXEC as the dereference.
   v_mov_b32_e32 v3, s5
 #if defined(FLAT_ADJACENT) && !defined(FLAT_STORE)
   v_mov_b32_e32 v2, (1016-FLAT_IMMEDIATE)
+#elif defined(FLAT_UNDERFLOW)
+  v_mov_b32_e32 v2, 0
+#elif defined(FLAT_OVERFLOW)
+  v_mov_b32_e32 v2, -4
 #elif defined(FLAT_OOB)
   v_mov_b32_e32 v2, (1024-FLAT_IMMEDIATE)
 #else
@@ -51,15 +68,20 @@
   FLAT_WRITE v[2:3], v5 offset:FLAT_IMMEDIATE
 #elif defined(FLAT_READREAD)
   DS_LOAD_B32 v10, v4
-  s_waitcnt 0
+  flat_wait_memory
   v_mov_b32 v10, 0
 #else
   DS_STORE_B32 v4, v5
 #endif
   MASK_MOVE MASK_EXEC, MASK_PEER_SAVE
 #ifdef FLAT_ORDERED
-  s_waitcnt 0
+  flat_wait_memory
+#if CONSAN_GFX12
+  s_barrier_signal -1
+  s_barrier_wait -1
+#else
   s_barrier
+#endif
 #endif
 
 #ifdef FLAT_EMPTY
@@ -74,7 +96,7 @@
 #else
   DS_LOAD_B32 v10, v4
 #endif
-  s_waitcnt 0
+  flat_wait_memory
 #ifdef FLAT_ORDERED
   v_mov_b32 v8, v10
 #endif
@@ -84,7 +106,7 @@
   group_flat_pointer
   // Alias the result with the low address half to exercise the BeforeInst probe.
   FLAT_READ v2, v[2:3] offset:FLAT_IMMEDIATE
-  s_waitcnt 0
+  flat_wait_memory
 #ifdef FLAT_ORDERED
   v_mov_b32 v8, v2
 #endif
