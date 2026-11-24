@@ -38,11 +38,6 @@ int rj_arith_v_dual_fmac_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   if (instruction_flags) {
     int error = rj_arith_v_fmac_f32_w32_gfx12(flags, 0, 0, d, a, b, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -75,11 +70,6 @@ int rj_arith_v_dual_fmaak_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         uint32_t literal, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   if (instruction_flags) {
     int error = rj_arith_v_fmaak_f32_w32_gfx12(flags, 0, 0, d, a, b, literal, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -112,11 +102,6 @@ int rj_arith_v_dual_fmamk_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, uint32_t literal,
                                         const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   if (instruction_flags) {
     int error = rj_arith_v_fmamk_f32_w32_gfx12(flags, 0, 0, d, a, literal, b, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -149,11 +134,6 @@ int rj_arith_v_dual_mul_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   if (instruction_flags) {
     int error = rj_arith_v_mul_f32_w32_gfx12(flags, 0, 0, d, a, b, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -186,11 +166,6 @@ int rj_arith_v_dual_add_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   if (instruction_flags) {
     int error = rj_arith_v_add_f32_w32_gfx12(flags, 0, 0, d, a, b, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -223,11 +198,6 @@ int rj_arith_v_dual_sub_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   if (instruction_flags) {
     int error = rj_arith_v_sub_f32_w32_gfx12(flags, 0, 0, d, a, b, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -260,11 +230,6 @@ int rj_arith_v_dual_subrev_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                          uint64_t instruction_flags, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   if (instruction_flags) {
     int error = rj_arith_v_subrev_f32_w32_gfx12(flags, 0, 0, d, a, b, excp_flag_user);
     return error ? error : RJ_ARITH_ERROR_INVALID_FLAGS;

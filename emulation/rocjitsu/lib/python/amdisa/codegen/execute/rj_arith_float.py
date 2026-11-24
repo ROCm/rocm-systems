@@ -1719,11 +1719,16 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
             '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         ]
         modifiers = 'modifiers'
+    flags_expr = (
+        'amdgpu::arith::compatibility_no_fp_status(wf.cu().arithmetic_flags())'
+        if arch == 'cdna5' and not dx9
+        else 'wf.cu().arithmetic_flags()'
+    )
     lines += [
         f'  amdgpu::arith::execute_float_fma32<{str(dx9).lower()}>(wf,',
         f'      {wave_api(api, 32)},',
         f'      {wave_api(api, 64)},',
-        f'      wf.cu().arithmetic_flags(), {modifiers},',
+        f'      {flags_expr}, {modifiers},',
         f'      {dst[0]}, {", ".join(inputs)},',
         f'      {str(arch in ("rdna2", "rdna3", "cdna3", "cdna4")).lower()});',
     ]
@@ -1943,11 +1948,16 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
             '  }',
         ]
     addend = dst[0] if accumulate else src[2]
+    flags_expr = (
+        'amdgpu::arith::compatibility_no_fp_status(wf.cu().arithmetic_flags())'
+        if arch == 'cdna5' and not selection
+        else 'wf.cu().arithmetic_flags()'
+    )
     lines += [
         f'  amdgpu::arith::execute_packed_fma16<{str(accumulate).lower()}>(wf,',
         f'      {wave_api(api, 32)},',
         f'      {wave_api(api, 64)},',
-        '      wf.cu().arithmetic_flags(), modifiers,',
+        f'      {flags_expr}, modifiers,',
         f'      {dst[0]}, {src[0]}, {src[1]}, {addend}, {str(older or arch in ("rdna3", "cdna3", "cdna4")).lower()},',
         '      narrow_sources, replicate_sources);',
     ]
@@ -2398,9 +2408,14 @@ def gen_float_fma16(ctx: ExecuteContext) -> str | None:
             '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
         ]
         modifiers = 'modifiers'
+    flags_expr = (
+        'amdgpu::arith::compatibility_no_fp_status(wf.cu().arithmetic_flags())'
+        if arch == 'cdna5'
+        else 'wf.cu().arithmetic_flags()'
+    )
     lines += [
         f'  amdgpu::arith::execute_float_ternary16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-        f'      wf.cu().arithmetic_flags(), {modifiers},',
+        f'      {flags_expr}, {modifiers},',
         f'      {dst[0]}, {", ".join(inputs)}, {str(arch in ("cdna1", "cdna2", "rdna1", "rdna2", "rdna3_5", "rdna3", "cdna3", "cdna4")).lower()}'
         + (
             ', true'

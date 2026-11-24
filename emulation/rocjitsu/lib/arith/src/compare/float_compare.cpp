@@ -59,24 +59,21 @@ uint64_t compare_input(const uint32_t *const *source, int lane, uint64_t mode, u
   return bits;
 }
 
-// Preserve the bridge's inherited signaling policy without changing numerical SIMD dispatch.
+// Classify active lanes for Compatibility without displacing numerical SIMD dispatch.
+// Matches mode 3: always reports INVALID (sNaN, plus qNaN under CLAMP) and INPUT_DENORM.
 template <int Bits>
 void classify_compatibility(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                             const uint32_t *const *a, const uint32_t *const *b,
                             CompatibilityStatus &status) {
-  constexpr uint64_t magnitude = (1ULL << (Bits - 1)) - 1;
-  constexpr uint64_t infinity = Bits == 16   ? 0x7c00
-                                : Bits == 32 ? 0x7f800000
-                                             : 0x7ff0000000000000ULL;
+  const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  const bool clamp = mode & RJ_ARITH_ALU_CLAMP;
   for (int lane = 0; lane < 32; ++lane) {
     if (!(exec_mask & (1U << lane))) {
       continue;
     }
     const uint64_t x = compare_input<Bits>(a, lane, mode, RJ_ARITH_ALU_HIGH_A);
     const uint64_t y = compare_input<Bits>(b, lane, mode, RJ_ARITH_ALU_HIGH_B);
-    status.nonfinite |= (x & magnitude) >= infinity || (y & magnitude) >= infinity;
-    status.causes |= rocjitsu::arith::float_compare_exceptions<Bits>(
-        x, y, flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, true);
+    status.causes |= rocjitsu::arith::float_compare_exceptions<Bits>(x, y, flush, clamp);
   }
 }
 
@@ -188,10 +185,10 @@ int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *
     return error;
   }
   CompatibilityStatus status;
-  const int error = evaluate_wave32<Bits, Predicate>(
-      flags, exec_mask, mode, d, a, b, excp_flag_user,
-      compatibility && (mode & RJ_ARITH_ALU_CLAMP) ? &status : nullptr);
-  if (!error && status.nonfinite) {
+  const int error =
+      evaluate_wave32<Bits, Predicate>(flags, exec_mask, mode, d, a, b, excp_flag_user,
+                                       compatibility && excp_flag_user ? &status : nullptr);
+  if (!error && compatibility && excp_flag_user && exec_mask) {
     *excp_flag_user |= status.causes;
   }
   return error;
@@ -205,7 +202,7 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
   const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   flags = rocjitsu::arith::resolve_compatibility(
       flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  const bool compatibility_reporting = compatibility && (mode & RJ_ARITH_ALU_CLAMP);
+  const bool compatibility_reporting = compatibility && excp_flag_user;
   CompatibilityStatus compatibility_status;
   uint32_t masks[2] = {}, exceptions = 0;
 
@@ -269,7 +266,7 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
   __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
   if (report) {
     *excp_flag_user |= exceptions;
-  } else if (compatibility_status.nonfinite) {
+  } else if (compatibility_reporting && exec_mask) {
     *excp_flag_user |= compatibility_status.causes;
   }
   return RJ_ARITH_SUCCESS;

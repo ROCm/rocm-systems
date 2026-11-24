@@ -109,8 +109,11 @@ int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  const bool report = rocjitsu::arith::reports_fp_status(flags);
+  if constexpr (Gfx1150) {
+    if (report) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+    }
   }
   if (mode >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
@@ -118,9 +121,10 @@ int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t 
   if constexpr (Accumulate) {
     c = *d;
   }
-  int error = run<Half, false, false, Gfx1150>(flags, uint32_t(mode), d, a, b, c);
-  if (!error && compatibility) {
-    *status |= rocjitsu::arith::scalar_fma_causes<Half, Gfx1150>(flags, a, b, c, *d);
+  const uint64_t numeric_flags = rocjitsu::arith::without_fp_status(flags);
+  int error = run<Half, false, false, Gfx1150>(numeric_flags, uint32_t(mode), d, a, b, c);
+  if (!error && (compatibility || report)) {
+    *status |= rocjitsu::arith::scalar_fma_causes<Half, Gfx1150>(numeric_flags, a, b, c, *d);
   }
   return error;
 }

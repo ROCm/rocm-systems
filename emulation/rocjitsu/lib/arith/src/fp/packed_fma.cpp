@@ -140,6 +140,15 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, u
   return RJ_ARITH_SUCCESS;
 }
 
+inline uint64_t resolve_gfx12_compatibility(uint64_t flags, uint32_t *excp_flag_user) {
+  const uint64_t target =
+      !excp_flag_user || (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                   RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_MASK))
+          ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+          : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+  return rocjitsu::arith::resolve_compatibility(flags, target);
+}
+
 } // namespace
 
 // Compute fused A*B+C with packed elements for selected lanes.
@@ -149,8 +158,7 @@ int rj_arith_v_pk_fma_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
                                     uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, const uint32_t *const *c,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  flags = resolve_gfx12_compatibility(flags, excp_flag_user);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -166,8 +174,7 @@ int rj_arith_v_pk_fma_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_pk_fmac_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  flags = resolve_gfx12_compatibility(flags, excp_flag_user);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -184,8 +191,7 @@ int rj_arith_v_pk_fma_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
                                     uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, const uint32_t *const *c,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  flags = resolve_gfx12_compatibility(flags, excp_flag_user);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -201,8 +207,7 @@ int rj_arith_v_pk_fma_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  flags = resolve_gfx12_compatibility(flags, excp_flag_user);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

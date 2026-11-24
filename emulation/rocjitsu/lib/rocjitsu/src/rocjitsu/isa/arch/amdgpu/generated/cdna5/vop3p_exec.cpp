@@ -261,10 +261,10 @@ void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()) ? 4u : 0u);
   const unsigned replicate_sources = 0;
-  amdgpu::arith::execute_packed_fma16<false>(wf, rj_arith_v_pk_fma_f16_w32_gfx12,
-                                             rj_arith_v_pk_fma_f16_w64_gfx12,
-                                             wf.cu().arithmetic_flags(), modifiers, vdst, src0,
-                                             src1, src2, false, narrow_sources, replicate_sources);
+  amdgpu::arith::execute_packed_fma16<false>(
+      wf, rj_arith_v_pk_fma_f16_w32_gfx12, rj_arith_v_pk_fma_f16_w64_gfx12,
+      amdgpu::arith::compatibility_no_fp_status(wf.cu().arithmetic_flags()), modifiers, vdst, src0,
+      src1, src2, false, narrow_sources, replicate_sources);
 }
 
 void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {

@@ -290,7 +290,10 @@ int rj_arith_v_sin_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mo
                                  uint32_t *const *d, const uint32_t *const *a,
                                  uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, !excp_flag_user || (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
+                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -304,7 +307,10 @@ int rj_arith_v_sin_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mo
                                  uint32_t *const *d, const uint32_t *const *a,
                                  uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, !excp_flag_user || (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
+                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -344,7 +350,10 @@ int rj_arith_v_cos_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mo
                                  uint32_t *const *d, const uint32_t *const *a,
                                  uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, !excp_flag_user || (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
+                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -358,7 +367,10 @@ int rj_arith_v_cos_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mo
                                  uint32_t *const *d, const uint32_t *const *a,
                                  uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, !excp_flag_user || (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
+                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

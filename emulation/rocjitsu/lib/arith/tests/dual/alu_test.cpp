@@ -19,10 +19,8 @@ TEST(DualMulF32W32Gfx11, Arithmetic) {
 
 // Check VOPD results and status against the corresponding ordinary instruction.
 TEST(DualMulF32W32Gfx12, Arithmetic) {
-  rocjitsu::arith::test::check_dual(
-      rj_arith_v_dual_mul_f32_w32_gfx12,
-      rocjitsu::arith::test::numeric_compatibility_reference(rj_arith_v_mul_f32_w32_gfx12),
-      0x40000000U, 0x40400000U, 0x40800000U, 0x40c00000U, false);
+  rocjitsu::arith::test::check_dual(rj_arith_v_dual_mul_f32_w32_gfx12, rj_arith_v_mul_f32_w32_gfx12,
+                                    0x40000000U, 0x40400000U, 0x40800000U, 0x40c00000U, false);
 }
 
 // Check VOPD results and status against the corresponding ordinary instruction.
@@ -33,10 +31,8 @@ TEST(DualAddF32W32Gfx11, Arithmetic) {
 
 // Check VOPD results and status against the corresponding ordinary instruction.
 TEST(DualAddF32W32Gfx12, Arithmetic) {
-  rocjitsu::arith::test::check_dual(
-      rj_arith_v_dual_add_f32_w32_gfx12,
-      rocjitsu::arith::test::numeric_compatibility_reference(rj_arith_v_add_f32_w32_gfx12),
-      0x40000000U, 0x40400000U, 0x40800000U, 0x40a00000U, false);
+  rocjitsu::arith::test::check_dual(rj_arith_v_dual_add_f32_w32_gfx12, rj_arith_v_add_f32_w32_gfx12,
+                                    0x40000000U, 0x40400000U, 0x40800000U, 0x40a00000U, false);
 }
 
 // Check VOPD results and status against the corresponding ordinary instruction.
@@ -47,10 +43,8 @@ TEST(DualSubF32W32Gfx11, Arithmetic) {
 
 // Check VOPD results and status against the corresponding ordinary instruction.
 TEST(DualSubF32W32Gfx12, Arithmetic) {
-  rocjitsu::arith::test::check_dual(
-      rj_arith_v_dual_sub_f32_w32_gfx12,
-      rocjitsu::arith::test::numeric_compatibility_reference(rj_arith_v_sub_f32_w32_gfx12),
-      0x40000000U, 0x40400000U, 0x40800000U, 0xbf800000U, false);
+  rocjitsu::arith::test::check_dual(rj_arith_v_dual_sub_f32_w32_gfx12, rj_arith_v_sub_f32_w32_gfx12,
+                                    0x40000000U, 0x40400000U, 0x40800000U, 0xbf800000U, false);
 }
 
 // Check VOPD results and status against the corresponding ordinary instruction.
@@ -61,10 +55,9 @@ TEST(DualSubrevF32W32Gfx11, Arithmetic) {
 
 // Check VOPD results and status against the corresponding ordinary instruction.
 TEST(DualSubrevF32W32Gfx12, Arithmetic) {
-  rocjitsu::arith::test::check_dual(
-      rj_arith_v_dual_subrev_f32_w32_gfx12,
-      rocjitsu::arith::test::numeric_compatibility_reference(rj_arith_v_subrev_f32_w32_gfx12),
-      0x40000000U, 0x40400000U, 0x40800000U, 0x3f800000U, false);
+  rocjitsu::arith::test::check_dual(rj_arith_v_dual_subrev_f32_w32_gfx12,
+                                    rj_arith_v_subrev_f32_w32_gfx12, 0x40000000U, 0x40400000U,
+                                    0x40800000U, 0x3f800000U, false);
 }
 
 // Check VOPD results and status against the corresponding ordinary instruction.

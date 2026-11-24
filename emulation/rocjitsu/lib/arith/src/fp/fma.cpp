@@ -7,6 +7,7 @@
 #include "common/alu.h"
 #include "common/simd.h"
 #include "common/validation.h"
+#include "fp/fma_exceptions.h"
 #include "fp/fma_scalar.h"
 #include "register/dpp.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -130,7 +131,8 @@ int fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
 // Validate and evaluate FP32 FMA, including supported DPP source routing; errors preserve D.
 template <bool Rdna3 = false, bool Dx9Zero = false>
 int fma_with_dpp(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint32_t *const *d,
-                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+                 uint32_t *excp_flag_user = nullptr) {
   if (int error = rocjitsu::arith::validate(
           flags, uint32_t(instruction_flags) & ~rocjitsu::arith::kFma32InstructionFlags,
           rocjitsu::arith::kFmaGuestFpFlags | (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
@@ -141,16 +143,35 @@ int fma_with_dpp(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                         [&](uint32_t selected, const uint32_t *const *source) {
                                           return fma_with_dpp<Rdna3, Dx9Zero>(
                                               flags, selected, uint32_t(instruction_flags), d,
-                                              source, b, c);
+                                              source, b, c, excp_flag_user);
                                         });
   }
-  if (!Dx9Zero && rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  const bool report = !Dx9Zero && rocjitsu::arith::reports_fp_status(flags);
+  if constexpr (Rdna3) {
+    if (report) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+    }
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  return fma<Rdna3, Dx9Zero>(flags, exec_mask, uint32_t(instruction_flags), d, a, b, c);
+  uint32_t causes = 0;
+  if constexpr (!Rdna3 && !Dx9Zero) {
+    if (report) {
+      for (int lane = 0; lane < 32; ++lane) {
+        if ((exec_mask >> lane) & 1) {
+          causes |= rocjitsu::arith::fma_exceptions_f32(a[0][lane], b[0][lane], c[0][lane], flags,
+                                                        uint32_t(instruction_flags));
+        }
+      }
+    }
+  }
+  const int error = fma<Rdna3, Dx9Zero>(rocjitsu::arith::without_fp_status(flags), exec_mask,
+                                        uint32_t(instruction_flags), d, a, b, c);
+  if (!error && report) {
+    *excp_flag_user |= causes;
+  }
+  return error;
 }
 
 // Keep the scalar scratch space and integer FMA work off the SIMD dispatch path.
@@ -200,7 +221,8 @@ template <rocjitsu::arith::FmaOperands Operands, bool Rdna3>
 // changing outputs.
 template <rocjitsu::arith::FmaOperands Operands, bool Rdna3 = false>
 int literal_fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
-                const uint32_t *const *a, const uint32_t *const *b, uint32_t literal) {
+                const uint32_t *const *a, const uint32_t *const *b, uint32_t literal,
+                uint32_t *excp_flag_user = nullptr) {
   static_assert(Operands == rocjitsu::arith::FmaOperands::MultiplyLiteral ||
                 Operands == rocjitsu::arith::FmaOperands::AddLiteral);
   if (int error = rocjitsu::arith::validate(flags, instruction_flags,
@@ -208,15 +230,33 @@ int literal_fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, 
                                                 (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
     return error;
   }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  const bool report = rocjitsu::arith::reports_fp_status(flags);
+  if constexpr (Rdna3) {
+    if (report) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+    }
   }
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
-  [[maybe_unused]] bool exact = rocjitsu::arith::is_exact(flags);
+  uint32_t causes = 0;
+  if constexpr (!Rdna3) {
+    if (report) {
+      for (int lane = 0; lane < 32; ++lane) {
+        if ((exec_mask >> lane) & 1) {
+          const uint32_t bv =
+              (Operands == rocjitsu::arith::FmaOperands::MultiplyLiteral) ? literal : b[0][lane];
+          const uint32_t cv =
+              (Operands == rocjitsu::arith::FmaOperands::MultiplyLiteral) ? b[0][lane] : literal;
+          causes |= rocjitsu::arith::fma_exceptions_f32(a[0][lane], bv, cv, flags, 0);
+        }
+      }
+    }
+  }
+  const uint64_t numeric_flags = rocjitsu::arith::without_fp_status(flags);
+  [[maybe_unused]] bool exact = rocjitsu::arith::is_exact(numeric_flags);
 #if defined(RJ_ARITH_HAVE_X86_64_V3) || defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (exact && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (exact && rocjitsu::arith::cpu_level_at_least(numeric_flags, RJ_ARITH_CPU_X86_64_V3)) {
     uint32_t broadcast[32];
     for (auto &value : broadcast) {
       value = literal;
@@ -226,44 +266,67 @@ int literal_fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, 
                    *cc = (Operands == rocjitsu::arith::FmaOperands::MultiplyLiteral) ? b[0]
                                                                                      : broadcast;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-      rocjitsu::arith::fma_exact_x86_64_v4(flags, exec_mask, 0, d[0], a[0], bb, cc, false, Rdna3);
+    if (rocjitsu::arith::cpu_level_at_least(numeric_flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::fma_exact_x86_64_v4(numeric_flags, exec_mask, 0, d[0], a[0], bb, cc, false,
+                                           Rdna3);
+      if (report) {
+        *excp_flag_user |= causes;
+      }
       return RJ_ARITH_SUCCESS;
     }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-    if (!(flags & RJ_ARITH_FP_ROUND_MASK)) {
-      rocjitsu::arith::fma_exact_x86_64_v3(flags, exec_mask, 0, d[0], a[0], bb, cc, false, Rdna3);
+    if (!(numeric_flags & RJ_ARITH_FP_ROUND_MASK)) {
+      rocjitsu::arith::fma_exact_x86_64_v3(numeric_flags, exec_mask, 0, d[0], a[0], bb, cc, false,
+                                           Rdna3);
+      if (report) {
+        *excp_flag_user |= causes;
+      }
       return RJ_ARITH_SUCCESS;
     }
 #endif
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (!exact && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::literal_fma_x86_64_v4<Operands>(flags, exec_mask, literal, d[0], a[0], b[0]);
+  if (!exact && rocjitsu::arith::cpu_level_at_least(numeric_flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::literal_fma_x86_64_v4<Operands>(numeric_flags, exec_mask, literal, d[0], a[0],
+                                                     b[0]);
+    if (report) {
+      *excp_flag_user |= causes;
+    }
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (!exact && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::literal_fma_x86_64_v3<Operands>(flags, exec_mask, literal, d[0], a[0], b[0]);
+  if (!exact && rocjitsu::arith::cpu_level_at_least(numeric_flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::literal_fma_x86_64_v3<Operands>(numeric_flags, exec_mask, literal, d[0], a[0],
+                                                     b[0]);
+    if (report) {
+      *excp_flag_user |= causes;
+    }
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  return literal_fma_scalar<Operands, Rdna3>(flags, exec_mask, d, a, b, literal);
+  const int error = literal_fma_scalar<Operands, Rdna3>(numeric_flags, exec_mask, d, a, b, literal);
+  if (!error && report) {
+    *excp_flag_user |= causes;
+  }
+  return error;
 }
 
 // Evaluate FP32 fused multiply-add for Wave64. Reject invalid controls before changing
 // outputs.
 template <bool Rdna3, bool Dx9Zero = false>
 int fma_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, uint32_t *const *d,
-               const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
-  int error =
-      fma_with_dpp<Rdna3, Dx9Zero>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr);
+               const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+               uint32_t *excp_flag_user = nullptr) {
+  int error = fma_with_dpp<Rdna3, Dx9Zero>(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
+                                           nullptr, excp_flag_user);
   if (error || !exec_mask) {
     return error;
   }
+  const bool report = !Dx9Zero && !Rdna3 && rocjitsu::arith::reports_fp_status(flags);
+  uint32_t causes = 0;
   for (int half = 0; half < 2; ++half) {
     uint64_t half_instruction_flags =
         rocjitsu::arith::dpp_half_wave_instruction_flags(instruction_flags, half);
@@ -271,10 +334,13 @@ int fma_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, u
     const uint32_t *x = a[0] + half * 32, *y = b[0] + half * 32, *z = c[0] + half * 32;
     uint32_t half_exec_mask = uint32_t(exec_mask >> (half * 32));
     error = fma_with_dpp<Rdna3, Dx9Zero>(flags, half_exec_mask, half_instruction_flags, &dest, &x,
-                                         &y, &z);
+                                         &y, &z, report ? &causes : nullptr);
     if (error) {
       return error;
     }
+  }
+  if (report) {
+    *excp_flag_user |= causes;
   }
   return RJ_ARITH_SUCCESS;
 }
@@ -284,22 +350,28 @@ int fma_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, u
 template <rocjitsu::arith::FmaOperands Operands, bool Rdna3 = false>
 int literal_fma_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags,
                        uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                       uint32_t literal) {
+                       uint32_t literal, uint32_t *excp_flag_user = nullptr) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
   if (int error = literal_fma<Operands, Rdna3>(flags, 0, instruction_flags, nullptr, nullptr,
-                                               nullptr, literal)) {
+                                               nullptr, literal, excp_flag_user)) {
     return error;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  const bool report = !Rdna3 && rocjitsu::arith::reports_fp_status(flags);
+  uint32_t causes = 0;
   for (int half = 0; half < 2; ++half) {
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *x = a[0] + half * 32, *y = b[0] + half * 32;
     if (int error = literal_fma<Operands, Rdna3>(flags, uint32_t(exec_mask >> (half * 32)),
-                                                 instruction_flags, &dest, &x, &y, literal)) {
+                                                 instruction_flags, &dest, &x, &y, literal,
+                                                 report ? &causes : nullptr)) {
       return error;
     }
+  }
+  if (report) {
+    *excp_flag_user |= causes;
   }
   return RJ_ARITH_SUCCESS;
 }
@@ -307,14 +379,16 @@ int literal_fma_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_
 } // namespace
 
 // Compute fused A*B+C for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fma_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
-                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+                                 uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  return fma_with_dpp(flags, exec_mask, instruction_flags, d, a, b, c);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  return fma_with_dpp(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
 }
 
 // Compute fused A*B+C with DX9 zero-product rules for selected lanes.
@@ -329,59 +403,65 @@ int rj_arith_v_fma_dx9_zero_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
 }
 
 // Accumulate fused A*B into D for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fmac_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b,
-                                  [[maybe_unused]] uint32_t *excp_flag_user) {
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   // FMAC has no explicit C operand, so its modifiers are invalid.
   if (instruction_flags & (RJ_ARITH_ALU_NEG_C | RJ_ARITH_ALU_ABS_C)) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fma_with_dpp(flags, exec_mask, instruction_flags, d, a, b, d);
+  return fma_with_dpp(flags, exec_mask, instruction_flags, d, a, b, d, excp_flag_user);
 }
 
 // Compute fused A*literal+B for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fmamk_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a, uint32_t literal,
-                                   const uint32_t *const *b,
-                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+                                   const uint32_t *const *b, uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return literal_fma<rocjitsu::arith::FmaOperands::MultiplyLiteral>(
-      flags, exec_mask, instruction_flags, d, a, b, literal);
+      flags, exec_mask, instruction_flags, d, a, b, literal, excp_flag_user);
 }
 
 // Compute fused A*B+literal for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fmaak_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, uint32_t literal,
-                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+                                   uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return literal_fma<rocjitsu::arith::FmaOperands::AddLiteral>(flags, exec_mask, instruction_flags,
-                                                               d, a, b, literal);
+                                                               d, a, b, literal, excp_flag_user);
 }
 
 // Compute fused A*B+C for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fma_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
-                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+                                 uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  return fma_wave64<false>(flags, exec_mask, instruction_flags, d, a, b, c);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  return fma_wave64<false>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
 }
 
 // Compute fused A*B+C with DX9 zero-product rules for selected lanes.
@@ -396,48 +476,52 @@ int rj_arith_v_fma_dx9_zero_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 }
 
 // Accumulate fused A*B into D for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fmac_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b,
-                                  [[maybe_unused]] uint32_t *excp_flag_user) {
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   // FMAC has no explicit C operand, so its modifiers are invalid.
   if (instruction_flags & (RJ_ARITH_ALU_NEG_C | RJ_ARITH_ALU_ABS_C)) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fma_wave64<false>(flags, exec_mask, instruction_flags, d, a, b, d);
+  return fma_wave64<false>(flags, exec_mask, instruction_flags, d, a, b, d, excp_flag_user);
 }
 
 // Compute fused A*literal+B for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fmamk_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a, uint32_t literal,
-                                   const uint32_t *const *b,
-                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+                                   const uint32_t *const *b, uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return literal_fma_wave64<rocjitsu::arith::FmaOperands::MultiplyLiteral>(
-      flags, exec_mask, instruction_flags, d, a, b, literal);
+      flags, exec_mask, instruction_flags, d, a, b, literal, excp_flag_user);
 }
 
 // Compute fused A*B+literal for selected lanes.
-// Return errors before changing outputs; required FP-status reporting is unsupported.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
 int rj_arith_v_fmaak_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, uint32_t literal,
-                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+                                   uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, excp_flag_user ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                            : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return literal_fma_wave64<rocjitsu::arith::FmaOperands::AddLiteral>(
-      flags, exec_mask, instruction_flags, d, a, b, literal);
+      flags, exec_mask, instruction_flags, d, a, b, literal, excp_flag_user);
 }
 
 // Compute fused A*B+C for selected lanes.

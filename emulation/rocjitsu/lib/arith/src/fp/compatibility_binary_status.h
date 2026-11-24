@@ -10,6 +10,7 @@
 #include "common/alu.h"
 #include "common/validation.h"
 #include "fp/binary.h"
+#include "fp/fma_exceptions.h"
 #include "fp/mul_exceptions.h"
 #include "rj_arith/detail/rj_arith_common.h"
 
@@ -127,6 +128,12 @@ inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, 
         lane_causes &= ~RJ_ARITH_EXCEPTION_INVALID;
       }
       causes |= lane_causes;
+    } else if constexpr (Op == Binary::Add || Op == Binary::Sub || Op == Binary::Subrev) {
+      if constexpr (!Rdna3 && !Gfx1250) {
+        if (write_mask & (1U << lane)) {
+          causes |= add_exceptions_f32<Op>(a[lane], b[lane], flags, modifiers);
+        }
+      }
     } else if constexpr (!Rdna3 && !Gfx1250) {
       if (write_mask & (1U << lane)) {
         causes |= gfx12_binary_causes<Op>(flags, modifiers, a[lane], b[lane]);

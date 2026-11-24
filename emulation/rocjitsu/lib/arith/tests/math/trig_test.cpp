@@ -102,7 +102,8 @@ template <int Lanes, bool Half, bool Gfx12, typename Call> void check_trig(Call 
             continue;
           }
           EXPECT_EQ(status & 0xffffff80U, 0x80000000U);
-          if (semantics != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+          if (semantics != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL &&
+              !(Gfx12 && semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY)) {
             EXPECT_EQ(status, 0x80000000U);
           }
           for (int lane = 0; lane < Lanes; ++lane) {

@@ -153,17 +153,15 @@ void check_fma(Call entry_point, bool gfx12, bool exact = true) {
             uint64_t flags = cpu | semantics;
             uint32_t fp_status = 0x80000000U;
 
+            const bool reports_status = Width == 32 && gfx12 && exact;
             int result = call(flags, exec_mask, instruction_flags, r.v + aliasing_offset, r.v,
                               r.v + 2, r.v + 4, &fp_status);
-            if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+            if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && !reports_status) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
               r.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;
             }
-            // FP32 and FP64 support exact numeric results on this domain on both
-            // architectures; loose-only entry points reject them. Neither format currently
-            // supports FP status.
             if (!exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               r.expect_preserved(input, 0, 0);
@@ -171,7 +169,14 @@ void check_fma(Call entry_point, bool gfx12, bool exact = true) {
               continue;
             }
             ASSERT_EQ(result, RJ_ARITH_SUCCESS);
-            EXPECT_EQ(fp_status, 0x80000000U);
+            const bool reporting =
+                reports_status && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                   semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
+            if (!reporting || !exec_mask) {
+              EXPECT_EQ(fp_status, 0x80000000U);
+            } else {
+              EXPECT_EQ(fp_status & 0x80000000U, 0x80000000U);
+            }
             compute_fma_expected<Width>(input, exec_mask, instruction_flags, aliasing_offset,
                                         expected_registers, gfx12, Accumulate);
 

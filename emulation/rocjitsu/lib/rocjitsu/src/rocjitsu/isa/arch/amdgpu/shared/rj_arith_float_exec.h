@@ -511,6 +511,15 @@ inline void execute_float_pack(Wavefront &wave, FloatBinary32Function wave32,
   }
 }
 
+// Resolve Compatibility to non-reporting exact for architectures (such as gfx1250)
+// that share gfx12 numeric entries without gfx1201 FP-status qualification.
+inline uint64_t compatibility_no_fp_status(uint64_t flags) {
+  return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY
+             ? (flags & ~RJ_ARITH_SEMANTICS_MASK) |
+                   RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+             : flags;
+}
+
 // Execute binary arithmetic and let the library compute optional FP causes.
 // DPP can suppress vector stores without suppressing Compatibility MUL status;
 // stage only that differing-mask case, preserving the ordinary direct SIMD call.

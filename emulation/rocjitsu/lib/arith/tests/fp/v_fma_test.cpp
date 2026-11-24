@@ -999,3 +999,44 @@ TEST(FpFmaF64Cdna, ScaledMinimumNormal) {
     }
   }
 }
+
+// gfx1201 hardware-verified FP32 FMA exception rules: 0*inf+qNaN raises INVALID without
+// INPUT_DENORM, inf-inf suppresses INPUT_DENORM, CLAMP suppresses all causes, and OMOD drops
+// INX/UNF while keeping INV/DEN/OVF.
+TEST(FpFmaF32Gfx12, StatusRules) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    uint32_t a, b, c;
+    uint64_t fp_flags;
+    uint32_t mode;
+    uint32_t causes;
+  } cases[] = {
+      {0x3f800000U, 0x3f800000U, 0, 0, 0, 0},
+      {0, 0x7f800000U, 0x7fc00000U, 0, 0, RJ_ARITH_EXCEPTION_INVALID},
+      {1, 0x7f800000U, 0x7fc00000U, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, 0,
+       RJ_ARITH_EXCEPTION_INVALID},
+      {1, 0x7f800000U, 0xff800000U, 0, 0, RJ_ARITH_EXCEPTION_INVALID},
+      {0x3f800000U, 0x3f800000U, 1, 0, 0,
+       RJ_ARITH_EXCEPTION_INPUT_DENORM | RJ_ARITH_EXCEPTION_INEXACT},
+      {0x7f7fffffU, 0x40000000U, 0, 0, 0, RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+      {0x7f7fffffU, 0x40000000U, 0, 0, RJ_ARITH_ALU_CLAMP, 0},
+      {0x7f000000U, 0x3f800000U, 0, 0, RJ_ARITH_ALU_OMOD_2, RJ_ARITH_EXCEPTION_OVERFLOW},
+      {0x3f800001U, 0x3f800001U, 0, 0, RJ_ARITH_ALU_OMOD_2, 0},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      for (const auto &sample : cases) {
+        Registers<4, 32> r;
+        r.v[0][0] = sample.a;
+        r.v[1][0] = sample.b;
+        r.v[2][0] = sample.c;
+        uint32_t status = 0x80U;
+        ASSERT_EQ(rj_arith_v_fma_f32_w32_gfx12(cpu | semantics | sample.fp_flags, 1U, sample.mode,
+                                               r.v + 3, r.v, r.v + 1, r.v + 2, &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(status, 0x80U | sample.causes);
+      }
+    }
+  }
+}

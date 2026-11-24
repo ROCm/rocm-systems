@@ -151,25 +151,29 @@ int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t 
   if (int error = validate_semantics(flags)) {
     return error;
   }
-  if (reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  const bool report = reports_fp_status(flags);
+  if constexpr (Gfx1150) {
+    if (report) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+    }
   }
   if (mode >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  int error = run<Op, Half, Gfx1150>(flags, uint32_t(mode), d, a, b);
-  if (error || !compatibility) {
+  const uint64_t numeric_flags = without_fp_status(flags);
+  int error = run<Op, Half, Gfx1150>(numeric_flags, uint32_t(mode), d, a, b);
+  if (error || (!compatibility && !report)) {
     return error;
   }
   if constexpr (Op == Binary::Add || Op == Binary::Sub || Op == Binary::Mul) {
     constexpr uint32_t sign = Half ? 0x8000 : 0x80000000;
     constexpr uint32_t one = Half ? 0x3c00 : 0x3f800000;
     const uint32_t c = Op == Binary::Mul ? (a ^ b) & sign : Op == Binary::Sub ? b ^ sign : b;
-    *status |= scalar_fma_causes<Half, Gfx1150>(flags, a, Op == Binary::Mul ? b : one, c, *d);
+    *status |=
+        scalar_fma_causes<Half, Gfx1150>(numeric_flags, a, Op == Binary::Mul ? b : one, c, *d);
   } else {
-    *status |= float_compare_exceptions < Half
-                   ? 16
-                   : 32 > (a, b, flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
+    *status |= float_compare_exceptions<Half ? 16 : 32>(
+        a, b, numeric_flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
   }
   return RJ_ARITH_SUCCESS;
 }

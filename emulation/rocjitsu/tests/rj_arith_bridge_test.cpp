@@ -760,11 +760,16 @@ TEST(ArithBridgeTest, DecodedFmaRequiredReportingRejectsWithoutPartialCommit) {
                                     {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 260});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      EXPECT_TRUE(
-          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
-      EXPECT_EQ(fixture.wave->trapsts(), 0x10u);
-      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, 0), 0x3c003c00u);
-      EXPECT_TRUE(fixture.recorder->writes.empty());
+      EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
+                rdna3);
+      if (rdna3) {
+        EXPECT_EQ(fixture.wave->trapsts(), 0x10u);
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, 0), 0x3c003c00u);
+        EXPECT_TRUE(fixture.recorder->writes.empty());
+      } else {
+        EXPECT_EQ(fixture.wave->trapsts() & 0x10u, 0x10u);
+        EXPECT_FALSE(fixture.recorder->writes.empty());
+      }
     }
   }
 }
@@ -1847,10 +1852,10 @@ TEST(ArithBridgeTest, TrigEncodingsNanClampMasksAndOptionalState) {
                           EXPECT_EQ(actual, packed(expected));
                         }
                       }
-                      const uint32_t causes =
-                          !empty && !rejected && policy_index == 2 && kind && !clamp
-                              ? RJ_ARITH_EXCEPTION_INVALID
-                              : 0;
+                      const bool reporting = policy_index == 2 || (!rdna3 && policy_index == 0);
+                      const uint32_t causes = !empty && !rejected && reporting && kind && !clamp
+                                                  ? RJ_ARITH_EXCEPTION_INVALID
+                                                  : 0;
                       EXPECT_EQ(fixture.wave->trapsts(), 0x10U | causes);
                     }
                 }
@@ -2829,10 +2834,11 @@ TEST(ArithBridgeTest, HalfFmaFormsRoundingPartialAccumulatorsAndState) {
                     << rdna3 << '/' << form << '/' << rounding << '/' << policy_index << '/'
                     << shift;
               }
-              const uint32_t causes =
-                  policy_index == 2 && !rejected
-                      ? RJ_ARITH_EXCEPTION_INPUT_DENORM | RJ_ARITH_EXCEPTION_INEXACT
-                      : 0;
+              const bool reporting =
+                  policy_index == 2 || (!rdna3 && policy_index == 0 && rounding == 0);
+              const uint32_t causes = reporting && !rejected ? RJ_ARITH_EXCEPTION_INPUT_DENORM |
+                                                                   RJ_ARITH_EXCEPTION_INEXACT
+                                                             : 0;
               EXPECT_EQ(fixture.wave->trapsts(), 0x10U | causes);
             }
 }
@@ -5273,14 +5279,12 @@ TEST(ArithBridgeTest, ScalarFloatBinaryOperationsHonorSemanticsAndFailureBoundar
       const auto words = rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      // Every form supports exact semantics but not FP status.
-      const bool supported = semantics != ArithmeticSemantics::BitExactEmpirical;
-      EXPECT_EQ(
-          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
-          supported);
+      // RDNA4 scalar FP ops never touch WAVE_EXCP_FLAG_USER, so mode 3 is supported.
+      EXPECT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
       EXPECT_EQ(fixture.recorder->scalar_reads, (std::vector<uint32_t>{base, base + 1}));
-      EXPECT_EQ(fixture.recorder->scalar_writes.size(), supported ? 1u : 0u);
-      EXPECT_EQ(fixture.cu->read_sgpr(base), supported ? test.expected : test.a);
+      EXPECT_EQ(fixture.recorder->scalar_writes.size(), 1u);
+      EXPECT_EQ(fixture.cu->read_sgpr(base), test.expected);
       EXPECT_TRUE(fixture.wave->read_scc());
       EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
     }
@@ -5306,8 +5310,7 @@ TEST(ArithBridgeTest, ScalarConversionsPreserveOperandFormatsAndRejectedOutputs)
           ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical,
           ArithmeticSemantics::Compatibility}) {
       ArithmeticPolicy policy{semantics};
-      // Every conversion supports exact semantics but not FP status.
-      const bool reporting = semantics == ArithmeticSemantics::BitExactEmpirical;
+      // RDNA4 scalar conversions never touch WAVE_EXCP_FLAG_USER, so mode 3 is supported.
       BridgeFixture fixture(false, 64, policy);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(0);
@@ -5323,11 +5326,10 @@ TEST(ArithBridgeTest, ScalarConversionsPreserveOperandFormatsAndRejectedOutputs)
                              : rdna4::build_sop1(test.opcode, {.ssrc0 = 0, .sdst = 0});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      EXPECT_EQ(
-          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
-          !reporting);
-      EXPECT_EQ(fixture.recorder->scalar_writes.size(), reporting ? 0u : 1u);
-      EXPECT_EQ(fixture.cu->read_sgpr(base), reporting ? test.a : test.expected);
+      EXPECT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.recorder->scalar_writes.size(), 1u);
+      EXPECT_EQ(fixture.cu->read_sgpr(base), test.expected);
       EXPECT_TRUE(fixture.wave->read_scc());
       EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
     }
@@ -5382,14 +5384,11 @@ TEST(ArithBridgeTest, ScalarFmaFormsPreserveAccumulatorLiteralOrderAndGuestRound
             rdna4::build_sop2(opcodes[op], {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2})[0], 0x40800000u};
         auto instruction = fixture.decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
-        const bool supported = loose || !reporting;
-        EXPECT_EQ(
-            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
-            supported);
-        const uint32_t initial = op == 1 ? 0xabcd4400u : 0x40800000u;
+        EXPECT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
         const uint32_t expected = op == 1 ? 0x4900u : op == 3 ? 0x41300000u : 0x41200000u;
-        EXPECT_EQ(fixture.cu->read_sgpr(base + 2), supported ? expected : initial);
-        EXPECT_EQ(fixture.recorder->scalar_writes.size(), supported ? 1u : 0u);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 2), expected);
+        EXPECT_EQ(fixture.recorder->scalar_writes.size(), 1u);
         EXPECT_TRUE(fixture.wave->read_scc());
         EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
       }
@@ -8393,7 +8392,12 @@ TEST(ArithBridgeTest, HalfFixupGuestRoundingNanClampAndPartialWrites) {
                 for (unsigned lane = 0; lane < lanes; ++lane)
                   EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane),
                             lane == last ? (expected << 16) | 0xa55a : 0x7c00a55a);
-                EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
+                const uint32_t expected_causes =
+                    !rdna3 && rounding == 0 && !clamp
+                        ? (nan ? RJ_ARITH_EXCEPTION_INVALID
+                               : RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT)
+                        : 0;
+                EXPECT_EQ(fixture.wave->trapsts(), 0x20U | expected_causes);
               }
 }
 

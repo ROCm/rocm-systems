@@ -49,12 +49,9 @@ void check_scalar_fp(Call call, Reference reference, bool exact = false, int out
         }
         bool flush = sample % 3 == 0;
         uint64_t flags = cpu | semantics | (flush ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0);
-        int wanted = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && !report
+        int wanted = !exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
                          ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                     : exact ? RJ_ARITH_SUCCESS
-                     : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
-                         ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                     : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                     : !exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
                          ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
                          : RJ_ARITH_SUCCESS;
         SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << sample);
@@ -76,7 +73,7 @@ void check_scalar_fp(Call call, Reference reference, bool exact = false, int out
                        exact ? semantics : RJ_ARITH_SEMANTICS_LOOSE,
                        /*atol=*/0x1p-149f, /*rtol=*/1.2e-7f);
           }
-          if (exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+          if (exact && report && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
             uint32_t magnitude = a & (sign - 1);
             if (magnitude > inf && !(magnitude & quiet)) {
               expected_status |= RJ_ARITH_EXCEPTION_INVALID;
@@ -90,9 +87,10 @@ void check_scalar_fp(Call call, Reference reference, bool exact = false, int out
           EXPECT_EQ(alias, words[1]);
           EXPECT_EQ(alias_status, status);
         }
-        // Compatibility arithmetic/conversion causes have dedicated literal cases;
-        // this shared numerical reference does not model their status.
-        if (semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+        // Arithmetic/conversion causes have dedicated capture tests below;
+        // this shared numerical reference only predicts single-input round status.
+        if (semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY &&
+            (report || semantics != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)) {
           EXPECT_EQ(status, expected_status);
         } else {
           EXPECT_EQ(status & 0x80000040U, 0x80000040U);
@@ -157,12 +155,12 @@ void check_scalar_captures(Call call, const ScalarCapture (&captures)[N], int in
                      << test.a << ", 0x" << test.b << ", 0x" << test.c);
         const uint64_t flags =
             cpu | semantics | scalar_capture_flags(test.mode, input_bits, output_bits, rounded);
-        const bool status = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+        const bool reports = semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY ||
+                             semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
         uint32_t d = test.c, fp_status = 0x80000000U;
-        ASSERT_EQ(call(flags, &d, test.a, test.b, test.c, &fp_status),
-                  status ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS : RJ_ARITH_SUCCESS);
-        EXPECT_EQ(d, status ? test.c : test.d);
-        if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+        ASSERT_EQ(call(flags, &d, test.a, test.b, test.c, &fp_status), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(d, test.d);
+        if (reports) {
           EXPECT_EQ(fp_status, 0x80000000U | test.causes);
         } else {
           EXPECT_EQ(fp_status, 0x80000000U);

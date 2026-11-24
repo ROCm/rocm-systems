@@ -56,7 +56,7 @@ void check_binary64_rounding(Call call, uint64_t a, uint64_t b, const uint64_t (
 template <int Width, int Lanes, bool Packed = false, typename Call, typename Reference>
 void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
                              bool fp_status_supported = false, bool compatibility_status = false,
-                             bool half_exact = true) {
+                             bool half_exact = true, bool full_status_domain = false) {
   static_assert(Width == 16 || Width == 32 || Width == 64);
   static_assert(Lanes == 32 || Lanes == 64);
   static_assert(!Packed || Width == 16);
@@ -110,7 +110,8 @@ void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
                              result.v + aliasing_offset, result.v, result.v + 2, &fp_status);
             if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL &&
                 (!fp_status_supported ||
-                 (instruction_flags & (RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_MASK)))) {
+                 (!full_status_domain &&
+                  (instruction_flags & (RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_MASK))))) {
               EXPECT_EQ(error, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
               result.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);

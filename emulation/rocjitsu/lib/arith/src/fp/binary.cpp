@@ -322,15 +322,20 @@ int binary_policy(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *c
   if (int error = validate_semantics(flags)) {
     return error;
   }
-  if constexpr (Op != Binary::Mul) {
+  constexpr bool reports_add_gfx12 =
+      !Rdna3 && !Gfx1250 && (Op == Binary::Add || Op == Binary::Sub || Op == Binary::Subrev);
+  if constexpr (Op != Binary::Mul && !reports_add_gfx12) {
     if (reports_fp_status(flags)) {
       return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
     }
   }
-  if (!compatibility || !exec_mask) {
-    return binary<Op, Rdna3>(flags, exec_mask, mode, d, a, b, state);
+  const bool report_via_policy = compatibility || (reports_add_gfx12 && reports_fp_status(flags));
+  if (!report_via_policy || !exec_mask) {
+    return binary<Op, Rdna3>(reports_add_gfx12 ? without_fp_status(flags) : flags, exec_mask, mode,
+                             d, a, b, state);
   }
-  if (int error = binary<Op, Rdna3>(flags, 0, mode, nullptr, nullptr, nullptr)) {
+  const uint64_t numeric_flags = reports_add_gfx12 ? without_fp_status(flags) : flags;
+  if (int error = binary<Op, Rdna3>(numeric_flags, 0, mode, nullptr, nullptr, nullptr)) {
     return error;
   }
   uint32_t permuted[32];
@@ -338,19 +343,19 @@ int binary_policy(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *c
   uint32_t write_mask = exec_mask & allowed_writes;
   if (mode >> 32) {
     if (mode & RJ_ARITH_DPP8) {
-      dpp8_source(flags, exec_mask, mode, permuted, source);
+      dpp8_source(numeric_flags, exec_mask, mode, permuted, source);
     } else {
-      write_mask &= dpp16_source(flags, exec_mask, mode, permuted, source);
+      write_mask &= dpp16_source(numeric_flags, exec_mask, mode, permuted, source);
     }
     source = permuted;
   }
   uint32_t modifiers = uint32_t(mode);
   if constexpr (Rdna3) {
-    modifiers = uint32_t(rdna3_output_modifiers(flags, modifiers));
+    modifiers = uint32_t(rdna3_output_modifiers(numeric_flags, modifiers));
   }
   const uint32_t causes = compatibility_binary_causes<Op, Rdna3, Gfx1250>(
-      flags, exec_mask, write_mask, modifiers, source, b[0]);
-  int error = binary<Op, Rdna3>(flags, write_mask, uint32_t(mode), d, &source, b);
+      numeric_flags, exec_mask, write_mask, modifiers, source, b[0]);
+  int error = binary<Op, Rdna3>(numeric_flags, write_mask, uint32_t(mode), d, &source, b);
   if (!error) {
     *state |= causes;
   }

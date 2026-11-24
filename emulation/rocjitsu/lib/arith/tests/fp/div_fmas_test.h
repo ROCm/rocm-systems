@@ -165,7 +165,8 @@ void check_div_fmas(Call call, bool gfx12, const Cases &status_cases) {
               continue;
             }
             ASSERT_EQ(result, RJ_ARITH_SUCCESS);
-            bool reporting = gfx12 && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
+            bool reporting = gfx12 && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                       semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
             if (!reporting || !exec_mask) {
               EXPECT_EQ(fp_status, 0x80000000U);
             } else {

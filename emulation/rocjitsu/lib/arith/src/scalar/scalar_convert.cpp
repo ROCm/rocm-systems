@@ -177,7 +177,7 @@ uint32_t conversion_causes(uint64_t flags, uint32_t a, uint32_t result) {
   }
 }
 
-// Compatibility preserves scalar conversion status; explicit reporting support is unchanged.
+// Compatibility and explicit mode 3 share the gfx1201 hardware-fitted scalar conversion status.
 template <Convert Op>
 int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t b,
                uint32_t *status) {
@@ -187,16 +187,15 @@ int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
+  const bool report = rocjitsu::arith::reports_fp_status(flags);
   if (mode >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  int error = run<Op>(flags, uint32_t(mode), d, a, b);
+  const uint64_t numeric_flags = rocjitsu::arith::without_fp_status(flags);
+  int error = run<Op>(numeric_flags, uint32_t(mode), d, a, b);
   if constexpr (Op != Convert::PackedHalfRtz) {
-    if (!error && compatibility) {
-      *status |= conversion_causes<Op>(flags, a, *d);
+    if (!error && (compatibility || report)) {
+      *status |= conversion_causes<Op>(numeric_flags, a, *d);
     }
   }
   return error;

@@ -203,7 +203,7 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *cons
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  bool report = !(Width == 16 && Rdna3) &&
+  bool report = excp_flag_user && !(Width == 16 && Rdna3) &&
                 rocjitsu::arith::reports_fp_status(rocjitsu::arith::resolve_compatibility(
                     flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL));
 
@@ -246,7 +246,9 @@ int rj_arith_v_div_fixup_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        const uint32_t *const *c, uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, !excp_flag_user || (flags & RJ_ARITH_FP_ROUND_MASK)
+                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -303,7 +305,9 @@ int rj_arith_v_div_fixup_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        const uint32_t *const *c, uint32_t *excp_flag_user) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, !excp_flag_user || (flags & RJ_ARITH_FP_ROUND_MASK)
+                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

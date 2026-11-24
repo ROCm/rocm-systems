@@ -93,9 +93,8 @@ void check_float_compare(Call call, bool gfx12, bool (*predicate)(double, double
         uint64_t flags = cpu | semantics | RJ_ARITH_FP_IEEE_MODE |
                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
                          (flush ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0);
-        bool reporting =
-            semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
-            (gfx12 && semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY && (mode & RJ_ARITH_ALU_CLAMP));
+        bool reporting = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                         (gfx12 && semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
         int error = reporting && !gfx12 ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS : RJ_ARITH_SUCCESS;
         SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << scenario);
         Mask expected = comparison_mask<Lanes>(mode, exec_mask, [&](int source, int lane) {
@@ -235,13 +234,13 @@ template <int Width, int Lanes, typename Call> void check_compatibility_compare(
     uint32_t causes;
   };
   const Case cases[] = {
-      {Mask(1), 0, RJ_ARITH_ALU_CLAMP, 0}, // Finite-only signaling reports nothing.
+      {Mask(1), 0, RJ_ARITH_ALU_CLAMP, RJ_ARITH_EXCEPTION_INPUT_DENORM},
       {last, 0, RJ_ARITH_ALU_CLAMP, RJ_ARITH_EXCEPTION_INVALID},
       {Mask(1) | last, 0, RJ_ARITH_ALU_CLAMP,
        RJ_ARITH_EXCEPTION_INVALID | RJ_ARITH_EXCEPTION_INPUT_DENORM},
       {Mask(1) | last, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_ALU_CLAMP,
        RJ_ARITH_EXCEPTION_INVALID},
-      {Mask(1) | last, 0, 0, 0}, // Quiet Compatibility does not report.
+      {Mask(1) | last, 0, 0, RJ_ARITH_EXCEPTION_INPUT_DENORM},
       {Mask(0), 0, RJ_ARITH_ALU_CLAMP, 0},
   };
   for (uint64_t cpu : supported_cpu_levels()) {

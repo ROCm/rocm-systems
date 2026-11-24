@@ -154,7 +154,8 @@ void check_immediate_fma_f16(Call entry_point, bool gfx12, const Cases &status_c
               continue;
             }
             ASSERT_EQ(result, RJ_ARITH_SUCCESS);
-            bool reporting = gfx12 && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
+            bool reporting = gfx12 && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                       semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
             if (!reporting || !exec_mask) {
               EXPECT_EQ(fp_status, 0x80000000U);
             } else {
@@ -340,14 +341,20 @@ void check_immediate_fma_f32(Call entry_point, bool gfx12) {
 
             int result = call(flags, exec_mask, instruction_flags, r.v + aliasing_offset, r.v,
                               r.v + 2, 0x3eaaaaabU, &fp_status);
-            if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+            if (!gfx12 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
               r.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;
             }
             ASSERT_EQ(result, RJ_ARITH_SUCCESS);
-            EXPECT_EQ(fp_status, 0x80000000U);
+            const bool reporting = gfx12 && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                             semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
+            if (!reporting || !exec_mask) {
+              EXPECT_EQ(fp_status, 0x80000000U);
+            } else {
+              EXPECT_EQ(fp_status & 0x80000000U, 0x80000000U);
+            }
             compute_immediate_fma_f32_expected<Lanes, MultiplyConstant>(
                 input, exec_mask, instruction_flags, aliasing_offset, expected_registers);
 
