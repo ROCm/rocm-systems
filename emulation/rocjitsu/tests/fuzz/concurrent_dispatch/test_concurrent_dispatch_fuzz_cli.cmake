@@ -75,6 +75,31 @@ if(random_replays)
     )
 endif()
 
+set(oracle_output "${WORK_DIRECTORY}/oracle-failure")
+execute_process(
+    COMMAND
+        "${ORACLE_FAILURE_EXECUTABLE}" --random 1 --seed 0 --output
+        "${oracle_output}"
+    RESULT_VARIABLE oracle_result
+    OUTPUT_VARIABLE oracle_stdout
+    ERROR_VARIABLE oracle_stderr
+)
+if(
+    NOT oracle_result STREQUAL "1"
+    OR NOT oracle_stderr MATCHES "injected concurrent dispatch oracle failure"
+)
+    message(
+        FATAL_ERROR
+        "oracle failure returned ${oracle_result}: ${oracle_stdout}${oracle_stderr}"
+    )
+endif()
+set(oracle_replay "${oracle_output}/failure-seed-0.bin")
+file(READ "${oracle_replay}" oracle_replay_hex HEX)
+string(REPEAT "5a" 64 expected_replay_hex)
+if(NOT oracle_replay_hex STREQUAL expected_replay_hex)
+    message(FATAL_ERROR "oracle failure did not preserve the generated replay")
+endif()
+
 set(retained_replay "${random_output}/failure-seed-0.bin")
 file(WRITE "${retained_replay}" "retained input")
 execute_process(
