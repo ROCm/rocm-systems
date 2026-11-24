@@ -327,27 +327,23 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   INFO(NCCL_COLL, "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
        grid.x, block.x, unroll);
 
-  // Stage sendbuff into this rank's scratch before the peer exchange. A single
-  // host-launched cudaMemcpyAsync avoids the per-block in-kernel copy race on
-  // the fabric path.
-  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalBytes, cudaMemcpyDeviceToDevice, stream));
-
+  // The kernel stages sendbuff into scratch itself at every grid size (see alltoall_dda_fabric.h).
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabric<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count, comm->rank, nRanks,
-                          barrierHost);
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabric<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count, comm->rank, nRanks,
-                          barrierHost);
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabric<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count, comm->rank, nRanks,
-                          barrierHost);
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   }
 

@@ -15,7 +15,7 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc, bool kStagingCopyInKernel = false>
+template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -33,16 +33,19 @@ __launch_bounds__(512)
   const auto idxEnd = countPerRank;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  if constexpr (kStagingCopyInKernel) {
-    // Small messages: fuse sendbuff -> scratch copy into the kernel to avoid
-    // cudaMemcpyAsync launch overhead on ROCm.
-    const size_t copyCount = count * NRANKS;
-    copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
-    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-  } else {
-    // Large messages: host enqueues cudaMemcpyAsync into ddaScratch before launch.
-    barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  // Stage sendbuff into this rank's scratch inside the kernel (no pre-kernel cudaMemcpyAsync).
+  // Each block copies exactly the elements that the same block index on every peer reads in the
+  // loop below (idx + r * count for idx in this block's stride set), so the per-block-index
+  // barrier publishes them for any grid size.
+  T* const myScratch = ipcbuffs[selfRank];
+  for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
+#pragma unroll NRANKS
+    for (int r = 0; r < NRANKS; ++r) {
+      const size_t i = idx + r * idxEnd;
+      *reinterpret_cast<uint4*>(&myScratch[i]) = reinterpret_cast<const uint4*>(&sendbuff[i])[0];
+    }
   }
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll NRANKS
