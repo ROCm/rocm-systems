@@ -41,7 +41,6 @@ set(ALL_TESTER_HSACOS "")
 foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   set(KERNEL_BC  ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.bc)
   set(LINKED_BC  ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}_linked.bc)
-  set(OBJ_FILE   ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.o)
   set(HSACO_FILE ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.hsaco)
 
   # Find the full arch string (with feature suffixes) for this base arch and
@@ -97,40 +96,20 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
     VERBATIM
   )
 
-  # Optimize the merged BC at -O3 so the final HSACO has efficient code.
-  # add_custom_command(
-  #   OUTPUT ${LINKED_BC}
-  #   COMMAND ${LLVM_OPT}
-  #     -O3
-  #     -mtriple=amdgcn-amd-amdhsa
-  #     -mcpu=${GPU_ARCH}
-  #     ${_TESTER_UNOPT_LINKED_BC}
-  #     -o ${LINKED_BC}
-  #   DEPENDS ${_TESTER_UNOPT_LINKED_BC}
-  #   COMMENT "device_bitcode_tester: optimizing merged BC for ${GPU_ARCH}"
-  #   VERBATIM
-  # )
 
   add_custom_command(
-    OUTPUT ${OBJ_FILE}
+    OUTPUT ${HSACO_FILE}
     COMMAND ${LLVM_CLANG}
+      -O0
       -target amdgcn-amd-amdhsa
       -mcpu=${GPU_ARCH}
       -mllvm -amdgpu-internalize-symbols=false
       -x ir
-      -c ${_TESTER_UNOPT_LINKED_BC}
-      -o ${OBJ_FILE}
+      ${_TESTER_UNOPT_LINKED_BC}
+      -o ${HSACO_FILE}
 
     DEPENDS ${_TESTER_UNOPT_LINKED_BC}
     COMMENT "device_bitcode_tester: compiling to object for ${GPU_ARCH}"
-    VERBATIM
-  )
-
-  add_custom_command(
-    OUTPUT ${HSACO_FILE}
-    COMMAND ${LLVM_LLD} -shared ${OBJ_FILE} -o ${HSACO_FILE}
-    DEPENDS ${OBJ_FILE}
-    COMMENT "device_bitcode_tester: linking HSACO for ${GPU_ARCH}"
     VERBATIM
   )
 

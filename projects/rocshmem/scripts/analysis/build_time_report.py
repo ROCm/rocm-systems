@@ -223,7 +223,9 @@ MILESTONE_PATTERNS = [
     ("kernel_compile",
      re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_(?!.*_unopt)[^/]+\.bc$")),
     ("kernel_unopt_link", re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_.*_unopt\.bc$")),
-    ("kernel_codegen", re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_[^/]+\.o$")),
+    # CMakeDeviceBitcodeTester.cmake used to codegen to a .o then `ld.lld -shared`
+    # it separately; both are now one clang invocation (no -c) that drives its
+    # own internal link, so there's no more standalone .o output to key off of.
     ("hsaco_lld", re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_[^/]+\.hsaco$")),
     ("host_archive", re.compile(r"^librocshmem\.a$")),
     ("functest_link", re.compile(r"^tests/functional_tests/rocshmem_functional_tests$")),
@@ -648,7 +650,7 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
     wall_total = (wall_end - wall_start) / 1000.0
 
     milestone_cmd_names = ("bc_unopt_link", "bc_opt", "kernel_compile", "kernel_unopt_link",
-                            "kernel_codegen", "hsaco_lld")
+                            "hsaco_lld")
     wanted_outputs = {milestones[n][2] for n in milestone_cmd_names if n in milestones}
     real_cmds = {out: simplify_command(cmd) for out, cmd in
                  extract_ninja_commands(build_ninja_path, wanted_outputs).items()} \
@@ -823,7 +825,7 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
                                 "#fff3bf", style="filled,dashed", color=gate_color, penwidth=2, shape="note"))
 
         # HSACO chain
-        hsaco_names = ["kernel_compile", "kernel_unopt_link", "kernel_codegen", "hsaco_lld"]
+        hsaco_names = ["kernel_compile", "kernel_unopt_link", "hsaco_lld"]
         if all(n in milestones for n in hsaco_names):
             chain_s, _, _ = milestones["kernel_compile"]
             _, chain_e, _ = milestones["hsaco_lld"]
@@ -836,8 +838,7 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             steps = [
                 ("kernel_compile", "clang++ kernel compile", "#b2f2bb", 1, "#f08c00"),
                 ("kernel_unopt_link", "llvm-link kernel+library", "#ffd8a8", 1, "#f08c00"),
-                ("kernel_codegen", "clang -x ir codegen -- SERIAL", "#ffd8a8", 2, "red"),
-                ("hsaco_lld", "ld.lld -> .hsaco", "#ffd8a8", 1, "#f08c00"),
+                ("hsaco_lld", "clang -x ir codegen+link -> .hsaco -- SERIAL", "#ffd8a8", 2, "red"),
             ]
             for name, label, fill, pw, ccolor in steps:
                 s, e = t(name)
@@ -854,8 +855,7 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             lines += [
                 "  kernel_hip -> kernel_compile;\n", "  kernel_compile -> kernel_unopt_link;\n",
                 "  bc_opt -> kernel_unopt_link [color=red];\n" if "bc_opt" in milestones else "",
-                "  kernel_unopt_link -> kernel_codegen;\n",
-                "  kernel_codegen -> hsaco_lld;\n", "  hsaco_lld -> hsaco_target;\n",
+                "  kernel_unopt_link -> hsaco_lld;\n", "  hsaco_lld -> hsaco_target;\n",
                 "  hsaco_target -> project_dep_hack [color=red, penwidth=2];\n" if has_gate else "",
             ]
 

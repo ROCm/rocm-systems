@@ -5,7 +5,7 @@
 
 digraph rocshmem_build {
   rankdir=TB; fontname="Helvetica"; labelloc="t";
-  label=<<B>rocSHMEM build dependency graph</B><BR/><FONT POINT-SIZE="10">wall 341.4s -- generated from .ninja_log</FONT>>;
+  label=<<B>rocSHMEM build dependency graph</B><BR/><FONT POINT-SIZE="10">wall 346.6s -- generated from .ninja_log</FONT>>;
   node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, margin="0.12,0.06"];
   edge [fontname="Helvetica", fontsize=8, color="#555555"];
 
@@ -31,7 +31,7 @@ dependency gate", style="filled,dashed", fillcolor="#fff3bf", color=red, penwidt
   cmake_configure [label="cmake configure
 GPU_TARGETS=gfx1250-strict
 backends: IPC,RO,GDA", style="rounded,filled", fillcolor="#cfe2ff"];
-  t_cmake_configure [label="8.92s", shape=circle, fixedsize=true, width=0.55, height=0.55, fontsize=8, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
+  t_cmake_configure [label="9.18s", shape=circle, fixedsize=true, width=0.55, height=0.55, fontsize=8, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
   cmake_configure -> t_cmake_configure [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
   {rank=same; cmake_configure; t_cmake_configure;}
   bc_sources [label="BITCODE_SOURCES (18 files)
@@ -52,14 +52,14 @@ util.cpp
   {rank=same; bc_compile; t_bc_compile;}
   bc_llvmlink [label="llvm-link <18 x *.bc inputs> -o
 librocshmem_device_gfx1250-strict_unopt.bc", style="rounded,filled", fillcolor="#ffd8a8"];
-  t_bc_llvmlink [label="1.0s", shape=circle, fixedsize=true, width=0.4, height=0.4, fontsize=7, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
+  t_bc_llvmlink [label="0.9s", shape=circle, fixedsize=true, width=0.4, height=0.4, fontsize=7, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
   bc_llvmlink -> t_bc_llvmlink [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
   {rank=same; bc_llvmlink; t_bc_llvmlink;}
   bc_opt [label="opt -O3 -mtriple=amdgcn-amd-amdhsa -mcpu=gfx1250-strict
 librocshmem_device_gfx1250-strict_unopt.bc -o
 librocshmem_device_gfx1250-strict.bc -- SERIAL
-t=7.4s -> 106.9s", style="rounded,filled", fillcolor="#ffd8a8", color=red, penwidth=2];
-  t_bc_opt [label="99.4s", shape=circle, fixedsize=true, width=0.6, height=0.6, fontsize=9, fillcolor="#fff9db", color="red", penwidth=2];
+t=7.4s -> 107.8s", style="rounded,filled", fillcolor="#ffd8a8", color=red, penwidth=2];
+  t_bc_opt [label="100.4s", shape=circle, fixedsize=true, width=0.6, height=0.6, fontsize=9, fillcolor="#fff9db", color="red", penwidth=2];
   bc_opt -> t_bc_opt [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
   {rank=same; bc_opt; t_bc_opt;}
   bc_target [label="rocshmem_device_bitcode (ALL)", style="rounded,filled,dashed", fillcolor="#e9ecef"];
@@ -71,11 +71,11 @@ t=7.4s -> 106.9s", style="rounded,filled", fillcolor="#ffd8a8", color=red, penwi
   host_sources [label="56 host/device TU compiles
 parallel
 src/(top-level):18, src/gda:12, src/reverse_offload:6,
-src/memory:5, src/ipc:5, src/bootstrap:3,
-src/containers:2, src/memfabric:2, src/host:1,
-src/sdma:1, src/sync:1
+src/ipc:5, src/memory:5, src/bootstrap:3,
+src/containers:2, src/memfabric:2, src/sync:1,
+src/sdma:1, src/host:1
 (shares 17 file(s) with bc_sources)", style="rounded,filled", fillcolor="#b2f2bb"];
-  t_host_sources [label="141.3s
+  t_host_sources [label="141.2s
 cpu-sum", shape=circle, fixedsize=true, width=0.6, height=0.6, fontsize=8, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
   host_sources -> t_host_sources [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
   {rank=same; host_sources; t_host_sources;}
@@ -86,7 +86,7 @@ cpu-sum", shape=circle, fixedsize=true, width=0.6, height=0.6, fontsize=8, fillc
 device_bitcode_tester_hsacos)
 gates: tests/functional_tests/all", style="filled,dashed", fillcolor="#fff3bf", color=red, penwidth=2, shape=note];
   subgraph cluster_hsaco {
-    label="device_bitcode_tester_hsacos (234.5s serial chain)";
+    label="device_bitcode_tester_hsacos (238.8s serial chain)";
     style="filled,dashed"; fillcolor="#fff5f5"; color=red; fontsize=11;
   kernel_hip [label="device_bitcode_tester_kernel.hip", style="rounded,filled,dashed", fillcolor="#cfe2ff"];
   kernel_compile [label="clang++ -Wall -Wextra -x hip --cuda-device-only
@@ -95,7 +95,7 @@ gates: tests/functional_tests/all", style="filled,dashed", fillcolor="#fff3bf", 
 --offload-arch=gfx1250-strict -c
 device_bitcode_tester_kernel.hip -o
 device_bitcode_tester_kernel_gfx1250-strict.bc
-t=106.9s -> 107.2s", style="rounded,filled", fillcolor="#b2f2bb", color="#f08c00"];
+t=107.8s -> 108.1s", style="rounded,filled", fillcolor="#b2f2bb", color="#f08c00"];
   t_kernel_compile [label="0.3s", shape=circle, fixedsize=true, width=0.5, height=0.5, fontsize=7, fillcolor="#fff9db", color="#f08c00", penwidth=1];
   kernel_compile -> t_kernel_compile [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
   {rank=same; kernel_compile; t_kernel_compile;}
@@ -103,33 +103,25 @@ t=106.9s -> 107.2s", style="rounded,filled", fillcolor="#b2f2bb", color="#f08c00
 device_bitcode_tester_kernel_gfx1250-strict.bc
 librocshmem_device_gfx1250-strict.bc -o
 device_bitcode_tester_kernel_gfx1250-strict_unopt.bc
-t=107.2s -> 112.3s", style="rounded,filled", fillcolor="#ffd8a8", color="#f08c00"];
+t=108.1s -> 113.3s", style="rounded,filled", fillcolor="#ffd8a8", color="#f08c00"];
   t_kernel_unopt_link [label="5.2s", shape=circle, fixedsize=true, width=0.5, height=0.5, fontsize=7, fillcolor="#fff9db", color="#f08c00", penwidth=1];
   kernel_unopt_link -> t_kernel_unopt_link [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
   {rank=same; kernel_unopt_link; t_kernel_unopt_link;}
-  kernel_codegen [label="clang++ -target amdgcn-amd-amdhsa -mcpu=gfx1250-strict
--mllvm -amdgpu-internalize-symbols=false -x ir -c
+  hsaco_lld [label="clang++ -target amdgcn-amd-amdhsa -mcpu=gfx1250-strict
+-mllvm -amdgpu-internalize-symbols=false -x ir
 device_bitcode_tester_kernel_gfx1250-strict_unopt.bc -o
-device_bitcode_tester_kernel_gfx1250-strict.o
-SERIAL, single-threaded
-t=112.3s -> 341.3s", style="rounded,filled", fillcolor="#ffd8a8", color=red, penwidth=2];
-  t_kernel_codegen [label="228.9s", shape=circle, fixedsize=true, width=0.6000000000000001, height=0.6000000000000001, fontsize=8, fillcolor="#fff9db", color="red", penwidth=2];
-  kernel_codegen -> t_kernel_codegen [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
-  {rank=same; kernel_codegen; t_kernel_codegen;}
-  hsaco_lld [label="ld.lld -shared
-device_bitcode_tester_kernel_gfx1250-strict.o -o
 device_bitcode_tester_kernel_gfx1250-strict.hsaco
-t=341.3s -> 341.4s", style="rounded,filled", fillcolor="#ffd8a8", color="#f08c00"];
-  t_hsaco_lld [label="0.1s", shape=circle, fixedsize=true, width=0.5, height=0.5, fontsize=7, fillcolor="#fff9db", color="#f08c00", penwidth=1];
-  hsaco_lld -> t_hsaco_lld [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
+SERIAL, single-threaded
+t=113.3s -> 346.6s", style="rounded,filled", fillcolor="#ffd8a8", color=red, penwidth=2];
+  t_hsaco_lld [label="233.3s", shape=circle, fixedsize=true, width=0.6000000000000001, height=0.6000000000000001, fontsize=8, fillcolor="#fff9db", color="red", penwidth=2];
+  hsaco_lld -> t_hsaco_lld [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
   {rank=same; hsaco_lld; t_hsaco_lld;}
   hsaco_target [label="device_bitcode_tester_hsacos (ALL)", style="rounded,filled,dashed", fillcolor="#e9ecef"];
   }
   kernel_hip -> kernel_compile;
   kernel_compile -> kernel_unopt_link;
   bc_opt -> kernel_unopt_link [color=red];
-  kernel_unopt_link -> kernel_codegen;
-  kernel_codegen -> hsaco_lld;
+  kernel_unopt_link -> hsaco_lld;
   hsaco_lld -> hsaco_target;
   hsaco_target -> project_dep_hack [color=red, penwidth=2];
   subgraph cluster_examples {
@@ -137,18 +129,18 @@ t=341.3s -> 341.4s", style="rounded,filled", fillcolor="#ffd8a8", color="#f08c00
 (NOT gated by HSACO chain)";
     fillcolor="#f8f9fa"; style=filled; fontsize=11;
   examples_link [label="11 targets (examples/*)
-tile_distributed_gemm: 120.3s
-rocshmem_getmem_test: 117.3s
-tile_halo_exchange: 117.1s
-rocshmem_put_signal_test: 116.3s
-rocshmem_user_mem_test: 116.3s
-rocshmem_user_mem_symm_test: 116.1s
-rocshmem_allreduce_test: 115.8s
-rocshmem_alltoall_test: 115.8s
-rocshmem_init_attr_test: 115.6s
-rocshmem_broadcast_test: 115.3s
-LL_MoE/ll_moe: 114.9s", style="rounded,filled", fillcolor="#ffa8a8"];
-  t_examples_link [label="1280.8s
+tile_distributed_gemm: 118.4s
+rocshmem_broadcast_test: 118.0s
+rocshmem_allreduce_test: 117.7s
+rocshmem_getmem_test: 117.6s
+tile_halo_exchange: 117.2s
+rocshmem_init_attr_test: 116.8s
+LL_MoE/ll_moe: 116.3s
+rocshmem_put_signal_test: 115.8s
+rocshmem_user_mem_test: 115.6s
+rocshmem_alltoall_test: 115.5s
+rocshmem_user_mem_symm_test: 115.5s", style="rounded,filled", fillcolor="#ffa8a8"];
+  t_examples_link [label="1284.4s
 cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fillcolor="#fff9db", color="red", penwidth=1.5];
   examples_link -> t_examples_link [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
   {rank=same; examples_link; t_examples_link;}
@@ -160,10 +152,10 @@ cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fil
     fillcolor="#f8f9fa"; style=filled; fontsize=11;
   other_links [label="3 targets (tools/unit-tests/
 rocprofiler-register)
-rocshmem_info: 117.3s
-rocshmem-rocprofiler-register-import-test: 116.3s
+rocshmem-rocprofiler-register-import-test: 116.7s
+rocshmem_info: 116.2s
 rocshmem_unit_tests: 116.1s", style="rounded,filled", fillcolor="#ffa8a8"];
-  t_other_links [label="349.7s
+  t_other_links [label="349.0s
 cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fillcolor="#fff9db", color="red", penwidth=1.5];
   other_links -> t_other_links [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
   {rank=same; other_links; t_other_links;}
@@ -174,14 +166,14 @@ cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fil
     style="filled,dashed"; fillcolor="#fff5f5"; color=red; fontsize=11;
   functest_sources [label="36 functional-test source compiles
 parallel", style="rounded,filled", fillcolor="#b2f2bb"];
-  t_functest_sources [label="87.7s cpu
-longest 29.1s", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
+  t_functest_sources [label="86.6s cpu
+longest 28.4s", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
   functest_sources -> t_functest_sources [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
   {rank=same; functest_sources; t_functest_sources;}
   functest_link [label="rocshmem_functional_tests (link)
 whole-program -fgpu-rdc device LTO
-t=32.8s -> 266.6s", style="rounded,filled", fillcolor="#ffa8a8", penwidth=2];
-  t_functest_link [label="233.9s", shape=circle, fixedsize=true, width=0.65, height=0.65, fontsize=9, fillcolor="#fff9db", color="red", penwidth=2];
+t=32.0s -> 266.2s", style="rounded,filled", fillcolor="#ffa8a8", penwidth=2];
+  t_functest_link [label="234.2s", shape=circle, fixedsize=true, width=0.65, height=0.65, fontsize=9, fillcolor="#fff9db", color="red", penwidth=2];
   functest_link -> t_functest_link [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
   {rank=same; functest_link; t_functest_link;}
   }
@@ -189,8 +181,8 @@ t=32.8s -> 266.6s", style="rounded,filled", fillcolor="#ffa8a8", penwidth=2];
   functest_sources -> functest_link;
   hsaco_target -> functest_link [style=dashed, label="  HSACO used at runtime"];
   build_done [label="ninja build complete
-wall 341.4s", style="rounded,filled", fillcolor="#d0bfff", shape=doubleoctagon];
-  t_build_done [label="341.4s
+wall 346.6s", style="rounded,filled", fillcolor="#d0bfff", shape=doubleoctagon];
+  t_build_done [label="346.6s
 wall", shape=circle, fixedsize=true, width=0.65, height=0.65, fontsize=8, fillcolor="#fff9db", color="#7048e8", penwidth=2];
   build_done -> t_build_done [style=dashed, arrowhead=none, color="#7048e8", constraint=false, weight=0];
   {rank=same; build_done; t_build_done;}
