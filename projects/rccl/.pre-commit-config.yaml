@@ -77,6 +77,8 @@ repos:
         entry: projects/rccl/maint/run-clang-tidy.sh
         # Only src/ is in the compile database: no tests, tools or plugins.
         files: ^projects/rccl/src/.*\.(c|cc|cpp|cu)$
+        # One run: batches would share build/clang-tidy and its findings file.
+        require_serial: true
         stages: [manual]
         verbose: true
 
