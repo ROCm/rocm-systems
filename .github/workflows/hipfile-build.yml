@@ -241,7 +241,7 @@ jobs:
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               export PATH="/opt/rocm/llvm/bin:${PATH}"
-              ../../rocm-systems/projects/hipfile/util/llvm-coverage.sh
+              ../../rocm-systems/projects/hipfile/util/llvm-coverage.sh -b .
               printf "# Code Coverage\n"
               printf "\`\`\`\n"
               cat coverage-report.txt
