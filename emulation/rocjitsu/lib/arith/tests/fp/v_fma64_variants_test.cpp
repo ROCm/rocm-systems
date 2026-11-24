@@ -4,6 +4,7 @@
 // CDNA accumulating and literal FP64 FMA forms share directed-rounding goldens.
 #include "common/cpu.h"
 #include "common/semantics.h"
+#include "fp/fp64_impl.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
@@ -263,12 +264,39 @@ TEST(FpF64Cdna, ExactAndLooseOnlyQualification) {
 // 0 * +-Inf, Fract(+-Inf)) produce canonical negative qNaN 0xfff8000000000000 across all CPU paths,
 // while incoming NaNs keep their quieted payload and sign.
 TEST(FpF64Cdna, InvalidOpCanonicalNegativeNan) {
+  using rocjitsu::arith::as_double;
+  using rocjitsu::arith::double_bits;
+  using rocjitsu::arith::fp64_nan_priority;
+
+  constexpr uint64_t kPosCanonQnan = 0x7ff8000000000000ULL;
   constexpr uint64_t kNegQnan = 0xfff8000000000000ULL;
   constexpr uint64_t kPosInf = 0x7ff0000000000000ULL;
   constexpr uint64_t kNegInf = 0xfff0000000000000ULL;
   constexpr uint64_t kOne = 0x3ff0000000000000ULL;
   constexpr uint64_t kPosSnan = 0x7ff0000012345678ULL;
   constexpr uint64_t kPosQnan = 0x7ff8000012345678ULL;
+
+  // Exercise fp64_nan_priority directly with a synthetic +qNaN host result so the
+  // canonical -qNaN fallback is verified on x86-64 too (where hardware +Inf + -Inf
+  // already yields 0xfff8000000000000).
+  EXPECT_EQ(double_bits(fp64_nan_priority<false>(as_double(kPosCanonQnan), as_double(kPosInf),
+                                                 as_double(kNegInf))),
+            kNegQnan);
+  EXPECT_EQ(
+      double_bits(fp64_nan_priority<false>(as_double(kPosCanonQnan), 0.0, as_double(kPosInf))),
+      kNegQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<true>(as_double(kPosCanonQnan), as_double(kOne),
+                                                as_double(kPosInf), as_double(kNegInf))),
+            kNegQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<true>(as_double(kPosCanonQnan), 0.0, as_double(kPosInf),
+                                                as_double(kPosSnan))),
+            kNegQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<false>(as_double(kNegQnan), as_double(kPosSnan),
+                                                 as_double(kNegInf), 0.0, true)),
+            kPosQnan);
+  EXPECT_EQ(double_bits(fp64_nan_priority<false>(as_double(kNegQnan), as_double(kPosSnan),
+                                                 as_double(kNegInf), 0.0, false)),
+            kPosSnan);
 
   for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
     for (uint64_t semantics : rocjitsu::arith::test::hardware_semantics()) {
