@@ -342,8 +342,9 @@ public:
     }
 
     OperationLease &operator=(OperationLease &&other) noexcept {
-      if (this == &other)
+      if (this == &other) {
         return *this;
+      }
       release();
       session_ = std::move(other.session_);
       endpoints_ = other.endpoints_;
@@ -398,8 +399,9 @@ public:
         : session_(std::move(session)), endpoints_(endpoints) {}
 
     void release() {
-      if (session_ == nullptr)
+      if (session_ == nullptr) {
         return;
+      }
       session_->release_operation();
       session_.reset();
       endpoints_ = {};
@@ -411,8 +413,9 @@ public:
 
   [[nodiscard]] OperationLease acquire() {
     std::lock_guard lock(mutex_);
-    if (state_ != State::Open)
+    if (state_ != State::Open) {
       return {};
+    }
     ++active_operations_;
     return OperationLease(shared_from_this(), endpoints_);
   }
@@ -421,8 +424,9 @@ public:
   /// @retval true This call changed the state from open to closing.
   bool begin_revoke() {
     std::lock_guard lock(mutex_);
-    if (state_ != State::Open)
+    if (state_ != State::Open) {
       return false;
+    }
     state_ = State::Closing;
     return true;
   }
@@ -430,8 +434,9 @@ public:
   /// @brief Wait for admitted operations and permanently clear the endpoints.
   void wait_until_drained() {
     std::unique_lock lock(mutex_);
-    if (state_ == State::Open)
+    if (state_ == State::Open) {
       state_ = State::Closing;
+    }
     drained_.wait(lock, [this]() { return active_operations_ == 0; });
     endpoints_ = {};
     state_ = State::Revoked;
@@ -451,8 +456,9 @@ private:
 
   void release_operation() {
     std::lock_guard lock(mutex_);
-    if (--active_operations_ == 0)
+    if (--active_operations_ == 0) {
       drained_.notify_all();
+    }
   }
 
   const uint64_t generation_;
@@ -532,11 +538,13 @@ public:
   /// @retval true The device is now attached to @p transport.
   /// @retval false Another transport holds it; this one was not installed.
   [[nodiscard]] bool attach_transport(const Transport *transport) {
-    if (transport == nullptr)
+    if (transport == nullptr) {
       return false;
+    }
     std::lock_guard lock(transport_mutex_);
-    if (transport_ != nullptr || closing_transport_session_ != nullptr)
+    if (transport_ != nullptr || closing_transport_session_ != nullptr) {
       return false;
+    }
     std::shared_ptr<PciTransportSession> session = make_transport_session_locked(*transport);
     transport_ = transport;
     transport_session_ = std::move(session);
@@ -552,8 +560,9 @@ public:
     std::lock_guard lock(transport_mutex_);
     if (transport_ != transport || transport_session_ != nullptr ||
         (closing_transport_session_ != nullptr &&
-         closing_transport_session_->state() != PciTransportSession::State::Revoked))
+         closing_transport_session_->state() != PciTransportSession::State::Revoked)) {
       return {};
+    }
     closing_transport_session_.reset();
     transport_session_ = make_transport_session_locked(*transport);
     return transport_session_;
@@ -564,8 +573,9 @@ public:
   [[nodiscard]] std::shared_ptr<PciTransportSession>
   revoke_transport_session(const Transport *transport) {
     std::lock_guard lock(transport_mutex_);
-    if (transport_ != transport || transport_session_ == nullptr)
+    if (transport_ != transport || transport_session_ == nullptr) {
       return {};
+    }
     std::shared_ptr<PciTransportSession> closing = std::move(transport_session_);
     (void)closing->begin_revoke();
     closing_transport_session_ = closing;
@@ -591,8 +601,9 @@ public:
     std::shared_ptr<PciTransportSession> closing;
     {
       std::lock_guard lock(transport_mutex_);
-      if (transport_ != transport)
+      if (transport_ != transport) {
         return false;
+      }
       closing = take_transport_session_for_shutdown_locked();
     }
     drain_transport_session(std::move(closing));
@@ -672,10 +683,12 @@ protected:
   ///          installed, or when no transport is attached.
   [[nodiscard]] bool restart_transport_session_after_reset() {
     std::lock_guard lock(transport_mutex_);
-    if (transport_ == nullptr)
+    if (transport_ == nullptr) {
       return true;
-    if (transport_session_ != nullptr || closing_transport_session_ != nullptr)
+    }
+    if (transport_session_ != nullptr || closing_transport_session_ != nullptr) {
       return false;
+    }
     transport_session_ = make_transport_session_locked(*transport_);
     return true;
   }
@@ -723,12 +736,14 @@ private:
   }
 
   void drain_transport_session(std::shared_ptr<PciTransportSession> closing) {
-    if (closing == nullptr)
+    if (closing == nullptr) {
       return;
+    }
     closing->wait_until_drained();
     const std::lock_guard lock(transport_mutex_);
-    if (closing_transport_session_ == closing)
+    if (closing_transport_session_ == closing) {
       closing_transport_session_.reset();
+    }
   }
 
   [[nodiscard]] std::shared_ptr<PciTransportSession>

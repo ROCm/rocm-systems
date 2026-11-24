@@ -261,8 +261,9 @@ public:
                                            uint32_t vmid = 0) {
     const auto vm_access = snapshot_atomic_access(vmid);
     const VmAccessOutcome admission = preflight_atomic_access(addr, size, vmid);
-    if (admission != VmAccessOutcome::Complete)
+    if (admission != VmAccessOutcome::Complete) {
       return admission;
+    }
     DeviceCacheCoherence::AtomicBoundary boundary = coherence_->acquire_atomic_boundary();
     return atomic_rmw(boundary, addr, size, std::forward<F>(fn), vmid, vm_access);
   }
@@ -285,14 +286,17 @@ public:
   [[nodiscard]] VmAccessOutcome atomic_rmw(const DeviceCacheCoherence::AtomicBoundary &boundary,
                                            uint64_t addr, uint32_t size, F &&fn, uint32_t vmid,
                                            const std::optional<GpuVmAccess> &vm_access) {
-    if (boundary.outcome() != VmAccessOutcome::Complete)
+    if (boundary.outcome() != VmAccessOutcome::Complete) {
       return boundary.outcome();
-    if (!boundary.belongs_to(coherence_.get()))
+    }
+    if (!boundary.belongs_to(coherence_.get())) {
       return VmAccessOutcome::Malformed;
+    }
 
     const VmAccessOutcome admission = preflight_atomic_access(addr, size, vmid);
-    if (admission != VmAccessOutcome::Complete)
+    if (admission != VmAccessOutcome::Complete) {
       return admission;
+    }
 
     return atomic_rmw_preflighted(addr, size, std::forward<F>(fn), vmid, vm_access);
   }
@@ -305,8 +309,9 @@ public:
   [[nodiscard]] VmAccessOutcome atomic_rmw(const DeviceCacheMaintenanceLease &boundary,
                                            uint64_t addr, uint32_t size, F &&fn, uint32_t vmid,
                                            const std::optional<GpuVmAccess> &vm_access) {
-    if (!boundary.prepared_atomic_boundary_for(coherence_.get()))
+    if (!boundary.prepared_atomic_boundary_for(coherence_.get())) {
       return VmAccessOutcome::Malformed;
+    }
     return atomic_rmw_preflighted(addr, size, std::forward<F>(fn), vmid, vm_access);
   }
 
@@ -325,13 +330,16 @@ public:
   atomic_rmw_lanes(const Boundary &boundary, std::span<const uint64_t> lane_addresses,
                    uint64_t lane_mask, uint32_t size, F &&fn, uint32_t vmid,
                    const std::optional<GpuVmAccess> &vm_access, uint32_t &next_lane) {
-    if (lane_addresses.size() > 64)
+    if (lane_addresses.size() > 64) {
       return VmAccessOutcome::Malformed;
+    }
     if constexpr (std::same_as<Boundary, DeviceCacheCoherence::AtomicBoundary>) {
-      if (boundary.outcome() != VmAccessOutcome::Complete)
+      if (boundary.outcome() != VmAccessOutcome::Complete) {
         return boundary.outcome();
-      if (!boundary.belongs_to(coherence_.get()))
+      }
+      if (!boundary.belongs_to(coherence_.get())) {
         return VmAccessOutcome::Malformed;
+      }
     } else if (!boundary.prepared_atomic_boundary_for(coherence_.get())) {
       return VmAccessOutcome::Malformed;
     }
@@ -359,8 +367,9 @@ public:
       // does. Later lanes were never attempted and must not count again on retry.
       if (outcome != VmAccessOutcome::Complete) {
         active = 0;
-        for (uint32_t lane = first; lane < lane_count && lane <= next_lane; ++lane)
+        for (uint32_t lane = first; lane < lane_count && lane <= next_lane; ++lane) {
           active += (lane_mask & (1ULL << lane)) != 0;
+        }
       }
       // Only totals are reported; attribute the batch to its first lane's shard.
       auto &counters = diagnostics(lane_addresses[first]);
@@ -369,8 +378,9 @@ public:
       return outcome;
     }
     for (uint32_t lane = next_lane; lane < lane_count; ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
+      if (!(lane_mask & (1ULL << lane))) {
         continue;
+      }
       const VmAccessOutcome outcome = atomic_rmw(
           boundary, lane_addresses[lane], size,
           [&](uint8_t *data, uint32_t offset) { fn(lane, data, offset); }, vmid, vm_access);
@@ -509,10 +519,12 @@ private:
             backing_memory_->atomic_modify(addr, size, [&](uint8_t *target) { fn(target, 0); });
         return modified ? VmAccessOutcome::Complete : VmAccessOutcome::Malformed;
       }
-      if (gpu_vm_ == nullptr)
+      if (gpu_vm_ == nullptr) {
         return VmAccessOutcome::Unavailable;
-      if (!vm_access)
+      }
+      if (!vm_access) {
         return VmAccessOutcome::Faulted;
+      }
       return vm_access->atomic_modify(addr, size, [&](std::span<std::byte> target) {
         fn(reinterpret_cast<uint8_t *>(target.data()), 0);
       });
@@ -673,8 +685,9 @@ private:
 
   uint64_t diagnostic_total(std::atomic<uint64_t> DiagnosticCounters::*counter) const {
     uint64_t total = 0;
-    for (const auto &shard : diagnostics_)
+    for (const auto &shard : diagnostics_) {
       total += (shard.*counter).load(std::memory_order_relaxed);
+    }
     return total;
   }
 

@@ -82,10 +82,11 @@ TEST(Fp4E2M1, ExhaustiveWiden) {
   for (uint8_t code = 0; code < 8; ++code) {
     EXPECT_EQ(util::fp4_e2m1_to_f32(code), kFp4TruthPositive[code]) << "code=" << int(code);
     float neg = util::fp4_e2m1_to_f32(code | 0x8);
-    if (code == 0)
+    if (code == 0) {
       EXPECT_TRUE(std::signbit(neg) && neg == 0.0f);
-    else
+    } else {
       EXPECT_EQ(neg, -kFp4TruthPositive[code]) << "neg code=" << int(code);
+    }
   }
 }
 
@@ -120,8 +121,9 @@ static float fp6_reference(uint8_t code) {
   uint32_t sign = (code >> 5) & 1;
   uint32_t exp = (code >> 3) & 0x3;
   uint32_t mant = code & 0x7;
-  if (exp == 0 && mant == 0)
+  if (exp == 0 && mant == 0) {
     return sign ? -0.0f : 0.0f;
+  }
   if (exp == 0) {
     float v = std::ldexp(static_cast<float>(mant), -3);
     return sign ? -v : v;
@@ -173,8 +175,9 @@ static float bf6_reference(uint8_t code) {
   uint32_t sign = (code >> 5) & 1;
   uint32_t exp = (code >> 2) & 0x7;
   uint32_t mant = code & 0x3;
-  if (exp == 0 && mant == 0)
+  if (exp == 0 && mant == 0) {
     return sign ? -0.0f : 0.0f;
+  }
   if (exp == 0) {
     float v = std::ldexp(static_cast<float>(mant), -4);
     return sign ? -v : v;
@@ -250,10 +253,11 @@ TEST(Fp8E4M3Fnuz, BlockMatchesScalar) {
   util::fp8_e4m3_fnuz_to_f32_block(src, dst, std::size(src));
   for (size_t i = 0; i < std::size(src); ++i) {
     float scalar = util::fp8_e4m3_fnuz_to_f32(src[i]);
-    if (std::isnan(scalar))
+    if (std::isnan(scalar)) {
       EXPECT_TRUE(std::isnan(dst[i])) << "i=" << i;
-    else
+    } else {
       EXPECT_EQ(dst[i], scalar) << "i=" << i;
+    }
   }
 }
 
@@ -536,10 +540,11 @@ TEST(Bf8E5M2Fnuz, BlockMatchesScalar) {
   util::bf8_e5m2_fnuz_to_f32_block(src, dst, std::size(src));
   for (size_t i = 0; i < std::size(src); ++i) {
     float scalar = util::bf8_e5m2_fnuz_to_f32(src[i]);
-    if (std::isnan(scalar))
+    if (std::isnan(scalar)) {
       EXPECT_TRUE(std::isnan(dst[i])) << "i=" << i;
-    else
+    } else {
       EXPECT_EQ(dst[i], scalar) << "i=" << i;
+    }
   }
 }
 
@@ -666,7 +671,7 @@ TEST(Fp16, PreservesEveryEncodingThroughF32) {
 }
 
 TEST(Fp16, NarrowNaNPayloadDoesNotBecomeInfinity) {
-  for (uint32_t sign : {0u, 0x80000000u})
+  for (uint32_t sign : {0u, 0x80000000u}) {
     for (uint32_t payload : {1u, 0x1fffu, 0x4000u, 0x400001u, 0x7fffffu}) {
       const float value = std::bit_cast<float>(sign | 0x7f800000u | payload);
       const uint16_t expected =
@@ -674,6 +679,7 @@ TEST(Fp16, NarrowNaNPayloadDoesNotBecomeInfinity) {
       EXPECT_EQ(util::f32_to_f16(value), expected);
       EXPECT_EQ(util::f32_to_f16_rtz(value), expected);
     }
+  }
 }
 
 // ---- BF16 ----
@@ -689,26 +695,30 @@ TEST(Bf16, RoundTrip) {
 
 TEST(Pack6Bit, RoundTrip) {
   uint8_t vals[32];
-  for (int i = 0; i < 32; ++i)
+  for (int i = 0; i < 32; ++i) {
     vals[i] = static_cast<uint8_t>(i * 2);
+  }
   uint32_t dwords[6];
   util::pack_6bit(vals, dwords);
   uint8_t unpacked[32];
   util::unpack_6bit(dwords, unpacked);
-  for (int i = 0; i < 32; ++i)
+  for (int i = 0; i < 32; ++i) {
     EXPECT_EQ(unpacked[i], vals[i] & 0x3F) << "i=" << i;
+  }
 }
 
 TEST(Pack6Bit, AllOnes) {
   uint8_t vals[32];
-  for (int i = 0; i < 32; ++i)
+  for (int i = 0; i < 32; ++i) {
     vals[i] = 0x3F;
+  }
   uint32_t dwords[6];
   util::pack_6bit(vals, dwords);
   uint8_t unpacked[32];
   util::unpack_6bit(dwords, unpacked);
-  for (int i = 0; i < 32; ++i)
+  for (int i = 0; i < 32; ++i) {
     EXPECT_EQ(unpacked[i], 0x3F) << "i=" << i;
+  }
 }
 
 // ---- PRNG LFSR ----

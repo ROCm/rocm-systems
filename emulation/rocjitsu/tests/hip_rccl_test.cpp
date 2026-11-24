@@ -78,8 +78,9 @@ static float reduction_tolerance(float absolute_input_sum) {
 class CollectiveDeadline {
 public:
   CollectiveDeadline(const char *name, int iter) : name_(name), iter_(iter) {
-    if (g_collective_timeout_ms == 0)
+    if (g_collective_timeout_ms == 0) {
       return;
+    }
     std::cout << "RCCL_COLLECTIVE_BEGIN case=" << name_ << " rank=" << g_rank << " iter=" << iter_
               << std::endl;
     worker_ = std::thread([this] {
@@ -87,8 +88,9 @@ public:
           std::chrono::steady_clock::now() + std::chrono::milliseconds(g_collective_timeout_ms);
       while (!stopped_.load(std::memory_order_acquire)) {
         if (std::chrono::steady_clock::now() >= deadline) {
-          if (stopped_.load(std::memory_order_acquire))
+          if (stopped_.load(std::memory_order_acquire)) {
             return;
+          }
           char message[192];
           const int length =
               std::snprintf(message, sizeof(message),
@@ -118,8 +120,9 @@ public:
 
   ~CollectiveDeadline() {
     stopped_.store(true, std::memory_order_release);
-    if (worker_.joinable())
+    if (worker_.joinable()) {
       worker_.join();
+    }
   }
 
 private:
@@ -143,22 +146,25 @@ private:
 
 __global__ void copy_kernel(float *dst, const float *src, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n)
+  if (i < n) {
     dst[i] = src[i];
+  }
 }
 
 static std::vector<float> random_floats(uint32_t seed, int n) {
   std::mt19937 rng(seed);
   std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
   std::vector<float> v(n);
-  for (auto &x : v)
+  for (auto &x : v) {
     x = dist(rng);
+  }
   return v;
 }
 
 static int fuzz_size(uint32_t seed) {
-  if (g_payload_elements != 0)
+  if (g_payload_elements != 0) {
     return g_payload_elements;
+  }
   std::mt19937 rng(seed);
   std::uniform_int_distribution<int> dist(64, 1024);
   int n = dist(rng);
@@ -182,8 +188,9 @@ static void read_file_blocking(const std::string &path, void *data, size_t size)
     if (std::filesystem::exists(path) && std::filesystem::file_size(path) >= size) {
       std::ifstream ifs(path, std::ios::binary);
       ifs.read(static_cast<char *>(data), static_cast<std::streamsize>(size));
-      if (ifs.good())
+      if (ifs.good()) {
         return;
+      }
     }
     std::this_thread::sleep_for(50ms);
   }
@@ -195,8 +202,9 @@ static void barrier(const std::string &name) {
   { std::ofstream(ready) << "1"; }
   for (int r = 0; r < g_world_size; ++r) {
     std::string other = g_shared_dir + "/" + name + ".ready." + std::to_string(r);
-    while (!std::filesystem::exists(other))
+    while (!std::filesystem::exists(other)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
 }
 
@@ -226,8 +234,9 @@ protected:
     const std::string rendezvous = test_info->name();
     ncclUniqueId id{};
     if (g_tcp_session) {
-      if (g_rank == 0)
+      if (g_rank == 0) {
         NCCL_ASSERT(ncclGetUniqueId(&id));
+      }
       const std::string full_name = std::string(test_info->test_suite_name()) + "." + rendezvous;
       try {
         g_tcp_session->ExchangeCase(full_name, g_case_ordinal++, &id);
@@ -241,8 +250,9 @@ protected:
         write_file(id_path, &id, sizeof(id));
       }
       barrier("nccl_init." + rendezvous);
-      if (g_rank != 0)
+      if (g_rank != 0) {
         read_file_blocking(id_path, &id, sizeof(id));
+      }
     }
     NCCL_ASSERT(ncclCommInitRank(&comm_, g_world_size, id, g_rank));
     HIP_ASSERT(hipStreamCreate(&stream_));
@@ -284,8 +294,9 @@ TEST_F(RcclTest, AllReduce) {
       HIP_ASSERT(
           hipMemcpy(input_readback.data(), d_send, n * sizeof(float), hipMemcpyDeviceToHost));
       int input_mismatches = 0;
-      for (int i = 0; i < n; ++i)
+      for (int i = 0; i < n; ++i) {
         input_mismatches += input_readback[i] != local[i];
+      }
       GTEST_LOG_(INFO) << "probe: rank=" << g_rank << " stage=input iter=" << iter << " n=" << n
                        << " mismatches=" << input_mismatches;
       ASSERT_EQ(input_mismatches, 0);
@@ -298,8 +309,9 @@ TEST_F(RcclTest, AllReduce) {
       std::vector<float> copied(n);
       HIP_ASSERT(hipMemcpy(copied.data(), d_copy, n * sizeof(float), hipMemcpyDeviceToHost));
       int gpu_input_mismatches = 0;
-      for (int i = 0; i < n; ++i)
+      for (int i = 0; i < n; ++i) {
         gpu_input_mismatches += copied[i] != local[i];
+      }
       GTEST_LOG_(INFO) << "probe: rank=" << g_rank << " stage=gpu-input iter=" << iter << " n=" << n
                        << " mismatches=" << gpu_input_mismatches;
       ASSERT_EQ(gpu_input_mismatches, 0);
@@ -349,9 +361,11 @@ TEST_F(RcclTest, AllReduce) {
 
     auto all = all_ranks_input(iter_seed, n);
     std::vector<float> ref(n, 0.0f);
-    for (int r = 0; r < g_world_size; ++r)
-      for (int i = 0; i < n; ++i)
+    for (int r = 0; r < g_world_size; ++r) {
+      for (int i = 0; i < n; ++i) {
         ref[i] += all[r * n + i];
+      }
+    }
 
     int mismatches = 0;
     int first_mismatch = -1;
@@ -360,8 +374,9 @@ TEST_F(RcclTest, AllReduce) {
     float first_tolerance = 0.0f;
     for (int i = 0; i < n; ++i) {
       float absolute_input_sum = 0.0f;
-      for (int r = 0; r < g_world_size; ++r)
+      for (int r = 0; r < g_world_size; ++r) {
         absolute_input_sum += std::fabs(all[r * n + i]);
+      }
       const float tolerance = reduction_tolerance(absolute_input_sum);
       if (!std::isfinite(result[i]) || std::fabs(result[i] - ref[i]) > tolerance) {
         ++mismatches;
@@ -397,8 +412,9 @@ TEST_F(RcclTest, Broadcast) {
     HIP_ASSERT(hipMalloc(&d_buf, n * sizeof(float)));
     GTEST_LOG_(INFO) << "probe: rank=" << g_rank << " stage=broadcast-alloc iter=" << iter
                      << " n=" << n << " buf_va=" << static_cast<void *>(d_buf);
-    if (g_rank == 0)
+    if (g_rank == 0) {
       HIP_ASSERT(hipMemcpy(d_buf, root_data.data(), n * sizeof(float), hipMemcpyHostToDevice));
+    }
 
     {
       CollectiveDeadline deadline("Broadcast", iter);
@@ -409,9 +425,10 @@ TEST_F(RcclTest, Broadcast) {
     std::vector<float> result(n);
     HIP_ASSERT(hipMemcpy(result.data(), d_buf, n * sizeof(float), hipMemcpyDeviceToHost));
 
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < n; ++i) {
       EXPECT_NEAR(result[i], root_data[i], kTolerance)
           << "iter=" << iter << " rank=" << g_rank << " i=" << i;
+    }
 
     (void)hipFree(d_buf);
   }
@@ -442,9 +459,10 @@ TEST_F(RcclTest, AllGather) {
 
     for (int r = 0; r < g_world_size; ++r) {
       auto ref_chunk = random_floats(iter_seed + r, chunk);
-      for (int i = 0; i < chunk; ++i)
+      for (int i = 0; i < chunk; ++i) {
         EXPECT_NEAR(result[r * chunk + i], ref_chunk[i], kTolerance)
             << "iter=" << iter << " rank=" << g_rank << " src_rank=" << r << " i=" << i;
+      }
     }
 
     (void)hipFree(d_send);
@@ -522,9 +540,10 @@ TEST_F(RcclTest, SendRecv) {
 
     std::vector<float> result(n);
     HIP_ASSERT(hipMemcpy(result.data(), d_recv, n * sizeof(float), hipMemcpyDeviceToHost));
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < n; ++i) {
       EXPECT_NEAR(result[i], expected[i], kTolerance)
           << "iter=" << iter << " rank=" << g_rank << " i=" << i;
+    }
 
     (void)hipFree(d_send);
     (void)hipFree(d_recv);
@@ -550,8 +569,9 @@ int main(int argc, char **argv) {
     uint64_t result = 0;
     const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
     if (value.empty() || error != std::errc{} || end != value.data() + value.size() ||
-        result > maximum)
+        result > maximum) {
       throw std::invalid_argument(std::string(option) + " requires an unsigned integer in range");
+    }
     return result;
   };
 
@@ -559,18 +579,21 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
       const std::string_view arg(argv[i]);
       if (arg.starts_with("--rank=")) {
-        if (saw_rank)
+        if (saw_rank) {
           throw std::invalid_argument("duplicate --rank");
+        }
         g_rank = static_cast<int>(parse_uint(arg.substr(7), INT_MAX, "--rank"));
         saw_rank = true;
       } else if (arg.starts_with("--world-size=")) {
-        if (saw_world_size)
+        if (saw_world_size) {
           throw std::invalid_argument("duplicate --world-size");
+        }
         g_world_size = static_cast<int>(parse_uint(arg.substr(13), INT_MAX, "--world-size"));
         saw_world_size = true;
       } else if (arg.starts_with("--shared-dir=")) {
-        if (saw_shared_dir)
+        if (saw_shared_dir) {
           throw std::invalid_argument("duplicate --shared-dir");
+        }
         g_shared_dir = arg.substr(13);
         saw_shared_dir = true;
       } else if (arg.starts_with("--seed=")) {
@@ -580,48 +603,58 @@ int main(int argc, char **argv) {
         g_expected_devices =
             static_cast<int>(parse_uint(arg.substr(19), INT_MAX, "--expected-devices"));
       } else if (arg.starts_with("--payload-elements=")) {
-        if (saw_payload_elements)
+        if (saw_payload_elements) {
           throw std::invalid_argument("duplicate --payload-elements");
+        }
         g_payload_elements =
             static_cast<int>(parse_uint(arg.substr(19), 1 << 20, "--payload-elements"));
-        if (g_payload_elements == 0)
+        if (g_payload_elements == 0) {
           throw std::invalid_argument("--payload-elements must be positive");
+        }
         saw_payload_elements = true;
       } else if (arg.starts_with("--collective-timeout-ms=")) {
-        if (saw_collective_timeout)
+        if (saw_collective_timeout) {
           throw std::invalid_argument("duplicate --collective-timeout-ms");
+        }
         constexpr std::string_view option = "--collective-timeout-ms=";
         g_collective_timeout_ms =
             static_cast<int64_t>(parse_uint(arg.substr(option.size()), 600000, option));
-        if (g_collective_timeout_ms == 0)
+        if (g_collective_timeout_ms == 0) {
           throw std::invalid_argument("--collective-timeout-ms must be positive");
+        }
         saw_collective_timeout = true;
       } else if (arg.starts_with("--collective-timeout-marker=")) {
-        if (saw_collective_marker)
+        if (saw_collective_marker) {
           throw std::invalid_argument("duplicate --collective-timeout-marker");
+        }
         constexpr std::string_view option = "--collective-timeout-marker=";
         g_collective_timeout_marker = arg.substr(option.size());
-        if (g_collective_timeout_marker.empty())
+        if (g_collective_timeout_marker.empty()) {
           throw std::invalid_argument("--collective-timeout-marker needs a path");
+        }
         saw_collective_marker = true;
       } else if (arg.starts_with("--bootstrap-listen=")) {
-        if (role)
+        if (role) {
           throw std::invalid_argument("choose exactly one TCP bootstrap role");
+        }
         role = tcp_bootstrap::Role::Listen;
         endpoint = arg.substr(19);
       } else if (arg.starts_with("--bootstrap-connect=")) {
-        if (role)
+        if (role) {
           throw std::invalid_argument("choose exactly one TCP bootstrap role");
+        }
         role = tcp_bootstrap::Role::Connect;
         endpoint = arg.substr(20);
       } else if (arg.starts_with("--bootstrap-run-id=")) {
-        if (saw_run_id)
+        if (saw_run_id) {
           throw std::invalid_argument("duplicate --bootstrap-run-id");
+        }
         run_id = arg.substr(19);
         saw_run_id = true;
       } else if (arg.starts_with("--bootstrap-timeout-ms=")) {
-        if (saw_timeout)
+        if (saw_timeout) {
           throw std::invalid_argument("duplicate --bootstrap-timeout-ms");
+        }
         timeout_ms =
             static_cast<int64_t>(parse_uint(arg.substr(23), 600000, "--bootstrap-timeout-ms"));
         saw_timeout = true;
@@ -630,17 +663,21 @@ int main(int argc, char **argv) {
       }
     }
 
-    if (g_world_size == 0)
+    if (g_world_size == 0) {
       throw std::invalid_argument("--world-size must be positive");
-    if (saw_payload_elements && g_payload_elements % g_world_size != 0)
+    }
+    if (saw_payload_elements && g_payload_elements % g_world_size != 0) {
       throw std::invalid_argument("--payload-elements must be divisible by --world-size");
-    if (saw_collective_marker && !saw_collective_timeout)
+    }
+    if (saw_collective_marker && !saw_collective_timeout) {
       throw std::invalid_argument("--collective-timeout-marker requires a deadline");
+    }
 
     if (role || saw_run_id || saw_timeout) {
-      if (saw_shared_dir || !role || !saw_run_id || !saw_timeout || !saw_rank || !saw_world_size)
+      if (saw_shared_dir || !role || !saw_run_id || !saw_timeout || !saw_rank || !saw_world_size) {
         throw std::invalid_argument("TCP bootstrap requires rank, world size, role, run ID, "
                                     "and timeout, without --shared-dir");
+      }
       tcp_bootstrap::Config config{*role,
                                    endpoint,
                                    run_id,

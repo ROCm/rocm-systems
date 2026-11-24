@@ -223,8 +223,9 @@ inline constexpr uint8_t elf_symbol_visibility(uint8_t other) { return other & 0
 /// through this object's own code or relocations.
 inline constexpr bool elf_symbol_is_externally_resolvable(uint8_t info, uint8_t other) {
   const uint8_t bind = elf_symbol_bind(info);
-  if (bind != kElfSymbolBindGlobal && bind != kElfSymbolBindWeak)
+  if (bind != kElfSymbolBindGlobal && bind != kElfSymbolBindWeak) {
     return false;
+  }
   const uint8_t visibility = elf_symbol_visibility(other);
   return visibility != kElfSymbolVisibilityHidden && visibility != kElfSymbolVisibilityInternal;
 }
@@ -318,8 +319,9 @@ struct Elf64_Phdr {
 [[nodiscard]] inline constexpr bool elf_load_maps_file_range(const Elf64_Phdr &segment,
                                                              uint64_t file_offset, uint64_t vaddr,
                                                              uint64_t size) {
-  if (segment.p_type != PT_LOAD || vaddr < segment.p_vaddr)
+  if (segment.p_type != PT_LOAD || vaddr < segment.p_vaddr) {
     return false;
+  }
   const uint64_t offset = vaddr - segment.p_vaddr;
   return offset <= segment.p_filesz && size <= segment.p_filesz - offset &&
          offset <= std::numeric_limits<uint64_t>::max() - segment.p_offset &&
@@ -333,19 +335,23 @@ struct Elf64_Phdr {
                                                              uint64_t file_offset, uint64_t vaddr,
                                                              uint64_t size) {
   if (size > std::numeric_limits<uint64_t>::max() - vaddr ||
-      size > std::numeric_limits<uint64_t>::max() - file_offset)
+      size > std::numeric_limits<uint64_t>::max() - file_offset) {
     return false;
+  }
   for (const Elf64_Phdr &segment : segments) {
-    if (segment.p_type != PT_LOAD || segment.p_filesz == 0)
+    if (segment.p_type != PT_LOAD || segment.p_filesz == 0) {
       continue;
+    }
     if (segment.p_filesz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr ||
-        segment.p_filesz > std::numeric_limits<uint64_t>::max() - segment.p_offset)
+        segment.p_filesz > std::numeric_limits<uint64_t>::max() - segment.p_offset) {
       return false;
+    }
     const uint64_t begin = std::max(vaddr, segment.p_vaddr);
     const uint64_t end = std::min(vaddr + size, segment.p_vaddr + segment.p_filesz);
     if (begin < end &&
-        !elf_load_maps_file_range(segment, file_offset + (begin - vaddr), begin, end - begin))
+        !elf_load_maps_file_range(segment, file_offset + (begin - vaddr), begin, end - begin)) {
       return false;
+    }
   }
   return true;
 }
@@ -405,14 +411,16 @@ struct Elf64_Rela {
 [[nodiscard]] inline std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
   if (offset >= 0) {
     const uint64_t positive = static_cast<uint64_t>(offset);
-    if (positive > std::numeric_limits<uint64_t>::max() - base)
+    if (positive > std::numeric_limits<uint64_t>::max() - base) {
       return std::nullopt;
+    }
     return base + positive;
   }
   // Form the magnitude without negating INT64_MIN.
   const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
-  if (magnitude > base)
+  if (magnitude > base) {
     return std::nullopt;
+  }
   return base - magnitude;
 }
 
@@ -424,14 +432,16 @@ template <typename Record>
 [[nodiscard]] std::optional<std::vector<Record>>
 read_elf_table(std::span<const uint8_t> image, uint64_t offset, uint64_t count, uint64_t stride) {
   static_assert(std::is_trivially_copyable_v<Record>);
-  if (count == 0)
+  if (count == 0) {
     return std::vector<Record>{};
+  }
   if (stride < sizeof(Record) || stride > std::numeric_limits<uint64_t>::max() / count) {
     return std::nullopt;
   }
   const uint64_t table_size = count * stride;
-  if (offset > image.size() || table_size > image.size() - offset)
+  if (offset > image.size() || table_size > image.size() - offset) {
     return std::nullopt;
+  }
 
   std::vector<Record> records(static_cast<std::size_t>(count));
   for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
@@ -509,12 +519,15 @@ enum class RocrRelocationSectionMode : uint8_t {
 inline constexpr RocrRelocationSectionMode
 classify_rocr_relocation_section(const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
                                  const Elf64_Shdr &relocs) {
-  if (ehdr.e_type != ET_DYN || relocs.sh_type != SHT_RELA)
+  if (ehdr.e_type != ET_DYN || relocs.sh_type != SHT_RELA) {
     return RocrRelocationSectionMode::NotApplicable;
-  if (relocs.sh_info == SHN_UNDEF)
+  }
+  if (relocs.sh_info == SHN_UNDEF) {
     return RocrRelocationSectionMode::Dynamic;
-  if (relocs.sh_info >= shdrs.size() || shdrs[relocs.sh_info].sh_type == SHT_NULL)
+  }
+  if (relocs.sh_info >= shdrs.size() || shdrs[relocs.sh_info].sh_type == SHT_NULL) {
     return RocrRelocationSectionMode::Malformed;
+  }
   return RocrRelocationSectionMode::ExplicitTarget;
 }
 
@@ -528,8 +541,9 @@ enum class RocrNoneRelocationAction : uint8_t {
 /// @brief Classify R_AMDGPU_NONE from the shared ROCr relocation-section mode.
 inline constexpr RocrNoneRelocationAction
 classify_rocr_none_relocation(RocrRelocationSectionMode mode, uint64_t relocation_info) {
-  if (elf_reloc_type(relocation_info) != R_AMDGPU_NONE)
+  if (elf_reloc_type(relocation_info) != R_AMDGPU_NONE) {
     return RocrNoneRelocationAction::NotNone;
+  }
   if (mode == RocrRelocationSectionMode::Dynamic || mode == RocrRelocationSectionMode::Malformed) {
     return RocrNoneRelocationAction::Rejected;
   }
@@ -556,15 +570,17 @@ inline constexpr TextSymbolRelocationAction
 classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocation_info,
                                 bool has_explicit_addend, int64_t addend, const Elf64_Sym &symbol) {
   const uint32_t relocation_type = elf_reloc_type(relocation_info);
-  if (mode == RocrRelocationSectionMode::Malformed)
+  if (mode == RocrRelocationSectionMode::Malformed) {
     return TextSymbolRelocationAction::Unsupported;
+  }
   const bool rocr_dynamic = mode == RocrRelocationSectionMode::Dynamic;
   if (relocation_type == R_AMDGPU_NONE) {
     return rocr_dynamic ? TextSymbolRelocationAction::Unsupported
                         : TextSymbolRelocationAction::Ignored;
   }
-  if (!has_explicit_addend || addend != 0 || elf_reloc_sym(relocation_info) == 0)
+  if (!has_explicit_addend || addend != 0 || elf_reloc_sym(relocation_info) == 0) {
     return TextSymbolRelocationAction::Unsupported;
+  }
 
   const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
   if (rocr_dynamic) {
@@ -582,8 +598,9 @@ classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocat
                : TextSymbolRelocationAction::RequiresSymbolMapping;
   }
 
-  if (symbol_type == kElfSymbolTypeSection)
+  if (symbol_type == kElfSymbolTypeSection) {
     return TextSymbolRelocationAction::Unsupported;
+  }
   if (elf_symbol_is_executable_entry(symbol_type) ||
       (symbol_type == kElfSymbolTypeNone && relocation_type == R_AMDGPU_ABS64)) {
     return TextSymbolRelocationAction::RequiresExecutableEntry;
@@ -599,14 +616,16 @@ classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocat
                                                               std::span<const Elf64_Shdr> sections,
                                                               uint64_t range_vaddr,
                                                               uint64_t range_size) {
-  if (range_size == 0)
+  if (range_size == 0) {
     return false;
+  }
   for (const Elf64_Shdr &relocs : sections) {
     if (classify_rocr_relocation_section(header, sections, relocs) !=
             RocrRelocationSectionMode::Dynamic ||
         relocs.sh_entsize != sizeof(Elf64_Rela) ||
-        (relocs.sh_offset > image.size() || relocs.sh_size > image.size() - relocs.sh_offset))
+        (relocs.sh_offset > image.size() || relocs.sh_size > image.size() - relocs.sh_offset)) {
       continue;
+    }
     const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
     for (size_t index = 0; index < count; ++index) {
       Elf64_Rela relocation = {};
@@ -614,13 +633,15 @@ classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocat
                   sizeof(relocation));
       const std::optional<uint64_t> write_size =
           rocr_dynamic_relocation_write_size(elf_reloc_type(relocation.r_info));
-      if (!write_size)
+      if (!write_size) {
         continue;
+      }
       const uint64_t place = relocation.r_offset;
       if (*write_size > std::numeric_limits<uint64_t>::max() - place ||
           (place >= range_vaddr && place - range_vaddr < range_size) ||
-          (place < range_vaddr && range_vaddr - place < *write_size))
+          (place < range_vaddr && range_vaddr - place < *write_size)) {
         return true;
+      }
     }
   }
   return false;
@@ -637,16 +658,18 @@ classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocat
                                                             const Elf64_Shdr &relocs,
                                                             uint64_t relocation_offset) {
   const RocrRelocationSectionMode mode = classify_rocr_relocation_section(ehdr, shdrs, relocs);
-  if (mode == RocrRelocationSectionMode::Malformed)
+  if (mode == RocrRelocationSectionMode::Malformed) {
     return false;
+  }
   if (mode == RocrRelocationSectionMode::ExplicitTarget) {
     return (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0;
   }
   if (mode == RocrRelocationSectionMode::NotApplicable && relocs.sh_info != SHN_UNDEF) {
     return relocs.sh_info < shdrs.size() && (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0;
   }
-  if (mode == RocrRelocationSectionMode::NotApplicable && ehdr.e_type != ET_DYN)
+  if (mode == RocrRelocationSectionMode::NotApplicable && ehdr.e_type != ET_DYN) {
     return false;
+  }
   for (const Elf64_Shdr &section : shdrs) {
     if ((section.sh_flags & SHF_ALLOC) != 0 && relocation_offset >= section.sh_addr &&
         relocation_offset - section.sh_addr < section.sh_size) {

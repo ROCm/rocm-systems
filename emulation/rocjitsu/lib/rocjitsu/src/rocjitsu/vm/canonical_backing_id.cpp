@@ -13,8 +13,9 @@ uint64_t allocate_canonical_backing_id() noexcept {
   static std::atomic<uint64_t> next{1};
   uint64_t current = next.load(std::memory_order_relaxed);
   while (current != std::numeric_limits<uint64_t>::max()) {
-    if (next.compare_exchange_weak(current, current + 1, std::memory_order_relaxed))
+    if (next.compare_exchange_weak(current, current + 1, std::memory_order_relaxed)) {
       return current;
+    }
   }
   std::terminate();
 }

@@ -31,8 +31,9 @@ using namespace rocjitsu::code_object_fuzz;
 util::Result parse_uint64(std::string_view text, uint64_t &value,
                           util::DiagnosticEmitter diagnostic) {
   const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
-  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) {
     return diagnostic.emit() << "expected an unsigned integer";
+  }
   return util::Result::success();
 }
 
@@ -40,8 +41,9 @@ util::Result publish_file(const std::filesystem::path &temporary, const std::fil
                           util::DiagnosticEmitter diagnostic) {
   std::error_code error;
   std::filesystem::rename(temporary, path, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot publish fuzz artifact: " << path << ": " << error.message();
+  }
   return util::Result::success();
 }
 
@@ -52,8 +54,9 @@ util::Result write_input(const std::filesystem::path &path, std::span<const uint
     std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
     stream.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
     stream.close();
-    if (!stream)
+    if (!stream) {
       return diagnostic.emit() << "cannot write fuzz input: " << path.string();
+    }
   }
   return publish_file(temporary, path, diagnostic);
 }
@@ -65,8 +68,9 @@ util::Result write_seed(const std::filesystem::path &path, uint64_t seed,
     std::ofstream stream(temporary, std::ios::trunc);
     stream << seed << '\n';
     stream.close();
-    if (!stream)
+    if (!stream) {
       return diagnostic.emit() << "cannot write fuzz seed: " << path.string();
+    }
   }
   return publish_file(temporary, path, diagnostic);
 }
@@ -77,24 +81,28 @@ util::Result update_active_seed(std::ofstream &stream, uint64_t seed,
   stream.seekp(0);
   stream.write(record.data(), record.size());
   stream.flush();
-  if (!stream)
+  if (!stream) {
     return diagnostic.emit() << "cannot update active fuzz seed";
+  }
   return util::Result::success();
 }
 
 util::FailureOr<std::vector<uint8_t>> read_input(const std::filesystem::path &path,
                                                  util::DiagnosticEmitter diagnostic) {
   std::ifstream stream(path, std::ios::binary | std::ios::ate);
-  if (!stream)
+  if (!stream) {
     return diagnostic.emit() << "cannot open input: " << path.string();
+  }
   const std::streamoff size = stream.tellg();
-  if (size < 0 || size > static_cast<std::streamoff>(kMaxInputSize))
+  if (size < 0 || size > static_cast<std::streamoff>(kMaxInputSize)) {
     return diagnostic.emit() << "input has an invalid size";
+  }
   std::vector<uint8_t> bytes(static_cast<std::size_t>(size));
   stream.seekg(0);
   if (!stream ||
-      (!bytes.empty() && !stream.read(reinterpret_cast<char *>(bytes.data()), bytes.size())))
+      (!bytes.empty() && !stream.read(reinterpret_cast<char *>(bytes.data()), bytes.size()))) {
     return diagnostic.emit() << "cannot read input";
+  }
   return bytes;
 }
 
@@ -102,17 +110,19 @@ util::Result create_directory(const std::filesystem::path &directory,
                               util::DiagnosticEmitter diagnostic) {
   std::error_code error;
   std::filesystem::create_directories(directory, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot create fuzz directory: " << directory << ": "
                              << error.message();
+  }
   return util::Result::success();
 }
 
 util::Result remove_path(const std::filesystem::path &path, util::DiagnosticEmitter diagnostic) {
   std::error_code error;
   std::filesystem::remove(path, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot remove fuzz path: " << path << ": " << error.message();
+  }
   return util::Result::success();
 }
 
@@ -120,27 +130,34 @@ util::Result emit_seeds(const std::filesystem::path &directory,
                         util::DiagnosticEmitter diagnostic) {
   std::error_code error;
   const bool exists = std::filesystem::exists(directory, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot inspect seed destination: " << error.message();
+  }
   if (exists) {
     const bool is_directory = std::filesystem::is_directory(directory, error);
-    if (error)
+    if (error) {
       return diagnostic.emit() << "cannot inspect seed destination: " << error.message();
-    if (!is_directory)
+    }
+    if (!is_directory) {
       return diagnostic.emit() << "seed destination must be an empty directory";
+    }
     const bool empty = std::filesystem::is_empty(directory, error);
-    if (error)
+    if (error) {
       return diagnostic.emit() << "cannot inspect seed destination: " << error.message();
-    if (!empty)
+    }
+    if (!empty) {
       return diagnostic.emit() << "seed destination must be an empty directory";
+    }
   }
-  if (create_directory(directory, diagnostic).failed())
+  if (create_directory(directory, diagnostic).failed()) {
     return util::Result::failure();
+  }
   const auto seeds = seed_corpus();
   for (std::size_t index = 0; index != seeds.size(); ++index) {
     if (write_input(directory / std::format("seed-{:04}.bin", index), seeds[index], diagnostic)
-            .failed())
+            .failed()) {
       return util::Result::failure();
+    }
   }
   std::cout << "wrote " << seeds.size() << " code-object seeds to " << directory << '\n';
   return util::Result::success();
@@ -176,8 +193,9 @@ int run_afl() {
 #endif
   while (__AFL_LOOP(1000)) {
     const std::size_t size = __AFL_FUZZ_TESTCASE_LEN;
-    if (size <= kMaxInputSize)
+    if (size <= kMaxInputSize) {
       (void)run_input(std::span<const uint8_t>(buffer, size));
+    }
   }
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -216,20 +234,24 @@ int main(int argc, char **argv) {
     } else if (argument == "--input" && index + 1 < argc) {
       input = argv[++index];
     } else if (argument == "--random" && index + 1 < argc) {
-      if (parse_uint64(argv[++index], cases, diagnostic.emitter()).failed())
+      if (parse_uint64(argv[++index], cases, diagnostic.emitter()).failed()) {
         return report_failure();
+      }
     } else if (argument == "--seed" && index + 1 < argc) {
-      if (parse_uint64(argv[++index], first_seed, diagnostic.emitter()).failed())
+      if (parse_uint64(argv[++index], first_seed, diagnostic.emitter()).failed()) {
         return report_failure();
+      }
     } else if (argument == "--threads" && index + 1 < argc) {
       const std::string_view value(argv[++index]);
       if (value == "auto") {
         requested_threads = 0;
       } else {
-        if (parse_uint64(value, requested_threads, diagnostic.emitter()).failed())
+        if (parse_uint64(value, requested_threads, diagnostic.emitter()).failed()) {
           return report_failure();
-        if (requested_threads == 0)
+        }
+        if (requested_threads == 0) {
           return fail("threads must be positive");
+        }
       }
     } else if (argument == "--output" && index + 1 < argc) {
       output = argv[++index];
@@ -241,41 +263,50 @@ int main(int argc, char **argv) {
   }
 
   if (!seed_directory.empty()) {
-    if (afl || !input.empty() || cases != 0 || !output.empty() || requested_threads)
+    if (afl || !input.empty() || cases != 0 || !output.empty() || requested_threads) {
       return fail("seed emission cannot be combined with fuzz execution");
+    }
   }
   if (afl) {
-    if (!input.empty() || cases != 0 || !output.empty() || requested_threads)
+    if (!input.empty() || cases != 0 || !output.empty() || requested_threads) {
       return fail("AFL mode cannot be combined with other execution modes");
+    }
   }
   if (seed_directory.empty() && !afl &&
-      ((input.empty() == (cases == 0)) || (cases != 0 && output.empty())))
+      ((input.empty() == (cases == 0)) || (cases != 0 && output.empty()))) {
     return fail("choose --input FILE or --random COUNT --output DIRECTORY");
-  if (!input.empty() && requested_threads && requested_threads != 1)
+  }
+  if (!input.empty() && requested_threads && requested_threads != 1) {
     return fail("threaded execution requires random mode");
+  }
   // Loader invariant failures terminate the AFL child by signal so AFL++
   // retains the input.
-  if (afl)
+  if (afl) {
     return run_afl();
+  }
 
   if (!seed_directory.empty()) {
-    if (emit_seeds(seed_directory, diagnostic.emitter()).failed())
+    if (emit_seeds(seed_directory, diagnostic.emitter()).failed()) {
       return report_failure();
+    }
     return 0;
   }
   RunStats total;
   uint64_t threads = 1;
   if (!input.empty()) {
     const util::FailureOr<std::vector<uint8_t>> bytes = read_input(input, diagnostic.emitter());
-    if (bytes.failed())
+    if (bytes.failed()) {
       return report_failure();
+    }
     const util::FailureOr<RunStats> result = run_input(bytes.value(), diagnostic.emitter());
-    if (result.failed())
+    if (result.failed()) {
       return report_failure();
+    }
     total = result.value();
   } else {
-    if (create_directory(output, diagnostic.emitter()).failed())
+    if (create_directory(output, diagnostic.emitter()).failed()) {
       return report_failure();
+    }
     const uint64_t automatic_threads = std::max(1u, std::thread::hardware_concurrency());
     threads = std::min(cases, (requested_threads ? requested_threads : automatic_threads));
     std::vector<RunStats> thread_stats(threads);
@@ -293,8 +324,9 @@ int main(int argc, char **argv) {
                                  : std::filesystem::path(output) / std::format("thread-{}", worker);
       if (create_directory(directory, diagnostic.emitter()).failed() ||
           remove_path(directory / "current.bin", diagnostic.emitter()).failed() ||
-          remove_path(directory / "current.seed", diagnostic.emitter()).failed())
+          remove_path(directory / "current.seed", diagnostic.emitter()).failed()) {
         return report_failure();
+      }
       worker_directories.push_back(directory);
     }
 
@@ -331,19 +363,22 @@ int main(int argc, char **argv) {
         }
       });
     }
-    for (std::jthread &worker : workers)
+    for (std::jthread &worker : workers) {
       worker.join();
+    }
 
     for (uint64_t worker = 0; worker != threads; ++worker) {
-      if (!failures[worker])
+      if (!failures[worker]) {
         continue;
+      }
       if (write_input(std::filesystem::path(output) / "failure.bin",
                       generate_input(failures[worker]->seed), diagnostic.emitter())
               .failed() ||
           write_seed(std::filesystem::path(output) / "failure.seed", failures[worker]->seed,
                      diagnostic.emitter())
-              .failed())
+              .failed()) {
         return report_failure();
+      }
       std::cerr << "seed=" << failures[worker]->seed << " replay=" << output << ": "
                 << failures[worker]->message << '\n';
       return 1;
@@ -351,10 +386,12 @@ int main(int argc, char **argv) {
     for (uint64_t worker = 0; worker != threads; ++worker) {
       total += thread_stats[worker];
       const std::filesystem::path &directory = worker_directories[worker];
-      if (remove_path(directory / "current.seed", diagnostic.emitter()).failed())
+      if (remove_path(directory / "current.seed", diagnostic.emitter()).failed()) {
         return report_failure();
-      if (threads != 1 && remove_path(directory, diagnostic.emitter()).failed())
+      }
+      if (threads != 1 && remove_path(directory, diagnostic.emitter()).failed()) {
         return report_failure();
+      }
     }
   }
   print_stats(total, threads);

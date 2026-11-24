@@ -11,8 +11,30 @@ set(UNIT_TEST_SOURCES
     json_serializer_test.cpp
     writer_test.cpp
     reader_test.cpp
+    rocpd_v3_table_events_test.cpp
+    reader_id_range_test.cpp
     sqlite_backend_impl_test.cpp
+    ph_ctx_test.cpp
+    catalog_aggregate_store_test.cpp
+    populate_reader_catalog_test.cpp
+    c_api_test.cpp
+    c_api_track_test.cpp
+    c_api_future_test.cpp
+    cached_track_reader_test.cpp
+    connection_pool_test.cpp
+    connection_source_test.cpp
+    depth_tracker_test.cpp
+    event_partitions_test.cpp
+    natural_merge_sort_test.cpp
+    thread_pool_test.cpp
+    track_window_test.cpp
+    track_file_store_test.cpp
 )
+
+# These tests read schema 2 traces, so they need the schema 2 reader compiled in.
+if(PROFILER_HUB_ENABLE_ROCPD_V2)
+    list(APPEND UNIT_TEST_SOURCES rocpd_v2_reader_test.cpp)
+endif()
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
 
@@ -27,6 +49,7 @@ target_link_libraries(
     PRIVATE
         profiler-hub
         profiler-hub_queries
+        profiler-hub-sqlite3
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
@@ -41,6 +64,20 @@ target_compile_definitions(
     profiler-hub_unit_tests
     PUBLIC ROCPD_DB_PATH="${ROCPD_DB_PATH}"
 )
+
+# The library defines this privately. Tests that write schema 2 traces use their own
+# copy to compile out when the schema 2 reader is off.
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE PROFILER_HUB_ENABLE_ROCPD_V2=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V2}>
+)
+
+if(PH_USE_NOMUTEX_OPTIMIZATION)
+    target_compile_definitions(
+        profiler-hub_unit_tests
+        PRIVATE PH_USE_NOMUTEX_OPTIMIZATION
+    )
+endif()
 
 # Same values storage_impl.cpp reports from get_storage_version(). Both come from
 # the VERSION file via project(), so a version bump does not require a test edit.

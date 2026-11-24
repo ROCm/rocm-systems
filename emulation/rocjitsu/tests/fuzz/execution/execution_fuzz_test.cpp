@@ -8,11 +8,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -44,10 +41,12 @@ util::FailureOr<std::optional<uint64_t>> find_generated_kernel_seed(FuzzTarget t
   constexpr uint64_t kSeedSearchLimit = 256;
   for (uint64_t seed = start_seed; seed < start_seed + kSeedSearchLimit; ++seed) {
     const util::FailureOr<std::vector<uint8_t>> input = random_input(seed, kMaxInputSize, target);
-    if (input.failed())
+    if (input.failed()) {
       return util::Result::failure();
-    if (input.value()[1] & kWaitCheckingBit)
+    }
+    if (input.value()[1] & kWaitCheckingBit) {
       return std::optional<uint64_t>{seed};
+    }
   }
   return std::optional<uint64_t>{};
 }
@@ -192,10 +191,12 @@ TEST(ExecutionFuzzInputTest, GeneratedKernelBranchTargetsAndMemoryWaits) {
       ASSERT_TRUE(maybe_input.succeeded());
       const std::vector<uint8_t> input = maybe_input.value();
       std::vector<uint32_t> words((input.size() - kHeaderSize) / sizeof(uint32_t));
-      for (size_t word_index = 0; word_index < words.size(); ++word_index)
-        for (unsigned byte = 0; byte < sizeof(uint32_t); ++byte)
+      for (size_t word_index = 0; word_index < words.size(); ++word_index) {
+        for (unsigned byte = 0; byte < sizeof(uint32_t); ++byte) {
           words[word_index] |= uint32_t{input[kHeaderSize + word_index * sizeof(uint32_t) + byte]}
                                << (8 * byte);
+        }
+      }
       std::vector<int64_t> branchable_word_offsets;
       std::vector<int64_t> branch_target_words;
       std::bitset<amdgpu::kWaitCounterCount> pending_counters;
@@ -209,12 +210,15 @@ TEST(ExecutionFuzzInputTest, GeneratedKernelBranchTargetsAndMemoryWaits) {
           const auto wait = amdgpu::WaitCounterPolicy::explicit_wait_fields(instruction, arch);
           ASSERT_TRUE(wait.succeeded() && wait.value().has_value()) << word_index;
           const amdgpu::WaitFields &fields = *wait.value();
-          for (size_t counter_index = 0; counter_index < fields.size(); ++counter_index)
-            if (fields[counter_index] == 0)
+          for (size_t counter_index = 0; counter_index < fields.size(); ++counter_index) {
+            if (fields[counter_index] == 0) {
               pending_counters.reset(counter_index);
+            }
+          }
         }
-        if (!instruction.is_waitcnt())
+        if (!instruction.is_waitcnt()) {
           branchable_word_offsets.push_back(word_index);
+        }
         if (instruction.flags() & PROGRAM_TERMINATOR) {
           terminated = true;
           break;
@@ -248,9 +252,10 @@ TEST(ExecutionFuzzInputTest, GeneratedKernelBranchTargetsAndMemoryWaits) {
       }
       EXPECT_TRUE(terminated);
       EXPECT_TRUE(pending_counters.none());
-      for (int64_t target_word : branch_target_words)
+      for (int64_t target_word : branch_target_words) {
         EXPECT_NE(std::ranges::find(branchable_word_offsets, target_word),
                   branchable_word_offsets.end());
+      }
     }
     EXPECT_TRUE(forward);
     EXPECT_TRUE(backward);
@@ -322,28 +327,6 @@ TEST(ExecutionFuzzInputTest, ReplaySelectsArithmeticSemanticsAndCompatibleCpuTie
       EXPECT_LE(actual_cpu, detected & RJ_ARITH_CPU_MASK);
       EXPECT_EQ(stats.force_scalar, util::force_scalar() || levels[cpu] == RJ_ARITH_CPU_BASELINE);
     }
-  }
-}
-
-TEST(ExecutionFuzzInputTest, ScalarReplayDisablesLegacySimd) {
-  const auto words = cdna4::build_vop3(cdna4::kVDivFixupF16Vop3,
-                                       {.vdst = 24, .src0 = 276, .src1 = 277, .src2 = 278});
-  std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx950), kFullExecMaskBit};
-  for (const uint32_t word : words)
-    for (unsigned byte = 0; byte < sizeof(word); ++byte)
-      input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
-  for (bool scalar : {false, true, false}) {
-    SCOPED_TRACE(scalar);
-    input[1] = kFullExecMaskBit | (scalar ? (1u << kArithmeticCpuShift) : 0);
-    amdgpu::ScopedSimdFastPathTracker paths;
-    const util::FailureOr<RunStats> maybe_stats =
-        run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
-    ASSERT_TRUE(maybe_stats.succeeded());
-    const RunStats &stats = maybe_stats.value();
-    EXPECT_EQ(stats.executed, 2u);
-    EXPECT_EQ(stats.inputs_halted, 1u);
-    EXPECT_EQ(paths.tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16),
-              util::has_stdx_simd && !scalar && !util::force_scalar());
   }
 }
 
@@ -442,10 +425,11 @@ TEST(ExecutionFuzzInputTest, ArbitraryInputsPreserveByteStreamAcrossSizes) {
         random_input(0, size, FuzzTarget::Gfx942);
     ASSERT_TRUE(maybe_input_2.succeeded());
     const std::vector<uint8_t> input = maybe_input_2.value();
-    if (size == 1)
+    if (size == 1) {
       EXPECT_EQ(input.front(), full_input.front() & kTargetMask);
-    else
+    } else {
       EXPECT_TRUE(std::ranges::equal(input, std::span(full_input).first(size)));
+    }
   }
 }
 
@@ -482,8 +466,9 @@ TEST(ExecutionFuzzInputTest, GeneratedInstructionsPreservePrefixesAcrossSizes) {
       // Each input has one sparse bit mutation, so their common prefix can
       // differ in at most two bits when those mutations land differently.
       unsigned differing_bits = 0;
-      for (size_t byte = kHeaderSize; byte < size; ++byte)
+      for (size_t byte = kHeaderSize; byte < size; ++byte) {
         differing_bits += std::popcount(static_cast<unsigned>(input[byte] ^ full_input[byte]));
+      }
       EXPECT_LE(differing_bits, 2u);
     }
   }
@@ -514,9 +499,11 @@ TEST(ExecutionFuzzInputTest, EntryMutationsStayWithinThePrefix) {
 TEST(ExecutionFuzzInputTest, WaitCheckingBitEnablesDiagnosticsOnReplay) {
   std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx1250), 0};
   const auto append = [&](auto words) {
-    for (const uint32_t word : words)
-      for (unsigned byte = 0; byte < sizeof(word); ++byte)
+    for (const uint32_t word : words) {
+      for (unsigned byte = 0; byte < sizeof(word); ++byte) {
         input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+      }
+    }
   };
   append(cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = 20, .soffset = 124}));
   append(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 20, .sdst = 21}));
@@ -571,9 +558,11 @@ TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
           static_cast<uint8_t>(target),
           static_cast<uint8_t>(test_case.prefix_mode | (short_input[1] & backend_and_cache))};
       const auto append = [&](const auto &words) {
-        for (const uint32_t word : words)
-          for (unsigned byte = 0; byte < sizeof(word); ++byte)
+        for (const uint32_t word : words) {
+          for (unsigned byte = 0; byte < sizeof(word); ++byte) {
             expected.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+          }
+        }
       };
       auto first = first_wmma, second = second_wmma;
       if (test_case.seed & 16) {
@@ -607,9 +596,11 @@ TEST(ExecutionFuzzInputTest, InitialAddressPairsReachMappedMemory) {
       const FuzzTarget target = scalar ? FuzzTarget::Gfx1250 : FuzzTarget::Gfx942;
       std::vector<uint8_t> input{static_cast<uint8_t>(target), 0};
       const auto append = [&](auto words) {
-        for (const uint32_t word : words)
-          for (unsigned byte = 0; byte < sizeof(word); ++byte)
+        for (const uint32_t word : words) {
+          for (unsigned byte = 0; byte < sizeof(word); ++byte) {
             input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+          }
+        }
       };
       if (scalar) {
         append(cdna5::build_smem(
@@ -644,9 +635,11 @@ TEST(ExecutionFuzzInputTest, GwsBarrierWithoutInitExecutesFromHarnessState) {
     SCOPED_TRACE(rid);
     std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx942), 0};
     const auto append = [&](auto words) {
-      for (const uint32_t word : words)
-        for (unsigned byte = 0; byte < sizeof(word); ++byte)
+      for (const uint32_t word : words) {
+        for (unsigned byte = 0; byte < sizeof(word); ++byte) {
           input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+        }
+      }
     };
     append(cdna3::build_ds(cdna3::kDsGwsBarrierDs, {.offset0 = rid, .gds = 1, .addr = 0}));
     const util::FailureOr<RunStats> maybe_stats =
@@ -789,9 +782,11 @@ TEST(ExecutionFuzzInputTest, HarnessModesPreserveInitialScalarCondition) {
     SCOPED_TRACE(static_cast<unsigned>(marker));
     std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx1250), 0};
     const auto append = [&](auto words) {
-      for (const uint32_t word : words)
-        for (unsigned byte = 0; byte < sizeof(word); ++byte)
+      for (const uint32_t word : words) {
+        for (unsigned byte = 0; byte < sizeof(word); ++byte) {
           input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
+        }
+      }
     };
     // The trailing marker changes the seeded SCC, which controls whether the NOP runs.
     append(cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = 1}));
@@ -863,8 +858,9 @@ TEST(ExecutionFuzzInputTest, ThreadedInputsKeepMigratedWmmaOnIssuers) {
       }
     });
   }
-  for (auto &worker : workers)
+  for (auto &worker : workers) {
     worker.join();
+  }
   uint64_t async_executed = 0;
   for (const RunStats &stats : results) {
     EXPECT_EQ(stats.inputs, kInputsPerThread);

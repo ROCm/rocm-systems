@@ -105,8 +105,9 @@ public:
   /// this pool is active, before the decoder is destroyed.
   /// @throws std::bad_alloc if the initial pool allocation fails.
   void enable_pool() {
-    if (!pool_)
+    if (!pool_) {
       pool_ = std::make_unique<Pool>();
+    }
     activate_pool([](void *p, size_t s) -> void * { return static_cast<Pool *>(p)->allocate(s); },
                   [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, pool_.get());
   }
@@ -143,14 +144,17 @@ public:
                       const DecodeErrorEmitter &emit_error) override {
     ScopedIsaExecutionBackend scope(execution_backend_);
     DecodeResult result = Isa::Decoder::decode(inst, emit_error);
-    if (result.failed()) [[unlikely]]
+    if (result.failed()) [[unlikely]] {
       return Result::failure();
+    }
     const uint64_t missing_features = result.value()->required_isa_features() & ~isa_features_;
-    if (missing_features != 0) [[unlikely]]
+    if (missing_features != 0) [[unlikely]] {
       return emit_error.emit() << "instruction requires unavailable target ISA features (mask "
                                << missing_features << ")";
-    if (validate_instruction_operands(*result.value(), emit_error).failed()) [[unlikely]]
+    }
+    if (validate_instruction_operands(*result.value(), emit_error).failed()) [[unlikely]] {
       return Result::failure();
+    }
     return result;
   }
 

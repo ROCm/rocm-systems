@@ -63,8 +63,9 @@ template <typename Format> struct Factor {
   unsigned mantissa() const { return bits & kMantissaMask; }
   bool negative() const { return (bits >> (Format::kExponentBits + kMantissaBits)) & 1; }
   bool nan() const {
-    if (exponent_field() != kExponentMax)
+    if (exponent_field() != kExponentMax) {
       return false;
+    }
     return Format::kOcpE4m3 ? mantissa() == kMantissaMask : mantissa() != 0;
   }
   bool inf() const {
@@ -97,18 +98,21 @@ inline constexpr ProductPolicy kFp8Dot4Products{4, kFactorNan};
 inline constexpr ProductPolicy kFp8WmmaProducts{4, kFactorNan};
 
 inline uint64_t shift_round_even(uint64_t value, int shift) {
-  if (shift <= 0)
+  if (shift <= 0) {
     return value << -shift;
-  if (shift >= 64)
+  }
+  if (shift >= 64) {
     return 0;
+  }
   const uint64_t tail = value & ((uint64_t{1} << shift) - 1);
   const uint64_t halfway = uint64_t{1} << (shift - 1);
   return (value >> shift) + (tail > halfway || (tail == halfway && ((value >> shift) & 1)));
 }
 
 inline uint32_t pack(int64_t units, int grid) {
-  if (!units)
+  if (!units) {
     return 0;
+  }
   const uint32_t sign = uint32_t(units < 0) << 31;
   const uint64_t magnitude = units < 0 ? uint64_t(-units) : uint64_t(units);
   const int top = int(std::bit_width(magnitude)) - 1;
@@ -123,8 +127,9 @@ inline uint32_t pack(int64_t units, int grid) {
     significand >>= 1;
     ++exponent;
   }
-  if (exponent > 127)
+  if (exponent > 127) {
     return sign | 0x7f800000u;
+  }
   return sign | (uint32_t(exponent + 127) << 23) | (uint32_t(significand) & 0x7fffff);
 }
 
@@ -170,8 +175,9 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &src0,
   static_assert(!Packed || (std::is_same_v<Src0Format, Src1Format> &&
                             (Bf16 || std::is_same_v<Src0Format, F16Factor>)));
   const auto special = [](uint32_t bits) -> uint32_t {
-    if constexpr (Packed)
+    if constexpr (Packed) {
       return dot_packed16::special<Bf16>(bits);
+    }
     return bits;
   };
   std::array<Term, N> products;
@@ -183,14 +189,16 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &src0,
   for (std::size_t i = 0; i < N; ++i) {
     const Factor<Src0Format> left{src0[i]};
     const Factor<Src1Format> right{src1[i]};
-    if (left.nan() || right.nan())
+    if (left.nan() || right.nan()) {
       return special(kFactorNan);
+    }
     invalid |= (left.inf() && !right.significand()) || (right.inf() && !left.significand());
     if (left.inf() || right.inf()) {
-      if (left.negative() != right.negative())
+      if (left.negative() != right.negative()) {
         negative_inf = true;
-      else
+      } else {
         positive_inf = true;
+      }
     }
     products[i] = left.product(right);
     product_grids[i] = products[i].significand
@@ -199,16 +207,19 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &src0,
     product_grid = std::max(product_grid, product_grids[i]);
   }
   // Factor NaNs, then invalid products, precede an accumulator NaN.
-  if (invalid || (positive_inf && negative_inf))
+  if (invalid || (positive_inf && negative_inf)) {
     return special(Policy.invalid_nan);
-  if ((acc & 0x7fffffff) > 0x7f800000)
+  }
+  if ((acc & 0x7fffffff) > 0x7f800000) {
     return special(acc | kQuietNanBit);
+  }
   positive_inf |= acc == 0x7f800000;
   negative_inf |= acc == 0xff800000;
-  if (positive_inf || negative_inf)
+  if (positive_inf || negative_inf) {
     return special(positive_inf && negative_inf ? Policy.invalid_nan
                    : negative_inf               ? 0xff800000
                                                 : 0x7f800000);
+  }
 
   const unsigned acc_exp = (acc >> 23) & 255;
   const Term c{acc_exp ? (acc & 0x7fffff) | 0x800000u : acc & 0x7fffff,
@@ -225,17 +236,19 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &src0,
     const int group_grid =
         *std::max_element(product_grids.begin() + i, product_grids.begin() + i + Policy.group);
     int64_t group = 0;
-    for (std::size_t j = i; j < i + Policy.group; ++j)
+    for (std::size_t j = i; j < i + Policy.group; ++j) {
       group += align(products[j], group_grid);
+    }
     total += align(Term{uint64_t(group < 0 ? -group : group), group_grid, group < 0}, grid);
   }
   // Group alignment retains at most 28 magnitude bits; the final sum and C
   // fit comfortably in int64_t. Zero, including underflow to zero, is positive.
   if constexpr (Packed) {
-    if constexpr (Bf16)
+    if constexpr (Bf16) {
       return pack(total, grid) >> 16;
-    else
+    } else {
       return dot_packed16::pack_f16(total, grid, false, fp16_ovfl);
+    }
   }
   return pack(total, grid);
 }

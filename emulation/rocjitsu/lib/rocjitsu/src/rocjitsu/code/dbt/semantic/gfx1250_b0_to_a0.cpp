@@ -107,8 +107,9 @@ constexpr uint16_t kSaSdstDepctrMask = 0x0001u;
 [[nodiscard]] const char *
 gfx1250_floating_wmma_control_error(const cdna5::Vop3pMachineInst &matrix,
                                     const cdna5::Vop3pMachineInst *scale = nullptr) {
-  if (scale != nullptr && scale->clamp != 0)
+  if (scale != nullptr && scale->clamp != 0) {
     return "Input is malformed, SCL_CM must be set to zero for scaled floating-point WMMA";
+  }
   if (matrix.clamp != 0) {
     return "Input is malformed, CLAMP \"must be set to zero\" for WMMA/SWMMAC producing "
            "floating-point results";
@@ -140,11 +141,13 @@ void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &
 /// S_NOP separation from a preceding MODE write.
 void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &current_mode,
                                         uint8_t new_mode) {
-  if (current_mode == new_mode)
+  if (current_mode == new_mode) {
     return;
+  }
 
-  if (words.empty())
+  if (words.empty()) {
     append_words(words, cdna5::build_sopp(cdna5::kSNopSopp, {.simm16 = 0}));
+  }
 
   append_words(words, cdna5::build_sopp(cdna5::kSWaitXcntSopp, {.simm16 = 0}));
   const uint16_t immediate =
@@ -158,8 +161,9 @@ struct Gfx1250VgprBanks {
   std::optional<uint8_t> src0, src1, src2, dst;
 
   std::optional<uint8_t> mode() const {
-    if (!src0 || !src1 || !src2 || !dst)
+    if (!src0 || !src1 || !src2 || !dst) {
       return std::nullopt;
+    }
     return static_cast<uint8_t>(*src0 | (*src1 << 2) | (*src2 << 4) | (*dst << 6));
   }
 };
@@ -168,23 +172,27 @@ FailureOr<Gfx1250VgprBanks> gfx1250_vgpr_banks_before(const Instruction &inst,
                                                       const LivenessAnalysis &liveness) {
   FailureOr<std::optional<uint8_t>> maybe_src0_bank =
       liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  if (maybe_src0_bank.failed())
+  if (maybe_src0_bank.failed()) {
     return Result::failure();
+  }
   const auto src0_bank = maybe_src0_bank.value();
   FailureOr<std::optional<uint8_t>> maybe_src1_bank =
       liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  if (maybe_src1_bank.failed())
+  if (maybe_src1_bank.failed()) {
     return Result::failure();
+  }
   const auto src1_bank = maybe_src1_bank.value();
   FailureOr<std::optional<uint8_t>> maybe_src2_bank =
       liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  if (maybe_src2_bank.failed())
+  if (maybe_src2_bank.failed()) {
     return Result::failure();
+  }
   const auto src2_bank = maybe_src2_bank.value();
   FailureOr<std::optional<uint8_t>> maybe_dst_bank =
       liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
-  if (maybe_dst_bank.failed())
+  if (maybe_dst_bank.failed()) {
     return Result::failure();
+  }
   const auto dst_bank = maybe_dst_bank.value();
   return Gfx1250VgprBanks{src0_bank, src1_bank, src2_bank, dst_bank};
 }
@@ -192,8 +200,9 @@ FailureOr<Gfx1250VgprBanks> gfx1250_vgpr_banks_before(const Instruction &inst,
 FailureOr<std::optional<uint8_t>> gfx1250_vgpr_mode_before(const Instruction &inst,
                                                            const LivenessAnalysis &liveness) {
   FailureOr<Gfx1250VgprBanks> banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (banks.failed())
+  if (banks.failed()) {
     return Result::failure();
+  }
   return banks.value().mode();
 }
 
@@ -206,8 +215,9 @@ FailureOr<std::optional<uint8_t>> gfx1250_vgpr_mode_before(const Instruction &in
 [[nodiscard]] bool append_gfx1250_scratch_preservation(std::vector<uint32_t> &words,
                                                        const SemanticScratchLease &lease,
                                                        bool restore) {
-  if (!lease.spilled)
+  if (!lease.spilled) {
     return true;
+  }
   if (lease.reg_class != RegClass::VGPR || lease.count == 0 ||
       static_cast<uint32_t>(lease.base) + lease.count > 256u ||
       lease.spill_offset + (static_cast<uint32_t>(lease.count) - 1u) * sizeof(uint32_t) >
@@ -325,22 +335,27 @@ FailureOr<std::optional<Gfx1250SgprScratchLease>>
 acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
                       TranslationContext &context, SemanticScratchAllocator *allocator,
                       const Gfx1250SgprScratchRequest &request) {
-  if (request.count == 0 || request.count > kGfx1250MaxScratchSgprs)
+  if (request.count == 0 || request.count > kGfx1250MaxScratchSgprs) {
     return std::optional<Gfx1250SgprScratchLease>{};
+  }
   auto maybe_has_live = liveness.has_live_before(inst);
-  if (maybe_has_live.failed())
+  if (maybe_has_live.failed()) {
     return Result::failure();
-  if (!maybe_has_live.value())
+  }
+  if (!maybe_has_live.value()) {
     return std::optional<Gfx1250SgprScratchLease>{};
+  }
 
   auto maybe_live = liveness.live_before(inst);
-  if (maybe_live.failed())
+  if (maybe_live.failed()) {
     return Result::failure();
+  }
   const RegisterSet &live = *maybe_live.value();
   for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= kGfx1250MaxScratchSgprs;
        ++base) {
-    if (!gfx1250_sgpr_window_allowed(base, request))
+    if (!gfx1250_sgpr_window_allowed(base, request)) {
       continue;
+    }
     RegisterSet candidate;
     candidate.expand({RegClass::SGPR, base, static_cast<uint8_t>(request.count)});
     if (!candidate.intersects(live)) {
@@ -353,8 +368,9 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
     }
   }
 
-  if (request.carrier_mode == Gfx1250SgprCarrierMode::None || allocator == nullptr)
+  if (request.carrier_mode == Gfx1250SgprCarrierMode::None || allocator == nullptr) {
     return std::optional<Gfx1250SgprScratchLease>{};
+  }
 
   std::optional<uint16_t> victim;
   for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= kGfx1250MaxScratchSgprs;
@@ -364,8 +380,9 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
       break;
     }
   }
-  if (!victim)
+  if (!victim) {
     return std::optional<Gfx1250SgprScratchLease>{};
+  }
 
   SemanticScratchRequest carrier_request;
   carrier_request.count = request.count;
@@ -378,10 +395,12 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
   const SemanticScratchResult carrier = allocator->acquire_vgprs(carrier_request);
   // TODO: Return the carrier failure alongside the lease so a rejected
   // dynamic-stack spill can retain its actionable rule-specific diagnostic.
-  if (carrier.failure == SemanticScratchFailure::LivenessUnavailable)
+  if (carrier.failure == SemanticScratchFailure::LivenessUnavailable) {
     return Result::failure();
-  if (!carrier)
+  }
+  if (!carrier) {
     return std::optional<Gfx1250SgprScratchLease>{};
+  }
 
   context.require_sgprs(static_cast<uint32_t>(*victim) + request.count);
   return std::optional<Gfx1250SgprScratchLease>{
@@ -400,16 +419,19 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
 [[nodiscard]] bool append_gfx1250_sgpr_preservation(std::vector<uint32_t> &words,
                                                     const Gfx1250SgprScratchLease &lease,
                                                     bool restore) {
-  if (!lease.has_carrier())
+  if (!lease.has_carrier()) {
     return true;
+  }
   const SemanticScratchLease &carrier = *lease.carrier;
   if (carrier.reg_class != RegClass::VGPR || carrier.count != lease.count ||
-      static_cast<uint32_t>(carrier.base) + carrier.count > 256u)
+      static_cast<uint32_t>(carrier.base) + carrier.count > 256u) {
     return false;
+  }
 
   if (lease.carrier_mode == Gfx1250SgprCarrierMode::LaneZero) {
-    if (carrier.spilled)
+    if (carrier.spilled) {
       return false;
+    }
     for (uint16_t i = 0; i < lease.count; ++i) {
       if (restore) {
         append_words(words,
@@ -426,12 +448,14 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
     }
     return true;
   }
-  if (lease.carrier_mode != Gfx1250SgprCarrierMode::ExecMasked)
+  if (lease.carrier_mode != Gfx1250SgprCarrierMode::ExecMasked) {
     return false;
+  }
 
   if (!restore) {
-    if (!append_gfx1250_scratch_preservation(words, carrier, false))
+    if (!append_gfx1250_scratch_preservation(words, carrier, false)) {
       return false;
+    }
     for (uint16_t i = 0; i < lease.count; ++i) {
       append_words(words, cdna5::build_vop1(cdna5::kVMovB32Vop1,
                                             {.src0 = static_cast<uint16_t>(lease.base + i),
@@ -458,10 +482,12 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
 /// architecture-specific SOPP builders have a common callback-based emitter.
 [[nodiscard]] bool prepend_gfx1250_execz_guard_for_masked_replacement(std::vector<uint32_t> &words,
                                                                       bool required) {
-  if (!required)
+  if (!required) {
     return true;
-  if (words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+  }
+  if (words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
     return false;
+  }
   words.insert(words.begin(),
                cdna5::build_sopp(cdna5::kSCbranchExeczSopp,
                                  {.simm16 = static_cast<uint16_t>(words.size())})[0]);
@@ -480,8 +506,9 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
                                      std::span<const uint8_t>, const LivenessAnalysis &,
                                      TranslationContext &, const LaneLayout *, const LaneLayout *) {
   if (inst.amdgpu_operation() != amdgpu::Operation::S_CLAUSE ||
-      inst.size() != static_cast<int>(sizeof(uint32_t)))
+      inst.size() != static_cast<int>(sizeof(uint32_t))) {
     return ExpandResult::failed("gfx1250 S_CLAUSE rule received an unsupported instruction");
+  }
 
   const auto nop = cdna5::build_sopp(cdna5::kSNopSopp, {.simm16 = 0});
   return ExpandResult::success(std::vector<uint32_t>(nop.begin(), nop.end()));
@@ -503,8 +530,9 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
   for (const Instruction *at = (inst.*step)();
        counted < limit && at != nullptr && at->size() == static_cast<int>(sizeof(uint32_t)) &&
        at->raw_encoding() != nullptr && at->raw_encoding()[0] == v_nop;
-       at = (at->*step)())
+       at = (at->*step)()) {
     ++counted;
+  }
   return counted;
 }
 
@@ -565,16 +593,19 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
   constexpr int kRequiredLeadingVNops = 2;
 
   if (inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_B32 &&
-      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32)
+      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32) {
     return false;
+  }
   const int size_bytes = inst.size();
   if (size_bytes < static_cast<int>(sizeof(uint32_t)) ||
-      size_bytes % static_cast<int>(sizeof(uint32_t)) != 0 || inst.raw_encoding() == nullptr)
+      size_bytes % static_cast<int>(sizeof(uint32_t)) != 0 || inst.raw_encoding() == nullptr) {
     return true;
+  }
 
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG) {
     return false;
+  }
 
   return count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,
                                          &Instruction::previous_instruction) <
@@ -588,23 +619,27 @@ ExpandResult expand_gfx1250_setreg_mode_ordering(const Instruction &inst, uint32
   constexpr int kRequiredLeadingVNops = 2;
 
   if (inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_B32 &&
-      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32)
+      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32) {
     return ExpandResult::failed("gfx1250 MODE setreg rule received an unsupported instruction");
+  }
   const int size_bytes = inst.size();
   if (size_bytes < static_cast<int>(sizeof(uint32_t)) ||
-      size_bytes % static_cast<int>(sizeof(uint32_t)) != 0 || inst.raw_encoding() == nullptr)
+      size_bytes % static_cast<int>(sizeof(uint32_t)) != 0 || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 MODE setreg rule received an unsupported encoding");
+  }
 
   // SOPK carries the hardware-register selector in SIMM16. Only MODE requires
   // the separation, so the mnemonic alone cannot decide this.
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG) {
     return ExpandResult::not_handled();
+  }
 
   const int existing_slots = count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,
                                                              &Instruction::previous_instruction);
-  if (existing_slots == kRequiredLeadingVNops)
+  if (existing_slots == kRequiredLeadingVNops) {
     return ExpandResult::not_handled();
+  }
 
   const size_t words_in_encoding = static_cast<size_t>(size_bytes) / sizeof(uint32_t);
   std::vector<uint32_t> words;
@@ -639,13 +674,15 @@ ExpandResult expand_gfx1250_barrier_signal_isfirst(const Instruction &inst, uint
   constexpr uint32_t kExcludedBarrierIdInline = 195;
 
   const size_t size = static_cast<size_t>(inst.size());
-  if (size < sizeof(uint32_t) || offset + size > source_text.size())
+  if (size < sizeof(uint32_t) || offset + size > source_text.size()) {
     return ExpandResult::failed("gfx1250 barrier-signal rule received an unsupported instruction");
+  }
 
   uint32_t word0 = 0;
   std::memcpy(&word0, source_text.data() + offset, sizeof(word0));
-  if ((word0 & 0xffu) != kExcludedBarrierIdInline)
+  if ((word0 & 0xffu) != kExcludedBarrierIdInline) {
     return ExpandResult::not_handled();
+  }
 
   return ExpandResult::failed(
       "gfx1250 s_barrier_signal_isfirst cannot name barrier id -3 (inline selector 195)",
@@ -754,8 +791,9 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
   const auto first = build_gfx1250_ds2_half(source, shape, static_cast<uint16_t>(offset0), false);
   const auto second = build_gfx1250_ds2_half(source, shape, static_cast<uint16_t>(offset1), true);
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (maybe_banks.failed())
+  if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const Gfx1250VgprBanks &banks = maybe_banks.value();
   const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
@@ -827,19 +865,23 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
     append_gfx1250_vgpr_msb_transition(words, current_mode, mode);
   };
   if (second_first) {
-    if (second_mode != original_mode)
+    if (second_mode != original_mode) {
       set_mode(second_mode);
+    }
     append_words(words, second);
-    if (second_mode != original_mode)
+    if (second_mode != original_mode) {
       set_mode(original_mode);
+    }
     append_words(words, first);
   } else {
     append_words(words, first);
-    if (second_mode != original_mode)
+    if (second_mode != original_mode) {
       set_mode(second_mode);
+    }
     append_words(words, second);
-    if (second_mode != original_mode)
+    if (second_mode != original_mode) {
       set_mode(original_mode);
+    }
   }
   append_words(words, cdna5::build_sopp(cdna5::kSWaitDscntSopp, {.simm16 = 0}));
   return ExpandResult::success(std::move(words));
@@ -912,8 +954,9 @@ struct TensorMaskClearPrefix {
   if (previous == nullptr || previous->size() != static_cast<int>(sizeof(uint32_t)) ||
       previous->raw_encoding() == nullptr ||
       previous->src_loc() + sizeof(uint32_t) != next_offset ||
-      previous->raw_encoding()[0] != build_tensor_mask_clear(descriptor_base))
+      previous->raw_encoding()[0] != build_tensor_mask_clear(descriptor_base)) {
     return {};
+  }
   return {.found_clear = true, .waited_for_sdst = waited_for_sdst};
 }
 
@@ -929,8 +972,9 @@ struct TensorMaskClearPrefix {
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
   constexpr uint8_t kLastOrdinarySgpr = 105;
   const uint8_t descriptor_base = static_cast<uint8_t>(source.vaddr1);
-  if (descriptor_base == kGfx1250Null || descriptor_base > kLastOrdinarySgpr - 7u)
+  if (descriptor_base == kGfx1250Null || descriptor_base > kLastOrdinarySgpr - 7u) {
     return true;
+  }
   return !tensor_mask_clear_prefix(inst, descriptor_base).waited_for_sdst;
 }
 
@@ -991,8 +1035,9 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
   scratch_request.count = 1;
   scratch_request.forbidden = gfx1250_instruction_registers(inst);
   auto maybe_scratch = acquire_gfx1250_sgprs(inst, liveness, context, nullptr, scratch_request);
-  if (maybe_scratch.failed())
+  if (maybe_scratch.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto scratch = maybe_scratch.value();
   if (!scratch || scratch->base > kLastOrdinarySgpr) {
     return ExpandResult::failed("gfx1250 tensor-load mask rule could not allocate scalar scratch",
@@ -1036,8 +1081,9 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
   cdna5::Vop3pMachineInst matrix{};
   std::memcpy(&scale, inst.raw_encoding(), sizeof(scale));
   std::memcpy(&matrix, inst.raw_encoding() + 2, sizeof(matrix));
-  if (gfx1250_floating_wmma_control_error(matrix, &scale) != nullptr)
+  if (gfx1250_floating_wmma_control_error(matrix, &scale) != nullptr) {
     return true;
+  }
   return matrix.op == cdna5::kVWmmaF3232x16x128F4Vop3p || scale.src2 != 0x100;
 }
 
@@ -1066,8 +1112,9 @@ gfx1250_split_m32_fp4(const Instruction &inst, const LivenessAnalysis &liveness,
   const uint16_t src1 = static_cast<uint16_t>(matrix.src1 - kVgprEncoding);
   const uint16_t src2 = src2_is_vgpr ? static_cast<uint16_t>(matrix.src2 - kVgprEncoding) : 0;
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (maybe_banks.failed())
+  if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const Gfx1250VgprBanks &banks = maybe_banks.value();
   const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
@@ -1090,8 +1137,9 @@ gfx1250_split_m32_fp4(const Instruction &inst, const LivenessAnalysis &liveness,
       (src2_is_vgpr &&
        overlaps(first_dst, kHalfDwords,
                 physical(*src2_bank, static_cast<uint16_t>(src2 + kHalfDwords)), kHalfDwords));
-  for (uint16_t shared : shared_low_bank_inputs)
+  for (uint16_t shared : shared_low_bank_inputs) {
     clobbers_shared_input |= overlaps(first_dst, kHalfDwords, physical(0, shared), 1);
+  }
   if (clobbers_shared_input) {
     return ExpandResult::failed(std::string(context) +
                                 " lower destination overlaps an input needed by the upper half");
@@ -1140,8 +1188,9 @@ gfx1250_split_m32_fp4(const Instruction &inst, const LivenessAnalysis &liveness,
     replacement[0] |= uint32_t{1} << 14; // matrix B: FP4
     append_words(words, replacement);
   }
-  if (src0_crosses || dst_crosses || src2_crosses)
+  if (src0_crosses || dst_crosses || src2_crosses) {
     append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
+  }
   return ExpandResult::success(std::move(words));
 }
 
@@ -1169,8 +1218,9 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   cdna5::Vop3pMachineInst matrix{};
   std::memcpy(&scale, inst.raw_encoding(), sizeof(scale));
   std::memcpy(&matrix, inst.raw_encoding() + 2, sizeof(matrix));
-  if (const char *error = gfx1250_floating_wmma_control_error(matrix, &scale))
+  if (const char *error = gfx1250_floating_wmma_control_error(matrix, &scale)) {
     return ExpandResult::failed(error);
+  }
   if (matrix.op != cdna5::kVWmmaF3232x16x128F4Vop3p) {
     std::vector<uint32_t> words(inst.raw_encoding(), inst.raw_encoding() + 4);
     if (regular_scale_residual(inst)) {
@@ -1193,8 +1243,9 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   size_t scale_input_count = 0;
   for (const uint16_t encoded :
        {static_cast<uint16_t>(scale.src0), static_cast<uint16_t>(scale.src1)}) {
-    if (encoded >= kVgprEncoding)
+    if (encoded >= kVgprEncoding) {
       scale_inputs[scale_input_count++] = static_cast<uint16_t>(encoded - kVgprEncoding);
+    }
   }
 
   const std::array<uint32_t, 2> prefix = {inst.raw_encoding()[0], inst.raw_encoding()[1]};
@@ -1224,11 +1275,13 @@ ExpandResult expand_gfx1250_wmma_32x16_f4(const Instruction &inst, uint32_t, uin
   std::memcpy(&matrix, inst.raw_encoding(), sizeof(matrix));
   // This form produces floating-point results, so it carries the same control
   // requirement as every other floating-point matrix entry point.
-  if (const char *error = gfx1250_floating_wmma_control_error(matrix))
+  if (const char *error = gfx1250_floating_wmma_control_error(matrix)) {
     return ExpandResult::failed(error);
+  }
   constexpr uint16_t kVgprEncoding = 256;
-  if (matrix.src0 < kVgprEncoding || matrix.src1 < kVgprEncoding)
+  if (matrix.src0 < kVgprEncoding || matrix.src1 < kVgprEncoding) {
     return ExpandResult::failed("gfx1250 32x16 FP4 operands are not VGPR ranges");
+  }
 
   const auto prefix = cdna5::build_vop3p(
       kWmmaScaleSrc2PrefixOp,
@@ -1266,8 +1319,9 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   // instructions. Decline those collisions so their own legalization can
   // diagnose them instead of reporting a misleading Scale16 error.
   if (!(inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4 ||
-        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4))
+        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4)) {
     return ExpandResult::not_handled();
+  }
   if (inst.size() != 4 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed(
         "gfx1250 Scale16 WMMA rule received an unsupported VOP3PX2 instruction");
@@ -1281,15 +1335,17 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
                                            matrix.op != cdna5::kVWmmaF3232x16x128F4Vop3p)) {
     return ExpandResult::failed("gfx1250 Scale16 WMMA rule received an unsupported base opcode");
   }
-  if (const char *error = gfx1250_floating_wmma_control_error(matrix, &scale))
+  if (const char *error = gfx1250_floating_wmma_control_error(matrix, &scale)) {
     return ExpandResult::failed(error);
+  }
 
   constexpr uint16_t kVgprEncoding = 256;
   const std::array<uint16_t, 2> encoded_scales = {static_cast<uint16_t>(scale.src0),
                                                   static_cast<uint16_t>(scale.src1)};
   for (const uint16_t encoded_scale : encoded_scales) {
-    if (encoded_scale < kVgprEncoding)
+    if (encoded_scale < kVgprEncoding) {
       continue;
+    }
     const uint16_t base = static_cast<uint16_t>(encoded_scale - kVgprEncoding);
     if ((base & 1u) != 0 || base > 254u) {
       return ExpandResult::failed(
@@ -1302,8 +1358,9 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
     return ExpandResult::success(std::move(words));
   }
 
-  if (matrix.src0 < kVgprEncoding || matrix.src1 < kVgprEncoding)
+  if (matrix.src0 < kVgprEncoding || matrix.src1 < kVgprEncoding) {
     return ExpandResult::failed("gfx1250 Scale16 32x16 FP4 matrix inputs are not VGPR ranges");
+  }
 
   constexpr uint16_t kHalfDwords = 8;
   const uint16_t src0 = static_cast<uint16_t>(matrix.src0 - kVgprEncoding);
@@ -1311,8 +1368,9 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   const bool src2_is_vgpr = matrix.src2 >= kVgprEncoding;
   const uint16_t src2 = src2_is_vgpr ? static_cast<uint16_t>(matrix.src2 - kVgprEncoding) : 0;
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (maybe_banks.failed())
+  if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const Gfx1250VgprBanks &banks = maybe_banks.value();
   const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
@@ -1387,18 +1445,21 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
     replacement[0] |= uint32_t{1} << 14; // matrix B: FP4
     append_words(words, replacement);
   }
-  if (src0_crosses || dst_crosses || src2_crosses)
+  if (src0_crosses || dst_crosses || src2_crosses) {
     append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
+  }
   return ExpandResult::success(std::move(words));
 }
 
 /// @brief Whether the shared structural key denotes an implemented Scale16 expansion.
 [[nodiscard]] bool scale16_residual(const Instruction &inst) {
   if (!(inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4 ||
-        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4))
+        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4)) {
     return false;
-  if (inst.size() != 4 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr)
+  }
+  if (inst.size() != 4 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return true;
+  }
 
   cdna5::Vop3pMachineInst scale{};
   cdna5::Vop3pMachineInst matrix{};
@@ -1414,11 +1475,13 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   constexpr uint16_t kVgprEncoding = 256;
   for (const uint16_t encoded_scale :
        {static_cast<uint16_t>(scale.src0), static_cast<uint16_t>(scale.src1)}) {
-    if (encoded_scale < kVgprEncoding)
+    if (encoded_scale < kVgprEncoding) {
       continue;
+    }
     const uint16_t base = static_cast<uint16_t>(encoded_scale - kVgprEncoding);
-    if ((base & 1u) != 0 || base > 254u)
+    if ((base & 1u) != 0 || base > 254u) {
       return true;
+    }
   }
   return matrix.op == cdna5::kVWmmaF3232x16x128F4Vop3p || scale.src2 != 0x100;
 }
@@ -1442,10 +1505,12 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
 /// an EXEC clear between the WMMA and its shadow, which is the case the TODO
 /// below has to rule out before it can count anything but a V_NOP.
 [[nodiscard]] int required_iu8_spacing_slots(const Instruction &inst) {
-  if (inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_I32_16X16X64_IU8)
+  if (inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_I32_16X16X64_IU8) {
     return 9;
-  if (inst.amdgpu_operation() == amdgpu::Operation::V_SWMMAC_I32_16X16X128_IU8)
+  }
+  if (inst.amdgpu_operation() == amdgpu::Operation::V_SWMMAC_I32_16X16X128_IU8) {
     return 5;
+  }
   return 0;
 }
 
@@ -1455,10 +1520,12 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
 
 [[nodiscard]] bool iu8_spacing_residual(const Instruction &inst) {
   const int required_slots = required_iu8_spacing_slots(inst);
-  if (required_slots == 0)
+  if (required_slots == 0) {
     return false;
-  if (inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr)
+  }
+  if (inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return true;
+  }
   return existing_iu8_spacing_slots(inst, required_slots) < required_slots;
 }
 
@@ -1467,10 +1534,12 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
                                              TranslationContext &, const LaneLayout *,
                                              const LaneLayout *) {
   const int required_slots = required_iu8_spacing_slots(inst);
-  if (required_slots == 0)
+  if (required_slots == 0) {
     return ExpandResult::not_handled();
-  if (inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr)
+  }
+  if (inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 IU8 WMMA rule received an unsupported VOP3P instruction");
+  }
 
   std::vector<uint32_t> words(inst.raw_encoding(),
                               inst.raw_encoding() + inst.size() / sizeof(uint32_t));
@@ -1509,10 +1578,12 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
 }
 
 [[nodiscard]] bool cluster_load_residual(const Instruction &inst) {
-  if (!is_gfx1250_cluster_load(inst.opcode()))
+  if (!is_gfx1250_cluster_load(inst.opcode())) {
     return false;
-  if (inst.size() != 3 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr)
+  }
+  if (inst.size() != 3 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return true;
+  }
   return !has_canonical_predecessor(inst, build_cluster_m0_clear());
 }
 
@@ -1555,8 +1626,9 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   scratch_request.forbidden = gfx1250_instruction_registers(inst);
   scratch_request.carrier_mode = Gfx1250SgprCarrierMode::LaneZero;
   auto maybe_scratch = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, scratch_request);
-  if (maybe_scratch.failed())
+  if (maybe_scratch.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto scratch = maybe_scratch.value();
   if (!scratch || scratch->base > 105) {
     return ExpandResult::failed(
@@ -1577,16 +1649,19 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   std::optional<uint8_t> original_mode;
   if (scratch->has_carrier()) {
     auto maybe_original_mode = gfx1250_vgpr_mode_before(inst, liveness);
-    if (maybe_original_mode.failed())
+    if (maybe_original_mode.failed()) {
       return ExpandResult::liveness_unavailable();
+    }
     original_mode = maybe_original_mode.value();
-    if (!original_mode)
+    if (!original_mode) {
       return ExpandResult::failed(
           "gfx1250 cluster-load SGPR carrier cannot prove the VGPR-MSB mode");
+    }
     current_mode = *original_mode;
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
-    if (!append_gfx1250_sgpr_preservation(words, *scratch, false))
+    if (!append_gfx1250_sgpr_preservation(words, *scratch, false)) {
       return ExpandResult::failed("gfx1250 cluster load could not preserve scalar scratch");
+    }
     append_gfx1250_vgpr_msb_transition(words, current_mode, *original_mode);
   }
   append_words(
@@ -1599,8 +1674,9 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
                                {.ssrc0 = static_cast<uint8_t>(scratch->base), .sdst = kGfx1250M0}));
   if (scratch->has_carrier()) {
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
-    if (!append_gfx1250_sgpr_preservation(words, *scratch, true))
+    if (!append_gfx1250_sgpr_preservation(words, *scratch, true)) {
       return ExpandResult::failed("gfx1250 cluster load could not restore scalar scratch");
+    }
     append_gfx1250_vgpr_msb_transition(words, current_mode, *original_mode);
   }
   return ExpandResult::success(std::move(words));
@@ -1634,8 +1710,9 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
   cdna5::VdsMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (maybe_banks.failed())
+  if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const Gfx1250VgprBanks &banks = maybe_banks.value();
   const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
@@ -1655,8 +1732,9 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
     request.forbidden = gfx1250_instruction_registers(inst);
     request.allow_spill = true;
     const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
-    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
       return ExpandResult::liveness_unavailable();
+    }
     if (!scratch) {
       if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
         return ExpandResult::failed(
@@ -1830,23 +1908,28 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
   }
   cdna5::Vop3MachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-  if (source.clamp == 0)
+  if (source.clamp == 0) {
     return ExpandResult::not_handled();
+  }
   // ABS, NEG, and OMOD are unsupported for this conversion and do not affect
   // its result, so their encoded values are intentionally ignored.
-  if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u)
+  if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u) {
     return ExpandResult::failed("gfx1250 E5M3 pack does not support DPP");
+  }
   // SRC_LITERAL64 carries a two-word payload, and the expansion has no free
   // literal slot to re-encode it: the generated helpers already spend selector
   // 255 on their own mask literals.
-  if (source.src0 == 254u || source.src1 == 254u)
+  if (source.src0 == 254u || source.src1 == 254u) {
     return ExpandResult::failed("gfx1250 E5M3 pack does not support SRC_LITERAL64");
+  }
   const bool has_literal = source.src0 == 255u || source.src1 == 255u;
-  if (has_literal && inst.size() < 3 * static_cast<int>(sizeof(uint32_t)))
+  if (has_literal && inst.size() < 3 * static_cast<int>(sizeof(uint32_t))) {
     return ExpandResult::failed("gfx1250 E5M3 pack literal word is missing");
+  }
   uint32_t literal = 0;
-  if (has_literal)
+  if (has_literal) {
     std::memcpy(&literal, inst.raw_encoding() + 2, sizeof(literal));
+  }
 
   SemanticScratchAllocator allocator(
       inst, liveness, context,
@@ -1857,8 +1940,9 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
   request.forbidden = gfx1250_instruction_registers(inst);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
-  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
     return ExpandResult::liveness_unavailable();
+  }
   if (!scratch) {
     if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
       return ExpandResult::failed(
@@ -1877,18 +1961,22 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
   mask_request.forbidden.expand(scratch.lease->registers());
   mask_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
   auto maybe_masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
-  if (maybe_masks.failed())
+  if (maybe_masks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto masks = maybe_masks.value();
-  if (!masks)
+  if (!masks) {
     return ExpandResult::failed("gfx1250 E5M3 pack could not allocate four scratch SGPRs");
+  }
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (maybe_banks.failed())
+  if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const Gfx1250VgprBanks &banks = maybe_banks.value();
   const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
-  if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
+  if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
     return ExpandResult::failed("gfx1250 E5M3 pack cannot prove the VGPR-MSB mode");
+  }
   const uint8_t original_mode = *banks.mode();
 
   std::vector<uint32_t> words;
@@ -1967,8 +2055,9 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
     }
   }
   append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
-  if (!prepend_gfx1250_execz_guard_for_masked_replacement(words, masks->has_carrier()))
+  if (!prepend_gfx1250_execz_guard_for_masked_replacement(words, masks->has_carrier())) {
     return ExpandResult::failed("gfx1250 E5M3 pack SGPR-carrier guard is too large");
+  }
   return ExpandResult::success(std::move(words));
 }
 
@@ -1985,20 +2074,25 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   }
   cdna5::Vop3MachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-  if (source.clamp == 0)
+  if (source.clamp == 0) {
     return ExpandResult::not_handled();
+  }
   // ABS, NEG, and OMOD are unsupported for this conversion and do not affect
   // its result, so their encoded values are intentionally ignored.
-  if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u)
+  if (source.src0 == 233u || source.src0 == 234u || source.src0 == 250u) {
     return ExpandResult::failed("gfx1250 stochastic E5M3 does not support DPP");
-  if (source.src0 == 254u || source.src1 == 254u)
+  }
+  if (source.src0 == 254u || source.src1 == 254u) {
     return ExpandResult::failed("gfx1250 stochastic E5M3 does not support SRC_LITERAL64");
+  }
   const bool has_literal = source.src0 == 255u || source.src1 == 255u;
-  if (has_literal && inst.size() < 3 * static_cast<int>(sizeof(uint32_t)))
+  if (has_literal && inst.size() < 3 * static_cast<int>(sizeof(uint32_t))) {
     return ExpandResult::failed("gfx1250 stochastic E5M3 literal word is missing");
+  }
   uint32_t literal = 0;
-  if (has_literal)
+  if (has_literal) {
     std::memcpy(&literal, inst.raw_encoding() + 2, sizeof(literal));
+  }
 
   SemanticScratchAllocator allocator(
       inst, liveness, context,
@@ -2009,8 +2103,9 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   request.forbidden = gfx1250_instruction_registers(inst);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
-  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
     return ExpandResult::liveness_unavailable();
+  }
   if (!scratch) {
     if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
       return ExpandResult::failed(
@@ -2030,23 +2125,27 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   mask_request.forbidden.expand(scratch.lease->registers());
   mask_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
   auto maybe_masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
-  if (maybe_masks.failed())
+  if (maybe_masks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto masks = maybe_masks.value();
-  if (!masks)
+  if (!masks) {
     return ExpandResult::failed("gfx1250 stochastic E5M3 could not allocate five scratch SGPRs");
+  }
   const uint16_t nan_mask = masks->base;
   const uint16_t subnormal_mask = static_cast<uint16_t>(masks->base + 1u);
   const uint16_t overflow_mask = static_cast<uint16_t>(masks->base + 2u);
   const uint16_t tiny_mask = static_cast<uint16_t>(masks->base + 3u);
   const uint16_t fp16_ovfl = static_cast<uint16_t>(masks->base + 4u);
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (maybe_banks.failed())
+  if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const Gfx1250VgprBanks &banks = maybe_banks.value();
   const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
-  if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
+  if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
     return ExpandResult::failed("gfx1250 stochastic E5M3 cannot prove the VGPR-MSB mode");
+  }
   const uint8_t original_mode = *banks.mode();
 
   const auto append_literal = [](std::vector<uint32_t> &output, uint16_t opcode,
@@ -2219,8 +2318,9 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
     }
   }
   append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
-  if (!prepend_gfx1250_execz_guard_for_masked_replacement(words, masks->has_carrier()))
+  if (!prepend_gfx1250_execz_guard_for_masked_replacement(words, masks->has_carrier())) {
     return ExpandResult::failed("gfx1250 stochastic E5M3 SGPR-carrier guard is too large");
+  }
   return ExpandResult::success(std::move(words));
 }
 
@@ -2237,8 +2337,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   cdna5::Vop3MachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
   constexpr uint16_t kVgprEncoding = 256;
-  if (!cvt_f32_fp8_e5m3_residual(inst))
+  if (!cvt_f32_fp8_e5m3_residual(inst)) {
     return ExpandResult::not_handled();
+  }
   // ABS, NEG, and OMOD are unsupported for this conversion and do not affect
   // its result, so their encoded values are intentionally ignored.
   if (source.src0 < kVgprEncoding) {
@@ -2254,8 +2355,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   request.forbidden = gfx1250_instruction_registers(inst);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
-  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
     return ExpandResult::liveness_unavailable();
+  }
   if (!scratch) {
     if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
       return ExpandResult::failed(
@@ -2275,8 +2377,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   // as one region, so the borrowed SGPR window remains untouched.
   mask_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
   auto maybe_masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
-  if (maybe_masks.failed())
+  if (maybe_masks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto masks = maybe_masks.value();
   if (!masks) {
     return ExpandResult::failed("gfx1250 E5M3 unpack could not allocate two SGPR masks");
@@ -2284,8 +2387,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   const uint16_t nan_mask = masks->base;
   const uint16_t exp31_mask = static_cast<uint16_t>(masks->base + 1u);
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-  if (maybe_banks.failed())
+  if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const Gfx1250VgprBanks &banks = maybe_banks.value();
   const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
@@ -2377,8 +2481,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
     }
   }
   append_gfx1250_vgpr_msb_transition(words, current_mode, original_mode);
-  if (!prepend_gfx1250_execz_guard_for_masked_replacement(words, masks->has_carrier()))
+  if (!prepend_gfx1250_execz_guard_for_masked_replacement(words, masks->has_carrier())) {
     return ExpandResult::failed("gfx1250 E5M3 unpack SGPR-carrier guard is too large");
+  }
   return ExpandResult::success(std::move(words));
 }
 
@@ -2433,8 +2538,9 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
 
   cdna5::Vop3pMachineInst matrix{};
   std::memcpy(&matrix, inst.raw_encoding(), sizeof(matrix));
-  if (const char *error = gfx1250_floating_wmma_control_error(matrix))
+  if (const char *error = gfx1250_floating_wmma_control_error(matrix)) {
     return ExpandResult::failed(error);
+  }
 
   std::vector<uint32_t> words;
   words.reserve(4);
@@ -2509,8 +2615,9 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
   }
   cdna5::Vop3pMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-  if (const char *error = gfx1250_floating_wmma_control_error(source))
+  if (const char *error = gfx1250_floating_wmma_control_error(source)) {
     return ExpandResult::failed(error);
+  }
 
   constexpr uint16_t kVgprEncoding = 256;
   if (source.src0 < kVgprEncoding || source.src1 < kVgprEncoding) {
@@ -2552,8 +2659,9 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
       return ExpandResult::failed(
           "gfx1250 f16 K=128 WMMA accumulator is not a VGPR range or inline zero");
     }
-    if (source.src2 >= kVgprEncoding && (source.src2 & 1u) != 0)
+    if (source.src2 >= kVgprEncoding && (source.src2 & 1u) != 0) {
       return ExpandResult::failed("gfx1250 f16 K=128 WMMA accumulator is not an even VGPR range");
+    }
 
     SemanticScratchAllocator allocator(
         inst, liveness, context,
@@ -2565,11 +2673,13 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     request.forbidden = gfx1250_instruction_registers(inst);
     request.allow_spill = true;
     const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
-    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable) {
       return ExpandResult::liveness_unavailable();
-    if (!scratch)
+    }
+    if (!scratch) {
       return ExpandResult::failed(
           "gfx1250 f16 K=128 WMMA could not allocate f32 accumulator scratch");
+    }
 
     Gfx1250SgprScratchRequest mode_request;
     mode_request.count = 1;
@@ -2578,27 +2688,33 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     mode_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
     auto maybe_mode_scratch =
         acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mode_request);
-    if (maybe_mode_scratch.failed())
+    if (maybe_mode_scratch.failed()) {
       return ExpandResult::liveness_unavailable();
+    }
     const auto mode_scratch = maybe_mode_scratch.value();
-    if (!mode_scratch)
+    if (!mode_scratch) {
       return ExpandResult::failed("gfx1250 f16 K=128 WMMA could not read FP16 overflow mode");
+    }
     FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
-    if (maybe_banks.failed())
+    if (maybe_banks.failed()) {
       return ExpandResult::liveness_unavailable();
+    }
     const Gfx1250VgprBanks &banks = maybe_banks.value();
     const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
-    if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
+    if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
       return ExpandResult::failed("gfx1250 f16 K=128 WMMA cannot prove the VGPR-MSB mode");
+    }
     const uint16_t physical_dst = static_cast<uint16_t>(*dst_bank * 256u + source.vdst);
-    if (physical_dst + 4u > 1024u)
+    if (physical_dst + 4u > 1024u) {
       return ExpandResult::failed("gfx1250 f16 K=128 WMMA destination exceeds the VGPR file");
+    }
     uint16_t physical_accumulator = 0;
     if (source.src2 >= kVgprEncoding) {
       physical_accumulator =
           static_cast<uint16_t>(*src2_bank * 256u + (source.src2 - kVgprEncoding));
-      if (physical_accumulator + 4u > 1024u)
+      if (physical_accumulator + 4u > 1024u) {
         return ExpandResult::failed("gfx1250 f16 K=128 WMMA accumulator exceeds the VGPR file");
+      }
     }
     const uint8_t original_mode = *banks.mode();
 
@@ -2654,8 +2770,9 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
                                             .neg = static_cast<uint8_t>(source.neg & 0x4u)}));
     append_words(words, cdna5::build_sopp(cdna5::kSWaitAluSopp,
                                           {.simm16 = kGfx1250WmmaCompletionWaitImmediate}));
-    for (uint16_t slot = 0; slot < 16; ++slot)
+    for (uint16_t slot = 0; slot < 16; ++slot) {
       append_words(words, cdna5::build_vop1(cdna5::kVNopVop1));
+    }
     // MI400 Shader Programming 4.6.12: a WMMA or SWMMAC result of 16 bits or
     // fewer becomes +/-MAX rather than +/-infinity when MODE.FP16_OVFL is set,
     // and the MODE table adds that WMMA saturates INF on this generation while
@@ -2723,8 +2840,9 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
         "gfx1250 K=128 f32 WMMA scalar accumulator cannot be represented by the scaled form");
   }
 
-  if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt))
+  if (!gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt)) {
     return ExpandResult::failed("gfx1250 K=128 WMMA rule received an unsupported opcode");
+  }
 
   std::vector<uint32_t> words;
   words.reserve(4);
