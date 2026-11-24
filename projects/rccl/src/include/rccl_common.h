@@ -433,19 +433,6 @@ size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func);
 bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
                                      bool graphMode);
 
-// Payload cap used to size comm->ddaScratch: max of every DDA protocol table
-// entry (LL / LL128 / VMM, including R2 and graph VMM variants) plus
-// ceNonRegMax for collectives that stage through ddaScratch (not AllReduce
-// 2-shot, which uses ceARTmpBuf). Env DDA_*_THRESHOLD, when set, is also
-// folded in. With no table, the same pre-table DDA defaults the selectors
-// use are folded in so scratch is not smaller than the VMM/LL/LL128 window.
-// All table values are total message bytes; no per-rank scaling is applied.
-//
-// Graph VMM (ddaVmmMaxGraph) is part of that max even for comms that never
-// capture: scratch is allocated once at init so a later capture can still
-// fit. On gfx1250 that is AllReduce 256 MiB whenever it is the largest entry.
-size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
-
 // Returns true when the DDA fast path should be attempted for this arch/size.
 // `threshold` is the per-collective cap from rcclDdaEntryThreshold(). 0 disables
 // DDA for the call.

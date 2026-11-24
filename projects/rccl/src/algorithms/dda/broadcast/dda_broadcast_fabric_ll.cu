@@ -75,14 +75,14 @@ size_t ncclBroadcastDdaBlockBudget(const ncclComm* comm) {
 }
 
 bool ncclBroadcastDdaFabricLLEligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  if (comm == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) return false;
+  if (comm == nullptr || comm->ddaRegionLL.self == nullptr || comm->ddaRegionLL.peersDev == nullptr) return false;
   if (comm->ddaFabricMemHandler == nullptr && comm->ddaIpcMemHandler == nullptr) return false;
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) return false;
   if (count == 0) return false;
   const size_t bytes = count * ncclTypeSize(datatype);
   if (bytes % 16 != 0) return false;
   if (bytes > rcclDdaLLThreshold(comm, ncclFuncBroadcast)) return false;
-  if ((bytes >> 3) > ddaLLBcSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) return false;
+  if ((bytes >> 3) > ddaLLBcSlotPkts(ddaBankSize(comm->ddaRegionLL.bytes), comm->nRanks)) return false;
   // Both the root and the non-root grid must fit the epoch cells.
   const dim3 r = ddaLLBcGrid(comm, /*isRoot=*/true, bytes);
   const dim3 n = ddaLLBcGrid(comm, /*isRoot=*/false, bytes);
@@ -107,8 +107,8 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
     reinterpret_cast<uintptr_t>(recvbuff) | (isRoot ? reinterpret_cast<uintptr_t>(sendbuff) : 0);
   const bool aligned = addrs % sizeof(uint32_t) == 0;
 
-  char* const* peers = reinterpret_cast<char* const*>(comm->ddaPeerPtrsDev);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  char* const* peers = reinterpret_cast<char* const*>(comm->ddaRegionLL.peersDev);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL.bytes);
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
 
   INFO(NCCL_COLL, "DDA Broadcast LL: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u aligned=%d", comm->nRanks, root,

@@ -151,7 +151,7 @@ static bool ddaLLArSpreadSelected(ncclComm* comm, size_t bytes, unsigned threads
     return false;
   }
   if (dda::common::ddaLLSpreadShardPkts(bytes >> 3, nRanks) >
-      ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), nRanks)) {
+      ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaRegionLL.bytes), nRanks)) {
     return false;
   }
   return ddaLLArSpreadWins(bytes, nRanks);
@@ -186,12 +186,12 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL.peersDev);
   // Shared epoch counter (same as AG/RS) so bank = flag & 1 is consistent
   // across all LL operation types and cannot alias scratch banks.
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL.bytes);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   if (ddaLLArSpreadSelected(comm, bytes, block.x)) {
@@ -339,14 +339,14 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t slices = ddaLL128Slices(bytes);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL128.bytes);
 
   const bool peerPar = ddaArLL128PeerPar(comm, bytes, /*oneShot=*/true, cap);
   const auto geom = ddaArLL128Geom(comm, bytes, /*oneShot=*/true, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL128.peersDev);
   // Same epoch counter the LL tiers use: they share a scratch layout, so one
   // monotonic flag is what keeps either from accepting a line the other left.
   uint32_t* epochDev = comm->ddaLLEpochDev;
@@ -380,7 +380,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const size_t bytes = count * sizeof(T);
   const size_t shardBytes = bytes / (size_t)nRanks;
   const size_t slices = ddaLL128Slices(shardBytes);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL128.bytes);
 
   const int wire = ddaArLL128Wire(comm, bytes);
   const bool peerPar = ddaArLL128PeerPar(comm, bytes, /*oneShot=*/false, cap);
@@ -388,7 +388,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL128.peersDev);
   // Same epoch counter every other LL/LL128 tier uses.
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
@@ -427,12 +427,12 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL.peersDev);
   // Same epoch counter the one-shot tier uses: the two share a scratch layout, so
   // one monotonic flag is what keeps either from accepting a line the other left.
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL.bytes);
 
   INFO(NCCL_COLL, "DDA fabric AllReduce LL two-shot: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
        grid.x, block.x);
@@ -480,7 +480,8 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
     return false;
   }
   // Fabric path: requires the fabric handler + scratch + peer table.
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL.self == nullptr ||
+      comm->ddaRegionLL.peersDev == nullptr) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
@@ -504,7 +505,7 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   // One packet carries 8B of payload, so the whole message has to fit the slot
   // the bank gives each rank. A bank too small for one packet per rank takes the
   // tier out entirely.
-  if ((bytes >> 3) > ddaLLArSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  if ((bytes >> 3) > ddaLLArSlotPkts(ddaBankSize(comm->ddaRegionLL.bytes), comm->nRanks)) {
     return false;
   }
 
@@ -524,7 +525,8 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
     return false;
   }
   // Fabric path: requires the fabric handler + scratch + peer table.
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL.self == nullptr ||
+      comm->ddaRegionLL.peersDev == nullptr) {
     return false;
   }
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
@@ -554,7 +556,7 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
 
   // A two-shot slot is half the one-shot's because a bank carries two staging
   // areas, so only the shard has to fit that halved slot.
-  if ((bytesPerRank >> 3) > ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  if ((bytesPerRank >> 3) > ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaRegionLL.bytes), comm->nRanks)) {
     return false;
   }
 
@@ -578,7 +580,8 @@ static bool ddaLL128ArOneShotEligibleCapped(ncclComm* comm, const void* sendbuff
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL128.self == nullptr ||
+      comm->ddaRegionLL128.peersDev == nullptr) {
     return false;
   }
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) {
@@ -609,7 +612,7 @@ static bool ddaLL128ArOneShotEligibleCapped(ncclComm* comm, const void* sendbuff
     return false;
   }
   // can the bank hold the data in the slot
-  const size_t slotWords = ddaLL128ArSlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks);
+  const size_t slotWords = ddaLL128ArSlotWords(ddaBankSize(comm->ddaRegionLL128.bytes), comm->nRanks);
   if (ddaLL128Slices(bytes) * (size_t)kDdaLL128WireWordsPerSlice > slotWords) {
     return false;
   }
@@ -632,7 +635,8 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL128.self == nullptr ||
+      comm->ddaRegionLL128.peersDev == nullptr) {
     return false;
   }
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) {
@@ -671,7 +675,7 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
 
   // A two-shot slot is half the one-shot's because a bank carries two staging
   // areas, so the shard has to fit the slices that halved stride holds.
-  const size_t slotWords = ddaLL128ArTwoShotSlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks);
+  const size_t slotWords = ddaLL128ArTwoShotSlotWords(ddaBankSize(comm->ddaRegionLL128.bytes), comm->nRanks);
   if (ddaLL128Slices(shardBytes) * (size_t)kDdaLL128WireWordsPerSlice > slotWords) {
     return false;
   }

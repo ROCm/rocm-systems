@@ -1525,47 +1525,6 @@ size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaEntryThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
 }
 
-size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
-  size_t cap = 0;
-  auto bump = [&](size_t v) {
-    if (v > cap) cap = v;
-  };
-  size_t env = 0;
-  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &env)) bump(env);
-  if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &env)) bump(env);
-  if (ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &env)) bump(env);
-
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
-  if (table == nullptr) {
-    // Same pre-table defaults rcclDda{LL,LL128,Vmm}Threshold return when the
-    // table is ignored, so fabric scratch covers any DDA path the selector
-    // can still pick. Env, when set (including 0 to disable a tier), already
-    // won above and is not replaced.
-    size_t unused;
-    if (!ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &unused)) bump(kDdaLLBaseDefault);
-    if (!ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &unused)) bump(kDdaLL128BaseDefault);
-    if (!ddaThresholdFromEnv(rcclParamDdaThreshold(), &unused)) bump(kDdaVmmBaseDefault);
-    return cap;
-  }
-
-  // All table entries are total message bytes; the selector compares totalBytes
-  // directly (rccl_wrap.cc rcclSelectReduceScatter). Rank-scaled caps are clipped to
-// rankScaledMaxBytes, which the table keeps within these totals.
-  for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i) {
-    bump(table->ddaLLMax[i]);
-    bump(table->ddaLL128Max[i]);
-    bump(table->ddaVmmMax[i]);
-    bump(table->ddaVmmMaxR2[i]);
-    // Graph VMM is included even for eager-only processes: one buffer must
-    // fit a later capture (gfx1250 AR graph cap is 256 MiB).
-    bump(table->ddaVmmMaxGraph[i]);
-    // AG CE-Scratch (and any other non-AR CE-scratch) copies the receive into
-    // ddaScratch, so that window must fit. AR 2-shot uses ceARTmpBuf.
-    if (i != (int)ncclFuncAllReduce) bump(table->ceNonRegMax[i]);
-  }
-  return cap;
-}
-
 // Context-aware VMM threshold resolver.  Callers pass the full winRegType so
 // the function can apply the correct override without the caller having to
 // interpret registration semantics.  Policy: only recv registration shifts the
@@ -2519,7 +2478,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       // Branch #2: CE via DDA scratch (unregistered windows).
       // Fires either via RCCL_FORCE_CE or automatically when totalBytes falls in the
       // [ceNonRegMin, ceNonRegMax] window from the arch table.  The scratch buffer
-      // must be large enough to hold the receive (ddaScratchBytes >= totalBytes).
+      // CE region must be large enough to hold the receive (ddaRegionCe.bytes >= totalBytes).
       const bool ceScratch =
         !ceCapturing && ncclCeScratchAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
       const size_t agCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllGather);
@@ -2528,13 +2487,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (rcclForceCeScratchEnabled(comm) && ceScratch &&
           winRegType == ncclSymSendNonregRecvNonreg &&
           !hasSysmemSegment &&
-          comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes &&
+          comm->ddaRegionCe.self != nullptr && totalBytes <= comm->ddaRegionCe.bytes &&
           ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || agCeNonRegWindow)) {
         decision->algo = RCCL_CE_SCRATCH;
         return rcclSelectDone("AG", query, decision);
       }
-      if (!query) INFO(NCCL_TUNING, "AG CE-scratch disqualified: ceScratch=%d hasSysmem=%d ddaScratch=%p totalBytes=%zu ddaScratchBytes=%zu forceCeScratch=%d agCeNonRegWindow=%d",
-           (int)ceScratch, (int)hasSysmemSegment, comm->ddaScratch, totalBytes, (size_t)comm->ddaScratchBytes, (int)rcclForceCeScratchEnabled(comm), (int)agCeNonRegWindow);
+      if (!query) INFO(NCCL_TUNING, "AG CE-scratch disqualified: ceScratch=%d hasSysmem=%d ceRegion=%p totalBytes=%zu ceRegionBytes=%zu forceCeScratch=%d agCeNonRegWindow=%d",
+           (int)ceScratch, (int)hasSysmemSegment, comm->ddaRegionCe.self, totalBytes, comm->ddaRegionCe.bytes, (int)rcclForceCeScratchEnabled(comm), (int)agCeNonRegWindow);
       // Branch #3: CE via registered symmetric windows. Taken when symk is not
       // eligible and the size is within ceRegMax, or when CTAPolicy=ZERO forces
       // CE for every size.
@@ -3023,14 +2982,14 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 
     // (6) CE scratch: unregistered buffers, RCCL_FORCE_CE, recv fits in DDA scratch.
     // Guard a2aWinRegType to reject registered recv windows (they must not be routed through
-    // ddaScratch; that would clobber the user recv buffer).  Mirrors AllGather Branch #2 at
+    // the DDA CE scratch region; that would clobber the user recv buffer).  Mirrors AllGather Branch #2 at
     // line ~1643 and the taskAppend funnel guard at enqueue.cc:3978.
     // CTAPolicy_ZERO bypasses the size window; RCCL_FORCE_CE=0 disables CE-scratch entirely.
     const size_t a2aCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAlltoAll);
     const size_t a2aCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAlltoAll);
     const bool a2aCeNonRegWindow = rcclWindowFits(totalBytes, a2aCeNonRegMin, a2aCeNonRegMax);
     if (rcclForceCeScratchEnabled(comm) && !a2aHasSysmem &&
-        comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
+        comm->ddaRegionCe.self != nullptr && totalBytes <= comm->ddaRegionCe.bytes &&
         ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || a2aCeNonRegWindow) &&
         ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_SCRATCH;

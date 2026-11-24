@@ -58,10 +58,10 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   const dim3 block = gridBlock.second;
   const int blocksPerPeer = (int)grid.y;
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL.peersDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL.bytes);
 
   INFO(NCCL_COLL, "DDA fabric AllToAll LL: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
@@ -100,7 +100,8 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL.self == nullptr ||
+      comm->ddaRegionLL.peersDev == nullptr) {
     return false;
   }
   if (count == 0) {
@@ -123,7 +124,7 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
     return false;
   }
   // One packet carries 8B of payload, so each peer's chunk has to fit the slot the bank gives it.
-  if ((perChunkBytes >> 3) > ddaLLPeerSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+  if ((perChunkBytes >> 3) > ddaLLPeerSlotPkts(ddaBankSize(comm->ddaRegionLL.bytes), comm->nRanks)) {
     return false;
   }
 

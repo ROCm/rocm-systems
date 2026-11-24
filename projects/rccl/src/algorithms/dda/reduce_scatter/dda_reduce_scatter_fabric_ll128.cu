@@ -122,11 +122,11 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   const int nRanks = comm->nRanks;
   const size_t shardBytes = recvcount * sizeof(T);
   const size_t slices = ddaLL128Slices(shardBytes);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaRegionLL128.bytes);
 
   const DdaLL128RsGeom geom = ddaReduceScatterFabricLL128Geom(comm, shardBytes);
 
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  T** peers = reinterpret_cast<T**>(comm->ddaRegionLL128.peersDev);
   // Same epoch counter every other LL/LL128 tier uses: they share a scratch
   // layout, so one monotonic flag is what keeps either from accepting a line
   // the other left.
@@ -172,7 +172,8 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL128.self == nullptr ||
+      comm->ddaRegionLL128.peersDev == nullptr) {
     return false;
   }
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) {
@@ -210,7 +211,7 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   }
 
   // The shard has to fit the slices one rank's slot holds.
-  const size_t slotWords = ddaLL128RsSlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks);
+  const size_t slotWords = ddaLL128RsSlotWords(ddaBankSize(comm->ddaRegionLL128.bytes), comm->nRanks);
   if (ddaLL128Slices(shardBytes) * (size_t)kDdaLL128WireWordsPerSlice > slotWords) {
     return false;
   }

@@ -854,6 +854,11 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaScratchIsVmm = false;
   comm->ddaPeerPtrsDev = nullptr;
   comm->ddaPeerPtrsHost = nullptr;
+  comm->ddaRegionCe = {};
+  comm->ddaRegionLL = {};
+  comm->ddaRegionLL128 = {};
+  comm->ddaFabricScratchBase = nullptr;
+  comm->ddaFabricScratchTotalBytes = 0;
   comm->ddaIpcBarrierState = nullptr;
   comm->ddaFabricBarrierState = nullptr;
   comm->ddaFabricMemHandler = nullptr;

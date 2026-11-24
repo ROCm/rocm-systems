@@ -122,7 +122,8 @@ static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, 
 bool ncclBroadcastDdaFabricLL128Eligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   if (comm == nullptr || comm->bootstrap == nullptr)
     return false;
-  if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr)
+  if (comm->ddaFabricMemHandler == nullptr || comm->ddaRegionLL128.self == nullptr ||
+      comm->ddaRegionLL128.peersDev == nullptr)
     return false;
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1)
     return false;
@@ -137,7 +138,7 @@ bool ncclBroadcastDdaFabricLL128Eligible(ncclComm* comm, size_t count, ncclDataT
   if (bytes % 16 != 0)
     return false;
 
-  const size_t bank = ddaBankSize(comm->ddaScratchBytes);
+  const size_t bank = ddaBankSize(comm->ddaRegionLL128.bytes);
 
   if (bytes < kDdaLL128BcTwoShotMin) {
     // One-shot path checks
@@ -189,8 +190,8 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
       reinterpret_cast<uintptr_t>(recvbuff) | (isRoot ? reinterpret_cast<uintptr_t>(sendbuff) : 0);
     const bool aligned = addrs % 16 == 0;
 
-    char* const* peers = reinterpret_cast<char* const*>(comm->ddaPeerPtrsDev);
-    const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+    char* const* peers = reinterpret_cast<char* const*>(comm->ddaRegionLL128.peersDev);
+    const size_t bankSize = ddaBankSize(comm->ddaRegionLL128.bytes);
     const dda::common::DdaKernelParams params{comm->abortFlagDev};
 
     const DdaLL128BcArch arch = ddaLL128BcArch(comm);
@@ -217,11 +218,11 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
 
     const size_t slices = ddaLL128Slices(bytes);
     const size_t cs = ddaLL128BcTwoShotChunkSlices(slices, comm->nRanks);
-    const size_t bank = ddaBankSize(comm->ddaScratchBytes);
+    const size_t bank = ddaBankSize(comm->ddaRegionLL128.bytes);
 
     auto [grid, block] = ddaBroadcastFabricLL128Geom(comm, bytes);
 
-    int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
+    int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaRegionLL128.peersDev);
     uint32_t* epochDev = comm->ddaLLEpochDev;
     const int epochLen = comm->ddaLLEpochLen;
     const int nRanks = comm->nRanks;
