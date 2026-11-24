@@ -1,12 +1,12 @@
 ---
 myst:
     html_meta:
-        "description": "Execution plugin system in rocJITsu, covering the ExecutionPlugin interface, multi-plugin dispatch, sink configuration, and built-in plugins for race detection and kernel logging."
-        "keywords": "rocJITsu, ROCm, execution plugins, race detection, kernel logging, sink system, RJ_RACE, RJ_LOG, RJ_SINKS, RJ_SINK_DIR"
+        "description": "Execution plugin system in rocjitsu, covering the ExecutionPlugin interface, multi-plugin dispatch, sink configuration, and built-in plugins for race detection and kernel logging."
+        "keywords": "rocjitsu, ROCm, execution plugins, race detection, kernel logging, sink system, RJ_RACE, RJ_LOG, RJ_SINKS, RJ_SINK_DIR"
 ---
 # Execution plugin system
 
-rocJITsu provides a pluggable execution plugin system that lets analysis
+rocjitsu provides a pluggable execution plugin system that lets analysis
 tools observe simulation events without modifying the core hardware
 model. Each plugin receives callbacks at well-defined points during
 wavefront execution, and all output flows through a configurable sink
@@ -95,7 +95,7 @@ that multiple sinks can be active at the same time. For example,
 | `RJ_SINK_DIR` | *(none)* | Directory for file sinks. Required when `file` appears in `RJ_SINKS`. |
 
 
-For a full reference of all rocJITsu environment variables, see
+For a full reference of all rocjitsu environment variables, see
 [Environment variable reference](../reference/environment-variables.md).
 
 ## Built-in plugins

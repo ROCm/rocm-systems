@@ -113,6 +113,7 @@ test_categories:
       - "Recorder.*"
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
+      - "DebugAttn.*"
       - "GinPluginInitFail.*"
       - "TunerPluginConstants.*"
       - "CpuAffinity.*"
@@ -123,6 +124,7 @@ test_categories:
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
+      - "HipProbe.*"
     exclude_windows:
       - "*"
     labels:

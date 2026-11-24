@@ -62,13 +62,15 @@ find_elf_symbol_for_test(std::span<const uint8_t> image, std::string_view name) 
     const uint64_t image_size = image.size();
     return offset <= image_size && size <= image_size - offset;
   };
-  if (!range_is_in_image(0, sizeof(Elf64_Ehdr)))
+  if (!range_is_in_image(0, sizeof(Elf64_Ehdr))) {
     return std::nullopt;
+  }
 
   const auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
   const uint64_t section_table_size = static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr);
-  if (!range_is_in_image(header.e_shoff, section_table_size))
+  if (!range_is_in_image(header.e_shoff, section_table_size)) {
     return std::nullopt;
+  }
 
   const auto sections = read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
   for (const Elf64_Shdr &symtab : sections) {
@@ -78,19 +80,22 @@ find_elf_symbol_for_test(std::span<const uint8_t> image, std::string_view name) 
       continue;
     }
     const Elf64_Shdr &strtab = sections[symtab.sh_link];
-    if (strtab.sh_type != SHT_STRTAB || !range_is_in_image(strtab.sh_offset, strtab.sh_size))
+    if (strtab.sh_type != SHT_STRTAB || !range_is_in_image(strtab.sh_offset, strtab.sh_size)) {
       continue;
+    }
     const auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab.sh_offset,
                                                             symtab.sh_size / sizeof(Elf64_Sym));
     for (const Elf64_Sym &symbol : symbols) {
-      if (symbol.st_name >= strtab.sh_size)
+      if (symbol.st_name >= strtab.sh_size) {
         continue;
+      }
       const char *begin =
           reinterpret_cast<const char *>(image.data() + strtab.sh_offset + symbol.st_name);
       const size_t remaining = strtab.sh_size - symbol.st_name;
       const auto *end = static_cast<const char *>(std::memchr(begin, '\0', remaining));
-      if (end != nullptr && std::string_view(begin, static_cast<size_t>(end - begin)) == name)
+      if (end != nullptr && std::string_view(begin, static_cast<size_t>(end - begin)) == name) {
         return symbol;
+      }
     }
   }
   return std::nullopt;
@@ -99,8 +104,9 @@ find_elf_symbol_for_test(std::span<const uint8_t> image, std::string_view name) 
 /// @brief Find a named section in a parsed code object.
 [[nodiscard]] inline const Section *find_section(const CodeObject &co, std::string_view name) {
   for (const auto &section : co.all_sections()) {
-    if (section->name() == name)
+    if (section->name() == name) {
       return section.get();
+    }
   }
   return nullptr;
 }
@@ -108,8 +114,9 @@ find_elf_symbol_for_test(std::span<const uint8_t> image, std::string_view name) 
 /// @brief Map a loaded ELF virtual address back to its file offset.
 [[nodiscard]] inline std::optional<uint64_t>
 loaded_vaddr_to_file_offset(std::span<const uint8_t> image, uint64_t vaddr) {
-  if (image.size() < sizeof(Elf64_Ehdr))
+  if (image.size() < sizeof(Elf64_Ehdr)) {
     return std::nullopt;
+  }
   Elf64_Ehdr header{};
   std::memcpy(&header, image.data(), sizeof(header));
   if (header.e_phoff == 0 || header.e_phnum == 0 || header.e_phentsize != sizeof(Elf64_Phdr)) {
@@ -130,8 +137,9 @@ loaded_vaddr_to_file_offset(std::span<const uint8_t> image, uint64_t vaddr) {
       continue;
     }
     const uint64_t file_offset = program.p_offset + (vaddr - program.p_vaddr);
-    if (file_offset >= image.size())
+    if (file_offset >= image.size()) {
       return std::nullopt;
+    }
     return file_offset;
   }
   return std::nullopt;
@@ -141,8 +149,9 @@ loaded_vaddr_to_file_offset(std::span<const uint8_t> image, uint64_t vaddr) {
 template <typename T>
 [[nodiscard]] std::optional<T> read_loaded_value(std::span<const uint8_t> image, uint64_t vaddr) {
   const auto offset = loaded_vaddr_to_file_offset(image, vaddr);
-  if (!offset || *offset > image.size() || sizeof(T) > image.size() - *offset)
+  if (!offset || *offset > image.size() || sizeof(T) > image.size() - *offset) {
     return std::nullopt;
+  }
   T value{};
   std::memcpy(&value, image.data() + *offset, sizeof(value));
   return value;

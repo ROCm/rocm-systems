@@ -5,6 +5,7 @@
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_SELECTORS_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -31,27 +32,27 @@ inline constexpr uint32_t kExecSelectorLast = 127;
 inline constexpr uint32_t kFlatScratchBaseSelectorFirst = 230;
 inline constexpr uint32_t kFlatScratchBaseSelectorLast = 231;
 
-[[nodiscard]] inline constexpr bool scalar_selector_is_null(rj_code_arch_t arch,
+[[nodiscard]] inline constexpr bool scalar_selector_is_null(rocjitsu::IsaFamily arch,
                                                             uint32_t selector) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
     return selector == kGfx10NullSelector;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
     return selector == kModernNullSelector;
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
   default:
     return false;
   }
 }
 
-[[nodiscard]] inline constexpr uint32_t scalar_m0_selector(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr uint32_t scalar_m0_selector(rocjitsu::IsaFamily arch) {
   return scalar_selector_is_null(arch, kModernNullSelector) ? kModernM0Selector : kLegacyM0Selector;
 }
 

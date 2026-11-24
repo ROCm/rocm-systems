@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/rocjitsu.h"
+#include "scoped_temp.h"
 
 #include <array>
 #include <atomic>
@@ -34,27 +35,8 @@ namespace {
 
 using namespace rocjitsu;
 
-class TempDirectory {
-public:
-  TempDirectory() {
-    std::string pattern =
-        (std::filesystem::temp_directory_path() / "rj-daemon-test-XXXXXX").string();
-    pattern.push_back('\0');
-    char *created = mkdtemp(pattern.data());
-    if (created)
-      path_ = created;
-  }
-
-  ~TempDirectory() {
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
-  }
-
-  [[nodiscard]] const std::filesystem::path &path() const { return path_; }
-
-private:
-  std::filesystem::path path_;
-};
+using rocjitsu::test::initialize_runtime_directory;
+using rocjitsu::test::ScopedTempDirectory;
 
 const std::string &daemon_json() {
   static const std::string config = [] {
@@ -88,8 +70,9 @@ public:
 
   rj_status_t stop() {
     const rj_status_t status = rj_daemon_stop(daemon_);
-    if (status == ROCJITSU_STATUS_SUCCESS)
+    if (status == ROCJITSU_STATUS_SUCCESS) {
       daemon_ = nullptr;
+    }
     return status;
   }
 
@@ -101,14 +84,16 @@ private:
 int connect_to(const std::filesystem::path &socket_path) {
   const std::string path = socket_path.string();
   sockaddr_un address{};
-  if (path.size() >= sizeof(address.sun_path))
+  if (path.size() >= sizeof(address.sun_path)) {
     return -1;
+  }
   address.sun_family = AF_UNIX;
   std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
 
   const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (fd < 0)
+  if (fd < 0) {
     return -1;
+  }
   const auto length = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + path.size() + 1);
   if (connect(fd, reinterpret_cast<const sockaddr *>(&address), length) != 0) {
     close(fd);
@@ -156,8 +141,9 @@ bool send_ioctl_request(int fd, uint32_t request_id, uint32_t command, const voi
                         size_t argument_size, const void *inline_data = nullptr,
                         size_t inline_size = 0) {
   constexpr size_t max_arguments = UINT32_MAX - sizeof(RpcIoctlRequest);
-  if (argument_size > max_arguments || inline_size > max_arguments - argument_size)
+  if (argument_size > max_arguments || inline_size > max_arguments - argument_size) {
     return false;
+  }
 
   const auto args_bytes = static_cast<uint32_t>(argument_size + inline_size);
   RpcHeader header{};
@@ -226,20 +212,25 @@ bool control_transfer(int fd, void *data, size_t size, bool sending) {
   while (offset < size) {
     const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
         deadline - std::chrono::steady_clock::now());
-    if (remaining.count() <= 0)
+    if (remaining.count() <= 0) {
       return false;
+    }
     pollfd ready{fd, static_cast<short>(sending ? POLLOUT : POLLIN), 0};
     const int polled = poll(&ready, 1, static_cast<int>(remaining.count()));
-    if (polled < 0 && errno == EINTR)
+    if (polled < 0 && errno == EINTR) {
       continue;
-    if (polled <= 0 || (ready.revents & (POLLERR | POLLNVAL)))
+    }
+    if (polled <= 0 || (ready.revents & (POLLERR | POLLNVAL))) {
       return false;
+    }
     const ssize_t moved = sending ? send(fd, bytes + offset, size - offset, MSG_NOSIGNAL)
                                   : recv(fd, bytes + offset, size - offset, 0);
-    if (moved < 0 && errno == EINTR)
+    if (moved < 0 && errno == EINTR) {
       continue;
-    if (moved <= 0)
+    }
+    if (moved <= 0) {
       return false;
+    }
     offset += static_cast<size_t>(moved);
   }
   return true;
@@ -285,65 +276,79 @@ int run_peer_owner(const std::filesystem::path &socket, int control) {
   };
 
   char start = 0;
-  if (!receive_control(control, start) || start != 'S')
+  if (!receive_control(control, start) || start != 'S') {
     return fail(1, -EIO);
+  }
   const int connection = connect_to(socket);
-  if (connection < 0)
+  if (connection < 0) {
     return fail(2, -errno);
+  }
   RemoteDriver client(connection);
   const int kfd_fd = client.open();
-  if (kfd_fd < 0)
+  if (kfd_fd < 0) {
     return fail(3, -EIO);
+  }
 
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
   allocation.size = kPeerPageBytes;
   allocation.gpu_id = kPeerOwnerGpu;
   allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
   int result = client.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation);
-  if (result != 0)
+  if (result != 0) {
     return fail(4, result);
+  }
   uint32_t owner_id = kPeerOwnerGpu;
   kfd_ioctl_map_memory_to_gpu_args map{};
   map.handle = allocation.handle;
   map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
   map.n_devices = 1;
   result = client.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
-  if (result != 0 || map.n_success != 1)
+  if (result != 0 || map.n_success != 1) {
     return fail(5, result, map.n_success);
+  }
   auto *owner_bytes = static_cast<uint8_t *>(client.mmap(
       nullptr, kPeerPageBytes, PROT_READ | PROT_WRITE, MAP_SHARED, allocation.mmap_offset));
-  if (owner_bytes == MAP_FAILED)
+  if (owner_bytes == MAP_FAILED) {
     return fail(10, -errno);
+  }
   std::memcpy(owner_bytes + kPeerPayloadOffset, kOwnerSeed.data(), kOwnerSeed.size());
   kfd_ioctl_ipc_export_handle_args exported{};
   exported.handle = allocation.handle;
   exported.gpu_id = kPeerOwnerGpu;
   result = client.ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported);
-  if (result != 0)
+  if (result != 0) {
     return fail(6, result);
+  }
 
   report.va = allocation.va_addr;
   report.n_success = map.n_success;
   std::memcpy(report.share_handle, exported.share_handle, sizeof(report.share_handle));
-  if (!send_control(control, report))
+  if (!send_control(control, report)) {
     return 1;
+  }
 
   char release = 0;
-  if (!receive_control(control, release) || release != 'R')
+  if (!receive_control(control, release) || release != 'R') {
     return fail(7, -EIO);
-  if (std::memcmp(owner_bytes + kPeerPayloadOffset, kPeerPayload.data(), kPeerPayload.size()) != 0)
+  }
+  if (std::memcmp(owner_bytes + kPeerPayloadOffset, kPeerPayload.data(), kPeerPayload.size()) !=
+      0) {
     return fail(11, -EIO);
+  }
   kfd_ioctl_free_memory_of_gpu_args free{};
   free.handle = allocation.handle;
   result = client.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
-  if (result != 0)
+  if (result != 0) {
     return fail(8, result);
-  if (::munmap(owner_bytes, kPeerPageBytes) != 0)
+  }
+  if (::munmap(owner_bytes, kPeerPageBytes) != 0) {
     return fail(12, -errno);
+  }
   result = client.close();
   close(kfd_fd);
-  if (result != 0)
+  if (result != 0) {
     return fail(9, result);
+  }
   report.stage = 0;
   return send_control(control, report) ? 0 : 1;
 }
@@ -360,41 +365,49 @@ int run_peer_importer(const std::filesystem::path &socket, int control) {
   };
 
   PeerRpcReport owner{};
-  if (!receive_control(control, owner) || owner.stage != 0)
+  if (!receive_control(control, owner) || owner.stage != 0) {
     return fail(1, -EIO);
+  }
   const int connection = connect_to(socket);
-  if (connection < 0)
+  if (connection < 0) {
     return fail(2, -errno);
+  }
   RemoteDriver client(connection);
   const int kfd_fd = client.open();
-  if (kfd_fd < 0)
+  if (kfd_fd < 0) {
     return fail(3, -EIO);
+  }
 
   kfd_ioctl_ipc_import_handle_args imported{};
   std::memcpy(imported.share_handle, owner.share_handle, sizeof(imported.share_handle));
   imported.gpu_id = kPeerOwnerGpu;
   imported.va_addr = owner.va + 0x20000;
   int result = client.ioctl(AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported);
-  if (result != 0)
+  if (result != 0) {
     return fail(4, result);
+  }
   auto *imported_bytes = static_cast<uint8_t *>(client.mmap(
       nullptr, kPeerPageBytes, PROT_READ | PROT_WRITE, MAP_SHARED, imported.mmap_offset));
-  if (imported_bytes == MAP_FAILED)
+  if (imported_bytes == MAP_FAILED) {
     return fail(13, -errno);
-  if (std::memcmp(imported_bytes + kPeerPayloadOffset, kOwnerSeed.data(), kOwnerSeed.size()) != 0)
+  }
+  if (std::memcmp(imported_bytes + kPeerPayloadOffset, kOwnerSeed.data(), kOwnerSeed.size()) != 0) {
     return fail(14, -EIO);
+  }
   std::array<uint32_t, 2> ids{kPeerOwnerGpu, kPeerRequesterGpu};
   kfd_ioctl_map_memory_to_gpu_args map{};
   map.handle = imported.handle;
   map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
   map.n_devices = 1;
   result = client.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
-  if (result != 0 || map.n_success != 1)
+  if (result != 0 || map.n_success != 1) {
     return fail(5, result, map.n_success);
+  }
   map.n_devices = ids.size();
   result = client.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
-  if (result != 0 || map.n_success != ids.size())
+  if (result != 0 || map.n_success != ids.size()) {
     return fail(6, result, map.n_success);
+  }
 
   struct GttBuffer {
     uint64_t gpu_va = 0;
@@ -430,16 +443,18 @@ int run_peer_importer(const std::filesystem::path &socket, int control) {
     buffer = {allocation.va_addr, allocation.handle, static_cast<uint8_t *>(host)};
     return true;
   };
-  if (!prepare_gtt(ring, 20) || !prepare_gtt(pointers, 23) || !prepare_gtt(local, 26))
+  if (!prepare_gtt(ring, 20) || !prepare_gtt(pointers, 23) || !prepare_gtt(local, 26)) {
     return 1;
+  }
   std::memcpy(local.host, kPeerPayload.data(), kPeerPayload.size());
 
   const off_t doorbell_offset =
       static_cast<off_t>(KFD_MMAP_TYPE_DOORBELL | kfd_mmap_gpu_id(kPeerRequesterGpu));
   void *doorbell_page =
       client.mmap(nullptr, kPeerPageBytes, PROT_READ | PROT_WRITE, MAP_SHARED, doorbell_offset);
-  if (doorbell_page == MAP_FAILED)
+  if (doorbell_page == MAP_FAILED) {
     return fail(29, -errno);
+  }
   kfd_ioctl_create_queue_args queue{};
   queue.gpu_id = kPeerRequesterGpu;
   queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
@@ -449,8 +464,9 @@ int run_peer_importer(const std::filesystem::path &socket, int control) {
   queue.write_pointer_address = pointers.gpu_va + sizeof(uint64_t);
   queue.queue_percentage = 100;
   result = client.ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue);
-  if (result != 0)
+  if (result != 0) {
     return fail(30, result);
+  }
   auto *ring_words = reinterpret_cast<uint32_t *>(ring.host);
   auto *queue_pointers = reinterpret_cast<uint64_t *>(pointers.host);
   auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<uint8_t *>(doorbell_page) +
@@ -470,59 +486,74 @@ int run_peer_importer(const std::filesystem::path &socket, int control) {
     std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
-      if (std::atomic_ref<uint64_t>(queue_pointers[0]).load(std::memory_order_acquire) == producer)
+      if (std::atomic_ref<uint64_t>(queue_pointers[0]).load(std::memory_order_acquire) ==
+          producer) {
         return true;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return false;
   };
 
-  if (!submit_copy(imported.va_addr + kPeerPayloadOffset, local.gpu_va + kPeerReturnOffset, 0))
+  if (!submit_copy(imported.va_addr + kPeerPayloadOffset, local.gpu_va + kPeerReturnOffset, 0)) {
     return fail(31, -ETIMEDOUT);
-  if (std::memcmp(local.host + kPeerReturnOffset, kOwnerSeed.data(), kOwnerSeed.size()) != 0)
+  }
+  if (std::memcmp(local.host + kPeerReturnOffset, kOwnerSeed.data(), kOwnerSeed.size()) != 0) {
     return fail(32, -EIO);
-  if (!submit_copy(local.gpu_va, imported.va_addr + kPeerPayloadOffset, 7))
+  }
+  if (!submit_copy(local.gpu_va, imported.va_addr + kPeerPayloadOffset, 7)) {
     return fail(33, -ETIMEDOUT);
+  }
   if (std::memcmp(imported_bytes + kPeerPayloadOffset, kPeerPayload.data(), kPeerPayload.size()) !=
-      0)
+      0) {
     return fail(34, -EIO);
+  }
 
   kfd_ioctl_destroy_queue_args destroy{};
   destroy.queue_id = queue.queue_id;
   result = client.ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
-  if (result != 0)
+  if (result != 0) {
     return fail(35, result);
+  }
 
   kfd_ioctl_unmap_memory_from_gpu_args unmap{};
   unmap.handle = imported.handle;
   unmap.device_ids_array_ptr = map.device_ids_array_ptr;
   unmap.n_devices = 1;
   result = client.ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
-  if (result != 0 || unmap.n_success != 1)
+  if (result != 0 || unmap.n_success != 1) {
     return fail(7, result, unmap.n_success);
+  }
   unmap.n_devices = ids.size();
   result = client.ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
-  if (result != 0 || unmap.n_success != ids.size())
+  if (result != 0 || unmap.n_success != ids.size()) {
     return fail(8, result, unmap.n_success);
+  }
   kfd_ioctl_free_memory_of_gpu_args free{};
   free.handle = imported.handle;
   result = client.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
-  if (result != 0)
+  if (result != 0) {
     return fail(9, result);
+  }
   for (const GttBuffer &buffer : {ring, pointers, local}) {
     free.handle = buffer.handle;
     result = client.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
-    if (result != 0)
+    if (result != 0) {
       return fail(36, result);
-    if (::munmap(buffer.host, kPeerPageBytes) != 0)
+    }
+    if (::munmap(buffer.host, kPeerPageBytes) != 0) {
       return fail(37, -errno);
+    }
   }
-  if (::munmap(imported_bytes, kPeerPageBytes) != 0 || ::munmap(doorbell_page, kPeerPageBytes) != 0)
+  if (::munmap(imported_bytes, kPeerPageBytes) != 0 ||
+      ::munmap(doorbell_page, kPeerPageBytes) != 0) {
     return fail(38, -errno);
+  }
   result = client.close();
   close(kfd_fd);
-  if (result != 0)
+  if (result != 0) {
     return fail(10, result);
+  }
 
   report.va = imported.va_addr;
   report.n_success = unmap.n_success;
@@ -538,8 +569,9 @@ public:
 
   void stop() {
     for (pid_t *child : {&owner, &importer}) {
-      if (*child <= 0)
+      if (*child <= 0) {
         continue;
+      }
       int status = 0;
       pid_t waited;
       do {
@@ -563,16 +595,18 @@ bool wait_for_peer_child(pid_t &child, int &status) {
       child = -1;
       return true;
     }
-    if (waited < 0 && errno != EINTR)
+    if (waited < 0 && errno != EINTR) {
       return false;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   return false;
 }
 
 TEST(DaemonApi, RejectsInvalidArguments) {
-  TempDirectory directory;
-  const std::string socket = (directory.path() / "daemon.sock").string();
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::string socket = (std::filesystem::path(directory.path()) / "daemon.sock").string();
   rj_daemon_t *daemon = reinterpret_cast<rj_daemon_t *>(1);
 
   EXPECT_EQ(rj_daemon_start(nullptr, socket.c_str(), &daemon), ROCJITSU_STATUS_INVALID_ARGUMENT);
@@ -618,8 +652,9 @@ TEST(DaemonApi, HandshakePublishesEachSelectedRenderMinor) {
        "location_id":1280,"drm_render_minor":130}]}]},
     "local_node":"tray7"
   })";
-  TempDirectory directory;
-  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::filesystem::path socket = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(json, socket.c_str());
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -649,8 +684,9 @@ TEST(DaemonApi, LegacyOneGpuHandshakeKeepsRenderMinorCompatibility) {
   ASSERT_NE(position, std::string::npos);
   json.replace(position, configured.size(), "\"drm_render_minor\": 129");
 
-  TempDirectory directory;
-  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::filesystem::path socket = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(json.c_str(), socket.c_str());
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int connection = connect_to(socket);
@@ -667,8 +703,9 @@ TEST(DaemonApi, LegacyOneGpuHandshakeKeepsRenderMinorCompatibility) {
 }
 
 TEST(DaemonApi, RemoteUserptrUsesCpuAddressIndependentOfGpuVa) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int connection = connect_to(socket_path);
@@ -726,8 +763,9 @@ TEST(DaemonApi, OneGpuManifestHandshakeMatchesOnlySelectedRenderMinor) {
        "location_id":1024,"drm_render_minor":129}]}]},
     "local_node":"tray7"
   })";
-  TempDirectory directory;
-  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::filesystem::path socket = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(json, socket.c_str());
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -776,9 +814,9 @@ TEST(DaemonApi, PeerIpcMapUnmapAcrossDistinctClientPids) {
     "local_node":"tray7"
   })";
 
-  TempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
-  const auto socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket = std::filesystem::path(directory.path()) / "daemon.sock";
   ChildControlSocket owner_control;
   ChildControlSocket importer_control;
   ASSERT_TRUE(owner_control.valid());
@@ -859,8 +897,9 @@ TEST(DaemonApi, PeerIpcMapUnmapAcrossDistinctClientPids) {
 }
 
 TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
-  TempDirectory directory;
-  const std::string socket = (directory.path() / "daemon.sock").string();
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::string socket = (std::filesystem::path(directory.path()) / "daemon.sock").string();
 
   TestDaemon empty_json("", socket.c_str());
   EXPECT_EQ(empty_json.start_status(), ROCJITSU_STATUS_INVALID_ARGUMENT);
@@ -884,8 +923,9 @@ TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
 }
 
 TEST(DaemonApi, PreservesExistingSocketAndNonSocketEntries) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon first(socket_path);
   ASSERT_EQ(first.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -912,8 +952,9 @@ TEST(DaemonApi, PreservesExistingSocketAndNonSocketEntries) {
 }
 
 TEST(DaemonApi, RecoversAbandonedSocket) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   const std::string path = socket_path.string();
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
@@ -934,8 +975,9 @@ TEST(DaemonApi, RecoversAbandonedSocket) {
 }
 
 TEST(DaemonApi, FullListenerQueueDoesNotBlockOrRemoveSocket) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   const std::string path = socket_path.string();
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
@@ -969,8 +1011,9 @@ TEST(DaemonApi, FullListenerQueueDoesNotBlockOrRemoveSocket) {
 }
 
 TEST(DaemonApi, ServesMultipleClientsAndCleansUp) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "nested" / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "nested" / "daemon.sock";
   {
     TestDaemon daemon(socket_path);
     ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
@@ -994,8 +1037,9 @@ TEST(DaemonApi, ServesMultipleClientsAndCleansUp) {
 }
 
 TEST(DaemonApi, MunmapReturnsDriverFailureAndKeepsConnectionUsable) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1016,8 +1060,9 @@ TEST(DaemonApi, MunmapReturnsDriverFailureAndKeepsConnectionUsable) {
 }
 
 TEST(DaemonApi, ClientMunmapDoesNotClaimDaemonBackingAtTheSameAddress) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int connection = connect_to(socket_path);
@@ -1063,8 +1108,9 @@ TEST(DaemonApi, ClientMunmapDoesNotClaimDaemonBackingAtTheSameAddress) {
 }
 
 TEST(DaemonApi, ExportDmabufTransfersSizedBackingFd) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1137,8 +1183,9 @@ TEST(DaemonApi, RemoteCloseReturnsDaemonFailure) {
 }
 
 TEST(DaemonApi, StopUnblocksActiveAndPartialClients) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1164,8 +1211,9 @@ TEST(DaemonApi, StopUnblocksActiveAndPartialClients) {
 }
 
 TEST(DaemonApi, RejectsMalformedMessagesWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   {
     TestDaemon daemon(socket_path);
     ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
@@ -1196,8 +1244,9 @@ TEST(DaemonApi, RejectsMalformedMessagesWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1223,8 +1272,9 @@ TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
 }
 
 TEST(DaemonApi, AcceptsCuMaskInlinePayloadAndKeepsConnectionUsable) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int client = connect_to(socket_path);
@@ -1252,8 +1302,9 @@ TEST(DaemonApi, AcceptsCuMaskInlinePayloadAndKeepsConnectionUsable) {
 }
 
 TEST(DaemonApi, RejectsMalformedCuMaskPayloadWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   struct MaskPayloadCase {
@@ -1292,8 +1343,9 @@ TEST(DaemonApi, RejectsMalformedCuMaskPayloadWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, RejectsWaitEventsInlineArrayOverflowWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1301,8 +1353,9 @@ TEST(DaemonApi, RejectsWaitEventsInlineArrayOverflowWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, RejectsWaitEventsInlineArrayOneByteShortWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1310,8 +1363,9 @@ TEST(DaemonApi, RejectsWaitEventsInlineArrayOneByteShortWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, RejectsWaitEventsInlineArrayWithTrailingByteWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1319,8 +1373,9 @@ TEST(DaemonApi, RejectsWaitEventsInlineArrayWithTrailingByteWithoutStoppingServe
 }
 
 TEST(DaemonApi, DoesNotRemoveAReplacementSocketEntry) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   {
     TestDaemon daemon(socket_path);
     ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);

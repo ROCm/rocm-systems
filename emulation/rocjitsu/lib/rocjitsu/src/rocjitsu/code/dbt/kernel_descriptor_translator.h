@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <array>
 #include <cstdint>
@@ -45,10 +46,11 @@ enum class Rsrc3Layout : uint8_t {
 };
 
 /// @brief RSRC3 layout family for an architecture.
-[[nodiscard]] Rsrc3Layout rsrc3_layout(rj_code_arch_t arch);
+[[nodiscard]] Rsrc3Layout rsrc3_layout(rocjitsu::IsaFamily arch);
 
 /// @brief True when the source RSRC3 word can be carried to the target verbatim.
-[[nodiscard]] bool rsrc3_carries_verbatim(rj_code_arch_t source_arch, rj_code_arch_t target_arch);
+[[nodiscard]] bool rsrc3_carries_verbatim(rocjitsu::IsaFamily source_arch,
+                                          rocjitsu::IsaFamily target_arch);
 
 /// @brief True for the layouts that encode SHARED_VGPR_COUNT in bits 3:0.
 [[nodiscard]] bool rsrc3_layout_has_shared_vgpr_count(Rsrc3Layout layout);
@@ -167,7 +169,7 @@ struct KernelDescriptorFacts {
   /// per-family field maps; in particular GFX10 encodes SHARED_VGPR_COUNT but
   /// reserves bits 11:4, so INST_PREF_SIZE cannot be read from a GFX10 source --
   /// that field starts at GFX11.
-  rj_code_arch_t source_arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily source_arch = rocjitsu::IsaFamily::Invalid;
 };
 
 /// @brief Target descriptor resources plus source/target accounting facts.
@@ -412,7 +414,7 @@ struct KdTranslation : KernelDescriptorFacts, KernelResourcePlan, KernelEntryPla
 /// @brief Compute descriptor patches and semantic metadata for one DBT pair.
 class KernelDescriptorTranslator {
 public:
-  KernelDescriptorTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
+  KernelDescriptorTranslator(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch);
 
   [[nodiscard]] std::vector<KdTranslation>
   translate_image(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
@@ -433,8 +435,8 @@ public:
                        const KernelDescriptorTranslationOptions &options) const;
 
 private:
-  rj_code_arch_t guest_arch_;
-  rj_code_arch_t host_arch_;
+  rocjitsu::IsaFamily guest_arch_;
+  rocjitsu::IsaFamily host_arch_;
 };
 
 } // namespace rocjitsu

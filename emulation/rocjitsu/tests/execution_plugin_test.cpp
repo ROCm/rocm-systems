@@ -10,6 +10,7 @@
 #include "instruction_failure_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
@@ -108,8 +109,9 @@ public:
       std::lock_guard<std::mutex> lock(mutex_);
       hot_hook_threads_.insert(std::this_thread::get_id());
     }
-    if (startup_arrivals_.fetch_add(1, std::memory_order_relaxed) < 2)
+    if (startup_arrivals_.fetch_add(1, std::memory_order_relaxed) < 2) {
       startup_.arrive_and_wait();
+    }
   }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t, uint32_t,
@@ -183,24 +185,29 @@ public:
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
     ++dispatch_callbacks;
     subscribed = subscribe_on_dispatch_;
-    if (reenter_on_dispatch && group)
+    if (reenter_on_dispatch && group) {
       group->onAmdgpuReadSgpr(&wf, 0);
+    }
   }
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
     ++halt_callbacks;
-    if (unsubscribe_on_halt)
+    if (unsubscribe_on_halt) {
       subscribed = false;
-    if (reenter_on_halt && group)
+    }
+    if (reenter_on_halt && group) {
       group->onAmdgpuReadSgpr(&wf, 0);
+    }
   }
 
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override {
     ++cancellation_callbacks;
-    if (unsubscribe_on_cancellation)
+    if (unsubscribe_on_cancellation) {
       subscribed = false;
-    if (reenter_on_cancellation && group)
+    }
+    if (reenter_on_cancellation && group) {
       group->onAmdgpuReadSgpr(&wf, 0);
+    }
   }
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
@@ -424,8 +431,9 @@ public:
     std::cerr << "\n=== Event timeline (" << events_.size() << " events) ===\n";
     for (size_t i = 0; i < events_.size(); ++i) {
       const auto &e = events_[i];
-      if (e.kind > Kind::WAVEFRONT_HALTED && e.kind != Kind::INIT && e.kind != Kind::SHUTDOWN)
+      if (e.kind > Kind::WAVEFRONT_HALTED && e.kind != Kind::INIT && e.kind != Kind::SHUTDOWN) {
         continue;
+      }
       std::cerr << std::setw(4) << i << "  " << std::setw(30) << std::left << kindName(e.kind)
                 << std::right;
       switch (e.kind) {
@@ -453,9 +461,11 @@ public:
   /// Count events of a given kind, optionally filtered by dispatch_id.
   size_t count(Kind kind, uint32_t dispatch_id = UINT32_MAX) const {
     size_t n = 0;
-    for (const auto &e : events_)
-      if (e.kind == kind && (dispatch_id == UINT32_MAX || e.dispatch_id == dispatch_id))
+    for (const auto &e : events_) {
+      if (e.kind == kind && (dispatch_id == UINT32_MAX || e.dispatch_id == dispatch_id)) {
         ++n;
+      }
+    }
     return n;
   }
 
@@ -464,8 +474,9 @@ public:
     std::vector<uint32_t> ids;
     for (const auto &e : events_) {
       if (e.kind == Kind::DISPATCH_PACKET_PROCESSED &&
-          std::ranges::find(ids, e.dispatch_id) == ids.end())
+          std::ranges::find(ids, e.dispatch_id) == ids.end()) {
         ids.push_back(e.dispatch_id);
+      }
     }
     return ids;
   }
@@ -480,8 +491,9 @@ public:
         last_a = i;
         found_a = true;
       }
-      if (events_[i].kind == b && i < first_b)
+      if (events_[i].kind == b && i < first_b) {
         first_b = i;
+      }
     }
     std::cerr << "  edge: last " << kindName(a) << " [" << last_a << "] -> first " << kindName(b)
               << " [" << first_b << "]\n";
@@ -500,8 +512,9 @@ public:
         last_a = i;
         found_a = true;
       }
-      if (events_[i].kind == b && events_[i].dispatch_id == db && i < first_b)
+      if (events_[i].kind == b && events_[i].dispatch_id == db && i < first_b) {
         first_b = i;
+      }
     }
     std::cerr << "  edge: last " << kindName(a) << "(d=" << da << ") [" << last_a << "] -> first "
               << kindName(b) << "(d=" << db << ") [" << first_b << "]\n";
@@ -549,8 +562,9 @@ private:
                          const char *key_name) const {
     std::map<uint32_t, size_t> opens;
     for (size_t i = 0; i < events_.size(); ++i) {
-      if (events_[i].dispatch_id != dispatch_id)
+      if (events_[i].dispatch_id != dispatch_id) {
         continue;
+      }
       uint32_t key = key_fn(events_[i]);
       if (events_[i].kind == begin_kind) {
         opens[key] = i;
@@ -681,8 +695,9 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
   std::istringstream lines{std::string(jsonl)};
   std::string line;
   while (std::getline(lines, line)) {
-    if (line.empty())
+    if (line.empty()) {
       continue;
+    }
 
     flexbuffers::Builder builder;
     if (!plugin_detail::flexbuffer_from_json(line, builder)) {
@@ -699,8 +714,9 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
     const auto record_type = object["record"];
     EXPECT_TRUE(schema.IsString()) << "schema must be a string";
     EXPECT_TRUE(record_type.IsString()) << "record must be a string";
-    if (!schema.IsString() || !record_type.IsString())
+    if (!schema.IsString() || !record_type.IsString()) {
       continue;
+    }
     EXPECT_EQ(schema.AsString().str(), "rocjitsu.throughput.v2");
 
     ParsedThroughputRecord record;
@@ -715,8 +731,9 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
     EXPECT_TRUE(throughput_mips.IsNumeric()) << "mips must be numeric";
     EXPECT_TRUE(families_value.IsMap()) << "families must be an object";
     if (!wall_seconds.IsNumeric() || !wave_instructions.IsIntOrUint() ||
-        !throughput_mips.IsNumeric() || !families_value.IsMap())
+        !throughput_mips.IsNumeric() || !families_value.IsMap()) {
       continue;
+    }
     record.wall_seconds = wall_seconds.AsDouble();
     record.wave_instructions = wave_instructions.AsUInt64();
     record.mips = throughput_mips.AsDouble();
@@ -739,34 +756,43 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
       if (grid.IsAnyVector()) {
         const auto values = grid.AsVector();
         EXPECT_EQ(values.size(), 3u);
-        for (size_t i = 0; i < values.size(); ++i)
+        for (size_t i = 0; i < values.size(); ++i) {
           EXPECT_TRUE(values[i].IsIntOrUint()) << "grid[" << i << "] must be an integer";
+        }
       }
       if (workgroup.IsAnyVector()) {
         const auto values = workgroup.AsVector();
         EXPECT_EQ(values.size(), 3u);
-        for (size_t i = 0; i < values.size(); ++i)
+        for (size_t i = 0; i < values.size(); ++i) {
           EXPECT_TRUE(values[i].IsIntOrUint()) << "workgroup[" << i << "] must be an integer";
+        }
       }
-      if (dispatch_id.IsIntOrUint())
+      if (dispatch_id.IsIntOrUint()) {
         record.dispatch_id = dispatch_id.AsUInt64();
-      if (kernel_name.IsString())
+      }
+      if (kernel_name.IsString()) {
         record.kernel_name = kernel_name.AsString().str();
-      if (kernel_symbol.IsString())
+      }
+      if (kernel_symbol.IsString()) {
         record.kernel_symbol = kernel_symbol.AsString().str();
-      if (workgroups.IsIntOrUint())
+      }
+      if (workgroups.IsIntOrUint()) {
         record.workgroups = workgroups.AsUInt64();
-      if (waves_per_workgroup.IsIntOrUint())
+      }
+      if (waves_per_workgroup.IsIntOrUint()) {
         record.waves_per_workgroup = waves_per_workgroup.AsUInt64();
+      }
     } else if (record.record == "summary") {
       const auto dispatches = object["dispatches"];
       const auto dispatch_seconds_sum = object["dispatch_seconds_sum"];
       EXPECT_TRUE(dispatches.IsIntOrUint()) << "dispatches must be an integer";
       EXPECT_TRUE(dispatch_seconds_sum.IsNumeric()) << "dispatch_seconds_sum must be numeric";
-      if (dispatches.IsIntOrUint())
+      if (dispatches.IsIntOrUint()) {
         record.dispatches = dispatches.AsUInt64();
-      if (dispatch_seconds_sum.IsNumeric())
+      }
+      if (dispatch_seconds_sum.IsNumeric()) {
         record.dispatch_seconds_sum = dispatch_seconds_sum.AsDouble();
+      }
     } else {
       ADD_FAILURE() << "unknown throughput record type: " << record.record;
     }
@@ -777,8 +803,9 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
       const auto family_name = plugins::throughput::ThroughputPlugin::family_name(family);
       const auto family_value = families[family_name.data()];
       EXPECT_TRUE(family_value.IsMap()) << "families." << family_name << " must be an object";
-      if (!family_value.IsMap())
+      if (!family_value.IsMap()) {
         continue;
+      }
       const auto values = family_value.AsMap();
       const auto instructions = values["instructions"];
       const auto execution_seconds = values["execution_seconds"];
@@ -802,14 +829,18 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
       }
       EXPECT_TRUE(dispatch_mips.IsNumeric())
           << "families." << family_name << ".dispatch_mips must be numeric";
-      if (instructions.IsIntOrUint())
+      if (instructions.IsIntOrUint()) {
         record.family_instructions[i] = instructions.AsUInt64();
-      if (execution_seconds.IsNumeric())
+      }
+      if (execution_seconds.IsNumeric()) {
         record.execution_seconds[i] = execution_seconds.AsDouble();
-      if (execution_mips.IsNumeric())
+      }
+      if (execution_mips.IsNumeric()) {
         record.execution_mips[i] = execution_mips.AsDouble();
-      if (dispatch_mips.IsNumeric())
+      }
+      if (dispatch_mips.IsNumeric()) {
         record.dispatch_mips[i] = dispatch_mips.AsDouble();
+      }
     }
     records.push_back(std::move(record));
   }
@@ -818,8 +849,9 @@ std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view json
 
 uint64_t family_total(const ParsedThroughputRecord &record) {
   uint64_t total = 0;
-  for (const uint64_t count : record.family_instructions)
+  for (const uint64_t count : record.family_instructions) {
     total += count;
+  }
   return total;
 }
 
@@ -996,8 +1028,9 @@ std::vector<ParsedMixRecord> parse_instruction_mix_jsonl(std::string_view jsonl)
   std::istringstream lines{std::string(jsonl)};
   std::string line;
   while (std::getline(lines, line)) {
-    if (line.empty())
+    if (line.empty()) {
       continue;
+    }
 
     flexbuffers::Builder builder;
     if (!plugin_detail::flexbuffer_from_json(line, builder)) {
@@ -1014,8 +1047,9 @@ std::vector<ParsedMixRecord> parse_instruction_mix_jsonl(std::string_view jsonl)
     const auto record_type = object["record"];
     EXPECT_TRUE(schema.IsString()) << "schema must be a string";
     EXPECT_TRUE(record_type.IsString()) << "record must be a string";
-    if (!schema.IsString() || !record_type.IsString())
+    if (!schema.IsString() || !record_type.IsString()) {
       continue;
+    }
     EXPECT_EQ(schema.AsString().str(), "rocjitsu.instruction_mix.v1");
 
     ParsedMixRecord record;
@@ -1140,10 +1174,12 @@ TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
 
   uint64_t family_execution_total = 0;
   uint64_t family_mnemonic_total = 0;
-  for (const auto &[name, count] : dispatch.family_executions)
+  for (const auto &[name, count] : dispatch.family_executions) {
     family_execution_total += count;
-  for (const auto &[name, count] : dispatch.family_mnemonics)
+  }
+  for (const auto &[name, count] : dispatch.family_mnemonics) {
     family_mnemonic_total += count;
+  }
   EXPECT_EQ(family_execution_total, dispatch.wave_instructions);
   EXPECT_EQ(family_mnemonic_total, dispatch.unique_mnemonics);
 
@@ -1332,7 +1368,7 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
 }
 
 TEST(InstructionMixPluginTest, DecodedTimestampsRemainScalarWork) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t opcode : {cdna4::kSMemtimeSmem, cdna4::kSMemrealtimeSmem}) {
     const auto words = cdna4::build_smem(opcode, {.sdata = 4});
@@ -1578,8 +1614,9 @@ public:
   bool supports_async_instructions() const override { return true; }
   bool observes_sgpr_reads() const override { return false; }
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &wf) override {
-    if (inst.mnemonic() == "s_set_vgpr_msb")
+    if (inst.mnemonic() == "s_set_vgpr_msb") {
       hazard_before_set_vgpr = wf.setreg_vgpr_msb_hazard();
+    }
   }
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &wf) override {
     EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
@@ -1628,8 +1665,9 @@ std::vector<uint32_t> independent_wmma_kernel() {
 
 TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
   if (!rocjitsu::amdgpu::async_mma_policy::candidate(
-          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
+  }
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -1675,8 +1713,9 @@ TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
   EXPECT_EQ(async_events->issued, 0u);
   unsigned before = 0, after = 0;
   for (const auto &event : sync_events->events) {
-    if (!event.mnemonic.starts_with("v_wmma_"))
+    if (!event.mnemonic.starts_with("v_wmma_")) {
       continue;
+    }
     before += event.kind == HookEvent::BEFORE_INSTRUCTION;
     after += event.kind == HookEvent::AFTER_INSTRUCTION;
   }
@@ -1686,8 +1725,9 @@ TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
 
 TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
   if (!rocjitsu::amdgpu::async_mma_policy::candidate(
-          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
+  }
   class AsyncFailurePlugin final : public ExecutionPlugin {
   public:
     explicit AsyncFailurePlugin(bool reject)
@@ -1698,11 +1738,12 @@ TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
                                         Wavefront &wave) override {
       ++issued;
       issuing_pc = pc;
-      if (reject_)
+      if (reject_) {
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
                                                 "async issue hook failed");
-      else
+      } else {
         EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+      }
     }
     void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
       ++before_callbacks;
@@ -1762,8 +1803,9 @@ TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
 
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
   if (!rocjitsu::amdgpu::async_mma_policy::candidate(
-          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
+  }
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1847,8 +1889,9 @@ TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
 // instead.
 TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
   if (!rocjitsu::amdgpu::async_mma_policy::candidate(
-          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
+  }
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1880,8 +1923,9 @@ TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
 
 TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
   if (!rocjitsu::amdgpu::async_mma_policy::candidate(
-          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
+  }
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1986,18 +2030,20 @@ TEST(ExecutionPluginTest, ReportedInstructionHookFailureCancelsBeforeContinuing)
     void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
                                           Wavefront &wave) override {
       issue_pc = pc;
-      if (fail_before_)
+      if (fail_before_) {
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
                                                 "before hook failed");
+      }
     }
     void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &,
                                          Wavefront &wave) override {
       EXPECT_EQ(pc, issue_pc + 4 * sizeof(uint32_t));
       EXPECT_EQ(wave.pc, pc);
       ++after_callbacks;
-      if (!fail_before_)
+      if (!fail_before_) {
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
                                                 "after hook failed");
+      }
     }
     void onAmdgpuWavefrontCancelled(Wavefront &) override { ++cancellations; }
     void onAmdgpuWavefrontHalted(Wavefront &) override { ++halts; }
@@ -2051,9 +2097,10 @@ TEST(ExecutionPluginTest, ReportedRoutingHookFailurePreventsPipelineIssue) {
         : ExecutionPlugin("failing_route"), after_routing_(after_routing) {}
     bool observes_memory_routing() const override { return true; }
     void onAmdgpuRouteMemoryInstruction(const Instruction &, Wavefront &wave) override {
-      if (!after_routing_)
+      if (!after_routing_) {
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
                                                 "route hook failed");
+      }
     }
     void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &, const Instruction &,
                                     Wavefront &wave) override {
@@ -2243,10 +2290,11 @@ TEST(ExecutionPluginTest, BarrierSignalAndWaitLockOnlyForSerialHotHooks) {
   for (bool serial : {false, true}) {
     SCOPED_TRACE(serial);
     ExecutionPluginGroup group(PluginSinkConfig{});
-    if (serial)
+    if (serial) {
       ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
-    else
+    } else {
       ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
+    }
     ASSERT_EQ(group.requires_serial_hot_hooks(), serial);
     const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
 
@@ -2311,8 +2359,9 @@ TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
 
     EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
     EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
-    for (uint32_t i = 0; i != 8; ++i)
+    for (uint32_t i = 0; i != 8; ++i) {
       group.onAmdgpuReadSgpr(wave, i);
+    }
 
     EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
     EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
@@ -2502,24 +2551,29 @@ TEST(ExecutionPluginTest, EmptyGroupDispatchBypassesCallbackLock) {
 
 int run_serial_hot_hook_halt_snapshot(PluginFixture &f) {
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  if (!f.plugin_group_->add(std::make_unique<SerialHotHookPlugin>()))
+  if (!f.plugin_group_->add(std::make_unique<SerialHotHookPlugin>())) {
     return 1;
+  }
 
   auto snapshot = std::make_unique<test::HaltSnapshotPlugin>();
   auto *snapshot_ptr = snapshot.get();
-  if (!f.plugin_group_->add(std::move(snapshot)))
+  if (!f.plugin_group_->add(std::move(snapshot))) {
     return 2;
+  }
   f.soc->set_plugin_group(f.plugin_group_);
 
   const uint32_t code[] = {S_ENDPGM};
   f.run_kernel(code, 1);
 
-  if (snapshot_ptr->snapshots().size() != 1u)
+  if (snapshot_ptr->snapshots().size() != 1u) {
     return 3;
-  if (snapshot_ptr->snapshots().front().sgprs.empty())
+  }
+  if (snapshot_ptr->snapshots().front().sgprs.empty()) {
     return 4;
-  if (snapshot_ptr->snapshots().front().vgprs.empty())
+  }
+  if (snapshot_ptr->snapshots().front().vgprs.empty()) {
     return 5;
+  }
   return 0;
 }
 
@@ -2693,10 +2747,12 @@ TEST(HookOrderingTest, LegacyBarrierEmitsSignalCompletionWaitTogether) {
   ASSERT_NE(first, p->events.end());
   for (auto it = first; it != p->events.end() && barrier_kinds.size() < 6; ++it) {
     barrier_kinds.push_back(it->kind);
-    if (it->kind == BARRIER_SIGNALED)
+    if (it->kind == BARRIER_SIGNALED) {
       signalling_waves.push_back(it->wf_id);
-    if (it->kind == BARRIER_WAIT_PASSED)
+    }
+    if (it->kind == BARRIER_WAIT_PASSED) {
       waiting_waves.push_back(it->wf_id);
+    }
     if (it->kind != BARRIER_RESOLVED) {
       EXPECT_EQ(it->barrier_round, round) << kindName(it->kind);
     }
@@ -2706,9 +2762,11 @@ TEST(HookOrderingTest, LegacyBarrierEmitsSignalCompletionWaitTogether) {
                                BARRIER_ROUND_COMPLETED, BARRIER_WAIT_PASSED, BARRIER_WAIT_PASSED}));
   // Each dispatched wave signals once and passes its wait once.
   std::vector<uint32_t> dispatched_waves;
-  for (const HookEvent &e : p->events)
-    if (e.kind == WAVEFRONT_DISPATCHED)
+  for (const HookEvent &e : p->events) {
+    if (e.kind == WAVEFRONT_DISPATCHED) {
       dispatched_waves.push_back(e.wf_id);
+    }
+  }
   std::ranges::sort(dispatched_waves);
   std::ranges::sort(signalling_waves);
   std::ranges::sort(waiting_waves);
@@ -2784,7 +2842,7 @@ TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
 
   const auto words =
       cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = 2});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> flat(decode_valid(*decoder, words.data()));
   ASSERT_NE(flat, nullptr);
@@ -2814,15 +2872,17 @@ TEST(HookOrderingTest, TerminatorEmitsBeforeButNotAfterInstruction) {
   size_t before_nop = 0, after_nop = 0;
   for (const auto &e : p->events) {
     if (e.kind == HookEvent::BEFORE_INSTRUCTION) {
-      if (e.mnemonic == "s_endpgm")
+      if (e.mnemonic == "s_endpgm") {
         ++before_endpgm;
-      else if (e.mnemonic == "s_nop")
+      } else if (e.mnemonic == "s_nop") {
         ++before_nop;
+      }
     } else if (e.kind == HookEvent::AFTER_INSTRUCTION) {
-      if (e.mnemonic == "s_endpgm")
+      if (e.mnemonic == "s_endpgm") {
         ++after_endpgm;
-      else if (e.mnemonic == "s_nop")
+      } else if (e.mnemonic == "s_nop") {
         ++after_nop;
+      }
     }
   }
 
@@ -2871,8 +2931,9 @@ TEST(HookOrderingTest, FiveDispatchLifecycle) {
   constexpr uint32_t total_wgs = 3 + 2 + 4 + 1 + 5;
 
   test::AqlQueue queue(f.mem, f.cp());
-  for (const auto &s : specs)
+  for (const auto &s : specs) {
     queue.dispatch(s.kernel, s.grid, static_cast<uint16_t>(s.wg_size));
+  }
   f.run_until_idle();
   f.shutdown();
 
@@ -3014,8 +3075,9 @@ TEST(HookOrderingTest, ParallelWorkgroupLifecycleRunsOnCommandProcessorAfterWork
   EventLog log(events);
   std::set<uint32_t> dispatch_ids;
   for (const auto &event : events) {
-    if (event.kind == HookEvent::WORKGROUP_DISPATCHED)
+    if (event.kind == HookEvent::WORKGROUP_DISPATCHED) {
       dispatch_ids.insert(event.dispatch_id);
+    }
     EXPECT_EQ(event.callback_thread, cp_thread);
   }
 

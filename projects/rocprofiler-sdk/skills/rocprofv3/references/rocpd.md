@@ -78,7 +78,7 @@ packages.
 | `rocpd merge -i A.db B.db -o merged` | Combine databases into one file | no |
 | `rocpd package -i DIR -d name --consolidate --copy` | Bundle databases into `name.rpdb` with an `index.yaml` | no |
 
-Shared convert options: `-d OUTPUT_PATH` (default `./rocpd-output-data`), `-o OUTPUT_FILE`,
+Shared convert options: `-d OUTPUT_DIRECTORY` (default `./rocpd-output-data`), `-o OUTPUT_FILE`,
 `--kernel-rename`, `--group-by-queue`, `--agent-index-value absolute|relative|type-relative`,
 `--start 25%|<ns>`, `--end 75%|<ns>`, `--start-marker NAME`, `--end-marker NAME`. Standalone
 wrappers `rocpd2pftrace`, `rocpd2otf2`, `rocpd2csv`, and `rocpd2summary` take the same options.

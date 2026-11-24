@@ -4,6 +4,7 @@
 // x86-64-v4 mixed-format MFMA column-wise fused reduction.
 #include "mfma/backends.h"
 #include "mfma/mixed.h"
+#include "mfma/x86_64/scaled_fp4.h"
 namespace rocjitsu::arith {
 // Decode independently packed operands and stage all outputs before publication.
 template <int M, int K>
@@ -22,6 +23,9 @@ template <int M, int K>
 void mfma_scaled_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                            const uint32_t *const *b, const uint32_t *const *c,
                            const uint32_t *scale_a, const uint32_t *scale_b, bool clamp_overflow) {
+  if (mfma_scaled_fp4<M>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow)) {
+    return;
+  }
   mfma_mixed_kernel<M, K, true>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
 }
 template void mfma_scaled_x86_64_v4<16, 128>(uint64_t controls, uint32_t *const *d,

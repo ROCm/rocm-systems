@@ -48,6 +48,5 @@ or the source tree trigger Cargo's native rebuild.
 
 Selecting another revision is a native dependency update. Compare layout sizes,
 pitches, mip offsets, and coordinate maps, then qualify affected device transfers
-before adopting it as the default. The current ROCr tree differs from the pinned
-copy in GFX12 linear row/slice pitch handling. Source sharing is opt-in so a
-directory refactor does not silently change those results.
+before adopting it as the default. The pinned copy includes the GFX12 linear
+row/slice pitch correction from AIRUNTIME-2652 (#15261).

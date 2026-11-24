@@ -17,6 +17,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -124,15 +125,16 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop3_cmkpack_mem"), l2("vop3_cmkpack_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_cmkpack", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -158,8 +160,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -178,8 +181,9 @@ void check_cndmask_one(uint64_t exec, uint64_t sel) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     fx.seed_sgpr_pair(sel);
@@ -222,8 +226,9 @@ void check_pack_one(uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -262,8 +267,9 @@ void check_pack_opsel_high_halves(uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -284,12 +290,14 @@ void check_pack_opsel_high_halves(uint64_t exec) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const bool flush = (defaults.wf->fp_denorm_mode_f16_f64() & 1u) == 0;
   const bool quiet =
-      amdgpu::fp_mode::quiets_nan(ROCJITSU_CODE_ARCH_CDNA4, defaults.wf->ieee_mode());
+      amdgpu::fp_mode::quiets_nan(rocjitsu::IsaFamily::Cdna4, defaults.wf->ieee_mode());
   const auto canonical = [&](uint16_t half) -> uint16_t {
-    if (flush && (half & 0x7c00u) == 0)
+    if (flush && (half & 0x7c00u) == 0) {
       return half & 0x8000u;
-    if (quiet && (half & 0x7fffu) > 0x7c00u)
+    }
+    if (quiet && (half & 0x7fffu) > 0x7c00u) {
       return half | 0x0200u;
+    }
     return half;
   };
   bool saw_distinguishing_lane = false;
@@ -318,8 +326,9 @@ TEST(Vop3CndmaskPackSimdCorrectness, Cndmask_FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (uint64_t sel : kSels)
+  for (uint64_t sel : kSels) {
     check_cndmask_one(/*exec=*/~0ULL, sel);
+  }
 }
 
 TEST(Vop3CndmaskPackSimdCorrectness, Cndmask_PartialExec) {
@@ -327,8 +336,9 @@ TEST(Vop3CndmaskPackSimdCorrectness, Cndmask_PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (uint64_t sel : kSels)
+  for (uint64_t sel : kSels) {
     check_cndmask_one(/*exec=*/0xA5A5'F0F0'1234'8001ULL, sel);
+  }
 }
 
 TEST(Vop3CndmaskPackSimdCorrectness, Pack_FullExec) {

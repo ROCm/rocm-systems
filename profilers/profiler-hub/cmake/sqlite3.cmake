@@ -42,6 +42,7 @@ else()
         CACHE STRING
         "Upstream SQLite3 git tag to check out"
     )
+
     # Windows amalgamation zip. Bump URL + SHA256 together with SQLITE3_GIT_TAG.
     set(SQLITE3_AMALGAMATION_URL
         "https://www.sqlite.org/2024/sqlite-amalgamation-3450300.zip"
@@ -54,9 +55,10 @@ else()
         "Expected SHA256 of SQLITE3_AMALGAMATION_URL"
     )
 
-    # Windows downloads the official amalgamation zip. Linux clones and runs
-    # upstream autotools, which needs git and make.
-    if(NOT WIN32)
+    # Generating the amalgamation from git runs upstream autotools, which needs
+    # git, make, and tclsh. Turn this OFF to download the official amalgamation
+    # zip instead, which needs only CMake.
+    if(PROFILER_HUB_SQLITE3_FROM_GIT AND NOT WIN32)
         find_package(Git REQUIRED)
         find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
     endif()
@@ -76,6 +78,7 @@ else()
             -DSQLITE3_GIT_TAG=${SQLITE3_GIT_TAG}
             -DSQLITE3_AMALGAMATION_URL=${SQLITE3_AMALGAMATION_URL}
             -DSQLITE3_AMALGAMATION_SHA256=${SQLITE3_AMALGAMATION_SHA256}
+            -DSQLITE3_FROM_GIT=${PROFILER_HUB_SQLITE3_FROM_GIT}
             -DSQLITE3_SOURCE_DIR=${SQLITE3_SOURCE_DIR} -P
             ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
         DEPENDS ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake

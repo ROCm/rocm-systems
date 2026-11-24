@@ -15,11 +15,13 @@ namespace {
 constexpr uint16_t kCdnaWaitcntAll0 = 0;
 
 [[nodiscard]] bool valid_lease(const SemanticScratchLease &lease) {
-  if (!lease.spilled)
+  if (!lease.spilled) {
     return true;
+  }
   if (lease.reg_class != RegClass::VGPR || lease.count == 0 ||
-      static_cast<uint32_t>(lease.base) + lease.count > 256)
+      static_cast<uint32_t>(lease.base) + lease.count > 256) {
     return false;
+  }
   return Cdna3ScratchEmitter::can_address(
       SemanticSpillRange{.byte_offset = lease.spill_offset, .dword_count = lease.count});
 }
@@ -56,10 +58,12 @@ void Cdna3ScratchEmitter::append_wait(std::vector<uint32_t> &words) {
 
 bool Cdna3ScratchEmitter::append_save(std::vector<uint32_t> &words,
                                       const SemanticScratchLease &lease) {
-  if (!valid_lease(lease))
+  if (!valid_lease(lease)) {
     return false;
-  if (!lease.spilled)
+  }
+  if (!lease.spilled) {
     return true;
+  }
 
   for (uint16_t i = 0; i < lease.count; ++i) {
     append_store_dword(words, static_cast<uint8_t>(lease.base + i),
@@ -71,10 +75,12 @@ bool Cdna3ScratchEmitter::append_save(std::vector<uint32_t> &words,
 
 bool Cdna3ScratchEmitter::append_restore(std::vector<uint32_t> &words,
                                          const SemanticScratchLease &lease) {
-  if (!valid_lease(lease))
+  if (!valid_lease(lease)) {
     return false;
-  if (!lease.spilled)
+  }
+  if (!lease.spilled) {
     return true;
+  }
 
   for (uint16_t i = 0; i < lease.count; ++i) {
     append_load_dword(words, static_cast<uint8_t>(lease.base + i),

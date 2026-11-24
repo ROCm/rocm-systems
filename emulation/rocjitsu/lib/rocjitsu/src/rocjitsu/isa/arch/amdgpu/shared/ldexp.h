@@ -121,8 +121,9 @@ constexpr V round_significand(V significand, V exponent, const Mask &negative,
   V result = choose(normal, normal_result, subnormal_result);
   // A value below the normal range is exact at full precision, so it is tiny
   // even when its subnormal encoding rounds up to the smallest normal.
-  if (policy.flush_tiny)
+  if (policy.flush_tiny) {
     result = choose(normal, result, zero);
+  }
 
   // Nearest-even overflows to infinity; directed rounding only toward the value's sign.
   const auto overflows = result >= V(Fmt::kInfinity);

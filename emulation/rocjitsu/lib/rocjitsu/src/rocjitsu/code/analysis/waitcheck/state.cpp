@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/analysis/waitcheck/state.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
@@ -13,15 +14,17 @@ namespace rocjitsu::waitcheck_detail {
 namespace {
 bool flat_has_other_pending_counters(const PendingState &state, WaitEventKind kind,
                                      WaitCounterKind waited_counter) {
-  if (kind != WaitEventKind::FlatLoad && kind != WaitEventKind::FlatStore)
+  if (kind != WaitEventKind::FlatLoad && kind != WaitEventKind::FlatStore) {
     return false;
+  }
   // Static FLAT routing is unknown. Completing one route does not prove that
   // the other route has consumed its VGPR sources. Include counter-only facets,
   // which can exist solely in the per-kind summaries (notably stores).
   for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Store, WaitCounterKind::Ds}) {
     if (counter != waited_counter &&
-        WaitcheckStateOps::counter_has_event_kind(state, counter, kind))
+        WaitcheckStateOps::counter_has_event_kind(state, counter, kind)) {
       return true;
+    }
   }
   return false;
 }
@@ -62,8 +65,9 @@ auto WaitcheckStateOps::register_ref_key(const std::optional<RegisterRef> &ref) 
 }
 
 bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const RegisterSet &rhs) {
-  if (lhs == rhs)
+  if (lhs == rhs) {
     return false;
+  }
 
   std::vector<RegisterRef> lhs_regs;
   std::vector<RegisterRef> rhs_regs;
@@ -88,14 +92,18 @@ bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const Pendi
       rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction, rhs.counter, rhs.kind,
       rhs.barrier_id, rhs.produces_regs, rhs.check_uses, rhs.check_defs, rhs.check_exec_defs,
       rhs.check_memory_order, rhs.check_program_end, rhs.check_counter_parity_order);
-  if (lhs_key != rhs_key)
+  if (lhs_key != rhs_key) {
     return lhs_key < rhs_key;
-  if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg))
+  }
+  if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg)) {
     return register_ref_key(lhs.special_reg) < register_ref_key(rhs.special_reg);
-  if (register_ref_key(lhs.partial_reg) != register_ref_key(rhs.partial_reg))
+  }
+  if (register_ref_key(lhs.partial_reg) != register_ref_key(rhs.partial_reg)) {
     return register_ref_key(lhs.partial_reg) < register_ref_key(rhs.partial_reg);
-  if (lhs.partial_reg_mask != rhs.partial_reg_mask)
+  }
+  if (lhs.partial_reg_mask != rhs.partial_reg_mask) {
     return lhs.partial_reg_mask < rhs.partial_reg_mask;
+  }
   return register_set_less(lhs.regs, rhs.regs);
 }
 
@@ -103,11 +111,13 @@ void WaitcheckStateOps::merge_va_vdst_hazards(VaVdstHazardState &dst,
                                               const VaVdstHazardState &src) {
   for (const auto &[index, src_hazard] : src.hazards) {
     auto [dst_it, inserted] = dst.hazards.try_emplace(index, src_hazard);
-    if (inserted)
+    if (inserted) {
       continue;
+    }
     VaVdstHazard &dst_hazard = dst_it->second;
-    if (dst_hazard == src_hazard)
+    if (dst_hazard == src_hazard) {
       continue;
+    }
 
     dst_hazard.trans_since = dst_hazard.trans_since || src_hazard.trans_since;
     dst_hazard.age = dst_hazard.trans_since ? 0 : std::min(dst_hazard.age, src_hazard.age);
@@ -120,27 +130,32 @@ void WaitcheckStateOps::merge_delay_alu(std::vector<PendingDelayAlu> &dst,
   for (DelayAluEffect effect : {DelayAluEffect::Valu, DelayAluEffect::Salu}) {
     auto earliest = [effect](const std::vector<PendingDelayAlu> &delays) {
       std::optional<uint8_t> result;
-      for (const PendingDelayAlu &delay : delays)
-        if (delay.effect == effect && (!result || delay.countdown < *result))
+      for (const PendingDelayAlu &delay : delays) {
+        if (delay.effect == effect && (!result || delay.countdown < *result)) {
           result = delay.countdown;
+        }
+      }
       return result;
     };
     const auto lhs = earliest(dst);
     const auto rhs = earliest(src);
     // A delayed clear is guaranteed only if every incoming path scheduled
     // one. Wait until the latest of their earliest guaranteed clears.
-    if (lhs && rhs)
+    if (lhs && rhs) {
       common.push_back({std::max(*lhs, *rhs), effect});
+    }
   }
   dst = std::move(common);
 }
 
 void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   dst.previous_vm_vsrc_zero_wait &= src.previous_vm_vsrc_zero_wait;
-  if (dst.vgpr_msb != src.vgpr_msb)
+  if (dst.vgpr_msb != src.vgpr_msb) {
     dst.vgpr_msb = {.mode = 0, .known = false};
-  if (dst.expert_scheduling != src.expert_scheduling)
+  }
+  if (dst.expert_scheduling != src.expert_scheduling) {
     dst.expert_scheduling = {.enabled = true, .known = false};
+  }
   for (size_t i = 0; i < kCounterCount; ++i) {
     // Presence and old-value proofs do not change hardware issue order.
     const bool same_order = std::ranges::equal(
@@ -148,14 +163,16 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
           return same_event_identity(lhs, rhs) && lhs.min_younger == rhs.min_younger &&
                  lhs.min_younger_in_fifo == rhs.min_younger_in_fifo;
         });
-    if (!dst.pending[i].empty() && !src.pending[i].empty() && !same_order)
+    if (!dst.pending[i].empty() && !src.pending[i].empty() && !same_order) {
       dst.uncertain_order[i] = true;
+    }
     for (PendingEvent &event : dst.pending[i]) {
       const auto position = std::ranges::lower_bound(src.pending[i], event, event_identity_less);
       const bool found = position != src.pending[i].end() && same_event_identity(*position, event);
       if (!found || !position->present_on_all_paths) {
-        if (event.present_on_all_paths)
+        if (event.present_on_all_paths) {
           event.ready_on_absent_paths = event.regs;
+        }
         event.ready_on_absent_paths &= found ? position->ready_on_absent_paths : src.ready_regs;
       }
       event.present_on_all_paths &= found && position->present_on_all_paths;
@@ -173,8 +190,9 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
       auto position = std::ranges::lower_bound(dst.pending[i], event, event_identity_less);
       if (position == dst.pending[i].end() || !same_event_identity(*position, event)) {
         position = dst.pending[i].insert(position, event);
-        if (position->present_on_all_paths)
+        if (position->present_on_all_paths) {
           position->ready_on_absent_paths = position->regs;
+        }
         position->ready_on_absent_paths &= dst.ready_regs;
         position->present_on_all_paths = false;
       } else {
@@ -190,8 +208,9 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   merge_sgpr_hazards(dst.sgpr_hazards, src.sgpr_hazards);
   merge_va_vdst_hazards(dst.va_vdst_hazards, src.va_vdst_hazards);
   dst.vgpr_msb_setreg_hazard = dst.vgpr_msb_setreg_hazard || src.vgpr_msb_setreg_hazard;
-  if (!dst.async_barrier_post_wait && src.async_barrier_post_wait)
+  if (!dst.async_barrier_post_wait && src.async_barrier_post_wait) {
     dst.async_barrier_post_wait = src.async_barrier_post_wait;
+  }
   merge_delay_alu(dst.delay_alu, src.delay_alu);
 }
 
@@ -202,10 +221,12 @@ WaitcheckStateOps::merge_predecessors(std::span<const size_t> predecessors,
   PendingState merged;
   bool initialized = false;
   for (size_t predecessor : predecessors) {
-    if (predecessor >= outputs.size() || predecessor >= output_initialized.size())
+    if (predecessor >= outputs.size() || predecessor >= output_initialized.size()) {
       return util::Result::failure();
-    if (output_initialized[predecessor] == 0)
+    }
+    if (output_initialized[predecessor] == 0) {
       continue;
+    }
     if (!initialized) {
       merged = outputs[predecessor];
       initialized = true;
@@ -225,27 +246,32 @@ bool WaitcheckStateOps::same_register_generation(const PendingEvent &lhs, const 
 void WaitcheckStateOps::make_retired_generations_ready(
     PendingState &state, std::span<const PendingEvent> retired_events) {
   for (const PendingEvent &retired : retired_events) {
-    if (!retired.produces_regs)
+    if (!retired.produces_regs) {
       continue;
+    }
     retired.regs.for_each([&](RegisterRef reg) {
-      if (!retired.present_on_all_paths && !retired.ready_on_absent_paths.contains(reg))
+      if (!retired.present_on_all_paths && !retired.ready_on_absent_paths.contains(reg)) {
         return;
-      if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR)
+      }
+      if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR) {
         return;
+      }
       const bool generation_still_pending =
           std::ranges::any_of(state.pending, [&](const std::vector<PendingEvent> &events) {
             return std::ranges::any_of(events, [&](const PendingEvent &pending) {
               return pending.regs.contains(reg) && same_register_generation(retired, pending);
             });
           });
-      if (generation_still_pending)
+      if (generation_still_pending) {
         return;
+      }
 
       state.ready_regs.expand(reg);
       for (auto &events : state.pending) {
         for (PendingEvent &pending : events) {
-          if (pending.produces_regs && pending.regs.contains(reg))
+          if (pending.produces_regs && pending.regs.contains(reg)) {
             pending.old_value_regs.expand(reg);
+          }
         }
       }
     });
@@ -257,8 +283,9 @@ void WaitcheckStateOps::retire_events(PendingState &state, std::vector<PendingEv
                                       Predicate should_retire) {
   std::vector<PendingEvent> retired_events;
   std::erase_if(events, [&](const PendingEvent &event) {
-    if (!should_retire(event))
+    if (!should_retire(event)) {
       return false;
+    }
     retired_events.push_back(event);
     return true;
   });
@@ -269,8 +296,9 @@ void WaitcheckStateOps::apply_wait_to_event_ages(PendingState &state, WaitCounte
                                                  uint32_t count) {
   auto &ages = state.pending_event_ages[counter_index(counter)].values;
   for (uint8_t &age : ages) {
-    if (age != kNoPendingEventAge && (count == 0 || age >= count))
+    if (age != kNoPendingEventAge && (count == 0 || age >= count)) {
       age = kNoPendingEventAge;
+    }
   }
 }
 
@@ -286,19 +314,22 @@ void WaitcheckStateOps::apply_wait(PendingState &state, WaitCounterKind counter,
   }
   retire_events(state, pending,
                 [count](const PendingEvent &event) { return event.min_younger >= count; });
-  if (pending.empty())
+  if (pending.empty()) {
     state.uncertain_order[idx] = false;
+  }
 }
 
 util::Result WaitcheckStateOps::apply_kmcnt_wait(PendingState &state, uint32_t count,
-                                                 rj_code_arch_t arch) {
+                                                 rocjitsu::IsaFamily arch) {
   const auto out_of_order = counter_out_of_order(state, WaitCounterKind::Km, arch);
-  if (out_of_order.failed())
+  if (out_of_order.failed()) {
     return util::Result::failure();
+  }
   // LLVM cannot use a partial wait to advance any part of a counter whose
   // pending event kinds may complete out of order.
-  if (count != 0 && out_of_order.value())
+  if (count != 0 && out_of_order.value()) {
     return util::Result::success();
+  }
   apply_wait(state, WaitCounterKind::Km, count);
   apply_xcnt_wait_implied_by_kmcnt(state, count);
   return util::Result::success();
@@ -313,14 +344,16 @@ void WaitcheckStateOps::retire_event_kind_ages(PendingState &state, WaitCounterK
     PendingEvent probe;
     probe.counter = counter;
     probe.kind = static_cast<WaitEventKind>(kind);
-    if (belongs_to_group(probe) && ages[kind] != kNoPendingEventAge && ages[kind] >= minimum_age)
+    if (belongs_to_group(probe) && ages[kind] != kNoPendingEventAge && ages[kind] >= minimum_age) {
       ages[kind] = kNoPendingEventAge;
+    }
   }
   PendingEvent smem;
   smem.counter = counter;
   smem.kind = WaitEventKind::Smem;
-  if (minimum_age == 0 && belongs_to_group(smem))
+  if (minimum_age == 0 && belongs_to_group(smem)) {
     state.pending_smem[idx] = false;
+  }
 }
 
 template <typename Predicate>
@@ -331,14 +364,16 @@ void WaitcheckStateOps::apply_filtered_vm_vsrc_wait(PendingState &state, Predica
   if (count == 0) {
     retire_events(state, pending, is_implied);
     retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied);
-    if (pending.empty())
+    if (pending.empty()) {
       state.uncertain_order[idx] = false;
+    }
     return;
   }
 
   const size_t matching = static_cast<size_t>(std::ranges::count_if(pending, is_implied));
-  if (state.uncertain_order[idx] || count >= matching)
+  if (state.uncertain_order[idx] || count >= matching) {
     return;
+  }
 
   // Pending vectors are canonicalized by event identity for stable CFG
   // equality, so their physical order is not the hardware issue order.  An
@@ -349,8 +384,9 @@ void WaitcheckStateOps::apply_filtered_vm_vsrc_wait(PendingState &state, Predica
   std::vector<uint32_t> matching_ages;
   matching_ages.reserve(matching);
   for (const PendingEvent &event : pending) {
-    if (is_implied(event))
+    if (is_implied(event)) {
       matching_ages.push_back(event.min_younger);
+    }
   }
   std::ranges::sort(matching_ages);
   if (matching_ages[count - 1] == matching_ages[count]) {
@@ -391,15 +427,17 @@ bool WaitcheckStateOps::is_xcnt_store_event(const PendingEvent &event) {
 template <typename Predicate>
 bool WaitcheckStateOps::has_xcnt_event(const PendingState &state, Predicate predicate) {
   const size_t idx = counter_index(WaitCounterKind::X);
-  if (std::ranges::any_of(state.pending[idx], predicate))
+  if (std::ranges::any_of(state.pending[idx], predicate)) {
     return true;
+  }
   for (size_t kind = 0; kind < kWaitEventKindCount; ++kind) {
     PendingEvent probe;
     probe.counter = WaitCounterKind::X;
     probe.kind = static_cast<WaitEventKind>(kind);
     if (predicate(probe) && (state.pending_event_ages[idx].values[kind] != kNoPendingEventAge ||
-                             (probe.kind == WaitEventKind::Smem && state.pending_smem[idx])))
+                             (probe.kind == WaitEventKind::Smem && state.pending_smem[idx]))) {
       return true;
+    }
   }
   return false;
 }
@@ -416,8 +454,9 @@ void WaitcheckStateOps::apply_xcnt_wait(PendingState &state, uint32_t count) {
   // SIInsertWaitcnts treats X_CNT as out of order while an SMEM
   // translation is pending. Only xcnt(0) proves that a particular scalar
   // source has been released.
-  if (count != 0 && has_xcnt_event(state, is_xcnt_smem_event))
+  if (count != 0 && has_xcnt_event(state, is_xcnt_smem_event)) {
     return;
+  }
   apply_wait(state, WaitCounterKind::X, count);
 }
 
@@ -427,15 +466,18 @@ void WaitcheckStateOps::retire_xcnt_group(PendingState &state, Predicate belongs
   auto &pending = state.pending[idx];
   retire_events(state, pending, belongs_to_group);
   retire_event_kind_ages(state, WaitCounterKind::X, belongs_to_group);
-  if (pending.empty())
+  if (pending.empty()) {
     state.uncertain_order[idx] = false;
+  }
 }
 
 void WaitcheckStateOps::apply_xcnt_wait_implied_by_kmcnt(PendingState &state, uint32_t count) {
-  if (count != 0)
+  if (count != 0) {
     return;
-  if (!has_xcnt_event(state, is_xcnt_smem_event))
+  }
+  if (!has_xcnt_event(state, is_xcnt_smem_event)) {
     return;
+  }
   if (has_xcnt_event(state, is_xcnt_vmem_event)) {
     retire_xcnt_group(state, is_xcnt_smem_event);
     return;
@@ -444,11 +486,13 @@ void WaitcheckStateOps::apply_xcnt_wait_implied_by_kmcnt(PendingState &state, ui
 }
 
 void WaitcheckStateOps::apply_xcnt_wait_implied_by_loadcnt(PendingState &state, uint32_t count) {
-  if (!has_xcnt_event(state, is_xcnt_vmem_event) || has_xcnt_event(state, is_xcnt_store_event))
+  if (!has_xcnt_event(state, is_xcnt_vmem_event) || has_xcnt_event(state, is_xcnt_store_event)) {
     return;
+  }
   if (has_xcnt_event(state, is_xcnt_smem_event)) {
-    if (count == 0)
+    if (count == 0) {
       retire_xcnt_group(state, is_xcnt_vmem_event);
+    }
     return;
   }
   apply_xcnt_wait(state, count);
@@ -468,15 +512,16 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
 
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                WaitCounterKind counter,
-                                                               rj_code_arch_t arch) {
+                                                               rocjitsu::IsaFamily arch) {
   // Unlike runtime requests, a static FLAT store has no proven VMEM route.
   // Its possible Store position cannot establish partial retirement, including
   // for an older ordinary store when the FLAT request might use only LDS.
   if (counter == WaitCounterKind::Store &&
-      counter_has_event_kind(state, counter, WaitEventKind::FlatStore))
+      counter_has_event_kind(state, counter, WaitEventKind::FlatStore)) {
     return true;
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  }
+  if ((arch != rocjitsu::IsaFamily::Cdna1 && arch != rocjitsu::IsaFamily::Cdna2 &&
+       arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4) ||
       (counter != WaitCounterKind::Load && counter != WaitCounterKind::Ds)) {
     return false;
   }
@@ -486,10 +531,11 @@ bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingStat
 
 util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState &state,
                                                               WaitCounterKind counter,
-                                                              rj_code_arch_t arch) {
+                                                              rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   // Match WaitcntBrackets::counterOutOfOrder. Scalar memory can always
   // complete out of order on its accounting counter (and on X_CNT).
   if (scalar_memory_makes_counter_out_of_order(state, counter, model.value()) ||
@@ -508,18 +554,20 @@ util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState
   std::bitset<kWaitEventKindCount> kinds;
   const auto &ages = state.pending_event_ages[counter_index(counter)].values;
   for (size_t kind_index = 0; kind_index < ages.size(); ++kind_index) {
-    if (ages[kind_index] == kNoPendingEventAge)
+    if (ages[kind_index] == kNoPendingEventAge) {
       continue;
+    }
     const auto normalized = normalized_hardware_event_kind(
         counter, static_cast<WaitEventKind>(kind_index), model.value());
-    if (normalized)
+    if (normalized) {
       kinds.set(static_cast<size_t>(*normalized));
+    }
   }
   return kinds.count() > 1;
 }
 
 util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCounterKind counter,
-                                                   uint32_t count, rj_code_arch_t arch) {
+                                                   uint32_t count, rocjitsu::IsaFamily arch) {
   if (counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch) && count) {
     // EXPCNT <= n bounds each ordered type separately, even in a mixed queue.
     // The newest request of any one type may still be pending at a nonzero wait.
@@ -529,24 +577,29 @@ util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCoun
     return util::Result::success();
   }
   const auto out_of_order = counter_out_of_order(state, counter, arch);
-  if (out_of_order.failed())
+  if (out_of_order.failed()) {
     return util::Result::failure();
-  if (count != 0 && out_of_order.value())
+  }
+  if (count != 0 && out_of_order.value()) {
     return util::Result::success();
+  }
   apply_wait(state, counter, count);
   return util::Result::success();
 }
 
 util::FailureOr<uint32_t> WaitcheckStateOps::dependency_required_count(const PendingState &state,
                                                                        const PendingEvent &event,
-                                                                       rj_code_arch_t arch) {
-  if (event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch))
+                                                                       rocjitsu::IsaFamily arch) {
+  if (event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch)) {
     return event.min_younger_in_fifo;
+  }
   const auto out_of_order = counter_out_of_order(state, event.counter, arch);
-  if (out_of_order.failed())
+  if (out_of_order.failed()) {
     return util::Result::failure();
-  if (state.uncertain_order[counter_index(event.counter)] || out_of_order.value())
+  }
+  if (state.uncertain_order[counter_index(event.counter)] || out_of_order.value()) {
     return 0;
+  }
   return event.min_younger;
 }
 
@@ -557,15 +610,17 @@ bool WaitcheckStateOps::same_operation(const PendingEvent &lhs, const PendingEve
 }
 
 util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCounterKind counter,
-                                                  uint32_t count, rj_code_arch_t arch) {
+                                                  uint32_t count, rocjitsu::IsaFamily arch) {
   const auto out_of_order = counter_out_of_order(state, counter, arch);
-  if (out_of_order.failed())
+  if (out_of_order.failed()) {
     return util::Result::failure();
+  }
   // SIInsertWaitcnts cannot use a nonzero wait to retire a particular event
   // while scalar memory is pending on this counter. This notably covers
   // legacy LGKMCNT shared by SMEM and DS operations.
-  if (count != 0 && out_of_order.value())
+  if (count != 0 && out_of_order.value()) {
     return util::Result::success();
+  }
   if (count != 0) {
     // A primary-counter wait can complete an operation even when a younger
     // counter-only request has no VM_VSRC facet. Correlate existing facets by
@@ -580,20 +635,24 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
     };
     retire_events(state, sources, [&](const PendingEvent &source) {
       if (!vm_vsrc_event_implied_by_wait(source.kind, counter) ||
-          flat_has_other_pending_counters(state, source.kind, counter))
+          flat_has_other_pending_counters(state, source.kind, counter)) {
         return false;
+      }
       // The primary kind's newest request being complete proves the entire
       // kind complete, including operations with no materialized primary facet.
-      if (kind_completed(source))
+      if (kind_completed(source)) {
         return true;
+      }
       bool covered_on_all_paths = false;
       for (const PendingEvent &event : primary) {
-        if (!same_operation(event, source))
+        if (!same_operation(event, source)) {
           continue;
+        }
         // Every pending instance/variant must be old enough, and a common
         // primary facet must prove the operation's coverage across the join.
-        if (event.min_younger < count)
+        if (event.min_younger < count) {
           return false;
+        }
         covered_on_all_paths |= event.present_on_all_paths;
       }
       return covered_on_all_paths;
@@ -601,13 +660,15 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
     // Individual operation proofs cannot clear a whole kind's summary. Use
     // the primary counter's all-requests-complete proof for age-only facts.
     retire_event_kind_ages(state, WaitCounterKind::VmVsrc, kind_completed);
-    if (sources.empty())
+    if (sources.empty()) {
       state.uncertain_order[counter_index(WaitCounterKind::VmVsrc)] = false;
+    }
   }
   apply_wait(state, counter, count);
   apply_implied_vm_vsrc_wait(state, counter, count);
-  if (counter == WaitCounterKind::Load)
+  if (counter == WaitCounterKind::Load) {
     apply_xcnt_wait_implied_by_loadcnt(state, count);
+  }
   return util::Result::success();
 }
 
@@ -631,8 +692,9 @@ void WaitcheckStateOps::clear_valu_vcc_hazard(SgprHazardState &state) {
 void WaitcheckStateOps::merge_lane_producers(
     std::unordered_map<uint16_t, SgprHazardProducer> &dst,
     const std::unordered_map<uint16_t, SgprHazardProducer> &src) {
-  for (const auto &[index, producer] : src)
+  for (const auto &[index, producer] : src) {
     dst.try_emplace(index, producer);
+  }
 }
 
 void WaitcheckStateOps::merge_sgpr_hazards(SgprHazardState &dst, const SgprHazardState &src) {
@@ -644,10 +706,12 @@ void WaitcheckStateOps::merge_sgpr_hazards(SgprHazardState &dst, const SgprHazar
   dst.vcc_hazard |= src.vcc_hazard;
   merge_lane_producers(dst.salu_producers, src.salu_producers);
   merge_lane_producers(dst.valu_producers, src.valu_producers);
-  if (!dst.salu_vcc_producer && src.salu_vcc_producer)
+  if (!dst.salu_vcc_producer && src.salu_vcc_producer) {
     dst.salu_vcc_producer = src.salu_vcc_producer;
-  if (!dst.valu_vcc_producer && src.valu_vcc_producer)
+  }
+  if (!dst.valu_vcc_producer && src.valu_vcc_producer) {
     dst.valu_vcc_producer = src.valu_vcc_producer;
+  }
 }
 
 void WaitcheckStateOps::apply_sgpr_hazard_wait(SgprHazardState &state, uint32_t depctr) {
@@ -658,21 +722,26 @@ void WaitcheckStateOps::apply_sgpr_hazard_wait(SgprHazardState &state, uint32_t 
   constexpr uint32_t kDepctrVaVccWidth = 1;
   constexpr uint32_t kDepctrVaSdstWidth = 3;
 
-  if (depctr_field(depctr, kDepctrSaSdstShift, kDepctrSaSdstWidth) == 0)
+  if (depctr_field(depctr, kDepctrSaSdstShift, kDepctrSaSdstWidth) == 0) {
     clear_salu_sgpr_hazards(state);
-  if (depctr_field(depctr, kDepctrVaVccShift, kDepctrVaVccWidth) == 0)
+  }
+  if (depctr_field(depctr, kDepctrVaVccShift, kDepctrVaVccWidth) == 0) {
     clear_valu_vcc_hazard(state);
-  if (depctr_field(depctr, kDepctrVaSdstShift, kDepctrVaSdstWidth) == 0)
+  }
+  if (depctr_field(depctr, kDepctrVaSdstShift, kDepctrVaSdstWidth) == 0) {
     clear_valu_sgpr_hazards(state);
+  }
 }
 
 util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const WaitFields &fields,
-                                                  rj_code_arch_t arch) {
-  if (amdgpu::waitcnt_model(arch).failed())
+                                                  rocjitsu::IsaFamily arch) {
+  if (amdgpu::waitcnt_model(arch).failed()) {
     return util::Result::failure();
+  }
   for (size_t i = 0; i < fields.size(); ++i) {
-    if (!fields[i])
+    if (!fields[i]) {
       continue;
+    }
     const WaitCounterKind counter = static_cast<WaitCounterKind>(i);
     const uint32_t count = *fields[i];
     switch (counter) {
@@ -681,12 +750,14 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
     case WaitCounterKind::Ds:
     case WaitCounterKind::Sample:
     case WaitCounterKind::Bvh:
-      if (apply_memory_wait(state, counter, count, arch).failed())
+      if (apply_memory_wait(state, counter, count, arch).failed()) {
         return util::Result::failure();
+      }
       break;
     case WaitCounterKind::Km:
-      if (apply_kmcnt_wait(state, count, arch).failed())
+      if (apply_kmcnt_wait(state, count, arch).failed()) {
         return util::Result::failure();
+      }
       break;
     case WaitCounterKind::X:
       apply_xcnt_wait(state, count);
@@ -696,12 +767,14 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
         const VaVdstHazard &hazard = entry.second;
         return count == 0 || (!hazard.trans_since && hazard.age >= count);
       });
-      if (apply_counter_wait(state, counter, count, arch).failed())
+      if (apply_counter_wait(state, counter, count, arch).failed()) {
         return util::Result::failure();
+      }
       break;
     default:
-      if (apply_counter_wait(state, counter, count, arch).failed())
+      if (apply_counter_wait(state, counter, count, arch).failed()) {
         return util::Result::failure();
+      }
       break;
     }
   }
@@ -709,22 +782,26 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
 }
 
 util::Result WaitcheckStateOps::apply_embedded_waitcnt(PendingState &state, const Instruction &inst,
-                                                       rj_code_arch_t arch) {
+                                                       rocjitsu::IsaFamily arch) {
   const auto fields = embedded_wait_fields(inst, arch);
-  if (fields.failed())
+  if (fields.failed()) {
     return util::Result::failure();
-  if (fields.value())
+  }
+  if (fields.value()) {
     return apply_wait_fields(state, *fields.value(), arch);
+  }
   return util::Result::success();
 }
 
 util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruction &inst,
-                                              rj_code_arch_t arch) {
+                                              rocjitsu::IsaFamily arch) {
   const auto fields = explicit_wait_fields(inst, arch);
-  if (fields.failed())
+  if (fields.failed()) {
     return util::Result::failure();
-  if (!fields.value())
+  }
+  if (!fields.value()) {
     return util::Result::success();
+  }
   if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_IDLE) {
     VgprMsbState vgpr_msb = state.vgpr_msb;
     ExpertSchedulingState expert_scheduling = state.expert_scheduling;
@@ -734,9 +811,10 @@ util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruc
     return util::Result::success();
   }
   if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_ALU ||
-      inst.amdgpu_operation() == amdgpu::Operation::S_WAITCNT_DEPCTR)
+      inst.amdgpu_operation() == amdgpu::Operation::S_WAITCNT_DEPCTR) {
     apply_sgpr_hazard_wait(state.sgpr_hazards,
                            static_cast<uint32_t>(inst.src_operand(0)->encoding_value()));
+  }
   return apply_wait_fields(state, *fields.value(), arch);
 }
 

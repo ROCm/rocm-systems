@@ -173,59 +173,22 @@ def test_cdna_pk_f32_reads_all_register_pairs():
     assert 'encoding_value_ >= 256' not in cpp
 
 
-def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
+def test_pk_lshl_add_u64_routes_through_count_validating_adapter():
     cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
-
-    assert 'const auto values = read_pk_u64_pair(src0, wf, lane);' in cpp
-    assert 'const auto shifts = read_pk_u32_pair(src1, wf, lane);' in cpp
-    assert 'const auto addends = read_pk_u64_pair(src2, wf, lane);' in cpp
-    assert (
-        'amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo'
-        in cpp
-    )
-    assert (
-        'amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi'
-        in cpp
-    )
-    assert 'lshl_masked(values.lo, shifts.lo)' not in cpp
-    assert 'lshl_masked(values.hi, shifts.hi)' not in cpp
-    assert 'results[lane] = {result_lo, result_hi};' in cpp
-    assert 'write_pk_u64_pair(vdst, wf, lane, results[lane]);' in cpp
+    assert 'execute_packed_u64<true>' in cpp
+    assert 'rj_arith_v_pk_lshl_add_u64_w32, 0, vdst, src0, src1, &src2' in cpp
     assert 'inst_.neg' not in cpp
     assert 'inst_.clamp' not in cpp
 
 
-def test_pk_lshl_add_u64_rejects_unproven_counts_before_any_write():
-    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
-
-    reject = 'if (shifts.lo > 4u || shifts.hi > 4u)'
-    report = 'wf.report_instruction_execution_error('
-    write = 'write_pk_u64_pair(vdst, wf, lane, results[lane]);'
-    assert reject in cpp
-    assert report in cpp
-    assert write in cpp
-    assert cpp.index(reject) < cpp.index(report) < cpp.index(write)
-
-
-def test_pk_u64_add_sub_generate_per_element_negation_and_integer_clamp():
-    add = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'add')
-    sub = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'sub')
-
-    for cpp in (add, sub):
-        assert 'const auto lhs = read_pk_u64_pair(src0, wf, lane);' in cpp
-        assert 'const auto rhs = read_pk_u64_pair(src1, wf, lane);' in cpp
-        assert 'using Wide = util::int128_t;' in cpp
-        assert 'if (negate_lhs) lhs_wide = -lhs_wide;' in cpp
-        assert 'if (negate_rhs) rhs_wide = -rhs_wide;' in cpp
-        assert 'if (result < Wide{}) return 0;' in cpp
-        assert 'if (result > kMax) return std::numeric_limits<uint64_t>::max();' in cpp
-        assert '(inst_.neg & 1u) != 0' in cpp
-        assert '(inst_.neg_hi & 2u) != 0' in cpp
-        assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
-        assert cpp.index('if (negate_lhs)') < cpp.index('const Wide result')
-        assert cpp.index('const Wide result') < cpp.index('if (inst_.clamp)')
-    assert 'const Wide result = lhs_wide + rhs_wide;' in add
-    assert 'const Wide result = lhs_wide - rhs_wide;' in sub
+def test_pk_u64_add_sub_forward_per_element_modifiers():
+    for op in ('add', 'sub'):
+        cpp = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], op)
+        assert 'execute_packed_u64<false>' in cpp
+        assert f'rj_arith_v_pk_{op}_nc_u64_w32, modifiers, vdst, src0, src1' in cpp
+        assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
+        assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp
+        assert 'int128' not in cpp
 
 
 def test_pk_u64_binop_rejects_unknown_operation():

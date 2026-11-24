@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -24,7 +25,7 @@ protected:
   static constexpr uint64_t kShared = 0x1000100000000ULL;
   static constexpr uint64_t kPrivate = 0x1000000000000ULL;
 
-  virtual rj_code_arch_t architecture() const { return ROCJITSU_CODE_ARCH_RDNA3_5; }
+  virtual rocjitsu::IsaFamily architecture() const { return rocjitsu::IsaFamily::Rdna3_5; }
 
   void make_cu(std::unique_ptr<ComputeUnitCore> &unit) {
     ComputeUnitCore::Config cfg{};
@@ -44,7 +45,7 @@ protected:
     l2_.set_backing_memory(&memory_);
     ASSERT_NO_FATAL_FAILURE(make_cu(cu_));
     cu_->set_apertures(kShared, kShared + UINT32_MAX, kPrivate, kPrivate + UINT32_MAX);
-    wf_ = cu_->dispatch_wf(0, 0, 106, 32, architecture() == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    wf_ = cu_->dispatch_wf(0, 0, 106, 32, architecture() == rocjitsu::IsaFamily::Cdna4 ? 64 : 32);
     ASSERT_NE(wf_, nullptr);
     wf_->set_apertures(kShared, kShared + UINT32_MAX, kPrivate, kPrivate + UINT32_MAX,
                        /*override_launch=*/true);
@@ -56,8 +57,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wf_)
+    if (wf_) {
       wf_->halt();
+    }
   }
 
   void issue(uint32_t word0, uint32_t word1, VmAccessOutcome expected = VmAccessOutcome::Complete) {
@@ -99,12 +101,12 @@ protected:
 };
 
 class Gfx11MemoryTest : public Rdna35MemoryTest,
-                        public testing::WithParamInterface<rj_code_arch_t> {
-  rj_code_arch_t architecture() const override { return GetParam(); }
+                        public testing::WithParamInterface<rocjitsu::IsaFamily> {
+  rocjitsu::IsaFamily architecture() const override { return GetParam(); }
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11MemoryTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11MemoryTest, ScratchAndFlatPrivateShareDwordInterleaving) {
   wf_->set_exec(2);
@@ -153,22 +155,23 @@ TEST_P(Gfx11MemoryTest, ScratchAndFlatPrivateShareDwordInterleaving) {
 }
 
 class ReturningDsAtomicRouteTest : public Rdna35MemoryTest,
-                                   public testing::WithParamInterface<rj_code_arch_t> {
-  rj_code_arch_t architecture() const override { return GetParam(); }
+                                   public testing::WithParamInterface<rocjitsu::IsaFamily> {
+  rocjitsu::IsaFamily architecture() const override { return GetParam(); }
 };
 
 INSTANTIATE_TEST_SUITE_P(Memory, ReturningDsAtomicRouteTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
-                                         ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3,
+                                         rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(ReturningDsAtomicRouteTest, DirectRouteQualifiesReturningAtomicBeforeWritingLds) {
   write_vector(2, 8);
   write_vector(3, 1);
   const auto address = wf_->lds_base() + 8;
-  const bool cdna4 = GetParam() == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool cdna4 = GetParam() == rocjitsu::IsaFamily::Cdna4;
   const uint32_t ordinary_vgprs = cdna4 ? 16 : 32;
-  if (cdna4)
+  if (cdna4) {
     wf_->set_accum_offset(ordinary_vgprs);
+  }
   for (uint32_t dst : {ordinary_vgprs - 1, ordinary_vgprs}) {
     SCOPED_TRACE(dst);
     wf_->lds().write32(address, 41);
@@ -331,8 +334,9 @@ private:
   mutable std::shared_ptr<const PrtRanges> ranges_;
   IdentityAddressSpaceTranslator identity;
   VmTranslationResult translate(uint64_t address, size_t size, VmAccessKind kind) const override {
-    if (address >= 0x50000)
+    if (address >= 0x50000) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     auto result = identity.translate(address, size, kind);
     result.translation.contiguous_bytes =
         std::min<uint64_t>(result.translation.contiguous_bytes, 0x50000 - address);
@@ -379,8 +383,9 @@ TEST_P(Gfx11MemoryTest, DebuggerProbesOnlyResidentBufferTfeElements) {
         translator->publish_hole(sparse, sparse && tfe && resident == 1);
         const uint32_t address = limit - 4 * resident;
         write_scalar(0, address);
-        for (unsigned reg = 0; reg < 3; ++reg)
+        for (unsigned reg = 0; reg < 3; ++reg) {
           write_vector(reg, sentinel);
+        }
         wf_->pc = tfe ? kernel : kernel + 8;
         watches.clear();
         faults = 0;
@@ -678,11 +683,13 @@ TEST_F(Rdna35MemoryTest, OrderedCountScoreboardTracksOnlyTheReturnedLane) {
     wf_->set_exec(exec);
     const unsigned result_lane = exec ? 1 : 0;
     EXPECT_EQ(MemoryWaitScoreboard::result_lanes(*decoded.value(), *wf_), 1ull << result_lane);
-    for (unsigned lane = 0; lane < 4; ++lane)
+    for (unsigned lane = 0; lane < 4; ++lane) {
       write_vector(8, 0xdeadbeef, lane);
+    }
     issue(words[0], words[1]);
-    for (unsigned lane = 0; lane < 4; ++lane)
+    for (unsigned lane = 0; lane < 4; ++lane) {
       EXPECT_EQ(read_vector(8, lane), lane == result_lane ? 0u : 0xdeadbeefu);
+    }
   }
 }
 
@@ -722,8 +729,9 @@ TEST_F(Rdna35MemoryTest, DebuggerTreatsAtcProbesAsNonfaultingHints) {
     IdentityAddressSpaceTranslator identity;
     VmTranslationResult translate(uint64_t address, size_t size,
                                   VmAccessKind access) const override {
-      if (address >= 0x50000 || (address >= 0x40000 && access == VmAccessKind::Write))
+      if (address >= 0x50000 || (address >= 0x40000 && access == VmAccessKind::Write)) {
         return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+      }
       return identity.translate(address, size, access);
     }
   };

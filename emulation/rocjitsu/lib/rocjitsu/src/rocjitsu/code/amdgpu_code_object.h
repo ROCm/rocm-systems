@@ -10,6 +10,7 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 #include <memory>
@@ -80,14 +81,14 @@ public:
   /// This overload scans the object's descriptors itself. Callers that already
   /// hold a scan (e.g. the DBI orchestrator) should pass it to the overload below
   /// to avoid re-walking the sections.
-  [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rj_code_arch_t arch) const;
+  [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rocjitsu::IsaFamily arch) const;
 
   /// @brief As above, computed from already-discovered @p kernels.
   ///
   /// @details Same decode as the scanning overload, but over a caller-supplied
   /// descriptor list (from scan_kernel_descriptors) rather than re-walking.
   [[nodiscard]] static std::optional<uint32_t>
-  min_kernel_sgpr_count(rj_code_arch_t arch, std::span<const KernelDescriptorInfo> kernels);
+  min_kernel_sgpr_count(rocjitsu::IsaFamily arch, std::span<const KernelDescriptorInfo> kernels);
 
 private:
   void load_sections();

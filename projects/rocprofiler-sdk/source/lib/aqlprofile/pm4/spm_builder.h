@@ -701,7 +701,7 @@ public:
         spm_buffer_desc->num_xcc         = config->xcc_number;
         spm_buffer_desc->num_events      = original_event_count;
 
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
         static std::once_flag dump_mux_once;
         std::call_once(dump_mux_once, [&]() {
             auto dump_mux = [](const char* name, const std::vector<mux_info_t>& mux) {
@@ -775,7 +775,7 @@ public:
                                                Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
                                                Primitives::rlc_spm_perfmon_cntl_value(1, 0));
         }
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
         if(config->spm_sample_count_ptr && !(Primitives::RLC_SPM_SAMPLE_CNT__ADDR == Register()))
         {
             builder.BuildCopyRegDataPacket(cmd_buffer,

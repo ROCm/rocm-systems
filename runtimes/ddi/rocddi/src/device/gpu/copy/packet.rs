@@ -245,7 +245,7 @@ fn encode_timestamp(command: &mut [u32], offset: usize, address: u64) {
     clippy::cast_possible_truncation,
     reason = "the timestamp address is deliberately split into low and high dwords"
 )]
-fn encode_gfx9_timestamp(command: &mut [u32], offset: usize, address: u64) {
+fn encode_legacy_timestamp(command: &mut [u32], offset: usize, address: u64) {
     command[offset] = SDMA_TIMESTAMP_GET_GLOBAL_GFX9;
     command[offset + 1] = address as u32;
     command[offset + 2] = (address >> 32) as u32;
@@ -278,14 +278,14 @@ fn encode_gfx9_transfer(
     words.fill(0);
     let mut offset = 0;
     if let Some(start) = timing.and_then(|timing| timing.start) {
-        encode_gfx9_timestamp(words, offset, start);
+        encode_legacy_timestamp(words, offset, start);
         offset += TIMESTAMP_PACKET_BYTES / 4;
     }
     encode_copy_packet(words, offset, destination, source, size);
     words[offset] = opcode;
     offset += COPY_PACKET_BYTES / 4;
     if let Some(timing) = timing {
-        encode_gfx9_timestamp(words, offset, timing.end);
+        encode_legacy_timestamp(words, offset, timing.end);
         offset += TIMESTAMP_PACKET_BYTES / 4;
     }
     (offset * 4) as u64
@@ -297,18 +297,14 @@ fn encode_timed_copy(
     source: u64,
     size: u32,
     timing: TimingAddresses,
-    protocol: SdmaProtocol,
 ) -> u64 {
     let copy_offset = 5 + usize::from(timing.start.is_some()) * TIMESTAMP_PACKET_BYTES / 4;
     let end_offset = copy_offset + COPY_PACKET_BYTES / 4;
     let trailing_gcr = end_offset + TIMESTAMP_PACKET_BYTES / 4;
     encode_cache_envelope(command, trailing_gcr);
-    // GFX10/11 share the OSS5 copy layout but have no timestamp scope field.
-    let timestamp = if matches!(protocol, SdmaProtocol::Gfx12_0) {
-        encode_timestamp
-    } else {
-        encode_gfx9_timestamp
-    };
+    // GFX10 through GFX12.0 use the OSS5 timestamp layout without a scope
+    // field. System scope is part of the GFX12.5 packet dialect.
+    let timestamp = encode_legacy_timestamp;
     if let Some(start) = timing.start {
         timestamp(command, 5, start);
     }
@@ -367,7 +363,7 @@ impl SdmaCommand {
                 SdmaProtocol::Gfx10 | SdmaProtocol::Gfx11 | SdmaProtocol::Gfx12_0 => {
                     debug_assert!(options.is_plain());
                     if let Some(timing) = timing {
-                        encode_timed_copy(words, destination, source, size, timing, protocol)
+                        encode_timed_copy(words, destination, source, size, timing)
                     } else {
                         encode_copy(words, destination, source, size);
                         COMMAND_BYTES as u64
@@ -524,7 +520,7 @@ mod tests {
         assert_eq!(
             &command[5..18],
             &[
-                SDMA_TIMESTAMP_GET_GLOBAL_SYS,
+                0x0000_020d,
                 0x1122_3344,
                 0xaabb_ccdd,
                 SDMA_COPY_LINEAR,
@@ -534,7 +530,7 @@ mod tests {
                 0xfeed_face,
                 0x9abc_def0,
                 0x1234_5678,
-                SDMA_TIMESTAMP_GET_GLOBAL_SYS,
+                0x0000_020d,
                 0x99aa_bbcc,
                 0x5566_7788,
             ]
@@ -556,7 +552,7 @@ mod tests {
             (TIMED_COMMAND_BYTES - TIMESTAMP_PACKET_BYTES) as u64
         );
         assert_eq!(command[5], SDMA_COPY_LINEAR);
-        assert_eq!(command[12], SDMA_TIMESTAMP_GET_GLOBAL_SYS);
+        assert_eq!(command[12], 0x0000_020d);
         assert_eq!(command[15], SDMA_USER_GCR);
         assert_eq!(&command[20..], &[0, 0, 0]);
     }

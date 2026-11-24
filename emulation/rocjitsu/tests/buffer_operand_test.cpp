@@ -9,6 +9,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 
 #include <gtest/gtest.h>
@@ -24,7 +25,7 @@ namespace {
 using namespace rocjitsu;
 
 struct BufferOperandCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *label;
   uint32_t encoding;
   const char *mnemonic;
@@ -79,8 +80,9 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
     }
   }
 
-  const bool has_acc = tc.arch == ROCJITSU_CODE_ARCH_CDNA2 || tc.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                       tc.arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool has_acc = tc.arch == rocjitsu::IsaFamily::Cdna2 ||
+                       tc.arch == rocjitsu::IsaFamily::Cdna3 ||
+                       tc.arch == rocjitsu::IsaFamily::Cdna4;
   if (has_acc) {
     // Word 1 bit 23 selects the AccVGPR bank for VDATA on CDNA2+. Keep both
     // address components enabled to cover the acc fold together with VADDR
@@ -108,9 +110,9 @@ TEST(BufferFeedbackTest, PrintedTfeMatchesTheConditionallyWrittenStatusRegister)
     uint32_t gfx10, gfx11;
     unsigned payload;
   };
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                          ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
-    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                          rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
+    const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
     const auto decoder = Decoder::create(arch);
     for (const auto &[old_opcode, new_opcode, payload] :
          {Encoding{0xe0300000, 0xe0500000, 1},    // Untyped dword.
@@ -163,7 +165,7 @@ TEST(BufferFeedbackTest, PrintedTfeMatchesTheConditionallyWrittenStatusRegister)
 }
 
 TEST(Gfx10BufferOperandTest, TfeFetchReservesOneConditionalStatusRegisterAfterTheData) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     auto decoder = Decoder::create(arch);
     ASSERT_NE(decoder, nullptr);
     for (const auto &[opcode, data_words] : {
@@ -190,37 +192,37 @@ TEST(Gfx10BufferOperandTest, TfeFetchReservesOneConditionalStatusRegisterAfterTh
 
 INSTANTIATE_TEST_SUITE_P(
     LegacyBufferFamilies, BufferOperandTest,
-    ::testing::Values(BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1_mubuf", 0xE0500000u,
+    ::testing::Values(BufferOperandCase{rocjitsu::IsaFamily::Cdna1, "cdna1_mubuf", 0xE0500000u,
                                         "buffer_load_dword", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2_mubuf", 0xE0500000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Cdna2, "cdna2_mubuf", 0xE0500000u,
                                         "buffer_load_dword", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3_mubuf", 0xE0500000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Cdna3, "cdna3_mubuf", 0xE0500000u,
                                         "buffer_load_dword", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4_mubuf", 0xE0500000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Cdna4, "cdna4_mubuf", 0xE0500000u,
                                         "buffer_load_dword", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1_mubuf", 0xE0300000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna1, "rdna1_mubuf", 0xE0300000u,
                                         "buffer_load_dword", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2_mubuf", 0xE0300000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna2, "rdna2_mubuf", 0xE0300000u,
                                         "buffer_load_dword", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3_mubuf", 0xE0500000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna3, "rdna3_mubuf", 0xE0500000u,
                                         "buffer_load_b32", true},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5_mubuf", 0xE0500000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna3_5, "rdna3_5_mubuf", 0xE0500000u,
                                         "buffer_load_b32", true},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Cdna1, "cdna1_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Cdna2, "cdna2_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Cdna3, "cdna3_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Cdna4, "cdna4_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna1, "rdna1_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna2, "rdna2_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", false},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna3, "rdna3_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", true},
-                      BufferOperandCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5_mtbuf", 0xE8000000u,
+                      BufferOperandCase{rocjitsu::IsaFamily::Rdna3_5, "rdna3_5_mtbuf", 0xE8000000u,
                                         "tbuffer_load_format_x", true}),
     [](const ::testing::TestParamInfo<BufferOperandCase> &info) {
       return std::string(info.param.label);

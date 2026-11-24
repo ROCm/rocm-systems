@@ -16,6 +16,15 @@ pub(crate) use hardware::{
     BUFFER_MAX_ELEMENTS, Format, Generation, Layout, ROW_ALIGNMENT, supported_gpu,
 };
 
+/// Minimum byte alignment of a linear texture row on this generation.
+pub(crate) fn row_pitch_alignment(generation: Generation) -> usize {
+    if generation == Generation::Gfx12 {
+        128
+    } else {
+        ROW_ALIGNMENT
+    }
+}
+
 /// Maps image error to the corresponding HSA representation.
 fn map_image_error(error: ImageError) -> Status {
     match error {
@@ -116,7 +125,7 @@ pub(crate) fn access_capabilities(geometry: u32, image_format: HsaExtImageFormat
     }
 }
 
-/// Calculates the GFX12 surface layout for an HSA image descriptor.
+/// Validates dimensions and calculates a conservative linear surface layout.
 pub(crate) fn layout(
     desc: HsaExtImageDescriptor,
     format: Format,

@@ -5,6 +5,77 @@
 
 use super::*;
 
+impl MemoryState {
+    /// Reserves bookkeeping before acquiring a native registration.
+    fn reserve_host_lock(&mut self, host: usize) -> Result<usize, Status> {
+        let count = match self.host_locks.get(&host) {
+            Some(HostLockState::Locked(count)) => count.checked_add(1).ok_or(OUT_OF_RESOURCES)?,
+            Some(HostLockState::Retiring) => return Err(OUT_OF_RESOURCES),
+            None => 1,
+        };
+        self.locked_allocations
+            .try_reserve(1)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        self.host_locks
+            .try_reserve(1)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        Ok(count)
+    }
+
+    /// Publishes a registration after its native acquisition succeeds.
+    fn add_host_lock(&mut self, memory: LockedMemory, host: usize, count: usize) {
+        self.locked_allocations.push(memory);
+        self.host_locks.insert(host, HostLockState::Locked(count));
+    }
+
+    /// Releases a host-address lock, preserving every alias until the last unlock.
+    pub(crate) fn unlock_host(&mut self, host: usize) -> Status {
+        self.unlock_host_with(host, |memory| memory.free().map_err(map_error))
+    }
+
+    /// Keeps native cleanup injectable so failure and retirement need no GPU in tests.
+    fn unlock_host_with(
+        &mut self,
+        host: usize,
+        mut free: impl FnMut(&mut LockedMemory) -> Result<(), Status>,
+    ) -> Status {
+        match self.host_locks.get_mut(&host) {
+            Some(HostLockState::Locked(count)) if *count > 1 => {
+                *count -= 1;
+                return SUCCESS;
+            }
+            Some(HostLockState::Locked(_)) => {
+                if self.locked_allocations.iter().any(|memory| {
+                    memory.description.host_base == Some(host)
+                        && self.copy_borrowed(memory.description.agent_base)
+                }) {
+                    return OUT_OF_RESOURCES;
+                }
+                self.host_locks.insert(host, HostLockState::Retiring);
+            }
+            Some(HostLockState::Retiring) => {}
+            None => return INVALID_ARGUMENT,
+        }
+
+        for memory in self
+            .locked_allocations
+            .iter_mut()
+            .filter(|memory| memory.description.host_base == Some(host) && !memory.retired)
+        {
+            if let Err(status) = free(memory) {
+                // Keep every alias as a rejecting tombstone, including earlier
+                // successful frees. A retry only visits unfinished owners.
+                return status;
+            }
+            memory.retired = true;
+        }
+        self.locked_allocations
+            .retain(|memory| memory.description.host_base != Some(host));
+        self.host_locks.remove(&host);
+        SUCCESS
+    }
+}
+
 /// Exports an allocation as a portable DMA-BUF descriptor.
 pub(crate) unsafe fn portable_export_dmabuf(
     pointer: *const c_void,
@@ -154,15 +225,11 @@ pub(crate) unsafe fn memory_lock_to_pool(
         }
     }
 
-    if runtime
-        .memory_state
-        .locked_allocations
-        .try_reserve(1)
-        .is_err()
-    {
-        return OUT_OF_RESOURCES;
-    }
     let host_base = host_ptr as usize;
+    let lock_count = match runtime.memory_state.reserve_host_lock(host_base) {
+        Ok(count) => count,
+        Err(status) => return status,
+    };
     let (allocation, device_base) =
         if let Some((&first_index, peer_indexes)) = gpu_indexes.split_first() {
             let (allocation, page_offset) = {
@@ -203,10 +270,8 @@ pub(crate) unsafe fn memory_lock_to_pool(
             handle: GPU_AGENT_BASE + index as u64,
         })
         .collect();
-    runtime
-        .memory_state
-        .locked_allocations
-        .push(LockedMemory::new(
+    runtime.memory_state.add_host_lock(
+        LockedMemory::new(
             allocation,
             host_base,
             device_base,
@@ -214,7 +279,10 @@ pub(crate) unsafe fn memory_lock_to_pool(
             owner,
             effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0, false),
             accessible,
-        ));
+        ),
+        host_base,
+        lock_count,
+    );
     // SAFETY: The caller supplied writable pointer storage.
     unsafe { agent_ptr.write(device_base as *mut c_void) };
     SUCCESS
@@ -341,4 +409,257 @@ pub(crate) unsafe fn interop_map_buffer(
         }
     }
     SUCCESS
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod host_lock_tests {
+    use super::*;
+
+    /// Uses metadata-only registrations to exercise lifetime without native devices.
+    fn state() -> MemoryState {
+        MemoryState::new(Arc::new(crate::session::SessionHealth::new()))
+    }
+
+    /// Publishes the same metadata that a successful host lock records.
+    fn register(state: &mut MemoryState, host: usize, alias: usize, size: usize, gpu: u64) {
+        let count = state.reserve_host_lock(host).unwrap();
+        state.add_host_lock(
+            LockedMemory::new(
+                None,
+                host,
+                alias,
+                size,
+                HsaAgent { handle: CPU_AGENT },
+                POOL_FLAG_COARSE,
+                vec![HsaAgent { handle: gpu }],
+            ),
+            host,
+            count,
+        );
+    }
+
+    #[test]
+    fn earlier_unlock_preserves_new_alias_and_its_copy_borrow() {
+        let mut state = state();
+        let host = 0x10_0000;
+        let older = 0x20_0000;
+        let newer = 0x30_0000;
+        register(&mut state, host, older, 0x41000, GPU_AGENT_BASE);
+        register(&mut state, host, newer, 0x41000, GPU_AGENT_BASE);
+        state.retain_copy_borrow(newer).unwrap();
+        let mut freed = Vec::new();
+        assert_eq!(
+            state.unlock_host_with(host, |memory| {
+                freed.push(memory.description.agent_base);
+                Ok(())
+            }),
+            SUCCESS
+        );
+        assert!(freed.is_empty());
+        for alias in [older, newer] {
+            let description = state
+                .locked_pointer_description(alias + 0x290, 0x40000)
+                .unwrap();
+            assert_eq!(description.pointer_type, POINTER_TYPE_LOCKED);
+            assert_eq!(description.agent_base, alias);
+            assert_eq!(
+                description.host_range(alias + 0x290, 0x40000),
+                Some(host + 0x290)
+            );
+            assert_eq!(description.accessible.len(), 1);
+            assert_eq!(description.accessible[0].handle, GPU_AGENT_BASE);
+        }
+        assert_eq!(state.unlock_host(host), OUT_OF_RESOURCES);
+        state.release_copy_borrow(newer);
+        assert_eq!(
+            state.unlock_host_with(host, |memory| {
+                freed.push(memory.description.agent_base);
+                Ok(())
+            }),
+            SUCCESS
+        );
+        assert_eq!(freed, [older, newer]);
+        assert!(state.locked_pointer_description(newer, 1).is_none());
+        assert_eq!(state.unlock_host(host), INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn same_alias_keeps_larger_registration_bounds_and_access() {
+        let mut state = state();
+        let host = 0x10_0000;
+        let alias = 0x20_0000;
+        register(&mut state, host, alias, 0x41000, GPU_AGENT_BASE);
+        register(&mut state, host, alias, 0x1000, GPU_AGENT_BASE + 1);
+        for pointer in [host, alias] {
+            let description = state
+                .locked_pointer_description(pointer + 0x290, 0x40000)
+                .unwrap();
+            assert_eq!(description.size, 0x41000);
+            assert_eq!(description.accessible.len(), 1);
+            assert_eq!(description.accessible[0].handle, GPU_AGENT_BASE);
+            assert_eq!(
+                description.host_range(pointer + 0x290, 0x40000),
+                Some(host + 0x290)
+            );
+        }
+        assert_eq!(state.unlock_host(host), SUCCESS);
+        assert_eq!(
+            state
+                .locked_pointer_description(alias, 0x41000)
+                .unwrap()
+                .size,
+            0x41000
+        );
+        assert_eq!(state.unlock_host(host), SUCCESS);
+        assert!(state.locked_allocations.is_empty());
+    }
+
+    #[test]
+    fn same_alias_keeps_each_live_gpu_grant() {
+        let mut state = state();
+        let host = 0x10_0000;
+        let alias = 0x20_0000;
+        register(&mut state, host, alias, 0x41000, GPU_AGENT_BASE);
+        register(&mut state, host, alias, 0x1000, GPU_AGENT_BASE + 1);
+        for pointer in [host, alias] {
+            for (gpu, size) in [(GPU_AGENT_BASE, 0x41000), (GPU_AGENT_BASE + 1, 0x1000)] {
+                let description = state
+                    .locked_gpu_description(pointer + 0x80, 0x100, HsaAgent { handle: gpu })
+                    .unwrap();
+                assert_eq!(description.size, size);
+                assert_eq!(description.accessible.len(), 1);
+                assert_eq!(description.accessible[0].handle, gpu);
+            }
+            assert!(
+                state
+                    .locked_gpu_description(
+                        pointer,
+                        0x41000,
+                        HsaAgent {
+                            handle: GPU_AGENT_BASE + 1
+                        },
+                    )
+                    .is_none()
+            );
+        }
+        assert_eq!(state.unlock_host(host), SUCCESS);
+        assert!(
+            state
+                .locked_gpu_description(
+                    alias,
+                    0x100,
+                    HsaAgent {
+                        handle: GPU_AGENT_BASE
+                    },
+                )
+                .is_some()
+        );
+        assert_eq!(state.unlock_host(host), SUCCESS);
+    }
+
+    #[test]
+    fn failed_final_unlock_retries_owners_and_keeps_rejecting_tombstones() {
+        let mut state = state();
+        let host = 0x10_0000;
+        let aliases = [0x20_0000, 0x30_0000, 0x40_0000];
+        for alias in aliases {
+            register(&mut state, host, alias, 0x1000, GPU_AGENT_BASE);
+        }
+        assert_eq!(state.unlock_host(host), SUCCESS);
+        assert_eq!(state.unlock_host(host), SUCCESS);
+        let mut attempted = Vec::new();
+        assert_eq!(
+            state.unlock_host_with(host, |memory| {
+                let alias = memory.description.agent_base;
+                attempted.push(alias);
+                if alias == aliases[1] {
+                    Err(ERROR)
+                } else {
+                    Ok(())
+                }
+            }),
+            ERROR
+        );
+        assert_eq!(attempted, aliases[..2]);
+        assert_eq!(state.reserve_host_lock(host).err(), Some(OUT_OF_RESOURCES));
+        for pointer in [host, aliases[0], aliases[1], aliases[2]] {
+            let description = state.locked_pointer_description(pointer, 1).unwrap();
+            assert_eq!(description.pointer_type, POINTER_TYPE_RESERVED_ADDR);
+            assert!(description.accessible.is_empty());
+        }
+
+        // A successfully freed VA can be reused by an unrelated registration.
+        let replacement_host = 0x50_0000;
+        register(
+            &mut state,
+            replacement_host,
+            aliases[0],
+            0x1000,
+            GPU_AGENT_BASE,
+        );
+        let replacement = state
+            .locked_pointer_description(aliases[0], 0x1000)
+            .unwrap();
+        assert_eq!(replacement.pointer_type, POINTER_TYPE_LOCKED);
+        assert_eq!(replacement.host_base, Some(replacement_host));
+
+        attempted.clear();
+        assert_eq!(
+            state.unlock_host_with(host, |memory| {
+                attempted.push(memory.description.agent_base);
+                Ok(())
+            }),
+            SUCCESS
+        );
+        assert_eq!(attempted, aliases[1..]);
+        assert!(state.locked_pointer_description(aliases[1], 1).is_none());
+        assert_eq!(state.unlock_host(replacement_host), SUCCESS);
+    }
+
+    #[test]
+    fn overlapping_host_ranges_with_distinct_starts_unlock_independently() {
+        let mut state = state();
+        register(&mut state, 0x10_0000, 0x30_0000, 0x41000, GPU_AGENT_BASE);
+        register(&mut state, 0x14_0000, 0x40_0000, 0x41000, GPU_AGENT_BASE);
+        assert_eq!(state.unlock_host(0x10_0000), SUCCESS);
+        assert!(state.locked_pointer_description(0x30_0000, 1).is_none());
+        assert_eq!(
+            state
+                .locked_pointer_description(0x40_0000, 0x41000)
+                .unwrap()
+                .host_base,
+            Some(0x14_0000)
+        );
+        assert_eq!(state.unlock_host(0x14_0000), SUCCESS);
+    }
+
+    #[test]
+    fn failed_unlock_does_not_hide_an_older_live_host_cover() {
+        let mut state = state();
+        register(&mut state, 0x10_0000, 0x30_0000, 0x41000, GPU_AGENT_BASE);
+        register(&mut state, 0x10_1000, 0x40_0000, 0x1000, GPU_AGENT_BASE);
+        assert_eq!(state.unlock_host_with(0x10_1000, |_| Err(ERROR)), ERROR);
+        let live = state.locked_pointer_description(0x10_1080, 0x100).unwrap();
+        assert_eq!(live.pointer_type, POINTER_TYPE_LOCKED);
+        assert_eq!(live.agent_base, 0x30_0000);
+        assert_eq!(live.host_range(0x10_1080, 0x100), Some(0x10_1080));
+        let retired = state.locked_pointer_description(0x40_0080, 0x100).unwrap();
+        assert_eq!(retired.pointer_type, POINTER_TYPE_RESERVED_ADDR);
+        assert_eq!(state.unlock_host(0x10_1000), SUCCESS);
+        assert_eq!(state.unlock_host(0x10_0000), SUCCESS);
+    }
+
+    #[test]
+    fn lock_count_overflow_is_rejected_before_registration() {
+        let mut state = state();
+        state
+            .host_locks
+            .insert(0x10_0000, HostLockState::Locked(usize::MAX));
+        assert_eq!(
+            state.reserve_host_lock(0x10_0000).err(),
+            Some(OUT_OF_RESOURCES)
+        );
+        assert!(state.locked_allocations.is_empty());
+    }
 }

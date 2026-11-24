@@ -14,6 +14,10 @@
 // and restructures the control flow onto a goto fail/exit pair, mirroring the
 // GIN plugin path covered by gin-plugin-init-test.cc.
 //
+// RmaInternalBackendTest covers initPluginLibsOnceFunc's internal RMA backends (IB-CAST
+// before the generic IB proxy, or the IB proxy alone) for each NCCL_NET, NIC type and
+// NCCL_NET_PLUGIN.
+//
 // ncclRmaPluginInit is file-static, so this TU #includes the hipified plugin
 // rma.cc (RMA_PLUGIN_CC_PATH), the standard micro-test pattern. A
 // scriptable ncclRma_t vtable stands in for the plugin; no GPU, no librccl.so,
@@ -25,19 +29,24 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 #include "nccl.h"
 #include "comm.h"
 #include "nccl_rma.h"
 #include "plugin.h"
 
+#include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/transport_stubs.h"
 
-// Externs the plugin rma.cc load path references. The tests call the file-static
-// ncclRmaPluginInit directly and never exercise these, but ncclRmaInit (compiled
+// Externs the plugin rma.cc load path references. RmaPluginInitTest calls the file-static
+// ncclRmaPluginInit directly and never exercises these, but ncclRmaInit (compiled
 // into this TU) references them through initPluginLibsOnceFunc / ncclRmaPluginLoad,
-// so they must resolve at link time. ncclPluginLibPaths, ncclClosePluginLib,
-// ncclGetNetPluginLib and ncclGetPluginLibName come from fakes/plugin_stubs.cc.
+// so they must resolve at link time. RmaInternalBackendTest does run
+// initPluginLibsOnceFunc, which asks the GIN and NET plugins for RMA support; neither
+// provides it here. As in gin-plugin-init-test.cc, the plugin library registry is
+// defined below instead of taken from the fail-loud fakes/plugin_stubs.cc.
 ncclRma_t* getNcclRma_v17(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v16(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v15(void*) { return nullptr; }
@@ -45,6 +54,10 @@ ncclRma_t* getNcclRma_v14(void*) { return nullptr; }
 ncclRma_t* getNcclRma_v13(void*) { return nullptr; }
 void* ncclOpenRmaPluginLib(const char*) { return nullptr; }
 void* ncclGetGinPluginLib(ncclPluginType) { return nullptr; }
+char* ncclPluginLibPaths[ncclPluginTypeEnv + 1] = {};
+ncclResult_t ncclClosePluginLib(void*, ncclPluginType) { return ncclSuccess; }
+void* ncclGetNetPluginLib(ncclPluginType) { return nullptr; }
+const char* ncclGetPluginLibName(ncclPluginType) { return ""; }
 
 // The three built-in RMA proxies live in production TUs this binary does not
 // compile; only their addresses need to exist for initPluginLibsOnceFunc.
@@ -273,6 +286,77 @@ TEST_F(RmaPluginInitTest, NullVtable_EnablesWithoutCallingIntoPlugin) {
   EXPECT_EQ(FakeRma::devicesCalls, 0);
   EXPECT_EQ(FakeRma::finalizeCalls, 0);
   EXPECT_EQ(comm_->rmaContext, nullptr);
+}
+
+// The internal backends initPluginLibsOnceFunc puts at the end of pluginLibs, socket last (no
+// external, GIN or NET-plugin RMA library loads here).
+class RmaInternalBackendTest : public ::testing::Test {
+ protected:
+  void TearDown() override {
+    ResetEnvFakes();
+    g_rcclUseAinicValue = false;
+    memset(pluginLibs, 0, sizeof(pluginLibs));
+    pluginCount = 0;
+  }
+
+  std::vector<const ncclRma_t*> Internal(const char* net, bool ainic, const char* netPlugin = nullptr) {
+    if (net) {
+      SetMicroEnv("NCCL_NET", net);
+    } else {
+      SetMicroEnvAbsent("NCCL_NET");
+    }
+    if (netPlugin) {
+      SetMicroEnv("NCCL_NET_PLUGIN", netPlugin);
+    } else {
+      SetMicroEnvAbsent("NCCL_NET_PLUGIN");
+    }
+    SetMicroEnv("NCCL_RMA_PLUGIN", "none");
+    g_rcclUseAinicValue = ainic;
+    initPluginLibsOnceFunc();
+    // With NCCL_RMA_PLUGIN=none and no GIN or NET plugin library, every entry is internal.
+    std::vector<const ncclRma_t*> out;
+    for (int i = 0; i < pluginCount; i++) out.push_back(pluginLibs[i].ncclRma);
+    return out;
+  }
+  // IB-CAST first, the generic IB backend as its fallback, then socket.
+  const std::vector<const ncclRma_t*> kCast{&IbCastRmaIbProxy, &ncclRmaIbProxy, &ncclRmaSocketProxy};
+  const std::vector<const ncclRma_t*> kIb{&ncclRmaIbProxy, &ncclRmaSocketProxy};
+};
+
+// The data path picks IB-CAST on an AINIC host with NCCL_NET unset (plugin/net.cc), and
+// the generic IB backend is not AINIC-aware, so RMA (and GIN over it) takes IB-CAST too.
+TEST_F(RmaInternalBackendTest, NetUnsetOnAinicIsIbCast) {
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true), kCast);
+}
+
+TEST_F(RmaInternalBackendTest, NetUnsetWithoutAinicIsIb) {
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/false), kIb);
+}
+
+TEST_F(RmaInternalBackendTest, NetIbCastIsIbCast) {
+  EXPECT_EQ(Internal("IB-CAST", /*ainic=*/false), kCast);
+}
+
+// An explicit NCCL_NET=IB keeps the generic backend, on AINIC hosts too.
+TEST_F(RmaInternalBackendTest, NetIbOnAinicStaysIb) {
+  EXPECT_EQ(Internal("IB", /*ainic=*/true), kIb);
+}
+
+// ROCM-IB selects the IB-CAST NET plugin (include/net.h), so RMA takes IB-CAST too.
+TEST_F(RmaInternalBackendTest, NetRocmIbIsIbCast) {
+  EXPECT_EQ(Internal("ROCM-IB", /*ainic=*/true), kCast);
+}
+
+// An external NET plugin keeps plugin/net.cc's internal slot on the generic IB plugin, and RMA
+// follows it; "none" and an empty value only opt out of external plugins.
+TEST_F(RmaInternalBackendTest, ExternalNetPluginOnAinicIsIb) {
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true, "libnccl-net-ext.so"), kIb);
+  EXPECT_EQ(Internal("IB-CAST", /*ainic=*/true, "libnccl-net-ext.so"), kIb);
+}
+
+TEST_F(RmaInternalBackendTest, NetPluginNoneOrEmptyOnAinicIsIbCast) {
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true, "none"), kCast);
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true, ""), kCast);
 }
 
 }  // namespace
