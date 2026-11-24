@@ -10,6 +10,7 @@
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -40,7 +41,7 @@ struct DbiEntryStorage {
 /// padding, so starting new storage there can land in special-SGPR territory.
 [[nodiscard]] uint32_t dbi_entry_storage_floor(KernelBlockScope blocks,
                                                const amdhsa::kernel_descriptor_t &desc,
-                                               rj_code_arch_t arch);
+                                               rocjitsu::IsaFamily arch);
 
 /// @brief Choose the SGPR run the entry prologue owns, or fail closed.
 ///
@@ -60,8 +61,8 @@ struct DbiEntryStorage {
 ///          when @p blocks has `s_movrel*` access that the floor cannot bound.
 [[nodiscard]] std::optional<DbiEntryStorage>
 plan_dbi_entry_storage(KernelBlockScope blocks, const amdhsa::kernel_descriptor_t &desc,
-                       rj_code_arch_t arch, uint32_t kernel_sgpr_count, const RegisterSet &reserved,
-                       std::string *error_out = nullptr);
+                       rocjitsu::IsaFamily arch, uint32_t kernel_sgpr_count,
+                       const RegisterSet &reserved, std::string *error_out = nullptr);
 
 /// @brief The one payload DBI appends to a kernel's kernarg wrapper: a 64-bit
 ///        pointer the prologue loads into its persistent pair.
@@ -102,7 +103,7 @@ struct DbiEntryPrologue {
 ///          whose offsets do not fit the target's SMEM immediate, or for a
 ///          non-AMDGPU architecture.
 [[nodiscard]] std::optional<DbiEntryPrologue>
-build_dbi_entry_prologue(const amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
+build_dbi_entry_prologue(const amdhsa::kernel_descriptor_t &desc, rocjitsu::IsaFamily arch,
                          DbiEntryStorage storage, std::string *error_out = nullptr);
 
 /// @brief Everything a caller needs to place a prologue in one kernel: the
@@ -130,7 +131,7 @@ struct DbiEntryProloguePlan {
 ///          composed steps report.
 [[nodiscard]] std::optional<DbiEntryProloguePlan>
 plan_dbi_entry_prologue(KernelBlockScope blocks, const amdhsa::kernel_descriptor_t &desc,
-                        rj_code_arch_t arch, uint32_t kernel_sgpr_count,
+                        rocjitsu::IsaFamily arch, uint32_t kernel_sgpr_count,
                         const RegisterSet &reserved, std::string *error_out = nullptr);
 
 } // namespace rocjitsu

@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/diagnostic.h"
 
@@ -36,16 +37,16 @@ static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
 /// @return The encoded word, or failure for an unsupported architecture.
 /// @param emit_error Destination for failure diagnostics; omitted emitters discard them.
 inline util::FailureOr<uint32_t>
-build_v_readfirstlane_b32(uint8_t sdst, uint8_t vsrc, rj_code_arch_t arch,
+build_v_readfirstlane_b32(uint8_t sdst, uint8_t vsrc, rocjitsu::IsaFamily arch,
                           util::DiagnosticEmitter emit_error = {}) {
   // VOP1 src0 uses the same 9-bit operand code as VOP3, and vdst names the SGPR.
   const uint16_t src0 = vop3_vgpr_src(vsrc);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop1(cdna3::kVReadfirstlaneB32Vop1, {.src0 = src0, .vdst = sdst}).front();
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop1(cdna4::kVReadfirstlaneB32Vop1, {.src0 = src0, .vdst = sdst}).front();
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop1(rdna4::kVReadfirstlaneB32Vop1, {.src0 = src0, .vdst = sdst}).front();
   default:
     return emit_error.emit()
@@ -57,13 +58,13 @@ build_v_readfirstlane_b32(uint8_t sdst, uint8_t vsrc, rj_code_arch_t arch,
 /// @return The encoded word on success, or failure for an unsupported architecture or
 /// scalar operands that do not fit their encoding fields.
 inline util::FailureOr<uint32_t> build_s_bcnt1_i32_b64(uint16_t sdst, uint16_t ssrc0,
-                                                       rj_code_arch_t arch) {
+                                                       rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return build_sop1_encoding(arch, cdna3::kSBcnt1I32B64Sop1, sdst, ssrc0);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return build_sop1_encoding(arch, cdna4::kSBcnt1I32B64Sop1, sdst, ssrc0);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return build_sop1_encoding(arch, rdna4::kSBcnt1I32B64Sop1, sdst, ssrc0);
   default:
     return util::Result::failure();
@@ -77,13 +78,13 @@ inline util::FailureOr<uint32_t> build_s_bcnt1_i32_b64(uint16_t sdst, uint16_t s
 /// @return The encoded word on success, or failure for an unsupported architecture or
 /// scalar operands that do not fit their encoding fields.
 inline util::FailureOr<uint32_t> build_s_first_set_bit_b64(uint16_t sdst, uint16_t ssrc0,
-                                                           rj_code_arch_t arch) {
+                                                           rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return build_sop1_encoding(arch, cdna3::kSFf1I32B64Sop1, sdst, ssrc0);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return build_sop1_encoding(arch, cdna4::kSFf1I32B64Sop1, sdst, ssrc0);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return build_sop1_encoding(arch, rdna4::kSCtzI32B64Sop1, sdst, ssrc0);
   default:
     return util::Result::failure();
@@ -94,13 +95,13 @@ inline util::FailureOr<uint32_t> build_s_first_set_bit_b64(uint16_t sdst, uint16
 /// @return The encoded word on success, or failure for an unsupported architecture or
 /// scalar operands that do not fit their encoding fields.
 inline util::FailureOr<uint32_t> build_s_and_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1,
-                                                 rj_code_arch_t arch) {
+                                                 rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return build_sop2_encoding(arch, cdna3::kSAndB32Sop2, sdst, ssrc0, ssrc1);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return build_sop2_encoding(arch, cdna4::kSAndB32Sop2, sdst, ssrc0, ssrc1);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return build_sop2_encoding(arch, rdna4::kSAndB32Sop2, sdst, ssrc0, ssrc1);
   default:
     return util::Result::failure();
@@ -111,16 +112,16 @@ inline util::FailureOr<uint32_t> build_s_and_b32(uint16_t sdst, uint16_t ssrc0, 
 ///        @p offset_dwords from the next instruction.
 /// @return The encoded word on success, or failure for an unsupported architecture.
 inline util::FailureOr<uint32_t> build_s_cbranch_scc(bool scc1, int16_t offset_dwords,
-                                                     rj_code_arch_t arch) {
+                                                     rocjitsu::IsaFamily arch) {
   const auto offset = static_cast<uint16_t>(offset_dwords);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return build_sopp_encoding(arch, scc1 ? cdna3::kSCbranchScc1Sopp : cdna3::kSCbranchScc0Sopp,
                                offset);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return build_sopp_encoding(arch, scc1 ? cdna4::kSCbranchScc1Sopp : cdna4::kSCbranchScc0Sopp,
                                offset);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return build_sopp_encoding(arch, scc1 ? rdna4::kSCbranchScc1Sopp : rdna4::kSCbranchScc0Sopp,
                                offset);
   default:

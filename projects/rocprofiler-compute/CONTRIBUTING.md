@@ -332,42 +332,53 @@ ruff format .
 Metric equations in YAML config files follow a canonical format. The canonical
 implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 
-**Scope.** Equation formatting applies to YAML files under:
+**Scope.** The formatter checks these YAML files under `src/rocprof_compute_soc/`:
 
-- `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
+- `analysis_configs/gfx*/*.yaml` (panel configs)
+- `metric_library/<arch>/*.yaml`, including `collectables.yaml`
+- `analysis_configs/collectables/<arch>_collectables.yaml` (panel collectables)
 
-Template files (`*_template.yaml`) and build artifacts are excluded. Only values
-under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
+It skips template files (`*_template.yaml`) and build artifacts. In the panel configs
+and metric library files, the equations are the values of these keys: `value`, `avg`,
+`min`, `max`, `std dev`, `expr`, `peak`, `formula` and `peak_empirical`. Table headers
+use the same keys for column titles, so the formatter skips them. In the panel
+collectables files, every top-level value is an equation.
 
 **Rules.**
 
-- **Operator spacing** — all binary operators (`+`, `-`, `*`, `/`) have exactly
-  one space on each side: `SUM(x) / SUM(y)`.
-- **Constant factoring** — when an aggregation (`SUM`, `AVG`, `MIN`, `MAX`)
-  multiplies by a numeric constant, factor it out:
-  `128 * SUM(x)`, not `SUM(x * 128)`. Addition inside aggregations is left as-is.
-- **Minimal parentheses** — remove parentheses made redundant by operator
-  precedence (`a + b + c`, not `(a + b) + c`), but preserve those required for
-  correct evaluation (`a - (b - c)`, `(a + b) * c`).
-- **Unary negation** — negation of a compound expression keeps its parentheses:
-  `-(a + b)`, not `-a + b`.
-- **Literal values** — `N/A`, `None`, `null`, `true`, `false`, and
-  `Peak (Empirical)` are never parsed as equations and must be written exactly
-  as shown (the space before `(` in `Peak (Empirical)` is required).
+- Operator spacing: each binary operator (`+`, `-`, `*`, `/`) has one space on each
+  side, as in `SUM(x) / SUM(y)`.
+- Constant factoring: a number that multiplies the single argument of an aggregation
+  (`SUM`, `AVG`, `MIN`, `MAX`) moves out of the call, so `SUM(x * 128)` becomes
+  `128 * SUM(x)`. A sum or a quotient inside an aggregation stays as written.
+- Minimal parentheses: the formatter removes parentheses that operator precedence
+  makes redundant, so `(a + b) + c` becomes `a + b + c`. A right operand of the same
+  precedence keeps its parentheses, and so does an operand whose parentheses change
+  the order of evaluation. `a - (b - c)`, `a + (b + c)` and `(a + b) * c` stay as
+  written.
+- Unary minus: a minus sign before an operation keeps its parentheses, so `-(a + b)`
+  does not become `-a + b`.
+- Left as written: the formatter does not parse per-channel templates such as
+  `TCC_HIT[::_1]`. A cell without a value is written `None`.
 
-Equations with unsupported syntax (unknown characters, unmatched parentheses) are
-left unchanged; the formatter never corrupts an equation it cannot fully parse.
+The formatter reports each equation that it cannot parse, such as one with an
+unknown character, an unmatched parenthesis or a missing operand. The report gives
+the key of the equation and the parser message. The formatter leaves the equation
+unchanged, so fix it by hand.
 
 **Enforcement.** The `yaml-format-fix` pre-commit hook runs
 `tools/format_yaml.py --fix` on staged config files and auto-corrects equations
 in place. Re-stage the modified files and commit again.
 
 ```bash
+# Report equations that need formatting
+python tools/format_yaml.py --check src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+
 # Show proposed changes
-python tools/format_yaml.py --diff src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --diff src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 
 # Auto-fix in place
-python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/collectables/*.yaml
 ```
 
 `tools/test_format_yaml.py` tests the formatter.
@@ -483,7 +494,7 @@ neither diagram can drift from the code. Do not edit the PNGs by hand.
 
 ## Instruction Execution Pipeline Table
 
-[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml)
+[`src/pc_sampling/instruction_pipelines.yaml`](src/pc_sampling/instruction_pipelines.yaml)
 is generated, not written by hand. Rerun the generator when a new GPU family
 needs support, or when an instruction shows up with an empty type in analyze,
 and commit the regenerated file as is:
@@ -540,13 +551,16 @@ These tests are automatically protected by guards in `tests/conftest.py` when te
 The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
 non-stdlib packages are imported.
 
+Only integration tests use `ProfileModeImportGuard`. Unit tests don't check
+profile-mode imports.
+
 ### What's Allowed
 
 **Python standard library** (Python 3.8+):
 - `json`, `csv`, `sqlite3`, `subprocess`, `pathlib`, `logging`, `sys`, `os`, etc.
 
 **Project modules**:
-- `rocprof_compute`, `utils`, `vendored.*`, `roofline`, `config`, `argparser`
+- `rocprof_compute`, `utils`, `ml_api_tracing`, `vendored.*`, `roofline`, `config`, `argparser`
 
 **ROCm system libraries** (bundled with ROCm, not pip packages):
 - `amdsmi` - AMD System Management Interface

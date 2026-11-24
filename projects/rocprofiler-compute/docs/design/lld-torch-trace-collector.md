@@ -8,14 +8,28 @@ and leaves call-tree construction to analysis.
 
 | Source | Responsibility |
 | --- | --- |
-| [torch.py](../../src/utils/inject_roctx/_backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
-| [torch_trace_collector.py](../../src/utils/inject_roctx/_backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
-| [core.py](../../src/utils/inject_roctx/core.py) | Python ROCTX I/O, source-location resolution, and flat marker composition |
+| [torch.py](../../src/ml_api_tracing/inject_roctx/backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
+| [torch_trace_collector.py](../../src/ml_api_tracing/inject_roctx/backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
+| [torch_wraps.py](../../src/ml_api_tracing/inject_roctx/backends/torch_wraps.py) | Functions and tensor methods that the torch backend wraps |
+| [installer.py](../../src/ml_api_tracing/inject_roctx/installer.py) | Installs the selected backends in the workload |
+| [launch.py](../../src/ml_api_tracing/inject_roctx/launch.py) | Entry point that runs the workload with the backends installed |
+| [orchestrator.py](../../src/ml_api_tracing/profiling/orchestrator.py) | Checks the `--trace-ml-api` options and adds the launcher to the workload command |
+| [marker_ranges.py](../../src/ml_api_tracing/inject_roctx/marker_ranges.py) | Python ROCTX runtime emission and source-location resolution |
+| [marker_format.py](../../src/ml_api_tracing/marker_format.py) | Shared Python marker encoding, composition, parsing, and legacy stacked-wire detection |
+| [constants.py](../../src/ml_api_tracing/constants.py) | Framework and user-region identities shared by profiling, analysis, and marker parsing |
+| [trace_selection.py](../../src/ml_api_tracing/profiling/trace_selection.py) | Resolves the frameworks that `--trace-ml-api` selects, using only the standard library |
+| [operator_patterns.py](../../src/ml_api_tracing/analyze/operator_patterns.py) | Matches `--list-operators` and `--operator` selectors to the frameworks a workload traced |
+| [orchestrator.py](../../src/ml_api_tracing/analyze/orchestrator.py) | Runs the analysis steps in order and reports diagnostics |
+| [trace_csv.py](../../src/ml_api_tracing/analyze/trace_csv.py) | Marker and counter file discovery and CSV loading |
+| [pass_matching.py](../../src/ml_api_tracing/analyze/pass_matching.py) | Joining passes, parsing markers, and matching operator calls across passes |
+| [call_tree.py](../../src/ml_api_tracing/analyze/call_tree.py) | Nesting, launcher attachment, traversal, and statistical rollup |
+| [output.py](../../src/ml_api_tracing/analyze/output.py) | Operator listing and matched-operator reports, summary table and terminal formatting |
+| [selection.py](../../src/ml_api_tracing/analyze/selection.py) | Matches `--operator` patterns to operators and maps their kernels to dispatches |
 | [torch_trace_collector.cpp](../../src/lib/torch_trace_collector/torch_trace_collector.cpp) | Process-wide callback installation, range lifetime, and launcher debug info |
 | [argument_capture.cpp](../../src/lib/torch_trace_collector/argument_capture.cpp) | Bounded input rendering and schema-name lookup |
 | [wire_format.h](../../src/lib/torch_trace_collector/wire_format.h) | Native marker serialization |
 | [torch_abi.h](../../src/lib/torch_trace_collector/torch_abi/torch_abi.h) | Measured private PyTorch layouts used by the local declarations |
-| [utils_profile.py](../../src/utils/utils_profile.py) | Copy marker and counter CSVs into the workload directory |
+| [storage.py](../../src/ml_api_tracing/profiling/storage.py) | Copy marker and counter CSVs into the workload directory |
 
 ## Installation and callback lifetime
 
@@ -143,12 +157,13 @@ the OS assigns new thread ids. The stitch key is the Function cell with
 ltid= removed: name, location, seqNr, tid, ftid, scope, args, and backend.
 function_ordinal is the 0-based occurrence of that stitch key in the pass,
 in marker order, assigned after join. Cross-pass collapse matches on stitch
-key and function_ordinal. A stacked Function first token
-(`:#` or `@`) makes current analyze exit during parse.
+key and function_ordinal. A regex match for `:#\d+@` in the first
+`|`-separated Function token identifies legacy stacked wire and makes current
+analyze exit during parse.
 
 ## Analyze path
 
-`--list-*-operators` / `--*-operator`:
+`--list-operators` / `--operator`:
 
 1. Pair each `ml_api_trace_*_marker_api_trace.csv` with its sibling
    `_counter_collection.csv`.
@@ -171,6 +186,14 @@ disagreement across passes. Coverage issues warn during join and attach, and
 the forest continues: unmatched dispatches, attach failures, and unlocated
 roots in `KNOWN_ML_API_BACKENDS` with no launcher thread. Plain analyze
 without those flags does not join and does not report those conditions.
+
+Analyze matches the `--list-operators` and `--operator` patterns against the
+frameworks each workload recorded in its `trace_ml_api` setting. Listing takes
+precedence over filtering. A bare `--list-operators` lists every operator. When
+a framework matches, the report keeps that framework's kernels below the match
+and the operators above it, without the kernels of those parent operators. When
+a user region matches, the report keeps everything below it. The kernel ids in
+the reports are the row numbers of the top-kernel table.
 
 ## Plain-C interface
 

@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
@@ -26,6 +29,7 @@
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/scoped_cfg_edges.h"
+#include "rocjitsu/code/text_padding.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -42,6 +46,7 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -53,17 +58,66 @@
 
 namespace rocjitsu {
 
+// The immutable source/profile binding is enforced by Instrumentor: only its
+// own source initializes these facts, and fork() retains that exact binding.
+// Storage owns the index/references, never the borrowed ELF, decoder or CFG.
+struct SourceTextFacts {
+  struct SourceLocation {
+    uint64_t address;
+    std::optional<uint64_t> text_offset;
+  };
+  struct ControlFlowEdge {
+    SourceLocation source;
+    uint64_t destination;
+    bool fallthrough = false;
+  };
+  InstructionBoundaries boundaries;
+  TextEditReferences references;
+  std::vector<SourceLocation> pc_reads;
+  std::vector<ControlFlowEdge> flow_edges;
+  std::vector<uint64_t> foreign_kernel_entries;
+};
+
+struct Instrumentor::ResolvedPoints {
+  std::vector<ResolvedInstrumentationSite> sites;
+  std::vector<ProbeCallable> probes;
+  std::vector<std::string> errors;
+  std::optional<TextEditError> edit_error;
+  // The object's kernel descriptors and the wave size they share. A probe-call
+  // site is resolved only when there is at least one kernel and one wave size.
+  std::vector<KernelDescriptorInfo> kernels;
+  std::optional<uint8_t> wave_size;
+};
+
 namespace {
 
-rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rj_code_arch_t arch) {
+rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rocjitsu::IsaFamily arch) {
   if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
     return object.target_id();
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *descriptor = registry.find(arch);
   if (descriptor == nullptr)
     return ROCJITSU_CODE_TARGET_INVALID;
-  const IsaGpuTargetDescription *target = registry.find_default_gpu_target(*descriptor);
+  const IsaTargetBinding *target = registry.find_default_target(*descriptor);
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
+}
+
+// CDNA3/CDNA4 retain a second dispatch entry for compatible preload firmware.
+// Hardware preloading on gfx1250 uses only the descriptor entry.
+bool has_kernarg_preload_firmware_entry(const KernelDescriptorInfo &kernel,
+                                        rocjitsu::IsaFamily arch) {
+  return (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) &&
+         kernarg_preload_length(kernel.descriptor) != 0;
+}
+
+std::optional<uint64_t> kernarg_preload_firmware_entry(const KernelDescriptorInfo &kernel,
+                                                       rocjitsu::IsaFamily arch,
+                                                       uint64_t text_size) {
+  constexpr uint64_t kFirmwareSkip = 256;
+  if (!has_kernarg_preload_firmware_entry(kernel, arch) || kernel.entry_text_offset >= text_size ||
+      text_size - kernel.entry_text_offset <= kFirmwareSkip)
+    return std::nullopt;
+  return kernel.entry_text_offset + kFirmwareSkip;
 }
 
 bool requires_cdna5_valu_follower(const Instruction &inst) {
@@ -76,9 +130,9 @@ bool requires_cdna5_valu_follower(const Instruction &inst) {
 
 // These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
 // architectures give that encoding different semantics.
-bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
-      arch != ROCJITSU_CODE_ARCH_RDNA3_5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+bool deallocates_vgprs(const Instruction &instruction, rocjitsu::IsaFamily arch) {
+  if (arch != rocjitsu::IsaFamily::Cdna5 && arch != rocjitsu::IsaFamily::Rdna3 &&
+      arch != rocjitsu::IsaFamily::Rdna3_5 && arch != rocjitsu::IsaFamily::Rdna4)
     return false;
   if (instruction.mnemonic() != "s_sendmsg" && instruction.mnemonic() != "s_sendmsghalt")
     return false;
@@ -87,9 +141,9 @@ bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
   // In-tree OPR_SENDMSG.MSG is 9/4/7/7 bits for RDNA3/3.5/4/CDNA5.
   // LLVM SendMsg::ID_MASK_GFX11Plus_ (SIDefines.h) uses the low byte. Until these descriptions
   // agree, reject deallocation under either interpretation (including 0x103).
-  const uint32_t message_mask = arch == ROCJITSU_CODE_ARCH_RDNA3     ? 0x1ffu
-                                : arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 0xfu
-                                                                     : 0x7fu;
+  const uint32_t message_mask = arch == rocjitsu::IsaFamily::Rdna3     ? 0x1ffu
+                                : arch == rocjitsu::IsaFamily::Rdna3_5 ? 0xfu
+                                                                       : 0x7fu;
   return message == nullptr || (message->encoding_value() & message_mask) == kDeallocVgprsMessage ||
          (message->encoding_value() & 0xffu) == kDeallocVgprsMessage;
 }
@@ -98,22 +152,43 @@ enum class CallableState { GprIndexing, Vskip, UnavailableStorage };
 
 enum class StateWrite { Unchanged, Safe, Unsafe };
 
-bool has_callable_state(rj_code_arch_t arch, CallableState state) {
+bool has_callable_state(rocjitsu::IsaFamily arch, CallableState state) {
   switch (state) {
   case CallableState::GprIndexing:
     return isa_properties(arch).mode_has_gpr_idx_en;
   case CallableState::Vskip:
     return arch_is_cdna_4_or_lower(arch);
   case CallableState::UnavailableStorage:
-    return arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-           arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+    return arch == rocjitsu::IsaFamily::Cdna5 || arch == rocjitsu::IsaFamily::Rdna3 ||
+           arch == rocjitsu::IsaFamily::Rdna3_5 || arch == rocjitsu::IsaFamily::Rdna4;
   }
   return false;
 }
 
+bool has_unavailable_branch_reference(const Instruction &instruction) {
+  const amdgpu::Operation operation = instruction.amdgpu_operation();
+  return !instruction.branch_offset_bytes() &&
+         (operation == amdgpu::Operation::S_CBRANCH_CDBGSYS ||
+          operation == amdgpu::Operation::S_CBRANCH_CDBGUSER ||
+          operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_AND_USER ||
+          operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_OR_USER ||
+          operation == amdgpu::Operation::S_SUBVECTOR_LOOP_BEGIN ||
+          operation == amdgpu::Operation::S_SUBVECTOR_LOOP_END);
+}
+
+bool reject_unavailable_branch_reference(const Instruction &instruction, TextEditError &error) {
+  if (!has_unavailable_branch_reference(instruction))
+    return false;
+  error = {.code = TextEditErrorCode::UnsupportedReferences,
+           .offset = instruction.src_loc(),
+           .message = "branch destination metadata is unavailable for " +
+                      std::string(instruction.mnemonic())};
+  return true;
+}
+
 StateWrite
-callable_state_write(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
-                     CallableState state,
+callable_state_write(const Instruction &inst, std::span<const uint8_t> text,
+                     rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<const Instruction *> *preserving_calls = nullptr) {
   if (!has_callable_state(arch, state))
     return StateWrite::Unchanged;
@@ -147,7 +222,7 @@ callable_state_write(const Instruction &inst, std::span<const uint8_t> text, rj_
 // A resolved straight-line helper can preserve the required state without an
 // ABI assumption. More complex or unresolved callees remain unknown here.
 bool callee_preserves_state(const BasicBlock::CallEdge &edge, std::span<const uint8_t> text,
-                            rj_code_arch_t arch, CallableState state) {
+                            rocjitsu::IsaFamily arch, CallableState state) {
   if (edge.callee == nullptr || !edge.callee->successors().empty() ||
       !edge.callee->predecessors().empty())
     return false;
@@ -263,8 +338,8 @@ std::optional<uint64_t> static_pc_reentry_target(const BasicBlock &block,
 // the closed text changes it. Unknown/external transfers still fail.
 bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBlock>> blocks,
                                                 std::span<const KernelDescriptorInfo> kernels,
-                                                std::span<const uint8_t> text, rj_code_arch_t arch,
-                                                CallableState state) {
+                                                std::span<const uint8_t> text,
+                                                rocjitsu::IsaFamily arch, CallableState state) {
   std::unordered_set<const Instruction *> known_returns;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
@@ -310,33 +385,26 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
   return true;
 }
 
-// PC-reading / PC-relative instructions to reject as anchors: relocating any of
-// them into a trampoline changes the PC value they read (s_getpc) or the target
-// they branch to. s_getpc and the s_rfe_ family carry no control-flow flag or
-// branch_offset_bytes, so validate_anchor's flag/offset checks miss them and the
-// denylist is the only thing that catches them. The s_call / s_setpc / s_swappc
-// entries are already rejected upstream by their INDIRECT_BRANCH / INDIRECT_CALL
-// flags and are listed only as defense-in-depth. gfx1250 renames the whole
-// family from *_b64 to *_i64 (e.g. s_getpc_b64 -> s_get_pc_i64), so both
-// spellings are listed; the s_rfe_ prefix match below covers s_rfe_b64,
-// s_rfe_i64, and s_rfe_restore_b64.
-constexpr std::array<std::string_view, 8> kPcRelativeDenylist = {
-    "s_getpc_b64",  "s_call_b64", "s_setpc_b64",  "s_swappc_b64",
-    "s_get_pc_i64", "s_call_i64", "s_set_pc_i64", "s_swap_pc_i64",
-};
-
-constexpr std::string_view kRfePrefix = "s_rfe_";
-
-[[nodiscard]] bool is_denylisted_mnemonic(std::string_view mnemonic) {
-  for (auto m : kPcRelativeDenylist)
-    if (mnemonic == m)
-      return true;
-  if (mnemonic.size() >= kRfePrefix.size() && mnemonic.substr(0, kRfePrefix.size()) == kRfePrefix)
+// Relocation changes the value observed by PC readers. PC restore and set
+// operations remain disallowed separately from ordinary branch metadata.
+[[nodiscard]] bool is_pc_relative_anchor(const Instruction &inst) {
+  if (inst.reads_pc())
     return true;
-  return false;
+  switch (inst.amdgpu_operation()) {
+  case amdgpu::Operation::S_SETPC_B64:
+  case amdgpu::Operation::S_SET_PC_I64:
+  case amdgpu::Operation::S_RFE_B64:
+  case amdgpu::Operation::S_RFE_I64:
+  case amdgpu::Operation::S_RFE_RESTORE_B64:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
+[[nodiscard]] bool is_s_clause(const Instruction &inst) {
+  return inst.amdgpu_operation() == amdgpu::Operation::S_CLAUSE;
+}
 
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
@@ -386,12 +454,12 @@ std::string reg_name(RegisterRef ref) {
 // The fields are signed, so the cap is the positive half: the CDNA FLAT path
 // writes the 12-bit offset (pad_12 left 0), RDNA4 has a signed 24-bit VSCRATCH
 // ioffset.
-uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
+uint32_t max_scratch_offset_bytes(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return 0xFFF; // 12-bit, pad_12 = 0
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return 0x7FFFFF; // positive half of signed 24-bit
   default:
     return 0;
@@ -406,12 +474,12 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 
 // All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
 // RDNA/gfx1250 have none.
-bool arch_has_accvgpr(rj_code_arch_t arch) {
+bool arch_has_accvgpr(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
   default:
     return false;
@@ -422,23 +490,23 @@ bool arch_has_accvgpr(rj_code_arch_t arch) {
 // allocation, split at the descriptor's ACCUM_OFFSET field. CDNA1/gfx908 allocates
 // AGPRs separately and has no such field; RDNA and gfx1250 have no AccVGPR file at
 // all.
-bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
+bool arch_has_unified_vgpr_allocation(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
     return false;
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_INVALID:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Invalid:
     break;
   }
   assert(false && "unified VGPR allocation for an unadmitted architecture");
@@ -454,7 +522,7 @@ struct KernelVgprBounds {
 };
 
 // Decode @p desc's VGPR allocation for @p arch.
-KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
+KernelVgprBounds kernel_vgpr_bounds(rocjitsu::IsaFamily arch,
                                     const rocjitsu::amdhsa::kernel_descriptor_t &desc) {
   const uint32_t granulated = RJ_AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
@@ -486,7 +554,7 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
 
 // The wave size every kernel in @p kernels runs at, or nullopt when there are
 // none or they disagree.
-std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
+std::optional<uint8_t> common_wavefront_size(rocjitsu::IsaFamily arch,
                                              std::span<const KernelDescriptorInfo> kernels) {
   std::optional<uint8_t> common;
   for (const KernelDescriptorInfo &kernel : kernels) {
@@ -504,10 +572,10 @@ std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
 // FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
 // that clobbers it entangles with the spill mechanism. Fail closed there rather
 // than let it silently corrupt the host kernel's state.
-bool check_probe_special_state(const ProbeClobberSummary &summary, rj_code_arch_t arch,
+bool check_probe_special_state(const ProbeClobberSummary &summary, rocjitsu::IsaFamily arch,
                                std::span<const uint32_t> allocations, std::string *error_out) {
   const bool writes_backing =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 && std::ranges::any_of(allocations, [&](uint32_t count) {
+      arch == rocjitsu::IsaFamily::Cdna3 && std::ranges::any_of(allocations, [&](uint32_t count) {
         const auto base = cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count));
         return summary.ordinary_clobbers.intersects(RegisterRef{RegClass::SGPR, base, 2});
       });
@@ -570,7 +638,7 @@ bool validate_anchor_bytes(const Instruction &anchor, uint64_t anchor_offset,
 
 bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
                            std::span<const uint8_t> text_bytes,
-                           [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
+                           [[maybe_unused]] rocjitsu::IsaFamily arch, std::string *error_out) {
   if (!validate_anchor_bytes(anchor, anchor_offset, text_bytes, error_out))
     return false;
   constexpr uint64_t kControlFlowFlags =
@@ -583,8 +651,8 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
     report(error_out, "anchor instruction has a PC-relative branch offset");
     return false;
   }
-  if (is_denylisted_mnemonic(anchor.mnemonic())) {
-    report(error_out, "anchor mnemonic is in the PC-relative denylist");
+  if (is_pc_relative_anchor(anchor)) {
+    report(error_out, "anchor instruction has PC-relative semantics");
     return false;
   }
   if (is_s_clause(anchor)) {
@@ -597,7 +665,7 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
 std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                rj_code_arch_t arch, std::string *error_out, bool setreg_vgpr_msb_fixup) {
+                rocjitsu::IsaFamily arch, std::string *error_out, bool setreg_vgpr_msb_fixup) {
   auto fail = [&](const char *msg) {
     report(error_out, (msg + (", anchor_offset = " + std::to_string(anchor_offset))).c_str());
   };
@@ -610,6 +678,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
   if (pt.kind != InstrumentationKind::BeforeInst && pt.kind != InstrumentationKind::AfterInst &&
       pt.kind != InstrumentationKind::KernelEntry && pt.kind != InstrumentationKind::KernelExit) {
     fail("InstrumentationPoint::kind must be BeforeInst, AfterInst, KernelEntry, or KernelExit");
+    return std::nullopt;
+  }
+  if (pt.replacement) {
+    fail("replacement payload requires ReplaceWithInst");
     return std::nullopt;
   }
   // A probe call needs both halves of the request: the object to resolve the
@@ -666,7 +738,7 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
   // CDNA5 ISA 5.7.2 / 7.12.1 require independent VALUs for co-execution hazards;
   // scalar waits do not provide that spacing before argument copies or spills.
   // Reject whole families conservatively, without inferring a latency class.
-  if (pt.kind == InstrumentationKind::AfterInst && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (pt.kind == InstrumentationKind::AfterInst && arch == rocjitsu::IsaFamily::Cdna5 &&
       may_require_cdna5_valu_spacing(anchor)) {
     fail("AfterInst requires proven VALU spacing for CDNA5 matrix or transcendental anchors");
     return std::nullopt;
@@ -681,7 +753,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
       fail("kernel boundary instrumentation requires a callable probe and valid anchor bytes");
       return std::nullopt;
     }
-    if (pt.kind == InstrumentationKind::KernelExit && anchor.mnemonic() != "s_endpgm") {
+    if (pt.kind == InstrumentationKind::KernelExit &&
+        anchor.amdgpu_operation() != amdgpu::Operation::S_ENDPGM) {
       fail("KernelExit must name s_endpgm");
       return std::nullopt;
     }
@@ -759,7 +832,7 @@ bool compute_probe_reserved_registers(std::span<const ProbeCallable> probes,
   return true;
 }
 
-bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_code_arch_t arch,
+bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rocjitsu::IsaFamily arch,
                       std::vector<SpillSlot> &out, std::string *error_out) {
   out.clear();
 
@@ -811,7 +884,7 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_cod
 
 bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_unavailable,
                       const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
-                      SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                      SpillManager &spills, rocjitsu::IsaFamily arch, std::vector<SpillSlot> &out,
                       uint16_t &out_bridge, std::string *error_out) {
   out.clear();
 
@@ -888,7 +961,8 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_un
 }
 
 bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillManager &spills,
-                     rj_code_arch_t arch, std::vector<SpillSlot> &out, std::string *error_out) {
+                     rocjitsu::IsaFamily arch, std::vector<SpillSlot> &out,
+                     std::string *error_out) {
   out.clear();
 
   // Plans AccVGPR spills only; the orchestrator routes VGPRs/SGPRs elsewhere.
@@ -961,7 +1035,7 @@ bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillMana
 namespace {
 
 // Fill the layout/identity fields shared by every trampoline plan
-TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
+TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rocjitsu::IsaFamily arch,
                               uint64_t trampoline_offset) {
   TrampolinePlan plan;
   plan.arch = arch;
@@ -976,6 +1050,12 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_a
   const size_t num_words = site.original_size / sizeof(uint32_t);
   plan.original_words.resize(num_words);
   std::memcpy(plan.original_words.data(), site.original_bytes.data(), site.original_size);
+  if (site.kind == InstrumentationKind::ReplaceWithInst) {
+    plan.emit_original = false;
+    plan.returns_to_kernel = !site.replacement_terminates;
+    if (!site.replacement_words.empty())
+      plan.after_items.push_back({.words = site.replacement_words});
+  }
   return plan;
 }
 
@@ -1027,7 +1107,8 @@ bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObjec
 } // namespace
 
 std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentationSite &site,
-                                                   rj_code_arch_t arch, uint64_t trampoline_offset,
+                                                   rocjitsu::IsaFamily arch,
+                                                   uint64_t trampoline_offset,
                                                    std::string *error_out) {
   OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
@@ -1035,6 +1116,8 @@ std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentation
   if (nop.failed())
     return std::nullopt;
   TrampolinePlan plan = make_base_plan(site, arch, trampoline_offset);
+  if (site.kind == InstrumentationKind::ReplaceWithInst)
+    return plan;
   plan.before_items = {InlineAsmItem{{nop.value()}}};
   plan.after_items = {};
   plan.emit_original = true;
@@ -1054,10 +1137,12 @@ namespace {
 
 // A direct call initializes its even SGPR pair to one of this kernel's decoded
 // continuations. A SETPC is bounded only if every path still carries such a link.
-bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
-                                     const BlockOffsetIndex &offsets,
-                                     const std::unordered_set<BasicBlock *> &reachable,
-                                     uint32_t sgpr_count) {
+bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
+                               const BlockOffsetIndex &offsets,
+                               const std::unordered_set<BasicBlock *> &reachable,
+                               uint32_t ordinary_sgpr_count,
+                               const std::unordered_set<const BasicBlock *> &proven_reentries = {},
+                               bool allow_implicit_exit = false) {
   if (std::ranges::none_of(reachable, [](const BasicBlock *block) {
         return block->successor_issue() != BasicBlock::SuccessorIssue::None;
       }))
@@ -1080,10 +1165,9 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
   merge(&entry, 0);
   for (uint64_t offset : spec.own_entries)
     merge(block_for_offset(offsets, offset), 0);
-  const auto pair_bit = [sgpr_count](unsigned reg) -> uint64_t {
+  const auto pair_bit = [ordinary_sgpr_count](unsigned reg) -> uint64_t {
     // Firmware's aliased scalar tail can also be written by implicit operands.
-    if ((reg & 1u) || reg >= 128 ||
-        reg + 1 >= cdna3::flat_scratch_base(cdna3::sgpr_alias_end(sgpr_count)))
+    if ((reg & 1u) || reg >= 128 || reg + 1 >= ordinary_sgpr_count)
       return 0;
     return uint64_t{1} << (reg / 2);
   };
@@ -1105,7 +1189,11 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
           links &= ~pair_bit(first);
       }
     }
-    if (block->successor_issue() != BasicBlock::SuccessorIssue::None) {
+    const BasicBlock::SuccessorIssue issue = block->successor_issue();
+    const bool implicit_exit =
+        allow_implicit_exit && issue == BasicBlock::SuccessorIssue::MissingFallthrough;
+    if (issue != BasicBlock::SuccessorIssue::None && !implicit_exit &&
+        !proven_reentries.contains(block)) {
       const Instruction *term = block->terminator();
       if (block->successor_issue() != BasicBlock::SuccessorIssue::IndirectControlFlow || !term ||
           term->mnemonic() != "s_setpc_b64" || !term->num_src_operands())
@@ -1129,31 +1217,363 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
   return false;
 }
 
+// Return provenance for the closed-text MODE proof is separate from register
+// liveness. Summarized callees may destroy any register they actually define;
+// lane saves survive a nested call only when its inspected callees leave them alone.
+class ClosedCallFlow {
+public:
+  ClosedCallFlow(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                 const BlockOffsetIndex &offsets,
+                 const std::unordered_set<const BasicBlock *> &proven_reentries,
+                 uint32_t ordinary_sgprs)
+      : offsets_(offsets), proven_reentries_(proven_reentries), ordinary_sgprs_(ordinary_sgprs) {
+    for (const std::unique_ptr<BasicBlock> &block : blocks)
+      decoded_.insert(block.get());
+  }
+
+  bool contains_flow(BasicBlock &entry, const KernelScopeSpec &spec) {
+    if (!analyze(entry, std::nullopt))
+      return false;
+    for (uint64_t offset : spec.own_entries) {
+      BasicBlock *extra = block_for_offset(offsets_, offset);
+      if (extra == nullptr || extra->start_offset() != offset || !analyze(*extra, std::nullopt))
+        return false;
+    }
+    return true;
+  }
+
+private:
+  struct State {
+    std::array<uint8_t, REGISTER_SET_MAX_SGPRS> scalar = {};
+    std::unordered_map<uint32_t, uint8_t> lanes;
+  };
+
+  const BlockOffsetIndex &offsets_;
+  const std::unordered_set<const BasicBlock *> &proven_reentries_;
+  uint32_t ordinary_sgprs_;
+  unsigned active_summaries_ = 0;
+  std::unordered_set<const BasicBlock *> decoded_;
+  std::unordered_map<const BasicBlock *, std::unordered_map<uint16_t, std::optional<RegisterSet>>>
+      summaries_;
+
+  static std::optional<RegisterRef> reg(const Operand *operand, RegClass cls) {
+    const std::optional<RegisterRef> ref =
+        operand == nullptr ? std::nullopt : operand->to_register_ref();
+    return ref && ref->cls == cls ? ref : std::nullopt;
+  }
+
+  static std::optional<uint16_t> lane(const Operand *operand) {
+    const std::optional<uint64_t> value =
+        operand == nullptr ? std::nullopt : operand->const_value();
+    return value && *value < 64 ? std::optional<uint16_t>(static_cast<uint16_t>(*value))
+                                : std::nullopt;
+  }
+
+  static uint32_t slot(RegisterRef vector, uint16_t lane_index) {
+    return uint32_t{vector.index} * 64 + lane_index;
+  }
+
+  static void kill(State &state, const RegisterSet &defs,
+                   std::optional<uint16_t> preserved_vector = std::nullopt) {
+    for (uint16_t index = 0; index < state.scalar.size(); ++index)
+      if (state.scalar[index] && defs.contains({RegClass::SGPR, index, 1}))
+        state.scalar[index] = 0;
+    std::erase_if(state.lanes, [&](const std::pair<const uint32_t, uint8_t> &item) {
+      const uint16_t vector = item.first / 64;
+      return vector != preserved_vector && defs.contains({RegClass::VGPR, vector, 1});
+    });
+  }
+
+  bool complete_calls(const BasicBlock &block) const {
+    const Instruction *term = block.terminator();
+    if (term == nullptr || block.call_edges().empty())
+      return false;
+    for (const BasicBlock::CallEdge &edge : block.call_edges()) {
+      if (edge.callee == nullptr || edge.continuation == nullptr ||
+          !decoded_.contains(edge.callee) || !decoded_.contains(edge.continuation) ||
+          edge.source_call_offset != term->src_loc() || edge.return_sreg % 2 ||
+          edge.return_sreg + 1u >= ordinary_sgprs_)
+        return false;
+      if (edge.kind == BasicBlock::CallEdgeKind::DirectCall) {
+        const std::optional<int64_t> delta = term->branch_offset_bytes();
+        if (!delta || static_cast<int64_t>(block.end_offset()) + *delta < 0 ||
+            static_cast<uint64_t>(static_cast<int64_t>(block.end_offset()) + *delta) !=
+                edge.callee->start_offset())
+          return false;
+      } else {
+        const std::vector<IndirectCallFixup> &fixups = block.static_indirect_call_fixups();
+        if (fixups.empty() ||
+            !std::ranges::any_of(fixups,
+                                 [&](const IndirectCallFixup &fixup) {
+                                   return fixup.source_call_offset == term->src_loc() &&
+                                          fixup.source_target_offset ==
+                                              edge.callee->start_offset() &&
+                                          fixup.source_return_sreg == edge.return_sreg;
+                                 }) ||
+            !std::ranges::all_of(fixups, [&](const IndirectCallFixup &fixup) {
+              return !fixup.source_incomplete && fixup.source_is_call &&
+                     fixup.source_call_offset == term->src_loc() &&
+                     std::ranges::any_of(
+                         block.call_edges(), [&](const BasicBlock::CallEdge &target) {
+                           return target.callee != nullptr &&
+                                  target.callee->start_offset() == fixup.source_target_offset &&
+                                  target.return_sreg == fixup.source_return_sreg;
+                         });
+            }))
+          return false;
+      }
+    }
+    return true;
+  }
+
+  std::optional<RegisterSet> callee(const BasicBlock::CallEdge &edge) {
+    std::unordered_map<uint16_t, std::optional<RegisterSet>> &by_link = summaries_[edge.callee];
+    const std::unordered_map<uint16_t, std::optional<RegisterSet>>::const_iterator found =
+        by_link.find(edge.return_sreg);
+    if (found != by_link.end())
+      return found->second;
+    // Bound recursion as well as cycles; an incomplete summary never grants admission.
+    by_link.emplace(edge.return_sreg, std::nullopt);
+    if (active_summaries_ == 64)
+      return std::nullopt;
+    ++active_summaries_;
+    const std::optional<RegisterSet> result = analyze(*edge.callee, edge.return_sreg);
+    --active_summaries_;
+    summaries_[edge.callee][edge.return_sreg] = result;
+    return result;
+  }
+
+  std::optional<RegisterSet> analyze(BasicBlock &entry, std::optional<uint16_t> link) {
+    State initial;
+    if (link) {
+      initial.scalar[*link] = 1;
+      initial.scalar[*link + 1] = 2;
+    }
+    std::unordered_map<const BasicBlock *, State> incoming;
+    std::vector<const BasicBlock *> work;
+    auto merge = [&](const BasicBlock *block, const State &state) {
+      if (block == nullptr || !decoded_.contains(block))
+        return false;
+      auto [position, inserted] = incoming.emplace(block, state);
+      bool changed = inserted;
+      if (!inserted) {
+        State &old = position->second;
+        for (size_t index = 0; index < old.scalar.size(); ++index) {
+          if (old.scalar[index] && old.scalar[index] != state.scalar[index]) {
+            old.scalar[index] = 0;
+            changed = true;
+          }
+        }
+        std::erase_if(old.lanes, [&](const std::pair<const uint32_t, uint8_t> &item) {
+          const std::unordered_map<uint32_t, uint8_t>::const_iterator other =
+              state.lanes.find(item.first);
+          const bool remove = other == state.lanes.end() || other->second != item.second;
+          changed |= remove;
+          return remove;
+        });
+      }
+      if (changed)
+        work.push_back(block);
+      return true;
+    };
+    merge(&entry, initial);
+    RegisterSet clobbers;
+    while (!work.empty()) {
+      const BasicBlock *block = work.back();
+      work.pop_back();
+      State state = incoming.at(block);
+      for (const Instruction &inst : block->instructions()) {
+        const std::string_view name = inst.mnemonic();
+        if (is_control_flow_transfer(inst) && &inst != block->terminator())
+          return std::nullopt;
+        // Dynamic register addressing is not represented by these fixed slots.
+        if (name.starts_with("s_movrel") || name.starts_with("s_set_gpr_idx") ||
+            name.starts_with("s_setreg"))
+          return std::nullopt;
+        const InstDefUse effects(inst, 64);
+        RegisterSet defs = effects.defs;
+        if (effects.conditional_vgpr_def)
+          defs.expand(*effects.conditional_vgpr_def);
+        clobbers |= defs;
+        const std::optional<RegisterRef> scalar_dst = reg(inst.dst_operand(0), RegClass::SGPR);
+        // WRITELANE's read-modify-write destination is its first decoded source.
+        const bool writes_lane = name == "v_writelane_b32";
+        const std::optional<RegisterRef> scalar_src =
+            reg(inst.src_operand(writes_lane ? 1 : 0), RegClass::SGPR);
+        const std::optional<RegisterRef> vector_dst = reg(inst.dst_operand(0), RegClass::VGPR);
+        const std::optional<RegisterRef> vector_src = reg(inst.src_operand(0), RegClass::VGPR);
+        const std::optional<uint16_t> lane_index = lane(inst.src_operand(writes_lane ? 2 : 1));
+        std::array<uint8_t, 2> copied = {};
+        unsigned copied_width = 0;
+        std::optional<uint32_t> written_lane;
+        uint8_t lane_value = 0;
+        if ((name == "s_mov_b32" || name == "s_mov_b64") && scalar_dst && scalar_src &&
+            scalar_dst->width == scalar_src->width && scalar_dst->width <= copied.size() &&
+            scalar_dst->index + scalar_dst->width <= ordinary_sgprs_ &&
+            scalar_src->index + scalar_src->width <= ordinary_sgprs_) {
+          copied_width = scalar_dst->width;
+          for (unsigned half = 0; half < copied_width; ++half)
+            copied[half] = state.scalar[scalar_src->index + half];
+        } else if (name == "v_writelane_b32" && vector_dst && vector_dst->width == 1 &&
+                   lane_index) {
+          written_lane = slot(*vector_dst, *lane_index);
+          if (scalar_src && scalar_src->width == 1 && scalar_src->index < ordinary_sgprs_)
+            lane_value = state.scalar[scalar_src->index];
+        } else if (name == "v_readlane_b32" && scalar_dst && scalar_dst->width == 1 &&
+                   scalar_dst->index < ordinary_sgprs_ && vector_src && vector_src->width == 1 &&
+                   lane_index) {
+          copied_width = 1;
+          const std::unordered_map<uint32_t, uint8_t>::const_iterator saved =
+              state.lanes.find(slot(*vector_src, *lane_index));
+          copied[0] = saved == state.lanes.end() ? 0 : saved->second;
+        }
+        kill(state, defs, written_lane ? std::optional<uint16_t>(vector_dst->index) : std::nullopt);
+        if (written_lane) {
+          state.lanes.erase(*written_lane);
+          if (lane_value)
+            state.lanes.emplace(*written_lane, lane_value);
+        }
+        for (unsigned half = 0; half < copied_width; ++half)
+          state.scalar[scalar_dst->index + half] = copied[half];
+      }
+      const Instruction *term = block->terminator();
+      if (term == nullptr)
+        return std::nullopt;
+      if (term->mnemonic() == "s_setpc_b64") {
+        const std::optional<RegisterRef> source = reg(term->src_operand(0), RegClass::SGPR);
+        if (link && source && source->width == 2 && source->index + 1u < ordinary_sgprs_ &&
+            state.scalar[source->index] == 1 && state.scalar[source->index + 1] == 2)
+          continue;
+      }
+      const bool has_calls = !block->call_edges().empty();
+      if (is_control_flow_transfer(*term) && !is_program_path_terminator(*term) &&
+          !term->branch_offset_bytes() && term->mnemonic() != "s_setpc_b64" && !has_calls &&
+          !proven_reentries_.contains(block))
+        return std::nullopt;
+      if (has_calls) {
+        if (!complete_calls(*block))
+          return std::nullopt;
+        for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+          const std::optional<RegisterSet> summary = callee(edge);
+          if (!summary)
+            return std::nullopt;
+          clobbers |= *summary;
+          kill(state, *summary);
+        }
+      }
+      const BasicBlock::SuccessorIssue issue = block->successor_issue();
+      if (issue != BasicBlock::SuccessorIssue::None &&
+          issue != BasicBlock::SuccessorIssue::MissingFallthrough &&
+          !(issue == BasicBlock::SuccessorIssue::IndirectControlFlow && has_calls) &&
+          !proven_reentries_.contains(block))
+        return std::nullopt;
+      for (const BasicBlock *next : block->successors())
+        if (!merge(next, state))
+          return std::nullopt;
+    }
+    return clobbers;
+  }
+};
+
+// Bounded call/return edges preserve a MODE bit only when its own writer scan
+// proves it stays clear. This establishes neither EXEC nor register liveness.
+bool mode_state_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                            std::span<const KernelDescriptorInfo> kernels,
+                                            std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
+                                            CallableState state, uint64_t entry_text_size) {
+  if (!arch_is_cdna_4_or_lower(arch) ||
+      (state != CallableState::GprIndexing && state != CallableState::Vskip))
+    return false;
+  std::unordered_set<const BasicBlock *> proven_reentries;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      const bool enables = state == CallableState::GprIndexing
+                               ? may_enable_gpr_indexing(inst, text, arch)
+                               : may_enable_vskip(inst, text, arch);
+      // Return-link tags in VGPR lanes require their save/restore instructions
+      // to issue, even when this invocation proves GPR indexing rather than VSKIP.
+      const bool skips_lane_saves =
+          state == CallableState::GprIndexing && may_enable_vskip(inst, text, arch);
+      if (enables || skips_lane_saves || inst.mnemonic().starts_with("s_rfe"))
+        return false;
+      if ((inst.flags() & INDIRECT_CALL) &&
+          (&inst != block->terminator() || block->call_edges().empty()))
+        return false;
+    }
+    if (static_pc_reentry_target(*block, kernels))
+      proven_reentries.insert(block.get());
+    for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+      if (callee_reentry_target(edge, kernels))
+        proven_reentries.insert(edge.callee);
+    }
+  }
+  const BlockOffsetIndex offsets = build_block_offset_index(blocks);
+  const BlockPositionIndex positions = build_block_position_index(blocks);
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    BasicBlock *entry = block_for_offset(offsets, kernel.entry_text_offset);
+    const std::optional<uint32_t> count =
+        AmdGpuCodeObject::min_kernel_sgpr_count(arch, std::span(&kernel, 1));
+    if (entry == nullptr || !count)
+      return false;
+    KernelScopeSpec spec;
+    if (has_kernarg_preload_firmware_entry(kernel, arch)) {
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, arch, entry_text_size);
+      BasicBlock *extra = firmware ? block_for_offset(offsets, *firmware) : nullptr;
+      if (extra == nullptr || extra->start_offset() != *firmware)
+        return false;
+      spec.own_entries.insert(*firmware);
+    }
+    const std::vector<BasicBlock *> reached =
+        reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
+    const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
+    const uint32_t ordinary = arch == rocjitsu::IsaFamily::Cdna3
+                                  ? cdna3::flat_scratch_base(cdna3::sgpr_alias_end(*count))
+                                  : ordinary_sgpr_bound(arch, *count);
+    if (kernel_has_unknown_target(*entry, spec, offsets, reachable, ordinary, proven_reentries,
+                                  true)) {
+      ClosedCallFlow calls(blocks, offsets, proven_reentries, ordinary);
+      if (!calls.contains_flow(*entry, spec))
+        return false;
+    }
+  }
+  return !kernels.empty();
+}
+
 // Shared code must satisfy every kernel that can execute a probe. Keep an
 // unresolved caller among the possible owners of every site.
 std::unordered_map<uint64_t, std::vector<uint32_t>>
 cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                         std::span<const KernelDescriptorInfo> kernels,
-                        std::span<const ResolvedInstrumentationSite> sites) {
+                        std::span<const ResolvedInstrumentationSite> sites,
+                        uint64_t source_text_size) {
   std::unordered_map<uint64_t, std::vector<uint32_t>> owners;
   const auto offsets = build_block_offset_index(blocks);
   const auto positions = build_block_position_index(blocks);
   std::vector<uint32_t> all_counts;
   for (const auto &kernel : kernels) {
     const uint32_t count =
-        *AmdGpuCodeObject::min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA3, std::span(&kernel, 1));
+        *AmdGpuCodeObject::min_kernel_sgpr_count(rocjitsu::IsaFamily::Cdna3, std::span(&kernel, 1));
     all_counts.push_back(count);
     auto *entry = block_for_offset(offsets, kernel.entry_text_offset);
     KernelScopeSpec spec;
-    // On gfx942 firmware can start 256 bytes beyond a kernarg-preload entry.
-    if (kernarg_preload_length(kernel.descriptor))
-      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    bool missing_firmware_entry = false;
+    if (has_kernarg_preload_firmware_entry(kernel, rocjitsu::IsaFamily::Cdna3)) {
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, rocjitsu::IsaFamily::Cdna3, source_text_size);
+      BasicBlock *extra = firmware ? block_for_offset(offsets, *firmware) : nullptr;
+      missing_firmware_entry = extra == nullptr || extra->start_offset() != *firmware;
+      if (!missing_firmware_entry)
+        spec.own_entries.insert(*firmware);
+    }
     std::vector<BasicBlock *> reached;
     if (entry)
       reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
     const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
     const bool incomplete =
-        !entry || cdna3_kernel_has_unknown_target(*entry, spec, offsets, reachable, count);
+        !entry || missing_firmware_entry ||
+        kernel_has_unknown_target(*entry, spec, offsets, reachable,
+                                  cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count)));
     for (const auto &site : sites) {
       if (site.is_probe_call() &&
           (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
@@ -1358,12 +1778,27 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
 // their observation states once, independently of the requested instrumentation.
 class Instrumentor::CallableStateAnalysis {
 public:
-  CallableStateAnalysis(std::span<const std::unique_ptr<BasicBlock>> blocks,
+  CallableStateAnalysis(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                         std::span<const KernelDescriptorInfo> kernels,
-                        std::span<const uint8_t> text, rj_code_arch_t arch) {
+                        std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
+                        uint64_t source_text_size) {
+    const uint64_t entry_text_size = std::min<uint64_t>(text.size(), source_text_size);
     std::unordered_set<uint64_t> entries;
-    for (const KernelDescriptorInfo &kernel : kernels)
+    for (const KernelDescriptorInfo &kernel : kernels) {
       entries.insert(kernel.entry_text_offset);
+      if (!has_kernarg_preload_firmware_entry(kernel, arch))
+        continue;
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, arch, entry_text_size);
+      // An appended replacement cave cannot supply a missing source entry.
+      if (!firmware || !std::ranges::any_of(blocks, [&](const std::unique_ptr<BasicBlock> &block) {
+            return block->start_offset() == *firmware;
+          })) {
+        missing_firmware_entry_ = true;
+        continue;
+      }
+      entries.insert(*firmware);
+    }
     std::unordered_set<const BasicBlock *> reachable;
     std::vector<const BasicBlock *> work;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1373,9 +1808,9 @@ public:
         states_.try_emplace(&inst);
         has_mfma_producer_ |= inst.is_mfma();
         has_cdna5_producer_ |=
-            arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(inst);
+            arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(inst);
         has_cdna5_packed_permute_ |=
-            arch == ROCJITSU_CODE_ARCH_CDNA5 && requires_cdna5_valu_follower(inst);
+            arch == rocjitsu::IsaFamily::Cdna5 && requires_cdna5_valu_follower(inst);
       }
     }
     while (!work.empty()) {
@@ -1391,7 +1826,7 @@ public:
     for (const CallableState state :
          {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
       if (has_callable_state(arch, state))
-        analyze_state(blocks, kernels, text, arch, state, entries, reachable);
+        analyze_state(blocks, kernels, text, arch, state, entries, reachable, entry_text_size);
     }
   }
 
@@ -1403,7 +1838,7 @@ public:
                                    CallableState state) const {
     const std::unordered_map<const Instruction *, PointState>::const_iterator found =
         states_.find(&anchor);
-    return found == states_.end() ||
+    return missing_firmware_entry_ || found == states_.end() ||
            ((after ? found->second.after : found->second.before) & state_bit(state)) != 0;
   }
 
@@ -1418,17 +1853,19 @@ private:
     uint8_t outgoing = 0;
   };
   std::unordered_map<const Instruction *, PointState> states_;
+  bool missing_firmware_entry_ = false;
   bool has_mfma_producer_ = false;
   bool has_cdna5_producer_ = false;
   bool has_cdna5_packed_permute_ = false;
 
   static uint8_t state_bit(CallableState state) { return 1u << static_cast<unsigned>(state); }
 
-  void analyze_state(std::span<const std::unique_ptr<BasicBlock>> blocks,
+  void analyze_state(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                      std::span<const KernelDescriptorInfo> kernels, std::span<const uint8_t> text,
-                     rj_code_arch_t arch, CallableState state,
+                     rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<uint64_t> &entries,
-                     const std::unordered_set<const BasicBlock *> &reachable) {
+                     const std::unordered_set<const BasicBlock *> &reachable,
+                     uint64_t entry_text_size) {
     std::unordered_set<const Instruction *> preserving_calls;
     std::unordered_set<const Instruction *> known_returns;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1458,8 +1895,14 @@ private:
       incomplete |=
           issue != BasicBlock::SuccessorIssue::None && !known_returns.contains(block->terminator());
     }
-    const bool closed_state = incomplete && callable_state_is_preserved_in_closed_text(
-                                                blocks, kernels, text, arch, state);
+    // The general proof models straight-line callees. Each MODE bit can also
+    // use the bounded return-link proof with its own writer scan. Storage and
+    // the stricter post-anchor completeness checks retain their existing gates.
+    const bool closed_state =
+        incomplete &&
+        (callable_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state) ||
+         mode_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state,
+                                                entry_text_size));
 
     // Each bit denotes a possible incoming state; zero has no proven source.
     // Constant writes seed the worklist even inside cycles. Ordinary edges join
@@ -1529,68 +1972,263 @@ private:
   }
 };
 
-Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rocjitsu::IsaFamily arch,
                            InstrumentationOptions options)
     : obj_(obj), arch_(arch), options_(options) {}
 
 Instrumentor::~Instrumentor() = default;
 
-void Instrumentor::add_point(InstrumentationPoint pt) { points_.push_back(std::move(pt)); }
+void Instrumentor::add_point(InstrumentationPoint pt) {
+  points_.push_back(std::move(pt));
+  // Probe arguments contribute reads to liveness; a changed queue needs new facts.
+  liveness_.reset();
+}
 
 void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKind kind) {
   InstrumentationPoint pt;
   pt.anchor_offset = anchor_offset;
   pt.kind = kind;
-  points_.push_back(std::move(pt));
+  add_point(std::move(pt));
 }
 
-bool Instrumentor::ensure_blocks_built(std::string *error_out) {
+bool Instrumentor::ensure_source_facts(TextEditError &error) {
+  error = {};
+  if (source_facts_)
+    return true;
+  if (CheckedTextEdits::validate_source_extent(obj_, error).failed())
+    return false;
+  std::string decoder_error;
+  if (!ensure_decoder(&decoder_error)) {
+    error = {.code = TextEditErrorCode::UnsupportedTarget,
+             .offset = 0,
+             .message = std::move(decoder_error)};
+    return false;
+  }
+  auto facts = std::make_shared<SourceTextFacts>();
+  const Section &text = *obj_.text_sections().front();
+  const TextAlignmentGaps alignment_gaps(obj_, arch_);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, obj_.image_data(), sizeof(header));
+  const auto record_instruction = [&](const Instruction &instruction, const Section &section,
+                                      InstructionBoundaries &boundaries, bool in_text) {
+    const size_t reference_count = boundaries.reference_addresses().size();
+    boundaries.record(instruction, section.vaddr());
+    const SourceTextFacts::SourceLocation source = {
+        .address = section.vaddr() + instruction.src_loc(),
+        .text_offset = in_text ? std::optional<uint64_t>(instruction.src_loc()) : std::nullopt};
+    // Reuse the boundary index's checked branch math; source admission below
+    // rejects its overflow flag before these facts can be used.
+    const std::span<const uint64_t> references = boundaries.reference_addresses();
+    if (references.size() != reference_count)
+      facts->flow_edges.push_back({.source = source, .destination = references.back()});
+    const bool unconditional_branch =
+        (instruction.flags() & BRANCH) != 0 && (instruction.flags() & COND_BRANCH) == 0;
+    const bool can_fall_through = !is_program_path_terminator(instruction) &&
+                                  !unconditional_branch &&
+                                  ((instruction.flags() & INDIRECT_BRANCH) == 0 ||
+                                   indirect_branch_falls_through(instruction));
+    const uint64_t size = instruction.size();
+    if (can_fall_through && size <= section.size() &&
+        instruction.src_loc() == section.size() - size)
+      facts->flow_edges.push_back(
+          {.source = source, .destination = section.vaddr() + section.size(), .fallthrough = true});
+    if (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64")
+      facts->pc_reads.push_back(source);
+  };
+  const auto decode_section = [&](const Section &section, InstructionBoundaries &boundaries,
+                                  bool in_text) {
+    const auto fail = [&](TextEditErrorCode code, uint64_t offset, std::string message) {
+      if (!in_text)
+        message = "executable section " + section.name() + ": " + message;
+      error = {.code = code, .offset = in_text ? offset : 0, .message = std::move(message)};
+      return false;
+    };
+    if (section.data() == nullptr || section.size() % sizeof(uint32_t) != 0 ||
+        section.vaddr() > std::numeric_limits<uint64_t>::max() - section.size())
+      return fail(TextEditErrorCode::InvalidImage, 0, "invalid executable extent");
+    const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(section.data()),
+                                          section.size() / sizeof(uint32_t));
+    size_t cursor = 0;
+    while (cursor < words.size()) {
+      if (is_text_padding_word(arch_, words[cursor])) {
+        ++cursor;
+        continue;
+      }
+      util::StringDiagnostic diagnostic;
+      DecodeResult decoded =
+          decoder_->decode_window(words.subspan(cursor), cursor * 4, diagnostic.emitter());
+      if (decoded.failed() || decoded.value()->size() == 0 || decoded.value()->size() % 4 != 0 ||
+          static_cast<size_t>(decoded.value()->size()) / 4 > words.size() - cursor)
+        return fail(TextEditErrorCode::InvalidInstruction, cursor * 4,
+                    "invalid source instruction: " + diagnostic.message());
+      if (reject_unavailable_branch_reference(*decoded.value(), error))
+        return fail(error.code, error.offset, std::move(error.message));
+      record_instruction(*decoded.value(), section, boundaries, in_text);
+      cursor += static_cast<size_t>(decoded.value()->size()) / sizeof(uint32_t);
+    }
+    if (boundaries.reference_overflow())
+      return fail(TextEditErrorCode::UnsupportedReferences, 0, "branch reference overflows");
+    return true;
+  };
+  const std::span<const uint32_t> text_words(reinterpret_cast<const uint32_t *>(text.data()),
+                                             text.size() / sizeof(uint32_t));
+  for (size_t cursor = 0; cursor < text_words.size(); ++cursor) {
+    const uint64_t byte_offset = cursor * sizeof(uint32_t);
+    if (text_words[cursor] != 0 || !alignment_gaps.contains(byte_offset))
+      continue;
+    // Qualify alignment with the original CFG, including calls that may return
+    // into it. Sources without such gaps retain the linear replacement path.
+    std::string cfg_error;
+    if (!ensure_blocks_built(&cfg_error)) {
+      error = {.code = TextEditErrorCode::InvalidInstruction,
+               .offset = byte_offset,
+               .message = std::move(cfg_error)};
+      return false;
+    }
+    break;
+  }
+  if (blocks_built_ && !analysis_object_) {
+    // Own the index rather than borrowing storage from the parent Instrumentor.
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+      for (const Instruction &instruction : block->instructions()) {
+        if (reject_unavailable_branch_reference(instruction, error))
+          return false;
+        record_instruction(instruction, text, facts->boundaries, true);
+      }
+    }
+  } else if (!decode_section(text, facts->boundaries, true)) {
+    return false;
+  }
+  // Replacement bypasses observation resolution. Collect descriptor entries
+  // explicitly, without imposing probe, owner, liveness or loader policy.
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                       obj_.image_size());
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
+  std::vector<uint64_t> kernel_entries;
+  kernel_entries.reserve(kernels.size());
+  for (const KernelDescriptorInfo &kernel : kernels)
+    kernel_entries.push_back(kernel.entry_text_offset);
+  const CodeObjectPatcher patcher(obj_);
+  FailureOr<TextEditReferences> references = CheckedTextEdits::collect_references(
+      obj_, arch_, facts->boundaries, patcher, kernel_entries, error);
+  if (references.failed())
+    return false;
+  facts->references = std::move(references).value();
+  // Foreign offsets must not enter the public .text index or be mistaken for
+  // replacement anchors. Their references still participate in the shared proof.
+  for (const Section *section : obj_.allocated_executable_sections()) {
+    // Relocatable sections have independent section-relative coordinates.
+    if (header.e_type == ET_REL || section == &text || section->size() == 0)
+      continue;
+    InstructionBoundaries boundaries;
+    if (!decode_section(*section, boundaries, false))
+      return false;
+    const std::vector<KernelDescriptorInfo> foreign_kernels = scan_kernel_descriptors(
+        image, section->sectionOffset(), section->size(), section->sectionHeaderIndex());
+    for (const KernelDescriptorInfo &kernel : foreign_kernels)
+      facts->foreign_kernel_entries.push_back(section->vaddr() + kernel.entry_text_offset);
+  }
+  for (const SourceTextFacts::ControlFlowEdge &edge : facts->flow_edges) {
+    if (edge.destination >= text.vaddr() &&
+        alignment_gaps.contains(edge.destination - text.vaddr())) {
+      error = {.code = TextEditErrorCode::UnsupportedReferences,
+               .offset = edge.source.text_offset.value_or(0),
+               .message = "control flow targets .text alignment"};
+      if (!edge.source.text_offset)
+        error.message += " (source VA " + std::to_string(edge.source.address) + ")";
+      return false;
+    }
+    if (!edge.fallthrough && !edge.source.text_offset)
+      facts->references.branch_addresses.push_back(edge.destination);
+  }
+  source_facts_ = std::move(facts);
+  return true;
+}
+
+const InstructionBoundaries *Instrumentor::instruction_boundaries(TextEditError &error) {
+  return ensure_source_facts(error) ? &source_facts_->boundaries : nullptr;
+}
+
+FailureOr<std::unique_ptr<Instrumentor>> Instrumentor::fork(TextEditError &error) {
+  if (!ensure_source_facts(error))
+    return Result::failure();
+  std::unique_ptr<Instrumentor> child = std::make_unique<Instrumentor>(obj_, arch_, options_);
+  child->source_facts_ = source_facts_;
+  return child;
+}
+
+bool Instrumentor::ensure_decoder(std::string *error_out) {
   if (!obj_.is_valid()) {
     report(error_out, "cannot instrument an invalid code object");
     return false;
   }
-  if (blocks_built_)
+  if (decoder_)
     return true;
-  if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
+  if (arch_ == rocjitsu::IsaFamily::Rv32i || arch_ == rocjitsu::IsaFamily::Rv64i) {
     report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
     return false;
   }
-  const auto &registry = default_isa_target_registry();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
   const rj_code_target_id_t target = obj_.target_id();
   if (target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetDescriptor *descriptor = registry.find(target);
-    if (descriptor == nullptr || descriptor->architecture_id != arch_) {
+    if (descriptor == nullptr || descriptor->family != arch_) {
       report(error_out, "code-object target does not match the requested architecture");
       return false;
     }
   } else if (obj_.image_size() >= sizeof(Elf64_Ehdr)) {
     Elf64_Ehdr header = {};
     std::memcpy(&header, obj_.image_data(), sizeof(header));
-    const rj_code_arch_t source_arch = arch_for_elf_mach(header.e_flags);
-    if (source_arch != ROCJITSU_CODE_ARCH_INVALID && source_arch != arch_) {
+    const rocjitsu::IsaFamily source_arch = arch_for_elf_mach(header.e_flags);
+    if (source_arch != rocjitsu::IsaFamily::Invalid && source_arch != arch_) {
       report(error_out, "code-object ELF architecture does not match the requested architecture");
       return false;
     }
   }
-  auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch_)
-                                                        : Decoder::create(registry, target);
+  std::unique_ptr<Decoder> decoder = target == ROCJITSU_CODE_TARGET_INVALID
+                                         ? Decoder::create(arch_)
+                                         : Decoder::create(registry, target);
   if (!decoder) {
     report(error_out, "no decoder available for the requested architecture");
     return false;
   }
   decoder_ = std::move(decoder);
+  return true;
+}
+
+bool Instrumentor::ensure_blocks_built(std::string *error_out) {
+  if (blocks_built_)
+    return true;
+  if (!ensure_decoder(error_out))
+    return false;
   util::StringDiagnostic decode_error;
+  const AmdGpuCodeObject &analysis = analysis_object_ ? *analysis_object_ : obj_;
   std::vector<uint64_t> kernel_entries;
-  if (obj_.text_sections().size() == 1) {
-    const Section *text = obj_.text_sections().front();
-    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
-                                         obj_.image_size());
+  if (analysis.text_sections().size() == 1) {
+    const Section *text = analysis.text_sections().front();
+    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(analysis.image_data()),
+                                         analysis.image_size());
     const std::vector<KernelDescriptorInfo> kernels =
         scan_kernel_descriptors(image, text->sectionOffset(), text->size());
-    for (const KernelDescriptorInfo &kernel : kernels)
+    const uint64_t entry_text_size =
+        obj_.text_sections().size() == 1
+            ? std::min(text->size(), obj_.text_sections().front()->size())
+            : 0;
+    for (const KernelDescriptorInfo &kernel : kernels) {
       kernel_entries.push_back(kernel.entry_text_offset);
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, arch_, entry_text_size);
+      if (firmware)
+        kernel_entries.push_back(*firmware);
+    }
+    std::ranges::sort(kernel_entries);
+    kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
   }
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter(), kernel_entries);
+  // Both firmware paths are external roots: a split point alone would retain
+  // indirect-target facts from a prefix the command processor can skip.
+  FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+      BasicBlock::build(analysis, *decoder_, arch_, decode_error.emitter(), kernel_entries);
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
@@ -1599,7 +2237,7 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   for (const auto &block : blocks_) {
     for (const Instruction &inst : block->instructions()) {
       offset_to_inst_.emplace(inst.src_loc(), &inst);
-      instruction_boundaries_.record(inst, obj_.text_sections().front()->vaddr());
+      instruction_boundaries_.record(inst, analysis.text_sections().front()->vaddr());
     }
   }
   blocks_built_ = true;
@@ -1613,24 +2251,41 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
 
 bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
                                          std::span<const KernelDescriptorInfo> kernels,
-                                         std::string *error_out) {
+                                         std::string *error_out,
+                                         std::span<const InstrumentationPoint> observations) {
   if (liveness_)
     return true;
   if (!ensure_blocks_built(error_out) || obj_.text_sections().size() != 1) {
     report(error_out, "liveness requires one decodable text section");
     return false;
   }
-  const Section *text = obj_.text_sections().front();
+  const AmdGpuCodeObject &analysis = analysis_object_ ? *analysis_object_ : obj_;
+  const Section *text = analysis.text_sections().front();
   std::vector<BasicBlock *> scope;
-  LivenessAnalysisOptions options;
-  options.arch = arch_;
-  options.target = effective_target(obj_, arch_);
-  options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
+  LivenessAnalysisOptions options = {
+      .arch = arch_,
+      .target = effective_target(analysis, arch_),
+      .additional_entry_blocks = {},
+      .text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()}};
   for (const std::unique_ptr<BasicBlock> &block : blocks_) {
     scope.push_back(block.get());
     if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
       options.entry_block = block.get();
   }
+  std::vector<AdditionalRegisterUse> uses;
+  for (const InstrumentationPoint &point : observations) {
+    // KernelEntry probes run only on dispatch, before this CFG. Their arguments
+    // must not become reads on guest backedges to the original entry.
+    if (point.probe_obj == nullptr || point.kind == InstrumentationKind::KernelEntry)
+      continue;
+    const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
+    if (anchor != nullptr)
+      uses.push_back({.instruction = anchor,
+                      .registers = probe_argument_registers(point.probe_args),
+                      .after_instruction = point.kind == InstrumentationKind::AfterInst});
+  }
+  options.additional_uses = uses;
+
   // Ordinary successors omit callees; their live-ins must reach the caller.
   std::vector<ScopedCfgEdge> edges =
       scoped_call_liveness_edges(KernelBlockScope(scope), options.text);
@@ -1655,16 +2310,392 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
       if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels)))
         return false;
   }
-  liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr,
-                                                 options, edges);
+
+  // A full-lane definition ends an observed value's live range, but only when
+  // EXEC is proven over this same graph. Calls and opaque transfers lack an
+  // interprocedural EXEC proof. A descriptor entry inside a block is another
+  // unmodeled input, since preceding instructions need not run on dispatch.
+  bool can_analyze_exec = !kernels.empty();
+  std::vector<const BasicBlock *> entries;
+  const uint64_t entry_text_size = std::min(text->size(), obj_.text_sections().front()->size());
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const std::vector<BasicBlock *>::const_iterator entry =
+        std::ranges::find(scope, kernel.entry_text_offset, &BasicBlock::start_offset);
+    if (entry == scope.end())
+      can_analyze_exec = false;
+    else
+      entries.push_back(*entry);
+    if (!has_kernarg_preload_firmware_entry(kernel, arch_))
+      continue;
+    // Firmware dispatch has clear VSKIP but may have partial EXEC, even though
+    // the skipped-prefix boundary is represented in this graph.
+    can_analyze_exec = false;
+    const std::optional<uint64_t> firmware =
+        kernarg_preload_firmware_entry(kernel, arch_, entry_text_size);
+    if (firmware) {
+      const std::vector<BasicBlock *>::const_iterator extra =
+          std::ranges::find(scope, *firmware, &BasicBlock::start_offset);
+      if (extra != scope.end())
+        entries.push_back(*extra);
+    }
+  }
+  for (const BasicBlock *block : scope) {
+    if (!block->call_edges().empty() || block->has_implicit_terminator() ||
+        block->successor_issue() != BasicBlock::SuccessorIssue::None)
+      can_analyze_exec = false;
+    for (const Instruction &inst : block->instructions()) {
+      if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst) &&
+          !inst.branch_offset_bytes())
+        can_analyze_exec = false;
+    }
+  }
+  // VSKIP is clear on dispatch. Keep this entry proof separate from EXEC,
+  // whose dispatch mask can be partial, and merge it with guest backedges.
+  options.vskip_clear_entry_blocks = entries;
+  std::unique_ptr<ExecMaskAnalysis> exec;
+  if (can_analyze_exec)
+    exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), wave_size, edges, entries);
+  liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size,
+                                                 std::move(exec), options, edges);
+  return true;
+}
+
+bool Instrumentor::prepare_mutation_analysis(
+    std::span<const ResolvedInstrumentationSite> replacements, TextEditError &error) {
+  CodeObjectPatcher patcher(obj_);
+  const size_t original_size = patcher.text_bytes().size();
+  std::vector<uint8_t> text(patcher.text_bytes().begin(), patcher.text_bytes().end());
+  std::vector<CheckedTextEdit> edits;
+  for (const ResolvedInstrumentationSite &site : replacements) {
+    const TrampolinePlan plan = make_base_plan(site, arch_, text.size());
+    std::string message;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::build(plan, &message);
+    if (!bytes) {
+      error = {.code = TextEditErrorCode::InvalidRange,
+               .offset = site.anchor_offset,
+               .message = std::move(message)};
+      return false;
+    }
+    edits.push_back({.offset = site.anchor_offset,
+                     .expected = site.original_bytes,
+                     .replacement = bytes->patched_anchor_bytes});
+    append_words(text, bytes->trampoline_words);
+  }
+  const CheckedTextEdits transaction(obj_, *decoder_, source_facts_->boundaries,
+                                     source_facts_->references);
+  if (transaction.apply(edits, std::span(text).first(original_size), error).failed())
+    return false;
+  if (!patcher.replace_text(text)) {
+    error = {.code = TextEditErrorCode::InvalidImage,
+             .offset = 0,
+             .message = "cannot construct the private replacement analysis layout"};
+    return false;
+  }
+  const std::span<const uint8_t> image = patcher.image_bytes();
+  auto object = std::make_unique<AmdGpuCodeObject>(image.data(), image.size());
+  if (!object->is_valid()) {
+    error = {.code = TextEditErrorCode::InvalidImage,
+             .offset = 0,
+             .message = "cannot parse the private replacement analysis layout"};
+    return false;
+  }
+  // Rebuild dataflow from all effective replacement bodies, including deleted
+  // definitions at other sites. PC-independent bodies make this layout
+  // semantically equivalent to the final probe-bearing layout. Pristine
+  // live-before sets are not a safe union.
+  liveness_.reset();
+  callable_state_analysis_.reset();
+  blocks_.clear();
+  offset_to_inst_.clear();
+  instruction_boundaries_ = {};
+  blocks_built_ = false;
+  analysis_object_ = std::move(object);
   return true;
 }
 
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ResolvedPoints out;
-
+  const bool has_replacements = std::ranges::any_of(points_, [](const InstrumentationPoint &point) {
+    return point.kind == InstrumentationKind::ReplaceWithInst;
+  });
+  std::vector<InstrumentationPoint> requests = points_;
+  std::vector<ResolvedInstrumentationSite> replacements;
+  std::unordered_map<uint64_t, size_t> replacement_indices;
   std::string err;
-  if (!ensure_blocks_built(&err)) {
+  if (has_replacements) {
+    TextEditError error;
+    if (!ensure_source_facts(error)) {
+      out.errors.push_back(error.message);
+      out.edit_error = std::move(error);
+      return out;
+    }
+    if (!ensure_decoder(&err)) {
+      out.errors.push_back(std::move(err));
+      return out;
+    }
+    std::vector<CheckedTextEdit> source_edits;
+    for (const InstrumentationPoint &point : requests) {
+      if (point.kind != InstrumentationKind::ReplaceWithInst)
+        continue;
+      if (!point.replacement) {
+        out.errors.emplace_back("ReplaceWithInst requires expected and replacement bytes");
+        return out;
+      }
+      if (point.filter_flags != 0 || (point.probe_obj == nullptr) != point.probe_symbol.empty() ||
+          (!point.probe_obj && (!point.probe_args.empty() || point.force_full_exec))) {
+        out.errors.emplace_back(
+            "replacement probe fields are inconsistent or filters are unsupported");
+        return out;
+      }
+      const std::vector<uint8_t> &expected = point.replacement->expected_bytes;
+      if (expected.size() != 4 && expected.size() != 8 && expected.size() != 12) {
+        out.errors.emplace_back("replacement requires one complete 4/8/12-byte source instruction");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidRange,
+                                       .offset = point.anchor_offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+      source_edits.push_back(
+          {.offset = point.anchor_offset, .expected = expected, .replacement = {}});
+      replacement_indices.emplace(point.anchor_offset, replacements.size());
+      replacements.push_back({.kind = InstrumentationKind::ReplaceWithInst,
+                              .anchor_offset = point.anchor_offset,
+                              .original_size = static_cast<uint32_t>(expected.size()),
+                              .original_bytes = expected,
+                              .mnemonic = {},
+                              .probe_index = std::nullopt,
+                              .probe_args = {}});
+    }
+    const CheckedTextEdits transaction(obj_, *decoder_, source_facts_->boundaries,
+                                       source_facts_->references);
+    if (transaction.validate_source_edits(source_edits, error).failed()) {
+      out.errors.push_back(error.message);
+      out.edit_error = std::move(error);
+      return out;
+    }
+    for (const InstrumentationPoint &point : requests) {
+      if (point.kind != InstrumentationKind::ReplaceWithInst)
+        continue;
+      ResolvedInstrumentationSite &site = replacements[replacement_indices.at(point.anchor_offset)];
+      const std::vector<uint8_t> &bytes = point.replacement->replacement_bytes;
+      if (bytes.size() % sizeof(uint32_t) != 0 ||
+          bytes.size() > std::numeric_limits<uint32_t>::max()) {
+        out.errors.emplace_back("replacement body must contain complete instruction dwords");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                       .offset = point.anchor_offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+      site.replacement_words.resize(bytes.size() / sizeof(uint32_t));
+      if (!bytes.empty())
+        std::memcpy(site.replacement_words.data(), bytes.data(), bytes.size());
+      size_t cursor = 0;
+      while (cursor < site.replacement_words.size()) {
+        const DecodeResult decoded = decoder_->decode_window(
+            std::span(site.replacement_words).subspan(cursor), point.anchor_offset + cursor * 4);
+        if (decoded.failed() || decoded.value()->size() == 0) {
+          out.errors.emplace_back("replacement contains an invalid or truncated instruction");
+          out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                         .offset = point.anchor_offset,
+                                         .message = out.errors.back()};
+          return out;
+        }
+        const Instruction &instruction = *decoded.value();
+        if (is_s_clause(instruction)) {
+          out.errors.emplace_back("replacement may not introduce a clause");
+          out.edit_error = TextEditError{.code = TextEditErrorCode::Clause,
+                                         .offset = point.anchor_offset,
+                                         .message = out.errors.back()};
+          return out;
+        }
+        if ((instruction.flags() &
+             (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | BRANCH_STACK)) != 0 ||
+            instruction.branch_offset_bytes() || is_pc_relative_anchor(instruction) ||
+            has_unavailable_branch_reference(instruction)) {
+          out.errors.emplace_back(
+              "replacement body contains unsupported PC-dependent control flow: " +
+              std::string(instruction.mnemonic()));
+          out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                         .offset = point.anchor_offset,
+                                         .message = out.errors.back()};
+          return out;
+        }
+        cursor += static_cast<size_t>(instruction.size()) / sizeof(uint32_t);
+        if ((instruction.flags() & PROGRAM_TERMINATOR) != 0) {
+          if (instruction.mnemonic() != "s_endpgm" || cursor != site.replacement_words.size()) {
+            out.errors.emplace_back("only a final s_endpgm may terminate a replacement body");
+            out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                           .offset = point.anchor_offset,
+                                           .message = out.errors.back()};
+            return out;
+          }
+          site.replacement_terminates = true;
+        }
+      }
+      if (!site.replacement_terminates &&
+          !source_facts_->boundaries.find(site.anchor_offset + site.original_size)) {
+        out.errors.emplace_back(
+            "replacement has no instruction to continue to after the source extent");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                       .offset = point.anchor_offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+    }
+    // A single replacement point can carry a probe directly. Also coalesce the
+    // explicit BeforeInst+Replace pair independently of request order. Other
+    // duplicates retain their existing all-or-nothing rejection.
+    for (const InstrumentationPoint &point : requests) {
+      const std::unordered_map<uint64_t, size_t>::const_iterator replacement =
+          replacement_indices.find(point.anchor_offset);
+      if (point.kind != InstrumentationKind::BeforeInst || replacement == replacement_indices.end())
+        continue;
+      if (point.replacement || !point.probe_obj || point.probe_symbol.empty() ||
+          point.filter_flags) {
+        out.errors.emplace_back("same-site observation composition requires a callable BeforeInst");
+        return out;
+      }
+      InstrumentationPoint *destination = nullptr;
+      for (InstrumentationPoint &candidate : requests) {
+        if (candidate.kind == InstrumentationKind::ReplaceWithInst &&
+            candidate.anchor_offset == point.anchor_offset) {
+          destination = &candidate;
+          break;
+        }
+      }
+      if (!destination || destination->probe_obj || !destination->probe_symbol.empty() ||
+          !destination->probe_args.empty() || destination->force_full_exec) {
+        out.errors.emplace_back("multiple probes requested the same replacement site");
+        return out;
+      }
+      destination->probe_obj = point.probe_obj;
+      destination->probe_symbol = point.probe_symbol;
+      destination->probe_args = point.probe_args;
+      destination->force_full_exec = point.force_full_exec;
+    }
+    // Copy from requests after coalescing, so a replacement preceding its probe
+    // sees the same merged fields as the opposite queue order.
+    std::vector<InstrumentationPoint> merged;
+    for (const InstrumentationPoint &point : requests) {
+      if (point.kind == InstrumentationKind::BeforeInst &&
+          replacement_indices.contains(point.anchor_offset))
+        continue;
+      merged.push_back(point);
+    }
+    requests = std::move(merged);
+
+    // Linked getpc/add constants carry no ELF relocation to adjust when data
+    // moves. Keep those layouts unsupported until the complete builder can be
+    // relocated; a getpc removed by this batch no longer produces a stale VA.
+    const auto is_removed = [&](const SourceTextFacts::SourceLocation &source) {
+      return source.text_offset && replacement_indices.contains(*source.text_offset);
+    };
+    const std::vector<SourceTextFacts::SourceLocation>::const_iterator retained_pc =
+        std::ranges::find_if(
+            source_facts_->pc_reads,
+            [&](const SourceTextFacts::SourceLocation &source) { return !is_removed(source); });
+    const bool has_retained_edge = std::ranges::any_of(
+        source_facts_->flow_edges,
+        [&](const SourceTextFacts::ControlFlowEdge &edge) { return !is_removed(edge.source); });
+    if (retained_pc != source_facts_->pc_reads.end() || has_retained_edge ||
+        !source_facts_->foreign_kernel_entries.empty()) {
+      const Section &text = *obj_.text_sections().front();
+      const uint64_t text_end = text.vaddr() + text.size();
+      const uint64_t file_end = text.sectionOffset() + text.size();
+      const CodeObjectPatcher source_patcher(obj_);
+      const std::vector<Elf64_Shdr> sections = source_patcher.section_headers();
+      const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                           obj_.image_size());
+      Elf64_Ehdr header = {};
+      std::memcpy(&header, image.data(), sizeof(header));
+      const std::optional<std::vector<Elf64_Phdr>> segments =
+          read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+      if (!segments) {
+        out.errors.emplace_back("invalid program headers for replacement text growth");
+        return out;
+      }
+      const auto storage_moves = [&](std::optional<uint64_t> destination) {
+        const auto contains = [&](uint64_t base, uint64_t size, uint64_t begin = 0) {
+          return size > begin &&
+                 (!destination || (*destination >= base && *destination - base >= begin &&
+                                   *destination - base < size));
+        };
+        for (const Elf64_Shdr &section : sections) {
+          if ((section.sh_flags & SHF_ALLOC) != 0 && section.sh_addr >= text_end &&
+              contains(section.sh_addr, section.sh_size))
+            return true;
+        }
+        for (const Elf64_Phdr &segment : *segments) {
+          if (segment.p_type != PT_LOAD || segment.p_memsz == 0)
+            continue;
+          if (segment.p_offset >= file_end) {
+            if (segment.p_vaddr >= text_end && contains(segment.p_vaddr, segment.p_memsz))
+              return true;
+          } else {
+            // Include unsectioned file-backed data and zero-fill after .text.
+            const uint64_t insertion_offset = file_end - segment.p_offset;
+            if (insertion_offset <= segment.p_filesz &&
+                contains(segment.p_vaddr, segment.p_memsz, insertion_offset))
+              return true;
+          }
+        }
+        return false;
+      };
+      if (retained_pc != source_facts_->pc_reads.end() && storage_moves(std::nullopt)) {
+        out.errors.emplace_back(
+            "replacement growth cannot preserve retained PC-relative addresses to moved storage");
+        if (!retained_pc->text_offset)
+          out.errors.back() += " (source VA " + std::to_string(retained_pc->address) + ")";
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = retained_pc->text_offset.value_or(0),
+                                       .message = out.errors.back()};
+        return out;
+      }
+      for (uint64_t entry : source_facts_->foreign_kernel_entries) {
+        if (!storage_moves(entry))
+          continue;
+        out.errors.emplace_back(
+            "replacement growth cannot preserve a kernel entry in another executable section "
+            "(entry VA " +
+            std::to_string(entry) + ")");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = 0,
+                                       .message = out.errors.back()};
+        return out;
+      }
+      for (const SourceTextFacts::ControlFlowEdge &edge : source_facts_->flow_edges) {
+        if (is_removed(edge.source) ||
+            storage_moves(edge.source.address) == storage_moves(edge.destination))
+          continue;
+        out.errors.emplace_back(
+            edge.fallthrough
+                ? "replacement growth cannot preserve a retained fallthrough edge"
+                : "replacement growth cannot preserve a retained direct branch displacement");
+        if (!edge.source.text_offset)
+          out.errors.back() += " (source VA " + std::to_string(edge.source.address) + ")";
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = edge.source.text_offset.value_or(0),
+                                       .message = out.errors.back()};
+        return out;
+      }
+    }
+  }
+  const bool needs_graph =
+      std::ranges::any_of(requests,
+                          [](const InstrumentationPoint &point) {
+                            return point.kind != InstrumentationKind::ReplaceWithInst ||
+                                   point.probe_obj != nullptr;
+                          }) ||
+      options_.register_growth.has_value();
+  if (has_replacements && needs_graph) {
+    TextEditError error;
+    if (!prepare_mutation_analysis(replacements, error)) {
+      out.errors.push_back(error.message);
+      out.edit_error = std::move(error);
+      return out;
+    }
+  }
+  if (needs_graph && !ensure_blocks_built(&err)) {
     out.errors.push_back(std::move(err));
     return out;
   }
@@ -1692,10 +2723,30 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
     }
   }
-  // M0 can displace SGPR reads and writes, which ordinary liveness does not
-  // model. Callable probes allocate envelope registers from those facts.
   if (std::ranges::any_of(
           points_, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; })) {
+    if (has_replacements) {
+      for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+        // The local liveness scope has no external or call/return edge overlay.
+        if (block->successor_issue() == BasicBlock::SuccessorIssue::None &&
+            block->call_edges().empty())
+          continue;
+        const Instruction *terminator = block->terminator();
+        const uint64_t offset =
+            terminator && terminator->src_loc() < obj_.text_sections().front()->size()
+                ? terminator->src_loc()
+                : 0;
+        out.errors.emplace_back(
+            !block->call_edges().empty()
+                ? "replacement probe does not support call/return liveness in the effective CFG"
+                : "replacement probe requires an effective CFG with all guest successors analyzed");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+    }
+    // M0-displaced SGPR accesses are absent from ordinary def/use facts.
     std::vector<BasicBlock *> probe_scope;
     probe_scope.reserve(blocks_.size());
     for (const std::unique_ptr<BasicBlock> &block : blocks_)
@@ -1708,6 +2759,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
+  const Section *analysis_text =
+      analysis_object_ ? analysis_object_->text_sections().front() : text;
+  const std::span<const uint8_t> analysis_text_bytes(
+      reinterpret_cast<const uint8_t *>(analysis_text->data()), analysis_text->size());
   // A probe call is analyzed and planned at the wave size the object's kernels
   // share, with temps bounded by their SGPR allocation. The point loop refuses a
   // probe call before any of that when either is missing.
@@ -1716,17 +2771,40 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   out.kernels = scan_kernel_descriptors(image, text->sectionOffset(), text->size());
   out.wave_size = common_wavefront_size(arch_, out.kernels);
 
-  const auto &registry = default_isa_target_registry();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
   const rj_code_target_id_t destination_target = effective_target(obj_, arch_);
-  const IsaGpuTargetDescription *gpu_target = registry.find_gpu_target(destination_target);
+  const IsaTargetBinding *gpu_target = registry.find_target(destination_target);
   const bool setreg_vgpr_msb_fixup =
       gpu_target == nullptr || gpu_target->capabilities.setreg_vgpr_msb_fixup;
   ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5 && out.wave_size) {
-    if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
-      out.errors.push_back(err);
+  const bool has_probe_requests = std::ranges::any_of(
+      requests, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; });
+  // Replacement liveness and physical VGPR observations require enumerable uses.
+  // Ordinary observations retain per-point MODE admission; AfterInst also checks
+  // completeness before preservation planning.
+  const bool requires_complete_vgpr_usage =
+      has_replacements || std::ranges::any_of(requests, [](const InstrumentationPoint &point) {
+        return point.probe_obj != nullptr &&
+               std::ranges::any_of(point.probe_args, [](const ProbeArgValue &arg) {
+                 return arg.source == ProbeArgSource::AnchorVgpr;
+               });
+      });
+  if (has_probe_requests && !out.kernels.empty() && out.wave_size) {
+    if (!ensure_liveness_built(*out.wave_size, out.kernels, &err, requests)) {
+      out.errors.push_back(std::move(err));
       return out;
     }
+    const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
+    if (complete.failed()) {
+      out.errors.emplace_back("probe calls require available guest liveness");
+      return out;
+    }
+    if (requires_complete_vgpr_usage && !complete.value()) {
+      out.errors.emplace_back("probe calls do not support relative or GPR-indexed VGPR access");
+      return out;
+    }
+  }
+  if (has_probe_requests && arch_ == rocjitsu::IsaFamily::Cdna5 && out.wave_size) {
     if (out.kernels.size() == 1) {
       bool has_call = false;
       for (const std::unique_ptr<BasicBlock> &block : blocks_) {
@@ -1735,7 +2813,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
       if (!has_call) {
         bool bank_analysis_failed = false;
-        const bool zero = std::ranges::all_of(points_, [&](const auto &point) {
+        const bool zero = std::ranges::all_of(requests, [&](const InstrumentationPoint &point) {
+          if (!point.probe_obj)
+            return true;
           const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
           if (!anchor)
             return false;
@@ -1864,10 +2944,38 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   std::vector<ResolvedInstrumentationSite> sites;
   std::unordered_set<uint64_t> site_offsets;
   std::unordered_set<uint64_t> entry_offsets;
-  sites.reserve(points_.size());
-  for (const auto &pt : points_) {
+  sites.reserve(requests.size());
+  for (const InstrumentationPoint &pt : requests) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
-    if (anchor == nullptr) {
+    std::unique_ptr<Instruction> source_anchor;
+    if (analysis_object_ && pt.kind != InstrumentationKind::ReplaceWithInst) {
+      // Validate and capture the pristine instruction. The effective CFG has a
+      // replacement branch at an entry shared with a replacement request.
+      anchor = nullptr;
+      const InstructionBoundaries::Entry *boundary =
+          source_facts_->boundaries.find(pt.anchor_offset);
+      if (boundary != nullptr) {
+        if (pt.anchor_offset > text_bytes.size() ||
+            boundary->size > text_bytes.size() - pt.anchor_offset) {
+          out.errors.emplace_back("source anchor extends past end of .text");
+          continue;
+        }
+        const std::span<const uint32_t> words(
+            reinterpret_cast<const uint32_t *>(text_bytes.data() + pt.anchor_offset),
+            boundary->size / sizeof(uint32_t));
+        util::StringDiagnostic diagnostic;
+        DecodeResult decoded =
+            decoder_->decode_window(words, pt.anchor_offset, diagnostic.emitter());
+        if (decoded.failed() || static_cast<uint32_t>(decoded.value()->size()) != boundary->size) {
+          out.errors.push_back("cannot decode source anchor at .text offset " +
+                               std::to_string(pt.anchor_offset) + ": " + diagnostic.message());
+          continue;
+        }
+        source_anchor = std::move(decoded).value();
+        anchor = source_anchor.get();
+      }
+    }
+    if (anchor == nullptr && pt.kind != InstrumentationKind::ReplaceWithInst) {
       out.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " +
                               std::to_string(pt.anchor_offset));
       continue;
@@ -1882,14 +2990,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     }
 
     std::string perr;
-    std::optional<ResolvedInstrumentationSite> site = validate_anchor(
-        *anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr, setreg_vgpr_msb_fixup);
+    std::optional<ResolvedInstrumentationSite> site;
+    if (pt.kind == InstrumentationKind::ReplaceWithInst)
+      site = replacements[replacement_indices.at(pt.anchor_offset)];
+    else
+      site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr,
+                             setreg_vgpr_msb_fixup);
     if (!site) {
       out.errors.push_back(std::move(perr));
       continue;
     }
 
-    const InstructionBoundaries::Entry *boundary = instruction_boundaries_.find(pt.anchor_offset);
+    const InstructionBoundaries &source_boundaries =
+        source_facts_ ? source_facts_->boundaries : instruction_boundaries_;
+    const InstructionBoundaries::Entry *boundary = source_boundaries.find(pt.anchor_offset);
     if (boundary && boundary->clause_member) {
       out.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
                               std::to_string(pt.anchor_offset));
@@ -1919,9 +3033,14 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       // Dispatch enters a separate stub once. Guest backedges to the original
       // entry do not revisit this callback and cannot change its initial state.
       if (pt.kind != InstrumentationKind::KernelEntry) {
+        const Instruction *state_anchor = find_instruction_at_offset(pt.anchor_offset);
+        if (state_anchor == nullptr) {
+          out.errors.emplace_back("effective anchor is unavailable for callable-state analysis");
+          continue;
+        }
         if (!callable_state_analysis_)
-          callable_state_analysis_ =
-              std::make_unique<CallableStateAnalysis>(blocks_, out.kernels, text_bytes, arch_);
+          callable_state_analysis_ = std::make_unique<CallableStateAnalysis>(
+              blocks_, out.kernels, analysis_text_bytes, arch_, text->size());
         // A scalar anchor does not discharge dependencies left by earlier VALUs.
         // Until spacing is proven, exclude the entire decoded object, including
         // unreachable producers and helper bodies rather than guessing ownership.
@@ -1948,7 +3067,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
                                           CallableState::UnavailableStorage}) {
           if (callable_state_analysis_->may_be_unsafe(
-                  *anchor, pt.kind == InstrumentationKind::AfterInst, state)) {
+                  *state_anchor, pt.kind == InstrumentationKind::AfterInst, state)) {
             const std::string reason =
                 state == CallableState::UnavailableStorage
                     ? "cannot prove the VGPR allocation and scratch storage"
@@ -1987,6 +3106,7 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
   ResolvedPoints resolved = resolve_points();
   ValidationResult result;
   result.errors = std::move(resolved.errors);
+  result.edit_error = std::move(resolved.edit_error);
   result.sites = std::move(resolved.sites);
   return result;
 }
@@ -2045,6 +3165,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   ResolvedPoints resolved = resolve_points();
   if (!resolved.errors.empty()) {
     result.errors = std::move(resolved.errors);
+    result.edit_error = std::move(resolved.edit_error);
     return result;
   }
 
@@ -2058,11 +3179,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // Reuse the bank proof from resolution when present, and otherwise build
   // liveness only for probe calls or register growth.
   // resolve_points() built blocks_ and resolved those probes only because the
-  // kernels share a wave size. obj_ owns the Instructions live_before() is keyed
-  // on.
+  // kernels share a wave size. blocks_ owns the Instructions live_before() is
+  // keyed on; their encoding bytes belong to obj_ or the owned analysis_object_.
   // TODO: scope this to the kernel containing each anchor, like the DBT path,
-  // rather than treating every decoded block as one CFG. Safe here: kernels end
-  // in s_endpgm, so there are no false cross-kernel fallthrough edges.
+  // rather than treating every decoded block as one CFG. Replacement analysis
+  // must retain any new edges caused by an omitted terminator.
   std::vector<BasicBlock *> liveness_scope;
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
@@ -2122,6 +3243,22 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   KernelVgprBounds vgpr_bounds = kernels.size() == 1
                                      ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
                                      : KernelVgprBounds{};
+  // Keep source bounds and growth reservations tied to the original allocation.
+  // Per-site preservation instead follows observation reads in the effective CFG.
+  RegisterSet observed_vgprs;
+  const uint32_t source_vgpr_bound = std::min(vgpr_bounds.ordinary_bound, 256u);
+  for (const ResolvedInstrumentationSite &site : sites) {
+    if (!site.is_probe_call())
+      continue;
+    for (const ProbeArgValue &arg : site.probe_args) {
+      if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index >= source_vgpr_bound) {
+        result.errors.emplace_back(
+            "guest VGPR argument exceeds the kernel's ordinary VGPR allocation");
+        return result;
+      }
+    }
+    observed_vgprs |= probe_argument_registers(site.probe_args);
+  }
   // What each probe body overwrites. Keyed on the probe, not the site, so it is
   // decoded once per distinct body and indexed alongside resolved.probes.
   std::vector<ProbeClobberSummary> probe_summaries;
@@ -2202,6 +3339,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       link.expand(probe_link_pair(resolved.probes[index].abi));
       include_registers(link);
     }
+    // Inputs may occupy physical padding beyond the original metadata counts.
+    // Keep growth's backup destinations above those observed registers too.
+    include_registers(observed_vgprs);
     sgpr_save_base = result.resources.sgprs + kDbiEntryStorageRegisters;
     vgpr_save_base = result.resources.vgprs;
     kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS +
@@ -2249,8 +3389,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   std::optional<SpillManager> spills;
 
   std::unordered_map<uint64_t, std::vector<uint32_t>> cdna3_owners;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 && kernels.size() > 1 && !resolved.probes.empty())
-    cdna3_owners = cdna3_probe_sgpr_counts(blocks_, kernels, sites);
+  if (arch_ == rocjitsu::IsaFamily::Cdna3 && kernels.size() > 1 && !resolved.probes.empty())
+    cdna3_owners =
+        cdna3_probe_sgpr_counts(blocks_, kernels, sites, obj_.text_sections().front()->size());
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
@@ -2286,7 +3427,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           continue;
         }
         const auto alias = std::ranges::find_if(allocations, [&](uint32_t count) {
-          return arch_ == ROCJITSU_CODE_ARCH_CDNA3 &&
+          return arch_ == rocjitsu::IsaFamily::Cdna3 &&
                  cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(count, link_base);
         });
         if (alias != allocations.end()) {
@@ -2521,9 +3662,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       record.probe_target_offset = probe.output_text_offset;
       record.link_pair_base = plan.link_pair_base;
       record.target_pair_base = plan.target_pair_base;
-      // If this site does not call a probe
-      // Currently, this means that the plan is to put a nop which means we do
-      // not need to mess with spills
+      // Sites without a probe need no call-envelope registers or spills.
     } else {
       std::optional<TrampolinePlan> maybe_plan =
           make_trampoline_plan(site, arch_, trampoline_offset, &err);
@@ -2532,8 +3671,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
       const TrampolinePlan &plan = *maybe_plan;
-      // The only assembly we currently allow is an inlined nop
-      if (!validate_inline_nop_plan(plan, &err)) {
+      // Observation retains its inline-nop guard. Replacement bodies have
+      // already passed concrete decoding and PC-independence admission.
+      if (site.kind != InstrumentationKind::ReplaceWithInst &&
+          !validate_inline_nop_plan(plan, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -2602,20 +3743,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   const std::span<const uint8_t> original_text = patcher.text_bytes();
   std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
   if (!anchor_edits.empty()) {
-    // Conditional-debug branches and subvector loops do not yet expose their
-    // destination metadata. Missing displacement does not prove an anchor has
-    // no incoming reference. Keep this admission guard out of generic analysis.
+    TextEditError edit_error;
+    // Retain B1's guard for known conditional-debug and subvector-loop forms
+    // whose missing destination metadata cannot establish reference safety.
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
-        const std::string_view mnemonic = instruction.mnemonic();
-        if ((mnemonic.starts_with("s_cbranch_cdbg") || mnemonic == "s_subvector_loop_begin" ||
-             mnemonic == "s_subvector_loop_end") &&
-            !instruction.branch_offset_bytes()) {
-          result.edit_error = TextEditError{
-              .code = TextEditErrorCode::UnsupportedReferences,
-              .offset = instruction.src_loc(),
-              .message = "branch destination metadata is unavailable for " + std::string(mnemonic)};
-          result.errors.push_back("anchor edit transaction: " + result.edit_error->message);
+        if (reject_unavailable_branch_reference(instruction, edit_error)) {
+          result.errors.push_back("anchor edit transaction: " + edit_error.message);
+          result.edit_error = std::move(edit_error);
           return result;
         }
       }
@@ -2624,9 +3759,22 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     kernel_entries.reserve(kernels.size());
     for (const KernelDescriptorInfo &kernel : kernels)
       kernel_entries.push_back(kernel.entry_text_offset);
-    const CheckedTextEdits transaction(obj_, arch_, *decoder_, instruction_boundaries_, patcher,
-                                       kernel_entries);
-    TextEditError edit_error;
+    const InstructionBoundaries &source_boundaries =
+        source_facts_ ? source_facts_->boundaries : instruction_boundaries_;
+    std::optional<TextEditReferences> local_references;
+    if (!source_facts_) {
+      FailureOr<TextEditReferences> collected = CheckedTextEdits::collect_references(
+          obj_, arch_, source_boundaries, patcher, kernel_entries, edit_error);
+      if (collected.failed()) {
+        result.errors.push_back("anchor edit transaction: " + edit_error.message);
+        result.edit_error = std::move(edit_error);
+        return result;
+      }
+      local_references = std::move(collected).value();
+    }
+    const TextEditReferences &references =
+        source_facts_ ? source_facts_->references : *local_references;
+    const CheckedTextEdits transaction(obj_, *decoder_, source_boundaries, references);
     if (transaction.apply(anchor_edits, new_text, edit_error).failed()) {
       result.errors.emplace_back("anchor edit transaction: " + edit_error.message);
       result.edit_error = std::move(edit_error);
@@ -2703,7 +3851,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("instrumentation exceeds the bounded register allocation");
         return result;
       }
-      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3) {
+      if (arch_ == rocjitsu::IsaFamily::Cdna3) {
         const uint32_t old_end =
             cdna3::sgpr_alias_end(*AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels));
         const uint32_t new_end =
@@ -2721,7 +3869,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                          amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                          result.resources.vgprs / granule - 1);
-      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 || arch_ == ROCJITSU_CODE_ARCH_CDNA4) {
+      if (arch_ == rocjitsu::IsaFamily::Cdna3 || arch_ == rocjitsu::IsaFamily::Cdna4) {
         RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                            amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                            (result.resources.sgprs + kCdnaSpecialSgprTailReserve + 7) / 8 - 1);
@@ -2764,9 +3912,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     result.sites.push_back(
         {.kind = a.site->kind,
          .original_offset = a.site->anchor_offset,
+         .original_size = a.site->original_size,
          .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
-         .guest_size =
-             a.site->kind == InstrumentationKind::KernelEntry ? 0u : a.site->original_size,
+         .guest_size = a.site->kind == InstrumentationKind::KernelEntry ? 0u
+                       : a.site->kind == InstrumentationKind::ReplaceWithInst
+                           ? static_cast<uint32_t>(a.site->replacement_words.size() * 4)
+                           : a.site->original_size,
          .instrumentation_offset =
              a.trampoline_offset + (a.is_probe_call ? a.bytes.call_envelope_byte_offset : 0),
          .instrumentation_size =

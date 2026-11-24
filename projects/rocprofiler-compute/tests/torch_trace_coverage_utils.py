@@ -23,6 +23,20 @@ import pytest
 import torch
 from common import normalize_kernel_names
 
+from ml_api_tracing.analyze.orchestrator import process_ml_api_trace_output
+from ml_api_tracing.inject_roctx.backends.torch_wraps import (
+    DEEP_TENSOR_METHOD_WRAPS,
+    EXTRA_STRUCTURAL_WRAPS,
+    TENSOR_METHOD_WRAPS,
+)
+from utils.schema import Workload
+
+_MAX_FAILURE_REASON_CHARS = 500
+_MAX_KERNEL_PREVIEW_ITEMS = 6
+_MAX_SKIP_REASON_CHARS = 4000
+_MAX_STDERR_HEAD_LINES = 10
+_MAX_VERBOSE_MATCH_ITEMS = 8
+
 # dense unary-float name list
 # fmt: off
 _UNARY_FLOAT_ELEMENTWISE_NAMES = (
@@ -627,10 +641,6 @@ def bool_mask(device: str, shape: Tuple[int, ...] = (4, 4)) -> torch.Tensor:
     return torch.ones(shape, device=device, dtype=torch.bool)
 
 
-def unit_interval_tensor(device: str, *shape: int) -> torch.Tensor:
-    return torch.rand(shape, device=device)
-
-
 # Symmetric positive-definite, for Cholesky-family ops.
 def spd_matrix(device: str, size: int = 4) -> torch.Tensor:
     factor = torch.randn(size, size, device=device)
@@ -678,11 +688,6 @@ def lu_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
         CoverageTensorArg(shape=(4,), emit="pivots_1based"),
         torch.randn(4, 2, device=device),
     ], {}
-
-
-def ldl_solve_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-    ld, pivots, _ = torch.linalg.ldl_factor_ex(spd_matrix(device))
-    return [ld, pivots.to(dtype=torch.int64), torch.randn(4, 2, device=device)], {}
 
 
 def solve_triangular_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
@@ -2371,7 +2376,7 @@ def _first_tensor_dtype(args: List[Any]) -> Optional[torch.dtype]:
     return None
 
 
-def _schema_returns_single_tensor(schema: object) -> bool:
+def _schema_has_one_return(schema: object) -> bool:
     """Return True when ``schema`` declares exactly one return value."""
     if schema is None:
         return False
@@ -2409,7 +2414,7 @@ def build_args_for_op(
         if (
             overload_suffix in _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES
             and short_name not in _OUT_MECHANISM_EXCLUDED_SHORT_NAMES
-            and _schema_returns_single_tensor(op.schema)
+            and _schema_has_one_return(op.schema)
         ):
             base = OP_SPECS.get(short_name)
             if base is not None and base.build is not None:
@@ -2564,11 +2569,7 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
 
     if op_name.startswith("torch.Tensor."):
         method = op_name[len("torch.Tensor.") :]
-        if marker_leaf == op_name:
-            return True
-        if marker_leaf.endswith("Tensor." + method):
-            return True
-        return False
+        return marker_leaf.endswith("Tensor." + method)
 
     if op_name.startswith("torch.") and not op_name.startswith("torch.ops."):
         return marker_leaf == op_name
@@ -3419,12 +3420,6 @@ def _nn_module_method_builder(method_name: str) -> StructuralBuilder:
 
 
 def _register_wrap_constant_builders() -> None:
-    from utils.inject_roctx._backends.torch import (
-        DEEP_TENSOR_METHOD_WRAPS,
-        EXTRA_STRUCTURAL_WRAPS,
-        TENSOR_METHOD_WRAPS,
-    )
-
     for _module_path, _attr_name, marker_name in EXTRA_STRUCTURAL_WRAPS:
         if marker_name not in STRUCTURAL_BUILDERS:
             STRUCTURAL_BUILDERS[marker_name] = _fallback_structural_builder(marker_name)
@@ -3914,13 +3909,13 @@ def multiline_coverage_failure_warning(
     """Format a bounded FAIL listing for the coverage test."""
     lines = [
         f"{len(failure_detail)} operator(s) failed ROCTX/kernel coverage.",
-        f"Re-run with -s: pytest tests/integration/test_torch_trace_coverage.py -m "
-        f"torch_trace_coverage --coverage-seed={seed} --coverage-n={sample_budget} -s",
+        "Re-run with -s: pytest tests/integration/test_torch_trace_coverage.py "
+        f"--coverage-seed={seed} --coverage-n={sample_budget} -s",
         "",
     ]
     shown = failure_detail[:max_ops]
     for name, reason in shown:
-        r = reason.replace("\n", " ")[:500]
+        r = reason.replace("\n", " ")[:_MAX_FAILURE_REASON_CHARS]
         lines.append(f"FAIL  {name}")
         lines.append(f"    {r}")
         lines.append("")
@@ -3932,9 +3927,6 @@ def multiline_coverage_failure_warning(
 
 def call_trees_from_workload(workload_dir: str) -> Dict[str, List[Any]]:
     """Build analyze call trees from a profiled workload directory."""
-    from utils.schema import Workload
-    from utils.utils_analysis import process_ml_api_trace_output
-
     workload = Workload()
     process_ml_api_trace_output(workload, workload_dir)
     return workload.ml_api_call_trees
@@ -3992,8 +3984,8 @@ def inclusive_gpu_ns(node: Any) -> float:
 
 def _trunc(label: str, items) -> str:
     items_sorted = sorted(items)
-    head = items_sorted[:8]
-    ellipsis = "…" if len(items_sorted) > 8 else ""
+    head = items_sorted[:_MAX_VERBOSE_MATCH_ITEMS]
+    ellipsis = "…" if len(items_sorted) > _MAX_VERBOSE_MATCH_ITEMS else ""
     return f"    [match] {label}: {head}{ellipsis}"
 
 
@@ -4036,7 +4028,11 @@ def compare_single_op(
 
     if ground_truth_entry is None or "error" in ground_truth_entry:
         err_msg = describe_missing_or_errored_op(op, ground_truth_entry)
-        reason = err_msg if len(err_msg) <= 4000 else f"{err_msg[:4000]}…"
+        reason = (
+            err_msg
+            if len(err_msg) <= _MAX_SKIP_REASON_CHARS
+            else f"{err_msg[:_MAX_SKIP_REASON_CHARS]}…"
+        )
         log_lines = coverage_log_skip(op.name, reason)
         if match_verbose:
             log_lines = log_lines + (
@@ -4068,7 +4064,7 @@ def compare_single_op(
 
     if not matched_nodes:
         if op.category == "structural":
-            skip_msg = "no matching analyze node - inject_roctx instrumentation gap"
+            skip_msg = "no matching analyze node - ML API tracing instrumentation gap"
             return OpCompareOutcome(
                 "skip",
                 skip_msg,
@@ -4112,10 +4108,11 @@ def compare_single_op(
                 )
             reason = (
                 "no inclusive kernel overlap with torch.profiler cuda_kernels "
-                f"(profiler={sorted(profiler_kernel_set)[:6]}"
-                f"{'…' if len(profiler_kernel_set) > 6 else ''}, "
-                f"tree={sorted(tree_kernels)[:6]}"
-                f"{'…' if len(tree_kernels) > 6 else ''})"
+                f"(profiler={sorted(profiler_kernel_set)[:_MAX_KERNEL_PREVIEW_ITEMS]}"
+                f"{'…' if len(profiler_kernel_set) > _MAX_KERNEL_PREVIEW_ITEMS else ''}"
+                ", "
+                f"tree={sorted(tree_kernels)[:_MAX_KERNEL_PREVIEW_ITEMS]}"
+                f"{'…' if len(tree_kernels) > _MAX_KERNEL_PREVIEW_ITEMS else ''})"
             )
             mismatch_lines = (
                 f"    profiler cuda_kernels ({len(profiler_kernel_set)}):",
@@ -4234,7 +4231,7 @@ def stderr_tail_collapsed(
     if len(collapsed) <= max_lines:
         body_lines = collapsed
     else:
-        head_n = min(10, max_lines // 3)
+        head_n = min(_MAX_STDERR_HEAD_LINES, max_lines // 3)
         tail_n = max_lines - head_n - 1
         head = collapsed[:head_n]
         tail = collapsed[-tail_n:]

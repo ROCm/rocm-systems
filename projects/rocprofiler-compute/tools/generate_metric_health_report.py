@@ -50,7 +50,8 @@ from rocprof_compute_soc.soc_base import iter_analysis_config_metrics
 from utils import file_io, parser, schema
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import build_metric_value_string
-from utils.utils_common import canonical_config_arch
+from utils.utils_analysis import pass_tables_on_rows
+from utils.utils_common import canonical_config_arch, load_panel_configs
 
 # Changes at least this large go in the delta table.
 DELTA_REL_THRESHOLD = 0.05
@@ -407,7 +408,7 @@ def load_workload_metric_tables(wl_dir: Path) -> Tuple[object, pd.DataFrame]:
     sys_info, arch = read_sysinfo(wl_dir)
     config_dir = config.analysis_configs_dir / (canonical_config_arch(arch) or arch)
     arch_config = schema.ArchConfig()
-    arch_config.panel_configs = file_io.load_panel_configs([str(config_dir)])
+    arch_config.panel_configs = load_panel_configs([str(config_dir)])
     parser.build_dfs(
         arch_configs=arch_config,
         filter_metrics=None,
@@ -520,9 +521,7 @@ def compute_dispatch_stats_for_workload(
         workload.roofline_peaks,
         filtered,
         debug=False,
-        pass_tables=[
-            table.loc[filtered.index] for table in workload.pass_tables.values()
-        ],
+        pass_tables=pass_tables_on_rows(workload.pass_tables, filtered),
     )
     return (
         _read_stat_column(arch_config, "Median"),

@@ -15,6 +15,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -205,7 +206,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t wave_size = 0,
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4, uint32_t wave_size = 0,
                    std::shared_ptr<ExecutionPluginGroup> plugins = {})
       : gpu_mem("vop3_bin_simd_mem"), l2("vop3_bin_simd_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -342,8 +343,9 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
       {0x7f801234u, 0xff805678u},
       {0x3f800000u, 0xff801234u},
   }};
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const bool rdna = arch != ROCJITSU_CODE_ARCH_CDNA4;
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna4}) {
+    const bool rdna = arch != rocjitsu::IsaFamily::Cdna4;
     for (unsigned form = 0; form < 4; ++form) {
       const bool e64 = form & 2, reverse = form & 1;
       // All 16 MODE combinations; rotate masks, aliases and modifiers rather
@@ -392,17 +394,14 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
           }
           observer->events.clear();
           {
-            SubtractionHostEnvironment host(rdna);
+            SubtractionHostEnvironment host(/*uses_arith=*/true);
             const auto before = SubtractionHostEnvironment::snapshot();
             const bool succeeded = fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
             const auto after = SubtractionHostEnvironment::snapshot();
             EXPECT_TRUE(succeeded);
-            if (rdna) {
-              EXPECT_EQ(after[0], before[0]);
-              EXPECT_EQ(after[2] & ~0x3f, before[2] & ~0x3f);
-            } else {
-              EXPECT_EQ(after, before);
-            }
+            EXPECT_EQ(after[0], before[0]);
+            EXPECT_EQ(after[1] & before[1], before[1]);
+            EXPECT_EQ(after[2] & ~0x3f, before[2] & ~0x3f);
           }
           // Snapshotting storage must not add events to the observed execution.
           const auto events = observer->events;
@@ -419,8 +418,8 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
         // Scalar execution reports each lane, SIMD each register view. Both must
         // cover the same registers and lanes, and every callback must see the
         // caller's FP environment.
-        EXPECT_EQ(observed_coverage(actual.second, rdna),
-                  observed_coverage(reference.second, rdna));
+        EXPECT_EQ(observed_coverage(actual.second, true),
+                  observed_coverage(reference.second, true));
         if (!e64 && (exec & 1u)) {
           // 1 - 2^-25 is exactly halfway below 1. This independent rounding
           // witness also catches GCC moving the SIMD subtraction across MODE.
