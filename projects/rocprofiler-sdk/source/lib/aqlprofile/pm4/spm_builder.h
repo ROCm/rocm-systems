@@ -99,6 +99,9 @@ public:
 
     void Begin(CmdBuffer* cmd_buffer, const SpmConfig* config, const counters_vector& counters_vec)
     {
+        // Each command stream can run after other packets change GRBM_GFX_INDEX.
+        grbm_index_value_last_ = ~uint32_t{0};
+
         // SPM parameters
         const uint32_t sampling_rate        = config->sampleRate;
         const uint64_t buffer_ptr           = reinterpret_cast<uint64_t>(config->data_buffer_ptr);
@@ -166,6 +169,13 @@ public:
         {
             auto&       counter_des = counters_vec[index];
             const auto& block_des   = counter_des.block_des;
+            const bool  is_sqc_even_mirror =
+                (Primitives::GFXIP_LEVEL >= 11 &&
+                 (counter_des.block_info->attr & CounterBlockSqAttr) &&
+                 block_des.id != static_cast<uint32_t>(AQLPROFILE_BLOCK_NAME_SQG));
+            const bool is_odd_only_sqc_16bit =
+                (is_sqc_even_mirror && counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_16_BITS &&
+                 !config->spm_enable_sq_even_lane);
 
             // The builder consumes resolved per-counter SPM depth and does not re-derive policy.
             // See resolve_spm_depth() in spm_v2.cpp for the current compatibility/default rules.
@@ -175,6 +185,11 @@ public:
                 counter_info_odd[block_des.id].push_back({block_des.id, index});
                 if(counter_des.block_info->attr & CounterBlockSpmGlobalAttr)
                     has_global_32bit_spm = true;
+            }
+            else if(is_odd_only_sqc_16bit)
+            {
+                counter_info_even[block_des.id].push_back({block_des.id, index});
+                counter_info_odd[block_des.id].push_back({block_des.id, index});
             }
             else
             {
@@ -365,6 +380,13 @@ public:
                 {
                     const auto  index       = counter_info_even[j][k].second;
                     const auto& counter_des = counters_vec[index];
+                    const bool  is_sqc_even_mirror =
+                        (Primitives::GFXIP_LEVEL >= 11 &&
+                         (counter_des.block_info->attr & CounterBlockSqAttr) &&
+                         counter_des.block_des.id !=
+                             static_cast<uint32_t>(AQLPROFILE_BLOCK_NAME_SQG));
+                    const bool map_even_lane =
+                        config->spm_enable_sq_even_lane || !is_sqc_even_mirror;
                     if(counter_des.spm_depth != depth[n]) continue;
                     if(depth[n] == AQLPROFILE_SPM_DEPTH_32_BITS)
                     {
@@ -378,7 +400,8 @@ public:
                     else
                     {
                         mux_ram[1][even_idx] = Primitives::spm_mux_ram_value(counter_des);
-                        counter_map[index]   = counter_map_value(even_idx, counter_des, false);
+                        if(map_even_lane)
+                            counter_map[index] = counter_map_value(even_idx, counter_des, false);
                     }
                     even_idx = Primitives::spm_mux_ram_idx_incr(even_idx);
                 }
@@ -678,7 +701,7 @@ public:
         spm_buffer_desc->num_xcc         = config->xcc_number;
         spm_buffer_desc->num_events      = original_event_count;
 
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
         static std::once_flag dump_mux_once;
         std::call_once(dump_mux_once, [&]() {
             auto dump_mux = [](const char* name, const std::vector<mux_info_t>& mux) {
@@ -752,7 +775,7 @@ public:
                                                Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
                                                Primitives::rlc_spm_perfmon_cntl_value(1, 0));
         }
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
         if(config->spm_sample_count_ptr && !(Primitives::RLC_SPM_SAMPLE_CNT__ADDR == Register()))
         {
             builder.BuildCopyRegDataPacket(cmd_buffer,

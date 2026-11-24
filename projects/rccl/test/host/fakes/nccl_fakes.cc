@@ -28,9 +28,11 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
-#include "ipcsocket.h"    // ncclIpcFd
+#include "ipcsocket.h"
 
+#include <algorithm>
 #include <functional>
+#include <string>
 
 #include "nccl_fakes.h"   // controllable seam hooks
 
@@ -56,6 +58,7 @@ ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
 ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
 ASSERT_HOOK_MATCHES_PROD(g_memTrack,                  ncclMemTrack);
 ASSERT_HOOK_MATCHES_PROD(g_memUntrackDynamic,         ncclMemUntrackDynamic);
+ASSERT_HOOK_MATCHES_PROD(g_memUntrackPersist,         ncclMemUntrackPersist);
 ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
 ASSERT_HOOK_MATCHES_PROD(g_shmImportShareableBuffer,  ncclShmImportShareableBuffer);
 ASSERT_HOOK_MATCHES_PROD(g_shmIpcClose,               ncclShmIpcClose);
@@ -77,20 +80,39 @@ uint32_t            ncclDebugLevelMask = 0; // NCCL_LOG_NONE
 uint64_t            ncclDebugMask    = 0;
 thread_local int    ncclDebugNoWarn  = 0;
 
-void ncclDebugLog(ncclDebugLogLevel /*level*/,
-                             unsigned long     /*flags*/,
+static void DefaultNcclDebugLog(ncclDebugLogLevel, unsigned long, const char* filefunc, int line, const char* msg)
+{
+    std::fprintf(stderr, "[fake] %s:%d %s\n", filefunc ? filefunc : "?", line, msg);
+}
+
+std::function<void(ncclDebugLogLevel, unsigned long, const char*, int, const char*)> g_ncclDebugLog =
+    DefaultNcclDebugLog;
+
+void ncclDebugLog(ncclDebugLogLevel level,
+                             unsigned long     flags,
                              const char*       filefunc,
                              int               line,
                              const char*       fmt,
                              ...)
 {
-    std::fprintf(stderr, "[fake] %s:%d ", filefunc ? filefunc : "?", line);
+    // debug.cc demotes a WARN raised under NOWARN to INFO.
+    if (ncclDebugNoWarn != 0 && level == NCCL_LOG_WARN) level = NCCL_LOG_INFO;
     std::va_list ap;
     va_start(ap, fmt);
-    std::vfprintf(stderr, fmt, ap);
+    std::va_list again;
+    va_copy(again, ap);
+    std::string msg(std::max(0, std::vsnprintf(nullptr, 0, fmt, ap)), '\0');
+    std::vsnprintf(&msg[0], msg.size() + 1, fmt, again);
+    va_end(again);
     va_end(ap);
-    std::fputc('\n', stderr);
+    g_ncclDebugLog(level, flags, filefunc, line, msg.c_str());
 }
+
+// src/debug.cc, same owner as the logging symbols above. A no-op rather than a
+// recorder: the name is cosmetic, so nothing a microtest asserts can depend on it.
+// Weak, like the pthread_t overload below, so a suite that wants to observe the
+// name (bootstrap_micro_fakes.cc) can define its own copy and still link.
+__attribute__((weak)) void ncclSetThreadName(std::thread& /*thread*/, const char* /*fmt*/, ...) {}
 
 // src/debug.cc's pthread_t overload; the hook gets the name as production would set it. Default: no-op,
 // like production at its NCCL_SET_THREAD_NAME=0 default. Weak so a suite with its own copy still links.
@@ -105,16 +127,7 @@ __attribute__((weak)) void ncclSetThreadName(pthread_t thread, const char* fmt, 
     g_ncclSetThreadName(thread, name);
 }
 
-// Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) {
-    *cache = deftVal;
-  }
-  if (noCache) {
-    *noCache = 0;
-  }
-  return deftVal;
-}
+// ncclLoadParam itself is owned solely by env_fakes.cc -- see the comment there.
 
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
 // every param sits at its compile-time default.
@@ -124,6 +137,27 @@ static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)
 }
 
 std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
+
+// --- ncclParam<T> runtime (src/param/param.cc, src/param/param_registry.cc) ---
+// DEFINE_NCCL_PARAM objects in the compiled production units (e.g. net_ib/connect.cc) register
+// themselves and load their value through ncclParamEnvPluginGet. Weak, so a binary that links the
+// real param runtime keeps it. Every read is uncached and routed through g_loadParam under the
+// key without its "NCCL_" prefix, the same name NCCL_PARAM passes, so tests flip these params
+// exactly like the NCCL_PARAM ones; unset (g_loadParam returns the sentinel) yields the default.
+__attribute__((weak)) ncclResult_t ncclParamRegistry::add(std::string /*key*/, ncclParamInfo_t /*info*/,
+                                                          ncclParamInterface* /*param*/) {
+    return ncclSuccess;
+}
+extern "C" __attribute__((weak)) bool ncclParamIsCacheDisabled(const char* /*key*/) { return true; }
+extern "C" __attribute__((weak)) const char* ncclParamEnvPluginGet(const char* key, bool /*envInit*/) {
+    constexpr int64_t unset = INT64_MIN;
+    const char* name = strncmp(key, "NCCL_", 5) == 0 ? key + 5 : key;
+    int64_t value = g_loadParam(name, unset);
+    if (value == unset) return nullptr;
+    static thread_local char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    return buf;
+}
 
 // ---------------------------------------------------------------------------
 // Seams worth controlling from tests (return failure by default)
@@ -221,10 +255,9 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
 
-// src/os/linux_ipcsocket.cc (NCCL 2.32): p2p.cc and dev_runtime.cc close
-// imported fds through this instead of close(2). A real close, as production
-// does, so suites that hand back a dup'd fd can still prove it was closed.
+#ifndef RCCL_NCCL_FAKES_OMIT_IPC_FD_CLOSE
 int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
+#endif
 
 // --- Controllable seam: ncclRegLocalIsValid -----------------------------
 // Default preserves the old stub: report the record as not locally valid
@@ -297,7 +330,7 @@ static ncclResult_t DefaultTopoCheckP2p(int /*rank1*/, int /*rank2*/, int* p2p,
 std::function<ncclResult_t(int, int, int*, int*, int*, int*, int*)>
     g_ncclTopoCheckP2p = DefaultTopoCheckP2p;
 
-// rccl-UnitTestsMicroGraph links the real src/graph/paths.cc and search.cc, which define these.
+// rccl-UnitTestsMicroGraphDev links the real src/graph/paths.cc and search.cc, which define these.
 #ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               struct ncclTopoSystem* /*system*/,
@@ -452,27 +485,6 @@ ncclResult_t ncclStreamWaitStream(hipStream_t a, hipStream_t b, hipEvent_t ev)
     return g_ncclStreamWaitStream(a, b, ev);
 }
 
-ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
-{
-    if (isXGMI) *isXGMI = false;
-    return ncclSuccess;
-}
-std::function<ncclResult_t(int, int, bool*, int)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
-int g_ncclTopoGetLinkTypeCalls = 0;
-
-#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    dev1,
-                                 int                    dev2,
-                                 bool*                  isXGMI,
-                                 int                    maxInter,
-                                 int                    /*nInter*/,
-                                 int*                   /*inter*/)
-{
-    g_ncclTopoGetLinkTypeCalls++;
-    return g_ncclTopoGetLinkType(dev1, dev2, isXGMI, maxInter);
-}
-#endif
 
 // ---------------------------------------------------------------------------
 // Memory-manager tracking stubs.
@@ -560,11 +572,16 @@ ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, st
     return g_memUntrackDynamic(manager, ptr, info);
 }
 
-ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
-                                   void*                  /*ptr*/,
-                                   size_t                 /*size*/)
+// --- Controllable seam: ncclMemUntrackPersist --------------------------
+static ncclResult_t DefaultMemUntrackPersist(struct ncclMemManager*, void*, size_t)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t)> g_memUntrackPersist = DefaultMemUntrackPersist;
+
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* manager, void* ptr, size_t size)
+{
+    return g_memUntrackPersist(manager, ptr, size);
 }
 
 // --- Controllable seam: ncclDynMemMarkExportToPeer ----------------------
@@ -623,6 +640,7 @@ int64_t ncclParamMultiSegmentRegister() { return g_loadParam("MULTI_SEGMENT_REGI
 
 void ResetNcclFakes()
 {
+    g_ncclDebugLog                 = DefaultNcclDebugLog;
     g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
     g_strongStreamRelease          = DefaultStrongStreamRelease;
@@ -636,9 +654,8 @@ void ResetNcclFakes()
     g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
     g_memTrack                     = DefaultMemTrack;
     g_memUntrackDynamic            = DefaultMemUntrackDynamic;
+    g_memUntrackPersist            = DefaultMemUntrackPersist;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
-    g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
-    g_ncclTopoGetLinkTypeCalls     = 0;
     g_ncclTopoCheckP2p             = DefaultTopoCheckP2p;
     g_ncclTopoCheckNet             = DefaultTopoCheckNet;
     g_regLocalIsValid              = DefaultRegLocalIsValid;
@@ -647,5 +664,16 @@ void ResetNcclFakes()
     g_shmIpcClose                  = DefaultShmIpcClose;
     g_commGraphRegister            = DefaultCommGraphRegister;
     g_commGraphDeregister          = DefaultCommGraphDeregister;
+    ncclCuMemHandleType            = hipMemHandleTypePosixFileDescriptor;
     g_ncclSetThreadName            = DefaultSetThreadName;
 }
+
+// ppc64le TOC references survive --gc-sections, so rome_models.cc's
+// extern topoPathTypeStr[] needs a definition even when the code path is dead.
+// Weak so that tests linking topo_stubs.cc (which has a strong definition) win.
+#if defined(__powerpc64__) || defined(__PPC64__)
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
+#include "graph.h"
+__attribute__((weak)) const char* topoPathTypeStr[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
+#endif
+#endif

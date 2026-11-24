@@ -43,12 +43,16 @@
 
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <optional>
 #include <string>
 
 namespace rocjitsu {
+
+/// @brief Architectural state proven by the caller at every use of the body.
+enum class ProbeEntryState { Unknown, ZeroVgprBanks };
 
 /// @brief Registers @p sym reads before defining that @p abi does not supply.
 ///
@@ -68,6 +72,13 @@ namespace rocjitsu {
 /// A vector write counts here as writing the whole register, even though EXEC
 /// masks it to the active lanes. The probe is responsible for its own EXEC; see
 /// `LivenessAnalysisOptions::exec_masked_defs_kill` for what that obliges.
+/// Callable admission must prove VSKIP clear on entry and reject bodies that
+/// can enable it. This analysis assumes that ABI precondition; it does not
+/// establish whether an arbitrary guest site satisfies it.
+///
+/// @p wave_size is the wave size of the kernels that call the probe, 32 or 64.
+/// A Wave32 compare writes one SGPR of the pair its encoding names, so analyzing
+/// a Wave32 probe at 64 would hide a read of the SGPR above.
 ///
 /// Returns std::nullopt (with a reason written to @p error_out, if non-null)
 /// when the analysis could not run: an @p abi that fails is_valid_probe_abi(),
@@ -77,7 +88,9 @@ namespace rocjitsu {
 /// access means its encoded operands do not name every register it reads.
 [[nodiscard]] std::optional<RegisterSet>
 analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj, const ResolvedProbeSymbol &sym,
-                       rj_code_arch_t arch, const ProbeAbi &abi, std::string *error_out = nullptr);
+                       rocjitsu::IsaFamily arch, const ProbeAbi &abi, uint8_t wave_size,
+                       std::string *error_out = nullptr,
+                       ProbeEntryState entry_state = ProbeEntryState::Unknown);
 
 /// @brief Render @p regs as a comma-separated operand list, e.g. "s4, v0, v1".
 ///

@@ -7,15 +7,16 @@ use std::ffi::c_void;
 use std::mem::size_of;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::pointer::*;
 use crate::memory::pool::*;
-use crate::runtime::{boundary, initialized_mut, lock, map_error};
+use crate::status::{boundary, map_error};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the allocation type, bounds, and owner for a pointer.
 pub unsafe extern "C" fn hsa_amd_pointer_info(
     pointer: *const c_void,
@@ -42,7 +43,7 @@ pub unsafe extern "C" fn hsa_amd_pointer_info(
                 Some(runtime) => runtime,
                 None => return NOT_INITIALIZED,
             };
-            pointer_description(runtime, pointer as usize)
+            pointer_info_description(runtime, pointer as usize)
         };
         // SAFETY: The caller supplies input_size writable bytes at info.
         unsafe { write_pointer_info(info, input_size, description.as_ref()) };
@@ -91,10 +92,10 @@ pub unsafe extern "C" fn hsa_amd_pointer_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info_set_userdata")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Associates caller-owned data with a tracked allocation.
 pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
     pointer: *const c_void,
@@ -121,10 +122,10 @@ pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agents_allow_access")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Grants the listed agents access to a memory allocation.
 pub unsafe extern "C" fn hsa_amd_agents_allow_access(
     num_agents: u32,
@@ -146,7 +147,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         };
         // SAFETY: The caller supplies num_agents readable entries.
         let agents = unsafe { std::slice::from_raw_parts(agents, num_agents as usize) };
-        if agents.iter().any(|agent| !runtime.is_agent(*agent)) {
+        if agents.iter().any(|agent| !runtime.agents.is_agent(*agent)) {
             return INVALID_AGENT;
         }
         let Some(key) = runtime
@@ -168,7 +169,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             return OUT_OF_RESOURCES;
         }
         let owner = memory.description.owner;
-        let storage = if runtime.is_cpu_agent(owner) {
+        let storage = if runtime.agents.is_cpu_agent(owner) {
             PoolStorage::System
         } else if memory.pool_global_flags & POOL_FLAG_FINE != 0 {
             PoolStorage::LocalFine
@@ -177,7 +178,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         };
         if agents.iter().any(|agent| {
             agent_pool_relationship(runtime, *agent, owner, storage).0 == POOL_ACCESS_NEVER
-                || (runtime.is_cpu_agent(*agent) && memory.description.host_base.is_none())
+                || (runtime.agents.is_cpu_agent(*agent) && memory.description.host_base.is_none())
         }) {
             return INVALID_ARGUMENT;
         }
@@ -195,11 +196,12 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             return OUT_OF_RESOURCES;
         }
         for agent in &desired {
-            if let Some(index) = runtime.gpu_index(*agent) {
-                devices.push(&runtime.gpus[index].device);
+            if let Some(index) = runtime.agents.gpu_index(*agent) {
+                devices.push(&runtime.agents.gpus[index].device);
             }
         }
         let Some(origin) = runtime
+            .agents
             .gpus
             .iter()
             .map(|gpu| &gpu.device)
@@ -207,7 +209,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         else {
             return ERROR;
         };
-        let cpu_count = runtime.cpus.len() as u64;
+        let cpu_count = runtime.agents.cpus.len() as u64;
         let Some(memory) = runtime.memory_state.allocations.get_mut(&key) else {
             return ERROR;
         };
@@ -232,10 +234,10 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
                 if memory
                     .description
                     .accessible
-                    .try_reserve(runtime.gpus.len())
+                    .try_reserve(runtime.agents.gpus.len())
                     .is_ok()
                 {
-                    for (index, gpu) in runtime.gpus.iter().enumerate() {
+                    for (index, gpu) in runtime.agents.gpus.iter().enumerate() {
                         if memory.allocation.device_address(&gpu.device).is_ok() {
                             memory.description.accessible.push(HsaAgent {
                                 handle: GPU_AGENT_BASE + index as u64,
@@ -255,10 +257,10 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_can_migrate")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reports whether memory can migrate between two pools.
 pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
     source_pool: HsaMemoryPool,
@@ -289,10 +291,10 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_migrate")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Migrates an allocation to the requested memory pool.
 pub unsafe extern "C" fn hsa_amd_memory_migrate(
     pointer: *const c_void,

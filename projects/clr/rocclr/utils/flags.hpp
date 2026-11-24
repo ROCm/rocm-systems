@@ -139,6 +139,8 @@ release(uint, GPU_MAX_COMMAND_BUFFERS, 8,                                     \
          "The maximum number of command buffers allocated per queue")         \
 release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
+release(uint, GPU_MAX_SDMA_QUEUES, 16,                                        \
+         "The maximum number of ABCE host SDMA queues per device")            \
 release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
         "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \
@@ -196,6 +198,8 @@ release(bool, DEBUG_HIP_MEM_POOL_VMHEAP, true,                                \
         "Enables virtual memory for memory pools")                            \
 release(bool, PAL_HIP_IPC_FLAG, true,                                         \
         "Enable interprocess flag for device allocation in PAL HIP")          \
+release(bool, OMNICACHE_ENABLE, true,                                         \
+        "Opt the process into OmniCache VRAM<->DRAM tiering.")                \
 release(uint, PAL_FORCE_ASIC_REVISION, 0,                                     \
         "Force a specific asic revision for all devices")                     \
 release(bool, PAL_EMBED_KERNEL_MD, false,                                     \
@@ -209,6 +213,10 @@ release(bool, AMD_CPU_AFFINITY, false,                                         \
         "Prefer GPU-local NUMA CPU affinity when the application has not set a CPU mask") \
 release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
+release(bool, DEBUG_CLR_ENABLE_ABCE, false,                                   \
+        "Use ABCE Blit Manager for copy path")                                \
+release(bool, DEBUG_CLR_ABCE_DEVICE_RING, true,                               \
+        "Place ABCE SDMA rings in device memory on PCIe-attached GPUs")       \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \
         "The minimum size in KB for P2P transfer with SDMA")                  \
 release(uint, ROC_AQL_QUEUE_SIZE, 16384,                                      \
@@ -219,6 +227,8 @@ release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \
         "Limit the number of workgroups in blit operations")                  \
 release(bool, DEBUG_CLR_BLIT_KERNARG_OPT, false,                              \
         "Enable blit kernel arguments optimization")                          \
+release(bool, DEBUG_CLR_DISABLE_MEMOBJ_CACHE, false,                          \
+        "Disable the hipMemcpyBatchAsync memory-object range cache")          \
 release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
         "If true, then runtime can skip kernel arg copy")                     \
 release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \
@@ -246,6 +256,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 0,                          \
         "Segment scheduling mode (segmented path only): "                      \
         "0=Hybrid/auto, 1=Round-robin, 2=DFS")                                \
+release(uint, DEBUG_HIP_GRAPH_COLLAPSE_RULE, 1,                               \
+        "When a segmented graph collapses to one stream: 1 = C1, a cross-stream "\
+        "edge touching a node that isn't AQL-captured collapses it, and the "  \
+        "slack rule applies only if DEBUG_HIP_GRAPH_MIN_OVERLAP is set; 0 = the "\
+        "slack rule (DEBUG_HIP_GRAPH_MIN_OVERLAP) alone, as before")          \
 release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
         "Min overlappable work (in occupancy passes) per unit of cross-stream "\
         "sync (barrier packets + completion signals) to keep a graph "         \
@@ -286,14 +301,26 @@ release(bool, DEBUG_CLR_DIRECT_DOORBELL, false,                               \
         "Write the hardware doorbell directly from CLR")                      \
 release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 1,                                     \
         "Device-memory AQL ring buffer for supported asics "                  \
-        "(1=enabled, 0=force system mem (default))")                          \
+        "(1=enabled (default), 0=force system mem)")                          \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
         "(1=enabled (default), 0=non-temporal store path)")                   \
 release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
-        "Place graph signals in device memory (large BAR only)")              \
+        "Place graph signals in device memory when ROCr reports a "           \
+        "signal-capable device pool, the device has a large BAR, and no "     \
+        "profiler tool is attached")                                          \
+release(bool, DEBUG_CLR_DEV_SIGNALS, true,                                    \
+        "Place queue signals in device memory when ROCr reports a "           \
+        "signal-capable device pool, the device has a large BAR, and no "     \
+        "profiler tool is attached")                                          \
+release(bool, DEBUG_CLR_GRAPH_FAST_LAUNCH, true,                             \
+        "Graph launches on several streams: end markers that complete a "    \
+        "signal without interrupt for the other queues, fork waits without "  \
+        "marker commands, "                                                    \
+        "empty nodes carrying their waits, no host read-backs of device "     \
+        "memory on the launch path (0 = the previous launch path)")           \
 
 namespace amd {
 

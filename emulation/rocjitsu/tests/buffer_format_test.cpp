@@ -1,30 +1,39 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "counting_gpu_memory.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -39,6 +48,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -58,6 +68,7 @@
 #include <memory>
 
 namespace {
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 using namespace rocjitsu;
 constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
 constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
@@ -81,6 +92,32 @@ TEST(BufferFormatTest, Gfx11TwoBitSnormRoundsHalfAwayFromZero) {
                       .succeeded());
       EXPECT_EQ(std::bit_cast<uint32_t>(packed), (format == 33 ? red_two_bit : alpha_two_bit)[i]);
     }
+}
+
+TEST(BufferFormatTest, ZeroSelectorsUseA8RoutingOnlyForSingleChannelFloat32) {
+  using E = amdgpu::BufferFormatEncoding;
+  const std::array<uint32_t, 4> components{bits(1), bits(2), bits(3), bits(4)};
+  for (auto encoding : {E::Gfx9, E::Rdna1, E::Rdna2, E::Gfx11}) {
+    const uint32_t format = encoding == E::Gfx9 ? 4 | (7 << 4) : 22;
+    for (auto missing : {amdgpu::BufferStoreMissingChannel::Zero,
+                         amdgpu::BufferStoreMissingChannel::ReplicateFirst})
+      for (uint32_t count = 1; count <= 4; ++count)
+        for (uint32_t selectors : {0u, 4u << 9}) {
+          SCOPED_TRACE(testing::Message()
+                       << "encoding=" << static_cast<int>(encoding) << " count=" << count
+                       << " selectors=" << selectors << " missing=" << static_cast<int>(missing));
+          std::array<uint8_t, 4> bytes{0xa5, 0xa5, 0xa5, 0xa5};
+          ASSERT_TRUE(amdgpu::pack_buffer_format(format, selectors,
+                                                 std::span(components).first(count), bytes,
+                                                 encoding, missing)
+                          .succeeded());
+          const uint32_t expected = count == 4 ? bits(4)
+                                    : missing == amdgpu::BufferStoreMissingChannel::ReplicateFirst
+                                        ? bits(1)
+                                        : 0;
+          EXPECT_EQ(std::bit_cast<uint32_t>(bytes), expected);
+        }
+  }
 }
 
 TEST(BufferFormatTest, ConstantStoreAlphaUsesTheMemoryNumericFormat) {
@@ -273,12 +310,14 @@ TEST(BufferFormatTest, Cdna4FormattedLoadCanWriteLdsWithoutClobberingVgprs) {
   amdgpu::L2Cache l2("format_lds_l2");
   l2.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.arch = rocjitsu::IsaFamily::Cdna4;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("format_lds_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "format_lds_cu", cfg, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -308,7 +347,7 @@ TEST(BufferFormatTest, Cdna4FormattedLoadCanWriteLdsWithoutClobberingVgprs) {
   wf->halt();
 }
 
-class BufferFormatExecutionTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class BufferFormatExecutionTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   amdgpu::GpuMemory memory{"formatted_memory"};
   amdgpu::L2Cache l2{"formatted_l2"};
@@ -322,7 +361,8 @@ protected:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 32;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("formatted_cu", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "formatted_cu", cfg, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(5); // Lane 1 must not read, store or receive a load result.
@@ -332,7 +372,7 @@ protected:
       wf->halt();
   }
   uint32_t encoded_format(uint32_t modern) {
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2)
+    if (GetParam() == rocjitsu::IsaFamily::Rdna1 || GetParam() == rocjitsu::IsaFamily::Rdna2)
       return modern >= 36 ? modern + 14 : modern;
     if (arch_is_cdna_4_or_lower(GetParam())) {
       switch (modern) {
@@ -346,8 +386,16 @@ protected:
         return 13 | (4 << 4); // 32_32_32_UINT.
       case 11:
         return 2 | (4 << 4); // 16_UINT.
+      case 13:
+        return 2 | (7 << 4); // 16_FLOAT.
+      case 22:
+        return 4 | (7 << 4); // 32_FLOAT.
       case 20:
         return 4 | (4 << 4); // 32_UINT.
+      case 21:
+        return 4 | (5 << 4); // 32_SINT.
+      case 50:
+        return 11 | (7 << 4); // 32_32_FLOAT.
       case 42:
         return 10; // 8_8_8_8_UNORM.
       case 46:
@@ -373,6 +421,65 @@ protected:
     cu->write_sgpr(sb + 5, stride << 16);
     cu->write_sgpr(sb + 6, 8);
     cu->write_sgpr(sb + 7, selectors | format_word | (1u << 28));
+  }
+  std::unique_ptr<Instruction> store_instruction(uint16_t mubuf_op, uint16_t vbuffer_op) {
+    auto decoder = Decoder::create(GetParam());
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
+      const auto words = rdna4::build_vbuffer(
+          vbuffer_op,
+          {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4, .scope = 3, .idxen = 1});
+      return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
+    }
+    const auto build = [mubuf_op](auto fields, auto builder) {
+      uint16_t op = mubuf_op;
+      if constexpr (requires { fields.opm; }) {
+        // RDNA1/2 select D16 with OPM instead of the ordinary opcode field.
+        if (op >= cdna4::kBufferStoreFormatD16XMubuf &&
+            op <= cdna4::kBufferStoreFormatD16XyzwMubuf) {
+          op -= cdna4::kBufferStoreFormatD16XMubuf - cdna4::kBufferStoreFormatXMubuf;
+          fields.opm = 1;
+        }
+      }
+      fields.idxen = 1;
+      fields.vdata = 8;
+      fields.srsrc = 1;
+      fields.soffset = 128;
+      if constexpr (requires { fields.glc; })
+        fields.glc = fields.slc = 1;
+      else
+        fields.sc0 = fields.sc1 = 1;
+      return builder(op, fields);
+    };
+    std::array<uint32_t, 2> words{};
+    switch (GetParam()) {
+    case rocjitsu::IsaFamily::Rdna1:
+    case rocjitsu::IsaFamily::Rdna2:
+      // RDNA2 retains the RDNA1 MUBUF encoding.
+      words = build(rdna1::MubufBuilderFields{}, rdna1::build_mubuf);
+      break;
+    case rocjitsu::IsaFamily::Rdna3:
+      words = build(rdna3::MubufBuilderFields{}, rdna3::build_mubuf);
+      break;
+    case rocjitsu::IsaFamily::Rdna3_5:
+      words = build(rdna3_5::MubufBuilderFields{}, rdna3_5::build_mubuf);
+      break;
+    case rocjitsu::IsaFamily::Cdna1:
+      words = build(cdna1::MubufBuilderFields{}, cdna1::build_mubuf);
+      break;
+    case rocjitsu::IsaFamily::Cdna2:
+      words = build(cdna2::MubufBuilderFields{}, cdna2::build_mubuf);
+      break;
+    case rocjitsu::IsaFamily::Cdna3:
+      words = build(cdna3::MubufBuilderFields{}, cdna3::build_mubuf);
+      break;
+    case rocjitsu::IsaFamily::Cdna4:
+      words = build(cdna4::MubufBuilderFields{}, cdna4::build_mubuf);
+      break;
+    default:
+      ADD_FAILURE() << "No buffer store encoding selected";
+      return nullptr;
+    }
+    return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
   }
   template <typename Load, typename Store, typename Machine>
   Instruction *execute(bool load, const Machine *raw) {
@@ -410,55 +517,55 @@ protected:
   void issue_typed(uint32_t format, uint32_t soffset = 128) {
     Instruction *inst = nullptr;
     switch (GetParam()) {
-    case ROCJITSU_CODE_ARCH_RDNA1:
+    case rocjitsu::IsaFamily::Rdna1:
       inst = legacy<rdna1::MachineInst, rdna1::MtbufMachineInst, rdna1::TbufferLoadFormatXyzwMtbuf,
                     rdna1::TbufferStoreFormatXMtbuf, rdna1::TbufferLoadFormatD16XyzMtbuf,
                     rdna1::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
                                                            soffset);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA2:
+    case rocjitsu::IsaFamily::Rdna2:
       inst = legacy<rdna2::MachineInst, rdna2::MtbufMachineInst, rdna2::TbufferLoadFormatXyzwMtbuf,
                     rdna2::TbufferStoreFormatXMtbuf, rdna2::TbufferLoadFormatD16XyzMtbuf,
                     rdna2::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
                                                            soffset);
       break;
-    case ROCJITSU_CODE_ARCH_CDNA1:
+    case rocjitsu::IsaFamily::Cdna1:
       inst = legacy<cdna1::MachineInst, cdna1::MtbufMachineInst, cdna1::TbufferLoadFormatXyzwMtbuf,
                     cdna1::TbufferStoreFormatXMtbuf, cdna1::TbufferLoadFormatD16XyzMtbuf,
                     cdna1::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
                                                            soffset);
       break;
-    case ROCJITSU_CODE_ARCH_CDNA2:
+    case rocjitsu::IsaFamily::Cdna2:
       inst = legacy<cdna2::MachineInst, cdna2::MtbufMachineInst, cdna2::TbufferLoadFormatXyzwMtbuf,
                     cdna2::TbufferStoreFormatXMtbuf, cdna2::TbufferLoadFormatD16XyzMtbuf,
                     cdna2::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
                                                            soffset);
       break;
-    case ROCJITSU_CODE_ARCH_CDNA3:
+    case rocjitsu::IsaFamily::Cdna3:
       inst = legacy<cdna3::MachineInst, cdna3::MtbufMachineInst, cdna3::TbufferLoadFormatXyzwMtbuf,
                     cdna3::TbufferStoreFormatXMtbuf, cdna3::TbufferLoadFormatD16XyzMtbuf,
                     cdna3::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
                                                            soffset);
       break;
-    case ROCJITSU_CODE_ARCH_CDNA4:
+    case rocjitsu::IsaFamily::Cdna4:
       inst = legacy<cdna4::MachineInst, cdna4::MtbufMachineInst, cdna4::TbufferLoadFormatXyzwMtbuf,
                     cdna4::TbufferStoreFormatXMtbuf, cdna4::TbufferLoadFormatD16XyzMtbuf,
                     cdna4::TbufferStoreFormatD16XyzwMtbuf>(true, false, encoded_format(format),
                                                            soffset);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3:
+    case rocjitsu::IsaFamily::Rdna3:
       inst = legacy<rdna3::MachineInst, rdna3::MtbufMachineInst, rdna3::TbufferLoadFormatXyzwMtbuf,
                     rdna3::TbufferStoreFormatXMtbuf, rdna3::TbufferLoadD16FormatXyzMtbuf,
                     rdna3::TbufferStoreD16FormatXyzwMtbuf>(true, false, encoded_format(format),
                                                            soffset);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
+    case rocjitsu::IsaFamily::Rdna3_5:
       inst = legacy<rdna3_5::MachineInst, rdna3_5::MtbufMachineInst,
                     rdna3_5::TbufferLoadFormatXyzwMtbuf, rdna3_5::TbufferStoreFormatXMtbuf,
                     rdna3_5::TbufferLoadD16FormatXyzMtbuf, rdna3_5::TbufferStoreD16FormatXyzwMtbuf>(
           true, false, encoded_format(format), soffset);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA4: {
+    case rocjitsu::IsaFamily::Rdna4: {
       rdna4::VbufferMachineInst m{};
       m.rsrc = 4;
       m.soffset = rdna4::OPR_SREG_M0_NULL;
@@ -480,7 +587,7 @@ protected:
     auto decoder = Decoder::create(GetParam());
     const uint16_t op = d16 ? 15 : 7;
     std::unique_ptr<Instruction> inst;
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
       const auto words =
           rdna4::build_vbuffer(op + (typed ? 128 : 0), {.soffset = rdna4::OPR_SREG_M0_NULL,
                                                         .vdata = 8,
@@ -510,7 +617,7 @@ protected:
   }
   void issue(bool load, bool d16 = false, uint32_t soffset = 128) {
     Instruction *inst;
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
       rdna4::VbufferMachineInst m{};
       m.rsrc = 4;
       m.soffset = rdna4::OPR_SREG_M0_NULL;
@@ -522,7 +629,7 @@ protected:
                            rdna4::BufferStoreD16FormatXyzwVbuffer>(load, raw)
                  : execute<rdna4::BufferLoadFormatXyzwVbuffer, rdna4::BufferStoreFormatXVbuffer>(
                        load, raw);
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Rdna3) {
       rdna3::MubufMachineInst m{};
       m.srsrc = 1;
       m.soffset = soffset;
@@ -535,27 +642,27 @@ protected:
                     load, raw)
               : execute<rdna3::BufferLoadFormatXyzwMubuf, rdna3::BufferStoreFormatXMubuf>(load,
                                                                                           raw);
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA1) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Rdna1) {
       inst = legacy<rdna1::MachineInst, rdna1::MubufMachineInst, rdna1::BufferLoadFormatXyzwMubuf,
                     rdna1::BufferStoreFormatXMubuf, rdna1::BufferLoadFormatD16XyzMubuf,
                     rdna1::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA2) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Rdna2) {
       inst = legacy<rdna2::MachineInst, rdna2::MubufMachineInst, rdna2::BufferLoadFormatXyzwMubuf,
                     rdna2::BufferStoreFormatXMubuf, rdna2::BufferLoadFormatD16XyzMubuf,
                     rdna2::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA1) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Cdna1) {
       inst = legacy<cdna1::MachineInst, cdna1::MubufMachineInst, cdna1::BufferLoadFormatXyzwMubuf,
                     cdna1::BufferStoreFormatXMubuf, cdna1::BufferLoadFormatD16XyzMubuf,
                     cdna1::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA2) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Cdna2) {
       inst = legacy<cdna2::MachineInst, cdna2::MubufMachineInst, cdna2::BufferLoadFormatXyzwMubuf,
                     cdna2::BufferStoreFormatXMubuf, cdna2::BufferLoadFormatD16XyzMubuf,
                     cdna2::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA3) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Cdna3) {
       inst = legacy<cdna3::MachineInst, cdna3::MubufMachineInst, cdna3::BufferLoadFormatXyzwMubuf,
                     cdna3::BufferStoreFormatXMubuf, cdna3::BufferLoadFormatD16XyzMubuf,
                     cdna3::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_CDNA4) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Cdna4) {
       inst = legacy<cdna4::MachineInst, cdna4::MubufMachineInst, cdna4::BufferLoadFormatXyzwMubuf,
                     cdna4::BufferStoreFormatXMubuf, cdna4::BufferLoadFormatD16XyzMubuf,
                     cdna4::BufferStoreFormatD16XyzwMubuf>(load, d16, -1, soffset);
@@ -584,7 +691,7 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowConfiguredPolicyForA
   const auto arch = GetParam();
   auto decoder = Decoder::create(arch);
   const auto vb = wf->vgpr_alloc().base;
-  const bool replicate = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool replicate = arch == rocjitsu::IsaFamily::Rdna4;
   for (bool typed : {false, true})
     for (bool d16 : {false, true}) {
       for (uint32_t count = 1; count <= 4; ++count)
@@ -607,7 +714,7 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowConfiguredPolicyForA
           }
           const uint32_t op = (d16 ? 12 : 4) + count - 1;
           std::unique_ptr<Instruction> inst;
-          if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+          if (arch == rocjitsu::IsaFamily::Rdna4) {
             const auto words =
                 rdna4::build_vbuffer(op + (typed ? 128 : 0), {.soffset = rdna4::OPR_SREG_M0_NULL,
                                                               .vdata = 8,
@@ -616,7 +723,7 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowConfiguredPolicyForA
                                                               .format = 46,
                                                               .idxen = 1});
             inst.reset(decode_valid(*decoder, words.data()));
-          } else if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+          } else if (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) {
             if (typed) {
               const auto words =
                   rdna1::build_mtbuf(4 + count - 1, {.idxen = 1,
@@ -678,8 +785,8 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowConfiguredPolicyForA
 }
 
 TEST_P(BufferFormatExecutionTest, Gfx11IntegerStoresSaturateForTypedAndD16Sources) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "Older integer store conversions were not measured";
   struct Case {
     uint32_t format, bytes;
@@ -732,8 +839,8 @@ TEST_P(BufferFormatExecutionTest, Gfx11IntegerStoresSaturateForTypedAndD16Source
 }
 
 TEST_P(BufferFormatExecutionTest, BgraStoresPackNormalizedAndIntegerChannels) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "Native BGRA conversion witnesses use Gfx11 formats";
   struct Case {
     uint32_t format, expected;
@@ -768,8 +875,8 @@ TEST_P(BufferFormatExecutionTest, BgraStoresPackNormalizedAndIntegerChannels) {
 
 TEST_P(BufferFormatExecutionTest, ScaledStoresNormalizeOnGfx11ForTypedAndD16Sources) {
   const auto arch = GetParam();
-  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "Older SCALED store conversions were not measured";
   auto decoder = Decoder::create(arch);
   wf->set_exec(1);
@@ -789,7 +896,7 @@ TEST_P(BufferFormatExecutionTest, ScaledStoresNormalizeOnGfx11ForTypedAndD16Sour
         memory.write32(0x1000, 0xa5a5a5a5);
         const uint16_t op = d16 ? 15 : 7;
         std::unique_ptr<Instruction> inst;
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+        if (arch == rocjitsu::IsaFamily::Rdna4) {
           const auto words =
               rdna4::build_vbuffer(op + (typed ? 128 : 0), {.soffset = rdna4::OPR_SREG_M0_NULL,
                                                             .vdata = 8,
@@ -821,8 +928,8 @@ TEST_P(BufferFormatExecutionTest, ScaledStoresNormalizeOnGfx11ForTypedAndD16Sour
 
 TEST_P(BufferFormatExecutionTest, D16FloatRgb1ConvertsRgbAndFillsMissingChannels) {
   const auto arch = GetParam();
-  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "This native witness uses Gfx11 format encodings";
   auto decoder = Decoder::create(arch);
   wf->set_exec(1);
@@ -837,7 +944,7 @@ TEST_P(BufferFormatExecutionTest, D16FloatRgb1ConvertsRgbAndFillsMissingChannels
       memory.write32(0x1000 + i * 4, 0xa5a5a5a5);
     std::unique_ptr<Instruction> inst;
     const uint16_t op = 12 + count - 1;
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (arch == rocjitsu::IsaFamily::Rdna4) {
       const auto words = rdna4::build_vbuffer(
           op, {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4, .idxen = 1});
       inst.reset(decode_valid(*decoder, words.data()));
@@ -853,9 +960,9 @@ TEST_P(BufferFormatExecutionTest, D16FloatRgb1ConvertsRgbAndFillsMissingChannels
     cu->l1_vector().flush_all();
     l2.flush_all();
     for (uint32_t i = 0; i < 3; ++i)
-      EXPECT_EQ(memory.read32(0x1000 + i * 4), i < count                          ? values[i]
-                                               : arch == ROCJITSU_CODE_ARCH_RDNA4 ? values[0]
-                                                                                  : 0u);
+      EXPECT_EQ(memory.read32(0x1000 + i * 4), i < count                            ? values[i]
+                                               : arch == rocjitsu::IsaFamily::Rdna4 ? values[0]
+                                                                                    : 0u);
     EXPECT_EQ(memory.read32(0x100c), bits(1));
     for (uint32_t i = 4; i < 8; ++i)
       EXPECT_EQ(memory.read32(0x1000 + i * 4), 0xa5a5a5a5u);
@@ -867,7 +974,7 @@ TEST_P(BufferFormatExecutionTest, UnqualifiedStoreSelectorsAreRejectedBeforeMemo
   descriptor(46, 4, 4 | (4 << 3) | (4 << 6) | (4 << 9));
   memory.write32(0x1000, 0xa5a5a5a5u);
   std::unique_ptr<Instruction> inst;
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
     const auto words =
         rdna4::build_vbuffer(rdna4::kBufferStoreFormatXVbuffer,
                              {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
@@ -890,6 +997,103 @@ TEST_P(BufferFormatExecutionTest, UnqualifiedStoreSelectorsAreRejectedBeforeMemo
   }
 }
 
+TEST_P(BufferFormatExecutionTest, SingleChannelFloat32ZeroSelectorsUseA8Routing) {
+  struct Form {
+    uint16_t mubuf_op, vbuffer_op;
+    uint32_t components;
+    bool d16, hi = false;
+  };
+  constexpr std::array forms{
+      Form{cdna4::kBufferStoreFormatXMubuf, rdna4::kBufferStoreFormatXVbuffer, 1, false},
+      Form{cdna4::kBufferStoreFormatXyMubuf, rdna4::kBufferStoreFormatXyVbuffer, 2, false},
+      Form{cdna4::kBufferStoreFormatXyzMubuf, rdna4::kBufferStoreFormatXyzVbuffer, 3, false},
+      Form{cdna4::kBufferStoreFormatXyzwMubuf, rdna4::kBufferStoreFormatXyzwVbuffer, 4, false},
+      Form{cdna4::kBufferStoreFormatD16XMubuf, rdna4::kBufferStoreD16FormatXVbuffer, 1, true},
+      Form{cdna4::kBufferStoreFormatD16XyMubuf, rdna4::kBufferStoreD16FormatXyVbuffer, 2, true},
+      Form{cdna4::kBufferStoreFormatD16XyzMubuf, rdna4::kBufferStoreD16FormatXyzVbuffer, 3, true},
+      Form{cdna4::kBufferStoreFormatD16XyzwMubuf, rdna4::kBufferStoreD16FormatXyzwVbuffer, 4, true},
+      Form{cdna4::kBufferStoreFormatD16HiXMubuf, rdna4::kBufferStoreD16HiFormatXVbuffer, 1, true,
+           true}};
+  const auto vb = wf->vgpr_alloc().base;
+  for (auto form : forms) {
+    SCOPED_TRACE(testing::Message()
+                 << "components=" << form.components << " d16=" << form.d16 << " hi=" << form.hi);
+    for (uint32_t selectors : {0u, 4u << 9}) {
+      SCOPED_TRACE(selectors);
+      descriptor(22, 4, selectors);
+      for (uint32_t lane = 0; lane < 3; ++lane) {
+        cu->write_vgpr(vb, lane, lane);
+        for (uint32_t i = 0; i < 4; ++i)
+          cu->write_vgpr(vb + 8 + i, lane, bits(static_cast<float>(i + 1)));
+        if (form.d16) {
+          cu->write_vgpr(vb + 8, lane, form.hi ? 0x3c00dead : 0x40003c00); // X=1, Y=2.
+          cu->write_vgpr(vb + 9, lane, 0x44004200);                        // Z=3, W=4.
+        }
+        memory.write32(0x1000 + lane * 4, 0xa5a5a5a5u);
+      }
+      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+      state.is_load = false;
+      const auto prepared = amdgpu::prepare_buffer_format(*wf, state, 4, -1, form.components);
+      ASSERT_TRUE(prepared.succeeded());
+      ASSERT_TRUE(prepared.value());
+      EXPECT_EQ(state.buffer_selectors, 4u << 9);
+      auto inst = store_instruction(form.mubuf_op, form.vbuffer_op);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      ASSERT_NE(inst->data(), nullptr);
+      const auto *stored = static_cast<const amdgpu::VectorMemState *>(inst->data());
+      EXPECT_EQ(stored->buffer_components, form.components);
+      EXPECT_EQ(stored->buffer_d16, form.d16);
+      EXPECT_EQ(stored->d16_hi, form.hi);
+      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+      ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      cu->l1_vector().flush_all();
+      l2.flush_all();
+      const uint32_t expected = form.components == 4                       ? bits(4)
+                                : GetParam() == rocjitsu::IsaFamily::Rdna4 ? bits(1)
+                                                                           : 0;
+      EXPECT_EQ(memory.read32(0x1000), expected);
+      EXPECT_EQ(memory.read32(0x1004), 0xa5a5a5a5u);
+      EXPECT_EQ(memory.read32(0x1008), expected);
+    }
+  }
+}
+
+TEST_P(BufferFormatExecutionTest, ZeroSelectorsRejectUnqualifiedFormatsThroughBothApis) {
+  const auto encoding =
+      arch_is_cdna_4_or_lower(GetParam())        ? amdgpu::BufferFormatEncoding::Gfx9
+      : GetParam() == rocjitsu::IsaFamily::Rdna1 ? amdgpu::BufferFormatEncoding::Rdna1
+      : GetParam() == rocjitsu::IsaFamily::Rdna2 ? amdgpu::BufferFormatEncoding::Rdna2
+                                                 : amdgpu::BufferFormatEncoding::Gfx11;
+  const std::array<uint32_t, 4> components{bits(1), bits(2), bits(3), bits(4)};
+  for (uint32_t format : {20u, 21u, 13u, 50u, 46u}) {
+    SCOPED_TRACE(format);
+    std::array<uint8_t, 16> bytes;
+    bytes.fill(0xa5);
+    const auto original = bytes;
+    for (auto missing : {amdgpu::BufferStoreMissingChannel::Zero,
+                         amdgpu::BufferStoreMissingChannel::ReplicateFirst}) {
+      EXPECT_TRUE(amdgpu::pack_buffer_format(encoded_format(format), 0, components, bytes, encoding,
+                                             missing)
+                      .failed());
+      EXPECT_EQ(bytes, original);
+    }
+    descriptor(format, 16, 0);
+    amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+    state.is_load = false;
+    EXPECT_TRUE(amdgpu::prepare_buffer_format(*wf, state, 4, -1, 4).failed());
+    for (uint32_t offset = 0; offset < 48; offset += 4)
+      memory.write32(0x1000 + offset, 0xa5a5a5a5);
+    auto inst =
+        store_instruction(cdna4::kBufferStoreFormatXyzwMubuf, rdna4::kBufferStoreFormatXyzwVbuffer);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+    EXPECT_EQ(inst->data(), nullptr);
+    for (uint32_t offset = 0; offset < 48; offset += 4)
+      EXPECT_EQ(memory.read32(0x1000 + offset), 0xa5a5a5a5u);
+  }
+}
+
 TEST_P(BufferFormatExecutionTest, NarrowStoreRoutingUsesQualifiedSelectorPatterns) {
   auto decoder = Decoder::create(GetParam());
   wf->set_exec(1);
@@ -907,7 +1111,7 @@ TEST_P(BufferFormatExecutionTest, NarrowStoreRoutingUsesQualifiedSelectorPattern
       cu->write_sgpr(wf->sgpr_alloc().base + 6, 64);
       memory.write32(0x1000, 0xa5a5a5a5u);
       std::unique_ptr<Instruction> inst;
-      if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+      if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
         const auto words =
             rdna4::build_vbuffer(rdna4::kBufferStoreFormatXyzwVbuffer,
                                  {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
@@ -943,8 +1147,8 @@ TEST_P(BufferFormatExecutionTest, NarrowStoreRoutingUsesQualifiedSelectorPattern
 }
 
 TEST_P(BufferFormatExecutionTest, RdnaNarrowLoadSelectorsWrapOnlyForUntypedFormats) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "Native qualification covers the Gfx11 formatted-load policy";
   auto decoder = Decoder::create(GetParam());
   wf->set_exec(1);
@@ -970,7 +1174,7 @@ TEST_P(BufferFormatExecutionTest, RdnaNarrowLoadSelectorsWrapOnlyForUntypedForma
             cu->write_vgpr(wf->vgpr_alloc().base + 8 + i, 1, 0xdeadbeef);
           const uint16_t opcode = d16 ? 11 : 3;
           std::unique_ptr<Instruction> inst;
-          if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+          if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
             const auto words = rdna4::build_vbuffer(
                 opcode + (typed ? 128 : 0), {.soffset = rdna4::OPR_SREG_M0_NULL,
                                              .vdata = 8,
@@ -1024,8 +1228,8 @@ TEST_P(BufferFormatExecutionTest, RdnaNarrowLoadSelectorsWrapOnlyForUntypedForma
 }
 
 TEST_P(BufferFormatExecutionTest, RdnaNarrowTypedStoresBypassDescriptorSwizzle) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "Native qualification covers the Gfx11 format table";
   auto decoder = Decoder::create(GetParam());
   wf->set_exec(1);
@@ -1036,7 +1240,7 @@ TEST_P(BufferFormatExecutionTest, RdnaNarrowTypedStoresBypassDescriptorSwizzle) 
     memory.write32(0x1000, 0xa5a5a5a5);
     std::unique_ptr<Instruction> inst;
     const uint16_t opcode = d16 ? 13 : 5;
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
       const auto words = rdna4::build_vbuffer(
           opcode + 128, {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4, .format = 18});
       inst.reset(decode_valid(*decoder, words.data()));
@@ -1053,41 +1257,33 @@ TEST_P(BufferFormatExecutionTest, RdnaNarrowTypedStoresBypassDescriptorSwizzle) 
   }
 }
 
-TEST_P(BufferFormatExecutionTest, NormalizedLoadsIgnoreAndRestoreHostRoundingMode) {
-  const amdgpu::fp_mode::detail::ScopedFenv restore_environment(0);
+TEST_P(BufferFormatExecutionTest, NormalizedLoads) {
   descriptor(42, 4);
   wf->set_exec(1);
   memory.write32(0x1000, 0x7fff8000);
   auto decoder = Decoder::create(GetParam());
-  for (int mode : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(mode), 0);
-    ASSERT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
-    ASSERT_EQ(std::feraiseexcept(FE_INVALID), 0);
-    std::unique_ptr<Instruction> inst;
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
-      const auto words =
-          rdna4::build_vbuffer(rdna4::kBufferLoadFormatXyzwVbuffer,
-                               {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
-      inst.reset(decode_valid(*decoder, words.data()));
-    } else {
-      const std::array<uint32_t, 2> words{0xe00c0000u, 0x80010800u};
-      inst.reset(decode_valid(*decoder, words.data()));
-    }
-    ASSERT_NE(inst, nullptr);
-    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
-    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
-    EXPECT_EQ(std::fegetround(), mode);
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INVALID);
-    const std::array<uint32_t, 4> expected{0, 0x3f008081, 0x3f800000, 0x3efefeff};
-    for (uint32_t reg = 0; reg < 4; ++reg)
-      EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 8 + reg, 0), expected[reg]);
+  std::unique_ptr<Instruction> inst;
+  if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
+    const auto words =
+        rdna4::build_vbuffer(rdna4::kBufferLoadFormatXyzwVbuffer,
+                             {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
+    inst.reset(decode_valid(*decoder, words.data()));
+  } else {
+    const std::array<uint32_t, 2> words{0xe00c0000u, 0x80010800u};
+    inst.reset(decode_valid(*decoder, words.data()));
   }
+  ASSERT_NE(inst, nullptr);
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+  ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  const std::array<uint32_t, 4> expected{0, 0x3f008081, 0x3f800000, 0x3efefeff};
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 8 + reg, 0), expected[reg]);
 }
 
 TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBoundaries) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna3 && GetParam() != rocjitsu::IsaFamily::Rdna3_5 &&
+      GetParam() != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "RDNA3+ swizzle geometry";
   wf->set_exec(1);
   auto decoder = Decoder::create(GetParam());
@@ -1124,7 +1320,7 @@ TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBo
           cu->write_vgpr(vb + 8, 0, load ? 0 : 0x11223344);
           cu->write_vgpr(vb + 9, 0, load ? 0 : 0x55667788);
           std::unique_ptr<Instruction> inst;
-          if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+          if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
             const uint16_t op =
                 typed ? (load ? rdna4::kTbufferLoadFormatXyVbuffer
                               : rdna4::kTbufferStoreFormatXyVbuffer)
@@ -1175,12 +1371,12 @@ TEST_P(BufferFormatExecutionTest, RdnaTransfersSwizzleEveryComponentAcrossUnitBo
 }
 
 TEST_P(BufferFormatExecutionTest, UnsupportedDescriptorFailsBeforeIssuingMemory) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA2 && GetParam() != ROCJITSU_CODE_ARCH_CDNA3)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna2 && GetParam() != rocjitsu::IsaFamily::Cdna3)
     GTEST_SKIP() << "Reserved formats differ by architecture";
   descriptor(11, 4);
   cu->write_sgpr(
       wf->sgpr_alloc().base + 7,
-      identity | (GetParam() == ROCJITSU_CODE_ARCH_RDNA2 ? 34u << 12 : (1u << 15) | (6u << 12)));
+      identity | (GetParam() == rocjitsu::IsaFamily::Rdna2 ? 34u << 12 : (1u << 15) | (6u << 12)));
   auto decoder = Decoder::create(GetParam());
   // buffer_load_format_xyzw v[8:11], off, s[4:7], 0.
   const std::array<uint32_t, 2> words{0xe00c0000u, 0x80010800u};
@@ -1193,7 +1389,7 @@ TEST_P(BufferFormatExecutionTest, UnsupportedDescriptorFailsBeforeIssuingMemory)
 }
 
 TEST_P(BufferFormatExecutionTest, InlineScalarOffsetsUseTheirUnsignedBitsForTypedAndUntypedLoads) {
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() == rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "VBUFFER uses a seven-bit register selector instead of inline SOFFSET";
   const uint32_t lane = wf->wf_size() - 1;
   wf->set_exec(uint64_t{1} << lane);
@@ -1259,7 +1455,7 @@ TEST_P(BufferFormatExecutionTest, TypedFormatDoesNotBindAnInvalidResource) {
 }
 
 TEST_P(BufferFormatExecutionTest, Rdna4TypedOpcodesConvertEveryLoadAndStoreWidth) {
-  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() != rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "Other targets already expose these typed opcodes";
   descriptor(11, 4); // Explicit instruction format overrides 16_UINT.
   const uint32_t vb = wf->vgpr_alloc().base;
@@ -1337,7 +1533,7 @@ TEST_P(BufferFormatExecutionTest, RdnaBoundsClampRawDwordsButDropFormattedTransf
     for (uint32_t i = 0; i < 4; ++i)
       cu->write_vgpr(vb + 8 + i, 0, 0xdeadbeef);
     Instruction *inst;
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
       rdna4::VbufferMachineInst m{};
       m.rsrc = 4;
       m.soffset = 12;
@@ -1346,7 +1542,7 @@ TEST_P(BufferFormatExecutionTest, RdnaBoundsClampRawDwordsButDropFormattedTransf
       m.scope = 3;
       inst = execute<rdna4::BufferLoadB128Vbuffer, rdna4::BufferStoreB128Vbuffer>(
           true, reinterpret_cast<const rdna4::MachineInst *>(&m));
-    } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+    } else if (GetParam() == rocjitsu::IsaFamily::Rdna3) {
       rdna3::MubufMachineInst m{};
       m.srsrc = 1;
       m.soffset = 12;
@@ -1430,7 +1626,7 @@ TEST_P(BufferFormatExecutionTest, RdnaSwizzledMode3BoundsIncludeScalarOffset) {
           cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
           cu->write_vgpr(vb + 8, 0, 0xfacefeed);
           std::unique_ptr<Instruction> inst;
-          if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+          if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
             const auto words = rdna4::build_vbuffer(
                 typed ? (load ? rdna4::kTbufferLoadFormatXVbuffer
                               : rdna4::kTbufferStoreFormatXVbuffer)
@@ -1591,7 +1787,7 @@ TEST_P(BufferFormatExecutionTest, IndexedAddressUsesOffsetAfterIndexAndScaledStr
   state.elem_size = 4;
   state.num_elems = 1;
   uint32_t stride = 4;
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
     stride *= 8;
     cu->write_sgpr(sb + 7, identity | (20 << 12) | (2 << 18) | (1u << 28));
     rdna4::VbufferMachineInst m{};
@@ -1600,7 +1796,7 @@ TEST_P(BufferFormatExecutionTest, IndexedAddressUsesOffsetAfterIndexAndScaledStr
     m.idxen = m.offen = 1;
     m.ioffset = 8;
     rdna4::mubuf_calculate_addresses(m, *wf, state);
-  } else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+  } else if (GetParam() == rocjitsu::IsaFamily::Rdna3) {
     rdna3::MubufMachineInst m{};
     m.srsrc = 1;
     m.soffset = 12;
@@ -1622,11 +1818,11 @@ TEST_P(BufferFormatExecutionTest, IndexedAddressUsesOffsetAfterIndexAndScaledStr
 }
 
 INSTANTIATE_TEST_SUITE_P(Targets, BufferFormatExecutionTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4));
 
 class RdnaLegacyFormatDecodeTest : public BufferFormatExecutionTest {};
 
@@ -1658,6 +1854,120 @@ TEST_P(RdnaLegacyFormatDecodeTest, SplitOpcodeBitSelectsD16BeforeExecution) {
   }
 }
 
+TEST_P(RdnaLegacyFormatDecodeTest, Gfx10BoundsUseElementStartsAndLaneAdjustedIndices) {
+  std::unique_ptr<Decoder> decoder = Decoder::create(GetParam());
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kBase = 0x1000;
+  for (uint32_t word = 0; word < 12; ++word)
+    memory.write32(kBase + word * 4, 100 + word);
+  cu->write_sgpr(sb, kBase);
+  wf->set_exec(7);
+  struct Case {
+    uint16_t offset;
+    uint8_t scalar_offset;
+    uint32_t mode, records;
+    bool swizzle, add_tid;
+    std::array<uint32_t, 3> first, second;
+  };
+  const bool inclusive_stride = GetParam() == rocjitsu::IsaFamily::Rdna1;
+  const uint32_t boundary = inclusive_stride ? 104u : 0u;
+  const Case cases[] = {
+      // The second dword starts exactly at the stride, accepted on GFX10.1.
+      {12, 0, 0, 4, false, false, {103, 103, 103}, {boundary, boundary, boundary}},
+      // Modes 0 and 1 check the ADD_TID-adjusted index even with IDXEN clear.
+      {12, 0, 0, 1, false, true, {103, 0, 0}, {boundary, 0, 0}},
+      {0, 0, 1, 1, false, true, {100, 0, 0}, {101, 0, 0}},
+      // Swizzled mode 3 checks a per-row payload and reduces the record
+      // limit by SOFFSET before index checking. This is the modeled policy.
+      {0, 4, 3, 4, true, true, {0, 0, 0}, {0, 0, 0}},
+      {0, 4, 3, 5, true, true, {101, 0, 0}, {109, 0, 0}},
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(testing::Message() << test.mode << ':' << test.records << ':' << test.offset);
+    cu->write_sgpr(sb + 1, (16u << 16) | (test.swizzle ? 1u << 31 : 0));
+    cu->write_sgpr(sb + 2, test.records);
+    cu->write_sgpr(sb + 3, (test.mode << 28) | (test.add_tid ? 1u << 23 : 0) | kRdnaFormat32);
+    const auto words =
+        GetParam() == rocjitsu::IsaFamily::Rdna1
+            ? rdna1::build_mubuf(rdna1::kBufferLoadDwordx2,
+                                 {.offset = test.offset,
+                                  .vdata = 8,
+                                  .soffset = static_cast<uint8_t>(128 + test.scalar_offset)})
+            : rdna2::build_mubuf(rdna2::kBufferLoadDwordx2,
+                                 {.offset = test.offset,
+                                  .vdata = 8,
+                                  .soffset = static_cast<uint8_t>(128 + test.scalar_offset)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      EXPECT_EQ(cu->read_vgpr(vb + 8, lane), test.first[lane]);
+      EXPECT_EQ(cu->read_vgpr(vb + 9, lane), test.second[lane]);
+    }
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Rdna, RdnaLegacyFormatDecodeTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2));
+
+TEST(BufferAddressGenerationTest, SharedBufferAddressHelpersRejectCdna5) {
+  amdgpu::GpuMemory memory{"cdna5_memory"};
+  amdgpu::L2Cache l2{"cdna5_l2"};
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = rocjitsu::IsaFamily::Cdna5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna5_cu", config, &memory, &l2);
+  amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, 106, 32);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb, 0x1000);
+  cu->write_sgpr(sb + 1, 16u << 16);
+  cu->write_sgpr(sb + 3, (1u << 23) | (1u << 28)); // ADD_TID and index-only bounds.
+  wf->set_exec(5);
+  for (uint32_t records : {1u, 0u}) {
+    cu->write_sgpr(sb + 2, records);
+    for (bool typed : {false, true}) {
+      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+      state.elem_size = 4;
+      state.num_elems = 1;
+      if (typed) {
+        rdna3_5::MtbufMachineInst instruction{};
+        instruction.srsrc = sb / 4;
+        instruction.soffset = 128; // Constant zero.
+        amdgpu::addr_calc::mtbuf_calculate_addresses(instruction, *wf, state);
+      } else {
+        rdna3_5::MubufMachineInst instruction{};
+        instruction.srsrc = sb / 4;
+        instruction.soffset = 128;
+        amdgpu::addr_calc::mubuf_calculate_addresses(instruction, *wf, state);
+      }
+      EXPECT_EQ(state.lane_mask, 0u);
+      EXPECT_EQ(state.per_lane_addr[0], 0u);
+      EXPECT_EQ(state.per_lane_addr[2], 0u);
+    }
+  }
+  wf->halt();
+}
+
+TEST(LegacyRdnaBufferAddressTest, SwizzledTidExcludesScalarOffset) {
+  using amdgpu::addr_calc::gfx10_buffer_address;
+  constexpr uint32_t swizzle = 1u << 31;
+  constexpr uint32_t cache_swizzle = 1u << 30;
+  constexpr uint32_t word3 = (2u << 21) | (1u << 23); // 32 indices and ADD_TID.
+  // Spill addressing: lane 5, dword offset 4, scalar offset 7, IDXEN disabled.
+  EXPECT_EQ(gfx10_buffer_address(swizzle, word3, 16, false, 3, 4, 7, 5).offset, 155u);
+  EXPECT_EQ(gfx10_buffer_address(swizzle | cache_swizzle, word3, 16, false, 3, 4, 7, 5).offset,
+            155u);
+  EXPECT_EQ(gfx10_buffer_address(cache_swizzle, word3, 16, false, 3, 4, 7, 5).offset, 91u);
+  EXPECT_EQ(gfx10_buffer_address(swizzle, 2u << 21, 16, false, 3, 4, 7, 5).offset, 135u);
+}
+
 } // namespace

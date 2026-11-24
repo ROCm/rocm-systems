@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/diagnostic.h"
 
 #include <array>
@@ -15,6 +16,7 @@ namespace rocjitsu::amdgpu {
 
 struct ComputeQueueRecord;
 class GpuVm;
+enum class VmAccessOutcome : uint8_t;
 
 /// @brief CP services used by packet execution.
 /// @details Queue state remains owned by CP. All callbacks must be populated and
@@ -23,11 +25,13 @@ class GpuVm;
 struct Pm4ExecutionContext {
   /// @brief Target architecture for architecture-specific packet behavior.
   /// @details INVALID represents a CP without a compute unit.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
   /// @brief XCD index used by PRED_EXEC in CDNA vendor command buffers.
   uint32_t xcc_id = 0;
   /// @brief Flush GPU caches before packet memory effects and stream completion.
-  std::function<void()> flush_caches;
+  /// @details Any non-Complete outcome faults the queue without retiring the packet
+  /// or publishing successful completion, including transient Unavailable outcomes.
+  std::function<VmAccessOutcome()> flush_caches;
   /// @brief Admit a dispatch through CP using X, Y, Z, and the initiator word.
   /// @details The initiator determines whether dimensions count threads or groups.
   /// CP appends admitted work to queue.dispatches.entries; processing pauses
@@ -42,11 +46,13 @@ struct Pm4ExecutionContext {
   /// @details Reset retry backoff and arrange a scheduling turn without marking
   /// this queue blocked; packet processing may continue in the current turn.
   std::function<void()> wake;
-  /// @brief Cancel through CP at the original execution points, including exception scope.
+  /// @brief Cancel through CP at the original execution points, including packet rejection.
   /// @details Set queue.faulted, cancel pending work, and notify failed submissions.
   /// The processor sets queue.publication_faulted before calling this callback
   /// on terminal cursor-publication failures; CP preserves that failure state.
   std::function<void()> fault_queue;
+  /// Apply AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID before entering the supplied IB.
+  std::function<void()> reset_gds_wave_id;
 };
 
 /// @brief Process a bounded turn of a native ring or DRM indirect-buffer stream.
@@ -64,8 +70,9 @@ struct Pm4ExecutionContext {
 /// A VM must be attached before commands can execute; idle queues do not access it.
 /// Returns when idle, waiting for dispatch retirement, blocked, faulted, or at the
 /// packet budget. Retry and fault handling are reported through context callbacks.
-/// Standard exceptions during execution are translated to fault_queue(); exceptions
-/// from cancellation before execution or from the catch handler propagate.
+/// Packet admission and execution failures emit a diagnostic and fault the queue
+/// without retiring the rejected packet. Effects preceding a failure are retained.
+/// Context callbacks must not throw; expected failures use their returned results.
 /// @param queue CP-owned queue whose command state and cursor are updated in place.
 /// @param gpu_vm Borrowed VM used to acquire pinned access to the queue address space.
 /// @param context Borrowed architecture and synchronous CP services for this turn.

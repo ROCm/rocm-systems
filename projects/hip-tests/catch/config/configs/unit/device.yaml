@@ -99,6 +99,9 @@ device:
   Unit_hipDeviceGetCacheConfig_Positive_Default:
     <<: *level_default
     tags: [config, P0]
+  Unit_hipDeviceGetCacheConfig_Positive_RoundTrip:
+    <<: *level_default
+    tags: [config, P1]
   Unit_hipDeviceSynchronize_Positive_Empty_Streams:
     <<: *level_default
     tags: [synchronization, P0]
@@ -221,6 +224,12 @@ device:
     tags: [query]
   Unit_hipDeviceGetLuid_VerifyLuidFrm_hipGetDeviceProperties:
     <<: *level_default
+    tags: [query]
+  Unit_hipDeviceGetExecAffinitySupport_Positive:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetExecAffinitySupport_Negative:
+    <<: *level_2
     tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_default
@@ -388,6 +397,12 @@ device:
   Unit_hipInit_Positive:
     <<: *level_default
     tags: [init, smoke, P0]
+  Unit_hipInit_Positive_NoQueuesAtInit:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "ROCM-34268 - counts the process's KFD create-queue ioctls: unit/device/CMakeLists.txt builds it only for AMD on UNIX, and WSL has no KFD."
+    tags: [init, P0]
   Unit_hipInit_Negative:
     <<: *level_default
     disabled:
@@ -451,7 +466,8 @@ device:
   Unit_hipGetProcAddress_SetGetMemPoolAPIs:
     <<: *level_default
     tags: [multigpu, P0]
-  Unit_hipGetDriverEntryPoint_Positive: *level_default
+  Unit_hipGetDriverEntryPoint_Positive:
+    <<: *level_default
   Unit_hipGetDriverEntryPoint_Negative: *level_default
   Unit_hipGetDriverEntryPoint_spt_Positive: *level_default
   Unit_hipGetDriverEntryPoint_spt_Negative: *level_default
@@ -469,6 +485,17 @@ device:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips: variant skipped. Needs re-triage."
     tags: [multigpu]
+  Unit_hipAmdFileIo_Negative_InvalidFd:
+    <<: *level_default
+  Unit_hipAmdFileIo_Negative_NullDevicePtr:
+    <<: *level_default
+  Unit_hipAmdFileIo_ValidArgs_ErrorStateConsistent:
+    <<: *level_default
+  Unit_hipAmdFileIo_Positive_WriteRead:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2892 - AIS file I/O support is HW specific and needs to be further triaged in CI."
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
     <<: *level_default
     tags: [P0]

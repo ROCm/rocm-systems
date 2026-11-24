@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/spill_manager.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/exec_state.h"
@@ -566,7 +567,7 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   };
   TestCodeObject co(std::move(words));
   IntegDecoder decoder;
-  auto blocks = build_valid_blocks(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
+  auto blocks = build_valid_blocks(co, decoder, rocjitsu::IsaFamily::Cdna3);
   ASSERT_FALSE(blocks.empty());
 
   // Pick the probe-site instruction by mnemonic match.
@@ -587,7 +588,7 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   for (const auto &b : blocks)
     scope.push_back(b.get());
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec)};
+  LivenessAnalysis liveness{KernelBlockScope(scope), 64, std::make_unique<ExecMaskAnalysis>(exec)};
   auto maybe_live = liveness.live_before(*probe);
   ASSERT_TRUE(maybe_live.succeeded());
   const RegisterSet &live = (*maybe_live.value());

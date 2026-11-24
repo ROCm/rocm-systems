@@ -83,6 +83,12 @@
 
 #define NCCL_CUMEM_HOST_GATE NCCL_CUMEM_HOST_GATE_FOR(NCCL_CUMEM_HOST_PROBE, HIP_VERSION)
 
+// Kernel version packing used by ncclGetKernelVersionCode(). cuMem works below 6.8; 6.8 is a performance recommendation.
+#define NCCL_KERNEL_VERSION_CODE(major, minor) (((major) << 16) | ((minor) << 8))
+#define NCCL_CUMEM_PERF_KERNEL_VERSION NCCL_KERNEL_VERSION_CODE(6, 8)
+#define NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode) \
+  ((kernelVersionCode) >= NCCL_CUMEM_PERF_KERNEL_VERSION)
+
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
@@ -110,6 +116,16 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 #else
 #define CUPFN(symbol) pfn_##symbol
 #endif
+
+// For calls whose failure is an expected answer ("is this a cuMem allocation?").
+// Unlike the CUDA driver API, every failed HIP call is recorded as the thread's
+// last error, so a tolerated failure would surface in the application's next
+// hipGetLastError() (PyTorch reports it from an unrelated allocation or kernel).
+static inline hipError_t rcclHipProbe(hipError_t err) {
+  if (err != hipSuccess) (void)hipGetLastError();
+  return err;
+}
+#define CUPROBE(call) rcclHipProbe(CUPFN(call))
 
 // Call sites go through pfn_##cmd so the (optional, weakly-linked)
 // hsa_amd_portable_export_dmabuf stays gated by its function pointer and is not
@@ -166,6 +182,7 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     hipError_t err = cmd; \
     if (err != hipSuccess) { \
       INFO(NCCL_ALL, "%s:%d HIP failure '%s'", __FILE__, __LINE__, hipGetErrorString(err)); \
+      (void)hipGetLastError(); /* clear sticky HIP error state */ \
     } \
   } while (false)
 

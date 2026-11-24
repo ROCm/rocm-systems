@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 
 #include <cstdint>
@@ -46,12 +47,11 @@ struct Isa : amdgpu::CdnaIsaBase {
   // operand.cpp; bodies forward to the anonymous-namespace helpers.
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace cdna4
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_CDNA4> {
+template <> struct IsaTrait<rocjitsu::IsaFamily::Cdna4> {
   using type = cdna4::Isa;
 };
 

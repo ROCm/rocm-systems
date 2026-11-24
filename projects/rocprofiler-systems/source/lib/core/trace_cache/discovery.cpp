@@ -3,9 +3,7 @@
 
 #include "core/trace_cache/discovery.hpp"
 
-#include "common/env_vars.hpp"
-#include "common/path.hpp"
-#include "core/config.hpp"
+#include "common/string_utility.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "logger/debug.hpp"
@@ -19,10 +17,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <stdexcept>
 #include <string>
-#include <variant>
 
 namespace rocprofsys::trace_cache::discovery
 {
@@ -83,32 +81,36 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
         const std::regex meta_regex(R"(metadata_(\d+)_(\d+)\.json)");
         std::smatch      match;
 
-        // Wrap stoi: regex's (\d+) can match digit runs that overflow int.
-        // A pathological file in the temp dir must not abort discovery.
-        try
-        {
-            if(std::regex_match(filename, match, buff_regex))
+        // Returns the child pid when the file belongs to root_pid.
+        auto const owned_pid = [&](const std::smatch& groups) -> std::optional<int> {
+            const auto parent_pid =
+                rocprofsys::utility::string::safe_stoi(groups[1].str());
+            const auto pid = rocprofsys::utility::string::safe_stoi(groups[2].str());
+            if(parent_pid.is_error() || pid.is_error())
             {
-                const int parent_pid = std::stoi(match[1]);
-                const int pid        = std::stoi(match[2]);
-                if(parent_pid == root_pid)
-                {
-                    cache_map[pid].buff_storage = trace_cache::tmp_directory + filename;
-                }
+                LOG_WARNING("Skipping cache file with unparsable PID '{}': {}", filename,
+                            parent_pid.is_error() ? parent_pid.error() : pid.error());
+                return std::nullopt;
             }
-            else if(std::regex_match(filename, match, meta_regex))
-            {
-                const int parent_pid = std::stoi(match[1]);
-                const int pid        = std::stoi(match[2]);
-                if(parent_pid == root_pid)
-                {
-                    cache_map[pid].metadata = trace_cache::tmp_directory + filename;
-                }
-            }
-        } catch(const std::exception& e)
+            if(parent_pid.value() != root_pid) return std::nullopt;
+            return pid.value();
+        };
+
+        if(std::regex_match(filename, match, buff_regex))
         {
-            LOG_WARNING("Skipping cache file with unparsable PID '{}': {}", filename,
-                        e.what());
+            if(auto const pid = owned_pid(match))
+            {
+                cache_map[*pid].buff_storage =
+                    std::string{ trace_cache::k_tmp_directory } + filename;
+            }
+        }
+        else if(std::regex_match(filename, match, meta_regex))
+        {
+            if(auto const pid = owned_pid(match))
+            {
+                cache_map[*pid].metadata =
+                    std::string{ trace_cache::k_tmp_directory } + filename;
+            }
         }
     };
 
@@ -139,67 +141,6 @@ clear(const data::mapped_cache_files_t& cache_files)
                             std::strerror(errno));
             }
         }
-    }
-}
-
-void
-merge_perfetto_files()
-{
-    // dmp::rank() returns 0 if MPI is not initialized/finalized. During shutdown
-    // MPI may already be finalized, so we read the rank captured at init time
-    // via settings::default_process_suffix().
-    auto         suffix_variant  = settings::default_process_suffix();
-    std::int32_t cached_mpi_rank = 0;
-
-    if(std::holds_alternative<int>(suffix_variant))
-    {
-        cached_mpi_rank = std::get<int>(suffix_variant);
-    }
-    else if(std::holds_alternative<std::string>(suffix_variant))
-    {
-        try
-        {
-            cached_mpi_rank = std::stoi(std::get<std::string>(suffix_variant));
-        } catch(...)
-        {
-            cached_mpi_rank = 0;
-        }
-    }
-
-    LOG_DEBUG("Merging perfetto files: rank={} (from settings::default_process_suffix)",
-              cached_mpi_rank);
-
-    if(cached_mpi_rank != 0)
-    {
-        return;
-    }
-
-    auto const _filename      = config::get_perfetto_output_filename();
-    auto const _output_folder = path::parent_path(_filename);
-    auto       _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-    auto       _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
-
-    if(!_script_dir.empty())
-    {
-        _script_path = fmt::format("{}/{}", _script_dir, _script_path);
-    }
-
-    if(!path::is_regular_file(_script_path))
-    {
-        LOG_WARNING("Merge script not found: {}", _script_path);
-        return;
-    }
-
-    auto      _command = _script_path + " '" + _output_folder + "'";
-    const int result   = system(_command.c_str());
-
-    if(result != 0)
-    {
-        LOG_ERROR("Failed to execute merge script: {}", _command);
-    }
-    else
-    {
-        LOG_INFO("Successfully executed: {}", _command);
     }
 }
 

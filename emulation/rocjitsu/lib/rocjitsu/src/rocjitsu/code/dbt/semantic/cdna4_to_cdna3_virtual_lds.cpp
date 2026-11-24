@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_cdna3_virtual_lds.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
@@ -565,7 +566,8 @@ void emit_virtual_lds_copy_temp_to_acc_range(std::vector<uint32_t> &words,
 /// spill-per-use fallback for descriptor-full kernels.
 [[nodiscard]] std::optional<VirtualLdsBaseSgprReservation>
 reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope blocks,
-                                         const KdTranslation &translation, rj_code_arch_t arch) {
+                                         const KdTranslation &translation,
+                                         rocjitsu::IsaFamily arch) {
   if (!arch_is_cdna_4_or_lower(arch))
     return std::nullopt;
 
@@ -574,7 +576,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   static_assert(kCdnaOrdinarySgprLimit == REGISTER_SET_ALLOCATABLE_SGPRS,
                 "virtual-LDS reservation and the shared SGPR scan must agree on "
                 "where ordinary SGPRs end");
-  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks);
+  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks, translation.guest_wavefront_size);
 
   ordinary_floor = std::max<uint32_t>(ordinary_floor, translation.target_user_sgpr_count);
   auto include_sgpr = [&](int16_t sgpr, uint32_t width) {
@@ -709,6 +711,8 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
     translation.prologue_words.push_back(build_cdna3_s_add_u32(temp, temp, product));
   };
 
+  // The admission checks above bound every move operand to the scalar fields;
+  // CDNA3 has the required encoding, so these builder results are guaranteed.
   auto append_restore_guest_user_sgprs = [&]() {
     if (translation.source_has_kernarg_segment_ptr) {
       // The wrapper pointer is DBT-owned. Restore the source kernarg pointer
@@ -717,10 +721,11 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
       append_smem_load_dwordx2(temp, state_sbase,
                                translation.kernarg_wrapper_original_pointer_offset);
       translation.prologue_words.push_back(
-          build_s_mov_b32(pointer_base_sgpr, temp, ROCJITSU_CODE_ARCH_CDNA3));
+          build_s_mov_b32(pointer_base_sgpr, temp, rocjitsu::IsaFamily::Cdna3).value());
       translation.prologue_words.push_back(
           build_s_mov_b32(static_cast<uint16_t>(pointer_base_sgpr + 1),
-                          static_cast<uint16_t>(temp + 1), ROCJITSU_CODE_ARCH_CDNA3));
+                          static_cast<uint16_t>(temp + 1), rocjitsu::IsaFamily::Cdna3)
+              .value());
     }
 
     // If DBT inserted a target-only kernarg segment pointer, CP shifted every
@@ -729,7 +734,8 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
     for (uint16_t i = 0; i < translation.user_sgpr_repair_count; ++i) {
       const uint16_t dst = static_cast<uint16_t>(translation.user_sgpr_repair_start + i);
       const uint16_t src = static_cast<uint16_t>(dst + 2);
-      translation.prologue_words.push_back(build_s_mov_b32(dst, src, ROCJITSU_CODE_ARCH_CDNA3));
+      translation.prologue_words.push_back(
+          build_s_mov_b32(dst, src, rocjitsu::IsaFamily::Cdna3).value());
     }
   };
 
@@ -738,7 +744,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   // stride fields:
   //   offset = wg_x * stride_x + wg_y * stride_y + wg_z * stride_z.
   translation.prologue_words.push_back(
-      build_s_mov_b32(temp, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA3));
+      build_s_mov_b32(temp, scalar_positive_inline_u32(0), rocjitsu::IsaFamily::Cdna3).value());
   append_stride_term(translation.lds_overflow_workgroup_id_sgpr_x, kVirtualLdsStateStrideXOffset);
   append_stride_term(translation.lds_overflow_workgroup_id_sgpr_y, kVirtualLdsStateStrideYOffset);
   append_stride_term(translation.lds_overflow_workgroup_id_sgpr_z, kVirtualLdsStateStrideZOffset);
@@ -935,16 +941,16 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
 /// @brief Return true when @p inst needs a virtual-LDS body variant.
 ///
 /// @details The scan is intentionally broader than the lowering table: any
-/// mnemonic with an LDS suffix or MUBUF LDS bit means the kernel cannot be made
+/// decoded LDS transfer or MUBUF LDS bit means the kernel cannot be made
 /// a zero-hardware-LDS sidecar until the access is either lowered or rejected
 /// with a clear diagnostic.
 [[nodiscard]] bool source_instruction_uses_virtualizable_lds_impl(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic.find("_lds") != std::string_view::npos)
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (inst.transfers_to_lds() || inst.transfers_from_lds())
     return true;
   if (is_cdna4_mubuf_lds_instruction(inst))
     return true;
-  if (mnemonic == "ds_read_b64_tr_b16")
+  if (operation == amdgpu::Operation::DS_READ_B64_TR_B16)
     return true;
   return is_cdna4_ds_encoding(inst) && virtual_lds_ds_op(inst.opcode()).has_value();
 }
@@ -1771,7 +1777,7 @@ bool cdna4_to_cdna3_source_instruction_uses_virtualizable_lds(const Instruction 
 std::optional<VirtualLdsBaseSgprReservation> reserve_cdna4_to_cdna3_virtual_lds_base_sgpr_pair(
     TranslationContext &context, KernelBlockScope blocks, const KdTranslation &translation) {
   return reserve_cdna3_virtual_lds_base_sgpr_pair(context, blocks, translation,
-                                                  ROCJITSU_CODE_ARCH_CDNA3);
+                                                  rocjitsu::IsaFamily::Cdna3);
 }
 
 bool append_cdna4_to_cdna3_virtual_lds_entry_prologue(KdTranslation &translation) {

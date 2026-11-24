@@ -1,11 +1,13 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test, vi } from 'vitest';
 import LargestChanges from '../../src/components/overview/LargestChanges.jsx';
 import MetricsGrid from '../../src/components/overview/MetricsGrid.jsx';
 import DurationHistory from '../../src/components/overview/DurationHistory.jsx';
 import { readDashboardRoute, buildDashboardUrl } from '../../src/hooks/useDashboardState.js';
 import { formatFullDate } from '../../src/utils/formatters.js';
+import { trendSlotStatus } from '../../src/components/overview/overviewPresentation.js';
 
 const capture = vi.hoisted(() => ({ props: null }));
 vi.mock('../../src/components/shared/Chart.jsx', () => ({ default: (props) => { capture.props = props; return createElement('div'); } }));
@@ -17,7 +19,7 @@ const projection = { rows: [{ key: 'gfx950/single', target: 'gfx950', mode: 'sin
 test('all-gap comparisons retain a focusable chronological surface without a chart', () => {
   const gap = { ...point, durationSeconds: null, speedup: null, completed: 0, reason: 'timeout' };
   const allGap = { ...projection, attempts: [{ run, eligible: false }], rows: [{ ...projection.rows[0], points: [gap, { ...gap, run: null }], reference: null, latest: gap }] };
-  const html = renderToStaticMarkup(createElement(DurationHistory, { projection: allGap, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  const html = renderToStaticMarkup(themed(DurationHistory, { projection: allGap, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   expect(html).toMatch(/data-testid="performance-trend-chart"[^>]*tabindex="0"/);
   expect(html).toContain('data-testid="trend-inspection-status"');
   expect(html).toContain('aria-live="polite"');
@@ -25,7 +27,7 @@ test('all-gap comparisons retain a focusable chronological surface without a cha
 });
 
 test('cards consume per-configuration endpoints and show only succeeded/required', () => {
-  const html = renderToStaticMarkup(createElement(MetricsGrid, { projection }));
+  const html = renderToStaticMarkup(themed(MetricsGrid, { projection }));
   const cards = [...html.matchAll(/data-testid="metric-card-([^"]+)"/g)].map((match) => match[1]);
   expect(cards).toEqual(['latest-duration', 'relative-speedup', 'latest-results', 'valid-data-points']);
   expect(html).not.toContain('Compared workloads');
@@ -33,25 +35,43 @@ test('cards consume per-configuration endpoints and show only succeeded/required
   expect(html).toContain('1.00×');
   expect(html).not.toContain('Run health');
 });
-test('relative chart has only configuration series, no gap bridges, dots or fill, and gap tooltip is empty', () => {
-  renderToStaticMarkup(createElement(DurationHistory, { projection, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+test('relative chart has only configuration series, connected lines, no bridge series or fill, and gap tooltip is empty', () => {
+  renderToStaticMarkup(themed(DurationHistory, { projection, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   const option = capture.props.option;
   expect(option.series).toHaveLength(1);
-  expect(option.series[0]).toMatchObject({ connectNulls: false, showSymbol: false, symbol: 'none' });
+  expect(option.series[0]).toMatchObject({ connectNulls: true });
   expect(option.series[0].areaStyle).toBeUndefined();
   expect(option.tooltip.hideDelay).toBe(0);
   expect(option.tooltip.formatter([{ dataIndex: 1 }])).toBe('');
   expect(option.tooltip.formatter([{ dataIndex: 0 }])).toContain('Commit abc');
 });
+test.each([
+  { duration: 12.3456, reference: 60.9876, expected: '12.3s', expectedReference: '1m 1.0s' },
+  { duration: 12, reference: 0.1, expected: '12.0s', expectedReference: '0.10s' },
+  { duration: 0.004, reference: 119.999, expected: '0.00s', expectedReference: '2m 0.0s' },
+  { duration: 75.25, reference: 9.876, expected: '1m 15.3s', expectedReference: '9.88s' },
+])('trend tooltip and keyboard status share duration units and precision: $duration', ({ duration, reference, expected, expectedReference }) => {
+  const row = projection.rows[0];
+  const model = { ...projection, rows: [{ ...row,
+    points: [{ ...point, durationSeconds: duration }, row.points[1]],
+    reference: { ...point, durationSeconds: reference },
+  }] };
+  renderToStaticMarkup(themed(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  const html = capture.props.option.tooltip.formatter([{ dataIndex: 0 }]);
+  expect(html).toContain(`<b>1.000×</b> · ${expected} · ref ${expectedReference}`);
+  expect(trendSlotStatus(model, 0)).toContain(`gfx950 single: 1.000× · ${expected}`);
+});
+
 test('trend tooltip starts with commit identity and commit time rather than execution time', () => {
   const committed = { ...run, commitTimestamp: '2025-12-31T23:00:00Z' };
-  renderToStaticMarkup(createElement(DurationHistory, { projection: { ...projection, slots: [{ run: committed, x: 0 }, projection.slots[1]] }, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  renderToStaticMarkup(themed(DurationHistory, { projection: { ...projection, slots: [{ run: committed, x: 0 }, projection.slots[1]] }, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   const html = capture.props.option.tooltip.formatter([{ dataIndex: 0 }]);
-  expect(html.split('<br/>').slice(0, 2)).toEqual(['<b>Commit abc</b>', formatFullDate(committed.commitTimestamp)]);
+  const lines = [...html.matchAll(/<div[^>]*>(.*?)<\/div>/g)].map(([, text]) => text.replace(/<svg.*?<\/svg>/, ''));
+  expect(lines.slice(0, 2)).toEqual(['<b>Commit abc</b>', formatFullDate(committed.commitTimestamp)]);
   expect(html).not.toContain(formatFullDate(run.timestamp));
   expect(html).not.toContain('Attempt:');
   expect(html).not.toContain('Reference:');
-  expect(html.split('<br/>').slice(2)).toEqual(['gfx950 single · <b>1.000×</b> · 12s · ref 12s']);
+  expect(lines.slice(2)).toEqual(['gfx950 single · <b>1.000×</b> · 12.0s · ref 12.0s']);
 });
 
 test.each(['1M', '3M', 'ALL'])('%s date labels use regular whole-day intervals without short edge ticks', (range) => {
@@ -60,7 +80,7 @@ test.each(['1M', '3M', 'ALL'])('%s date labels use regular whole-day intervals w
     slots: [{ run: null, x: 0 }, { run, x: 1 }, { run, x: 23 }],
     rows: [{ ...projection.rows[0], points: [{ ...point, speedup: null }, point, { ...point, speedup: 1.04 }] }],
   };
-  renderToStaticMarkup(createElement(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  renderToStaticMarkup(themed(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   const axis = capture.props.option.xAxis;
   expect(axis.axisLabel.customValues).toEqual(range === 'ALL' ? [1, 5, 9, 13, 17, 21] : [0, 4, 8, 12, 16, 20]);
   expect(axis.axisLabel.customValues.map(axis.axisLabel.formatter)).toEqual(range === 'ALL'
@@ -70,12 +90,11 @@ test.each(['1M', '3M', 'ALL'])('%s date labels use regular whole-day intervals w
 });
 
 test('trend uses a solid bottom axis and a dotted reference only for sub-baseline results', () => {
-  const render = (model) => renderToStaticMarkup(createElement(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  const render = (model) => renderToStaticMarkup(themed(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   render(projection);
   expect(capture.props.option.xAxis.axisLine).toMatchObject({ show: true, onZero: false, lineStyle: { type: 'solid' } });
-  expect(capture.props.option.series[0].markLine).toBeUndefined();
-  render({ ...projection, rows: [{ ...projection.rows[0], points: [point, { ...point, speedup: 0.96 }] }] });
-  expect(capture.props.option.series[0].markLine).toMatchObject({ lineStyle: { type: 'dotted' }, data: [{ yAxis: 1 }] });
+  // The 1.00× reference is always drawn as a quiet dash-dot line.
+  expect(capture.props.option.series[0].markLine).toMatchObject({ data: [{ yAxis: 1 }] });
 });
 
 test.each(['1W', '1M', '3M', 'ALL'])('%s preserves its selected start policy and interior gaps', (range) => {
@@ -84,7 +103,7 @@ test.each(['1W', '1M', '3M', 'ALL'])('%s preserves its selected start policy and
     slots: [{ run: null, x: 0 }, { run, x: start }, { run: null, x: start + 1 }, { run, x: start + 2 }],
     rows: [{ ...projection.rows[0], points: [{ ...point, speedup: null }, point, { ...point, speedup: null }, { ...point, speedup: 1.04 }] }],
   };
-  renderToStaticMarkup(createElement(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  renderToStaticMarkup(themed(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   expect(capture.props.option.xAxis.min).toBe(['1M', '3M'].includes(range) ? 0 : start);
   expect(capture.props.option.series[0].data[2][1]).toBeNull();
 });
@@ -95,7 +114,7 @@ test('weekly axes align day-center labels and the first baseline point with the 
     slots: [{ run, x: 0.5 }, { run: null, x: 1 }, { run, x: 2.5 }],
     rows: [{ ...projection.rows[0], points: [point, { ...point, speedup: null }, { ...point, speedup: 1.04 }] }],
   };
-  const render = (model) => renderToStaticMarkup(createElement(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
+  const render = (model) => renderToStaticMarkup(themed(DurationHistory, { projection: model, catalogs: [], onRangeChange() {}, onCatalogChange() {} }));
   render(weekly);
   const { xAxis, yAxis, series } = capture.props.option;
   expect(xAxis.min).toBe(0.5);

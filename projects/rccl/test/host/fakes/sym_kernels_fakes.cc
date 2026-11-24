@@ -17,6 +17,9 @@ ASSERT_HOOK_MATCHES_PROD(g_symkAvailable, ncclSymkAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsLL, rcclSymkKernelIdIsLL);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdIsTma, rcclSymkKernelIdIsTma);
 ASSERT_HOOK_MATCHES_PROD(g_symkFinalize, ncclSymkFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_symkAgHierAvailable, ncclSymkAgHierAvailable);
+ASSERT_HOOK_MATCHES_PROD(g_symkAgHierGroups, ncclSymkAgHierGroups);
+ASSERT_HOOK_MATCHES_PROD(g_symkAlltoAllLLForced, ncclSymkAlltoAllLLForced);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 ncclSymRegType_t g_symRegType = ncclSymSendNonregRecvNonreg;
@@ -57,6 +60,29 @@ static ncclResult_t DefaultSymkFinalize(struct ncclComm*) { return ncclSuccess; 
 std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize = DefaultSymkFinalize;
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_symkFinalize(comm); }
 
+static bool DefaultSymkAgHierAvailable(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_symkAgHierAvailable = DefaultSymkAgHierAvailable;
+bool ncclSymkAgHierAvailable(struct ncclComm* comm) { return g_symkAgHierAvailable(comm); }
+
+static int DefaultSymkAgHierGroups(struct ncclComm*) { return 0; }
+std::function<int(struct ncclComm*)> g_symkAgHierGroups = DefaultSymkAgHierGroups;
+int ncclSymkAgHierGroups(struct ncclComm* comm) { return g_symkAgHierGroups(comm); }
+
+int ncclSymkAgHierMaxBlocksLimit() { return ncclSymkAgHierMaxBlocks; }
+size_t ncclSymkAgHierMaxChunkBytesLimit() { return ncclSymkAgHierMaxChunkBytes; }
+
+// NCCL 2.32.6: whether the tuner forced the AlltoAll LL symmetric kernel. Default false, as for a comm whose
+// tuning context forces nothing.
+static bool DefaultSymkAlltoAllLLForced(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_symkAlltoAllLLForced = DefaultSymkAlltoAllLLForced;
+bool ncclSymkAlltoAllLLForced(struct ncclComm* comm) { return g_symkAlltoAllLLForced(comm); }
+
+// [RCCL] tuning.cc now calls ncclSymkMask() once per ncclTuningCompute() invocation.
+// Return all bits set so no sym kernel entry is pre-filtered in host tests.
+// The last flag matches src/sym_kernels.cc; host tests do not model unregistered GIN windows.
+ncclSymkKernelMask ncclSymkMask(struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                size_t, bool, bool) { return ~ncclSymkKernelMask{0}; }
+
 void ResetSymKernelsFakes() {
   g_symRegType = ncclSymSendNonregRecvNonreg;
   g_getSymRegTypeResult = ncclSuccess;
@@ -67,4 +93,7 @@ void ResetSymKernelsFakes() {
   g_symkKernelIdIsLL = DefaultSymkKernelIdIsLL;
   g_symkKernelIdIsTma = DefaultSymkKernelIdIsTma;
   g_symkFinalize = DefaultSymkFinalize;
+  g_symkAgHierAvailable = DefaultSymkAgHierAvailable;
+  g_symkAgHierGroups = DefaultSymkAgHierGroups;
+  g_symkAlltoAllLLForced = DefaultSymkAlltoAllLLForced;
 }

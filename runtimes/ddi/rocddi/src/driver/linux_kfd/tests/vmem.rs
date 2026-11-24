@@ -5,7 +5,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::super::{memory, sys, sysfs};
+use super::super::{connection, memory, sysfs};
 use super::*;
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
@@ -40,10 +40,10 @@ fn fixture() -> (
     Owned<KfdVirtualAddress>,
     Owned<KfdVirtualMemory>,
 ) {
-    let kfd = Shared::new(sys::Kfd::with_hook(
+    let kfd = Shared::new(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(|call| {
-            if let sys::Call::Wait(args, _) = call {
+            if let connection::Call::Wait(args, _) = call {
                 args.result = uapi::WAIT_TIMEOUT;
             }
             Ok(())
@@ -51,6 +51,8 @@ fn fixture() -> (
     ))
     .unwrap();
     let node = sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
+        host_atomics: false,
         node: 1,
         gpu_id: 42,
         render_minor: Some(128),
@@ -58,6 +60,7 @@ fn fixture() -> (
         identity: [0; 16],
         queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             xcc_count: 1,
             ..sysfs::KfdQueueProperties::default()
         },
@@ -77,13 +80,13 @@ fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
     let source = backing_file();
     for (flags, expected) in [
         (uapi::GTT, Some(VirtualMemoryPlacement::System)),
-        (uapi::VRAM, Some(VirtualMemoryPlacement::Device(42))),
+        (uapi::VRAM, Some(VirtualMemoryPlacement::Device([42; 16]))),
         (uapi::GTT | uapi::VRAM, None),
     ] {
-        let kfd = sys::Kfd::with_hook(
+        let kfd = connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(move |call| {
-                if let sys::Call::DmaBufInfo(args, _) = call {
+                if let connection::Call::DmaBufInfo(args, _) = call {
                     args.size = page();
                     args.gpu_id = 42;
                     args.flags = flags;
@@ -91,20 +94,41 @@ fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
                 Ok(())
             }),
         );
-        let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &kfd).unwrap();
+        let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &kfd, |id| {
+            (id == 42).then_some([42; 16])
+        })
+        .unwrap();
         assert_eq!(imported.info().placement, expected);
     }
 
-    let old_kfd = sys::Kfd::with_hook(
+    let old_kfd = connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(|call| {
-            if matches!(call, sys::Call::DmaBufInfo(_, _)) {
+            if matches!(call, connection::Call::DmaBufInfo(_, _)) {
                 return Err(std::io::Error::from_raw_os_error(errno::EINVAL));
             }
             Ok(())
         }),
     );
-    let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &old_kfd).unwrap();
+    let imported =
+        KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &old_kfd, |_| None).unwrap();
+    assert_eq!(imported.info().placement, None);
+
+    let foreign_kfd = connection::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(|call| {
+            if let connection::Call::DmaBufInfo(args, _) = call {
+                args.size = page();
+                args.gpu_id = 99;
+                args.flags = uapi::VRAM;
+            }
+            Ok(())
+        }),
+    );
+    let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &foreign_kfd, |id| {
+        (id == 42).then_some([42; 16])
+    })
+    .unwrap();
     assert_eq!(imported.info().placement, None);
 }
 
@@ -119,10 +143,18 @@ fn extended_coherence_rejects_uncached_request_from_either_source() {
         contiguous: false,
     };
     assert_eq!(
-        KfdVirtualMemory::create(vm.clone(), kind, page(), false, true)
-            .err()
-            .unwrap()
-            .kind(),
+        KfdVirtualMemory::create(
+            vm.clone(),
+            kind,
+            page(),
+            VirtualMemoryOptions {
+                pinned: false,
+                uncached: true,
+            },
+        )
+        .err()
+        .unwrap()
+        .kind(),
         ErrorKind::InvalidArgument
     );
     let kind_uncached = MemoryKind::DeviceLocal {
@@ -133,7 +165,7 @@ fn extended_coherence_rejects_uncached_request_from_either_source() {
         contiguous: false,
     };
     assert_eq!(
-        KfdVirtualMemory::create(vm, kind_uncached, page(), false, false)
+        KfdVirtualMemory::create(vm, kind_uncached, page(), VirtualMemoryOptions::default(),)
             .err()
             .unwrap()
             .kind(),
@@ -350,7 +382,11 @@ fn ambiguous_syncobj_destroy_quarantines_the_id_and_render_vm() {
             let mut state = vm.vmem.lock().unwrap();
             assert_eq!(state.ensure_syncobj(render).unwrap(), 7);
             assert_eq!(
-                state.close(render).unwrap_err().native_error_code(),
+                state
+                    .close(render)
+                    .unwrap_err()
+                    .native_status()
+                    .and_then(crate::NativeStatus::errno_code),
                 Some(errno::EFAULT)
             );
             let replacement = drm::create_syncobj(render).unwrap();

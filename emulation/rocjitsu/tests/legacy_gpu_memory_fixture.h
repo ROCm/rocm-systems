@@ -25,7 +25,9 @@ namespace rocjitsu::amdgpu {
 class LegacyAddressSpaceTestAccess {
 public:
   static auto *backing_atomic_mutex_for(const void *address) {
-    return &LegacyAddressSpace::backing_atomic_mutex(reinterpret_cast<uintptr_t>(address));
+    const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
+    return &LegacyAddressSpace::backing_atomic_mutex(
+        LegacyAddressSpace::host_backing_key(reinterpret_cast<uintptr_t>(address)));
   }
 
   static uint64_t rejected_identity_accesses(const LegacyAddressSpace &address_space) {
@@ -58,6 +60,26 @@ public:
 
 namespace rocjitsu::test {
 
+class ScopedHostMappingObservation {
+public:
+  explicit ScopedHostMappingObservation(bool observed) : previous_(current()) {
+    host_mapping_lock().set_mapping_changes_observed(observed);
+  }
+
+  ~ScopedHostMappingObservation() { host_mapping_lock().set_mapping_changes_observed(previous_); }
+
+  ScopedHostMappingObservation(const ScopedHostMappingObservation &) = delete;
+  ScopedHostMappingObservation &operator=(const ScopedHostMappingObservation &) = delete;
+
+private:
+  static bool current() {
+    const auto mapping = host_mapping_lock().lock_shared();
+    return host_mapping_lock().mapping_changes_observed();
+  }
+
+  bool previous_;
+};
+
 /// @brief Test-only owner that keeps legacy mappings under a real GpuVm.
 class LegacyGpuMemoryFixture : public amdgpu::GpuMemory {
 public:
@@ -74,7 +96,7 @@ public:
                    util::DistributedSharedMutex *page_table_mutex,
                    const uint64_t *page_table_generation = nullptr,
                    std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
-                   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch = {},
+                   util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch = {},
                    std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state = {}) {
     unregister_process(vmid);
     const amdgpu::AddressSpaceHandle handle = legacy_vm_.register_address_space(

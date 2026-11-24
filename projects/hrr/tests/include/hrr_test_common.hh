@@ -123,8 +123,15 @@ inline std::string hrr_self_exe() {
 // hrr-playback sits next to the test binary
 // (.../hrr/playback next to .../hrr/tests/integration). Resolving it from the
 // running executable keeps it on the same mount the parent was started from.
-inline std::string hrr_playback_exe() {
-#if !defined(_WIN32) && defined(HRR_PLAYBACK_EXE)
+//
+// HRR_PLAYBACK_BIN in the environment overrides both: the installed test tree
+// (share/hrr/test) sets it, because the build-tree path compiled in below does
+// not exist there.
+inline std::string hrr_playback_bin() {
+  if (const char* env = std::getenv("HRR_PLAYBACK_BIN")) {
+    if (*env) return env;
+  }
+#if !defined(_WIN32) && defined(HRR_PLAYBACK_BIN)
   const std::string self = hrr_self_exe();
   const std::size_t slash = self.find_last_of('/');
   if (slash != std::string::npos) {
@@ -134,8 +141,8 @@ inline std::string hrr_playback_exe() {
     if (::realpath(candidate.c_str(), resolved) != nullptr) return resolved;
   }
 #endif
-#if defined(HRR_PLAYBACK_EXE)
-  return HRR_PLAYBACK_EXE;
+#if defined(HRR_PLAYBACK_BIN)
+  return HRR_PLAYBACK_BIN;
 #else
   return {};
 #endif
@@ -147,6 +154,30 @@ struct ScopedDir {
   explicit ScopedDir(fs::path p) : path(std::move(p)) { fs::remove_all(path); }
   ~ScopedDir() { fs::remove_all(path); }
 };
+
+// `name` under the temp directory, suffixed with this process's id so
+// concurrent runs of the suite do not share it.
+inline fs::path hrr_temp_dir(const std::string& name) {
+#ifdef _WIN32
+  const unsigned long pid = GetCurrentProcessId();
+#else
+  const long pid = static_cast<long>(::getpid());
+#endif
+  return fs::temp_directory_path() / (name + "_" + std::to_string(pid));
+}
+
+inline std::vector<uint8_t> read_file(const fs::path& path) {
+  std::ifstream f(path, std::ios::binary);
+  REQUIRE(f.good());
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+}
+
+inline void write_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(reinterpret_cast<const char*>(bytes.data()),
+          static_cast<std::streamsize>(bytes.size()));
+  REQUIRE(f.good());
+}
 
 inline std::string read_text_file(const fs::path& path) {
   std::ifstream in(path, std::ios::binary);
@@ -253,7 +284,7 @@ inline bool hrr_d2h_mismatch_exit(int ret, const std::string& out) {
 inline void hrr_run_playback(const fs::path& cap_path,
                              const std::string& extra_args = "",
                              bool require_d2h = true) {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -389,7 +420,7 @@ inline std::pair<int, std::string> hrr_playback_env(
     const fs::path& cap_path,
     const std::vector<std::pair<std::string, std::string>>& env,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   std::string path_arg = hrr_quote_path(cap_path);
@@ -399,7 +430,7 @@ inline std::pair<int, std::string> hrr_playback_env(
 
 inline std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
                                                     const std::string& extra_args) {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
   std::string path_arg = cap_path.string();
   int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
@@ -436,6 +467,45 @@ inline const char* hrr_replay_class_name(HrrReplayClass c) {
   return "?";
 }
 
+// A kernel launch record as capture writes it (v10 layout): `num_args`
+// zero-length arguments (or, with `pointer_args`, one-byte kind-3 arguments with
+// one embedded-pointer offset each), then the pinned host snapshot record `rec` if there is
+// one, cut `cut` bytes short of a whole record. A cut record has no attribute
+// tail, so the event runs out inside the snapshot.
+inline std::vector<uint8_t> make_launch_with_snapshot(uint64_t seq,
+                                                      const std::vector<uint8_t>& rec,
+                                                      size_t cut = 0,
+                                                      uint16_t num_args = 0,
+                                                      bool pointer_args = false) {
+  std::vector<uint8_t> p(sizeof(hrr_event_header), 0);
+  auto put = [&](const void* d, size_t n) {
+    p.insert(p.end(), static_cast<const uint8_t*>(d), static_cast<const uint8_t*>(d) + n);
+  };
+  const uint64_t stream = 0, co_hash[2] = {0, 0};
+  const uint16_t name_len = 1;
+  const uint16_t counts[2] = {num_args, static_cast<uint16_t>(rec.empty() ? 0 : 1)};
+  const uint32_t dims[7] = {1, 1, 1, 1, 1, 1, 0}, attrs[2] = {0, 0};
+  put(&stream, 8); put(&name_len, 2); put("k", 1); put(co_hash, 16);
+  put(dims, sizeof(dims)); put(counts, sizeof(counts));
+  for (uint16_t i = 0; i < num_args; ++i) {
+    const uint8_t kind = pointer_args ? 3 : 0;
+    const uint16_t size = pointer_args ? 1 : 0;
+    put(&kind, 1); put(&size, 2);
+    if (pointer_args) {
+      const uint8_t data = 0;
+      const uint16_t n_ptrs = 1, offset = 0;
+      put(&data, 1); put(&n_ptrs, 2); put(&offset, 2);
+    }
+  }
+  put(rec.data(), rec.size() - cut);
+  if (!cut) put(attrs, sizeof(attrs));
+  auto* h = reinterpret_cast<hrr_event_header*>(p.data());
+  h->event_type     = static_cast<uint16_t>(HRR_API_HIPMODULELAUNCHKERNEL);
+  h->sequence_id    = seq;
+  h->payload_length = static_cast<uint32_t>(p.size());
+  return p;
+}
+
 // Run hrr-playback with stderr merged into the captured output.  The NOOP and
 // ERROR_STUB handlers write their one-time warnings to stderr, so a test that
 // asserts on replay class must merge the two streams; hrr_playback_env cannot,
@@ -444,7 +514,7 @@ inline std::pair<int, std::string> hrr_playback_merged(
     const fs::path& cap_path,
     const std::string& extra_args = "",
     const std::vector<std::pair<std::string, std::string>>& env = {}) {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true,
                       /*capture_stderr=*/true);
   set_proc_search_path(proc);
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
@@ -472,7 +542,7 @@ inline constexpr int kHrrWatchdogKilled = hrr::test::SpawnProc::kKilledOnTimeout
 inline std::pair<int, std::string> hrr_playback_watchdog(
     const fs::path& cap_path, int timeout_seconds,
     const std::string& extra_args = "") {
-  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true,
                             /*capture_stderr=*/true);
   set_proc_search_path(proc);
   std::string path_arg = hrr_quote_path(cap_path);

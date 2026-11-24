@@ -4,6 +4,8 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_SELECTORS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_SELECTORS_H_
 
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -29,6 +31,30 @@ inline constexpr uint32_t kExecSelectorFirst = 126;
 inline constexpr uint32_t kExecSelectorLast = 127;
 inline constexpr uint32_t kFlatScratchBaseSelectorFirst = 230;
 inline constexpr uint32_t kFlatScratchBaseSelectorLast = 231;
+
+[[nodiscard]] inline constexpr bool scalar_selector_is_null(rocjitsu::IsaFamily arch,
+                                                            uint32_t selector) {
+  switch (arch) {
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+    return selector == kGfx10NullSelector;
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+    return selector == kModernNullSelector;
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  default:
+    return false;
+  }
+}
+
+[[nodiscard]] inline constexpr uint32_t scalar_m0_selector(rocjitsu::IsaFamily arch) {
+  return scalar_selector_is_null(arch, kModernNullSelector) ? kModernM0Selector : kLegacyM0Selector;
+}
 
 /// Backing selected by a decoded scalar-register operand.
 enum class ScalarRegisterStorage : uint8_t {

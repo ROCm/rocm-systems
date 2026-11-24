@@ -39,7 +39,7 @@
 #include "bootstrap/bootstrap.hpp"
 #include "atomic.hpp"
 #include "sdma_policy.hpp"
-#include "tdm_policy.hpp"
+#include "lds_stage_policy.hpp"
 
 namespace rocshmem {
 
@@ -113,6 +113,12 @@ class IpcOnImpl {
    */
   int ipc_first_pe{0};
   int ipc_stride{0};    // 0 = pattern invalid
+
+  // Node-local IPC communicator created by the MPI ipcHostInit and freed by ipcHostStop only if this
+  // instance created it, so initFrom copies neither field. No MPI_COMM_NULL default: IpcImpl is
+  // also constructed in device code, where that host symbol is unavailable.
+  MPI_Comm shm_comm{};
+  bool owns_shm_comm{false};
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);
@@ -264,12 +270,12 @@ class IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
-    memcpy_wg_tdm<Kind>(dst, src, size);
+    memcpy_wg_lds_stage<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
-    memcpy_wave_tdm<Kind>(dst, src, size);
+    memcpy_wave_lds_stage<Kind>(dst, src, size);
   }
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
@@ -431,7 +437,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       }
       return;
     }
-    memcpy_wg_tdm<Kind>(dst, src, size);
+    memcpy_wg_lds_stage<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
@@ -452,7 +458,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       }
       return;
     }
-    memcpy_wave_tdm<Kind>(dst, src, size);
+    memcpy_wave_lds_stage<Kind>(dst, src, size);
   }
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
@@ -470,12 +476,11 @@ class IpcSdmaImpl : public IpcOnImpl {
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
-      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
-                         (local_pe * sdmaImpl_.numChannels);
+      uint64_t pe_mask = sdmaImpl_.sdmaPeMask(local_pe);
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(
                         &sdmaImpl_.sdmaDirty) & pe_mask)
-        sdmaImpl_.sdmaQuiet(local_pe);
+        sdmaImpl_.sdmaQuietMask(pe_mask);
     }
     atomic::threadfence<scope, order>();
   }
@@ -500,12 +505,11 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __device__ void ipcQuiet(int local_pe) {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
-      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
-                         (local_pe * sdmaImpl_.numChannels);
+      uint64_t pe_mask = sdmaImpl_.sdmaPeMask(local_pe);
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(
                          &sdmaImpl_.sdmaDirty) & pe_mask)
-        sdmaImpl_.sdmaQuiet(local_pe);
+        sdmaImpl_.sdmaQuietMask(pe_mask);
       atomic::threadfence<atomic::memory_scope::system,
                           atomic::memory_order::acq_rel>();
       return;

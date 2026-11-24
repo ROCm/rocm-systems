@@ -276,7 +276,7 @@ amdsmi_status_t WSLGPUBackend::GetKfdInfo(amdsmi_kfd_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
   // No KFD in WSL — the KFD ID and node ID concepts don't apply.
   std::memset(info, 0xFF, sizeof(*info));
-  return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
@@ -476,7 +476,7 @@ amdsmi_status_t WSLGPUBackend::GetClockInfo(amdsmi_clk_type_t clk_type, amdsmi_c
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
+  std::memset(info, 0xFF, sizeof(*info));
   info->clk = rocdxg_info.clk;
   info->min_clk = rocdxg_info.min_clk;
   info->max_clk = rocdxg_info.max_clk;
@@ -513,6 +513,20 @@ amdsmi_status_t WSLGPUBackend::GetDriverInfo(amdsmi_driver_info_t* info) {
   copy_rocdxg_string(info->driver_version, device_info_.driver.driver_version);
   copy_rocdxg_string(info->driver_date, device_info_.driver.driver_date);
   copy_rocdxg_string(info->driver_name, device_info_.driver.driver_name);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t WSLGPUBackend::GetDriverInfoV2(amdsmi_driver_info_v2_t* info) {
+  amdsmi_status_t r = load_device_info();
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  std::memset(info, 0, sizeof(*info));
+  copy_rocdxg_string(info->driver_version, device_info_.driver.driver_version);
+  copy_rocdxg_string(info->driver_date, device_info_.driver.driver_date);
+  copy_rocdxg_string(info->driver_name, device_info_.driver.driver_name);
+  // The WDDM version has no amdgpu parts and no Linux driver package behind it.
+  copy_rocdxg_string(info->driver_full_version, device_info_.driver.driver_version);
   return AMDSMI_STATUS_SUCCESS;
 }
 

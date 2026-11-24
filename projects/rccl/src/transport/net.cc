@@ -265,7 +265,9 @@ static void rcclDetectIBNics() {
   int _NicsRate[rcclIBNicTypeMax]{};
   int totalNnics = 0;
 
-  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware */
+  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware.
+     Keep the literal: rcclCanonicalNetName() folds ROCM-IB into IB-CAST, which
+     must not force AINIC mode (see its comment in net.h). */
   const char* envNet = ncclGetEnv("NCCL_NET");
   if (envNet && strcasecmp(envNet, "ROCM-IB") == 0) {
     INFO(NCCL_NET | NCCL_INIT, "RCCL: AINIC mode forced by NCCL_NET=ROCM-IB");
@@ -433,12 +435,12 @@ void setXferNetAttrs(struct ncclProxyState* proxyState, struct ncclProxyArgs* ar
 
   if (send) {
     netAttr.sendCommAttr.maxConcurrentPeers = args->nPeers;
-    netAttr.sendCommAttr.minConcurrentPeers = args->nPeers;
+    netAttr.sendCommAttr.minConcurrentPeers = args->minPeers;
     netAttr.sendCommAttr.maxFlowsPerPeer = args->nChannels;
     netAttr.sendCommAttr.minFlowsPerPeer = args->nChannels;
   } else {
     netAttr.recvCommAttr.maxConcurrentPeers = args->nPeers;
-    netAttr.recvCommAttr.minConcurrentPeers = args->nPeers;
+    netAttr.recvCommAttr.minConcurrentPeers = args->minPeers;
     netAttr.recvCommAttr.maxFlowsPerPeer = args->nChannels;
     netAttr.recvCommAttr.minFlowsPerPeer = args->nChannels;
   }
@@ -502,7 +504,8 @@ static ncclResult_t sendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   if (proxyRank != myInfo->rank && connIndex == 0) comm->useNetPXN = true;
   if (req.useGdr && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx90a") &&
       !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") &&
-      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
+      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
     CUDACHECK(hipDeviceGetAttribute((int*)&req.curr_hdp_reg, hipDeviceAttributeHdpMemFlushCntl, myInfo->cudaDev));
     send->conn.curr_hdp_reg = req.curr_hdp_reg;
   }
@@ -616,8 +619,9 @@ static ncclResult_t netMapShm(struct ncclComm* comm, struct ncclProxyConnector* 
 }
 
 static ncclResult_t netCreateShm(struct ncclProxyState* proxyState, struct connectMapMem* mem) {
-  NCCLCHECK(ncclShmAllocateShareableBuffer(mem->size, false, &mem->createDesc, (void**)&mem->cpuPtr,
-                                           (void**)&mem->gpuPtr));
+  // The proxy only needs CPU access to this buffer (the sender registers its own mapping).
+  NCCLCHECK(ncclShmAllocateShareableBuffer(mem->size, !proxyState->cuMemHostEnabled, &mem->createDesc,
+                                           (void**)&mem->cpuPtr, nullptr));
   return ncclSuccess;
 }
 
@@ -877,6 +881,125 @@ static ncclResult_t recvFree(struct ncclComm* comm, struct ncclConnector* recv) 
 }
 
 #define NCCL_SHARED_STEPS 16
+
+#if defined(NCCL_OS_LINUX)
+// Host-memory shared P2P pools are registered on every NIC that serves a non-GDR P2P connection.
+// With 4 KiB pages a 256 MiB pool takes 65,536 NIC page-table entries; AINIC caps them per LIF
+// (rdma_npts_per_lif = 1,048,576), so one communicator's pools nearly fill a NIC and the next
+// ibv_reg_mr fails with EINVAL. Backing the pool with transparent huge pages lets the MR use
+// 2 MiB pages (128 entries per 256 MiB).
+RCCL_PARAM(NetSharedHostHugePages, "NET_SHARED_HOST_HUGEPAGES", 1);
+static constexpr size_t rcclHugePageSize = 2UL << 20;
+
+static size_t rcclAnonHugeKb(const void* addr) {
+  FILE* f = fopen("/proc/self/smaps", "r");
+  if (f == NULL) return 0;
+  char line[512];
+  bool inVma = false;
+  size_t kb = 0;
+  while (fgets(line, sizeof(line), f)) {
+    unsigned long start, end;
+    if (sscanf(line, "%lx-%lx ", &start, &end) == 2) {
+      if (inVma) break;
+      inVma = (uintptr_t)addr >= start && (uintptr_t)addr < end;
+    } else if (inVma && sscanf(line, "AnonHugePages: %zu kB", &kb) == 1) {
+      break;
+    }
+  }
+  fclose(f);
+  return kb;
+}
+
+// Backs state->hostBuff with a 2 MiB-aligned anonymous mapping that is registered with the GPU runtime. Returns false
+// when the huge-page path is disabled or fails; in that case nothing stays mapped or registered.
+static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p* state) {
+  if (!rcclParamNetSharedHostHugePages() || (size_t)state->size < rcclHugePageSize) return false;
+  size_t mapSize = ROUNDUP((size_t)state->size, rcclHugePageSize);
+  char* raw =
+    (char*)mmap(NULL, mapSize + rcclHugePageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (raw == MAP_FAILED) {
+    ATTN("NET/Shared host pool: mmap of %zu bytes failed (%s), using hipHostMalloc", mapSize, strerror(errno));
+    return false;
+  }
+  char* ptr = (char*)ROUNDUP((uintptr_t)raw, rcclHugePageSize);
+  size_t head = ptr - raw;
+  if (head) munmap(raw, head);
+  if (rcclHugePageSize - head) munmap(ptr + mapSize, rcclHugePageSize - head);
+  if (madvise(ptr, mapSize, MADV_HUGEPAGE) != 0) {
+    INFO(NCCL_ALLOC | NCCL_NET, "NET/Shared host pool: madvise(MADV_HUGEPAGE) failed: %s", strerror(errno));
+  }
+  memset(ptr, 0, mapSize);
+
+  // No CUDACHECK between the mapping and the end of this block: an early return would leak the mapping.
+  void* devPtr = NULL;
+  bool registered = false;
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  cudaError_t err = cudaThreadExchangeStreamCaptureMode(&mode);
+  if (err == cudaSuccess) {
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+    err = cudaHostRegister(ptr, mapSize,
+                           cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached);
+#else
+    err = cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped);
+#endif
+    registered = (err == cudaSuccess);
+    if (registered) err = cudaHostGetDevicePointer(&devPtr, ptr, 0);
+    // Restore the capture mode whether or not the registration succeeded.
+    cudaError_t restoreErr = cudaThreadExchangeStreamCaptureMode(&mode);
+    if (err == cudaSuccess) err = restoreErr;
+  }
+  if (err != cudaSuccess) {
+    ATTN("NET/Shared host pool: huge-page registration failed (%s), using hipHostMalloc", cudaGetErrorString(err));
+    if (registered) (void)cudaHostUnregister(ptr);
+    (void)cudaGetLastError();
+    munmap(ptr, mapSize);
+    return false;
+  }
+  state->hostBuff = ptr;
+  state->hostBuffDev = (char*)devPtr;
+  state->hostBuffMapSize = mapSize;
+  INFO(NCCL_INIT | NCCL_NET, "NET/Shared host pool %p (dev %p) size %zu: %zu kB on huge pages", ptr, devPtr, mapSize,
+       rcclAnonHugeKb(ptr));
+  return true;
+}
+
+static ncclResult_t sharedHostBuffFreeHuge(struct ncclProxySharedP2p* state) {
+  // Same rule as ncclCudaHostFree: at process exit the GPU runtime may already be destroyed, so leave the mapping to
+  // the OS instead of calling into it.
+  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
+    INFO(NCCL_ALLOC, "NET/Shared host pool: skipping free (process shutdown) pointer %p", state->hostBuff);
+    return ncclSuccess;
+  }
+  CUDACHECK(cudaHostUnregister(state->hostBuff));
+  munmap(state->hostBuff, state->hostBuffMapSize);
+  return ncclSuccess;
+}
+#else
+// Huge-page backing is Linux only; other platforms use hipHostMalloc.
+static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p*) { return false; }
+static ncclResult_t sharedHostBuffFreeHuge(struct ncclProxySharedP2p*) { return ncclSuccess; }
+#endif  // NCCL_OS_LINUX
+
+static ncclResult_t sharedHostBuffAlloc(struct ncclProxySharedP2p* state) {
+  state->hostBuffMapSize = 0;
+  if (sharedHostBuffAllocHuge(state)) return ncclSuccess;
+  NCCLCHECK(ncclCudaHostCalloc(&state->hostBuff, state->size));
+  state->hostBuffDev = state->hostBuff;
+  return ncclSuccess;
+}
+
+static ncclResult_t sharedHostBuffFree(struct ncclProxySharedP2p* state) {
+  if (state->hostBuffMapSize) {
+    NCCLCHECK(sharedHostBuffFreeHuge(state));
+  } else {
+    NCCLCHECK(ncclCudaHostFree(state->hostBuff));
+  }
+  state->hostBuff = NULL;
+  state->hostBuffDev = NULL;
+  state->hostBuffMapSize = 0;
+  return ncclSuccess;
+}
+
 static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int cuda, int tpLocalRank, int type,
                                          int sameProcess, int nChannels, char** gpuPtr, char** cpuPtr, ssize_t* size,
                                          ncclIpcDesc* ipcDesc) {
@@ -927,10 +1050,10 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int 
     }
   }
   if (!cuda && state->hostBuff == NULL) {
-    NCCLCHECK(ncclCudaHostCalloc(&state->hostBuff, state->size));
+    NCCLCHECK(sharedHostBuffAlloc(state));
   }
   if (cpuPtr) *cpuPtr = cuda ? state->cudaBuff : state->hostBuff;
-  if (gpuPtr) *gpuPtr = (cpuPtr && sameProcess) ? *cpuPtr : NULL;
+  if (gpuPtr) *gpuPtr = (cpuPtr && sameProcess) ? (cuda ? state->cudaBuff : state->hostBuffDev) : NULL;
   if (ipcDesc) memcpy(ipcDesc, &state->ipcDesc, sizeof(state->ipcDesc));
   return ncclSuccess;
 }
@@ -962,7 +1085,7 @@ static ncclResult_t sharedNetBuffersDestroy(struct ncclProxyState* proxyState, i
       }
       NCCLCHECK(ncclCudaFree(state->cudaBuff, proxyState->memManager));
     }
-    if (state->hostBuff) NCCLCHECK(ncclCudaHostFree(state->hostBuff));
+    if (state->hostBuff) NCCLCHECK(sharedHostBuffFree(state));
   }
 
   if (peer->send.refcount || peer->recv.refcount) return ncclSuccess;
@@ -1358,10 +1481,11 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
           CUCHECK(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)resources->buffers[p],
                                                 resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                                 getHandleForAddressRangeFlags(resources->useGdr)));
-          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p],
-                                                     resources->buffSizes[p], type, 0ULL, dmabuf_fd,
-                                                     &resources->mhandles[p]));
+          ncclResult_t dmaBufRegRes =
+            proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type,
+                                             0ULL, dmabuf_fd, &resources->mhandles[p]);
           (void)close(dmabuf_fd);
+          NCCLCHECK(dmaBufRegRes);
         }
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
@@ -1372,12 +1496,13 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
                                                 &offset));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p],
-                                                   resources->buffSizes[p], type, offset, dmabuf_fd,
-                                                   &resources->mhandles[p]));
+        ncclResult_t dmaBufRegRes =
+          proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type,
+                                           offset, dmabuf_fd, &resources->mhandles[p]);
         (void)close(dmabuf_fd);
         TRACE(NCCL_INIT | NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
               (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
+        NCCLCHECK(dmaBufRegRes);
       } else // FALL-THROUGH to nv_peermem GDR path
 #endif
       {
@@ -1611,10 +1736,11 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
           CUCHECK(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)resources->buffers[p],
                                                 resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                                 getHandleForAddressRangeFlags(resources->useGdr)));
-          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p],
-                                                     resources->buffSizes[p], type, 0ULL, dmabuf_fd,
-                                                     &resources->mhandles[p]));
+          ncclResult_t dmaBufRegRes =
+            proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type,
+                                             0ULL, dmabuf_fd, &resources->mhandles[p]);
           (void)close(dmabuf_fd);
+          NCCLCHECK(dmaBufRegRes);
         }
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
@@ -1625,12 +1751,13 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
                                                 &offset));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p],
-                                                   resources->buffSizes[p], type, offset, dmabuf_fd,
-                                                   &resources->mhandles[p]));
+        ncclResult_t dmaBufRegRes =
+          proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type,
+                                           offset, dmabuf_fd, &resources->mhandles[p]);
         (void)close(dmabuf_fd);
         TRACE(NCCL_INIT | NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
               (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
+        NCCLCHECK(dmaBufRegRes);
       } else // FALL-THROUGH to nv_peermem GDR path
 #endif
       {
@@ -1798,6 +1925,8 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
 
 static_assert(NCCL_STEPS <= NCCL_NET_MAX_REQUESTS, "Not enough net requests to cover for steps");
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct ncclProxyArgs* args) {
   int checkedNetAttr = 0;
   if (args->state == ncclProxyOpReady) {
@@ -1994,6 +2123,8 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
 
 RCCL_PARAM(NetHdpFlush, "NET_HDP_FLUSH", 0);
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct ncclProxyArgs* args) {
   int checkedNetAttr = 0;
   if (args->state == ncclProxyOpReady) {
@@ -2069,8 +2200,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             if (resources->shared) {
               if (sub->reg) {
                 // Wait until CUDA kernel has started before we access the user buffer directly.
-                if (!sub->regBufferReady && connFifo[sub->base % NCCL_STEPS].size == -1) continue;
-                sub->regBufferReady = 1;
+                if (!sub->regBufferReady) {
+                  if (connFifo[sub->base % NCCL_STEPS].size == -1) continue;
+                  sub->regBufferReady = 1;
+                  connFifo[sub->base % NCCL_STEPS].size = -1;
+                }
                 ptrs[subCount] = sub->recvbuff + sub->posted * NCCL_MAX_NET_SIZE;
                 sizes[subCount] =
                   std::min((ssize_t)NCCL_MAX_NET_SIZE, (ssize_t)(sub->nbytes - sub->posted * NCCL_MAX_NET_SIZE));
@@ -2084,8 +2218,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
               }
             } else {
               if (sub->reg) {
-                if (!sub->regBufferReady && connFifo[sub->base % NCCL_STEPS].size == -1) continue;
-                sub->regBufferReady = 1;
+                if (!sub->regBufferReady) {
+                  if (connFifo[sub->base % NCCL_STEPS].size == -1) continue;
+                  sub->regBufferReady = 1;
+                  connFifo[sub->base % NCCL_STEPS].size = -1;
+                }
                 sub->ringAlgo->getNextRecvAddr(sub->posted, (uint8_t**)&ptrs[subCount], &sizes[subCount],
                                                &sub->recvMhandle);
               } else {
@@ -2155,10 +2292,6 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             struct ncclProxySubArgs* sub = subGroup + i;
 
             int receivedStepId = sub->received;
-            int buffSlot = (sub->base + sub->received) % NCCL_STEPS;
-            struct recvNetResources* resources = (struct recvNetResources*)(sub->connection->transportResources);
-            volatile struct ncclConnFifo* connFifo = (volatile struct ncclConnFifo*)resources->recvMem->connFifo;
-            connFifo[buffSlot].size = -1;
             sub->transSize = sizes[i];
             sub->received += args->sliceSteps;
             ncclProfilerRecordProxyStepEventState(s + i, args, receivedStepId, ncclProfilerProxyStepRecvFlushWait);

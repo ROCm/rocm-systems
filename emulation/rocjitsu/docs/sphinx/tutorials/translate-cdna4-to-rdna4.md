@@ -1,8 +1,8 @@
 ---
 myst:
     html_meta:
-        "description": "Tutorial walking through translating a CDNA4 (gfx950) kernel to RDNA4 (gfx1200) using the rj_dbt_translate tool in rocJITsu."
-        "keywords": "rocJITsu, ROCm, DBT, dynamic binary translation, CDNA4, RDNA4, gfx950, gfx1200, rj_dbt_translate, code object"
+        "description": "Tutorial walking through translating a CDNA4 (gfx950) kernel to RDNA4 (gfx1200) using the rj_dbt_translate tool in rocjitsu."
+        "keywords": "rocjitsu, ROCm, DBT, dynamic binary translation, CDNA4, RDNA4, gfx950, gfx1200, rj_dbt_translate, code object"
 ---
 # Translate a CDNA4 kernel to RDNA4 using `rj_dbt_translate`
 
@@ -12,7 +12,7 @@ that it can run on RDNA4 (gfx1200). You will learn how to run the tool
 in diff mode, interpret the translation actions it reports, and extract
 a translated code object.
 
-`rj_dbt_translate` is the primary debugging interface for the rocJITsu
+`rj_dbt_translate` is the primary debugging interface for the rocjitsu
 dynamic binary translator (DBT). Use it whenever you need to inspect how
 the translator handles individual instructions across ISA boundaries ---
 for example, when verifying that a kernel you compiled for one
@@ -154,6 +154,6 @@ problems:
 
 -   Read the full [rj_dbt_translate command reference](../reference/rj-dbt-translate.md) for all supported options and targets.
 -   See [Architecture and component layers](../conceptual/architecture.md) for an
-    overview of how the DBT fits into the rocJITsu component stack.
+    overview of how the DBT fits into the rocjitsu component stack.
 -   Try [Inspect and disassemble a code object with the C API](inspect-code-object.md)
-    to explore code objects with the rocJITsu C API.
+    to explore code objects with the rocjitsu C API.

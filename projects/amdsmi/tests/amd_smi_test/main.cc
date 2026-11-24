@@ -13,6 +13,7 @@
 #include "functional/gpu/clock/frequencies_read_write.h"
 #include "functional/gpu/events/evt_notif_read_write.h"
 #include "functional/gpu/identity/device_cuid_read.h"
+#include "functional/gpu/identity/driver_info_read.h"
 #include "functional/gpu/identity/id_info_read.h"
 #include "functional/gpu/identity/version_read.h"
 #include "functional/gpu/memory/mem_page_info_read.h"
@@ -41,15 +42,18 @@
 #include "functional/gpu/power/power_cap_read_write.h"
 #include "functional/gpu/power/power_read.h"
 #include "functional/gpu/power/power_read_write.h"
+#include "functional/gpu/power/power_stabilization_read_write.h"
 #include "functional/gpu/ras/err_cnt_read.h"
 #include "functional/gpu/thermal/fan_read.h"
 #include "functional/gpu/thermal/fan_read_write.h"
 #include "functional/gpu/thermal/temp_read.h"
 #include "functional/gpu/xgmi/xgmi_read_write.h"
 #include "functional/ifoe/fabric/fabric_read.h"
-#include "functional/ifoe/fabric/fabric_write.h"
 #include "functional/ifoe/identity/ifoe_info_read.h"
 #include "functional/ifoe/tray/tray_info_read.h"
+#include "functional/nic/identity/nic_port_read.h"
+#include "functional/nic/identity/nic_type_read.h"
+#include "functional/nic/telemetry/telemetry_read.h"
 #include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
 #include "functional/system/init_shutdown_refcount.h"
@@ -206,6 +210,13 @@ TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
+TEST(GpuFunctionalReadWrite, TestPowerStabilizationReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestPowerStabilizationReadWrite tst;
+  RunGenericTest(&tst);
+}
 TEST(GpuFunctionalReadWrite, TestAmppReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
@@ -228,6 +239,10 @@ TEST(GpuFunctionalReadOnly, TestIdInfoRead) {
 }
 TEST(GpuFunctionalReadOnly, TestDeviceCuidRead) {
   TestDeviceCuidRead tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadOnly, TestDriverInfoRead) {
+  TestDriverInfoRead tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {
@@ -348,13 +363,6 @@ TEST(IfoeFunctionalReadOnly, TestFabricRead) {
   RunGenericTest(&tst);
 }
 
-TEST(IfoeFunctionalReadWrite, TestFabricWrite) {
-  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
-  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
-  TestFabricWrite tst;
-  RunGenericTest(&tst);
-}
-
 TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: iFoE NIC not available on DXG backend";
@@ -364,6 +372,21 @@ TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
 
 TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
   TestTrayInfoRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(NicFunctionalReadOnly, TestNicTelemetryRead) {
+  TestNicTelemetryRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(NicFunctionalReadOnly, TestNicPortRead) {
+  TestNicPortRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(NicFunctionalReadOnly, TestNicTypeRead) {
+  TestNicTypeRead tst;
   RunGenericTest(&tst);
 }
 

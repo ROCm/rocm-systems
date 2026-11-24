@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -11,6 +12,8 @@
 
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 namespace rocjitsu {
 
@@ -244,7 +247,13 @@ inline constexpr uint64_t kKernelEntryAlignment = 256;
 
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words);
 
-void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code_arch_t arch);
+/// @brief Append word-aligned target-ISA NOP padding.
+/// @returns Failure for an unsupported architecture when padding is required;
+/// leaves @p text unchanged on that failure.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
+                                rocjitsu::IsaFamily arch,
+                                const util::DiagnosticEmitter *error = nullptr);
 
 [[nodiscard]] uint64_t padding_for_residue(uint64_t current_offset, uint64_t target_residue,
                                            uint64_t alignment);
@@ -270,11 +279,13 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
 /// @param requirements Exact monotonic window-growth requests.
 /// @param arch Target architecture used to initialize inserted words.
 /// @returns Insertions in the original @p text coordinate space, or
-/// std::nullopt without mutation when any request is invalid.
+/// std::nullopt without mutation when any request is invalid or padding fails.
+/// @param error Optional borrowed diagnostic emitter for padding failures. Invalid
+/// growth requests fail silently. The emitter and its sink must outlive this call.
 [[nodiscard]] std::optional<std::vector<TextLayoutInsertion>>
 grow_control_flow_windows(std::vector<uint8_t> &text, KernelTextLayout &layout,
                           std::span<const ControlFlowWindowRequirement> requirements,
-                          rj_code_arch_t arch);
+                          rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr);
 
 /// @brief Rebase one offset through a sorted set of text insertions.
 void rebase_text_offset(uint64_t &offset, std::span<const TextLayoutInsertion> insertions);
@@ -301,8 +312,11 @@ private:
 [[nodiscard]] uint64_t next_direct_branch_island_pool_offset(uint64_t current_body_size);
 
 /// @brief Append one skipped branch-island pool to @p kernel_text and record its slots.
-void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelTextLayout &layout,
-                                      rj_code_arch_t arch);
+/// @returns Failure for an unsupported architecture, leaving bytes and slots unchanged.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
+                                              KernelTextLayout &layout, rocjitsu::IsaFamily arch,
+                                              const util::DiagnosticEmitter *error = nullptr);
 
 /// @brief Add @p delta to body-relative target offsets in @p layout.
 ///
@@ -317,7 +331,7 @@ void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta);
 /// layer. DBT and DBI retain ownership of descriptor policy and diagnostics.
 [[nodiscard]] KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
                                                                 const SkippedKernelLayoutPlan &plan,
-                                                                rj_code_arch_t arch);
+                                                                rocjitsu::IsaFamily arch);
 
 /// @brief Append one relocated kernel body plus any descriptor-visible entry stubs.
 ///
@@ -327,21 +341,21 @@ void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta);
 /// prologue launch stubs when the descriptor requires them.
 [[nodiscard]] KernelTextAppendResult
 append_relocated_kernel_text(std::vector<uint8_t> &translated_text, KernelTextLayout &layout,
-                             std::span<const uint8_t> kernel_text, rj_code_arch_t arch);
+                             std::span<const uint8_t> kernel_text, rocjitsu::IsaFamily arch);
 
 /// @brief Patch all direct PC-relative branches recorded in @p layout.
 [[nodiscard]] TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                                                               const KernelTextLayout &layout,
-                                                              rj_code_arch_t arch);
+                                                              rocjitsu::IsaFamily arch);
 
 /// @brief Patch all recovered indirect branch/call windows recorded in @p layout.
 [[nodiscard]] TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
                                                                    const KernelTextLayout &layout,
-                                                                   rj_code_arch_t arch);
+                                                                   rocjitsu::IsaFamily arch);
 
 /// @brief Patch recovered source-side PC builders for multi-target consumers.
 [[nodiscard]] TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                                                                   const KernelTextLayout &layout,
-                                                                  rj_code_arch_t arch);
+                                                                  rocjitsu::IsaFamily arch);
 
 } // namespace rocjitsu

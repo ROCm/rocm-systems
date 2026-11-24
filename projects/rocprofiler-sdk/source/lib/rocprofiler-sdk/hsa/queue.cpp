@@ -43,6 +43,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/untracked_memory.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
@@ -524,7 +525,11 @@ WriteInterceptor(const void* packets,
         else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
         {
             const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
-            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+               || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+            )
             {
                 ++num_dispatch_packets;
             }
@@ -672,7 +677,11 @@ WriteInterceptor(const void* packets,
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
             {
                 const auto& ext_packet = _packets[i].ext_kernel_dispatch;
-                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+                   || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+                )
                 {
                     is_ext_kernel_dispatch = true;
                 }
@@ -847,7 +856,8 @@ WriteInterceptor(const void* packets,
                                       .group_segment_size   = pkt_info.group_segment_size,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
-                                      .reserved_padding     = {0}}};
+                                      .reserved_padding     = {0}},
+                                  ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE};
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -1182,14 +1192,17 @@ WriteInterceptor(const void* packets,
             // which of those it hit.
             const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
 
-            // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
-            // application data, so decline replay. Close the CONFIG sequence, free our drain
-            // signal, and run this dispatch once still under the writer lock with its original
-            // completion signal, then return.
-            if(!snapshot.ok)
+            // Snapshot incomplete, or checked kernel arguments identify memory outside it:
+            // restoring only part of what the passes write would corrupt application data, so
+            // decline replay. Close the CONFIG sequence, free our drain signal, and run this
+            // dispatch once still under the writer lock with its original completion signal, then
+            // return.
+            if(!snapshot.ok || !kernel_replay::untracked_memory::can_replay_dispatch(
+                                   dispatch_pkt.kernel_dispatch, snapshot))
             {
-                LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; running "
-                                           "this dispatch once without replay";
+                if(!snapshot.ok)
+                    LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; "
+                                               "running this dispatch once without replay";
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
                 if(drain_signal != null_hsa_signal)
@@ -1250,9 +1263,10 @@ WriteInterceptor(const void* packets,
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
                 // would submit the next pass over corrupted memory and (because the final pass
                 // skips restore) would also leave that corruption visible to the application.
-                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
-                    "kernel replay: restore failed between passes (partial host->device copy); "
-                    "aborting rather than continuing with corrupted device memory");
+                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot))
+                    << fmt::format("kernel replay: restore failed between passes (partial "
+                                   "host->device copy); aborting rather than continuing with "
+                                   "corrupted device memory");
             }
 
             kernel_replay::execute_config_phase_exit(
@@ -1439,17 +1453,20 @@ Queue::Queue(
     CoreApiTable            core_api,
     AmdExtTable             ext_api,
     hsa_queue_t*            queue,
-    set_write_interceptor_t set_write_interceptor)  // NOLINT(performance-unnecessary-value-param)
+    set_write_interceptor_t set_write_interceptor,  // NOLINT(performance-unnecessary-value-param)
+    bool                    tracked_queue)
 : _core_api(core_api)
 , _ext_api(ext_api)
 , _agent(agent)
 , _intercept_queue(queue)
+, _tracked_queue(tracked_queue)
 {
-    if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
-                    ctx->device_thread_trace);
-        }).empty())
+    if(tracked_queue && !context::get_registered_contexts([](const context::context* ctx) {
+                             return (ctx->dispatch_counter_collection ||
+                                     ctx->device_counter_collection || ctx->dispatch_spm ||
+                                     ctx->device_spm || ctx->dispatch_thread_trace ||
+                                     ctx->device_thread_trace);
+                         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
         CHECK(_agent.get_hsa_agent().handle != 0);
@@ -1505,6 +1522,13 @@ Queue::~Queue()
     if(_active_kernels.handle != 0 && _core_api.hsa_signal_destroy_fn != nullptr)
     {
         _core_api.hsa_signal_destroy_fn(_active_kernels);
+    }
+
+    // A non-participant is never registered, so nothing else releases its ready_signal.
+    // block_signal is released on queue destruction, not here.
+    if(!_tracked_queue && ready_signal.handle != 0 && _core_api.hsa_signal_destroy_fn != nullptr)
+    {
+        _core_api.hsa_signal_destroy_fn(ready_signal);
     }
 }
 

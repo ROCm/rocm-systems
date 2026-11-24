@@ -14,8 +14,10 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
@@ -32,6 +34,10 @@
 namespace rocjitsu {
 
 namespace {
+
+// gfx1250 is Wave32-only.
+constexpr uint8_t kGfx1250WaveSize =
+    static_cast<uint8_t>(isa_properties(rocjitsu::IsaFamily::Cdna5).wave_size_max);
 
 [[nodiscard]] bool always_residual(const Instruction &) { return true; }
 [[nodiscard]] bool scale16_residual(const Instruction &inst);
@@ -90,6 +96,8 @@ constexpr uint16_t kGfx1250InlineZero = 128;
 constexpr uint32_t kGfx1250ScratchMaxDwordOffset = 0x7ffffcu;
 constexpr uint16_t kGfx1250ModeFp16OvflHwreg = 1u | (23u << 6);
 constexpr uint16_t kGfx1250WmmaCompletionWaitImmediate = 0x0f9f;
+constexpr uint16_t kWaitAluNoWaitImmediate = 0xff9fu;
+constexpr uint16_t kSaSdstDepctrMask = 0x0001u;
 
 /// @brief Diagnose control fields that are invalid for floating-point WMMA.
 ///
@@ -281,7 +289,7 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// high-bank operand conservatively forbids its low-bank alias. Supporting
 /// high-bank scratch requires physicalizing this set first.
 [[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
-  const InstDefUse def_use(inst);
+  const InstDefUse def_use(inst, kGfx1250WaveSize);
   return (def_use.uses | def_use.defs).ordinary_only();
 }
 
@@ -471,7 +479,8 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
 ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t,
                                      std::span<const uint8_t>, const LivenessAnalysis &,
                                      TranslationContext &, const LaneLayout *, const LaneLayout *) {
-  if (inst.mnemonic() != "s_clause" || inst.size() != static_cast<int>(sizeof(uint32_t)))
+  if (inst.amdgpu_operation() != amdgpu::Operation::S_CLAUSE ||
+      inst.size() != static_cast<int>(sizeof(uint32_t)))
     return ExpandResult::failed("gfx1250 S_CLAUSE rule received an unsupported instruction");
 
   const auto nop = cdna5::build_sopp(cdna5::kSNopSopp, {.simm16 = 0});
@@ -555,7 +564,8 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
 [[nodiscard]] bool setreg_mode_ordering_residual(const Instruction &inst) {
   constexpr int kRequiredLeadingVNops = 2;
 
-  if (inst.mnemonic() != "s_setreg_b32" && inst.mnemonic() != "s_setreg_imm32_b32")
+  if (inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_B32 &&
+      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32)
     return false;
   const int size_bytes = inst.size();
   if (size_bytes < static_cast<int>(sizeof(uint32_t)) ||
@@ -563,7 +573,7 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
     return true;
 
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_vgpr_msb_hwreg(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
     return false;
 
   return count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,
@@ -577,7 +587,8 @@ ExpandResult expand_gfx1250_setreg_mode_ordering(const Instruction &inst, uint32
                                                  const LaneLayout *) {
   constexpr int kRequiredLeadingVNops = 2;
 
-  if (inst.mnemonic() != "s_setreg_b32" && inst.mnemonic() != "s_setreg_imm32_b32")
+  if (inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_B32 &&
+      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32)
     return ExpandResult::failed("gfx1250 MODE setreg rule received an unsupported instruction");
   const int size_bytes = inst.size();
   if (size_bytes < static_cast<int>(sizeof(uint32_t)) ||
@@ -587,7 +598,7 @@ ExpandResult expand_gfx1250_setreg_mode_ordering(const Instruction &inst, uint32
   // SOPK carries the hardware-register selector in SIMM16. Only MODE requires
   // the separation, so the mnemonic alone cannot decide this.
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_vgpr_msb_hwreg(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
     return ExpandResult::not_handled();
 
   const int existing_slots = count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,
@@ -848,6 +859,15 @@ struct TensorMaskWrapper {
       {.ssrc0 = kGfx1250InlineZero, .ssrc1 = descriptor_base, .sdst = descriptor_base})[0];
 }
 
+// S_WAIT_ALU depctr_sa_sdst(0): drain descriptor writes before their consumers.
+// Start from the gfx1250 no-wait encoding and clear only the SA_SDST field;
+// other depctr fields remain disabled. This does not wait for TENSORCNT.
+constexpr uint16_t kTensorMaskSdstWaitImmediate = kWaitAluNoWaitImmediate & ~kSaSdstDepctrMask;
+
+[[nodiscard]] uint32_t build_tensor_mask_sdst_wait() {
+  return cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = kTensorMaskSdstWaitImmediate})[0];
+}
+
 /// @brief Build the canonical save/clear/restore words around one tensor load.
 [[nodiscard]] TensorMaskWrapper build_tensor_mask_wrapper(uint8_t descriptor_base,
                                                           uint8_t scratch) {
@@ -868,14 +888,38 @@ struct TensorMaskWrapper {
          previous->raw_encoding() != nullptr && previous->raw_encoding()[0] == expected_word;
 }
 
-/// @brief Check whether every path to a tensor load executes the canonical mask clear.
-[[nodiscard]] bool has_tensor_mask_clear(const Instruction &inst, uint8_t descriptor_base) {
-  return has_canonical_predecessor(inst, build_tensor_mask_clear(descriptor_base));
+struct TensorMaskClearPrefix {
+  bool found_clear = false;
+  bool waited_for_sdst = false;
+};
+
+/// @brief Find a same-block clear followed only by SA_SDST drains or S_WAIT_ALU instructions.
+[[nodiscard]] TensorMaskClearPrefix tensor_mask_clear_prefix(const Instruction &inst,
+                                                             uint8_t descriptor_base) {
+  const Instruction *previous = inst.previous_instruction();
+  uint64_t next_offset = inst.src_loc();
+  bool waited_for_sdst = false;
+  while (previous != nullptr &&
+         (previous->mnemonic() == "s_wait_alu" || previous->mnemonic() == "s_wait_idle") &&
+         previous->size() == static_cast<int>(sizeof(uint32_t)) &&
+         previous->raw_encoding() != nullptr &&
+         previous->src_loc() + sizeof(uint32_t) == next_offset) {
+    waited_for_sdst |= previous->mnemonic() == "s_wait_idle" ||
+                       (previous->raw_encoding()[0] & kSaSdstDepctrMask) == 0;
+    next_offset = previous->src_loc();
+    previous = previous->previous_instruction();
+  }
+  if (previous == nullptr || previous->size() != static_cast<int>(sizeof(uint32_t)) ||
+      previous->raw_encoding() == nullptr ||
+      previous->src_loc() + sizeof(uint32_t) != next_offset ||
+      previous->raw_encoding()[0] != build_tensor_mask_clear(descriptor_base))
+    return {};
+  return {.found_clear = true, .waited_for_sdst = waited_for_sdst};
 }
 
 /// @brief Whether the tensor-load expansion still needs to add its canonical prefix.
 [[nodiscard]] bool tensor_load_residual(const Instruction &inst) {
-  if (inst.mnemonic() != "tensor_load_to_lds" ||
+  if (inst.amdgpu_operation() != amdgpu::Operation::TENSOR_LOAD_TO_LDS ||
       inst.size() != static_cast<int>(sizeof(cdna5::VimageMachineInst)) ||
       inst.raw_encoding() == nullptr) {
     return true;
@@ -887,7 +931,7 @@ struct TensorMaskWrapper {
   const uint8_t descriptor_base = static_cast<uint8_t>(source.vaddr1);
   if (descriptor_base == kGfx1250Null || descriptor_base > kLastOrdinarySgpr - 7u)
     return true;
-  return !has_tensor_mask_clear(inst, descriptor_base);
+  return !tensor_mask_clear_prefix(inst, descriptor_base).waited_for_sdst;
 }
 
 /// @brief Disable Tensor-DMA multicast for one A0 tensor load.
@@ -898,19 +942,20 @@ struct TensorMaskWrapper {
 /// therefore be cleared for every tensor load; inspecting only the instruction
 /// cannot prove that the runtime descriptor mask is zero. Preserve the guest
 /// descriptor value around the load because later tensor instructions commonly
-/// reuse and update the same descriptor.
+/// reuse and update the same descriptor. Wait for both the clear before the
+/// tensor read and the restore before a subsequent guest SGPR read.
 ///
-/// A second translation preserves the load when its immediately preceding
-/// decoded instruction in the same basic block is the canonical mask clear.
-/// This proves that no control-flow edge can bypass the clear. The clear
-/// instruction currently has no B0-to-A0 semantic rule and is copied unchanged;
+/// A second translation preserves the load when its same-block prefix has the
+/// canonical clear followed by an SA_SDST wait. A guest-authored clear without
+/// that wait receives only the missing wait, preserving its descriptor state.
+/// The clear currently has no B0-to-A0 semantic rule and is copied unchanged;
 /// this reuse condition must be revisited if such a rule is added.
 ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t, uint64_t,
                                                std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness,
                                                TranslationContext &context, const LaneLayout *,
                                                const LaneLayout *) {
-  if (inst.mnemonic() != "tensor_load_to_lds" ||
+  if (inst.amdgpu_operation() != amdgpu::Operation::TENSOR_LOAD_TO_LDS ||
       inst.size() != static_cast<int>(sizeof(cdna5::VimageMachineInst)) ||
       inst.raw_encoding() == nullptr) {
     return ExpandResult::failed(
@@ -926,10 +971,20 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
         {"Provide TENSOR_LOAD_TO_LDS VADDR1 as an ordinary eight-SGPR descriptor."});
   }
 
-  if (!tensor_load_residual(inst)) {
+  const TensorMaskClearPrefix prefix = tensor_mask_clear_prefix(inst, descriptor_base);
+  if (prefix.waited_for_sdst) {
     return ExpandResult::success(std::vector<uint32_t>(
         inst.raw_encoding(),
         inst.raw_encoding() + sizeof(cdna5::VimageMachineInst) / sizeof(uint32_t)));
+  }
+
+  if (prefix.found_clear) {
+    std::vector<uint32_t> words;
+    words.reserve(4);
+    words.push_back(build_tensor_mask_sdst_wait());
+    words.insert(words.end(), inst.raw_encoding(),
+                 inst.raw_encoding() + sizeof(cdna5::VimageMachineInst) / sizeof(uint32_t));
+    return ExpandResult::success(std::move(words));
   }
 
   Gfx1250SgprScratchRequest scratch_request;
@@ -945,7 +1000,7 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
   }
 
   std::vector<uint32_t> words;
-  words.reserve(6);
+  words.reserve(9);
   append_gfx1250_scratch_dependency_barrier(words);
 
   const TensorMaskWrapper wrapper =
@@ -954,9 +1009,11 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
   // PACK_HH forms {SRC1[31:16], SRC0[31:16]}. Inline zero as SRC0 clears
   // D1[15:0] while preserving all descriptor fields in D1[31:16].
   words.push_back(wrapper.clear);
+  words.push_back(build_tensor_mask_sdst_wait());
   words.insert(words.end(), inst.raw_encoding(),
                inst.raw_encoding() + sizeof(cdna5::VimageMachineInst) / sizeof(uint32_t));
   words.push_back(wrapper.restore);
+  words.push_back(build_tensor_mask_sdst_wait());
 
   return ExpandResult::success(std::move(words));
 }
@@ -969,7 +1026,8 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
 
 /// @brief Whether a regular-Scale compound still needs normalization or splitting.
 [[nodiscard]] bool regular_scale_residual(const Instruction &inst) {
-  if (!inst.mnemonic().starts_with("v_wmma_scale_f32_") ||
+  if (!(inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4 ||
+        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE_F32_32X16X128_F4) ||
       inst.size() != 4 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return true;
   }
@@ -1100,8 +1158,9 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
                                             std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, TranslationContext &,
                                             const LaneLayout *, const LaneLayout *) {
-  if (!inst.mnemonic().starts_with("v_wmma_scale_f32_") || inst.size() != 4 * sizeof(uint32_t) ||
-      inst.raw_encoding() == nullptr) {
+  if (!(inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4 ||
+        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE_F32_32X16X128_F4) ||
+      inst.size() != 4 * sizeof(uint32_t) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed(
         "gfx1250 scaled-WMMA SRC2 rule received an unsupported VOP3PX2 instruction");
   }
@@ -1155,7 +1214,7 @@ ExpandResult expand_gfx1250_wmma_32x16_f4(const Instruction &inst, uint32_t, uin
                                           std::span<const uint8_t>,
                                           const LivenessAnalysis &liveness, TranslationContext &,
                                           const LaneLayout *, const LaneLayout *) {
-  if (inst.mnemonic() != "v_wmma_f32_32x16x128_f4" ||
+  if (inst.amdgpu_operation() != amdgpu::Operation::V_WMMA_F32_32X16X128_F4 ||
       inst.opcode() != cdna5::kVWmmaF3232x16x128F4Vop3p ||
       inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 32x16 FP4 WMMA rule received an unsupported instruction");
@@ -1206,7 +1265,8 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   // The prefix opcode shares its structural lookup key with ordinary VOP3P
   // instructions. Decline those collisions so their own legalization can
   // diagnose them instead of reporting a misleading Scale16 error.
-  if (!inst.mnemonic().starts_with("v_wmma_scale16_f32_"))
+  if (!(inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4 ||
+        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4))
     return ExpandResult::not_handled();
   if (inst.size() != 4 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed(
@@ -1334,7 +1394,8 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
 
 /// @brief Whether the shared structural key denotes an implemented Scale16 expansion.
 [[nodiscard]] bool scale16_residual(const Instruction &inst) {
-  if (!inst.mnemonic().starts_with("v_wmma_scale16_f32_"))
+  if (!(inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4 ||
+        inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4))
     return false;
   if (inst.size() != 4 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr)
     return true;
@@ -1381,9 +1442,9 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
 /// an EXEC clear between the WMMA and its shadow, which is the case the TODO
 /// below has to rule out before it can count anything but a V_NOP.
 [[nodiscard]] int required_iu8_spacing_slots(const Instruction &inst) {
-  if (inst.mnemonic() == "v_wmma_i32_16x16x64_iu8")
+  if (inst.amdgpu_operation() == amdgpu::Operation::V_WMMA_I32_16X16X64_IU8)
     return 9;
-  if (inst.mnemonic() == "v_swmmac_i32_16x16x128_iu8")
+  if (inst.amdgpu_operation() == amdgpu::Operation::V_SWMMAC_I32_16X16X128_IU8)
     return 5;
   return 0;
 }
@@ -1762,7 +1823,8 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
                                                 const LivenessAnalysis &liveness,
                                                 TranslationContext &context, const LaneLayout *,
                                                 const LaneLayout *) {
-  if (inst.mnemonic() != "v_cvt_pk_fp8_f32" || inst.raw_encoding() == nullptr ||
+  if (inst.amdgpu_operation() != amdgpu::Operation::V_CVT_PK_FP8_F32 ||
+      inst.raw_encoding() == nullptr ||
       inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst))) {
     return ExpandResult::failed("gfx1250 E5M3 pack rule received an unsupported instruction");
   }
@@ -1916,7 +1978,8 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
                                                 const LivenessAnalysis &liveness,
                                                 TranslationContext &context, const LaneLayout *,
                                                 const LaneLayout *) {
-  if (inst.mnemonic() != "v_cvt_sr_fp8_f32" || inst.raw_encoding() == nullptr ||
+  if (inst.amdgpu_operation() != amdgpu::Operation::V_CVT_SR_FP8_F32 ||
+      inst.raw_encoding() == nullptr ||
       inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst))) {
     return ExpandResult::failed("gfx1250 stochastic E5M3 rule received an unsupported instruction");
   }
@@ -2167,7 +2230,7 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
                                              const LivenessAnalysis &liveness,
                                              TranslationContext &context, const LaneLayout *,
                                              const LaneLayout *) {
-  if (!inst.mnemonic().starts_with("v_cvt_f32_fp8") ||
+  if (!(inst.amdgpu_operation() == amdgpu::Operation::V_CVT_F32_FP8) ||
       inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 E5M3 unpack rule received an unsupported instruction");
   }
@@ -2320,7 +2383,7 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
 }
 
 [[nodiscard]] bool cvt_f32_fp8_e5m3_residual(const Instruction &inst) {
-  if (!inst.mnemonic().starts_with("v_cvt_f32_fp8") ||
+  if (!(inst.amdgpu_operation() == amdgpu::Operation::V_CVT_F32_FP8) ||
       inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return true;
   }
@@ -2329,8 +2392,8 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   return source.clamp != 0;
 }
 
-[[nodiscard]] bool cvt_fp8_f32_e5m3_residual(const Instruction &inst, std::string_view mnemonic) {
-  if (inst.mnemonic() != mnemonic ||
+[[nodiscard]] bool cvt_fp8_f32_e5m3_residual(const Instruction &inst, amdgpu::Operation operation) {
+  if (inst.amdgpu_operation() != operation ||
       inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst)) ||
       inst.raw_encoding() == nullptr) {
     return true;
@@ -2341,11 +2404,11 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
 }
 
 [[nodiscard]] bool cvt_pk_fp8_f32_e5m3_residual(const Instruction &inst) {
-  return cvt_fp8_f32_e5m3_residual(inst, "v_cvt_pk_fp8_f32");
+  return cvt_fp8_f32_e5m3_residual(inst, amdgpu::Operation::V_CVT_PK_FP8_F32);
 }
 
 [[nodiscard]] bool cvt_sr_fp8_f32_e5m3_residual(const Instruction &inst) {
-  return cvt_fp8_f32_e5m3_residual(inst, "v_cvt_sr_fp8_f32");
+  return cvt_fp8_f32_e5m3_residual(inst, amdgpu::Operation::V_CVT_SR_FP8_F32);
 }
 
 /// @brief Wrap a standalone low-precision WMMA in an A0-safe neutral scale prefix.
@@ -2361,7 +2424,7 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
                                              std::span<const uint8_t>, const LivenessAnalysis &,
                                              TranslationContext &, const LaneLayout *,
                                              const LaneLayout *) {
-  if (inst.mnemonic() != "v_wmma_f32_16x16x128_f8f6f4" ||
+  if (inst.amdgpu_operation() != amdgpu::Operation::V_WMMA_F32_16X16X128_F8F6F4 ||
       inst.opcode() != cdna5::kVWmmaF3216x16x128F8f6f4Vop3p ||
       inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed(

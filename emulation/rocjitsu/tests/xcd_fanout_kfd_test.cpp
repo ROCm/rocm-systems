@@ -63,7 +63,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi350x.json");
 using test::kernel_path;
 
 constexpr uint32_t kGpuId = 38144;
@@ -85,6 +85,7 @@ struct KfdFanoutFixture {
   std::thread sim_thread;
 
   void initialize() {
+    util::StringDiagnostic admission_diagnostic;
     ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     // Both taken before take_root(): the loader owns the tree until then, and
     // its accessors stop resolving once ownership has moved out.
@@ -104,9 +105,11 @@ struct KfdFanoutFixture {
     auto vm = std::make_unique<VirtualMachine>(std::move(soc_root));
     driver = vm->driver();
     engine->topology().set_root(std::move(vm));
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     soc->wire_backing(engine->topology());
-    engine->create();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     engine->register_as_primary();
   }
 
@@ -191,7 +194,15 @@ bool map_userptr(SimulatedKfd *driver, uint32_t pid, void *host, size_t size) {
   alloc.size = size;
   alloc.gpu_id = kGpuId;
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
-  return driver->ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc) == 0;
+  if (driver->ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc) != 0)
+    return false;
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  return driver->ioctl(pid, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) == 0 && map.n_success == 1;
 }
 
 // A fanned-out dispatch of a kernel that spills to private memory, submitted

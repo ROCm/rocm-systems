@@ -2,10 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 //! Device-accessible allocation ownership and registration.
+//!
+//! New allocations, registrations, and access changes participate in session
+//! admission. Retirement leaves checks and explicit resource release available.
 
-use super::{AllocationInfo, DeviceAccess, HostMappingPolicy, HostRegistration, MemoryKind};
+use super::{
+    AllocationInfo, DeviceAccess, HostMappingPolicy, HostRegistration, MemoryKind,
+    registered_host_page_cover,
+};
 use crate::device::Device;
 use crate::driver::{self, AddressSpaceInfo, AllocationOperations, CachedInfo};
+use crate::memory::host::host_page_size;
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
@@ -96,6 +103,10 @@ pub(crate) struct DriverAllocation<D: AllocationOperations> {
 }
 
 impl<D: AllocationOperations> DriverAllocation<D> {
+    pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        self.driver.admission().enter()
+    }
+
     pub(crate) fn new(driver: Shared<D>, inner: Owned<D::Allocation>) -> Self {
         let info = inner.cached_info();
         Self {
@@ -168,6 +179,7 @@ where
     D: AllocationOperations,
     F: for<'a> Fn(&'a Device) -> Option<(&'a Shared<D>, &'a D::DeviceState)>,
 {
+    let _operation = allocation.admit()?;
     let mut states = crate::memory::storage::try_vec_with_capacity(devices.len())?;
     for device in devices {
         let (driver, state) = state_of(device).ok_or(Error::Operation {
@@ -192,17 +204,32 @@ where
     D::set_allocation_access(allocation.driver_state_mut(), states.as_slice())
 }
 
+/// Frontend-assigned identity of one live backing in a process-local namespace.
+/// This is not a native export handle or a cross-process physical identity.
+/// The frontend keeps namespace/object pairs unique while aliases may exist.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalBackingIdentity {
+    /// Frontend namespace (for example one instance's identity).
+    pub namespace: u64,
+    /// Nonzero identity of the backing within that namespace.
+    pub object: u64,
+}
+
 /// Owns one native allocation, its exact VM dependencies, and cleanup progress.
 /// Explicit free reports failures. If final Drop cannot complete cleanup, it
 /// retains potentially reachable native backing instead of recycling its VA.
 pub struct Allocation {
     /// Concrete owner and driver selected when the allocation was created.
     pub(crate) inner: driver::AllocationState,
+    local_identity: Option<LocalBackingIdentity>,
 }
 
 impl Allocation {
     pub(crate) fn new(inner: driver::AllocationState) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            local_identity: None,
+        }
     }
 
     pub(crate) fn shares_driver_instance(&self, device: &Device) -> bool {
@@ -215,6 +242,65 @@ impl Allocation {
     #[must_use]
     pub fn info(&self) -> AllocationInfo {
         self.inner.info()
+    }
+
+    /// Borrows retained memory for a fatal diagnostic, including after a VM fault.
+    /// Unmapped private VRAM has no CPU alias and must be recorded as unavailable.
+    ///
+    /// # Errors
+    /// Rejects released, uncertain, MMIO, or unsupported backing.
+    pub fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.inner.diagnostic_memory()
+    }
+
+    /// Offset of this allocation's logical base into an identified backing.
+    /// For a page-cover registration, add the returned caller-pointer offset.
+    /// Absence means that the provider has no external backing-offset metadata.
+    #[must_use]
+    pub fn backing_offset(&self) -> Option<u64> {
+        self.inner.backing_offset()
+    }
+
+    /// Returns the frontend identity bound before this owner was published.
+    #[must_use]
+    pub fn local_backing_identity(&self) -> Option<LocalBackingIdentity> {
+        self.local_identity
+    }
+
+    /// Binds frontend identity once, before exposing this allocation or aliases.
+    /// Providers may index it for registration reuse; providers without such a
+    /// registry need no special implementation. Native export identity is separate.
+    ///
+    /// # Errors
+    /// Rejects invalid/rebound identities, released backing, or provider indexing
+    /// failure. A failure leaves the common metadata unpublished.
+    pub fn bind_local_backing_identity(
+        &mut self,
+        identity: LocalBackingIdentity,
+    ) -> Result<(), Error> {
+        let _operation = self.inner.admit()?;
+        self.check()?;
+        if identity.namespace == 0 || identity.object == 0 {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "invalid local backing identity",
+            });
+        }
+        if let Some(current) = self.local_identity {
+            return if current == identity {
+                Ok(())
+            } else {
+                Err(Error::Operation {
+                    kind: ErrorKind::InvalidArgument,
+                    detail: "backing identity cannot be rebound",
+                })
+            };
+        }
+        self.inner.publish_local_backing_identity(identity)?;
+        self.local_identity = Some(identity);
+        Ok(())
     }
 
     /// Reports allocation-owned payload still tied to a native backing handle
@@ -301,6 +387,153 @@ impl Allocation {
 }
 
 impl Device {
+    /// Returns provider guarantees for a construction on this activated device.
+    ///
+    /// # Errors
+    /// Reports an unavailable construction or native lifetime failure.
+    pub fn memory_capabilities(
+        &self,
+        request: super::MemoryCapabilityRequest<'_>,
+    ) -> Result<super::DeviceMemoryCapabilities, Error> {
+        self.driver_state
+            .memory_capabilities(&self.endpoint, request)
+    }
+
+    fn validate_allocation(
+        &self,
+        kind: MemoryKind,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        let cap = self.memory_capabilities(super::MemoryCapabilityRequest::Allocation(kind))?;
+        if !cap
+            .native
+            .supports(crate::memory::constraints::AllocationDesc { size, alignment })
+            || alignment > cap.maximum_alignment
+            || !cap.supports_range(0, size, permissions)
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "provider does not support allocation requirements",
+            });
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_registration(
+        &self,
+        peers: &[&Self],
+        address: usize,
+        policy: HostMappingPolicy,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        for device in std::iter::once(self).chain(peers.iter().copied()) {
+            let cap =
+                device.memory_capabilities(super::MemoryCapabilityRequest::Registration(policy))?;
+            if address == 0
+                || size == 0
+                || !alignment.is_power_of_two()
+                || !permissions.contains(cap.required_access)
+            {
+                return Err(Error::Operation {
+                    kind: ErrorKind::InvalidArgument,
+                    detail: "invalid host registration request",
+                });
+            }
+            if address == 0
+                || !cap.supports_range(address as u64, size, permissions)
+                || !alignment.is_power_of_two()
+                || alignment < cap.native.alignment
+                || alignment > cap.maximum_alignment
+            {
+                return Err(Error::Operation {
+                    kind: ErrorKind::Unsupported,
+                    detail: "provider does not support registration requirements",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Registers an arbitrary host byte range, including an unaligned first
+    /// byte. Returns the allocation for the complete page cover and the byte
+    /// offset of `address` from its base. Add that offset to a device address
+    /// obtained from the returned allocation.
+    ///
+    /// # Errors
+    /// Rejects an invalid page cover and propagates native registration errors.
+    ///
+    /// # Safety
+    /// The complete page cover must remain mapped and synchronized until
+    /// successful release. An ambiguous native failure extends that obligation
+    /// through process teardown.
+    #[allow(unsafe_code)]
+    pub unsafe fn register_host_range(
+        &self,
+        address: usize,
+        policy: HostMappingPolicy,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(Allocation, u64), Error> {
+        // SAFETY: The caller retains the complete page cover.
+        unsafe {
+            self.register_host_range_with_peers(&[], address, policy, size, alignment, permissions)
+        }
+    }
+
+    /// Registers a host byte range in this device and every listed peer.
+    /// The returned offset applies to each mapped device address.
+    ///
+    /// # Errors
+    /// Rejects an invalid page cover or peer set and propagates native errors.
+    ///
+    /// # Safety
+    /// The complete page cover must remain mapped and synchronized until
+    /// successful release. An ambiguous native failure extends that obligation
+    /// through process teardown.
+    #[allow(unsafe_code)]
+    pub unsafe fn register_host_range_with_peers(
+        &self,
+        peers: &[&Self],
+        address: usize,
+        policy: HostMappingPolicy,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(Allocation, u64), Error> {
+        self.validate_registration(peers, address, policy, size, alignment, permissions)?;
+        let page = usize::try_from(host_page_size()?).map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "host page size exceeds address width",
+        })?;
+        let size = usize::try_from(size).map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "host registration size exceeds address width",
+        })?;
+        let (base, cover) =
+            registered_host_page_cover(address, size, page).ok_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "invalid registered host page cover",
+            })?;
+        // SAFETY: The caller retains the cover, which is exactly the extent
+        // passed to the native registration.
+        let allocation = unsafe {
+            self.register_host_with_peers(
+                peers,
+                base,
+                policy,
+                cover as u64,
+                alignment,
+                permissions,
+            )?
+        };
+        Ok((allocation, (address - base) as u64))
+    }
+
     /// Creates owned backing and establishes this device's mapping before
     /// returning. `kind` selects owned system or local placement; borrowed
     /// caller pages must use [`Self::register_host`]. Permissions are never
@@ -323,6 +556,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_allocation(kind, size, alignment, permissions)?;
         self.driver_state
             .allocate_owned(kind, size, alignment, permissions)
     }
@@ -349,6 +583,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_registration(&[], address, policy, size, alignment, permissions)?;
         // SAFETY: The caller owns the complete page cover through successful
         // free or process teardown, as required by this public raw contract.
         let request = HostRegistration {
@@ -386,6 +621,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_allocation(kind, size, alignment, permissions)?;
         self.driver_state
             .allocate_with_peers(self, peers, kind, size, alignment, permissions)
     }
@@ -413,6 +649,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_registration(peers, address, policy, size, alignment, permissions)?;
         let request = HostRegistration {
             address,
             policy,
@@ -481,8 +718,47 @@ impl Device {
 }
 
 #[cfg(test)]
-mod rollback_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn retiring_allocation_rejects_publication_and_preserves_release() -> Result<(), Error> {
+        use crate::driver::test_driver::TestDriver;
+        use crate::session::{DriverContextLifetime, RetirementOutcome, Session};
+        use crate::topology::EndpointKind;
+
+        let id = [0x67; 16];
+        let driver = TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session)
+            .with_owned_allocation();
+        let mut session = Session::from_drivers(
+            vec![driver::DriverInstance::Test(Shared::new(driver)?)],
+            DriverContextLifetime::Session,
+        )?;
+        let device = session.activate(&session.open_endpoint(id)?)?;
+        let mut allocation = device.allocate(MemoryKind::System, 4096, 4096, DeviceAccess::READ)?;
+        session.begin_retirement()?;
+        assert!(
+            device
+                .allocate(MemoryKind::System, 4096, 4096, DeviceAccess::READ)
+                .is_err()
+        );
+        assert!(matches!(
+            allocation.bind_local_backing_identity(LocalBackingIdentity {
+                namespace: 1,
+                object: 1,
+            }),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        assert!(allocation.local_backing_identity().is_none());
+        allocation.check()?;
+        assert_ne!(allocation.device_address(&device)?, 0);
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        allocation.free()?;
+        drop(allocation);
+        drop(device);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+        Ok(())
+    }
 
     #[test]
     fn rollback_capture_keeps_first_error_and_charges_only_owned_payload() {

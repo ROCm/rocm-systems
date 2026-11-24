@@ -3,8 +3,8 @@
 
 // Host CPU/OS feature detection and public CPU-level names.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/cpu_decode.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -58,6 +58,27 @@ uint64_t rj_arith_init_cpu_flags(void) {
 #else
   return RJ_ARITH_CPU_BASELINE;
 #endif
+}
+
+uint64_t rj_arith_limit_cpu_flags(uint64_t detected_flags, uint64_t max_level) {
+  const uint64_t detected_level = detected_flags & RJ_ARITH_CPU_MASK;
+  [[maybe_unused]] const uint64_t limit = detected_level < max_level ? detected_level : max_level;
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16) || defined(RJ_ARITH_HAVE_AVX512VNNI)
+  if (limit >= RJ_ARITH_CPU_X86_64_ZEN4) {
+    return detected_flags;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (limit >= RJ_ARITH_CPU_X86_64_V4) {
+    return RJ_ARITH_CPU_X86_64_V4;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (limit >= RJ_ARITH_CPU_X86_64_V3) {
+    return RJ_ARITH_CPU_X86_64_V3;
+  }
+#endif
+  return RJ_ARITH_CPU_BASELINE;
 }
 
 // Return a stable CPU-level name, or "unknown" for an unrecognized level.

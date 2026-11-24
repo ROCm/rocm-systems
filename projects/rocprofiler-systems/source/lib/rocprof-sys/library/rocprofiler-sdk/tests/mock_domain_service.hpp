@@ -935,6 +935,7 @@ struct gmock_externals
     MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
 
     MOCK_METHOD(bool, is_active, ());
+    MOCK_METHOD(bool, is_finalized, ());
     MOCK_METHOD(bool, get_use_timemory, ());
     MOCK_METHOD(void, tracing_push_timemory, (std::string_view name));
     MOCK_METHOD(void, tracing_pop_timemory, (std::string_view name));
@@ -1131,9 +1132,6 @@ struct gmock_buffer_storage
                  std::size_t timestamp_ns, std::string event_metadata,
                  std::uint32_t device_id, std::uint8_t device_type,
                  std::string pmc_info_name, double value));
-    MOCK_METHOD(bool, get_use_timemory, ());
-    MOCK_METHOD(void, write_timemory_bundle,
-                (std::string_view name, std::uint64_t tid, std::uint64_t elapsed_ns));
     // NOLINTNEXTLINE(readability-function-size)
     MOCK_METHOD(void, store_region_sample,
                 (std::uint64_t thread_id, std::string region_name,
@@ -1244,7 +1242,6 @@ struct externals
         }
 
         [[nodiscard]] std::size_t get_gpu_agents_count() const { return 0; }
-        [[nodiscard]] std::size_t get_cpu_agents_count() const { return 0; }
     };
 
     static constexpr int k_agent_type_gpu = 1;
@@ -1398,6 +1395,8 @@ struct externals
     };
 
     static bool is_active() { return true; }
+
+    static bool is_finalized() { return true; }
 
     template <typename CategoryT>
     static void tracing_push_timemory(CategoryT, std::string_view /*name*/)
@@ -1703,25 +1702,7 @@ struct externals
         return s_storage;
     }
 
-    static std::string_view get_kernel_symbol_name(std::uint64_t /*kernel_id*/)
-    {
-        return {};
-    }
-
-    static constexpr std::uint64_t k_unknown_tid = 0xABCDABCD;
-
-    static std::optional<std::uint64_t> get_thread_info_sequent_tid(std::uint64_t tid)
-    {
-        return tid == k_unknown_tid ? std::nullopt : std::optional<std::uint64_t>{ 0 };
-    }
-
-    static bool get_use_timemory() { return g_buffer_storage_mock->get_use_timemory(); }
-
-    static void write_timemory_bundle(std::string_view name, std::uint64_t tid,
-                                      std::uint64_t elapsed_ns)
-    {
-        g_buffer_storage_mock->write_timemory_bundle(name, tid, elapsed_ns);
-    }
+    static bool get_use_timemory() { return false; }
 };
 
 // Every SdkBackend member on_tracing_api_enter/exit
@@ -1786,6 +1767,7 @@ struct mock_sdk_with_tracing : mock_sdk
 struct externals_with_tracing : externals
 {
     static bool is_active() { return g_externals_mock->is_active(); }
+    static bool is_finalized() { return g_externals_mock->is_finalized(); }
     static bool get_use_timemory() { return g_externals_mock->get_use_timemory(); }
 
     template <typename CategoryT>

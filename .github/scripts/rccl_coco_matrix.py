@@ -37,22 +37,36 @@ SCHEDULED_CATALOGUE = [
     ("nightly", "oci-rccl-perf-nightly", "oci", "perf", 720),
     ("nightly", "oci-rccl-unit-nightly", "oci", "unit", 720),
     ("nightly", "oci-nixl-nightly", "oci", "nixl", 120),
+    ("nightly", "tensorwave-rccl-perf-nightly", "tw", "perf", 720),
+    ("nightly", "tensorwave-rccl-unit-nightly", "tw", "unit", 720),
+    ("nightly", "tensorwave-rccl-gin-unit-nightly", "tw", "gin", 720),
+    ("nightly", "crusoe-rccl-perf-nightly", "crusoe", "perf", 720),
+    ("nightly", "crusoe-rccl-unit-nightly", "crusoe", "unit", 720),
+    ("nightly", "crusoe-rccl-gin-unit-nightly", "crusoe", "gin", 720),
     ("weekly", "ruby64-rccl-perf-weekly", "ruby", "perf", 2880),
     ("weekly", "oci-rccl-perf-weekly", "oci", "perf", 2880),
+    ("weekly", "tensorwave-rccl-perf-weekly", "tw", "perf", 2880),
+    ("weekly", "crusoe-rccl-perf-weekly", "crusoe", "perf", 2880),
+    ("weekly", "ruby64-rccl-tls-weekly", "ruby", "unit", 360),
     ("monthly", "ruby64-rccl-perf-monthly", "ruby", "perf", 2880),
     ("monthly", "oci-rccl-perf-monthly", "oci", "perf", 2880),
-    # Crusoe: job configs exist in tRCCL, but there is no crusoe label in
-    # rccl-cluster-runners.allowlist yet.
-    # ("nightly", "crusoe-rccl-perf-nightly", "crusoe", "perf", 720),
-    # ("nightly", "crusoe-rccl-unit-nightly", "crusoe", "unit", 720),
-    # ("weekly", "crusoe-rccl-perf-weekly", "crusoe", "perf", 2880),
-    # ("monthly", "crusoe-rccl-perf-monthly", "crusoe", "perf", 2880),
+    ("monthly", "tensorwave-rccl-perf-monthly", "tw", "perf", 2880),
+    ("monthly", "crusoe-rccl-perf-monthly", "crusoe", "perf", 2880),
 ]
 
 SCHEDULED_RUNNERS = {
     "ruby": "ruby-linux-slurm-scale-runner",
     "oci": "oci-linux-slurm-scale-runner",
-    # "crusoe": "<crusoe runner label>",
+    "tw": "tw-linux-slurm-scale-runner",
+    "crusoe": "crusoe-linux-slurm-scale-runner",
+}
+
+# Clusters whose runner workspace is not mounted on the compute nodes.
+SCHEDULED_SHARED_SCRATCH = {
+    "ruby": "",
+    "oci": "",
+    "tw": "/share_nfs/coco/ci-scratch",
+    "crusoe": "/shared_nfs/coco/ci-scratch",
 }
 
 
@@ -65,6 +79,7 @@ def scheduled_runs(mode: str) -> None:
         {
             "job": job,
             "runner": SCHEDULED_RUNNERS[cluster],
+            "shared_scratch": SCHEDULED_SHARED_SCRATCH[cluster],
             "timeout": timeout,
             "group": f"rccl-coco-{entry_mode}-{cluster}-{kind}",
         }

@@ -188,12 +188,15 @@ jobs:
         env:
           TSAN_OPTIONS: exitcode=1:halt_on_error=1
         run: |
+          # The concurrent-dispatch seed runs four scheduling modes. Under TSan,
+          # 32 workers calibrating it together can exceed AFL++'s default 1s limit.
           python3 rocm-systems/.github/scripts/run_rocjitsu_afl_campaign.py \
             "${ROCJITSU_TSAN_BUILD_DIR}/fuzz/multiplexer/rj_fuzz" \
             "${ROCJITSU_SEED_DIR}" \
             "${ROCJITSU_TSAN_FINDINGS_DIR}" \
             "${ROCJITSU_FUZZ_CAMPAIGN_SECONDS}" \
-            "${ROCJITSU_FUZZ_WORKERS}"
+            "${ROCJITSU_FUZZ_WORKERS}" \
+            --input-timeout-ms 5000
 
       - name: Collect crashes and hangs
         id: findings

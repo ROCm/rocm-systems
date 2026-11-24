@@ -6,8 +6,8 @@
 # Upstream builds with meson and installs no pkg-config file, so rather than
 # requiring meson and ninja we compile its handful of sources directly. The
 # source list mirrors lib/meson.build; keep the two in step when bumping the
-# pinned tag. json-c is the library's only dependency and is a CMake project, so
-# it is fetched the same way.
+# pinned revision. json-c is the library's only dependency and is a CMake
+# project, so it is fetched the same way.
 #
 # Everything lands under FETCHCONTENT_BASE_DIR (third_party/ by default),
 # matching how googletest and flatbuffers are handled.
@@ -62,7 +62,8 @@ set(DISABLE_WERROR ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     libvfio-user
     GIT_REPOSITORY https://github.com/nutanix/libvfio-user.git
-    GIT_TAG v0.8
+    # Upstream #885 preserves upper address bits of small 64-bit BARs.
+    GIT_TAG 5b9c7220647e45a0bbfc2a22bef05bbfd56e5742
 )
 
 # json-c reads two variables that belong to the enclosing project:
@@ -76,6 +77,7 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 # libvfio-user ships no CMakeLists.txt, so MakeAvailable only fetches it; the
 # targets below are ours.
 FetchContent_MakeAvailable(json-c libvfio-user)
+
 set(BUILD_SHARED_LIBS ${_rj_saved_build_shared_libs} CACHE BOOL "" FORCE)
 set(BUILD_TESTING ${_rj_saved_build_testing} CACHE BOOL "" FORCE)
 unset(_rj_saved_build_shared_libs)

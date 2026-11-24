@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/data_types.h"
 #include "util/host_target.h"
 
@@ -26,7 +27,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <stdexcept>
 #include <type_traits>
 
 #if RJ_HOST_ARCH_X86
@@ -242,24 +242,25 @@ inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
 } // namespace detail
 
 /// @brief Legacy NaN priority, MODE.IEEE handling and qualified median zero ordering.
-inline minmax::LegacyPolicy legacy_minmax_policy(rj_code_arch_t arch, bool ieee_mode) noexcept {
+inline minmax::LegacyPolicy legacy_minmax_policy(rocjitsu::IsaFamily arch,
+                                                 bool ieee_mode) noexcept {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return {.prefer_first_nan = true, .ieee = ieee_mode, .ordered_zero_median = true};
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     // CDNA follows the ISA rules for two-NaN priority and median zero ties.
     return {.ieee = ieee_mode};
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_INVALID:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Invalid:
     break;
   }
   assert(false && "legacy min/max policy requires a legacy AMDGPU architecture");
@@ -267,14 +268,14 @@ inline minmax::LegacyPolicy legacy_minmax_policy(rj_code_arch_t arch, bool ieee_
 }
 
 /// @brief Whether floating operations with exception support quiet signaling NaNs.
-inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
+inline bool quiets_nan(rocjitsu::IsaFamily arch, bool ieee_mode) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
 }
 
 /// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
 /// @details Raw half decoding preserves signaling NaNs. The caller flushes the
 /// half under MODE before widening it; this applies target-specific NaN quieting.
-inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
+inline uint32_t cvt_f32_f16(float source, rocjitsu::IsaFamily arch, bool ieee_mode) {
   uint32_t bits = std::bit_cast<uint32_t>(source);
   const uint32_t magnitude = bits & 0x7fffffffu;
   if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
@@ -282,12 +283,37 @@ inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
   return bits;
 }
 
+/// @brief Pack two rounded F16 results, applying the destination denormal mode to each half.
+/// @details gfx1250 flushes the exact subnormal 2^-20. At the normal boundary,
+/// the packed conversion models tininess using the rounded FP16 encoding.
+template <typename V> inline V pack_f16_results(V low, V high, uint32_t denorm_mode) {
+  const auto output = output_denormal::Policy::make(denorm_mode);
+  return output_denormal::flush_output<fp_format::F16>(low, output) |
+         (output_denormal::flush_output<fp_format::F16>(high, output) << 16);
+}
+
+/// @brief Convert one V_CVT_SR_PK_F16_F32 component with its half of the seed.
+inline uint16_t cvt_sr_pk_f16_f32(uint32_t bits, uint16_t seed, bool fp16_ovfl) {
+  // CDNA5 ISA 15.14, p. 646 adds the seed directly to the F32 bits. For 1.0,
+  // 0x3f800000 + 0x8000 gives 0x3f808000, or FP16 0x3c04. gfx1250 returns 0x3c00.
+  // Use the CDNA4 single-result helper util::f32_to_f16_sr_mode with the high 13
+  // seed bits. The exact-input capture also permits the low 13 bits and leaves
+  // the packed opcode's output denormal behavior unmeasured.
+  return util::f32_to_f16_sr_mode(std::bit_cast<float>(bits), uint32_t{seed} << 16, fp16_ovfl);
+}
+
+/// @brief Convert one V_CVT_SR_PK_BF16_F32 component with its 16-bit addend.
+inline uint16_t cvt_sr_pk_bf16_f32(uint32_t bits, uint16_t addend, bool fp16_ovfl) {
+  // The single-result converter consumes the high half of a 32-bit seed.
+  return util::f32_to_bf16_sr_mode(std::bit_cast<float>(bits), uint32_t{addend} << 16, fp16_ovfl);
+}
+
 /// @brief Return the OMOD value supported by an ordinary floating-point result.
-inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
+inline uint32_t effective_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
                                uint32_t omod) {
   if (omod == 0)
     return 0;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
     return omod;
   return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
 }
@@ -297,12 +323,13 @@ inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool i
 /// OMOD on the promoted VOP3 form of V_PK_FMAC_F16, subject to their ordinary
 /// output-denormal and MODE.IEEE restrictions. GFX12 and gfx1250 allow OMOD on
 /// non-packed F16 results regardless of output-denormal mode.
-inline uint32_t effective_f16_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
+inline uint32_t effective_f16_omod(rocjitsu::IsaFamily arch, uint32_t denorm_mode, bool ieee_mode,
                                    bool packed_result, uint32_t omod) {
   if (omod == 0)
     return 0;
-  if (packed_result && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+  if (packed_result &&
+      (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+       arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5))
     return 0;
   return effective_omod(arch, denorm_mode, ieee_mode, omod);
 }
@@ -399,12 +426,11 @@ inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float mu
 /// which is needed when the rounded F64 value lands on a BF16 boundary or midpoint.
 inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float addend,
                                 uint32_t round_mode, bool clamp, bool clamp_nan_to_zero) {
-  detail::ScopedFenv nearest_environment(0);
   return detail::fma_f32_to_bf16_nearest_environment(multiplicand, multiplier, addend, round_mode,
                                                      clamp, clamp_nan_to_zero);
 }
 
-/// @brief Isolate scalar or SIMD arithmetic from the caller's rounding and flush controls.
+/// @brief Guest rounding through the host rounding mode, for the legacy paths that still use it.
 using ScopedEnvironment = detail::ScopedFenv;
 
 enum class PackedF32Op { ADD, MUL, FMA };
@@ -416,10 +442,10 @@ enum class PackedBinaryOp { ADD, MUL, MIN, MAX, MINIMUM, MAXIMUM };
 /// selected denormals even when MODE disables output denormals.
 template <bool Minimum, typename V>
 inline V packed_minmax_f16(V a_bits, V b_bits, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+                           bool clamp_nan_to_zero, rocjitsu::IsaFamily arch, bool ieee_mode) {
   const auto input_policy = input_denormal::Policy::make(denorm_mode);
   V result;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
     using Selection = std::conditional_t<Minimum, minmax::MinNum, minmax::MaxNum>;
     result = minmax::evaluate<fp_format::F16, Selection>(input_policy, a_bits, b_bits);
   } else {
@@ -434,7 +460,7 @@ inline V packed_minmax_f16(V a_bits, V b_bits, uint32_t denorm_mode, bool clamp,
 /// @brief Packed F16 binary arithmetic uses the FP16/64 MODE controls.
 inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uint16_t b_bits,
                                   uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                                  bool fp16_ovfl, bool clamp_nan_to_zero, rj_code_arch_t arch,
+                                  bool fp16_ovfl, bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
                                   bool ieee_mode) {
   if (operation == PackedBinaryOp::MIN)
     return packed_minmax_f16<true>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
@@ -442,7 +468,6 @@ inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uin
   if (operation == PackedBinaryOp::MAX)
     return packed_minmax_f16<false>(uint32_t(a_bits), uint32_t(b_bits), denorm_mode, clamp,
                                     clamp_nan_to_zero, arch, ieee_mode);
-  detail::ScopedFenv nearest_environment(0);
   a_bits = detail::flush_input_f16(a_bits, denorm_mode);
   b_bits = detail::flush_input_f16(b_bits, denorm_mode);
   const bool a_nan = (a_bits & 0x7fffu) > 0x7c00u;
@@ -492,7 +517,8 @@ inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uin
 /// @brief Select three packed F16 operands, applying output controls only to the final result.
 inline uint16_t packed_select3_f16(PackedBinaryOp operation, uint16_t first, uint16_t second,
                                    uint16_t third, uint32_t denorm_mode, bool clamp,
-                                   bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+                                   bool clamp_nan_to_zero, rocjitsu::IsaFamily arch,
+                                   bool ieee_mode) {
   const uint16_t pair = packed_binary_f16(operation, first, second, 0, denorm_mode | 2u, false,
                                           false, false, arch, ieee_mode);
   return packed_binary_f16(operation, pair, third, 0, denorm_mode, clamp, false, clamp_nan_to_zero,
@@ -501,7 +527,6 @@ inline uint16_t packed_select3_f16(PackedBinaryOp operation, uint16_t first, uin
 
 /// @brief Packed BF16 numeric min/max preserve denormals and order signed zeros explicitly.
 inline uint16_t packed_select_bf16(float first, float second, bool minimum) {
-  ScopedEnvironment environment(0);
   const float selected = first == second
                              ? (minimum ? (std::signbit(first) ? first : second)
                                         : (std::signbit(first) ? second : first))
@@ -522,7 +547,7 @@ inline uint16_t clamp_bf16(uint16_t value, bool clamp, bool clamp_nan_to_zero) {
 }
 
 /// @brief F32 FMA with architectural NaN selection in the active FP environment.
-inline float fma_f32(float a, float b, float c, rj_code_arch_t arch, bool ieee_mode,
+inline float fma_f32(float a, float b, float c, rocjitsu::IsaFamily arch, bool ieee_mode,
                      uint32_t denorm_mode, bool force_output_flush = false) {
 #if defined(__clang__)
 #pragma STDC FENV_ACCESS ON
@@ -552,6 +577,7 @@ inline float fma_f32(float a, float b, float c, rj_code_arch_t arch, bool ieee_m
       // Detect tininess after rounding the 24-bit significand, before packing
       // it into F32's exponent range. Subnormal F32 rounding has a wider step
       // and can otherwise promote a still-tiny intermediate to minimum normal.
+      // The caller's scope installed the guest rounding; the residual needs nearest-even.
       const int rounding = std::fegetround();
       detail::ScopedFenv environment(0);
       volatile double wide_left = left;
@@ -585,7 +611,7 @@ inline float fma_f32(float a, float b, float c, rj_code_arch_t arch, bool ieee_m
 /// @brief Packed F32 operations use FP32 MODE, independently of the host environment.
 inline uint32_t packed_f32(float first, float second, float third, PackedF32Op operation,
                            uint32_t round_mode, uint32_t denorm_mode, bool clamp,
-                           bool clamp_nan_to_zero, rj_code_arch_t arch, bool ieee_mode) {
+                           bool clamp_nan_to_zero, rocjitsu::IsaFamily arch, bool ieee_mode) {
   detail::ScopedFenv environment(round_mode);
   auto flush = [](float value) {
     const uint32_t bits = std::bit_cast<uint32_t>(value);
@@ -644,15 +670,16 @@ enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 /// @details FCMPSWAP flushes only comparison inputs and selects the original source or memory
 /// bits. RDNA3/3.5 ISA 13.2 and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 instead specify flushing
 /// the CompareStore result. Captures on gfx1010/gfx1030/gfx1100 LDS (F32/F64) and gfx1100
-/// global F32 contradict that rule on those paths. CDNA1-4 and RDNA3.5 LDS F32/F64,
-/// RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32 inherit this policy
-/// without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
-/// Every capture used FP_DENORM 0 or 3, endpoints that cannot separate input-controlled
-/// from output-controlled flushing. Denormal memory compared against +0 with a normal
-/// replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
+/// global F32 contradict that rule on those paths, as do MI350X LDS F32/F64. CDNA1-3 and
+/// RDNA3.5 LDS F32/F64, RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32
+/// inherit this policy without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions
+/// in this tree. Every RDNA capture used FP_DENORM 0 or 3, endpoints that cannot separate
+/// input-controlled from output-controlled flushing. Denormal memory compared against +0 with a
+/// normal replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
-                   uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false) {
+                   uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false,
+                   bool minmax_snan_wins = false) {
   static_assert(std::is_same_v<Bits, uint32_t> || std::is_same_v<Bits, uint64_t>);
   using Float = std::conditional_t<sizeof(Bits) == 4, float, double>;
   constexpr Bits kSign = Bits{1} << (sizeof(Bits) * 8 - 1);
@@ -689,25 +716,31 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     if ((old_input & ~kSign) == kExponent && (source_input & ~kSign) == kExponent &&
         ((old_input ^ source_input) & kSign))
       return kSign | kExponent | kQuiet;
-    detail::ScopedFenv nearest_environment(0);
     volatile Float old_value = std::bit_cast<Float>(old_input);
     volatile Float source_value = std::bit_cast<Float>(source_input);
     const Bits result = std::bit_cast<Bits>(static_cast<Float>(old_value + source_value));
     return (denorm_mode & 2u) ? result : flush(result);
   }
 
-  if (operation != ScalarAtomicOp::FMIN && operation != ScalarAtomicOp::FMAX)
-    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
+  assert((operation == ScalarAtomicOp::FMIN || operation == ScalarAtomicOp::FMAX) &&
+         "unsupported scalar floating-point atomic operation");
 
-  // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
-  // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
+  // legacy_minmax is the emulator's current CDNA1-2 / RDNA1-3.5 policy: return the original
+  // selected bits and propagate SNaNs. MI300A, MI350X and gfx1100 DS hardware instead return
+  // the flushed winner and a quieted SNaN, the data operand's first; CDNA5 / RDNA4 flush too.
   const Bits old_result = legacy_minmax ? old_bits : old_input;
   const Bits source_result = legacy_minmax ? source_bits : source_input;
+  auto is_snan = [&](Bits bits) { return is_nan(bits) && !(bits & kQuiet); };
   if (legacy_minmax) {
-    if (is_nan(old_input) && !(old_input & kQuiet))
+    if (is_snan(old_input))
       return old_input | kQuiet;
-    if (is_nan(source_input) && !(source_input & kQuiet))
+    if (is_snan(source_input))
       return source_input | kQuiet;
+  } else if (minmax_snan_wins) {
+    if (is_snan(source_input))
+      return source_input | kQuiet;
+    if (is_snan(old_input))
+      return old_input | kQuiet;
   }
   if (is_nan(old_input))
     return is_nan(source_input) ? (legacy_minmax ? old_input : source_input) | kQuiet
@@ -730,7 +763,6 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
 /// caller supplies DS input/output denormal controls, or 3 for no flushing.
 inline uint32_t atomic_add_packed_16(uint32_t old_val, uint32_t src_val, bool bf16,
                                      uint32_t denorm_mode, bool source_nan_first = false) {
-  detail::ScopedFenv nearest_environment(0);
   const uint16_t exponent_mask = bf16 ? 0x7f80u : 0x7c00u;
   auto flush_denorm = [&](uint16_t bits) -> uint16_t {
     return (bits & exponent_mask) == 0 ? bits & 0x8000u : bits;
@@ -877,7 +909,7 @@ inline Float arithmetic(Float lhs, Float rhs, Float addend, uint32_t round_mode,
 /// @brief F32 arithmetic combines MODE with architectural NaN and tininess policies.
 template <Arithmetic operation>
 inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
-                        uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
+                        uint32_t denorm_mode, rocjitsu::IsaFamily arch, bool ieee_mode,
                         bool force_output_flush = false) {
   static_assert(operation == Arithmetic::ADD || operation == Arithmetic::MUL ||
                 operation == Arithmetic::FMA || operation == Arithmetic::FMA_DX9_ZERO);
@@ -918,7 +950,7 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 /// Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets with
 /// V_MULLIT_F32 inherit these rules without measurement.
 inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
-                           uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
+                           uint32_t denorm_mode, rocjitsu::IsaFamily arch, bool ieee_mode,
                            bool force_output_flush) {
   using F32 = fp_format::F32;
   constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
@@ -960,9 +992,8 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
 
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
 /// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
-/// afterward. SDWA supplies omod here to keep the emulator's pre-round scaling,
-/// which gfx1030 SDWA MUL_F16 and ADD_F16 captures contradict; see
-/// output_modifier.h.
+/// afterward. CDNA SDWA supplies omod for pre-round scaling here. GFX10 SDWA
+/// applies the modifier after arithmetic rounding, like VOP3.
 /// The unscoped form leaves the nearest-even environment to the caller, keeping
 /// the same rounding, output flushing and FP16_OVFL handling.
 inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode,
@@ -975,28 +1006,17 @@ inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode
   return finalize_omod_f16(result, omod);
 }
 
-/// @brief finish_arithmetic_f16_unscoped under its own nearest-even environment.
-/// @details Installs the environment and delegates, for callers that own no scope.
+/// @brief finish_arithmetic_f16_unscoped for callers that own no guest-rounding scope.
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
-  detail::ScopedFenv environment(0);
   return finish_arithmetic_f16_unscoped(value, round_mode, denorm_mode, fp16_ovfl, omod);
 }
 
 /// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.
-/// @details Requires nearest rounding and preserved host inputs/outputs.
+/// @details Requires nearest rounding and preserved inputs/outputs; the host is in its
+/// default FP environment (docs/arith-design.md).
 inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
-  if (denorm_mode != 3 || round_mode != 0 || std::fegetround() != FE_TONEAREST)
-    return false;
-#if RJ_HOST_ARCH_X86
-  // MXCSR rounding can differ from the x87 rounding reported by fegetround().
-  return (_mm_getcsr() & (_MM_ROUND_MASK | (1u << 6) | (1u << 15))) == 0;
-#elif RJ_HOST_ARCH_AARCH64
-  return (detail::read_fpcr() & ((uint64_t{1} << 0) | (uint64_t{1} << 19) | (uint64_t{1} << 24))) ==
-         0;
-#else
-  return false;
-#endif
+  return denorm_mode == 3 && round_mode == 0;
 }
 
 /// @brief Round an F16 FMA significand before testing tininess and packing the exponent.
@@ -1070,6 +1090,8 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
   const double multiplicand = static_cast<double>(util::f16_to_f32(src0));
   const double multiplier = static_cast<double>(util::f16_to_f32(src1));
   const double addend = static_cast<double>(util::f16_to_f32(src2));
+  // Back to nearest-even: the CDNA2 MAD scalar fallback calls this inside its
+  // guest-rounding scope.
   detail::ScopedFenv environment(0);
   // The product is exact in F64, but a tiny product added to a large F16
   // accumulator can still exceed F64's significand range.
@@ -1158,8 +1180,12 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
 
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
 /// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
+/// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
+/// returned without entering the host floating-point environment.
 inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp,
                            bool clamp_nan_to_zero) {
+  if (omod == 0 && !clamp)
+    return value;
   double result;
   {
     detail::ScopedFenv environment(round_mode);
@@ -1197,6 +1223,16 @@ inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
   if ((bits & 0x7fffffffu) > 0x7f800000u)
     return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
   return util::f32_to_f16_mode(value, fp16_ovfl);
+}
+
+/// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
+/// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.
+inline double widen_scalef32_source(uint32_t bits, uint32_t denorm_mode) {
+  const uint32_t magnitude = bits & 0x7fffffffu;
+  if (magnitude >= 0x00800000u)
+    return static_cast<double>(std::bit_cast<float>(bits));
+  const double value = (denorm_mode & 1u) ? std::ldexp(static_cast<double>(magnitude), -149) : 0.0;
+  return (bits >> 31) ? -value : value;
 }
 
 struct FrexpF32Result {

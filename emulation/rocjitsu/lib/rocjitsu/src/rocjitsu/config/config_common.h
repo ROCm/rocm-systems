@@ -7,8 +7,10 @@
 #ifndef ROCJITSU_CONFIG_CONFIG_COMMON_H_
 #define ROCJITSU_CONFIG_CONFIG_COMMON_H_
 
+#include "rocjitsu/config/json_fields.h"
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
@@ -27,6 +29,33 @@
 
 namespace rocjitsu {
 namespace config {
+
+/// Parse arithmetic settings through the configuration diagnostic channel.
+inline util::FailureOr<amdgpu::ArithmeticPolicy>
+parse_arithmetic_config(std::string_view semantics, util::DiagnosticEmitter emit_error,
+                        std::string_view field = "arithmetic.semantics") {
+  auto policy = amdgpu::parse_arithmetic_policy(semantics);
+  if (policy.failed())
+    return emit_error.emit()
+           << field << ": Arithmetic semantics must be loose, bit_exact_empirical_allow_loose, "
+           << "bit_exact_empirical_no_fp_status, bit_exact_empirical, or compatibility";
+  return policy;
+}
+
+/// Decode policy, using Compatibility for omitted configuration/checkpoint fields.
+inline util::FailureOr<amdgpu::ArithmeticPolicy>
+arithmetic_from_fb(const fb::ArithmeticPolicyConfig *policy, util::DiagnosticEmitter emit_error) {
+  return parse_arithmetic_config(policy && policy->semantics() ? policy->semantics()->string_view()
+                                                               : "compatibility",
+                                 emit_error);
+}
+
+/// @brief Serialize the effective per-CU policy using its configuration name.
+inline flatbuffers::Offset<fb::ArithmeticPolicyConfig>
+arithmetic_to_fb(flatbuffers::FlatBufferBuilder &builder, amdgpu::ArithmeticPolicy policy) {
+  return fb::CreateArithmeticPolicyConfig(
+      builder, builder.CreateString(amdgpu::arithmetic_semantics_name(policy.semantics)));
+}
 
 /// @brief Launch override: disable checks, enable ordinary checks, or also enable XCNT.
 enum class WaitChecking { Off, On, All };
@@ -98,6 +127,21 @@ auto with_parsed_simulation_config_json(const std::string &json, const std::stri
   const fb::SimulationConfig *config =
       flatbuffers::GetRoot<fb::SimulationConfig>(parser.builder_.GetBufferPointer());
   return std::forward<Callback>(callback)(config);
+}
+
+/// @brief Reject unknown arithmetic fields without restricting unrelated config objects.
+inline Result validate_arithmetic_config_json(const std::string &json,
+                                              const std::string &schema_text,
+                                              util::DiagnosticEmitter emit_error) {
+  auto policy = json_top_level_field(json, "arithmetic", emit_error);
+  if (policy.failed())
+    return Result::failure();
+  flatbuffers::Parser parser;
+  if (!parser.Parse(schema_text.c_str()) ||
+      !parser.SetRootType("rocjitsu.fb.ArithmeticPolicyConfig") ||
+      !parser.Parse(policy.value().c_str()))
+    return emit_error.emit() << "Invalid arithmetic config: " << parser.error_;
+  return Result::success();
 }
 
 /// @brief Convert a FlatBuffers PCI bus table into the runtime config form.

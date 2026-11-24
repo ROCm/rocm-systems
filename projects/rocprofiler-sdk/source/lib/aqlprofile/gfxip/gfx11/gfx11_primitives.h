@@ -115,11 +115,6 @@ public:
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_DROPPED_CNTR);
     static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
-    static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
-        Register reg = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
-        reg.offset -= UCONFIG_SPACE_START;
-        return reg;
-    }();
     static const uint32_t     TT_BUFF_ALIGN_SHIFT = 12;
     static constexpr Register GUS_PERFCOUNTER_RSLT_CNTL_ADDR =
         REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_RSLT_CNTL);
@@ -650,7 +645,7 @@ public:
 
     // Indicate the different TT messages/tokens that should be enabled/logged
     // Indicate the different TT tokens that specify register operations to be logged
-    static uint32_t sqtt_token_mask_on_value(bool)
+    static uint32_t sqtt_token_mask_on_value(bool, bool)
     {
 #if SQTT_PRIM_ENABLED
         uint32_t sq_thread_trace_token_mask =

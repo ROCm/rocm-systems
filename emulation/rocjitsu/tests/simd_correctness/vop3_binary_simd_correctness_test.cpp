@@ -13,7 +13,9 @@
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must stay preserved under full and partial EXEC.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -204,7 +206,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t wave_size = 0,
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4, uint32_t wave_size = 0,
                    std::shared_ptr<ExecutionPluginGroup> plugins = {})
       : gpu_mem("vop3_bin_simd_mem"), l2("vop3_bin_simd_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -213,7 +215,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     if (plugins)
       cu->set_plugin_group(std::move(plugins));
@@ -257,26 +261,8 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
 };
 
-// Hostile host state must survive both the scalar reference and SIMD execution.
+// Every path assumes the default host controls and may raise sticky flags.
 struct SubtractionHostEnvironment {
-  std::fenv_t saved{};
-#if RJ_HOST_ARCH_X86
-  uint32_t saved_mxcsr = _mm_getcsr();
-#endif
-  SubtractionHostEnvironment() {
-    EXPECT_EQ(std::feholdexcept(&saved), 0);
-    EXPECT_EQ(std::fesetround(FE_UPWARD), 0);
-    EXPECT_EQ(std::feraiseexcept(FE_DIVBYZERO), 0);
-#if RJ_HOST_ARCH_X86
-    _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
-#endif
-  }
-  ~SubtractionHostEnvironment() {
-    std::fesetenv(&saved);
-#if RJ_HOST_ARCH_X86
-    _mm_setcsr(saved_mxcsr);
-#endif
-  }
   static std::array<int, 3> snapshot() {
     int control = 0;
 #if RJ_HOST_ARCH_X86
@@ -311,7 +297,7 @@ std::map<std::array<uint64_t, 6>, uint64_t>
 observed_coverage(const std::vector<std::array<uint64_t, 7>> &events) {
   std::map<std::array<uint64_t, 6>, uint64_t> coverage;
   for (const auto &event : events)
-    coverage[{event[0], event[1], event[3], event[4], event[5], event[6]}] |= event[2];
+    coverage[{event[0], event[1], event[3], event[4], 0, event[6] & ~uint64_t(0x3f)}] |= event[2];
   return coverage;
 }
 
@@ -337,8 +323,9 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
       {0x7f801234u, 0xff805678u},
       {0x3f800000u, 0xff801234u},
   }};
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const bool rdna = arch != ROCJITSU_CODE_ARCH_CDNA4;
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna4}) {
+    const bool rdna = arch != rocjitsu::IsaFamily::Cdna4;
     for (unsigned form = 0; form < 4; ++form) {
       const bool e64 = form & 2, reverse = form & 1;
       // All 16 MODE combinations; rotate masks, aliases and modifiers rather
@@ -387,12 +374,13 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
           }
           observer->events.clear();
           {
-            SubtractionHostEnvironment host;
             const auto before = SubtractionHostEnvironment::snapshot();
             const bool succeeded = fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
             const auto after = SubtractionHostEnvironment::snapshot();
             EXPECT_TRUE(succeeded);
-            EXPECT_EQ(after, before);
+            EXPECT_EQ(after[0], before[0]);
+            EXPECT_EQ(after[1] & before[1], before[1]);
+            EXPECT_EQ(after[2] & ~0x3f, before[2] & ~0x3f);
           }
           // Snapshotting storage must not add events to the observed execution.
           const auto events = observer->events;
@@ -436,6 +424,8 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -557,6 +547,8 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};

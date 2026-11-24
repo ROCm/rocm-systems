@@ -21,6 +21,7 @@ Imported by every functional/unit leaf test and by all three runners
 """
 
 import contextlib
+import fnmatch
 import importlib.util
 import inspect
 import io
@@ -183,6 +184,26 @@ def cli_search_order(source_dir, prefer_install=False):
     return (source_dir, amdsmi_path)
 
 
+def amdsmi_interface_path(start_file: str) -> pathlib.Path:
+    """Return the ``amdsmi_interface.py`` source for tests that parse it as text.
+
+    A checkout carries it in ``py-interface/``; an install ships it inside the ``amdsmi``
+    package under ``share/amd_smi`` and has no ``py-interface`` directory. Priority follows
+    ``cli_search_order()``: a pinned install wins, otherwise the checkout does.
+    """
+    checkout = [
+        parent / "py-interface" / "amdsmi_interface.py"
+        for parent in pathlib.Path(start_file).resolve().parents
+    ]
+    installed = [pathlib.Path(amdsmi_path) / "amdsmi" / "amdsmi_interface.py"]
+    candidates = installed + checkout if amdsmi_path_is_explicit else checkout + installed
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    searched = "\n  ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"amdsmi_interface.py not found; searched:\n  {searched}")
+
+
 def generated_version_stub(version="0.0.0+source"):
     """Stub entry for the CLI's ``_version``, or empty when the real one resolves.
 
@@ -192,7 +213,9 @@ def generated_version_stub(version="0.0.0+source"):
     stub mapping, or into ``sys.modules`` directly -- it is empty whenever the
     real module is importable, so it never shadows a build. No test reads it.
     """
-    if importlib.util.find_spec("_version") is not None:
+    # find_spec raises ValueError on a sys.modules entry with no __spec__, which an
+    # earlier module's import-time stub leaves behind until its tearDownModule runs.
+    if "_version" in sys.modules or importlib.util.find_spec("_version") is not None:
         return {}
     return {"_version": fake_module("_version", __version__=version)}
 
@@ -452,7 +475,13 @@ def build_type_lists():
     link_types = []
     for member in amdsmi.AmdSmiLinkType:
         cond = PASS
-        if member.name in ["AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN"]:
+        # NUMA and XNUMA only relate a NIC to a GPU, so the GPU nearest-search rejects them.
+        if member.name in [
+            "AMDSMI_LINK_TYPE_NOT_APPLICABLE",
+            "AMDSMI_LINK_TYPE_UNKNOWN",
+            "AMDSMI_LINK_TYPE_NUMA",
+            "AMDSMI_LINK_TYPE_XNUMA",
+        ]:
             cond = FAIL
         link_types.append((member.name, amdsmi.AmdSmiLinkType(member.value), cond))
 
@@ -756,19 +785,24 @@ def _parse_x_pattern(argv=None):
     return None
 
 
+def _filter_suite(suite, keep):
+    """Return a copy of *suite* holding only the tests whose id satisfies *keep*."""
+    filtered = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            filtered.addTest(_filter_suite(test, keep))
+        elif keep(test.id()):
+            filtered.addTest(test)
+    return filtered
+
+
 def _filter_suite_exclude(suite, pattern):
     """Return a copy of *suite* with every test whose id contains *pattern* removed.
 
     unittest's ``-k`` can only include matching tests; this provides the inverse so
     callers can run everything except, e.g., the performance suites (``-x performance``).
     """
-    filtered = unittest.TestSuite()
-    for test in suite:
-        if isinstance(test, unittest.TestSuite):
-            filtered.addTest(_filter_suite_exclude(test, pattern))
-        elif pattern not in test.id():
-            filtered.addTest(test)
-    return filtered
+    return _filter_suite(suite, lambda test_id: pattern not in test_id)
 
 
 def run_test_dir(subdir, title, top_level_dir):
@@ -800,6 +834,13 @@ def run_test_dir(subdir, title, top_level_dir):
         pattern="test_*.py",
         top_level_dir=top_level_dir,
     )
+    # testNamePatterns is Python 3.7+; 3.6 ignores it and would run every test.
+    if k_pattern and sys.version_info < (3, 7):
+        suite = _filter_suite(
+            suite,
+            lambda test_id: test_id.startswith("unittest.loader.")
+            or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"),
+        )
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
     # -k), e.g. run everything but the perf suites with `-x performance`.

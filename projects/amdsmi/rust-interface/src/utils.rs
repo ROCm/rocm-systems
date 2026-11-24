@@ -9,10 +9,11 @@ pub use crate::amdsmi_wrapper::{AmdsmiEventHandleT, AmdsmiProcessorHandle, Amdsm
 // Re-export all the enums type
 pub use crate::amdsmi_wrapper::{
     AmdsmiCachePropertyTypeT, AmdsmiCardFormFactorT, AmdsmiClkLimitTypeT, AmdsmiClkTypeT,
-    AmdsmiComputePartitionTypeT, AmdsmiCounterCommandT, AmdsmiDevPerfLevelT, AmdsmiEventGroupT,
+    AmdsmiComputePartitionTypeT, AmdsmiCounterCommandT, AmdsmiDevPerfLevelT, AmdsmiDriverPackageT,
+    AmdsmiEventGroupT,
     AmdsmiEventTypeT, AmdsmiEvtNotificationTypeT, AmdsmiFreqIndT, AmdsmiFwBlockT, AmdsmiGpuBlockT,
     AmdsmiInitFlagsT, AmdsmiLinkStatusT, AmdsmiLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
-    AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
+    AmdsmiNicHealthStateT, AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
     AmdsmiTemperatureMetricT, AmdsmiTemperatureTypeT, AmdsmiUtilizationCounterTypeT,
     AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT, AmdsmiProcessorTypeT, AmdsmiAcceleratorPartitionTypeT
 };
@@ -21,10 +22,13 @@ pub use crate::amdsmi_wrapper::{
 pub use crate::amdsmi_wrapper::{
     AmdMetricsTableHeaderT, AmdsmiAcceleratorPartitionProfileT, AmdsmiAsicInfoT, AmdsmiBoardInfoT,
     AmdsmiClkInfoT, AmdsmiCounterValueT, AmdsmiDpmPolicyEntryT, AmdsmiDpmPolicyT,
-    AmdsmiDriverInfoT, AmdsmiEngineUsageT, AmdsmiErrorCountT, AmdsmiEvtNotificationDataT,
+    AmdsmiDriverInfoT, AmdsmiDriverInfoV2T, AmdsmiEngineUsageT, AmdsmiEnumerationInfoT,
+    AmdsmiErrorCountT, AmdsmiEvtNotificationDataT,
     AmdsmiFreqVoltRegionT, AmdsmiFrequenciesT, AmdsmiFrequencyRangeT, AmdsmiFwInfoT,
     AmdsmiGpuCacheInfoT, AmdsmiGpuCacheInfoTCache, AmdsmiGpuMetricsT, AmdsmiKfdInfoT,
     AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiLinkTopologyT, AmdsmiNameValueT,
+    AmdsmiNicFwEntryT, AmdsmiNicFwInfoT, AmdsmiNicHealthT, AmdsmiNicPortSplitT,
+    AmdsmiNicTelemetryT,
     AmdsmiOdVoltFreqDataT, AmdsmiP2pCapabilityT, AmdsmiPcieBandwidthT, AmdsmiPcieInfoT,
     AmdsmiPcieInfoTPcieMetric, AmdsmiPcieInfoTPcieStatic, AmdsmiPowerCapInfoT, AmdsmiPowerInfoT,
     AmdsmiPowerProfileStatusT, AmdsmiProcInfoT, AmdsmiProcInfoTEngineUsage,
@@ -151,6 +155,9 @@ impl_cstr_getters!(AmdsmiVbiosInfoT, name, build_date, part_number, version, boo
 // Implement the getters for the C string fields in AmdsmiAsicInfoT
 impl_cstr_getters!(AmdsmiAsicInfoT, market_name, vendor_name, asic_serial);
 
+// Implement the getters for the C string fields in AmdsmiEnumerationInfoT
+impl_cstr_getters!(AmdsmiEnumerationInfoT, hip_uuid);
+
 // Implement the getters for the C string fields in AmdsmiBoardInfoT
 impl_cstr_getters!(
     AmdsmiBoardInfoT,
@@ -163,6 +170,18 @@ impl_cstr_getters!(
 
 // Implement the getters for the C string fields in AmdsmiDriverInfoT
 impl_cstr_getters!(AmdsmiDriverInfoT, driver_version, driver_date, driver_name);
+
+// Implement the getters for the C string fields in AmdsmiDriverInfoV2T
+impl_cstr_getters!(
+    AmdsmiDriverInfoV2T,
+    driver_version,
+    driver_date,
+    driver_name,
+    driver_kernel_version,
+    amdgpu_driver_version,
+    driver_build_version,
+    driver_full_version
+);
 
 // Implement the getters for the C string fields in AmdsmiNameValueT
 impl_cstr_getters!(AmdsmiNameValueT, name);

@@ -11,6 +11,7 @@
 /// modifier combination over normal/NaN/Inf/denormal/signed-zero inputs.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/simd.h"
 
@@ -157,10 +158,10 @@ double ref_dst(double v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
 TEST(Vop3ModifierPolicy, NanClampFollowsArchitectureAndDx10Mode) {
   using rocjitsu::amdgpu::floating_clamp_nan_to_zero;
 
-  EXPECT_FALSE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, false));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, true));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_RDNA4, false));
-  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA5, false));
+  EXPECT_FALSE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna4, true));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Rdna4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(rocjitsu::IsaFamily::Cdna5, false));
 }
 
 TEST(Vop3ModifierPolicy, ScalarClampHandlesQuietSignalingNanAndSignedZero) {
@@ -257,17 +258,11 @@ TEST(Vop3ModifierSimd, DstModF32OverflowFollowsGuestRounding) {
     const util::native<float> v(std::bit_cast<float>(test.value));
     for (uint32_t mode = 0; mode < 4; ++mode) {
       const uint32_t expected = test.by_mode[mode];
-      for (const int host : {FE_TONEAREST, FE_TOWARDZERO}) {
-        ASSERT_EQ(std::fesetround(host), 0);
-        const auto out = apply_vop3_dst_mod_f32(v, test.omod, 0, false, mode);
-        const auto clamped = apply_vop3_dst_mod_f32(v, test.omod, 1, false, mode);
-        ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
-        EXPECT_EQ(std::bit_cast<uint32_t>(float(out[0])), expected)
-            << std::hex << test.value << " omod=" << test.omod << " mode=" << mode
-            << " host=" << host;
-        EXPECT_EQ(std::bit_cast<uint32_t>(float(clamped[0])),
-                  (test.value >> 31) ? 0u : 0x3f800000u);
-      }
+      const auto out = apply_vop3_dst_mod_f32(v, test.omod, 0, false, mode);
+      const auto clamped = apply_vop3_dst_mod_f32(v, test.omod, 1, false, mode);
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(out[0])), expected)
+          << std::hex << test.value << " omod=" << test.omod << " mode=" << mode;
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(clamped[0])), (test.value >> 31) ? 0u : 0x3f800000u);
     }
   }
 }

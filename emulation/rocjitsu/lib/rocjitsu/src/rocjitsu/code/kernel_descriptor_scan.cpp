@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cstring>
@@ -21,13 +24,6 @@ namespace {
 using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
-
-// True if [offset, offset + length) fits within [0, size) without overflow (the
-// image is an arbitrary span, so offset + length may wrap). Use before forming any
-// pointer into the image.
-[[nodiscard]] bool range_in_bounds(uint64_t offset, uint64_t length, uint64_t size) {
-  return offset <= size && length <= size - offset;
-}
 
 [[nodiscard]] std::optional<std::string>
 kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
@@ -79,20 +75,6 @@ text_vaddr_for_section(uint64_t text_offset, uint64_t text_size,
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
-  if (offset >= 0) {
-    const uint64_t positive = static_cast<uint64_t>(offset);
-    if (positive > std::numeric_limits<uint64_t>::max() - base)
-      return std::nullopt;
-    return base + positive;
-  }
-  // Form the magnitude without negating INT64_MIN.
-  const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
-  if (magnitude > base)
-    return std::nullopt;
-  return base - magnitude;
-}
-
 } // namespace
 
 std::vector<KernelDescriptorInfo>
@@ -136,7 +118,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     size_t strtab_size = 0;
     if (symbol_section.sh_link < section_hdrs->size()) {
       const Elf64_Shdr &strtab_shdr = (*section_hdrs)[symbol_section.sh_link];
-      if (range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
+      if (util::is_range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
         strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr.sh_offset);
         strtab_size = strtab_shdr.sh_size;
       }
@@ -163,8 +145,8 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 
       const Elf64_Shdr &owner = (*section_hdrs)[owner_index];
       const uint64_t delta = symbol.st_value - owner.sh_addr;
-      if (!range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
-          !range_in_bounds(delta, sizeof(KD), owner.sh_size))
+      if (!util::is_range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
+          !util::is_range_in_bounds(delta, sizeof(KD), owner.sh_size))
         continue;
       const uint64_t file_offset = owner.sh_offset + delta;
       if (!seen_descriptor_offsets.insert(file_offset).second)
@@ -190,7 +172,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
   return out;
 }
 
-uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
+uint8_t kernel_wavefront_size(rocjitsu::IsaFamily arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently handled here.
   if (arch_is_cdna_4_or_lower(arch))
     return 64;
@@ -198,7 +180,7 @@ uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
   // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
   // as Wave64: older producers may omit the bit even though the hardware has
   // no Wave64 launch mode.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return 32;
 
   // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
@@ -213,7 +195,8 @@ uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
   return 64;
 }
 
-uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+uint32_t descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily arch,
+                                                   uint32_t wavefront_size) {
   // This is the AMDHSA kernel-descriptor encoding granularity for
   // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
   // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
@@ -224,24 +207,24 @@ uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t
   // If/when occupancy modeling needs the physical allocation block size, add a
   // separate helper for that policy. Reusing this descriptor helper for
   // occupancy would mix two different hardware contracts.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+  if (arch == rocjitsu::IsaFamily::Cdna1)
     return 4;
   if (arch_is_cdna_4_or_lower(arch))
     return 8;
   // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
   // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
   // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return 16;
   if (arch_is_rdna(arch))
     return wavefront_size == 32 ? 8 : 4;
   return 1;
 }
 
-uint32_t kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+uint32_t kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily arch, const KD &desc) {
   // gfx1250 widens USER_SGPR_COUNT from the generic five-bit field at [5:1]
   // to a six-bit field at [6:1], allowing valid counts such as 32.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     return RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
                               rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT);
   }
@@ -249,11 +232,11 @@ uint32_t kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, const KD &desc) 
                             rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
 
-void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
+void set_kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily arch, KD &desc,
                                            uint32_t user_sgpr_count) {
   // Select the same architecture-specific field when rewriting descriptors so
   // DBT and patching do not truncate gfx1250 counts above 31.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2,
                        rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgpr_count);
     return;
@@ -262,7 +245,7 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
                      user_sgpr_count);
 }
 
-uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count) {
+uint32_t ordinary_sgpr_bound(rocjitsu::IsaFamily arch, uint32_t kernel_sgpr_count) {
   const uint32_t tail = arch_is_cdna_4_or_lower(arch) ? kCdnaSpecialSgprTailReserve : 0;
   // The tail sits at the top of the allocation itself, so it comes off before
   // the clamp to the addressable maximum, not after.
@@ -270,16 +253,21 @@ uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count) {
   return std::min<uint32_t>(ordinary, REGISTER_SET_ALLOCATABLE_SGPRS);
 }
 
-uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+uint32_t kernel_descriptor_initial_sgpr_count(rocjitsu::IsaFamily arch, const KD &desc) {
   uint32_t sgprs = kernel_descriptor_user_sgpr_count(arch, desc);
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
-    ++sgprs;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
-    ++sgprs;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
-    ++sgprs;
+  if (!isa_properties(arch).uses_ttmp_workgroup_ids) {
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+      ++sgprs;
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+      ++sgprs;
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+      ++sgprs;
+  }
   if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+    ++sgprs;
+  if (arch_appends_private_segment_wave_offset_sgpr(arch) &&
+      RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT))
     ++sgprs;
   return sgprs;
 }

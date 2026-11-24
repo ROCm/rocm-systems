@@ -42,6 +42,13 @@ const unsigned int SDMA_SUBOP_WRITE_LINEAR = 0;
 
 const unsigned int SDMA_SCOPE_SYS = 3;
 
+enum SDMAV8_uc_sel_enum {
+    uc_sel_original_mtype = 0,
+    uc_sel_override_io_space = 1,
+    uc_sel_override_local_space = 2,
+    uc_sel_override_all_memory = 3
+};
+
 /*
 ** Definitions for SDMA_PKT_COPY_LINEAR packet
 */
@@ -139,6 +146,104 @@ typedef struct SDMA_PKT_COPY_LINEAR_TAG
     } DST_ADDR[0];
 } SDMA_PKT_COPY_LINEAR, *PSDMA_PKT_COPY_LINEAR;
 
+typedef struct SDMA_V8_PKT_COPY_LINEAR_TAG
+{
+
+    union
+    {
+        struct
+        {
+            unsigned int op:8;
+            unsigned int sub_op:8;
+            unsigned int reserved_0:11;
+            unsigned int broadcast:1;
+            unsigned int reserved_1:4;
+        };
+        unsigned int DW_0_DATA;
+    } HEADER_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int count:30;
+            unsigned int reserved_0:2;
+        };
+        unsigned int DW_1_DATA;
+    } COUNT_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int dst_uc_sel:2;
+            unsigned int src_uc_sel:2;
+            unsigned int reserved_0:12;
+            unsigned int dst_sw:2;
+            unsigned int dst_scope:2;
+            unsigned int dst_hint:3;
+            unsigned int reserved_1:1;
+            unsigned int src_sw:2;
+            unsigned int src_scope:2;
+            unsigned int src_hint:3;
+            unsigned int reserved_2:1;
+        };
+        unsigned int DW_2_DATA;
+    } PARAMETER_UNION;
+
+    union
+    {
+        struct
+        {
+             unsigned int data_format:9;
+             unsigned int num_type:7;
+             unsigned int rd_cm:2;
+             unsigned int wr_cm:6;
+             unsigned int max_cm:2;
+             unsigned int max_ucm:6;
+        };
+        unsigned int DW_3_DATA;
+    } DW3_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int src_addr_31_0:32;
+        };
+        unsigned int DW_4_DATA;
+    } SRC_ADDR_LO_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int src_addr_63_32:32;
+        };
+        unsigned int DW_5_DATA;
+    } SRC_ADDR_HI_UNION;
+
+    struct
+    {
+        union
+        {
+            struct
+            {
+                unsigned int dst_addr_31_0:32;
+            };
+            unsigned int DW_6_DATA;
+        } DST_ADDR_LO_UNION;
+
+        union
+        {
+            struct
+            {
+                unsigned int dst_addr_63_32:32;
+            };
+            unsigned int DW_7_DATA;
+        } DST_ADDR_HI_UNION;
+    } DST_ADDR[0];
+} SDMA_V8_PKT_COPY_LINEAR, *PSDMA_V8_PKT_COPY_LINEAR;
 /*
 ** Definitions for SDMA_PKT_WRITE_UNTILED packet
 */
@@ -214,6 +319,84 @@ typedef struct SDMA_PKT_WRITE_UNTILED_TAG
     } DATA0_UNION;
 } SDMA_PKT_WRITE_UNTILED, *PSDMA_PKT_WRITE_UNTILED;
 
+typedef struct SDMA_V8_PKT_WRITE_UNTILED_TAG
+{
+
+    union
+    {
+        struct
+        {
+            unsigned int op:8;
+            unsigned int sub_op:8;
+            unsigned int reserved0:2;
+            unsigned int tmz:1;
+            unsigned int reserved1:2;
+            unsigned int hi_pri:1;
+            unsigned int reserved2:2;
+            unsigned int swap:2;
+            unsigned int reserved3:4;
+            unsigned int dst_uc_sel:2;
+        };
+        unsigned int DW_0_DATA;
+    } HEADER_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int dst_addr_31_0:32;
+        };
+        unsigned int DW_1_DATA;
+    } DST_ADDR_LO_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int dst_addr_63_32:32;
+        };
+        unsigned int DW_2_DATA;
+    } DST_ADDR_HI_UNION;
+
+    union
+    {
+        struct
+        {
+             unsigned int count:20;
+             unsigned int sys:1;
+             unsigned int reserved:1;
+             unsigned int snp:1;
+             unsigned int gpa:1;
+             unsigned int mtype:2;
+             unsigned int scope:2;
+             unsigned int hint:4;
+        };
+        unsigned int DW_3_DATA;
+    } DW_3_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int data_format:9;
+            unsigned int num_type:7;
+            unsigned int rd_cm:2;
+            unsigned int wr_cm:6;
+            unsigned int max_cm:2;
+            unsigned int max_ucm:6;
+        };
+        unsigned int DW_4_DATA;
+    } DW_4_UNION;
+
+    union
+    {
+        struct
+        {
+            unsigned int data0:32;
+        };
+        unsigned int DW_5_DATA;
+    } DATA0_UNION;
+} SDMA_V8_PKT_WRITE_UNTILED, *PSDMA_V8_PKT_WRITE_UNTILED;
 /*
 ** Definitions for SDMA_PKT_FENCE packet
 */

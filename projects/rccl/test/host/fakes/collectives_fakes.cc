@@ -4,8 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Data and string helpers defined by src/collectives.cc. Pure data with no
-// behaviour to drive, so no seam and no reset entry point.
+// Data and string helpers defined by src/collectives.cc, plus the enqueue-path gate seam (collectives_fakes.h).
 //
 // Distinct from collective_stubs.cc, which is a fail-loud floor for the
 // collective LAUNCH pipeline (ncclLaunchKernel and friends) and therefore
@@ -15,10 +14,15 @@
 // and tests asserting log content must see the same text production emits.
 // Keep these switches faithful to src/collectives.cc.
 
+#include "collectives_fakes.h"
 #include "device.h"
 #include "info.h"
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the RCCL_PARAM default this stands in for
+#include "rccl_common.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_collectiveMustUseEnqueuePath, rcclCollectiveMustUseEnqueuePath);
 
 // Algorithm/protocol name tables. Passed to the RCCL tuning override hooks and
 // logged through.
@@ -101,3 +105,8 @@ const char* ncclDevRedOpToString(ncclDevRedOp_t) { return "redop"; }
 // from outside collectives.cc and the redirected RCCL_PARAM does not cover it.
 // Same env name and default (off) as collectives.cc:452.
 int64_t rcclParamAlltoAllPivotEnable() { return g_loadParam("RCCL_ALL_TO_ALL_PIVOT_ENABLE", 0); }
+
+std::function<bool(struct ncclComm*)> g_collectiveMustUseEnqueuePath = [](struct ncclComm*) { return false; };
+bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm) {
+  return g_collectiveMustUseEnqueuePath(comm);
+}

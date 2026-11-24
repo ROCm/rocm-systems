@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cassert>
@@ -119,15 +122,6 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   }
 }
 
-[[nodiscard]] uint64_t checked_lcm_u64(uint64_t lhs, uint64_t rhs) {
-  const uint64_t gcd = std::gcd(lhs, rhs);
-  if (gcd == 0)
-    return 0;
-  assert(lhs / gcd <= std::numeric_limits<uint64_t>::max() / rhs &&
-         "ELF load alignment LCM overflow");
-  return std::lcm(lhs, rhs);
-}
-
 [[nodiscard]] uint64_t align_up(uint64_t value, uint64_t alignment) {
   if (alignment <= 1)
     return value;
@@ -135,18 +129,68 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return remainder == 0 ? value : value + alignment - remainder;
 }
 
-[[nodiscard]] uint64_t shifted_load_delta_alignment(std::span<const Elf64_Phdr> phdrs,
-                                                    uint64_t file_offset) {
-  uint64_t alignment = 1;
-  // Later LOAD segments remain loader-valid only when their file shift keeps
-  // p_offset % p_align congruent with p_vaddr % p_align.
-  for (const Elf64_Phdr &phdr : phdrs) {
-    if (phdr.p_type != PT_LOAD || phdr.p_align <= 1)
+[[nodiscard]] std::optional<uint64_t>
+padded_insertion_size(std::span<const Elf64_Shdr> shdrs, std::span<const Elf64_Phdr> phdrs,
+                      uint64_t file_offset, uint64_t vaddr, size_t text_index,
+                      uint64_t requested_size, uint64_t max_delta) {
+  uint64_t alignment = sizeof(uint32_t);
+  uint64_t largest_shifted_end = 0;
+  const auto include_alignment = [&](uint64_t required) {
+    if (required <= 1)
+      return true;
+    const std::optional<uint64_t> combined =
+        util::checked_mul(alignment / std::gcd(alignment, required), required);
+    if (!combined)
+      return false;
+    alignment = *combined;
+    return true;
+  };
+  const auto include_extent = [&](uint64_t offset, uint64_t size) {
+    const std::optional<uint64_t> end = util::checked_add(offset, size);
+    if (!end)
+      return false;
+    largest_shifted_end = std::max(largest_shifted_end, *end);
+    return true;
+  };
+  for (size_t index = 0; index < shdrs.size(); ++index) {
+    const Elf64_Shdr &section = shdrs[index];
+    if (index == text_index || section.sh_type == SHT_NULL)
       continue;
-    if (phdr.p_offset >= file_offset)
-      alignment = checked_lcm_u64(alignment, phdr.p_align);
+    const bool file_moves = section.sh_offset >= file_offset;
+    const bool address_moves = (section.sh_flags & SHF_ALLOC) != 0 && section.sh_addr >= vaddr;
+    // NOBITS has no file payload, but its offset field still moves with the tables.
+    const bool file_backed = section.sh_type != SHT_NOBITS;
+    if (((file_moves && file_backed) || address_moves) && !include_alignment(section.sh_addralign))
+      return std::nullopt;
+    if (file_moves && !include_extent(section.sh_offset, file_backed ? section.sh_size : 0))
+      return std::nullopt;
+    if (address_moves && !include_extent(section.sh_addr, section.sh_size))
+      return std::nullopt;
   }
-  return alignment;
+  // Keep the existing LOAD congruence rule as well as section alignment, even
+  // when the object has no program headers or a LOAD's alignment is weaker.
+  for (const Elf64_Phdr &phdr : phdrs) {
+    if (phdr.p_offset >= file_offset) {
+      if (!include_extent(phdr.p_offset, phdr.p_filesz) ||
+          (phdr.p_type == PT_LOAD && !include_alignment(phdr.p_align)))
+        return std::nullopt;
+      if (phdr.p_vaddr < vaddr)
+        continue;
+    } else if (phdr.p_type != PT_LOAD || file_offset - phdr.p_offset > phdr.p_filesz) {
+      continue;
+    } else if (!include_extent(phdr.p_offset, phdr.p_filesz)) {
+      return std::nullopt;
+    }
+    if (!include_extent(phdr.p_vaddr, phdr.p_memsz) || !include_extent(phdr.p_paddr, phdr.p_memsz))
+      return std::nullopt;
+  }
+  const uint64_t remainder = requested_size % alignment;
+  const std::optional<uint64_t> padded =
+      util::checked_add(requested_size, remainder == 0 ? uint64_t{0} : alignment - remainder);
+  if (!padded || *padded > max_delta ||
+      *padded > std::numeric_limits<uint64_t>::max() - largest_shifted_end)
+    return std::nullopt;
+  return padded;
 }
 
 [[nodiscard]] std::optional<size_t> validated_text_section(std::span<const Elf64_Shdr> shdrs,
@@ -161,38 +205,38 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return text_index;
 }
 
-[[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+[[nodiscard]] bool target_supports_wave32(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
-[[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+[[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
-[[nodiscard]] bool target_uses_wgp_mode(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
+[[nodiscard]] bool target_uses_wgp_mode(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4;
 }
 
-[[nodiscard]] bool target_uses_gfx90a_accum_offset(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA4;
+[[nodiscard]] bool target_uses_gfx90a_accum_offset(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+         arch == rocjitsu::IsaFamily::Cdna4;
 }
 
-[[nodiscard]] bool target_clears_rsrc1_mode_bits(rj_code_arch_t arch) {
+[[nodiscard]] bool target_clears_rsrc1_mode_bits(rocjitsu::IsaFamily arch) {
   // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for GFX10
   // and GFX11 targets where they still affect floating-point behavior.
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
-[[nodiscard]] uint32_t target_default_inst_pref_size(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5
+[[nodiscard]] uint32_t target_default_inst_pref_size(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+                 arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5
              ? 2
              : 0;
 }
@@ -200,6 +244,144 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
 [[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size) {
   const uint64_t limit = static_cast<uint64_t>(image_size);
   return file_offset <= limit && size <= limit - file_offset;
+}
+
+bool load_mappings_preserve_text(std::span<const Elf64_Phdr> segments, size_t image_size,
+                                 uint64_t text_offset, uint64_t text_vaddr, uint64_t text_size) {
+  if (!image_contains_range(image_size, text_offset, text_size) ||
+      text_size > std::numeric_limits<uint64_t>::max() - text_vaddr)
+    return false;
+  const uint64_t text_end = text_vaddr + text_size;
+  bool has_load = false;
+  bool has_full_backing = false;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    has_load = true;
+    if ((segment.p_filesz != 0 &&
+         !image_contains_range(image_size, segment.p_offset, segment.p_filesz)) ||
+        segment.p_filesz > segment.p_memsz ||
+        segment.p_memsz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr)
+      return false;
+    const uint64_t overlap_begin = std::max(text_vaddr, segment.p_vaddr);
+    const uint64_t overlap_end = std::min(text_end, segment.p_vaddr + segment.p_memsz);
+    if (overlap_begin >= overlap_end)
+      continue;
+    // A distinct backing or zero-fill range must not acquire executable bytes.
+    if (!elf_load_maps_file_range(segment, text_offset + (overlap_begin - text_vaddr),
+                                  overlap_begin, overlap_end - overlap_begin))
+      return false;
+    has_full_backing |= overlap_begin == text_vaddr && overlap_end == text_end;
+  }
+  // Every LOAD owning the insertion grows by the complete padded delta, so a
+  // valid owner supplies the entire appended range. Preserve section-only use.
+  return !has_load || has_full_backing;
+}
+
+bool load_extent_is_valid(const Elf64_Phdr &segment, size_t image_size) {
+  return (segment.p_filesz == 0 ||
+          image_contains_range(image_size, segment.p_offset, segment.p_filesz)) &&
+         segment.p_filesz <= segment.p_memsz &&
+         segment.p_memsz <= std::numeric_limits<uint64_t>::max() - segment.p_vaddr;
+}
+
+bool rocr_load_extents_fit_allocation(std::span<const Elf64_Phdr> segments, size_t image_size) {
+  const Elf64_Phdr *first = nullptr;
+  const Elf64_Phdr *last = nullptr;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    if (!load_extent_is_valid(segment, image_size))
+      return false;
+    if (first == nullptr)
+      first = &segment;
+    last = &segment;
+  }
+  if (first == nullptr)
+    return true;
+  // ROCr LoadSizeV2 uses the last LOAD's end, not the maximum segment end.
+  // LoadSegmentV2 bounds each memory extent relative to the first LOAD's VA.
+  const uint64_t allocation_size = last->p_vaddr + last->p_memsz;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    if (segment.p_vaddr < first->p_vaddr)
+      return false;
+    const uint64_t offset = segment.p_vaddr - first->p_vaddr;
+    if (offset > allocation_size || segment.p_memsz > allocation_size - offset)
+      return false;
+  }
+  return true;
+}
+
+bool section_load_backing_is_preserved(std::span<const Elf64_Shdr> original_sections,
+                                       std::span<const Elf64_Shdr> sections,
+                                       std::span<const Elf64_Phdr> original_segments,
+                                       std::span<const Elf64_Phdr> segments,
+                                       size_t original_image_size, size_t image_size,
+                                       size_t text_index) {
+  if (original_sections.size() != sections.size() || original_segments.size() != segments.size())
+    return false;
+  for (size_t index = 0; index < segments.size(); ++index) {
+    if (original_segments[index].p_type == PT_LOAD &&
+        (segments[index].p_type != PT_LOAD ||
+         !load_extent_is_valid(original_segments[index], original_image_size) ||
+         !load_extent_is_valid(segments[index], image_size)))
+      return false;
+  }
+  for (size_t index = 0; index < original_sections.size(); ++index) {
+    const Elf64_Shdr &original = original_sections[index];
+    const Elf64_Shdr &section = sections[index];
+    if (index == text_index || original.sh_type == SHT_NULL ||
+        (original.sh_flags & SHF_ALLOC) == 0 || original.sh_size == 0)
+      continue;
+    const bool zero_fill = original.sh_type == SHT_NOBITS;
+    if (section.sh_size != original.sh_size ||
+        original.sh_size > std::numeric_limits<uint64_t>::max() - original.sh_addr ||
+        section.sh_size > std::numeric_limits<uint64_t>::max() - section.sh_addr ||
+        (!zero_fill &&
+         (!image_contains_range(original_image_size, original.sh_offset, original.sh_size) ||
+          !image_contains_range(image_size, section.sh_offset, section.sh_size))))
+      return false;
+    for (size_t segment_index = 0; segment_index < original_segments.size(); ++segment_index) {
+      const Elf64_Phdr &old_load = original_segments[segment_index];
+      if (old_load.p_type != PT_LOAD)
+        continue;
+      const uint64_t load_begin = old_load.p_vaddr + (zero_fill ? old_load.p_filesz : 0);
+      const uint64_t load_end =
+          old_load.p_vaddr + (zero_fill ? old_load.p_memsz : old_load.p_filesz);
+      const uint64_t begin = std::max(original.sh_addr, load_begin);
+      const uint64_t end = std::min(original.sh_addr + original.sh_size, load_end);
+      if (begin >= end)
+        continue;
+      const uint64_t section_offset = begin - original.sh_addr;
+      const uint64_t size = end - begin;
+      if (!zero_fill &&
+          !elf_load_maps_file_range(old_load, original.sh_offset + section_offset, begin, size))
+        return false;
+      const Elf64_Phdr &new_load = segments[segment_index];
+      const uint64_t target = section.sh_addr + section_offset;
+      if (zero_fill) {
+        if (target < new_load.p_vaddr)
+          return false;
+        const uint64_t offset = target - new_load.p_vaddr;
+        if (offset < new_load.p_filesz || offset > new_load.p_memsz ||
+            size > new_load.p_memsz - offset)
+          return false;
+        for (const Elf64_Phdr &other : segments) {
+          if (other.p_type == PT_LOAD && other.p_filesz != 0 &&
+              target < other.p_vaddr + other.p_filesz && other.p_vaddr < target + size)
+            return false;
+        }
+      } else if (!elf_load_maps_file_range(new_load, section.sh_offset + section_offset, target,
+                                           size) ||
+                 !elf_load_file_mappings_match_range(segments, section.sh_offset + section_offset,
+                                                     target, size)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /// @brief Read a kernel descriptor struct out of the in-memory image.
@@ -233,7 +415,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
 /// kernel body may use, which the caller must surface as a failed translation.
 [[nodiscard]] bool apply_kernel_descriptor_resource_translation(KD &desc,
                                                                 const KdTranslation &translation,
-                                                                rj_code_arch_t target_arch) {
+                                                                rocjitsu::IsaFamily target_arch) {
   RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                      translation.target_vgpr_granulated);
   RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
@@ -460,6 +642,13 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   if (new_text_size <= old_text_size)
     return;
 
+  struct FunctionSymbol {
+    uint64_t file_offset;
+    uint64_t text_offset;
+    Elf64_Sym symbol;
+  };
+  std::vector<FunctionSymbol> functions;
+  uint64_t last_function_start = 0;
   const Elf64_Shdr &text = shdrs[text_index];
   for (const Elf64_Shdr &symtab : shdrs) {
     if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
@@ -479,33 +668,33 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         continue;
 
       // ET_DYN symbols use virtual addresses; ET_REL symbols use section
-      // offsets.  Normalize both forms so the range test below is independent
-      // of the input code-object kind.
+      // offsets. Normalize both forms before comparing function ranges.
       uint64_t symbol_text_offset = symbol.st_value;
       if (ehdr.e_type != ET_REL) {
         if (symbol.st_value < text.sh_addr)
           continue;
         symbol_text_offset = symbol.st_value - text.sh_addr;
       }
-      if (symbol_text_offset > old_text_size)
+      if (symbol_text_offset > old_text_size || symbol.st_size == 0 ||
+          symbol.st_size > old_text_size - symbol_text_offset)
         continue;
 
-      // The translator appends executable cave code after the original .text
-      // contents and branches into it from relocated instructions.  AMDGPU code
-      // objects often leave padding after the kernel function, so a valid input
-      // function symbol may not reach the old section end.  Any non-empty
-      // function body that starts in the translated .text can now reach appended
-      // cave code, so keep its extent covering those bytes for loaders and
-      // runtime tooling that consult FUNC ranges.
-      if (symbol.st_size == 0)
-        continue;
-
-      const uint64_t grown_size = new_text_size - symbol_text_offset;
-      if (symbol.st_size >= grown_size)
-        continue;
-      symbol.st_size = grown_size;
-      std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
+      last_function_start = std::max(last_function_start, symbol_text_offset);
+      functions.push_back(
+          {.file_offset = symbol_offset, .text_offset = symbol_text_offset, .symbol = symbol});
     }
+  }
+
+  // ELF function extents are contiguous. Growing earlier functions would cover
+  // inter-function alignment and other bodies, so extend only the tail aliases.
+  for (FunctionSymbol &function : functions) {
+    if (function.text_offset != last_function_start)
+      continue;
+    const uint64_t grown_size = new_text_size - function.text_offset;
+    if (function.symbol.st_size >= grown_size)
+      continue;
+    function.symbol.st_size = grown_size;
+    std::memcpy(image.data() + function.file_offset, &function.symbol, sizeof(function.symbol));
   }
 }
 
@@ -555,7 +744,6 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
   std::unordered_map<size_t, std::unordered_set<uint32_t>> referenced_by_symtab;
   for (const Elf64_Shdr &relocs : shdrs) {
     if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
-        relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
         !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
       continue;
     }
@@ -570,6 +758,8 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
         !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size)) {
       continue;
     }
+    // Admission processes complete records before a partial tail. Their symbol
+    // references still require mappings when the text is rewritten.
     const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
     for (size_t i = 0; i < count; ++i) {
       Elf64_Rela rela{};
@@ -1079,17 +1269,18 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   if (image_.size() < sizeof(Elf64_Ehdr))
     return false;
 
-  auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
-  const auto shdrs = read_section_headers(image_, header);
-  const auto text_index =
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const std::vector<Elf64_Shdr> shdrs = read_section_headers(image_, header);
+  const std::optional<size_t> text_index =
       validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index)
     return false;
 
   // A relocation's place (r_offset) is interpreted differently by ELF type:
   //   - ET_DYN/ET_EXEC: r_offset is a virtual address. An in-.text place is one
-  //     inside [text.sh_addr, text.sh_addr + size). The reloc section applies
-  //     across the whole image, so every record must be range-checked.
+  //     inside [text.sh_addr, text.sh_addr + size). A supported ROCr dynamic
+  //     write can also start before that interval and extend into it.
   //   - ET_REL: r_offset is relative to the section the reloc section applies to,
   //     named by the reloc section's sh_info. Only records whose sh_info is the
   //     text section can land in .text, and there any r_offset < text.sh_size is
@@ -1129,12 +1320,12 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
         continue;
       const bool in_text = is_rel_object
                                ? r_offset < text_size_
-                               : (r_offset >= text.sh_addr && r_offset < text.sh_addr + text_size_);
+                               : (r_offset >= text.sh_addr && r_offset - text.sh_addr < text_size_);
       if (in_text)
         return true;
     }
   }
-  return false;
+  return elf_has_rocr_dynamic_write_in_range(image_, header, shdrs, text.sh_addr, text_size_);
 }
 
 bool CodeObjectPatcher::has_rocr_rejected_none_relocation() const {
@@ -1228,7 +1419,7 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
       continue;
     const bool is_rela = relocs.sh_type == SHT_RELA;
     const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
-    if (relocs.sh_entsize != entsize || relocs.sh_size % entsize != 0)
+    if (relocs.sh_entsize != entsize)
       continue;
     const RocrRelocationSectionMode section_mode =
         classify_rocr_relocation_section(header, shdrs, relocs);
@@ -1238,6 +1429,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
     if (relocs.sh_link >= shdrs.size())
       continue;
     const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
+    // Shared admission permits partial tails; preceding complete records still
+    // carry references that can make a text edit unsafe.
     const size_t count = relocs.sh_size / entsize;
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
@@ -1288,6 +1481,40 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   return false;
 }
 
+std::vector<uint64_t> CodeObjectPatcher::relative_text_addend_offsets() const {
+  if (text_size_ == 0 || image_.size() < sizeof(Elf64_Ehdr))
+    return {};
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const std::vector<Elf64_Shdr> sections = section_headers();
+  const std::optional<size_t> text_index =
+      validated_text_section(sections, text_section_index_, text_offset_, text_size_);
+  if (!text_index)
+    return {};
+  const uint64_t text_vaddr = sections[*text_index].sh_addr;
+  std::vector<uint64_t> offsets;
+  for (const Elf64_Shdr &relocs : sections) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size))
+      continue;
+    // Match relocation rewriting: inspect complete records even with a partial tail.
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela relocation = {};
+      std::memcpy(&relocation, image_.data() + relocs.sh_offset + index * sizeof(Elf64_Rela),
+                  sizeof(relocation));
+      if (elf_reloc_type(relocation.r_info) != R_AMDGPU_RELATIVE64 ||
+          elf_reloc_sym(relocation.r_info) != 0 ||
+          !elf_relocation_place_is_allocated(header, sections, relocs, relocation.r_offset))
+        continue;
+      const uint64_t destination = static_cast<uint64_t>(relocation.r_addend);
+      if (destination >= text_vaddr && destination - text_vaddr < text_size_)
+        offsets.push_back(destination - text_vaddr);
+    }
+  }
+  return offsets;
+}
+
 bool CodeObjectPatcher::replace_text(
     std::span<const uint8_t> new_text, std::span<const TextOffsetRelocation> text_relocations,
     std::span<const PcRelativeDataRelocation> data_relocations,
@@ -1328,6 +1555,8 @@ bool CodeObjectPatcher::replace_text(
   }
 
   const auto text_header = shdrs[*text_index];
+  if (new_text.size() > std::numeric_limits<uint64_t>::max() - text_header.sh_addr)
+    return false;
   struct ResolvedDataRelocation {
     PcRelativeDataRelocation relocation;
     size_t target_section = 0;
@@ -1357,13 +1586,33 @@ bool CodeObjectPatcher::replace_text(
   const uint64_t growth = new_text.size() - text_size_;
 
   if (growth != 0) {
-    // Growing .text can shift later LOAD segments. Pad the inserted file range
-    // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
-    // p_align. The padding is executable segment filler, not part of .text.
-    const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
-    const uint64_t padded_file_delta = align_up(growth, file_delta_alignment);
-    assert(padded_file_delta >= growth && "aligned text growth underflowed");
-    assert(padded_file_delta % sizeof(uint32_t) == 0 && "text growth must stay word-aligned");
+    const std::vector<Elf64_Shdr> original_sections = shdrs;
+    const std::vector<Elf64_Phdr> original_segments = phdrs;
+    const size_t original_image_size = image_.size();
+    // insert_file_bytes() extends every LOAD containing the insertion point,
+    // including a segment ending there. A divergent mapping would expose cave
+    // bytes at another address, potentially replacing its original zero fill.
+    for (const Elf64_Phdr &segment : phdrs) {
+      if (segment.p_type != PT_LOAD || segment.p_offset >= old_text_end_file)
+        continue;
+      const uint64_t insertion_offset = old_text_end_file - segment.p_offset;
+      if (insertion_offset > segment.p_filesz)
+        continue;
+      if (!image_contains_range(image_.size(), segment.p_offset, segment.p_filesz) ||
+          segment.p_filesz > segment.p_memsz ||
+          segment.p_memsz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr ||
+          segment.p_vaddr + insertion_offset != old_text_end_vaddr)
+        return false;
+    }
+
+    // Padding preserves moved section alignment and LOAD congruence. It is
+    // executable segment filler rather than part of the replacement .text.
+    const std::optional<uint64_t> padded =
+        padded_insertion_size(shdrs, phdrs, old_text_end_file, old_text_end_vaddr, *text_index,
+                              growth, image_.max_size() - image_.size());
+    if (!padded)
+      return false;
+    const uint64_t padded_file_delta = *padded;
 
     std::vector<uint8_t> inserted(padded_file_delta, 0);
     std::vector<bool> shift_section_vaddr(shdrs.size(), false);
@@ -1411,7 +1660,23 @@ bool CodeObjectPatcher::replace_text(
               phdrs[i].p_offset % phdrs[i].p_align == phdrs[i].p_vaddr % phdrs[i].p_align) &&
              "shifted LOAD lost file/virtual address congruence");
     }
+    if (!section_load_backing_is_preserved(original_sections, shdrs, original_segments, phdrs,
+                                           original_image_size, image_.size(), *text_index) ||
+        (header.e_type == ET_DYN && !rocr_load_extents_fit_allocation(phdrs, image_.size())))
+      return false;
   }
+
+  // File order and address order can differ. Even a LOAD whose file range
+  // precedes the insertion can remain over the newly appended executable bytes.
+  if (growth != 0 && !load_mappings_preserve_text(phdrs, image_.size(), old_text_end_file,
+                                                  old_text_end_vaddr, growth))
+    return false;
+
+  // Destinations in moved sections have their final addresses now. Unsectioned
+  // places remain fixed and must not overlap the newly appended executable text.
+  if (elf_has_rocr_dynamic_write_in_range(image_, header, shdrs, text_header.sh_addr,
+                                          new_text.size()))
+    return false;
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
   for (const ResolvedDataRelocation &resolved : resolved_data_relocations) {
@@ -1471,8 +1736,8 @@ bool CodeObjectPatcher::replace_text(
     return false;
   }
   // Instrumentation appends a cave without relocating the original body and
-  // therefore supplies no offset map. Preserve its historical function-range
-  // growth. DBT supplies exact starts/ends and gets precise relocated sizes.
+  // therefore supplies no offset map. Preserve earlier function boundaries while
+  // growing the tail. DBT supplies exact starts/ends and gets precise relocated sizes.
   if (text_relocations.empty())
     grow_text_function_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size());
   text_size_ = new_text.size();
@@ -1502,18 +1767,24 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
   return true;
 }
 
-bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
-                                                       uint32_t bytes) {
-  auto desc = read_kernel_descriptor(image_, descriptor_file_offset);
-  if (!desc)
+bool CodeObjectPatcher::patch_kernel_resources(const KernelDescriptorInfo &kernel,
+                                               const amdhsa::kernel_descriptor_t &descriptor,
+                                               std::optional<uint32_t> sgprs,
+                                               std::optional<uint32_t> vgprs, std::string *error) {
+  if (!image_contains_range(image_.size(), kernel.descriptor_file_offset, sizeof(descriptor))) {
+    if (error != nullptr)
+      *error = "kernel resource descriptor lies outside the image";
     return false;
-
-  desc->private_segment_fixed_size = bytes;
-  return write_kernel_descriptor(image_, descriptor_file_offset, *desc);
+  }
+  const amdhsa::kernel_descriptor_t updated = descriptor;
+  if (amdhsa::update_resource_metadata(image_, kernel, updated, sgprs, vgprs, error).failed())
+    return false;
+  return patch_kernel_descriptor(kernel.descriptor_file_offset,
+                                 {reinterpret_cast<const uint8_t *>(&updated), sizeof(updated)});
 }
 
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
-                                                            rj_code_arch_t target_arch) {
+                                                            rocjitsu::IsaFamily target_arch) {
   auto desc = read_kernel_descriptor(image_, translation.descriptor_file_offset);
   if (!desc)
     return false;
@@ -1531,7 +1802,8 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
 
 std::optional<std::vector<AppendedSidecarDescriptor>>
 CodeObjectPatcher::append_sidecar_descriptor_translations(
-    std::span<const KdTranslation> translations, rj_code_arch_t target_arch, uint64_t alignment) {
+    std::span<const KdTranslation> translations, rocjitsu::IsaFamily target_arch,
+    uint64_t alignment) {
   if (translations.empty())
     return std::vector<AppendedSidecarDescriptor>{};
   if (alignment == 0 || (alignment & (alignment - 1)) != 0)
@@ -1550,10 +1822,15 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
   if (!text_index)
     return std::nullopt;
 
-  const uint64_t insertion_file_offset = text_offset_ + text_size_ + text_tail_size_;
-  const uint64_t insertion_vaddr = text_vaddr_ + text_size_ + text_tail_size_;
-  if (insertion_file_offset > image_.size())
+  if (!image_contains_range(image_.size(), text_offset_, text_size_) ||
+      text_tail_size_ > image_.size() - text_offset_ - text_size_)
     return std::nullopt;
+  const uint64_t insertion_file_offset = text_offset_ + text_size_ + text_tail_size_;
+  const std::optional<uint64_t> checked_vaddr =
+      util::checked_add(text_vaddr_, insertion_file_offset - text_offset_);
+  if (!checked_vaddr)
+    return std::nullopt;
+  const uint64_t insertion_vaddr = *checked_vaddr;
 
   const bool insertion_is_loaded = std::ranges::any_of(phdrs, [&](const Elf64_Phdr &phdr) {
     if (phdr.p_type != PT_LOAD)
@@ -1597,16 +1874,13 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
     cursor_vaddr = descriptor_vaddr + sizeof(desc);
   }
 
-  // Later LOAD segments remain valid only if the file shift preserves their
-  // p_offset/p_vaddr congruence. Any padding after the descriptor payload is
-  // intentionally unsectioned loaded data; runtime metadata points only at the
-  // descriptor starts recorded above.
-  const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, insertion_file_offset);
-  const uint64_t padded_size = align_up(inserted.size(), file_delta_alignment);
-  if (padded_size < inserted.size() ||
-      padded_size > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+  // Tail padding is unsectioned loaded data; metadata names descriptor starts.
+  const std::optional<uint64_t> padded =
+      padded_insertion_size(shdrs, phdrs, insertion_file_offset, insertion_vaddr, *text_index,
+                            inserted.size(), image_.max_size() - image_.size());
+  if (!padded)
     return std::nullopt;
-  inserted.resize(static_cast<size_t>(padded_size), 0);
+  inserted.resize(static_cast<size_t>(*padded), 0);
 
   std::vector<bool> shift_section_vaddr(shdrs.size(), false);
   for (size_t i = 0; i < shdrs.size(); ++i) {

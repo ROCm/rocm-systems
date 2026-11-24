@@ -11,6 +11,7 @@
 #include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -23,7 +24,7 @@
 namespace rocjitsu {
 namespace {
 
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
 
 // s_cbranch_scc0 is SOPP opcode 5 on CDNA; simm16 is the dword delta from the
 // next instruction.
@@ -76,14 +77,23 @@ constexpr uint64_t kMidB = 0x14;
 constexpr uint64_t kTailB = 0x18;
 
 [[nodiscard]] std::vector<uint32_t> two_kernel_words() {
+  constexpr util::FailureOr<uint32_t> kBranch2Result = build_s_branch(2, kArch);
+  static_assert(kBranch2Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kNopResult = build_s_nop(0, kArch);
+  static_assert(kNopResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kEndpgmResult = build_s_endpgm(kArch);
+  static_assert(kEndpgmResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kBranch0Result = build_s_branch(0, kArch);
+  static_assert(kBranch0Result.succeeded());
+
   return {
-      build_s_cbranch_scc0(1),  // 0x00: -> A tail at 0x08.
-      build_s_branch(2, kArch), // 0x04: -> B entry at 0x10.
-      build_s_nop(0, kArch),    // 0x08: A tail, first of two instructions.
-      build_s_endpgm(kArch),    // 0x0c.
-      build_s_cbranch_scc0(1),  // 0x10: -> B tail at 0x18.
-      build_s_branch(0, kArch), // 0x14: -> B tail at 0x18.
-      build_s_endpgm(kArch),    // 0x18.
+      build_s_cbranch_scc0(1), // 0x00: -> A tail at 0x08.
+      kBranch2Result.value(),  // 0x04: -> B entry at 0x10.
+      kNopResult.value(),      // 0x08: A tail, first of two instructions.
+      kEndpgmResult.value(),   // 0x0c.
+      build_s_cbranch_scc0(1), // 0x10: -> B tail at 0x18.
+      kBranch0Result.value(),  // 0x14: -> B tail at 0x18.
+      kEndpgmResult.value(),   // 0x18.
   };
 }
 
@@ -210,9 +220,9 @@ TEST(BasicBlockWindow, CfgRejectsTruncatedInstructionWithSourceOffset) {
 
 TEST(BasicBlockWindow, CfgPreservesFourWordInstructionAtSectionEnd) {
   TestCodeObject object({0xcc3a0200, 0x42020d04, 0xcc336008, 0x04223110});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  auto blocks = build_valid_blocks(object, *decoder, rocjitsu::IsaFamily::Cdna5);
   ASSERT_EQ(blocks.size(), 1u);
   const Instruction &instruction = *blocks.front()->instructions().begin();
   EXPECT_EQ(instruction.size(), 16);
