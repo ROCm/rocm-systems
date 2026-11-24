@@ -808,6 +808,7 @@ add_executable(
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
     pci/gpu_pci_device_test.cpp
+    pci/pci_transport_session_test.cpp
     pci/vram_store_test.cpp
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp

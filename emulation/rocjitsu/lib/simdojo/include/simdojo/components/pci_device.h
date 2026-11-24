@@ -34,6 +34,7 @@
 #include "simdojo/sim/component.h"
 #include "util/diagnostic.h"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -326,33 +327,51 @@ struct PciTransport {
 /// peer receives a distinct session so device state retained from an earlier
 /// peer can never migrate to a later one. Revocation first refuses new leases,
 /// then waits for admitted operations before endpoint storage may be destroyed.
+///
+/// Admitting and releasing a lease takes no lock while the session is open, so
+/// concurrent device threads do not serialize on the session. Leases may be
+/// acquired and released from any thread, including a different thread from the
+/// one that acquired them.
 class PciTransportSession final : public std::enable_shared_from_this<PciTransportSession> {
 public:
   enum class State : uint8_t { Open, Closing, Revoked };
 
-  class OperationLease {
+  /// @brief One admitted operation against this session's endpoints.
+  ///
+  /// @details Move-only. A default-constructed or moved-from lease is empty:
+  /// it tests false, exposes no endpoints, and every operation through it
+  /// reports @ref DmaAccessOutcome::Unavailable. A lease that tests true holds
+  /// off @ref wait_until_drained until it is destroyed or assigned over, so the
+  /// endpoints it captured stay valid for its whole lifetime.
+  ///
+  /// @tparam SessionRef How the lease refers to its session: an owning
+  /// `std::shared_ptr` (@ref OperationLease) or a raw pointer (@ref
+  /// BorrowedLease) for a caller that already owns the session.
+  template <typename SessionRef> class BasicLease {
   public:
-    OperationLease() = default;
-    OperationLease(const OperationLease &) = delete;
-    OperationLease &operator=(const OperationLease &) = delete;
+    BasicLease() = default;
+    BasicLease(const BasicLease &) = delete;
+    BasicLease &operator=(const BasicLease &) = delete;
 
-    OperationLease(OperationLease &&other) noexcept
-        : session_(std::move(other.session_)), endpoints_(other.endpoints_) {
+    BasicLease(BasicLease &&other) noexcept
+        : session_(std::exchange(other.session_, SessionRef{})), endpoints_(other.endpoints_),
+          stripe_(other.stripe_) {
       other.endpoints_ = {};
     }
 
-    OperationLease &operator=(OperationLease &&other) noexcept {
+    BasicLease &operator=(BasicLease &&other) noexcept {
       if (this == &other) {
         return *this;
       }
       release();
-      session_ = std::move(other.session_);
+      session_ = std::exchange(other.session_, SessionRef{});
       endpoints_ = other.endpoints_;
+      stripe_ = other.stripe_;
       other.endpoints_ = {};
       return *this;
     }
 
-    ~OperationLease() { release(); }
+    ~BasicLease() { release(); }
 
     [[nodiscard]] explicit operator bool() const { return session_ != nullptr; }
     [[nodiscard]] DmaEngine *dma() const { return endpoints_.dma; }
@@ -395,29 +414,62 @@ public:
 
   private:
     friend class PciTransportSession;
-    OperationLease(std::shared_ptr<PciTransportSession> session, PciTransport endpoints)
-        : session_(std::move(session)), endpoints_(endpoints) {}
+    BasicLease(SessionRef session, PciTransport endpoints, uint32_t stripe)
+        : session_(std::move(session)), endpoints_(endpoints), stripe_(stripe) {}
 
     void release() {
       if (session_ == nullptr) {
         return;
       }
-      session_->release_operation();
-      session_.reset();
+      // The session must outlive this call: an owning lease drops its
+      // reference only afterwards, and a borrower holds its own.
+      session_->release_operation(stripe_);
+      session_ = SessionRef{};
       endpoints_ = {};
     }
 
-    std::shared_ptr<PciTransportSession> session_;
+    SessionRef session_{};
     PciTransport endpoints_;
+    // Leases may be released on another thread, so the admitting stripe is
+    // carried rather than recomputed.
+    uint32_t stripe_ = 0;
   };
 
+  /// @brief A lease that keeps its session alive, so it may outlive every other
+  /// reference to the session.
+  using OperationLease = BasicLease<std::shared_ptr<PciTransportSession>>;
+
+  /// @brief A lease that does not keep its session alive.
+  /// @details For a caller that itself owns a `shared_ptr` to the session for
+  /// at least as long as the lease. It leaves the session's shared reference
+  /// count untouched, which every concurrent operation would otherwise contend
+  /// on. It admits, refuses and holds off revocation exactly as an @ref
+  /// OperationLease does.
+  using BorrowedLease = BasicLease<PciTransportSession *>;
+
+  /// @brief Admit one operation and retain the session for its duration.
+  /// @returns A lease on the session's endpoints, or an empty lease once
+  ///          revocation has begun.
   [[nodiscard]] OperationLease acquire() {
-    std::lock_guard lock(mutex_);
-    if (state_ != State::Open) {
+    const uint32_t stripe = thread_stripe();
+    if (!admit(stripe)) {
       return {};
     }
-    ++active_operations_;
-    return OperationLease(shared_from_this(), endpoints_);
+    return OperationLease(shared_from_this(), endpoints_, stripe);
+  }
+
+  /// @brief Admit one operation without retaining the session.
+  /// @details The caller must hold a `shared_ptr` to this session until the
+  /// returned lease is destroyed; otherwise releasing the lease touches a
+  /// destroyed session.
+  /// @returns A lease on the session's endpoints, or an empty lease once
+  ///          revocation has begun.
+  [[nodiscard]] BorrowedLease borrow() {
+    const uint32_t stripe = thread_stripe();
+    if (!admit(stripe)) {
+      return {};
+    }
+    return BorrowedLease(this, endpoints_, stripe);
   }
 
   /// @brief Refuse future leases without waiting for admitted operations.
@@ -428,6 +480,7 @@ public:
       return false;
     }
     state_ = State::Closing;
+    closing_.store(true, std::memory_order_seq_cst);
     return true;
   }
 
@@ -437,7 +490,8 @@ public:
     if (state_ == State::Open) {
       state_ = State::Closing;
     }
-    drained_.wait(lock, [this]() { return active_operations_ == 0; });
+    closing_.store(true, std::memory_order_seq_cst);
+    drained_.wait(lock, [this]() { return admitted_operations() == 0; });
     endpoints_ = {};
     state_ = State::Revoked;
   }
@@ -454,11 +508,57 @@ private:
   PciTransportSession(uint64_t generation, PciTransport endpoints)
       : generation_(generation), endpoints_(endpoints) {}
 
-  void release_operation() {
-    std::lock_guard lock(mutex_);
-    if (--active_operations_ == 0) {
-      drained_.notify_all();
+  // Admission is a store/load handshake with revocation: an operation counts
+  // itself and then checks the closing flag, while revocation raises the flag
+  // and then reads the counts. Both sides are sequentially consistent, so
+  // either the operation sees the flag and backs out, or revocation sees the
+  // count and waits. endpoints_ is cleared only after that wait, so an admitted
+  // operation may copy it without a lock.
+  //
+  // The count is striped so that concurrent operations do not share one cache
+  // line. A lease is counted on the stripe of the thread that admitted it and
+  // carries that index, so no stripe goes negative and a stripe that revocation
+  // has read as zero cannot gain an admitted operation afterwards.
+  static constexpr uint32_t kStripes = 64;
+  struct alignas(64) Stripe {
+    std::atomic<int64_t> active{0};
+  };
+
+  /// @brief The stripe the calling thread counts its admissions on.
+  [[nodiscard]] static uint32_t thread_stripe() {
+    static std::atomic<uint32_t> threads_seen{0};
+    thread_local const uint32_t stripe =
+        threads_seen.fetch_add(1, std::memory_order_relaxed) % kStripes;
+    return stripe;
+  }
+
+  /// @brief Count one operation on @p stripe unless revocation has begun.
+  [[nodiscard]] bool admit(uint32_t stripe) {
+    stripes_[stripe].active.fetch_add(1, std::memory_order_seq_cst);
+    if (!closing_.load(std::memory_order_seq_cst)) {
+      return true;
     }
+    release_operation(stripe);
+    return false;
+  }
+
+  [[nodiscard]] int64_t admitted_operations() const {
+    int64_t total = 0;
+    for (const Stripe &stripe : stripes_) {
+      total += stripe.active.load(std::memory_order_seq_cst);
+    }
+    return total;
+  }
+
+  void release_operation(uint32_t stripe) {
+    stripes_[stripe].active.fetch_sub(1, std::memory_order_seq_cst);
+    if (!closing_.load(std::memory_order_seq_cst)) {
+      return;
+    }
+    // Take the mutex so a drain that has evaluated its predicate but not yet
+    // started waiting cannot miss this wakeup.
+    std::lock_guard lock(mutex_);
+    drained_.notify_all();
   }
 
   const uint64_t generation_;
@@ -466,7 +566,9 @@ private:
   std::condition_variable drained_;
   PciTransport endpoints_;
   State state_ = State::Open;
-  uint64_t active_operations_ = 0;
+  // Mirrors state_ != State::Open for the lock-free admission path.
+  std::atomic<bool> closing_{false};
+  std::array<Stripe, kStripes> stripes_{};
 };
 
 /// @brief A simulated PCI function: a component with a transport-agnostic bus face.
