@@ -302,6 +302,22 @@ jobs:
           pip install -r requirements.txt -r requirements-test.txt --timeout 300
           echo "✅ pip requirements installed!"
 
+      - name: Install JAX
+        run: |
+          set -e
+          # PyPI is --index-url so the nightly extra-index cannot hide the
+          # PyPI jax-rocm10-plugin. Pin jax/jaxlib to the plugin 0.11 series.
+          # TheRock JAX wheels are Python 3.12+; 3.10 jobs keep ROCm/torch only.
+          pip install \
+            --index-url https://pypi.org/simple/ \
+            --extra-index-url https://nightly.repo.amd.com/rocm/jax/whl-next/ \
+            --timeout 600 \
+            "jax-rocm10-plugin; python_version >= '3.12'" \
+            "jax-rocm10-pjrt; python_version >= '3.12'" \
+            "jax==0.11.*; python_version >= '3.12'" \
+            "jaxlib==0.11.*; python_version >= '3.12'"
+          echo "✅ JAX installation complete!"
+
       - name: Configure, Build, and Test
         id: test
         continue-on-error: true
