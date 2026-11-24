@@ -33,6 +33,7 @@ It exercises:
 |--------|----------------|
 | (wheel artifact) | `cmake --build --target nccl4py` produced a `.whl` |
 | `test_rocm_extensions.py` | RCCL-only wrappers (`all_reduce_with_bias`, `all_to_all_v`) fail controlled |
+| `test_gin_custom_peers.py` | `nccl.core` GIN custom peer array (`CUSTOM_ARRAY`, `gin_custom_peers`) wiring |
 | `test_shim_surface.py` | HIP `cuda.core` shim (optional; self-skips without visible GPUs) |
 | `test_group_window.py` | `register_window()` inside `nccl.core.group()` returns a handle (2 GPUs; self-skips on fewer) |
 
