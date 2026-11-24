@@ -31,9 +31,10 @@ consteval ImageAddressEquation make_image_equation(const uint32_t *masks, uint32
     }
     for (uint32_t axis = 0; axis < 2; ++axis) {
       for (uint32_t chunk = 0; chunk < 3; ++chunk) {
-        for (uint32_t value = 0; value < 16; ++value) {
-          result.chunks[axis][chunk][value] |=
-              (std::popcount((value << (chunk * 4)) & (masks[bit] >> (axis * 16))) & 1u) << bit;
+        if (const uint32_t selectors = (masks[bit] >> (axis * 16 + chunk * 4)) & 15u) {
+          for (uint32_t value = 0; value < 16; ++value) {
+            result.chunks[axis][chunk][value] |= (std::popcount(value & selectors) & 1u) << bit;
+          }
         }
       }
     }
