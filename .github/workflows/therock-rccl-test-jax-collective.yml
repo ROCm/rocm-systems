@@ -67,6 +67,17 @@ jobs:
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
       OUTPUT_ARTIFACTS_DIR: "./build"
       JAX_SRC: ${{ github.workspace }}/jax-src
+      # jax, jaxlib, and the ROCm plugin and PJRT wheels all install this
+      # release. ==X.Y.Z also matches the nightly plugin builds, which are
+      # versioned X.Y.Z+rocm<version>a<date>.
+      #
+      # Keep it at a release TheRock still builds the plugin for nightly
+      # (JAX_REF_CONFIGS in TheRock's configure_jax_release_matrix.py). The
+      # nightly index keeps a rolling window of builds, about three months as
+      # of 2026-11, so a release TheRock stops building eventually fails to
+      # install. The rccl-ci team, which owns this workflow, bumps it; the
+      # test sources follow the installed jax automatically.
+      JAX_VERSION: "0.12.0"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -93,9 +104,9 @@ jobs:
 
       - name: Install JAX and test dependencies
         timeout-minutes: 15
-        # Intentionally installs latest nightly wheels against pinned test sources.
-        # The 10 smoke tests use stable pmap/shard_map APIs that are compatible
-        # across JAX versions. This lets us catch RCCL regressions with current JAX.
+        # Installs JAX_VERSION with the latest nightly ROCm plugin build of it.
+        # test_jax_collective.py checks out the JAX tests at the commit the
+        # installed jax was built from, so test sources always match it.
         #
         # xla_rocm_plugin.so has RUNPATH entries that resolve math libraries
         # (hipBLASLt, hipFFT, MIOpen, rocBLAS, etc.) from the _rocm_sdk_libraries
@@ -110,11 +121,12 @@ jobs:
           # jax-rocm10-plugin outranks the nightly build and is silently
           # installed in its place.
           #
-          # jax/jaxlib are held to the plugin's 0.11 series: the plugin
-          # declares no jax dependency at all, so an unconstrained resolve
-          # pairs jax 0.12 with a 0.11 plugin.
+          # All four packages are pinned to the same release. The plugin
+          # declares no jax dependency, so without an exact pin on each one
+          # the resolver can pair a jax and plugin from different releases.
           uv pip install --prerelease=allow \
-            jax-rocm10-plugin jax-rocm10-pjrt "jax==0.11.*" "jaxlib==0.11.*" \
+            "jax-rocm10-plugin==${JAX_VERSION}" "jax-rocm10-pjrt==${JAX_VERSION}" \
+            "jax==${JAX_VERSION}" "jaxlib==${JAX_VERSION}" \
             --index-url https://pypi.org/simple/ \
             --extra-index-url https://nightly.repo.amd.com/rocm/jax/whl-next/
           uv pip install \
