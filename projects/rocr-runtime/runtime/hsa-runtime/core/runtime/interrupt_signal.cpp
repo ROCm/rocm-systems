@@ -49,6 +49,20 @@ namespace core {
 
 HsaEvent* InterruptSignal::EventPool::alloc() {
   std::lock_guard<HybridMutex> lock(lock_);
+  if (!overflow_checked_) {
+    overflow_checked_ = true;
+    // Reserve one event while slots are still free. A signal created after KFD
+    // runs out of signal events (KFD_SIGNAL_EVENT_LIMIT per process) shares it
+    // instead of getting no event, so its async handler and its waiters keep
+    // sleeping in KFD. Without it, such a signal forces the async-events thread
+    // to poll the whole batch, and every waiter on it to spin.
+    // Sharing needs event age: each waiter passes the age it last saw, so a
+    // notification meant for another signal on the same event only costs a
+    // re-check of the value and is never consumed from under another waiter.
+    if (Runtime::runtime_singleton_->flag().enable_shared_overflow_event() &&
+        Runtime::runtime_singleton_->KfdVersion().supports_event_age)
+      overflow_.reset(InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false));
+  }
   if (events_.empty()) {
     if (!allEventsAllocated) {
       HsaEvent* evt = InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
@@ -112,6 +126,11 @@ void InterruptSignal::AttachEvent(HsaEvent* use_event) {
   } else {
     event_ = Runtime::runtime_singleton_->GetEventPool()->alloc();
     free_event_ = true;
+    if (event_ == nullptr) {
+      // Out of KFD signal events: share the reserved overflow event, if any.
+      event_ = Runtime::runtime_singleton_->GetEventPool()->overflow();
+      free_event_ = false;
+    }
   }
 
   if (event_ != nullptr) {

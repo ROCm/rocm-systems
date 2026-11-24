@@ -88,6 +88,13 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_SHARED_OVERFLOW_EVENT``
+        | KFD has a fixed number of signal events per process (4096). When they are used up, interrupt signals created afterwards share one event that the runtime reserves up front, so their async handlers and waiters still sleep in KFD and are woken by interrupt. With sharing disabled, such signals get no event: the async-events thread then polls (or sleeps between polls of) every signal with an async handler, and waiters on them spin.
+        | Requires a KFD with event age support; on older kernels the variable has no effect and signals without an event behave as with ``0``.
+      - ``1``
+      - | 0: Disable
+        | 1: Enable
+
     * - | ``HSA_ENABLE_YIELDING_POLL``
         | When enabled, waits on signals that have no interrupt event (for example the completion signal of a host-device copy) spin for a short window and then sleep between polls with an increasing interval, instead of spinning for the whole wait. Lowers CPU use for long waits; a wait that completes within the window keeps its latency.
         | The window is 200 us, or 10 ms for waits with the ``HSA_WAIT_STATE_ACTIVE`` hint (these also back off afterwards). After the window the sleep starts at 20 us and doubles up to 2 ms, so a completion is observed up to about 2 ms late; no sleep extends past the wait's timeout.

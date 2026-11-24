@@ -2228,8 +2228,11 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     if (!keep) {
       // Drop the removed event's cached age so a future event reusing the same
       // HsaEvent* address does not inherit a stale baseline.
+      // The shared overflow event stays in use by other signals, so keep its age.
       HsaEvent* removed_event = hsa_signal_handle(async_events_.signal_[index])->EopEvent();
-      if (removed_event != nullptr) event_age_map.erase(removed_event);
+      if (removed_event != nullptr &&
+          removed_event != runtime_singleton_->GetEventPool()->overflow())
+        event_age_map.erase(removed_event);
       hsa_signal_handle(async_events_.signal_[index])->Release();
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
