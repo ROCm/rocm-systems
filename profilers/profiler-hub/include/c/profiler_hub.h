@@ -585,10 +585,13 @@ extern "C"
     ph_result_t ph_future_result(ph_future_t future, ph_result_t* result);
 
     /**
-     * @brief Releases @p future.
+     * @brief Releases @p future. Call it exactly once for each future created
+     *        by ph_future_create(). Calling it again on the same handle, or
+     *        using the handle afterwards, is undefined behavior: once the
+     *        operation has ended, the first call may already have freed it.
      * @param future Future to release.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if
-     *         @p future is null or was already released.
+     *         @p future is null.
      * @note Does not wait for the operation. A running operation keeps the
      *       future alive until its on_finished callback has returned.
      */
