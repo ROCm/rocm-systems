@@ -4,6 +4,7 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include <algorithm>
@@ -230,7 +231,7 @@ TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
     for (uint32_t lane = 0; lane < cases.size(); ++lane)
       sim.cu()->write_vgpr(vgpr_base + kSrc, lane, cases[lane].input);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     auto check_encoding = [&](const auto &words, std::string_view expected_mnemonic) {
       SCOPED_TRACE(expected_mnemonic);
@@ -279,7 +280,7 @@ TEST(Gfx1250SimulationTest, PackedBf16ArithmeticRoundsOnceAndHonorsOverflowMode)
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t vb = wf->vgpr_alloc().base;
   wf->set_exec(1);
@@ -369,7 +370,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
   const auto add_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 129});
   const auto add_minus_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 193});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> increment(decode_valid(*decoder, add_one.data()));
   std::unique_ptr<Instruction> decrement(decode_valid(*decoder, add_minus_one.data()));
@@ -583,7 +584,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSignalIsfirstPreservesSccWithoutAllocati
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
   std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
@@ -605,7 +606,7 @@ void expect_barrier_init_reads_implicit_m0(uint32_t init_encoding, uint32_t init
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2, 4);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> init_words = {init_encoding};
   const std::array<uint32_t, 1> join_words = {0xBE805281u};   // s_barrier_join 1
@@ -657,7 +658,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSynchronizesJoinedWavesAcrossPhases) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2, 4);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> join_words = {0xBE80527Du};
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
@@ -801,7 +802,7 @@ TEST(Gfx1250SimulationTest, WorkgroupSignalIsfirstAcceptsNegativeInlineBarrierId
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804FC1u}; // s_barrier_signal_isfirst -1
   std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
@@ -2437,7 +2438,7 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
   cu->write_vgpr(vb + kAddend, 0, std::bit_cast<uint32_t>(100.0f));
   cu->write_vgpr(vb + kSrc2Bank * kBankStride + kAddend, 0, std::bit_cast<uint32_t>(4.0f));
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -2614,7 +2615,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   constexpr uint32_t kM0ByteBase = 0x1000;
   wf->set_m0(kM0ByteBase);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kLane0Data = 0x12345678u;
@@ -2827,7 +2828,7 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
   wf->set_exec(0x3u);
   wf->set_vcc(0x1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, cndmask.data()));
   ASSERT_NE(inst, nullptr);
@@ -2860,7 +2861,7 @@ TEST(Gfx1250ExecutionTest, Vopd3MixedWidthGuestRounding) {
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
   const uint32_t base = wf->vgpr_alloc().base;
@@ -2912,7 +2913,7 @@ TEST(Gfx1250ExecutionTest, Vopd3MinMaxInputDenormals) {
            .src2 = 0,
            .dst = 2},
           {.op = VopdOp::MovB32, .src0 = vopd_src0_vgpr(6), .src1 = 0, .src2 = 0, .dst = 9});
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
       ASSERT_EQ(instruction->flags() & INVALID_VOPD_OPERANDS, 0U);

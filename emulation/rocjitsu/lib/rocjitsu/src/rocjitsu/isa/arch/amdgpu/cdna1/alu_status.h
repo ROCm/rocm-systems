@@ -24,13 +24,15 @@ uint32_t classify_binary_f32(const Inst &inst, amdgpu::Wavefront &wf, const Oper
     return 0;
   const amdgpu::RegisterAccess regs(wf);
   const unsigned denorm_mode = wf.fp_denorm_mode_f32();
-  amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   unsigned omod = amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F32>(inst, wf);
   if constexpr (requires { inst.inst_.omod; })
     omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(),
                                            inst.inst_.omod);
   const float scale = omod == 1 ? 2.0f : omod == 2 ? 4.0f : omod == 3 ? 0.5f : 1.0f;
   uint32_t causes = 0;
+  // Guest rounding for the host arithmetic below; the scope also starts with clear
+  // host exception flags, which fetestexcept reads after the loop.
+  amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   for (uint64_t mask = active; mask; mask &= mask - 1) {
     const unsigned lane = std::countr_zero(mask);
     auto read = [&](const Operand &src, unsigned index) {

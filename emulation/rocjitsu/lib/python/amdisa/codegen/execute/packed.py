@@ -571,52 +571,17 @@ def gen_pk_ternary_f32(
 
 
 def gen_pk_binop_u64(dst: list[str], src: list[str], op: str) -> str:
-    """Generate packed U64 add/sub with VOP3P source modifiers and clamp.
-
-    The packed pair contains two independent U64 elements.  ``neg`` applies
-    to the low element and ``neg_hi`` to the high element before the binary
-    operation.  A signed 128-bit intermediate preserves the mathematical
-    result until integer clamp has saturated it to the U64 range; without
-    clamp, conversion back to U64 provides the instruction's modulo-2^64
-    result.  Source negation is applied before the arithmetic, and clamp is
-    applied to the resulting mathematical value.
-    """
+    """Forward packed U64 source negation and saturation to rj-arith."""
     if op not in ('add', 'sub'):
         raise ValueError(f'unsupported packed U64 binary operation: {op}')
-
-    d, s0, s1 = dst[0], src[0], src[1]
-    operator = '+' if op == 'add' else '-'
-    L = [
-        '  uint64_t exec = wf.exec();',
-        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
-        '    if (!(exec & (1ULL << lane))) continue;',
-        f'    const auto lhs = read_pk_u64_pair({s0}, wf, lane);',
-        f'    const auto rhs = read_pk_u64_pair({s1}, wf, lane);',
-        '    const auto apply = [&](uint64_t lhs_value, uint64_t rhs_value,',
-        '                           bool negate_lhs, bool negate_rhs) -> uint64_t {',
-        '      using Wide = util::int128_t;',
-        '      Wide lhs_wide = static_cast<Wide>(lhs_value);',
-        '      Wide rhs_wide = static_cast<Wide>(rhs_value);',
-        '      if (negate_lhs) lhs_wide = -lhs_wide;',
-        '      if (negate_rhs) rhs_wide = -rhs_wide;',
-        f'      const Wide result = lhs_wide {operator} rhs_wide;',
-        '      if (inst_.clamp) {',
-        '        if (result < Wide{}) return 0;',
-        '        constexpr Wide kMax =',
-        '            static_cast<Wide>(std::numeric_limits<uint64_t>::max());',
-        '        if (result > kMax) return std::numeric_limits<uint64_t>::max();',
-        '      }',
-        '      return static_cast<uint64_t>(result);',
-        '    };',
-        '    const uint64_t result_lo =',
-        '        apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);',
-        '    const uint64_t result_hi = apply(lhs.hi, rhs.hi,',
-        '                                     (inst_.neg_hi & 1u) != 0,',
-        '                                     (inst_.neg_hi & 2u) != 0);',
-        f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
-        '  }',
-    ]
-    return '\n'.join(L)
+    return '\n'.join(
+        [
+            '  const uint64_t modifiers = inst_.neg | (uint64_t(inst_.neg_hi) << 3) |',
+            '      (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0);',
+            '  amdgpu::arith::execute_packed_u64<false>(',
+            f'      wf, rj_arith_v_pk_{op}_nc_u64_w32, modifiers, {dst[0]}, {src[0]}, {src[1]});',
+        ]
+    )
 
 
 def gen_pk_binop_f64(dst: list[str], src: list[str], op: str) -> str:
@@ -704,39 +669,11 @@ def gen_pk_ternary_f64(dst: list[str], src: list[str], op: str) -> str:
 
 
 def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
-    """Generate packed U64 shift-left-add over two independent elements.
-
-    V_PK_LSHL_ADD_U64 has two 64-bit values in each 128-bit value/addend
-    operand and two 32-bit shift counts in its 64-bit shift operand. VGPR U64
-    sources supply both elements, while scalar-backed U64 sources broadcast the
-    low 64 bits. Its public LLVM profile explicitly disables clamp and source
-    modifiers, so the body intentionally consumes neither field. The currently
-    proven shift-count range is 0..4; execution fails closed before any
-    destination write if either count of any active lane is outside that range.
-    """
-    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    """Forward shift-add through the adapter that validates active counts before stores."""
     return '\n'.join(
         [
-            '  uint64_t exec = wf.exec();',
-            '  std::array<PkU64Pair, 64> results{};',
-            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
-            '    if (!(exec & (1ULL << lane))) continue;',
-            f'    const auto values = read_pk_u64_pair({s0}, wf, lane);',
-            f'    const auto shifts = read_pk_u32_pair({s1}, wf, lane);',
-            f'    const auto addends = read_pk_u64_pair({s2}, wf, lane);',
-            '    if (shifts.lo > 4u || shifts.hi > 4u) {',
-            '      wf.report_instruction_execution_error(',
-            '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
-            '      return;',
-            '    }',
-            '    const uint64_t result_lo = amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo;',
-            '    const uint64_t result_hi = amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi;',
-            '    results[lane] = {result_lo, result_hi};',
-            '  }',
-            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
-            '    if (!(exec & (1ULL << lane))) continue;',
-            f'    write_pk_u64_pair({d}, wf, lane, results[lane]);',
-            '  }',
+            '  amdgpu::arith::execute_packed_u64<true>(',
+            f'      wf, rj_arith_v_pk_lshl_add_u64_w32, 0, {dst[0]}, {src[0]}, {src[1]}, &{src[2]});',
         ]
     )
 

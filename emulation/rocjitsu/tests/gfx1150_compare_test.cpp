@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -42,7 +43,7 @@ TEST(Gfx1150ComparisonTest, MasksAndSignaling) {
       amdgpu::GpuMemory memory("gfx1150_compare");
       amdgpu::L2Cache l2("gfx1150_compare");
       amdgpu::ComputeUnitCore::Config config{};
-      config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+      config.arch = rocjitsu::IsaFamily::Rdna3_5;
       config.arithmetic.semantics = semantics;
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 104;

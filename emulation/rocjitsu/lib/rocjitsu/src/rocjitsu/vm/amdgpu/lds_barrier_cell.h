@@ -38,13 +38,21 @@ inline uint64_t lds_barrier_cell_init_count(uint64_t state) {
   return (state >> kLdsBarrierCellInitCountShift) & kLdsBarrierCellInitCountMask;
 }
 
+/// Whether an arrival that subtracts `update` from `state` meets the barrier:
+/// the pending count rolls under, which changes the phase and reloads the
+/// count. CDNA5 ISA section 15.15 tests bit WIDTH-1 of the 32-bit result,
+/// which is bit 28 at WIDTH=29.
+inline bool lds_barrier_cell_arrive_completes_phase(uint64_t state, uint32_t update = 1) {
+  return ((static_cast<uint32_t>(state) - update) & kLdsBarrierCellPendingRollUnderBit) != 0;
+}
+
 /// Subtract the update once from the packed 32-bit phase and pending count.
-/// CDNA5 ISA section 15.15 tests bit 28 of the result for roll-under at WIDTH=29.
-/// When set, keep the phase from the subtraction and reload the initial count.
+/// On roll-under (see lds_barrier_cell_arrive_completes_phase()), keep the
+/// phase from the subtraction and reload the initial count.
 inline uint64_t lds_barrier_cell_update_arrive(uint64_t state, uint32_t update = 1) {
   const uint32_t next = static_cast<uint32_t>(state) - update;
   uint64_t result = (state & ~kLdsBarrierCellBarStateMask) | next;
-  if (next & kLdsBarrierCellPendingRollUnderBit)
+  if (lds_barrier_cell_arrive_completes_phase(state, update))
     result = (result & ~kLdsBarrierCellPendingMask) | lds_barrier_cell_init_count(state);
   return result;
 }

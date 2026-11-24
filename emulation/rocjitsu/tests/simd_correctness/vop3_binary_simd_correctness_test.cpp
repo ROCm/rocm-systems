@@ -15,6 +15,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -205,7 +206,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t wave_size = 0,
+  explicit Fixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4, uint32_t wave_size = 0,
                    std::shared_ptr<ExecutionPluginGroup> plugins = {})
       : gpu_mem("vop3_bin_simd_mem"), l2("vop3_bin_simd_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -260,27 +261,8 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
 };
 
-// Migrated RDNA paths assume default controls and may raise sticky flags.
-// Legacy CDNA paths still promise isolation from nondefault host state.
+// Every path assumes the default host controls and may raise sticky flags.
 struct SubtractionHostEnvironment {
-  std::fenv_t saved{};
-#if RJ_HOST_ARCH_X86
-  uint32_t saved_mxcsr = _mm_getcsr();
-#endif
-  explicit SubtractionHostEnvironment(bool uses_arith) {
-    EXPECT_EQ(std::feholdexcept(&saved), 0);
-    EXPECT_EQ(std::fesetround(uses_arith ? FE_TONEAREST : FE_UPWARD), 0);
-    EXPECT_EQ(std::feraiseexcept(FE_DIVBYZERO), 0);
-#if RJ_HOST_ARCH_X86
-    _mm_setcsr(uses_arith ? 0x1f80u : _mm_getcsr() | (1u << 6) | (1u << 15));
-#endif
-  }
-  ~SubtractionHostEnvironment() {
-    std::fesetenv(&saved);
-#if RJ_HOST_ARCH_X86
-    _mm_setcsr(saved_mxcsr);
-#endif
-  }
   static std::array<int, 3> snapshot() {
     int control = 0;
 #if RJ_HOST_ARCH_X86
@@ -312,11 +294,10 @@ public:
 // Lanes reported per (write, register, bytes, rounding, flags, control), merging
 // the per-lane events of scalar execution with SIMD's per-view events.
 std::map<std::array<uint64_t, 6>, uint64_t>
-observed_coverage(const std::vector<std::array<uint64_t, 7>> &events, bool uses_arith) {
+observed_coverage(const std::vector<std::array<uint64_t, 7>> &events) {
   std::map<std::array<uint64_t, 6>, uint64_t> coverage;
   for (const auto &event : events)
-    coverage[{event[0], event[1], event[3], event[4], uses_arith ? 0 : event[5],
-              uses_arith ? event[6] & ~uint64_t(0x3f) : event[6]}] |= event[2];
+    coverage[{event[0], event[1], event[3], event[4], 0, event[6] & ~uint64_t(0x3f)}] |= event[2];
   return coverage;
 }
 
@@ -342,8 +323,9 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
       {0x7f801234u, 0xff805678u},
       {0x3f800000u, 0xff801234u},
   }};
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const bool rdna = arch != ROCJITSU_CODE_ARCH_CDNA4;
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna4}) {
+    const bool rdna = arch != rocjitsu::IsaFamily::Cdna4;
     for (unsigned form = 0; form < 4; ++form) {
       const bool e64 = form & 2, reverse = form & 1;
       // All 16 MODE combinations; rotate masks, aliases and modifiers rather
@@ -392,7 +374,6 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
           }
           observer->events.clear();
           {
-            SubtractionHostEnvironment host(/*uses_arith=*/true);
             const auto before = SubtractionHostEnvironment::snapshot();
             const bool succeeded = fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
             const auto after = SubtractionHostEnvironment::snapshot();
@@ -416,8 +397,7 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
         // Scalar execution reports each lane, SIMD each register view. Both must
         // cover the same registers and lanes, and every callback must see the
         // caller's FP environment.
-        EXPECT_EQ(observed_coverage(actual.second, true),
-                  observed_coverage(reference.second, true));
+        EXPECT_EQ(observed_coverage(actual.second), observed_coverage(reference.second));
         if (!e64 && (exec & 1u)) {
           // 1 - 2^-25 is exactly halfway below 1. This independent rounding
           // witness also catches GCC moving the SIMD subtraction across MODE.

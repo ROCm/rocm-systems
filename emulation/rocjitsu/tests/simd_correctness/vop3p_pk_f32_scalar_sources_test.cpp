@@ -3,6 +3,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -63,7 +64,7 @@ protected:
       GTEST_SKIP() << "SIMD execution is unavailable";
 
     amdgpu::ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.arch = rocjitsu::IsaFamily::Cdna5;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
@@ -71,7 +72,7 @@ protected:
     cache_.set_backing_memory(&memory_);
     ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
         cu_, "packed_f32_scalar_sources", config, &memory_, &cache_));
-    decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    decoder_ = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     wave_ = cu_->dispatch_wf(0, 0, 106, 256);
     ASSERT_NE(wave_, nullptr);
   }

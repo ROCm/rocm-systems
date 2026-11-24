@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
@@ -151,7 +152,7 @@ TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLan
 
   const auto words =
       cdna4::build_flat(cdna4::kFlatStoreDwordx4Flat, {.addr = kAddress, .data = kData});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
   ASSERT_NE(store, nullptr);
@@ -173,14 +174,14 @@ TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLan
 }
 
 TEST(ExecutionPluginTest, EmptyGlobalTransposeSkipsAddressesAndPreservesLoadCounterOrdering) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (uint32_t width : {32u, 64u}) {
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && width == 64)
+      if (arch == rocjitsu::IsaFamily::Cdna5 && width == 64)
         continue;
       SCOPED_TRACE(testing::Message() << arch << " width=" << width);
       PluginFixture f;
       ASSERT_NO_FATAL_FAILURE(
-          f.initialize(1, arch == ROCJITSU_CODE_ARCH_RDNA4 ? "rdna4" : "cdna5", 32, 128));
+          f.initialize(1, arch == rocjitsu::IsaFamily::Rdna4 ? "rdna4" : "cdna5", 32, 128));
       f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
       auto observer = std::make_unique<OrderingPlugin>();
       auto *seen = observer.get();
@@ -192,7 +193,7 @@ TEST(ExecutionPluginTest, EmptyGlobalTransposeSkipsAddressesAndPreservesLoadCoun
       ASSERT_NE(wave, nullptr);
       std::vector<uint16_t> opcodes{rdna4::kGlobalLoadTrB64Vglobal,
                                     rdna4::kGlobalLoadTrB128Vglobal};
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+      if (arch == rocjitsu::IsaFamily::Cdna5)
         opcodes.insert(opcodes.end(),
                        {cdna5::kGlobalLoadTr4B64Vglobal, cdna5::kGlobalLoadTr6B96Vglobal});
       for (auto opcode : opcodes) {
@@ -638,7 +639,7 @@ TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgpr
   };
   f.mem->load_image(reinterpret_cast<const uint8_t *>(kData.data()), sizeof(kData), kDataAddress);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   TestScalarMemPipeline pipeline(&cu->l1_scalar());
   auto issue_load = [&](uint16_t op, uint8_t sdata, uint64_t address, uint8_t sbase = 0) {
@@ -714,7 +715,7 @@ TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
 
   const auto words = cdna4::build_smem(cdna4::kSLoadDwordx2Smem,
                                        {.sbase = 0, .sdata = amdgpu::kTtmpSelectorLast, .imm = 1});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
   ASSERT_NE(load, nullptr);
@@ -1027,7 +1028,7 @@ TEST(RoutedMemoryObservationTest, DecodedImageSampleReportsEveryFilteredTexelOnc
   cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(1.f));
   cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(1.f));
   cu->write_vgpr(vb + 8, 1, 0xdeadbeef);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   const auto words = rdna4::build_vsample(rdna4::kImageSampleLzVsample, {.dim = 1,
                                                                          .unorm = 1,
                                                                          .dmask = 1,
@@ -1086,7 +1087,7 @@ void check_cdna2_lds_to_buffer_observation(bool buffer_store_first) {
     wave->set_lds_size(16);
   }
   fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 64, 204, waves);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna2);
   auto issue = [&](Wavefront &wave, const std::array<uint32_t, 2> &words) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
@@ -1152,12 +1153,12 @@ TEST(RoutedMemoryObservationTest, Cdna2DsWriteDetectsAnOutstandingLdsToBufferRea
   check_cdna2_lds_to_buffer_observation(true);
 }
 
-void check_flat_lds_observation(rj_code_arch_t arch) {
+void check_flat_lds_observation(rocjitsu::IsaFamily arch) {
   using namespace rocjitsu::plugins::race_detector;
 
   SCOPED_TRACE(arch);
-  const bool cdna2_target = arch == ROCJITSU_CODE_ARCH_CDNA2;
-  const bool cdna5_target = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool cdna2_target = arch == rocjitsu::IsaFamily::Cdna2;
+  const bool cdna5_target = arch == rocjitsu::IsaFamily::Cdna5;
   const uint32_t wave_size = cdna2_target ? 64 : 32;
   const uint32_t sgprs = cdna2_target ? 102 : 128;
   PluginFixture fixture;
@@ -1312,9 +1313,9 @@ void check_flat_lds_observation(rj_code_arch_t arch) {
 }
 
 TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPrefixes) {
-  ASSERT_NO_FATAL_FAILURE(check_flat_lds_observation(ROCJITSU_CODE_ARCH_RDNA4));
-  ASSERT_NO_FATAL_FAILURE(check_flat_lds_observation(ROCJITSU_CODE_ARCH_CDNA5));
-  ASSERT_NO_FATAL_FAILURE(check_flat_lds_observation(ROCJITSU_CODE_ARCH_CDNA2));
+  ASSERT_NO_FATAL_FAILURE(check_flat_lds_observation(rocjitsu::IsaFamily::Rdna4));
+  ASSERT_NO_FATAL_FAILURE(check_flat_lds_observation(rocjitsu::IsaFamily::Cdna5));
+  ASSERT_NO_FATAL_FAILURE(check_flat_lds_observation(rocjitsu::IsaFamily::Cdna2));
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
@@ -1574,9 +1575,9 @@ TEST(RoutedMemoryObservationTest, DualDsReportsEffectiveAddressesAndKeepsBothRes
   constexpr uint16_t read = rdna2::kDsRead2B32, write = rdna2::kDsWrite2B32,
                      swap = rdna2::kDsWrxchg2RtnB32;
   for (const auto &[arch, gds] :
-       {std::pair{ROCJITSU_CODE_ARCH_RDNA2, false}, std::pair{ROCJITSU_CODE_ARCH_RDNA2, true},
-        std::pair{ROCJITSU_CODE_ARCH_CDNA4, false}}) {
-    const bool rdna2 = arch == ROCJITSU_CODE_ARCH_RDNA2;
+       {std::pair{rocjitsu::IsaFamily::Rdna2, false}, std::pair{rocjitsu::IsaFamily::Rdna2, true},
+        std::pair{rocjitsu::IsaFamily::Cdna4, false}}) {
+    const bool rdna2 = arch == rocjitsu::IsaFamily::Rdna2;
     PluginFixture fixture;
     ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, rdna2 ? "rdna2" : "cdna4", 64, 128));
     auto *plugin = fixture.attach_memory_observation_plugin();
@@ -2268,7 +2269,7 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowTargetIssuePolicy) {
 }
 
 TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
 
   const auto generic_words =
@@ -2300,8 +2301,8 @@ TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
 
 TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
   for (const auto &[arch, words] : std::array{
-           std::pair{ROCJITSU_CODE_ARCH_CDNA2, cdna2::build_mubuf(cdna2::kBufferStoreDwordMubuf)},
-           std::pair{ROCJITSU_CODE_ARCH_RDNA2,
+           std::pair{rocjitsu::IsaFamily::Cdna2, cdna2::build_mubuf(cdna2::kBufferStoreDwordMubuf)},
+           std::pair{rocjitsu::IsaFamily::Rdna2,
                      rdna2::build_mubuf(rdna2::kBufferStoreDwordMubuf)}}) {
     SCOPED_TRACE(arch);
     auto decoder = Decoder::create(arch);
@@ -2313,13 +2314,13 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
     const auto obligations = issue->counter_obligations();
     ASSERT_EQ(obligations.size(), 1u);
     EXPECT_EQ(obligations[0].wait_counter_type(),
-              arch == ROCJITSU_CODE_ARCH_CDNA2 ? WaitCounterType::VMCNT : WaitCounterType::VSCNT);
-    EXPECT_EQ(obligations[0].completion_class(), arch == ROCJITSU_CODE_ARCH_CDNA2
+              arch == rocjitsu::IsaFamily::Cdna2 ? WaitCounterType::VMCNT : WaitCounterType::VSCNT);
+    EXPECT_EQ(obligations[0].completion_class(), arch == rocjitsu::IsaFamily::Cdna2
                                                      ? MemoryCompletionClass::VMEM
                                                      : MemoryCompletionClass::UNORDERED);
   }
 
-  auto cdna2_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto cdna2_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna2);
   ASSERT_NE(cdna2_decoder, nullptr);
   const auto image_store_words =
       cdna2::build_mimg(cdna2::kImageStoreMimg, {.dmask = 1, .unorm = 1, .vdata = 8});
@@ -2357,7 +2358,7 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
   EXPECT_EQ(flat_store_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
   EXPECT_EQ(flat_store_obligations[1].wait_counter_type(), WaitCounterType::LGKMCNT);
 
-  auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto cdna4_decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(cdna4_decoder, nullptr);
   // CDNA4 reserves GDS=1 (ISA Table 57). Verify fallback metadata for the
   // unsupported encoding, not executable CDNA4 GDS behavior.
@@ -2371,7 +2372,7 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
 }
 
 TEST(InstructionMetadataTest, Cdna5AsyncOperationsExposeDistinctCompletionDomains) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const auto load_words = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal);
   const auto store_words = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB32Vglobal);
@@ -2394,7 +2395,7 @@ TEST(InstructionMetadataTest, Cdna5AsyncOperationsExposeDistinctCompletionDomain
 // Loads complete in order with loads and stores with stores (10.8), and cluster
 // loads in order with other loads on the same counter (10.7).
 TEST(InstructionMetadataTest, Cdna5AsyncCopiesOfEveryWidthCompleteOnAsynccnt) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array cases{
       std::pair{cdna5::kGlobalLoadAsyncToLdsB8Vglobal, MemoryCompletionClass::ASYNC_LOAD},
@@ -2424,7 +2425,7 @@ TEST(InstructionMetadataTest, Cdna5AsyncCopiesOfEveryWidthCompleteOnAsynccnt) {
 }
 
 TEST(InstructionMetadataTest, WideScalarLoadContributesTwoCounterTokens) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   const auto words =
       cdna4::build_smem(cdna4::kSLoadDwordx2Smem, {.sbase = 0, .sdata = 4, .imm = 1, .offset = 0});

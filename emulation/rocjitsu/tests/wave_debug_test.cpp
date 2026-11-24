@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -62,7 +63,7 @@ struct WaveDebugFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit WaveDebugFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4,
+  explicit WaveDebugFixture(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4,
                             uint32_t num_wf_slots = 1,
                             uint32_t quantum = amdgpu::ComputeUnitCore::Config{}.functional_quantum,
                             uint32_t async_helpers = 0)
@@ -92,7 +93,7 @@ struct WaveDebugFixture {
 
 // Scalar FP ignores EXEC and delivers a fresh trap even for an already sticky cause.
 TEST(WaveDebugTest, Gfx12ScalarCompatibilityDeliversInvalidAfterCommit) {
-  WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture f(rocjitsu::IsaFamily::Rdna4);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const auto words = rdna4::build_sop2(rdna4::kSMulF32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
   f.gpu_mem.write32(kKernelAddr, words[0]);
@@ -124,15 +125,17 @@ TEST(WaveDebugTest, Gfx12ScalarCompatibilityDeliversInvalidAfterCommit) {
 }
 
 TEST(WaveDebugTest, TrapDrainsBeforeEnteringPrivilegedHandler) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                    ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture f(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    const bool opcode16 = arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                          arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool opcode16 =
+        arch == rocjitsu::IsaFamily::Cdna5 || arch == rocjitsu::IsaFamily::Rdna3 ||
+        arch == rocjitsu::IsaFamily::Rdna3_5 || arch == rocjitsu::IsaFamily::Rdna4;
     f.gpu_mem.write32(kKernelAddr, opcode16 ? kGfx12STrap : kSTrapSeven);
     f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
       return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, true};
@@ -150,7 +153,7 @@ TEST(WaveDebugTest, TrapDrainsBeforeEnteringPrivilegedHandler) {
 }
 
 TEST(WaveDebugTest, Gfx10TrapDrainsBeforeEnteringPrivilegedHandler) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     WaveDebugFixture f(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     f.gpu_mem.write32(kKernelAddr, kSTrapSeven);
@@ -181,7 +184,7 @@ TEST(WaveDebugTest, Gfx10TrapDrainsBeforeEnteringPrivilegedHandler) {
 }
 
 TEST(WaveDebugTest, Gfx10TracePriorityAndOrderedEndReportTheIssuingWave) {
-  WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA1);
+  WaveDebugFixture f(rocjitsu::IsaFamily::Rdna1);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const uint32_t program[] = {
       0xbf8f0003, // s_setprio 3
@@ -224,7 +227,7 @@ TEST(WaveDebugTest, Gfx10TracePriorityAndOrderedEndReportTheIssuingWave) {
 }
 
 TEST(WaveDebugTest, Gfx10SethaltStopsIssueAndCodeEndRaisesIllegalInstruction) {
-  WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA1);
+  WaveDebugFixture f(rocjitsu::IsaFamily::Rdna1);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   f.gpu_mem.write32(kKernelAddr, 0xbf8d0001u);
   f.gpu_mem.write32(kKernelAddr + 4, 0xbf9f0000u);
@@ -251,7 +254,7 @@ TEST(WaveDebugTest, Gfx10SethaltStopsIssueAndCodeEndRaisesIllegalInstruction) {
 
 TEST(WaveDebugTest, SingleStepWaitsForGfx10ClauseAdmission) {
   for (bool internal_nop : {false, true})
-    for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
       SCOPED_TRACE(testing::Message() << arch << " internal_nop=" << internal_nop);
       WaveDebugFixture fixture(arch, 2, 1);
       ASSERT_TRUE(fixture.cu);
@@ -291,7 +294,7 @@ TEST(WaveDebugTest, SingleStepWaitsForGfx10ClauseAdmission) {
 
 TEST(WaveDebugTest, SingleStepWaitsForTheExportGrant) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     for (uint32_t immediate : {0u, 1u, 2u, 3u}) {
       SCOPED_TRACE(testing::Message() << arch << " immediate=" << immediate);
       WaveDebugFixture fx(arch, 1, 1);
@@ -308,7 +311,7 @@ TEST(WaveDebugTest, SingleStepWaitsForTheExportGrant) {
       });
       wave->set_debug_single_step(true);
       fx.cu->step();
-      if (arch == ROCJITSU_CODE_ARCH_RDNA4 ? (immediate & 2u) != 0 : (immediate & 1u) == 0) {
+      if (arch == rocjitsu::IsaFamily::Rdna4 ? (immediate & 2u) != 0 : (immediate & 1u) == 0) {
         EXPECT_EQ(completed, 0u);
         EXPECT_EQ(wave->state(), amdgpu::WfState::EXPORT_WAIT);
         wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusExportReadyMask);
@@ -325,7 +328,7 @@ TEST(WaveDebugTest, Rdna2PrivateMemoryProbeUsesTransferredSpans) {
   constexpr uint32_t pid = 9;
   for (bool clipped : {true, false}) {
     SCOPED_TRACE(clipped);
-    WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA2);
+    WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna2);
     std::vector<uint8_t> kernel(page), data(page);
     KfdProcess::PageTable pt;
     util::DistributedSharedMutex mutex;
@@ -371,7 +374,7 @@ TEST(WaveDebugTest, Rdna2PrivateMemoryProbeUsesTransferredSpans) {
 }
 
 TEST(WaveDebugTest, Gfx10DeclinedGraphicsAndComputeControlMessagesReportMissingBackend) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     WaveDebugFixture fx(arch);
     fx.cu->set_sendmsg_handler(
         [](amdgpu::Wavefront &, uint32_t id) { return id == 1 || id == 10; });
@@ -397,7 +400,7 @@ TEST(WaveDebugTest, Gfx10DeclinedGraphicsAndComputeControlMessagesReportMissingB
 }
 
 TEST(WaveDebugTest, Gfx11ShaderCyclesWrapsAtTwentyBitsOnAFullRegisterRead) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     WaveDebugFixture fx(arch);
     auto *wave = fx.dispatch(kKernelAddr);
     auto decoder = Decoder::create(arch);
@@ -414,9 +417,9 @@ TEST(WaveDebugTest, Gfx11ShaderCyclesWrapsAtTwentyBitsOnAFullRegisterRead) {
 
 TEST(WaveDebugTest, Rdna4ShaderCyclesReadsBothHalvesOfTheSixtyFourBitCounter) {
   // clock64() on gfx12 reads SHADER_CYCLES_HI, _LO, _HI and retries on a carry.
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
   auto *wave = fx.dispatch(kKernelAddr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   // s_getreg_b32 s4, hwreg(HW_REG_SHADER_CYCLES_LO)
   // s_getreg_b32 s5, hwreg(HW_REG_SHADER_CYCLES_HI)
   const auto lo_words = rdna4::build_sopk(17, {.simm16 = 0xf81d, .sdst = 4});
@@ -440,8 +443,8 @@ TEST(WaveDebugTest, Rdna4ShaderCyclesReadsBothHalvesOfTheSixtyFourBitCounter) {
 }
 
 TEST(WaveDebugTest, SaveWaveRequiresAContextSaveGrantInTheTrapHandler) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch);
     ASSERT_TRUE(fx.cu);
@@ -478,7 +481,7 @@ TEST(WaveDebugTest, SaveWaveRequiresAContextSaveGrantInTheTrapHandler) {
 }
 
 TEST(WaveDebugTest, Gfx11PixelParametersWaitAndSelectPrimitivePerQuad) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 1, 1);
     ASSERT_TRUE(fx.cu);
@@ -513,7 +516,7 @@ TEST(WaveDebugTest, Gfx11PixelParametersWaitAndSelectPrimitivePerQuad) {
 }
 
 TEST(WaveDebugTest, Gfx1151PrivilegedDestinationsAndPerformanceTrace) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   const uint32_t words[] = {
       0xbeec0081, // s_mov_b32 ttmp0, 1
@@ -550,7 +553,7 @@ TEST(WaveDebugTest, Gfx1151PrivilegedDestinationsAndPerformanceTrace) {
 }
 
 TEST(WaveDebugTest, Gfx1151SopkWaitMasksImmediateAndReplacesEarlierTarget) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   fx.gpu_mem.write32(kKernelAddr, 0xbcfc0040);      // s_waitcnt_vmcnt null, 0x40
   fx.gpu_mem.write32(kKernelAddr + 4, 0xbf800000);  // s_nop 0
@@ -573,7 +576,7 @@ TEST(WaveDebugTest, Gfx1151SopkWaitMasksImmediateAndReplacesEarlierTarget) {
 
 TEST(WaveDebugTest, WaitEventUsesTheTargetExportGrantBit) {
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     for (uint32_t immediate : {0u, 1u, 2u, 3u}) {
       SCOPED_TRACE(testing::Message() << arch << " immediate=" << immediate);
       WaveDebugFixture fx(arch, 1, 1);
@@ -585,7 +588,8 @@ TEST(WaveDebugTest, WaitEventUsesTheTargetExportGrantBit) {
       wf->set_exec(1);
       wf->set_status_raw(wf->status_raw() & ~amdgpu::Wavefront::kStatusExportReadyMask);
       fx.cu->step();
-      const bool waits = arch == ROCJITSU_CODE_ARCH_RDNA4 ? bool(immediate & 2) : !(immediate & 1);
+      const bool waits =
+          arch == rocjitsu::IsaFamily::Rdna4 ? bool(immediate & 2) : !(immediate & 1);
       EXPECT_EQ(wf->state() == amdgpu::WfState::EXPORT_WAIT, waits);
       fx.cu->step();
       EXPECT_EQ(fx.cu->read_vgpr(wf->vgpr_alloc().base + 1, 0), waits ? 0u : 1u);
@@ -599,7 +603,7 @@ TEST(WaveDebugTest, WaitEventUsesTheTargetExportGrantBit) {
 }
 
 TEST(WaveDebugTest, Gfx1151ExportWaitAndDualSourceLaneMask) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   fx.gpu_mem.write32(kKernelAddr, 0xbf8b0000);     // s_wait_event 0
   fx.gpu_mem.write32(kKernelAddr + 4, 0xf8000951); // exp dual_src_blend0, v2, off, off, off done
@@ -627,7 +631,7 @@ TEST(WaveDebugTest, Gfx1151ExportWaitAndDualSourceLaneMask) {
 }
 
 TEST(WaveDebugTest, Gfx1151ExportUsesVgprZeroForAnOutOfRangeComponent) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   fx.gpu_mem.write32(kKernelAddr, 0xf8000803); // exp mrt0 v255, v2, off, off done
   fx.gpu_mem.write32(kKernelAddr + 4, 0x000002ff);
@@ -649,8 +653,8 @@ TEST(WaveDebugTest, Gfx1151ExportUsesVgprZeroForAnOutOfRangeComponent) {
 }
 
 TEST(WaveDebugTest, LegacyCdnaSetHaltIgnoresBitTwo) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     for (bool handler : {false, true}) {
       SCOPED_TRACE(testing::Message() << arch << " handler=" << handler);
       WaveDebugFixture fx(arch, 1, 1);
@@ -675,7 +679,7 @@ TEST(WaveDebugTest, LegacyCdnaSetHaltIgnoresBitTwo) {
 }
 
 TEST(WaveDebugTest, Gfx1151FatalHaltBlocksAResumedTrapHandler) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   fx.gpu_mem.write32(kKernelAddr, 0xbf820005);     // s_sethalt 5
   fx.gpu_mem.write32(kKernelAddr + 4, 0xbfb50002); // s_setprio 2
@@ -694,7 +698,7 @@ TEST(WaveDebugTest, Gfx1151FatalHaltBlocksAResumedTrapHandler) {
 }
 
 TEST(WaveDebugTest, Gfx1151ControlFlowPriorityAndHalt) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   const uint32_t words[] = {
       0xbfb50003, // s_setprio 3
@@ -717,7 +721,7 @@ TEST(WaveDebugTest, Gfx1151ControlFlowPriorityAndHalt) {
 }
 
 TEST(WaveDebugTest, Gfx1151IllegalPaddingEntersPrivilegedHandler) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   fx.gpu_mem.write32(kKernelAddr, 0xbf9f0000);          // s_code_end
   fx.gpu_mem.write32(kTrapHandlerAddr, 0xb8820142);     // s_getreg_b32 s2, STATUS.PRIV
@@ -740,7 +744,7 @@ TEST(WaveDebugTest, Gfx1151IllegalPaddingEntersPrivilegedHandler) {
 }
 
 TEST(WaveDebugTest, Gfx1151VinterpWaitsBeforeReadingCoefficients) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   fx.gpu_mem.write32(kKernelAddr, 0xcd000100); // v_interp_p10_f32 v0, v1, v2, v3 wait_exp:1
   fx.gpu_mem.write32(kKernelAddr + 4, 0x040e0501);
@@ -777,7 +781,7 @@ TEST(WaveDebugTest, Gfx1151VinterpWaitsBeforeReadingCoefficients) {
 }
 
 TEST(WaveDebugTest, Gfx12SetprioUpdatesShaderReadableStatePriv) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 1, 1);
     constexpr std::array<uint32_t, 3> priorities{1, 3, 0};
@@ -797,7 +801,7 @@ TEST(WaveDebugTest, Gfx12SetprioUpdatesShaderReadableStatePriv) {
 }
 
 TEST(WaveDebugTest, Rdna4ProtectsTrapWritesAndExposesUserPriority) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   constexpr uint32_t program[] = {
       0x806c81c1u, // s_add_co_u32 ttmp0, -1, 1
@@ -826,7 +830,7 @@ TEST(WaveDebugTest, Rdna4ProtectsTrapWritesAndExposesUserPriority) {
 }
 
 TEST(WaveDebugTest, Gfx12WakesSleepingPeersInTheSameWorkgroup) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
     WaveDebugFixture fx(arch, 3);
     ASSERT_NE(fx.cu, nullptr);
@@ -853,7 +857,7 @@ TEST(WaveDebugTest, Gfx12WakesSleepingPeersInTheSameWorkgroup) {
 }
 
 TEST(WaveDebugTest, Gfx12WakeupGivesAnAwakeWaveOneCredit) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
     WaveDebugFixture fx(arch, 3);
     ASSERT_NE(fx.cu, nullptr);
@@ -895,7 +899,7 @@ TEST(WaveDebugTest, Gfx12WakeupGivesAnAwakeWaveOneCredit) {
         peer->debug_write_sgpr(0, count);
         issue(*issuer, wakeup);
         issue(*issuer, wakeup);
-        expect_credit(*issuer, arch == ROCJITSU_CODE_ARCH_RDNA4);
+        expect_credit(*issuer, arch == rocjitsu::IsaFamily::Rdna4);
         expect_credit(*peer, true);
         expect_credit(*single, false);
         issue(*peer, word);
@@ -928,7 +932,7 @@ TEST(WaveDebugTest, Gfx12WakeupGivesAnAwakeWaveOneCredit) {
 }
 
 TEST(WaveDebugTest, Gfx1250NamedBarrierWakeTargetsMembersWithoutReleasingWaiters) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5, 5);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna5, 5);
   ASSERT_NE(fx.cu, nullptr);
   fx.cu->begin_workgroup(0, 0, 4, 2);
   fx.cu->begin_workgroup(0, 1, 1, 1);
@@ -943,7 +947,7 @@ TEST(WaveDebugTest, Gfx1250NamedBarrierWakeTargetsMembersWithoutReleasingWaiters
   ASSERT_NE(other, nullptr);
   ASSERT_NE(foreign, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   auto issue = [&](amdgpu::Wavefront &wave, uint32_t encoding) {
     const std::array<uint32_t, 1> code{encoding};
     auto instruction = decoder->decode_window(code);
@@ -1000,7 +1004,7 @@ TEST(WaveDebugTest, Gfx1250NamedBarrierWakeTargetsMembersWithoutReleasingWaiters
 }
 
 TEST(WaveDebugTest, Gfx1250UnassociatedNamedWakeReportsFailureBeforeChangingAnyPeer) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5, 4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna5, 4);
   fx.cu->begin_workgroup(0, 0, 3, 1);
   auto *sender = fx.dispatch(kKernelAddr);
   auto *joined = fx.dispatch(kKernelAddr);
@@ -1011,7 +1015,7 @@ TEST(WaveDebugTest, Gfx1250UnassociatedNamedWakeReportsFailureBeforeChangingAnyP
   ASSERT_NE(unjoined, nullptr);
   ASSERT_NE(foreign, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto issue = [&](amdgpu::Wavefront &wf, uint32_t word, bool supported = true) {
     auto instruction = decoder->decode_window(std::span(&word, 1));
     ASSERT_TRUE(instruction.succeeded());
@@ -1065,7 +1069,7 @@ TEST(WaveDebugTest, Gfx1250UnassociatedNamedWakeReportsFailureBeforeChangingAnyP
 }
 
 TEST(WaveDebugTest, Gfx12SleepingWaveRestoresDelayWhenDebugStopIsRolledBack) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch);
     ASSERT_NE(fx.cu, nullptr);
@@ -1085,7 +1089,7 @@ TEST(WaveDebugTest, Gfx12SleepingWaveRestoresDelayWhenDebugStopIsRolledBack) {
 }
 
 TEST(WaveDebugTest, Rdna4TrapDrainDependsOnAnInstalledHandler) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   fx.gpu_mem.write32(kKernelAddr - 4, 0xb8820182u); // s_getreg_b32 s2,hwreg(STATUS,6,1)
   fx.gpu_mem.write32(kTrapHandlerAddr, 0xb8820182u);
@@ -1133,7 +1137,7 @@ TEST(WaveDebugTest, Gfx10OrderedPsDoneIssuesOnceAfterOlderMemory) {
     void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halted; }
     unsigned before = 0, after = 0, halted = 0;
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch);
     ASSERT_NE(fx.cu, nullptr);
@@ -1168,7 +1172,8 @@ TEST(WaveDebugTest, Gfx10OrderedPsDoneIssuesOnceAfterOlderMemory) {
 }
 
 TEST(WaveDebugTest, RdnaCodeEndRaisesIllegalInstructionAtThePaddingWord) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch);
     ASSERT_NE(fx.cu, nullptr);
@@ -1189,15 +1194,15 @@ TEST(WaveDebugTest, RdnaCodeEndRaisesIllegalInstructionAtThePaddingWord) {
 
 TEST(WaveDebugTest, ShaderRealtimeUsesTheDeviceTickPeriodInTheModelEpoch) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture f(arch);
     ASSERT_NE(f.cu, nullptr);
     auto *wave = f.dispatch(kKernelAddr);
     ASSERT_NE(wave, nullptr);
     auto decoder = Decoder::create(arch);
-    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
     // s_memrealtime s[0:1] or s_sendmsg_rtn_b64 s[0:1], GET_REALTIME.
     auto inst =
         decoder->decode_window(gfx10 ? std::array{0xf4940000u, 0u} : std::array{0xbe804d83u, 0u});
@@ -1215,7 +1220,7 @@ TEST(WaveDebugTest, ShaderRealtimeUsesTheDeviceTickPeriodInTheModelEpoch) {
 TEST(WaveDebugTest, Gfx1250TrapMessagesAgreeWithTrapEnable) {
   constexpr uint64_t tma = 0x123456789abcu;
   for (const uint64_t address : {uint64_t{0}, uint64_t{kTrapHandlerAddr}}) {
-    WaveDebugFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 1, 1);
+    WaveDebugFixture fixture(rocjitsu::IsaFamily::Cdna5, 1, 1);
     fixture.cu->set_trap_handler_resolver([&](const amdgpu::Wavefront &) {
       return amdgpu::ComputeUnitCore::TrapHandlerConfig{address, tma, false};
     });
@@ -1235,10 +1240,11 @@ TEST(WaveDebugTest, Gfx1250TrapMessagesAgreeWithTrapEnable) {
 }
 
 TEST(WaveDebugTest, TrapReturnClearsPrivilegeInsideAndOutsideTheHandler) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                    ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     for (bool handler : {false, true}) {
       WaveDebugFixture fixture(arch, 1, 1);
@@ -1247,7 +1253,7 @@ TEST(WaveDebugTest, TrapReturnClearsPrivilegeInsideAndOutsideTheHandler) {
       wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusPrivMask);
       wave->set_trap_saved_status(wave->status_raw());
       wave->set_in_trap_handler(handler);
-      const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+      const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
       const uint32_t word = arch_is_cdna_4_or_lower(arch) ? 0xbe801f00u
                             : gfx10                       ? 0xbe802200u
                                                           : 0xbe804a00u;
@@ -1255,7 +1261,7 @@ TEST(WaveDebugTest, TrapReturnClearsPrivilegeInsideAndOutsideTheHandler) {
       auto inst = decoder->decode_window(std::span(&word, 1));
       ASSERT_TRUE(inst.succeeded());
       ASSERT_EQ(inst.value()->mnemonic(),
-                arch == ROCJITSU_CODE_ARCH_CDNA5 ? "s_rfe_i64" : "s_rfe_b64");
+                arch == rocjitsu::IsaFamily::Cdna5 ? "s_rfe_i64" : "s_rfe_b64");
       ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *wave).succeeded());
       EXPECT_FALSE(wave->in_trap_handler());
       EXPECT_EQ(wave->status_raw() & amdgpu::Wavefront::kStatusPrivMask, 0u);
@@ -1264,8 +1270,8 @@ TEST(WaveDebugTest, TrapReturnClearsPrivilegeInsideAndOutsideTheHandler) {
 }
 
 TEST(WaveDebugTest, ReturnMessagesUseTheIssuingQueueAndDispatch) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fixture(arch, 1, 1);
     auto *wave = fixture.dispatch(kKernelAddr);
@@ -1301,11 +1307,12 @@ TEST(WaveDebugTest, ReturnMessagesUseTheIssuingQueueAndDispatch) {
 }
 
 TEST(WaveDebugTest, TrapReturnPreservesTheHandlersExec) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                    ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
+    const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
     const bool legacy = arch_is_cdna_4_or_lower(arch);
     for (bool change : {false, true}) {
       SCOPED_TRACE(testing::Message() << arch << " change=" << change);
@@ -1339,7 +1346,7 @@ TEST(WaveDebugTest, TrapReturnPreservesTheHandlersExec) {
 }
 
 TEST(WaveDebugTest, Gfx11StatusReflectsMultiwaveMembershipAndTrapBasePresence) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     for (unsigned members : {1u, 2u}) {
       SCOPED_TRACE(arch);
       SCOPED_TRACE(members);
@@ -1372,7 +1379,7 @@ TEST(WaveDebugTest, Gfx11StatusReflectsMultiwaveMembershipAndTrapBasePresence) {
 }
 
 TEST(WaveDebugTest, Rdna4DrainsPendingMemoryBeforeEnteringTheConfiguredTrapHandler) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   constexpr uint64_t tma = 0x123456789abcu;
   fx.gpu_mem.write32(kKernelAddr, kGfx12STrap);
@@ -1412,13 +1419,15 @@ TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
   constexpr std::array gfx11{0xdd0c4000u, 0x087c0402u, 0u};
   constexpr std::array gfx12{0xec10c07cu, 0x02100000u, 2u};
   for (const auto &[arch, words] :
-       {std::pair{ROCJITSU_CODE_ARCH_CDNA2, cdna}, std::pair{ROCJITSU_CODE_ARCH_RDNA2, gfx10},
-        std::pair{ROCJITSU_CODE_ARCH_RDNA3, gfx11}, std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, gfx11},
-        std::pair{ROCJITSU_CODE_ARCH_RDNA4, gfx12}, std::pair{ROCJITSU_CODE_ARCH_CDNA5, gfx12}}) {
+       {std::pair{rocjitsu::IsaFamily::Cdna2, cdna}, std::pair{rocjitsu::IsaFamily::Rdna2, gfx10},
+        std::pair{rocjitsu::IsaFamily::Rdna3, gfx11},
+        std::pair{rocjitsu::IsaFamily::Rdna3_5, gfx11},
+        std::pair{rocjitsu::IsaFamily::Rdna4, gfx12},
+        std::pair{rocjitsu::IsaFamily::Cdna5, gfx12}}) {
     const bool private_memviol =
-        arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-    const bool encoded_scratch = arch == ROCJITSU_CODE_ARCH_CDNA5;
+        arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+        arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
+    const bool encoded_scratch = arch == rocjitsu::IsaFamily::Cdna5;
     const uint64_t global = encoded_scratch ? 0x200050000ull : 0x50000;
     for (bool private_lane : {false, true}) {
       for (const auto &[global_mapped, shader] : {std::pair{false, false}, std::pair{true, false},
@@ -1541,13 +1550,13 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
   constexpr uint64_t shared = uint64_t{3} << 32, global = 0x50000;
   constexpr uint32_t pid = 9, shift = amdgpu::GpuMemory::PAGE_SHIFT;
   constexpr uint32_t size = amdgpu::GpuMemory::PAGE_SIZE;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5}) {
-    const bool gfx11 = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    const bool gfx11 = arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
     const std::array code =
         gfx11 ? std::array{0xdcd44000u, 0x007c0402u, 0u} : std::array{0xec0d407cu, 0x02100000u, 2u};
     for (unsigned offset : {4u, 5u, 0x80000004u}) {
-      if (offset >= 0x80000000u && arch != ROCJITSU_CODE_ARCH_CDNA5)
+      if (offset >= 0x80000000u && arch != rocjitsu::IsaFamily::Cdna5)
         continue;
       for (bool mapped : {false, true}) {
         SCOPED_TRACE(testing::Message()
@@ -1592,15 +1601,30 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
             });
         fx.cu->set_memory_violation_handler(
             [&](auto &wave, uint64_t address, bool write, uint64_t) {
-              // The synchronous memory violation has no translated address.
-              EXPECT_EQ(write, address == global);
+              EXPECT_TRUE(write);
               faults.push_back(address);
               wave.debug_trap(0);
               return true;
             });
+        unsigned aperture_stops = 0;
+        fx.cu->set_aperture_violation_handler([&](auto &wave) {
+          ++aperture_stops;
+          wave.debug_trap(0);
+          return true;
+        });
         fx.cu->step();
+        // MEMVIOL is delivered before the next instruction issues. Other offsets
+        // retire on the first step; another would decode the padding after it.
+        if (offset == 5)
+          fx.cu->step();
+        // Misaligned LDS MEMVIOL stops at the aperture-violation owner, which
+        // does not wait for a VM fault event. Beyond the LDS allocation the
+        // lane is DDS, which fails before any VM fault report and aborts the
+        // queue instead.
+        EXPECT_EQ(aperture_stops, offset == 5 ? 1u : 0u);
+        EXPECT_EQ((wf->trapsts() & (1u << 8)) != 0, offset == 5);
         if (offset != 4) {
-          EXPECT_EQ(faults, (std::vector<uint64_t>{0}));
+          EXPECT_TRUE(faults.empty());
         } else if (!mapped) {
           EXPECT_EQ(faults, (std::vector<uint64_t>{global}));
         } else {
@@ -1623,7 +1647,7 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
 TEST(WaveDebugTest, ScalarBufferProbesOnlyInBoundsDwords) {
   constexpr uint64_t page = amdgpu::GpuMemory::PAGE_SIZE, data = 0x10000, addr = data + page - 4;
   constexpr uint32_t pid = 9, value = 0x12345678u, sentinel = 0xdeadbeefu;
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
     for (unsigned bound : {0u, 4u, 8u}) {
       SCOPED_TRACE(bound);
@@ -1636,8 +1660,8 @@ TEST(WaveDebugTest, ScalarBufferProbesOnlyInBoundsDwords) {
       pages[data >> amdgpu::GpuMemory::PAGE_SHIFT] = {payload.data(), amdgpu::Mtype::RW};
       fx.gpu_mem.register_process(pid, &pages, &mutex);
       // s_buffer_load_b64 s[4:5], s[0:3], null
-      fx.gpu_mem.write32(kKernelAddr, arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0xf4022100u : 0xf4240100u,
-                         pid);
+      fx.gpu_mem.write32(kKernelAddr,
+                         arch == rocjitsu::IsaFamily::Rdna4 ? 0xf4022100u : 0xf4240100u, pid);
       fx.gpu_mem.write32(kKernelAddr + 4, 0xf8000000u, pid);
       fx.gpu_mem.write32(addr, value, pid);
       auto *wf = fx.dispatch(kKernelAddr);
@@ -1665,7 +1689,7 @@ TEST(WaveDebugTest, ScalarBufferProbesOnlyInBoundsDwords) {
 }
 
 TEST(WaveDebugTest, DebuggerReadsPreservePhysicalStorageBoundsAtNonzeroOffsets) {
-  const auto check = []<GpuIsa Isa>(rj_code_arch_t arch) {
+  const auto check = []<GpuIsa Isa>(rocjitsu::IsaFamily arch) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 2);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1714,13 +1738,13 @@ TEST(WaveDebugTest, DebuggerReadsPreservePhysicalStorageBoundsAtNonzeroOffsets) 
     EXPECT_EQ(wave->debug_read_vgpr(1, 0), 44u);
     EXPECT_EQ(wave->debug_read_vgpr(0, fx.cu->vgpr_storage_lane_count()), 0u);
   };
-  check.operator()<cdna3::Isa>(ROCJITSU_CODE_ARCH_CDNA3);
-  check.operator()<cdna4::Isa>(ROCJITSU_CODE_ARCH_CDNA4);
-  check.operator()<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
+  check.operator()<cdna3::Isa>(rocjitsu::IsaFamily::Cdna3);
+  check.operator()<cdna4::Isa>(rocjitsu::IsaFamily::Cdna4);
+  check.operator()<rdna4::Isa>(rocjitsu::IsaFamily::Rdna4);
 }
 
 TEST(WaveDebugTest, DebuggerReadsPreserveSmallAllocationStorage) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 2);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1749,7 +1773,7 @@ TEST(WaveDebugTest, DebuggerReadsPreserveSmallAllocationStorage) {
 }
 
 TEST(WaveDebugTest, DebuggerReadsPreserveStoredLanesForWave32) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
   ASSERT_NE(wave, nullptr);
@@ -1769,7 +1793,7 @@ TEST(WaveDebugTest, DebuggerReadsPreserveStoredLanesForWave32) {
 }
 
 TEST(WaveDebugTest, DebuggerReadsPreservePhysicalLaneBoundsForGfx1250) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
   ASSERT_NE(wave, nullptr);
@@ -1785,7 +1809,7 @@ TEST(WaveDebugTest, DebuggerReadsPreservePhysicalLaneBoundsForGfx1250) {
 }
 
 TEST(WaveDebugTest, Cdna2TrapDrainsMemoryAndExposesPrivilegeAndHandlerAddresses) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna2);
   fx.gpu_mem.write32(kKernelAddr, kSTrapSeven);
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
   const std::array handler{
@@ -1829,7 +1853,7 @@ TEST(WaveDebugTest, Cdna2FlatBoundsReportOnCompletionAndEnterEnabledHandlerAtNex
   constexpr uint32_t mem_viol = 1u << 8;
   for (bool local : {false, true}) {
     SCOPED_TRACE(local);
-    WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+    WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna2);
     fx.l2.set_backing_memory(&fx.gpu_mem);
     fx.cu->set_apertures(shared, shared + UINT32_MAX, priv, priv + UINT32_MAX);
     const std::array code = {0xdc500000u, 0x08000002u, // flat_load_dword v8, v[2:3]
@@ -1900,7 +1924,7 @@ TEST(WaveDebugTest, Cdna2FlatBoundsReportPartialElementsOnlyForActiveLanes) {
   constexpr uint64_t priv = uint64_t{2} << 48;
   for (const uint64_t aperture : {priv, shared}) {
     SCOPED_TRACE(aperture);
-    WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+    WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna2);
     fx.l2.set_backing_memory(&fx.gpu_mem);
     fx.cu->set_apertures(shared, shared + UINT32_MAX, priv, priv + UINT32_MAX);
     for (uint32_t i = 0; i != 2; ++i) {
@@ -1937,7 +1961,7 @@ TEST(WaveDebugTest, Cdna2FlatBoundsReportPartialElementsOnlyForActiveLanes) {
 TEST(WaveDebugTest, Cdna2TakenTrapRetiresDependenciesBeforeHandlerReads) {
   for (const bool handler_installed : {false, true}) {
     SCOPED_TRACE(handler_installed);
-    WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+    WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna2);
     fx.l2.set_backing_memory(&fx.gpu_mem);
     constexpr uint32_t kData = 0x4000;
     constexpr uint32_t kValue = 0x11223344;
@@ -1972,7 +1996,7 @@ TEST(WaveDebugTest, Cdna2TakenTrapRetiresDependenciesBeforeHandlerReads) {
 }
 
 TEST(WaveDebugTest, Cdna2ConditionalBranchAndScalarSourcesUseLiveWaveState) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna2);
   const std::array program{
       0xbf970001u, // s_cbranch_cdbgsys +1
       0xbeec0081u, // s_mov_b32 ttmp0, 1 (skipped)
@@ -2013,7 +2037,7 @@ TEST(WaveDebugTest, Cdna2ConditionalBranchAndScalarSourcesUseLiveWaveState) {
 }
 
 TEST(WaveDebugTest, Cdna2DeferredScalarLoadsHonorTtmpWritePermission) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna2);
   fx.l2.set_backing_memory(&fx.gpu_mem);
   fx.gpu_mem.write32(kKernelAddr, 0xc0021c00); // s_load_dword ttmp4, s[0:1], 0
   fx.gpu_mem.write32(kKernelAddr + 4, 0);
@@ -2036,7 +2060,7 @@ TEST(WaveDebugTest, Cdna2DeferredScalarLoadsHonorTtmpWritePermission) {
 }
 
 TEST(WaveDebugTest, Cdna2WakeupTargetsOnlySleepingPeersInTheSameWorkgroup) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2, 3);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna2, 3);
   fx.gpu_mem.write32(kKernelAddr, 0xbf830000); // s_wakeup
   auto *issuer = fx.cu->dispatch_wf(3, kKernelAddr, 16, 16);
   auto *peer = fx.cu->dispatch_wf(3, 0, 16, 16);
@@ -2045,7 +2069,7 @@ TEST(WaveDebugTest, Cdna2WakeupTargetsOnlySleepingPeersInTheSameWorkgroup) {
   issuer->set_workgroup_dispatch(8, 2);
   peer->set_workgroup_dispatch(8, 2);
   other->set_workgroup_dispatch(9, 1);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna2);
   ASSERT_NE(decoder, nullptr);
   const std::array words{0xbf830000u, 0u};
   auto wake = decoder->decode_window(words);
@@ -2119,15 +2143,15 @@ TEST(WaveDebugTest, Cdna4UserShaderReadsLiveStateAndHalts) {
 TEST(WaveDebugTest, SingleStepCompletesAfterTheFrontendGrant) {
   enum class Operation { Export, ParameterLoad, DirectLoad };
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     for (const auto op : {Operation::Export, Operation::ParameterLoad, Operation::DirectLoad}) {
       const bool lds = op != Operation::Export;
-      if (lds && arch == ROCJITSU_CODE_ARCH_RDNA4)
+      if (lds && arch == rocjitsu::IsaFamily::Rdna4)
         continue;
       SCOPED_TRACE(testing::Message() << "arch=" << arch << " op=" << static_cast<unsigned>(op));
       WaveDebugFixture fx(arch);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
-      const auto exp = arch == ROCJITSU_CODE_ARCH_RDNA4
+      const auto exp = arch == rocjitsu::IsaFamily::Rdna4
                            ? rdna4::build_vexport({.en = 1, .tgt = 0, .done = true})
                            : rdna3::build_exp({.en = 1, .tgt = 0, .done = true});
       const auto load = rdna3::build_ldsdir(
@@ -2180,7 +2204,7 @@ TEST(WaveDebugTest, SingleStepCompletesAfterTheFrontendGrant) {
 TEST(WaveDebugTest, Cdna4TrapWaitsAndReturnsThroughCompatibilityOpcode) {
   for (const uint32_t helpers : {0u, 1u}) {
     SCOPED_TRACE(helpers);
-    WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA4, 1,
+    WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna4, 1,
                         amdgpu::ComputeUnitCore::Config{}.functional_quantum, helpers);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fx.gpu_mem.write32(kKernelAddr, kSTrapSeven);
@@ -2407,8 +2431,8 @@ TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
       {"sgpr", {0x9580016Cu}},                 // s_rfe_restore_b64 ttmp[0:1], s1
       {"literal", {0x9580FF6Cu, 0xDEADBEEFu}}, // s_rfe_restore_b64 ttmp[0:1], 0xdeadbeef
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     for (const auto &form : forms) {
       SCOPED_TRACE(form.name);
       SCOPED_TRACE(static_cast<int>(arch));
@@ -2458,8 +2482,8 @@ TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
 // not be charged to the return. Charging it there also used up the hazard, so
 // a resumed read that skipped the wait went unreported.
 TEST(WaveDebugTest, RfeRestoreDoesNotWaitOnItsIgnoredOperand) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     for (bool resumed_wait : {false, true}) {
       SCOPED_TRACE(static_cast<int>(arch));
       SCOPED_TRACE(resumed_wait);
@@ -2518,8 +2542,8 @@ TEST(WaveDebugTest, RfeRestoreDoesNotWaitOnItsIgnoredOperand) {
 // loading it straight into the return without a wait is reported there.
 TEST(WaveDebugTest, RfeRestoreWaitsOnItsReturnAddress) {
   constexpr uint32_t kSavedPcAddr = kTrapHandlerAddr + 0x100;
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                    ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     SCOPED_TRACE(static_cast<int>(arch));
     WaveDebugFixture fx(arch);
     fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
@@ -2599,7 +2623,7 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
 }
 
 TEST(WaveDebugTest, Rdna4SuppressedReturningAtomicSkipsUnmappedDebuggerProbe) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(fx.cu, nullptr);
   constexpr uint32_t process = 7;
   constexpr uint32_t unmapped = 0x4000;
@@ -2974,22 +2998,22 @@ TEST(WaveDebugTest, SendmsghaltWithoutADebugSessionHaltsAndStaysReleasable) {
 // unmodelled architecture would hand rocm-dbgapi an image it decodes against a
 // different layout, so the codec has to say plainly which ones it covers.
 TEST(WaveDebugTest, CwsrLayoutIsModelledForGfx94AndGfx1250) {
-  EXPECT_EQ(kmd::cwsr_layout_kind(ROCJITSU_CODE_ARCH_CDNA3), kmd::CwsrLayoutKind::Gfx9_4);
-  EXPECT_EQ(kmd::cwsr_layout_kind(ROCJITSU_CODE_ARCH_CDNA4), kmd::CwsrLayoutKind::Gfx9_4);
-  EXPECT_EQ(kmd::cwsr_layout_kind(ROCJITSU_CODE_ARCH_CDNA5), kmd::CwsrLayoutKind::Gfx12_5);
-  EXPECT_TRUE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA3)); // gfx942
-  EXPECT_TRUE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA4)); // gfx950
-  EXPECT_TRUE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA5)); // gfx1250
+  EXPECT_EQ(kmd::cwsr_layout_kind(rocjitsu::IsaFamily::Cdna3), kmd::CwsrLayoutKind::Gfx9_4);
+  EXPECT_EQ(kmd::cwsr_layout_kind(rocjitsu::IsaFamily::Cdna4), kmd::CwsrLayoutKind::Gfx9_4);
+  EXPECT_EQ(kmd::cwsr_layout_kind(rocjitsu::IsaFamily::Cdna5), kmd::CwsrLayoutKind::Gfx12_5);
+  EXPECT_TRUE(kmd::cwsr_layout_modelled(rocjitsu::IsaFamily::Cdna3)); // gfx942
+  EXPECT_TRUE(kmd::cwsr_layout_modelled(rocjitsu::IsaFamily::Cdna4)); // gfx950
+  EXPECT_TRUE(kmd::cwsr_layout_modelled(rocjitsu::IsaFamily::Cdna5)); // gfx1250
 
   // gfx908 saves an ACC-VGPR block and gfx908/gfx90a keep the packet id in
   // TTMP6, so being gfx9 is not enough.
-  EXPECT_FALSE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA1));
-  EXPECT_FALSE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(kmd::cwsr_layout_modelled(rocjitsu::IsaFamily::Cdna1));
+  EXPECT_FALSE(kmd::cwsr_layout_modelled(rocjitsu::IsaFamily::Cdna2));
 
   // RDNA layouts remain outside this codec.
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4})
     EXPECT_EQ(kmd::cwsr_layout_kind(arch), kmd::CwsrLayoutKind::Unsupported)
         << "arch " << static_cast<int>(arch);
 }
@@ -3079,7 +3103,7 @@ TEST(WaveDebugTest, Gfx10HalfAddReportsBothArithmeticAndOutputModifierCauses) {
       {"SDWA negative modifier underflow", sdwa, 0x0404d501, 0, 0x8400, 0, 0x8000beef,
        unfl | inexact},
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     WaveDebugFixture fx(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     uint32_t pc = kKernelAddr;
@@ -3122,7 +3146,7 @@ TEST(WaveDebugTest, Gfx10HalfAddReportsBothArithmeticAndOutputModifierCauses) {
 }
 
 TEST(WaveDebugTest, Gfx1250AluExceptionDeliveryUsesTrapCtrlNotModeVgprMsb) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kInvalidCause = 1u << 0;
   constexpr uint32_t kOverflowCause = 1u << 3;
@@ -3241,7 +3265,7 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
 TEST(WaveDebugTest, FlatFaultUsesTheOriginalSegmentAtAnApertureBoundary) {
   constexpr uint64_t shared = uint64_t{3} << 32;
   for (bool starts_in_lds : {false, true}) {
-    WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+    WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     constexpr unsigned process = 9;
     constexpr uint64_t page_size = amdgpu::GpuMemory::PAGE_SIZE;
@@ -3496,7 +3520,7 @@ TEST(WaveDebugTest, STrapWithoutDebuggerIsNoOp) {
 }
 
 TEST(WaveDebugTest, Gfx10WakeupEndsSleepOnlyInItsWorkgroup) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA2, 3);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna2, 3);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, 0xbf830000u); // s_wakeup
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
@@ -3516,7 +3540,7 @@ TEST(WaveDebugTest, Gfx10WakeupEndsSleepOnlyInItsWorkgroup) {
 }
 
 TEST(WaveDebugTest, Gfx10ShaderHaltHonorsPrivilegeAndKeepsTheWaveResident) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA2);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna2);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, 0xbf8d0001u);     // s_sethalt 1
   fx.gpu_mem.write32(kKernelAddr + 4, 0xbf8d0005u); // s_sethalt 5 (fatal halt)
@@ -3544,8 +3568,8 @@ TEST(WaveDebugTest, Gfx10ShaderHaltHonorsPrivilegeAndKeepsTheWaveResident) {
 
 TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
   // RDNA2 S_CODE_END is a valid encoding that raises the same illegal-instruction interrupt.
-  for (const auto &[arch, word] : {std::pair{ROCJITSU_CODE_ARCH_CDNA4, 0xffffffffu},
-                                   std::pair{ROCJITSU_CODE_ARCH_RDNA2, 0xbf9f0000u}}) {
+  for (const auto &[arch, word] : {std::pair{rocjitsu::IsaFamily::Cdna4, 0xffffffffu},
+                                   std::pair{rocjitsu::IsaFamily::Rdna2, 0xbf9f0000u}}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -3618,7 +3642,7 @@ TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveSt
 }
 
 TEST(WaveDebugTest, Gfx1250TrapWithoutConfiguredHandlerAdvancesPc) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kGfx12STrap);
 
@@ -3634,7 +3658,7 @@ TEST(WaveDebugTest, Rdna4TrapEntryAndReturnUseTheGfx12WaveStateLayout) {
   constexpr uint64_t kHighKernelAddr = 0x0000123400001000ULL;
   constexpr uint32_t kApplicationStatus = 1u | (0xAu << 1);
   constexpr uint32_t kSchedMode = 2u;
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Rdna4);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kHighKernelAddr, kGfx12STrap);
   fx.gpu_mem.write32(kHighKernelAddr + 4, kSEndpgm);
@@ -3691,7 +3715,7 @@ TEST(WaveDebugTest, Gfx1250TrapEntryAndReturnFollowTheGfx12Abi) {
   constexpr uint64_t kHighKernelAddr = 0x0100000000001000ULL;
   constexpr uint32_t kApplicationStatus = 1u | (0xAu << 1);
   constexpr uint64_t kScratchBase = 0x0000001240008000ULL;
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  WaveDebugFixture fx(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kHighKernelAddr, kGfx12STrap);
   fx.gpu_mem.write32(kHighKernelAddr + 4, kSEndpgm);
@@ -3913,9 +3937,9 @@ TEST(WaveDebugTest, CwsrRejectsUnmodelledTargetsWithoutAccessingMemory) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
-        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-        ROCJITSU_CODE_ARCH_RDNA4}) {
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(static_cast<int>(arch));
     std::vector<kmd::CwsrWaveState> waves = {make_wave(0xAA01, 0x4000)};
     waves[0].is_first_in_group = waves[0].is_last_in_group = true;
@@ -3946,7 +3970,7 @@ TEST(WaveDebugTest, CwsrRejectsUnmodelledTargetsWithoutAccessingMemory) {
 TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
 
   auto wave = make_wave(0xAABBCCDD11223344ULL, 0x123456789ABCuLL);
   wave.exec = 0xFFFFFFFFu;
@@ -4044,7 +4068,7 @@ TEST(WaveDebugTest, Gfx1250CwsrAcceptsTheFullAddressableVgprFile) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;
   constexpr uint32_t kMaxVgprs = 1024;
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
 
   auto wave = make_wave(0xAA55, 0x4000);
   wave.num_vgprs = kMaxVgprs;
@@ -4078,7 +4102,7 @@ TEST(WaveDebugTest, CwsrHonorsTheRuntimeControlStackBoundary) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000, kControlCapacity = 4096;
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     auto wave = make_wave(0x1234, 0x98765432);
     std::map<uint64_t, uint32_t> memory;
     auto write32 = [&](uint64_t address, uint32_t value) { memory[address] = value; };
@@ -4101,7 +4125,7 @@ TEST(WaveDebugTest, CwsrHonorsTheRuntimeControlStackBoundary) {
 TEST(WaveDebugTest, CwsrRetainsTheShaderEngineAndScratchSlot) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     for (uint32_t engine = 0; engine < 4; ++engine) {
       auto wave = make_wave(0xAA01, 0x2000);
       wave.shader_engine_id = engine;
@@ -4121,8 +4145,8 @@ TEST(WaveDebugTest, CwsrRetainsTheShaderEngineAndScratchSlot) {
 TEST(WaveDebugTest, CwsrLdsUsesTheTargetAbiGranularity) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const uint32_t granule = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512 : 1280;
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const uint32_t granule = arch == rocjitsu::IsaFamily::Cdna3 ? 512 : 1280;
     for (const uint32_t bytes : {1u, 512u, 513u, 1280u, 1291u}) {
       SCOPED_TRACE(static_cast<int>(arch));
       SCOPED_TRACE(bytes);
@@ -4166,7 +4190,7 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
   waves[2].lds = {0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07, 0x18};
 
   kmd::CwsrLayout layout =
-      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, ROCJITSU_CODE_ARCH_CDNA4);
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(layout.ok);
 
   std::vector<ParsedWave> parsed = parse_cwsr(mem, kCtxBase, /*lds_granule=*/1280);
@@ -4211,18 +4235,18 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
   auto invalid = make_wave(1, 0x3000);
   invalid.num_vgprs = 257;
   EXPECT_FALSE(
-      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, {invalid}, write32, ROCJITSU_CODE_ARCH_CDNA4)
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, {invalid}, write32, rocjitsu::IsaFamily::Cdna4)
           .ok);
   EXPECT_EQ(mem, original_mem);
 
   EXPECT_FALSE(
-      kmd::serialize_queue_cwsr(kCtxBase + 1, kAreaSize, waves, write32, ROCJITSU_CODE_ARCH_CDNA4)
+      kmd::serialize_queue_cwsr(kCtxBase + 1, kAreaSize, waves, write32, rocjitsu::IsaFamily::Cdna4)
           .ok);
-  EXPECT_FALSE(
-      kmd::serialize_queue_cwsr(UINT64_MAX - 3, kAreaSize, waves, write32, ROCJITSU_CODE_ARCH_CDNA4)
-          .ok);
+  EXPECT_FALSE(kmd::serialize_queue_cwsr(UINT64_MAX - 3, kAreaSize, waves, write32,
+                                         rocjitsu::IsaFamily::Cdna4)
+                   .ok);
   EXPECT_FALSE(kmd::serialize_queue_cwsr(kCtxBase, layout.wave_state_offset - 1, waves, write32,
-                                         ROCJITSU_CODE_ARCH_CDNA4)
+                                         rocjitsu::IsaFamily::Cdna4)
                    .ok);
   EXPECT_EQ(mem, original_mem);
 }
@@ -4245,7 +4269,7 @@ TEST(WaveDebugTest, Cdna3CwsrUsesEachWavesPhysicalSgprAllocation) {
   std::map<uint64_t, uint32_t> image;
   auto write32 = [&](uint64_t address, uint32_t value) { image[address] = value; };
   auto read32 = [&](uint64_t address) { return image.at(address); };
-  auto layout = kmd::serialize_queue_cwsr(base, bytes, waves, write32, ROCJITSU_CODE_ARCH_CDNA3);
+  auto layout = kmd::serialize_queue_cwsr(base, bytes, waves, write32, rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(layout.ok);
   const auto parsed = parse_cwsr(image, base, 512);
   ASSERT_EQ(parsed.size(), waves.size());
@@ -4259,7 +4283,7 @@ TEST(WaveDebugTest, Cdna3CwsrUsesEachWavesPhysicalSgprAllocation) {
     write32(flat, 0x87654321u);
     write32(vcc + 4, 0xfedcba98u);
   }
-  ASSERT_TRUE(kmd::deserialize_queue_cwsr(base, bytes, waves, read32, ROCJITSU_CODE_ARCH_CDNA3));
+  ASSERT_TRUE(kmd::deserialize_queue_cwsr(base, bytes, waves, read32, rocjitsu::IsaFamily::Cdna3));
   for (uint32_t i = 0; i < waves.size(); ++i) {
     EXPECT_EQ(waves[i].flat_scratch, 0x2345678987654321ull);
     EXPECT_EQ(waves[i].vcc, 0xfedcba989abcdef0ull + i);
@@ -4270,7 +4294,7 @@ TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x4000;
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(static_cast<int>(arch));
     std::vector<kmd::CwsrWaveState> waves = {make_wave(1, 0x1000), make_wave(2, 0x2000),
                                              make_wave(3, 0x3000)};
@@ -4286,13 +4310,13 @@ TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
     };
     const auto layout = kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, arch);
     ASSERT_TRUE(layout.ok);
-    const uint32_t state_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2 : 1;
+    const uint32_t state_words = arch == rocjitsu::IsaFamily::Cdna5 ? 2 : 1;
     EXPECT_EQ(layout.control_stack_size, (2 + 2 * state_words + waves.size()) * sizeof(uint32_t));
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
+    if (arch != rocjitsu::IsaFamily::Cdna5) {
       const auto parsed =
-          parse_cwsr(mem, kCtxBase, arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512u : 1280u);
+          parse_cwsr(mem, kCtxBase, arch == rocjitsu::IsaFamily::Cdna3 ? 512u : 1280u);
       ASSERT_EQ(parsed.size(), waves.size());
-      EXPECT_EQ(parsed[0].lds.size(), arch == ROCJITSU_CODE_ARCH_CDNA3 ? 4096u : 5120u);
+      EXPECT_EQ(parsed[0].lds.size(), arch == rocjitsu::IsaFamily::Cdna3 ? 4096u : 5120u);
       EXPECT_TRUE(parsed[1].lds.empty());
       EXPECT_TRUE(parsed[2].lds.empty());
     }
@@ -4310,7 +4334,7 @@ TEST(WaveDebugTest, GroupLdsChangesPreserveRuntimeContextBoundaries) {
   constexpr uint32_t kControlStackCapacity = 4096;
   const std::array<uint32_t, 6> runtime_fields{128 * 1024, 4096, 0x1234, 0x5678, 42, 0xA5A5};
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(static_cast<int>(arch));
     std::vector<kmd::CwsrWaveState> waves = {make_wave(1, 0x1000), make_wave(2, 0x2000),
                                              make_wave(3, 0x3000)};
@@ -4328,14 +4352,14 @@ TEST(WaveDebugTest, GroupLdsChangesPreserveRuntimeContextBoundaries) {
         kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, arch, kControlStackCapacity,
                                   kmd::CwsrDebugRegion{runtime_fields[0], runtime_fields[1]});
     ASSERT_TRUE(layout.ok);
-    const uint32_t state_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2 : 1;
+    const uint32_t state_words = arch == rocjitsu::IsaFamily::Cdna5 ? 2 : 1;
     EXPECT_EQ(layout.control_stack_size, (2 + waves.size() * (state_words + 1)) * sizeof(uint32_t));
     EXPECT_EQ(layout.control_stack_offset + layout.control_stack_size, kControlStackCapacity);
     EXPECT_EQ(layout.wave_state_offset - layout.wave_state_size, kControlStackCapacity);
     for (size_t i = 0; i < runtime_fields.size(); ++i)
       EXPECT_EQ(read32(kCtxBase + 16 + i * sizeof(uint32_t)), runtime_fields[i]);
-    if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
-      const uint32_t granule = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512 : 1280;
+    if (arch != rocjitsu::IsaFamily::Cdna5) {
+      const uint32_t granule = arch == rocjitsu::IsaFamily::Cdna3 ? 512 : 1280;
       const auto parsed = parse_cwsr(mem, kCtxBase, granule);
       ASSERT_EQ(parsed.size(), waves.size());
       for (size_t i = 0; i < waves.size(); ++i)
@@ -4372,7 +4396,7 @@ TEST(WaveDebugTest, CwsrReservesDebuggerMemoryForDisplacedStepping) {
 
   std::vector<kmd::CwsrWaveState> waves = {make_wave(0xAA01, 0x2000)};
   kmd::CwsrLayout layout =
-      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, ROCJITSU_CODE_ARCH_CDNA4);
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(layout.ok);
 
   // The header advertises the region dbgapi reads (kfd_context_save_area_header
@@ -4425,13 +4449,13 @@ TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
   in[0].vcc = 0x0123456789ABCDEFULL;
 
   ASSERT_TRUE(
-      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, ROCJITSU_CODE_ARCH_CDNA4).ok);
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, rocjitsu::IsaFamily::Cdna4).ok);
 
   std::vector<kmd::CwsrWaveState> out(1);
   out[0].num_sgprs = in[0].num_sgprs;
   out[0].num_vgprs = in[0].num_vgprs;
   ASSERT_TRUE(
-      kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, out, read32, ROCJITSU_CODE_ARCH_CDNA4));
+      kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, out, read32, rocjitsu::IsaFamily::Cdna4));
 
   EXPECT_EQ(out[0].flat_scratch, kFlatScratch) << "flat_scratch was not restored";
   EXPECT_EQ(out[0].vcc, in[0].vcc);
@@ -4442,7 +4466,7 @@ TEST(WaveDebugTest, CwsrRoundTripPreservesAliasedSgprsAndFlatScratch) {
   // pairs and are ordinary registers. That is why the predicate is an explicit
   // slot test and not a bound.
   for (uint32_t s = 0; s < kMaxAcceptedSgprs; ++s) {
-    if (kmd::cwsr_sgpr_slot_is_aliased(s, ROCJITSU_CODE_ARCH_CDNA4))
+    if (kmd::cwsr_sgpr_slot_is_aliased(s, rocjitsu::IsaFamily::Cdna4))
       EXPECT_EQ(out[0].sgprs[s], 0u) << "aliased slot " << s << " decoded as an SGPR";
     else
       EXPECT_EQ(out[0].sgprs[s], in[0].sgprs[s]) << "sgpr " << s << " did not survive";
@@ -4469,7 +4493,7 @@ TEST(WaveDebugTest, CwsrAcceptsTheFullDefaultSgprAllocation) {
   in[0].num_sgprs = kmd::kCwsrSavedSgprSlots;
   in[0].sgprs.assign(kmd::kCwsrSavedSgprSlots, 0u);
   EXPECT_TRUE(
-      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, ROCJITSU_CODE_ARCH_CDNA4).ok)
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, rocjitsu::IsaFamily::Cdna4).ok)
       << "a wave using the default " << kmd::kCwsrSavedSgprSlots << "-SGPR allocation was rejected";
 
   // One past the block is genuinely out of range and must still be refused
@@ -4478,7 +4502,7 @@ TEST(WaveDebugTest, CwsrAcceptsTheFullDefaultSgprAllocation) {
   in[0].num_sgprs = kmd::kCwsrSavedSgprSlots + 1;
   in[0].sgprs.assign(in[0].num_sgprs, 0u);
   EXPECT_FALSE(
-      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, ROCJITSU_CODE_ARCH_CDNA4).ok);
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, rocjitsu::IsaFamily::Cdna4).ok);
   EXPECT_TRUE(mem.empty()) << "a rejected image still wrote to the ctx-save area";
 }
 
@@ -4502,7 +4526,7 @@ TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
   in[1].mode = (1u << 11);
 
   ASSERT_TRUE(
-      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, ROCJITSU_CODE_ARCH_CDNA4).ok);
+      kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32, rocjitsu::IsaFamily::Cdna4).ok);
 
   // Reload: supply only the per-wave geometry (num_sgprs/num_vgprs) so the
   // decoder reproduces the exact layout, then read the values back.
@@ -4514,7 +4538,7 @@ TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
     out.push_back(g);
   }
   ASSERT_TRUE(
-      kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, out, read32, ROCJITSU_CODE_ARCH_CDNA4));
+      kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, out, read32, rocjitsu::IsaFamily::Cdna4));
   ASSERT_EQ(out.size(), in.size());
 
   for (size_t i = 0; i < in.size(); ++i) {
@@ -4547,7 +4571,8 @@ TEST(WaveDebugTest, CwsrBulkCodecMatchesDwordCodecAndPublishesHeaderLast) {
   std::map<uint64_t, uint32_t> dwords;
   const auto reference = kmd::serialize_queue_cwsr(
       kCtxBase, kAreaSize, waves,
-      [&](uint64_t address, uint32_t value) { dwords[address] = value; }, ROCJITSU_CODE_ARCH_CDNA4);
+      [&](uint64_t address, uint32_t value) { dwords[address] = value; },
+      rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(reference.ok);
 
   std::vector<uint8_t> bulk_image(reference.wave_state_offset);
@@ -4560,7 +4585,7 @@ TEST(WaveDebugTest, CwsrBulkCodecMatchesDwordCodecAndPublishesHeaderLast) {
         ASSERT_LE(offset + bytes.size(), bulk_image.size());
         std::memcpy(bulk_image.data() + offset, bytes.data(), bytes.size());
       },
-      ROCJITSU_CODE_ARCH_CDNA4);
+      rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(bulk.ok);
   EXPECT_EQ(bulk.control_stack_offset, reference.control_stack_offset);
   EXPECT_EQ(bulk.control_stack_size, reference.control_stack_size);
@@ -4589,7 +4614,7 @@ TEST(WaveDebugTest, CwsrPublicationPreservesRuntimeFieldsAndDebuggerMemory) {
   const std::array<uint32_t, 6> owned = {debug.offset, debug.size, 0x76543210u,
                                          0x1234u,      83u,        0xA5A5u};
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(static_cast<int>(arch));
     for (bool bulk : {false, true}) {
       SCOPED_TRACE(bulk);
@@ -4656,7 +4681,7 @@ TEST(WaveDebugTest, CwsrBulkDeserializeRoundTripsAndRejectsCorruptHeader) {
                   [&](uint64_t address, std::span<const uint8_t> bytes) {
                     std::memcpy(image.data() + (address - kCtxBase), bytes.data(), bytes.size());
                   },
-                  ROCJITSU_CODE_ARCH_CDNA4)
+                  rocjitsu::IsaFamily::Cdna4)
                   .ok);
 
   auto geometry_only = [&] {
@@ -4673,7 +4698,7 @@ TEST(WaveDebugTest, CwsrBulkDeserializeRoundTripsAndRejectsCorruptHeader) {
 
   auto output = geometry_only();
   ASSERT_TRUE(kmd::deserialize_queue_cwsr_bulk(kCtxBase, kAreaSize, output, read_block,
-                                               ROCJITSU_CODE_ARCH_CDNA4));
+                                               rocjitsu::IsaFamily::Cdna4));
   ASSERT_EQ(output.size(), input.size());
   for (size_t index = 0; index < input.size(); ++index) {
     EXPECT_EQ(output[index].pc, input[index].pc);
@@ -4689,7 +4714,7 @@ TEST(WaveDebugTest, CwsrBulkDeserializeRoundTripsAndRejectsCorruptHeader) {
   image[8] ^= 1;
   output = geometry_only();
   EXPECT_FALSE(kmd::deserialize_queue_cwsr_bulk(kCtxBase, kAreaSize, output, read_block,
-                                                ROCJITSU_CODE_ARCH_CDNA4));
+                                                rocjitsu::IsaFamily::Cdna4));
 }
 
 TEST(WaveDebugTest, CwsrBulkCodecUsesConstantBlockOperationsAtFullScale) {
@@ -4718,7 +4743,7 @@ TEST(WaveDebugTest, CwsrBulkCodecUsesConstantBlockOperationsAtFullScale) {
         ++write_calls;
         bytes_written += bytes.size();
       },
-      ROCJITSU_CODE_ARCH_CDNA4);
+      rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(layout.ok);
   EXPECT_EQ(write_calls, 2u);
   EXPECT_EQ(bytes_written,

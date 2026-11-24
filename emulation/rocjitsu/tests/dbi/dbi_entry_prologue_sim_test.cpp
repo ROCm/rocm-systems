@@ -109,6 +109,7 @@
 #include "../dbi_test_util.h"
 #include "../instrumentor_test_access.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -160,17 +161,17 @@ constexpr uint16_t kInlineMinus1 = 193;
 
 struct PrologueSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
   bool wave32;
 };
 
-constexpr PrologueSimArch kCdna3{"cdna3", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942,
+constexpr PrologueSimArch kCdna3{"cdna3", rocjitsu::IsaFamily::Cdna3, EF_AMDGPU_MACH_AMDGCN_GFX942,
                                  64, false};
-constexpr PrologueSimArch kCdna4{"cdna4", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950,
+constexpr PrologueSimArch kCdna4{"cdna4", rocjitsu::IsaFamily::Cdna4, EF_AMDGPU_MACH_AMDGCN_GFX950,
                                  64, false};
-constexpr PrologueSimArch kRdna4{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
+constexpr PrologueSimArch kRdna4{"rdna4", rocjitsu::IsaFamily::Rdna4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
                                  32, true};
 
 // The kernarg image the CP delivers: the guest's own kernargs, then its
@@ -800,7 +801,7 @@ TEST_F(DbiRdna4EntryPrologueSim, DispatchAtTheOriginalEntrySkipsThePrologue) {
   expect_dispatch_at_the_original_entry_skips_the_prologue();
 }
 
-void replace_entry_vgpr_capture_with_v1(std::vector<uint32_t> &words, rj_code_arch_t arch) {
+void replace_entry_vgpr_capture_with_v1(std::vector<uint32_t> &words, rocjitsu::IsaFamily arch) {
   // The prologue chooses the destination SGPR. Match the full capture and
   // rebuild it with only the source VGPR changed.
   size_t matches = 0;
@@ -1036,15 +1037,15 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch, Probe
 }
 
 TEST(DbiEntrySnapshotSim, TrapTemporaryLaunchValueAndVectorSnapshotReachProbe) {
-  const PrologueSimArch cdna5{"cdna5", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 32,
-                              true};
+  const PrologueSimArch cdna5{"cdna5", rocjitsu::IsaFamily::Cdna5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                              32, true};
   ASSERT_NO_FATAL_FAILURE(
       expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp));
 }
 
 TEST(DbiEntrySnapshotSim, ReadingLiveTrapTemporaryInsteadOfSnapshotReturnsTheChangedValue) {
-  const PrologueSimArch cdna5{"cdna5", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 32,
-                              true};
+  const PrologueSimArch cdna5{"cdna5", rocjitsu::IsaFamily::Cdna5, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                              32, true};
   ASSERT_NO_FATAL_FAILURE(expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp,
                                                                    /*read_live_ttmp=*/true));
 }
@@ -1069,7 +1070,7 @@ private:
 };
 
 TEST(DbiEntrySnapshotSim, SameIndexScalarAndTrapTemporarySnapshotsRemainDistinct) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
   const util::FailureOr<uint32_t> overwrite = build_s_mov_b32(9, 128, kArch);
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   const util::FailureOr<uint32_t> live_output = build_v_mov_b32_src(4, 9, kArch);

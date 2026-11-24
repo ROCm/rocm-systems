@@ -35,13 +35,14 @@ class GpuVmAccess;
 class GpuVmAccessState;
 class GpuVmTransferBatch;
 class DeviceCacheMaintenanceLease;
+struct CacheMaintenanceResult;
 class VmTransferEffectGate;
 
 /// @brief Acquire a move-only cache lease for one tokenized data step.
 /// @details Acquisition runs without the VM state lock. A local backing step
 /// keeps the lease through its effect; a deferred request releases it before
 /// submission or polling.
-using VmTransferMaintenance = std::function<util::FailureOr<DeviceCacheMaintenanceLease>()>;
+using VmTransferMaintenance = std::function<util::FailureOr<CacheMaintenanceResult>()>;
 
 /// @brief Cache immutable VM snapshots for one bounded execution quantum.
 /// @details Nested guards share the outer cache. Borrowed objects remain alive
@@ -869,6 +870,10 @@ public:
   /// Whether two snapshots descend from one explicit VM root binding.
   /// Invalidation preserves the lineage; root replacement starts a new one.
   [[nodiscard]] bool same_root_lineage(const GpuVmAccess &other) const;
+  /// @brief Whether this binding raises a VM fault event for its failed translations.
+  /// @details Without a reporter, a terminal fault reaches no runtime event, so
+  /// its issuer must notify the queue owner directly.
+  [[nodiscard]] bool reports_faults() const;
   [[nodiscard]] VmCacheNamespace cache_namespace() const {
     return {.address_space = address_space_, .translation_epoch = info_.translation_epoch};
   }

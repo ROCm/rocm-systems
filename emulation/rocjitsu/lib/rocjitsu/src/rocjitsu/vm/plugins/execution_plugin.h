@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
+#include "rocjitsu/vm/plugins/lds_barrier_arrival_observation.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
@@ -306,6 +307,25 @@ public:
   virtual void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation & /*issue*/,
                                        const amdgpu::Wavefront & /*wf*/) {}
 
+  /// Called for each arrival at an LDS barrier cell (CDNA5 ISA 11.2.2), after
+  /// the cell has been updated. The DS arrive instructions report one arrival
+  /// per active lane whose address is in range, in the simulator's lane order,
+  /// within the issuing wave's instruction step and after
+  /// onAmdgpuMemoryAccessRouted(); issued with EXEC zero they report nothing.
+  /// ds_atomic_barrier_arrive_rtn_b64 with an update value of zero reads the
+  /// cell without arriving, and is reported with `old_state == new_state`. A
+  /// tensor DMA instruction whose descriptor requests an arrival reports one,
+  /// after onAmdgpuTensorDmaIssued() and after the transfer has written LDS;
+  /// `wf` is the wave that issued the transfer. A tensor instruction ignores
+  /// EXEC (CDNA5 ISA 10.11.1) and reports nothing only for a NULL descriptor.
+  /// A transfer deferred until its memory is available arrives when it
+  /// resumes, outside any instruction step of its wave and before the wave
+  /// issues another instruction.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuLdsBarrierArrived(const amdgpu::LdsBarrierArrivalObservation & /*arrival*/,
+                                         const amdgpu::Wavefront & /*wf*/) {}
+
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any
   /// workgroups are placed. Multiple packets may be parsed in a single fetch.
@@ -484,6 +504,10 @@ public:
   /// ranges is work on the instruction path, so consumers must opt in. The
   /// group samples this stable policy when the plugin is added.
   virtual bool observes_tensor_dma_issue() const { return false; }
+
+  /// Whether this plugin consumes onAmdgpuLdsBarrierArrived(). The group
+  /// samples this stable policy when the plugin is added.
+  virtual bool observes_lds_barrier_arrival() const { return false; }
 
   /// Whether this plugin needs typed scalar-register reads or legacy SGPR reads.
   /// The group samples this policy once when the plugin is added. The

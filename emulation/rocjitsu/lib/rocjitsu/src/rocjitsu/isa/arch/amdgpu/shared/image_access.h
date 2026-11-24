@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/image_addressing.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -65,8 +66,8 @@ struct ImageFields {
 
 /// RDNA1 through RDNA3.5 document the clamped and raw GET_LOD channels.
 /// W7900 and R9700 captures also return zero for the selected Z and W channels.
-inline bool image_lod_mask_supported(rj_code_arch_t arch, uint32_t mask) {
-  return !(mask & 0xcu) || arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+inline bool image_lod_mask_supported(rocjitsu::IsaFamily arch, uint32_t mask) {
+  return !(mask & 0xcu) || arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4;
 }
 
 /// GET_LOD packs selected channels into consecutive registers. A dropped query returns zero.
@@ -188,17 +189,17 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
   state.elem_size = 1;
   state.buffer_d16 = fields.d16;
   state.buffer_components = static_cast<uint32_t>(std::popcount(fields.dmask & 15u));
-  const rj_code_arch_t arch = wf.cu().arch();
+  const rocjitsu::IsaFamily arch = wf.cu().arch();
   if (!arch_has_image_memory_instructions(arch))
     return fail(InstructionExecutionError::UnimplementedInstruction);
   const bool gfx9 = arch_is_cdna_4_or_lower(arch);
-  state.buffer_format_encoding = gfx9                               ? BufferFormatEncoding::Gfx9
-                                 : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
-                                 : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
-                                                                    : BufferFormatEncoding::Gfx11;
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  state.buffer_format_encoding = gfx9                                 ? BufferFormatEncoding::Gfx9
+                                 : arch == rocjitsu::IsaFamily::Rdna1 ? BufferFormatEncoding::Rdna1
+                                 : arch == rocjitsu::IsaFamily::Rdna2 ? BufferFormatEncoding::Rdna2
+                                                                      : BufferFormatEncoding::Gfx11;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   const bool atomic_tfe =
-      arch == ROCJITSU_CODE_ARCH_RDNA4 && fields.tfe && state.atomic_op != AtomicOp::NONE;
+      arch == rocjitsu::IsaFamily::Rdna4 && fields.tfe && state.atomic_op != AtomicOp::NONE;
   if (!gfx10 && (fields.r128 || (fields.tfe && !atomic_tfe) || fields.lwe))
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (state.buffer_components == 0 ||
@@ -207,7 +208,7 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
     return fail(InstructionExecutionError::UnsupportedOperandValue);
   state.check_texel_residency = gfx10 || (has_gfx11_plus_image_operands(arch) && !state.is_load &&
                                           state.atomic_op == AtomicOp::NONE);
-  if (state.is_load && (gfx10 || (sampled && arch == ROCJITSU_CODE_ARCH_RDNA4))) {
+  if (state.is_load && (gfx10 || (sampled && arch == rocjitsu::IsaFamily::Rdna4))) {
     const bool status = fields.tfe || (sampled && fields.lwe);
     uint32_t count = fields.gather && !fields.packed_texels ? 4u : state.buffer_components;
     if (fields.d16)
@@ -218,7 +219,7 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
     if (!wf.vgpr_alloc().contains(state.dst_reg_base, count + status)) {
       state.exec_mask = 0;
       // GFX10.3 still consumes the scalar descriptor of an issued memory instruction.
-      if (arch != ROCJITSU_CODE_ARCH_RDNA2)
+      if (arch != rocjitsu::IsaFamily::Rdna2)
         return ImageResource{};
     }
     if (status && state.exec_mask) {
@@ -281,7 +282,7 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
     state.buffer_selectors = descriptor_selectors;
     const uint32_t mask = fields.dmask & 15u;
     state.image_store_component_mask =
-        arch == ROCJITSU_CODE_ARCH_RDNA1 && fields.d16 ? (1u << std::popcount(mask)) - 1 : mask;
+        arch == rocjitsu::IsaFamily::Rdna1 && fields.d16 ? (1u << std::popcount(mask)) - 1 : mask;
   }
 
   // The six-bit image DFMT must fit the buffer decoder's four-bit packed key.
@@ -298,7 +299,7 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
     state.image_srgb = true;
     state.buffer_format = resource.data_format; // Decode channels as UNORM first.
   } else if (!gfx9) {
-    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
     state.buffer_format = image_srgb_storage_format(resource.data_format, gfx10);
     state.image_srgb = state.buffer_format != resource.data_format;
   }
@@ -394,9 +395,9 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   if (!resource.width)
     return util::Result::success();
   const uint64_t exec = state.exec_mask;
-  const rj_code_arch_t arch = wf.cu().arch();
+  const rocjitsu::IsaFamily arch = wf.cu().arch();
   const bool gfx9 = arch_is_cdna_4_or_lower(arch);
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   const ImageCoordinateShape shape = image_coordinate_shape(resource.type, fields.da || !gfx9);
   const bool msaa = resource.type >= kImage2dMsaa;
   const bool layered = shape.layered || resource.type == kImage2dMsaaArray;

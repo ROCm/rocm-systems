@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_status.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -44,7 +45,7 @@ inline FmaInputs dual_fma_inputs(uint32_t op, uint32_t a, uint32_t b, uint32_t c
 inline uint32_t evaluate_fma(FmaInputs in, amdgpu::Wavefront &wave, bool force_flush = false) {
   return std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
       std::bit_cast<float>(in.a), std::bit_cast<float>(in.b), std::bit_cast<float>(in.c),
-      wave.fp_round_mode_f32(), wave.fp_denorm_mode_f32(), ROCJITSU_CODE_ARCH_RDNA3_5,
+      wave.fp_round_mode_f32(), wave.fp_denorm_mode_f32(), rocjitsu::IsaFamily::Rdna3_5,
       wave.ieee_mode(), force_flush));
 }
 
@@ -71,7 +72,7 @@ uint32_t arithmetic_flags(const Inst &inst, amdgpu::Wavefront &wave, const rocji
   if constexpr (requires { inst.inst_.omod; }) {
     absolute = inst.inst_.abs;
     negate = inst.inst_.neg;
-    omod = amdgpu::fp_mode::effective_omod(ROCJITSU_CODE_ARCH_RDNA3_5, wave.fp_denorm_mode_f32(),
+    omod = amdgpu::fp_mode::effective_omod(rocjitsu::IsaFamily::Rdna3_5, wave.fp_denorm_mode_f32(),
                                            wave.ieee_mode(), inst.inst_.omod);
   }
   amdgpu::RegisterAccess regs(wave);

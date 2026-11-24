@@ -1139,6 +1139,49 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     return 0
 
 
+def _rounds_on_host(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether lowering node evaluates float arithmetic inline on the host.
+
+    Such arithmetic rounds under the host rounding mode, so it needs the guest
+    rounding installed around it. Arithmetic lowered to fp_mode helpers installs
+    the guest rounding itself, and raw-bit helpers do not round on the host.
+    """
+    host_ops = (
+        SemaNodeKind.DIV,
+        SemaNodeKind.POW,
+        SemaNodeKind.FPOW,
+        SemaNodeKind.SQRT,
+        SemaNodeKind.SIN,
+        SemaNodeKind.COS,
+        SemaNodeKind.LOG2,
+    )
+    for n in node.walk():
+        if not n.ty or n.ty.base != 'F':
+            continue
+        helper = (
+            ctx.mode_arithmetic
+            and ctx.exec_model == ExecModel.VECTOR
+            and n.ty.size in (16, 32, 64)
+        )
+        if n.kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL) or (
+            n.kind == SemaNodeKind.CALL and n.call_name == 'mul_legacy'
+        ):
+            if not helper:
+                return True
+        elif n.kind == SemaNodeKind.FMA:
+            if not helper and n.ty != SemaType.F32:
+                return True
+        elif n.kind == SemaNodeKind.LDEXP:
+            if not _is_vector_ldexp(n, ctx):
+                return True
+        elif n.kind == SemaNodeKind.FRACT:
+            if not _is_vector_fract(n, ctx):
+                return True
+        elif n.kind in host_ops:
+            return True
+    return False
+
+
 def _contains_mode_arithmetic(node: SemaNode) -> bool:
     return (
         (
@@ -2717,6 +2760,10 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
         )
     if node.ty == SemaType.F32:
+        # Raw-bit scaling rounds by its explicit mode; only inline host
+        # arithmetic in the operand needs the guest rounding installed.
+        if not _rounds_on_host(node.children[1], ctx):
+            environment = ''
         return (
             f'[&]() {{ {environment}float v = {rhs};'
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
@@ -2740,25 +2787,26 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
-    mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
     fp_type = 'double' if is_f64 else 'float'
-    mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
-    environment = (
-        f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
-        if mode_arithmetic
-        else ''
-    )
     if node.ty == SemaType.F32 and any(
         child.kind in (SemaNodeKind.ADD, SemaNodeKind.MUL, SemaNodeKind.FMA)
         for child in node.children[1].walk()
     ):
-        # The arithmetic helper scopes MODE itself; scope only CLAMP here, after
-        # the operand reads, so register-access callbacks keep the caller's FP state.
+        # The arithmetic helper scopes MODE itself, and CLAMP compares raw bits.
         return (
             f'[&]() {{ float v = {rhs};'
-            f' if (inst_.clamp) {{ {environment}'
-            ' v = amdgpu::clamp_floating_result(v, wf); } return v; }()'
+            ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf); return v; }()'
         )
+    # CLAMP compares raw bits; only inline host arithmetic in the operand needs the
+    # guest rounding installed.
+    mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
+    environment = (
+        f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
+        if ctx.mode_arithmetic
+        and _contains_mode_arithmetic(node)
+        and _rounds_on_host(node.children[1], ctx)
+        else ''
+    )
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
         ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf);'

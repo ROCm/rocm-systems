@@ -125,6 +125,92 @@ bool LegacyAddressSpace::local_ingress_mapped(
   return true;
 }
 
+LegacyAddressSpace::BackingKeyRange
+LegacyAddressSpace::find_backing_key_range(uintptr_t address, uint64_t generation) {
+  struct Index {
+    std::mutex refresh_mutex;
+    std::atomic<uint64_t> generation{0};
+    std::vector<BackingKeyRange> shared_mappings;
+    bool complete = false;
+  };
+  // All callers hold the mapping lease. Publication requires a mutex because
+  // multiple readers may see a new layout, but the previous index has no
+  // readers once a mapping update takes the exclusive lock.
+  // HIP/ROCR finalizers can submit work after C++ static destructors in
+  // the preloaded simulator have run. Keep the index alive for those readers.
+  alignas(Index) static std::byte storage[sizeof(Index)];
+  static Index &index = *new (storage) Index;
+  if (index.generation.load(std::memory_order_acquire) != generation) {
+    std::lock_guard lock(index.refresh_mutex);
+    if (index.generation.load(std::memory_order_relaxed) != generation) {
+      index.shared_mappings.clear();
+      index.complete = false;
+      // Read the actual mappings, including views that existed before the
+      // first KFD open. Bypass the interposer as in host_page_writability().
+      const int saved_errno = errno;
+      const long fd = ::syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
+      if (fd >= 0) {
+        try {
+          std::string pending;
+          char buffer[8192];
+          bool valid = true;
+          while (valid) {
+            const long got = ::syscall(SYS_read, fd, buffer, sizeof(buffer));
+            if (got < 0 && errno == EINTR)
+              continue;
+            if (got <= 0) {
+              index.complete = got == 0 && pending.empty();
+              break;
+            }
+            pending.append(buffer, static_cast<size_t>(got));
+            size_t begin = 0;
+            for (size_t end = pending.find('\n'); end != std::string::npos;
+                 end = pending.find('\n', begin)) {
+              uintptr_t first, last, offset;
+              unsigned major, minor;
+              unsigned long long inode;
+              char permissions[5]{};
+              if (std::sscanf(pending.c_str() + begin, "%zx-%zx %4s %zx %x:%x %llu", &first, &last,
+                              permissions, &offset, &major, &minor, &inode) != 7) {
+                valid = false;
+                break;
+              }
+              // System V shmid 0 appears as a shared mapping with inode 0.
+              if (permissions[3] == 's') {
+                const uintptr_t file =
+                    (inode * 0x9e3779b97f4a7c15ULL ^ (uint64_t{major} << 32) ^ minor)
+                    << kBackingAtomicGranuleShift;
+                index.shared_mappings.push_back({first, last, UINTPTR_MAX, file + offset - first});
+              }
+              begin = end + 1;
+            }
+            pending.erase(0, begin);
+          }
+        } catch (const std::bad_alloc &) {
+          // Keep one lock namespace for the whole layout, even if the lookup
+          // ran out of memory partway through building the index.
+        }
+        ::syscall(SYS_close, fd);
+      }
+      errno = saved_errno;
+      index.generation.store(generation, std::memory_order_release);
+    }
+  }
+
+  // Without a complete map, serialize equal in-page offsets across all
+  // mappings. A virtual-address fallback could put only one alias in the
+  // canonical namespace. Kernel mapping offsets are host-page aligned.
+  if (!index.complete)
+    return {0, UINTPTR_MAX, PAGE_MASK, 0};
+
+  const auto &ranges = index.shared_mappings;
+  auto next = std::ranges::upper_bound(ranges, address, {}, &BackingKeyRange::end);
+  if (next != ranges.end() && address >= next->begin)
+    return *next;
+  return {next == ranges.begin() ? 0 : std::prev(next)->end,
+          next == ranges.end() ? UINTPTR_MAX : next->begin, UINTPTR_MAX, 0};
+}
+
 PageWritability LegacyAddressSpace::host_page_writability(const uint8_t *page, uintptr_t *vma_end) {
   if (page == nullptr)
     return PageWritability::Inaccessible;

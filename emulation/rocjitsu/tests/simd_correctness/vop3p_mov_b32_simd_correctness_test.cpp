@@ -14,6 +14,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -52,14 +53,14 @@ constexpr uint32_t kMixedVgprLo = 0x55555555u;
 constexpr uint32_t kMixedVgprHi = 0x66666666u;
 
 struct ArchCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
 };
 
 constexpr std::array<ArchCase, 3> kArchCases{{
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2"},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+    {rocjitsu::IsaFamily::Cdna2, "cdna2"},
+    {rocjitsu::IsaFamily::Cdna3, "cdna3"},
+    {rocjitsu::IsaFamily::Cdna4, "cdna4"},
 }};
 
 constexpr void vop3p_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
@@ -153,11 +154,11 @@ struct Fixture {
   std::array<uint64_t, WF_SIZE> run_simd_probe(Instruction *inst, const ArchCase &arch,
                                                uint32_t rot, uint64_t exec, uint32_t op_sel) {
     switch (arch.arch) {
-    case ROCJITSU_CODE_ARCH_CDNA2:
+    case rocjitsu::IsaFamily::Cdna2:
       return run_simd_probe_impl<cdna2::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
-    case ROCJITSU_CODE_ARCH_CDNA3:
+    case rocjitsu::IsaFamily::Cdna3:
       return run_simd_probe_impl<cdna3::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
-    case ROCJITSU_CODE_ARCH_CDNA4:
+    case rocjitsu::IsaFamily::Cdna4:
       return run_simd_probe_impl<cdna4::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
     default:
       ADD_FAILURE() << "unsupported arch case " << arch.name;

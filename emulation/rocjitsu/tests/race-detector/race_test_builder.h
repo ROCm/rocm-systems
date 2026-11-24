@@ -9,6 +9,7 @@
 #pragma once
 
 #include "race_test_instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
@@ -30,7 +31,7 @@ class RaceTestBuilder {
 public:
   RaceTestBuilder(
       int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0),
-      CounterCapacities counterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4))
+      CounterCapacities counterCapacities = counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4))
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
         numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },
@@ -39,6 +40,7 @@ public:
       waves_.push_back(&detector_->getWaveRaceState(w));
     }
     ended_.assign(numWaves, false);
+    tensorTransfers_.assign(numWaves, EventId{});
   }
 
   // -- Memory events --
@@ -392,6 +394,59 @@ public:
 
   size_t openBarrierRounds() const { return detector_->openBarrierRounds(); }
 
+  // -- LDS barrier cells (ds_atomic_*barrier_arrive, tensor DMA arrival) --
+
+  /// Arrive at the barrier cell at `cell`, as the plugin does: the DS arrive
+  /// instructions validate and register an aligned 64-bit atomic on the cell,
+  /// on DSCNT in the LDS class or on ASYNCCNT in the async-load class; a tensor
+  /// transfer's arrival is validated and attaches the cell to the wave's
+  /// latest tensor transfer, if it has issued one since its last tensor
+  /// arrival. `completes` says whether the arrival changes the cell's phase.
+  void cellArrive(int wave, int cell, BarrierCellArrival kind, bool completes) {
+    const bool tensor = kind == BarrierCellArrival::Tensor;
+    const bool ds = kind == BarrierCellArrival::Ds;
+    const MemoryOrderClass order = tensor ? MemoryOrderClass::UNORDERED
+                                   : ds   ? MemoryOrderClass::LDS
+                                          : MemoryOrderClass::ASYNC_LOAD;
+    const auto counter = ds ? amdgpu::WaitCounterType::DSCNT : amdgpu::WaitCounterType::ASYNCCNT;
+    const int lane = tensor ? -1 : 0;
+    if (!tensor) {
+      ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter).succeeded());
+    }
+    // An arrival updates the cell atomically: it is checked as a read, against
+    // writes of the cell, and never against reads of it.
+    detector_->validateRead(cell, WaveId{wave}, lane, kBarrierCellBytes, order, kBarrierCellBytes);
+    if (tensor) {
+      if (const EventId transfer = std::exchange(tensorTransfers_[wave], {}); transfer.isValid())
+        detector_->attachBarrierArrive(transfer, static_cast<uint32_t>(cell));
+    } else {
+      IntervalSet intervals;
+      intervals.append(cell, cell + kBarrierCellBytes);
+      intervals.finalize();
+      const std::array obligations{amdgpu::MemoryCounterObligation{counter, order}};
+      waves_[wave]->registerEventWithIntervals(
+          testInstruction(pc_++), ds ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS,
+          /*registers=*/{}, /*execMask=*/1, /*byteMask=*/0xF, std::move(intervals), obligations,
+          order, /*lastRegisterByteMask=*/0,
+          LdsAccess{.read_modify_write = true,
+                    .aligned_atomic_bytes = kBarrierCellBytes,
+                    .barrier_arrive = true});
+    }
+    detector_->barrierCellArrived(WaveId{wave}, static_cast<uint32_t>(cell), kind, completes);
+  }
+
+  /// A DS load of `bytes` bytes at `addr` on DSCNT, such as a poll of a barrier
+  /// cell: validated and registered like any LDS read, then offered to the
+  /// detector as a read of whichever barrier cells it overlaps.
+  void cellRead(int wave, int addr, int vgprDst, int bytes = kBarrierCellBytes) {
+    ldsRead(wave, /*lane=*/0, addr, bytes, vgprDst, /*byteMask=*/0xF,
+            amdgpu::WaitCounterType::DSCNT);
+    IntervalSet intervals;
+    intervals.append(addr, addr + bytes);
+    intervals.finalize();
+    detector_->acquireBarrierCells(WaveId{wave}, intervals);
+  }
+
   // -- Trigger race checks --
 
   /// Check a VGPR read for races against pending loads.
@@ -536,8 +591,8 @@ private:
     }
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-    waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations,
-                                        memoryOrder);
+    tensorTransfers_[wave] = waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type,
+                                                                 ranges, obligations, memoryOrder);
   }
 
   std::unique_ptr<RaceDetector> detector_;
@@ -547,6 +602,8 @@ private:
   uint64_t defaultExec_;
   int pc_ = 0; // Auto-incrementing fake PC for event registration.
   std::vector<bool> ended_;
+  /// Each wave's latest tensor transfer that no tensor arrival has taken.
+  std::vector<EventId> tensorTransfers_;
   uint64_t nextWorkgroupGeneration_ = 0;
 };
 

@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/lds_barrier_arrival_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "util/bit.h"
@@ -780,10 +781,20 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
   wf.cu().report_tensor_dma_memory_access(access);
 }
 
+/// Send the arrival a descriptor requests, and report it with the cell already
+/// updated.
 inline void arrive_atomic_barrier(const TensorDmaDescriptor &desc, Wavefront &wf) {
   const uint32_t addr = wf.lds_base() + desc.atomic_barrier_addr;
   const uint64_t state = wf.lds().read64(addr);
-  wf.lds().write64(addr, lds_barrier_cell_update_arrive(state));
+  const uint64_t arrived = lds_barrier_cell_update_arrive(state);
+  wf.lds().write64(addr, arrived);
+  if (wf.cu().observes_lds_barrier_arrival())
+    wf.cu().report_lds_barrier_arrival(
+        {.source = LdsBarrierArrivalObservation::Source::TensorDma,
+         .cell_address = addr,
+         .old_state = state,
+         .new_state = arrived,
+         .phase_completed = lds_barrier_cell_arrive_completes_phase(state)});
 }
 
 // A declined batch has no observable effect. Only the element access below

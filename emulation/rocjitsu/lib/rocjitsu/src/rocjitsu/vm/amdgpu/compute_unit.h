@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
@@ -34,7 +35,6 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
 #include "util/diagnostic.h"
-#include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
 
@@ -152,7 +152,7 @@ public:
 
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch; ///< ISA architecture (determines wave size, decoder).
+    rocjitsu::IsaFamily arch; ///< ISA architecture (determines wave size, decoder).
     rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete GPU target.
     uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
@@ -177,7 +177,7 @@ public:
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
-      return arch == ROCJITSU_CODE_ARCH_CDNA5 && xcnt_diagnostics != MemoryWaitDiagnostics::Off;
+      return arch == rocjitsu::IsaFamily::Cdna5 && xcnt_diagnostics != MemoryWaitDiagnostics::Off;
     }
     /// @brief Whether either core memory-result or replay-source checking is enabled.
     bool memory_wait_checks_enabled() const {
@@ -712,7 +712,9 @@ public:
 
   // GWS hooks called by the generated DS execute bodies. These forward to the
   // device-global GWS store this CU participates in; see GwsDevice (gws_device.h)
-  // for the authoritative scheduling policy.
+  // for the authoritative scheduling policy. Rejection or timeout cancels the
+  // dispatch and retains GwsFailure and its static detail on the original wave
+  // until its slot is reused. An attached engine also receives a fatal exit request.
   /// @brief Seed a GWS resource's shared barrier/semaphore counter.
   void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
   /// @brief Arrive at a GWS barrier (may park the wave).
@@ -860,6 +862,10 @@ public:
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
   uint64_t arithmetic_flags() const { return arithmetic_.flags(); }
+  bool force_scalar() const { return arithmetic_.force_scalar(); }
+
+  /// @brief Limit the host arithmetic backend on a quiescent CU before wave dispatch.
+  void limit_arithmetic_cpu_level(uint64_t max_level) { arithmetic_.limit_cpu_level(max_level); }
 
   /// @brief Lazily acquire and cache the VM helper pool.
   matrix_coexecution::SharedPool &async_pool();
@@ -1016,7 +1022,7 @@ public:
     shared_aperture_limit_ = shared_limit;
     private_aperture_base_ = private_base;
     private_aperture_limit_ = private_limit;
-    flat_pointer32_ = arch() == ROCJITSU_CODE_ARCH_RDNA1 && ptr32;
+    flat_pointer32_ = arch() == rocjitsu::IsaFamily::Rdna1 && ptr32;
   }
 
   /// @brief Program the shader aperture register bank selected by a guest VMID.
@@ -1083,7 +1089,7 @@ public:
 
   /// @brief Return the ISA architecture.
   /// @returns Architecture enum value.
-  rj_code_arch_t arch() const { return config_.arch; }
+  rocjitsu::IsaFamily arch() const { return config_.arch; }
 
   /// @brief Return the device tiling identity, or standalone CU defaults.
   ImageAddressConfig image_address_config() const {
@@ -1198,7 +1204,7 @@ public:
   // even when its reserved physical slot has room for additional registers.
   [[nodiscard]] bool valid_operand_vgpr_range(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2)
+    if (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2)
       return wf.vgpr_alloc().contains(base, count);
     return owns_vgpr_range(wf, base, count);
   }
@@ -1207,9 +1213,9 @@ public:
   /// allocated VGPR tuple, even if that tuple fits in the simulator's register slot.
   [[nodiscard]] bool owns_memory_result_range(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA4 || arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-        arch() == ROCJITSU_CODE_ARCH_RDNA3_5 || arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
-        arch() == ROCJITSU_CODE_ARCH_RDNA2)
+    if (arch() == rocjitsu::IsaFamily::Rdna4 || arch() == rocjitsu::IsaFamily::Rdna3 ||
+        arch() == rocjitsu::IsaFamily::Rdna3_5 || arch() == rocjitsu::IsaFamily::Rdna1 ||
+        arch() == rocjitsu::IsaFamily::Rdna2)
       return &wf.raw_cu() == this && wf.vgpr_alloc().contains(base, count);
     return owns_memory_result_vgprs(wf, base, count);
   }
@@ -1560,13 +1566,12 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  /// @param failure_detail Receives the reported register-access diagnostic or
-  /// `UnimplementedInst::what()` when that legacy exception is translated.
+  /// @param failure_detail Receives the reported execution diagnostic, when available.
   /// Otherwise the pointed-to string is unchanged.
-  /// @returns Failure for an unimplemented instruction stub or a reported operand
-  /// or register-access failure. The wavefront retains the reason for caller-owned
-  /// diagnostics.
-  /// Each call clears the previous error; a failed call does not halt the wavefront.
+  /// @returns Failure when the instruction reports an execution error. The
+  /// wavefront retains the reason for caller-owned diagnostics.
+  /// Each call clears the previous error. Instruction stubs and operand failures
+  /// leave the wavefront active; GWS rejection cancels its dispatch.
   /// Other host failures inside implemented instructions still raise exceptions.
   util::Result execute_instruction(Instruction *inst, Wavefront &wf,
                                    std::string *failure_detail = nullptr) {
@@ -1590,24 +1595,16 @@ public:
     }
     const bool saved_scc = preserve_scc && wf.read_scc();
     // The decoded instruction already selects its ISA execution callback.
-    try {
-      inst->execute(*inst, &wf);
-      if (inst->is_memory_op() && inst->data() &&
-          (config_.arch == ROCJITSU_CODE_ARCH_RDNA3 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5))
-        qualify_gfx11_memory(*inst, wf);
-    } catch (const util::UnimplementedInst &error) {
-      // Some implemented instructions reject particular operand or mode
-      // combinations through the legacy exception path. Treat those guest
-      // encodings like generated unimplemented stubs at the CU boundary.
-      wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
-      if (failure_detail)
-        *failure_detail = error.what();
-    }
-    if (config_.arch == ROCJITSU_CODE_ARCH_RDNA4 && inst->data())
+    inst->execute(*inst, &wf);
+    if (inst->is_memory_op() && inst->data() &&
+        (config_.arch == rocjitsu::IsaFamily::Rdna3 ||
+         config_.arch == rocjitsu::IsaFamily::Rdna3_5))
+      qualify_gfx11_memory(*inst, wf);
+    if (config_.arch == rocjitsu::IsaFamily::Rdna4 && inst->data())
       nullify_unallocated_memory_result(*inst, wf);
     if (preserve_scc)
       wf.write_scc(saved_scc);
-    if (inst->data() && config_.arch == ROCJITSU_CODE_ARCH_CDNA4)
+    if (inst->data() && config_.arch == rocjitsu::IsaFamily::Cdna4)
       qualify_cdna4_memory_destination(*inst, wf);
     if (failure_detail && wf.instruction_execution_error_detail())
       *failure_detail = wf.instruction_execution_error_detail();
@@ -1723,7 +1720,7 @@ protected:
                                               uint32_t count) const {
     if (!owns_vgpr_range(wf, base, count))
       return false;
-    if (arch() != ROCJITSU_CODE_ARCH_CDNA4)
+    if (arch() != rocjitsu::IsaFamily::Cdna4)
       return true;
 
     return wf.unified_vgpr_range_is_allocated(base - wf.vgpr_alloc().base, count);
@@ -1858,9 +1855,16 @@ protected:
   /// @param issue_pc Original instruction PC, before advancing to the resume PC.
   void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
   /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
-  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
+  /// @details A failure that no VM fault reporter covered also aborts the queue:
+  /// the CP cancellation does not wake the dispatch's waiter, and ROCr acts on a
+  /// memory-violation status only after a VM fault event.
+  /// @param issue_pc PC of the failing instruction, for the diagnostic.
+  /// @param unreported Static cause of a failure known to have no VM fault
+  ///        event, or null to decide from the outcome and the wave's binding.
+  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc,
+                                const char *unreported = nullptr);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
-  void fail_gws_wait(Wavefront &wf, std::string_view reason);
+  void fail_gws_wait(Wavefront &wf, const char *reason);
 
   /// @brief Cancel a fatal decode or execution failure without successful completion.
   /// @param exception_claimed The illegal-instruction handler already owns notification;
@@ -2170,10 +2174,11 @@ inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_
 inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
-inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline rocjitsu::IsaFamily InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline uint64_t InstructionComputeUnitView::arithmetic_flags() const {
   return raw_cu().arithmetic_flags();
 }
+inline bool InstructionComputeUnitView::force_scalar() const { return raw_cu().force_scalar(); }
 inline ImageAddressConfig InstructionComputeUnitView::image_address_config() const {
   return raw_cu().image_address_config();
 }
@@ -2247,6 +2252,13 @@ inline bool InstructionComputeUnitView::observes_tensor_dma_issue() const {
 inline void
 InstructionComputeUnitView::report_tensor_dma_issue(const TensorDmaIssueObservation &issue) {
   raw_cu().plugin_group().onAmdgpuTensorDmaIssued(issue, raw_wavefront());
+}
+inline bool InstructionComputeUnitView::observes_lds_barrier_arrival() const {
+  return raw_cu().plugin_group().observes_lds_barrier_arrival(raw_wavefront());
+}
+inline void InstructionComputeUnitView::report_lds_barrier_arrival(
+    const LdsBarrierArrivalObservation &arrival) {
+  raw_cu().plugin_group().onAmdgpuLdsBarrierArrived(arrival, raw_wavefront());
 }
 
 /// @brief Execution-mode-aware compute unit shell.

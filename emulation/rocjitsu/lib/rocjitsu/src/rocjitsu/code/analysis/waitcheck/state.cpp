@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/analysis/waitcheck/state.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
@@ -291,7 +292,7 @@ void WaitcheckStateOps::apply_wait(PendingState &state, WaitCounterKind counter,
 }
 
 util::Result WaitcheckStateOps::apply_kmcnt_wait(PendingState &state, uint32_t count,
-                                                 rj_code_arch_t arch) {
+                                                 rocjitsu::IsaFamily arch) {
   const auto out_of_order = counter_out_of_order(state, WaitCounterKind::Km, arch);
   if (out_of_order.failed())
     return util::Result::failure();
@@ -468,15 +469,15 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
 
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                WaitCounterKind counter,
-                                                               rj_code_arch_t arch) {
+                                                               rocjitsu::IsaFamily arch) {
   // Unlike runtime requests, a static FLAT store has no proven VMEM route.
   // Its possible Store position cannot establish partial retirement, including
   // for an older ordinary store when the FLAT request might use only LDS.
   if (counter == WaitCounterKind::Store &&
       counter_has_event_kind(state, counter, WaitEventKind::FlatStore))
     return true;
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+  if ((arch != rocjitsu::IsaFamily::Cdna1 && arch != rocjitsu::IsaFamily::Cdna2 &&
+       arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4) ||
       (counter != WaitCounterKind::Load && counter != WaitCounterKind::Ds)) {
     return false;
   }
@@ -486,7 +487,7 @@ bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingStat
 
 util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState &state,
                                                               WaitCounterKind counter,
-                                                              rj_code_arch_t arch) {
+                                                              rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
@@ -519,7 +520,7 @@ util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState
 }
 
 util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCounterKind counter,
-                                                   uint32_t count, rj_code_arch_t arch) {
+                                                   uint32_t count, rocjitsu::IsaFamily arch) {
   if (counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch) && count) {
     // EXPCNT <= n bounds each ordered type separately, even in a mixed queue.
     // The newest request of any one type may still be pending at a nonzero wait.
@@ -539,7 +540,7 @@ util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCoun
 
 util::FailureOr<uint32_t> WaitcheckStateOps::dependency_required_count(const PendingState &state,
                                                                        const PendingEvent &event,
-                                                                       rj_code_arch_t arch) {
+                                                                       rocjitsu::IsaFamily arch) {
   if (event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch))
     return event.min_younger_in_fifo;
   const auto out_of_order = counter_out_of_order(state, event.counter, arch);
@@ -557,7 +558,7 @@ bool WaitcheckStateOps::same_operation(const PendingEvent &lhs, const PendingEve
 }
 
 util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCounterKind counter,
-                                                  uint32_t count, rj_code_arch_t arch) {
+                                                  uint32_t count, rocjitsu::IsaFamily arch) {
   const auto out_of_order = counter_out_of_order(state, counter, arch);
   if (out_of_order.failed())
     return util::Result::failure();
@@ -667,7 +668,7 @@ void WaitcheckStateOps::apply_sgpr_hazard_wait(SgprHazardState &state, uint32_t 
 }
 
 util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const WaitFields &fields,
-                                                  rj_code_arch_t arch) {
+                                                  rocjitsu::IsaFamily arch) {
   if (amdgpu::waitcnt_model(arch).failed())
     return util::Result::failure();
   for (size_t i = 0; i < fields.size(); ++i) {
@@ -709,7 +710,7 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
 }
 
 util::Result WaitcheckStateOps::apply_embedded_waitcnt(PendingState &state, const Instruction &inst,
-                                                       rj_code_arch_t arch) {
+                                                       rocjitsu::IsaFamily arch) {
   const auto fields = embedded_wait_fields(inst, arch);
   if (fields.failed())
     return util::Result::failure();
@@ -719,7 +720,7 @@ util::Result WaitcheckStateOps::apply_embedded_waitcnt(PendingState &state, cons
 }
 
 util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruction &inst,
-                                              rj_code_arch_t arch) {
+                                              rocjitsu::IsaFamily arch) {
   const auto fields = explicit_wait_fields(inst, arch);
   if (fields.failed())
     return util::Result::failure();

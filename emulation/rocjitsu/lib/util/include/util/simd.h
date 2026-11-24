@@ -474,38 +474,6 @@ inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double
   return result;
 }
 
-inline native<double> cvt_i32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane))
-      lane = 0.0;
-    else if (lane >= 2147483648.0)
-      lane = 2147483647.0;
-    else if (lane < -2147483648.0)
-      lane = -2147483648.0;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
-inline native<double> cvt_u32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane) || lane < 0.0)
-      lane = 0.0;
-    else if (lane >= 4294967296.0)
-      lane = 4294967295.0;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
 inline native<double> sqrt_f64_simd(native<double> a) {
   native<double> r = stdx::sqrt(a);
   constexpr std::size_t W = native<double>::size();

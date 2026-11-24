@@ -28,6 +28,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -152,7 +153,7 @@ struct Fixture {
 
   Fixture() : gpu_mem("cvt_pk_f32_mem"), l2("cvt_pk_f32_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+    cfg.arch = rocjitsu::IsaFamily::Rdna3;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -160,7 +161,7 @@ struct Fixture {
     rocjitsu::test::initialize_compute_unit(cu, "cu_cvt_pk_f32", cfg, &gpu_mem, &l2);
     if (!cu)
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+    decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 

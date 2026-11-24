@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_sample.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -80,7 +81,7 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
     return util::Result::failure();
   };
   const auto arch = wf.cu().arch();
-  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
   const bool query = queried_lods != nullptr;
   const bool atomic = state.atomic_op != AtomicOp::NONE;
   state.check_texel_residency = !state.is_load && !atomic;
@@ -98,7 +99,7 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
       atomic ? image_atomic_texel_bytes(state.atomic_op, mask,
                                         atomic_is_floating_point(state.atomic_op))
              : 0;
-  if ((!gfx12 && arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+  if ((!gfx12 && arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5) ||
       (atomic && (!controls.unorm || d16 || !atomic_bytes)) || (packed && d16) || (mask & ~15u) ||
       (query && (d16 || !image_lod_mask_supported(arch, mask))) ||
       (gather && std::popcount(mask) != 1))

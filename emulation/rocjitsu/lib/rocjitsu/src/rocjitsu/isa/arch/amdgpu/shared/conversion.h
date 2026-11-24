@@ -16,7 +16,7 @@
 ///      floating destinations).
 ///   4. OMOD, then CLAMP, on a floating result (output_modifier.h).
 ///
-/// ToFloat, F32ToInteger (FloorI32, NearestI32), PackU8, PackB32F16 and ToFp8
+/// ToFloat, PackU8, PackB32F16 and ToFp8
 /// hold the settings of every stage that applies to them, so a scalar body and
 /// its SIMD probe pass the same object. Every stage works on raw encodings in
 /// unsigned integer lanes, so host rounding, DAZ and FTZ cannot change a result.
@@ -149,26 +149,6 @@ constexpr V f32_to_integer(V bits, Rounding rounding, NanResult nan_result) {
                     : choose(negative, V(L{0} - kNegativeLimit), V(kHighest));
   return choose(magnitude > V(F32::kInfinity), nan, result);
 }
-
-/// @brief An F32-to-integer conversion with the instruction's ABS/NEG and input flush.
-/// @details Usable directly as a scalar or SIMD lane operation on raw F32 bits.
-template <typename Int, Rounding Direction, NanResult Nan> struct F32ToInteger {
-  /// VOP3 ABS and NEG fields; bit 0 applies to the source.
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-  input_denormal::Policy input;
-
-  template <typename V> constexpr V operator()(V bits) const {
-    bits = source_modifier::apply<fp_format::F32>(bits, 0, abs, neg);
-    return f32_to_integer<Int>(input_denormal::flush_input<fp_format::F32>(bits, input), Direction,
-                               Nan);
-  }
-};
-
-/// V_CVT_FLOOR_I32_F32 (V_CVT_FLR_I32_F32).
-using FloorI32 = F32ToInteger<int32_t, Rounding::FLOOR, NanResult::SATURATE_BY_SIGN>;
-/// V_CVT_NEAREST_I32_F32 (V_CVT_RPI_I32_F32).
-using NearestI32 = F32ToInteger<int32_t, Rounding::NEAREST_UP, NanResult::SATURATE_BY_SIGN>;
 
 /// @brief V_CVT_PK_U8_F32: an F32 source rounded in MODE to an unsigned byte.
 /// @details The byte replaces the one that bits [1:0] of the selector pick in

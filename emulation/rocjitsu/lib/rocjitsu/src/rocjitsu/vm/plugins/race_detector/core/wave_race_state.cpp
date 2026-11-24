@@ -345,7 +345,7 @@ EventId WaveRaceState::registerLdsEvent(
                                     ldsAccess);
 }
 
-void WaveRaceState::registerLdsRangeEvent(
+EventId WaveRaceState::registerLdsRangeEvent(
     InstructionSnapshot instruction, MemoryEventType type, std::span<const LdsByteRange> ranges,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder) {
@@ -354,8 +354,8 @@ void WaveRaceState::registerLdsRangeEvent(
     appendLdsInterval(intervals, range.address, static_cast<int>(range.bytes), *detector,
                       /*elementBytes=*/1);
   intervals.finalize();
-  registerEventWithIntervals(instruction, type, {}, 0, 0xF, std::move(intervals),
-                             counterObligations, memoryOrder);
+  return registerEventWithIntervals(instruction, type, {}, 0, 0xF, std::move(intervals),
+                                    counterObligations, memoryOrder);
 }
 
 void WaveRaceState::retireEventRegisters(EventId eventId) {
@@ -518,6 +518,35 @@ void WaveRaceState::recordLdsOperandRead(InstructionSnapshot instruction, uint32
       std::span<const amdgpu::MemoryCounterObligation>{}, MemoryOrderClass::UNORDERED);
   queueForBarrier(event);
   covered = bytes;
+}
+
+void WaveRaceState::handOffPending(BarrierCellArrival kind, uint32_t epoch) {
+  const EventRegistry &events = detector->events();
+  for (const EventId eventId : waveMemoryEvents) {
+    // An access that has completed is released on the wave's epoch instead. A
+    // transfer that touches no LDS bytes still carries its arrival's cell.
+    if (events.handoffKind(eventId) ||
+        (!events.hasLiveLdsIntervals(eventId) && !events.hasLdsSourceReads(eventId)) ||
+        events.ldsAccessComplete(eventId))
+      continue;
+    const MemoryOrderClass order = events.ldsOrder(eventId);
+    bool ordered = false;
+    switch (kind) {
+    case BarrierCellArrival::Ds:
+      ordered = order == MemoryOrderClass::LDS;
+      break;
+    case BarrierCellArrival::Async:
+      ordered =
+          order == MemoryOrderClass::ASYNC_LOAD &&
+          (events.type(eventId) == MemoryEventType::GLOBAL_TO_LDS || events.barrierArrive(eventId));
+      break;
+    case BarrierCellArrival::Tensor:
+      ordered = order == MemoryOrderClass::TENSOR;
+      break;
+    }
+    if (ordered)
+      detector->markEventHandedOff(eventId, kind, epoch);
+  }
 }
 
 void WaveRaceState::queueForBarrier(EventId eventId) {

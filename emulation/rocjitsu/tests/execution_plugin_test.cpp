@@ -10,6 +10,7 @@
 #include "instruction_failure_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
@@ -1332,7 +1333,7 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
 }
 
 TEST(InstructionMixPluginTest, DecodedTimestampsRemainScalarWork) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t opcode : {cdna4::kSMemtimeSmem, cdna4::kSMemrealtimeSmem}) {
     const auto words = cdna4::build_smem(opcode, {.sdata = 4});
@@ -2784,7 +2785,7 @@ TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
 
   const auto words =
       cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = 2});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> flat(decode_valid(*decoder, words.data()));
   ASSERT_NE(flat, nullptr);

@@ -367,16 +367,16 @@ protected:
 
   amdgpu::MemoryAccessCompletion
   complete_access(Instruction &, amdgpu::Wavefront &wave,
-                  amdgpu::MemoryAccessDeferredCompletion deferred_completion) override {
+                  const amdgpu::MemoryAccessCompletionFactory &take_completion) override {
     ++writeback_calls;
     counters_at_writeback = wave.wait_counters().vmcnt;
     if (before_completion)
       before_completion(wave);
     if (completion == amdgpu::MemoryAccessCompletion::Deferred) {
       if (complete_inline)
-        deferred_completion();
+        take_completion()();
       else
-        pending_completion_ = std::move(deferred_completion);
+        pending_completion_ = take_completion();
     }
     return completion;
   }
@@ -1394,16 +1394,74 @@ TEST(GpuVmPipeline, InfrastructureFailuresDoNotReachTheArchitecturalFaultOwner) 
       wf.set_debug_suspended(true);
       return true;
     });
+    std::vector<uint64_t> exceptions;
+    context.cu->set_queue_exception_handler(
+        [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+          exceptions.push_back(status);
+          return true;
+        });
     if (missing_vm) {
       context.cu->set_gpu_vm(nullptr);
     } else {
       ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
     }
+    testing::internal::CaptureStderr();
     context.cu->step();
+    const std::string warnings = testing::internal::GetCapturedStderr();
     EXPECT_EQ(faults, 0u);
     EXPECT_TRUE(context.wf->is_halted());
     EXPECT_FALSE(context.wf->fatal_exception_pending());
+    // No VM fault reporter saw either failure, so cancelling the dispatch alone
+    // would leave its waiter hanging; the queue owner receives a wave abort.
+    EXPECT_EQ(exceptions, std::vector<uint64_t>{amdgpu::kAqlQueueWaveAbort});
+    EXPECT_NE(warnings.find(missing_vm ? "translated wave has no GPU VM"
+                                       : "address space retired before fetch"),
+              std::string::npos)
+        << warnings;
   }
+}
+
+// A DDS lane is rejected before translation, so no VM fault event follows.
+// Offering it to the memory-violation owner made KFD publish a status ROCr
+// pairs with that event, and the host waited forever. The queue owner
+// receives a wave abort naming the failing instruction instead.
+TEST(GpuVmPipeline, DdsRejectionAbortsTheQueueWithoutAMemoryViolation) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t shared_base = uint64_t{1} << 48, pc = 0x1000;
+  context.cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+  context.wf->pc = pc;
+  context.wf->set_exec(1);
+  const auto words =
+      cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 16, .vaddr = 0});
+  context.external->store(pc, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+  const uint32_t vb = context.wf->vgpr_alloc().base;
+  const uint64_t dds_address = shared_base + 0xffffffc0;
+  context.cu->write_vgpr(vb, 0, static_cast<uint32_t>(dds_address));
+  context.cu->write_vgpr(vb + 1, 0, static_cast<uint32_t>(dds_address >> 32));
+  uint32_t faults = 0;
+  context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool, uint64_t) {
+    ++faults;
+    return true;
+  });
+  std::vector<uint64_t> exceptions;
+  context.cu->set_queue_exception_handler(
+      [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+        exceptions.push_back(status);
+        return true;
+      });
+  testing::internal::CaptureStderr();
+  context.cu->step();
+  const std::string warnings = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(faults, 0u);
+  EXPECT_TRUE(context.wf->is_halted());
+  EXPECT_EQ(exceptions, std::vector<uint64_t>{amdgpu::kAqlQueueWaveAbort});
+  const std::string failure = "memory access failed: CDNA5 FLAT DDS backing is not implemented";
+  const auto reported = warnings.find(failure);
+  ASSERT_NE(reported, std::string::npos) << warnings;
+  // Name the failing instruction, not the advanced resume PC.
+  EXPECT_NE(warnings.find("pc=0x1000", reported), std::string::npos) << warnings;
 }
 
 TEST(GpuVmPipeline, ADeclinedFetchFaultIsOfferedOnlyOnce) {
@@ -3935,6 +3993,60 @@ TEST(GpuVmPipeline, TranslatedTensorLoadRetriesBeforeCommittingLdsOrBarrier) {
   EXPECT_EQ(context.external->read_history[0].address, kGlobalAddress);
   EXPECT_EQ(context.external->read_history[1].address, kGlobalAddress + sizeof(uint32_t));
   EXPECT_EQ(context.external->read_history[2].address, kGlobalAddress + sizeof(uint32_t));
+}
+
+// A tensor load deferred for memory arrives at its barrier cell when it
+// resumes, not when it issues. Its wave is still stalled in VM_RETRY at that
+// point, so the wave issues nothing between the transfer and its arrival.
+TEST(GpuVmPipeline, DeferredTensorLoadReportsItsArrivalBeforeItsWaveResumes) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  context.wf->set_lds_base(context.cu->allocate_lds(256));
+  auto &recorder = install_lds_barrier_arrival_recorder(context.sim);
+
+  constexpr uint64_t kGlobalAddress = 0x500;
+  constexpr uint32_t kBarrierAddress = 64;
+  const uint64_t kUnarrived = amdgpu::lds_barrier_cell_init_state(2);
+  for (uint32_t index = 0; index < 2; ++index)
+    context.external->store(kGlobalAddress + index * sizeof(uint32_t), 0x11223344u + index);
+  context.wf->lds().write64(context.wf->lds_base() + kBarrierAddress, kUnarrived);
+  context.external->unavailable_read_call = 2;
+
+  amdgpu::tensor_dma_detail::TensorDmaDescriptor descriptor;
+  descriptor.elem_size = sizeof(uint32_t);
+  descriptor.atomic_barrier = true;
+  descriptor.atomic_barrier_addr = kBarrierAddress;
+  auto state = std::make_unique<amdgpu::tensor_dma_detail::TensorDmaState>(descriptor, false);
+  state->access = context.wf->snapshot_vm_access();
+  ASSERT_TRUE(state->access);
+  state->payload.resize(2 * sizeof(uint32_t));
+  for (uint32_t index = 0; index < 2; ++index) {
+    state->elements.push_back(
+        {.global_address = kGlobalAddress + index * sizeof(uint32_t),
+         .lds_address = context.wf->lds_base() + index * static_cast<uint32_t>(sizeof(uint32_t)),
+         .in_bounds = true});
+  }
+
+  amdgpu::TensorDmaPipeline pipeline;
+  EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_TRUE(recorder.arrivals.empty());
+
+  pipeline.tick();
+
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector<LdsBarrierArrivalRecorder::Arrival>{
+                {.observation = {.source = amdgpu::LdsBarrierArrivalObservation::Source::TensorDma,
+                                 .cell_address = context.wf->lds_base() + kBarrierAddress,
+                                 .old_state = kUnarrived,
+                                 .new_state = amdgpu::lds_barrier_cell_update_arrive(kUnarrived),
+                                 .phase_completed = false},
+                 .wave = context.wf,
+                 .wave_state = amdgpu::WfState::VM_RETRY}}));
 }
 
 TEST(GpuVmPipeline, DeferredTensorLoadCommitsLdsAfterPeerReadEffects) {

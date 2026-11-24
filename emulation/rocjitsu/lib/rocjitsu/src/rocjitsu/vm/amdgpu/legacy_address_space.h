@@ -1243,7 +1243,7 @@ public:
             }
           }
           std::lock_guard transaction_lock(
-              backing_atomic_mutex(reinterpret_cast<uintptr_t>(target)));
+              backing_atomic_mutex(host_backing_key(reinterpret_cast<uintptr_t>(target))));
           if (size == sizeof(uint64_t)) {
             value = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(target))
                         .load(std::memory_order_acquire);
@@ -1839,6 +1839,55 @@ private:
     return backing_atomic_mutexes()[index].mutex;
   }
 
+  struct BackingKeyRange {
+    uintptr_t begin = 0;
+    uintptr_t end = 0;
+    uintptr_t mask = UINTPTR_MAX;
+    uintptr_t delta = 0;
+  };
+
+  // The mapping lease pins both the address and the generation of the
+  // identity used to synchronize it. The range cache is per host thread.
+  static BackingKeyRange find_backing_key_range(uintptr_t address, uint64_t generation);
+
+  static const BackingKeyRange &observed_backing_key_range(uintptr_t address, uint64_t generation) {
+    struct Cache {
+      uint64_t generation = 0;
+      BackingKeyRange range;
+    };
+    static thread_local Cache cache;
+    auto &range = cache.range;
+    if (cache.generation != generation || address < range.begin || address >= range.end) {
+      range = find_backing_key_range(address, generation);
+      cache.generation = generation;
+    }
+    return range;
+  }
+
+  static uintptr_t host_backing_key(uintptr_t address) {
+    const auto &mapping = rocjitsu::host_mapping_lock();
+    // Embedders can create aliases through libc without taking our mapping
+    // lock. Use one namespace based on in-page offsets in that mode.
+    if (!mapping.mapping_changes_observed())
+      return address & PAGE_MASK;
+    const auto &range = observed_backing_key_range(address, mapping.generation());
+    return (address & range.mask) + range.delta;
+  }
+
+  static std::pair<size_t, size_t> backing_copy_stripes(const uint8_t *host, size_t size,
+                                                        const auto &backing_key) {
+    const auto first = reinterpret_cast<uintptr_t>(host);
+    const auto last = first + size - 1;
+    const auto first_key = backing_key(first);
+    // File-backed offsets and host pointers have the same page alignment.
+    // A transfer crossing host pages may reach two unrelated mappings.
+    const auto last_key =
+        ((first ^ last) & ~uintptr_t{PAGE_MASK}) == 0 ? first_key + size - 1 : backing_key(last);
+    const auto first_index = backing_atomic_mutex_index(first_key);
+    const auto last_index = backing_atomic_mutex_index(last_key);
+    return {std::min(first_index, last_index), std::max(first_index, last_index)};
+  }
+
   static BackingStripeLock &backing_atomic_mutex(uintptr_t key) {
     return backing_atomic_mutex_at(backing_atomic_mutex_index(key));
   }
@@ -1854,10 +1903,7 @@ private:
     if (size == 0)
       return true;
     if (size == transactions_.chunk_size(address, size)) {
-      size_t first = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(host));
-      size_t last = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(host + size - 1));
-      if (last < first)
-        std::swap(first, last);
+      const auto [first, last] = backing_copy_stripes(host, size, host_backing_key);
       std::lock_guard first_lock(backing_atomic_mutex_at(first));
       std::unique_lock<BackingStripeLock> last_lock;
       if (last != first)
@@ -1882,15 +1928,25 @@ private:
     std::unique_lock<BackingStripeLock> first_lock;
     std::unique_lock<BackingStripeLock> last_lock;
     const auto copy = [&] {
+      // The caller's mapping lease keeps each identity range valid throughout
+      // the copy. Apply its mask at each address so the fallback wraps at
+      // host-page boundaries.
+      const auto &mapping = rocjitsu::host_mapping_lock();
+      const bool observed = mapping.mapping_changes_observed();
+      const auto generation = mapping.generation();
+      BackingKeyRange range{.end = observed ? 0 : UINTPTR_MAX, .mask = PAGE_MASK};
+      const auto backing_key = [&](uintptr_t target) {
+        if (target >= range.end && observed)
+          range = observed_backing_key_range(target, generation);
+        return (target & range.mask) + range.delta;
+      };
+
       size_t copied = 0;
       while (copied < size) {
         const size_t chunk = transactions_.chunk_size(address + copied, size - copied);
         auto *target = host + copied;
         auto *value = static_cast<uint8_t *>(local) + copied;
-        size_t first = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(target));
-        size_t last = backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(target + chunk - 1));
-        if (last < first)
-          std::swap(first, last);
+        const auto [first, last] = backing_copy_stripes(target, chunk, backing_key);
         first_lock = std::unique_lock(backing_atomic_mutex_at(first));
         if (last != first)
           last_lock = std::unique_lock(backing_atomic_mutex_at(last));
@@ -1920,7 +1976,8 @@ private:
   /// interposed mapping changes from racing the operation.
   template <typename F>
   [[nodiscard]] static bool atomic_rmw_mapped(uint8_t *target, uint32_t size, F &fn) {
-    std::lock_guard lock(backing_atomic_mutex(reinterpret_cast<uintptr_t>(target)));
+    std::lock_guard lock(
+        backing_atomic_mutex(host_backing_key(reinterpret_cast<uintptr_t>(target))));
     return rocjitsu::with_host_access_guard([&] {
       if (size == sizeof(uint64_t)) {
         std::atomic_ref atomic(*reinterpret_cast<uint64_t *>(target));
@@ -2143,8 +2200,8 @@ private:
     lock_indices.fill(kBackingAtomicLockStripes);
     for (size_t i = 0; i < span_count; ++i) {
       for (size_t byte = 0; byte < spans[i].size; ++byte) {
-        const size_t index =
-            backing_atomic_mutex_index(reinterpret_cast<uintptr_t>(spans[i].host_ptr + byte));
+        const size_t index = backing_atomic_mutex_index(
+            host_backing_key(reinterpret_cast<uintptr_t>(spans[i].host_ptr + byte)));
         if (std::ranges::find(lock_indices, index) != lock_indices.end())
           continue;
         auto free_slot = std::ranges::find(lock_indices, kBackingAtomicLockStripes);
@@ -3561,6 +3618,7 @@ private:
     if (pid <= 0)
       return false;
     if (pid == getpid()) {
+      const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
       const bool copied =
           copy_backing_bytes(addr, reinterpret_cast<uint8_t *>(addr), dst, len, false);
       if (!copied)
@@ -3593,6 +3651,7 @@ private:
     if (pid <= 0)
       return false;
     if (pid == getpid()) {
+      const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
       return copy_backing_bytes(addr, reinterpret_cast<uint8_t *>(addr), const_cast<void *>(src),
                                 len, true);
     }

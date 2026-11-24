@@ -43,6 +43,9 @@ bool binary_exact_x86_64_v3(Binary op, uint64_t flags, uint32_t exec_mask,
 void binary_x86_64_v4(Binary op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                       uint32_t *d, const uint32_t *a, const uint32_t *b);
 // Evaluate a binary selection with validated controls, preserving inactive lanes and aliases.
+void packed_bf16_selection_x86_64_v4(bool maximum, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                                     const uint32_t *a, const uint32_t *b);
+
 void selection_f32_x86_64_v4(Binary op, uint64_t flags, uint32_t exec_mask, uint32_t mode,
                              uint32_t *const *d, const uint32_t *const *a,
                              const uint32_t *const *b);

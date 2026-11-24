@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -2479,7 +2480,7 @@ TEST(SoCAssembly, RejectsNullIodWithoutRecordingIt) {
 
 TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
   GpuMemory memory("memory");
-  rocjitsu::SoC soc("soc", &memory, ROCJITSU_CODE_ARCH_CDNA4);
+  rocjitsu::SoC soc("soc", &memory, rocjitsu::IsaFamily::Cdna4);
   const AddressSpaceHandle internal = soc.internal_address_space();
   const SdmaQueueScheduler::Handle queue =
       soc.sdma_queue_scheduler().attach({.ring = {.address_space = internal,
@@ -2492,9 +2493,9 @@ TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
   ASSERT_TRUE(queue);
   util::StringDiagnostic diagnostic;
 
-  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, diagnostic.emitter()).failed());
+  EXPECT_TRUE(soc.set_arch(rocjitsu::IsaFamily::Rdna4, diagnostic.emitter()).failed());
   EXPECT_EQ(diagnostic.message(), "SoC architecture cannot change while copy queues are active");
-  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(soc.arch(), rocjitsu::IsaFamily::Cdna4);
   EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::LegacyExtendedCount);
   EXPECT_TRUE(soc.sdma_queue_scheduler().contains(queue));
   EXPECT_EQ(soc.internal_address_space(), internal);
@@ -2503,9 +2504,9 @@ TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
 
   ASSERT_TRUE(soc.sdma_queue_scheduler().detach(queue));
   util::StringDiagnostic retry_diagnostic;
-  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, retry_diagnostic.emitter()).succeeded());
+  EXPECT_TRUE(soc.set_arch(rocjitsu::IsaFamily::Rdna4, retry_diagnostic.emitter()).succeeded());
   EXPECT_TRUE(retry_diagnostic.message().empty());
-  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(soc.arch(), rocjitsu::IsaFamily::Rdna4);
   EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::Rdna4);
   EXPECT_EQ(soc.internal_address_space(), internal);
 }

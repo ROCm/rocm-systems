@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/rocjitsu.h"
+#include "scoped_temp.h"
 
 #include <array>
 #include <atomic>
@@ -34,27 +35,8 @@ namespace {
 
 using namespace rocjitsu;
 
-class TempDirectory {
-public:
-  TempDirectory() {
-    std::string pattern =
-        (std::filesystem::temp_directory_path() / "rj-daemon-test-XXXXXX").string();
-    pattern.push_back('\0');
-    char *created = mkdtemp(pattern.data());
-    if (created)
-      path_ = created;
-  }
-
-  ~TempDirectory() {
-    std::error_code error;
-    std::filesystem::remove_all(path_, error);
-  }
-
-  [[nodiscard]] const std::filesystem::path &path() const { return path_; }
-
-private:
-  std::filesystem::path path_;
-};
+using rocjitsu::test::initialize_runtime_directory;
+using rocjitsu::test::ScopedTempDirectory;
 
 const std::string &daemon_json() {
   static const std::string config = [] {
@@ -571,8 +553,9 @@ bool wait_for_peer_child(pid_t &child, int &status) {
 }
 
 TEST(DaemonApi, RejectsInvalidArguments) {
-  TempDirectory directory;
-  const std::string socket = (directory.path() / "daemon.sock").string();
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::string socket = (std::filesystem::path(directory.path()) / "daemon.sock").string();
   rj_daemon_t *daemon = reinterpret_cast<rj_daemon_t *>(1);
 
   EXPECT_EQ(rj_daemon_start(nullptr, socket.c_str(), &daemon), ROCJITSU_STATUS_INVALID_ARGUMENT);
@@ -618,8 +601,9 @@ TEST(DaemonApi, HandshakePublishesEachSelectedRenderMinor) {
        "location_id":1280,"drm_render_minor":130}]}]},
     "local_node":"tray7"
   })";
-  TempDirectory directory;
-  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::filesystem::path socket = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(json, socket.c_str());
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -649,8 +633,9 @@ TEST(DaemonApi, LegacyOneGpuHandshakeKeepsRenderMinorCompatibility) {
   ASSERT_NE(position, std::string::npos);
   json.replace(position, configured.size(), "\"drm_render_minor\": 129");
 
-  TempDirectory directory;
-  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::filesystem::path socket = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(json.c_str(), socket.c_str());
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int connection = connect_to(socket);
@@ -667,8 +652,9 @@ TEST(DaemonApi, LegacyOneGpuHandshakeKeepsRenderMinorCompatibility) {
 }
 
 TEST(DaemonApi, RemoteUserptrUsesCpuAddressIndependentOfGpuVa) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int connection = connect_to(socket_path);
@@ -726,8 +712,9 @@ TEST(DaemonApi, OneGpuManifestHandshakeMatchesOnlySelectedRenderMinor) {
        "location_id":1024,"drm_render_minor":129}]}]},
     "local_node":"tray7"
   })";
-  TempDirectory directory;
-  const std::filesystem::path socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::filesystem::path socket = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(json, socket.c_str());
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -776,9 +763,9 @@ TEST(DaemonApi, PeerIpcMapUnmapAcrossDistinctClientPids) {
     "local_node":"tray7"
   })";
 
-  TempDirectory directory;
-  ASSERT_FALSE(directory.path().empty());
-  const auto socket = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket = std::filesystem::path(directory.path()) / "daemon.sock";
   ChildControlSocket owner_control;
   ChildControlSocket importer_control;
   ASSERT_TRUE(owner_control.valid());
@@ -859,8 +846,9 @@ TEST(DaemonApi, PeerIpcMapUnmapAcrossDistinctClientPids) {
 }
 
 TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
-  TempDirectory directory;
-  const std::string socket = (directory.path() / "daemon.sock").string();
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const std::string socket = (std::filesystem::path(directory.path()) / "daemon.sock").string();
 
   TestDaemon empty_json("", socket.c_str());
   EXPECT_EQ(empty_json.start_status(), ROCJITSU_STATUS_INVALID_ARGUMENT);
@@ -884,8 +872,9 @@ TEST(DaemonApi, RejectsInvalidJsonAndLongSocketPath) {
 }
 
 TEST(DaemonApi, PreservesExistingSocketAndNonSocketEntries) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon first(socket_path);
   ASSERT_EQ(first.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -912,8 +901,9 @@ TEST(DaemonApi, PreservesExistingSocketAndNonSocketEntries) {
 }
 
 TEST(DaemonApi, RecoversAbandonedSocket) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   const std::string path = socket_path.string();
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
@@ -934,8 +924,9 @@ TEST(DaemonApi, RecoversAbandonedSocket) {
 }
 
 TEST(DaemonApi, FullListenerQueueDoesNotBlockOrRemoveSocket) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   const std::string path = socket_path.string();
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
@@ -969,8 +960,9 @@ TEST(DaemonApi, FullListenerQueueDoesNotBlockOrRemoveSocket) {
 }
 
 TEST(DaemonApi, ServesMultipleClientsAndCleansUp) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "nested" / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "nested" / "daemon.sock";
   {
     TestDaemon daemon(socket_path);
     ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
@@ -994,8 +986,9 @@ TEST(DaemonApi, ServesMultipleClientsAndCleansUp) {
 }
 
 TEST(DaemonApi, MunmapReturnsDriverFailureAndKeepsConnectionUsable) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1016,8 +1009,9 @@ TEST(DaemonApi, MunmapReturnsDriverFailureAndKeepsConnectionUsable) {
 }
 
 TEST(DaemonApi, ClientMunmapDoesNotClaimDaemonBackingAtTheSameAddress) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int connection = connect_to(socket_path);
@@ -1063,8 +1057,9 @@ TEST(DaemonApi, ClientMunmapDoesNotClaimDaemonBackingAtTheSameAddress) {
 }
 
 TEST(DaemonApi, ExportDmabufTransfersSizedBackingFd) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1137,8 +1132,9 @@ TEST(DaemonApi, RemoteCloseReturnsDaemonFailure) {
 }
 
 TEST(DaemonApi, StopUnblocksActiveAndPartialClients) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1164,8 +1160,9 @@ TEST(DaemonApi, StopUnblocksActiveAndPartialClients) {
 }
 
 TEST(DaemonApi, RejectsMalformedMessagesWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   {
     TestDaemon daemon(socket_path);
     ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
@@ -1196,8 +1193,9 @@ TEST(DaemonApi, RejectsMalformedMessagesWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1223,8 +1221,9 @@ TEST(DaemonApi, AcceptsValidGetVersionIoctlPayload) {
 }
 
 TEST(DaemonApi, AcceptsCuMaskInlinePayloadAndKeepsConnectionUsable) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   const int client = connect_to(socket_path);
@@ -1252,8 +1251,9 @@ TEST(DaemonApi, AcceptsCuMaskInlinePayloadAndKeepsConnectionUsable) {
 }
 
 TEST(DaemonApi, RejectsMalformedCuMaskPayloadWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
   struct MaskPayloadCase {
@@ -1292,8 +1292,9 @@ TEST(DaemonApi, RejectsMalformedCuMaskPayloadWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, RejectsWaitEventsInlineArrayOverflowWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1301,8 +1302,9 @@ TEST(DaemonApi, RejectsWaitEventsInlineArrayOverflowWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, RejectsWaitEventsInlineArrayOneByteShortWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1310,8 +1312,9 @@ TEST(DaemonApi, RejectsWaitEventsInlineArrayOneByteShortWithoutStoppingServer) {
 }
 
 TEST(DaemonApi, RejectsWaitEventsInlineArrayWithTrailingByteWithoutStoppingServer) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   TestDaemon daemon(socket_path);
   ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);
 
@@ -1319,8 +1322,9 @@ TEST(DaemonApi, RejectsWaitEventsInlineArrayWithTrailingByteWithoutStoppingServe
 }
 
 TEST(DaemonApi, DoesNotRemoveAReplacementSocketEntry) {
-  TempDirectory directory;
-  const auto socket_path = directory.path() / "daemon.sock";
+  ScopedTempDirectory directory;
+  ASSERT_TRUE(initialize_runtime_directory(directory, "rj-da-"));
+  const auto socket_path = std::filesystem::path(directory.path()) / "daemon.sock";
   {
     TestDaemon daemon(socket_path);
     ASSERT_EQ(daemon.start_status(), ROCJITSU_STATUS_SUCCESS);

@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -66,7 +67,7 @@ struct BenchFixture {
 
   BenchFixture() : gpu_mem("wmma_simd_bench_mem"), l2("wmma_simd_bench_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    cfg.arch = rocjitsu::IsaFamily::Cdna5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -241,7 +242,7 @@ TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
   const auto words = cdna5::build_vop3p(
       cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
       {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -276,7 +277,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
                                                                           .opsel_hi = 0});
   matrix[0] |= 1u << 14;
   const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -296,7 +297,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
   fx.seed_words(S1_OFF, 8, packed_fp4_one);
   fx.seed_words(S2_OFF, kM32OutRegs, 0);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (const auto &[prefix_op, label] : std::array<std::pair<uint16_t, const char *>, 2>{
            {{0x35, "decoded v_wmma_scale_f32_32x16x128_fp4"},

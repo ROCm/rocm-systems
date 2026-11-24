@@ -36,6 +36,8 @@ enum Reply {
     MapDevices(&'static [u32], u32, u32, Option<i32>),
     UnmapDevices(&'static [u32], u32, u32, Option<i32>),
     Free(Option<i32>),
+    Svm(u64, u64, &'static [(u32, u32)], Option<i32>),
+    Userptr(u64, u64, u64, Option<i32>),
 }
 
 enum FixtureMemoryKind {
@@ -232,6 +234,34 @@ impl Fixture {
                     .pop_front()
                     .expect("unexpected native call");
                 let errno = match (call, reply) {
+                    (
+                        connection::Call::Allocate(args),
+                        Reply::Userptr(address, size, handle, errno),
+                    ) => {
+                        assert_eq!(args.mmap_offset, address);
+                        assert_eq!(args.size, size);
+                        assert_eq!(
+                            args.flags,
+                            uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE | uapi::WRITABLE
+                        );
+                        assert_eq!(args.gpu_id, 42);
+                        args.handle = handle;
+                        errno
+                    }
+                    (
+                        connection::Call::Svm(args, attributes),
+                        Reply::Svm(start, size, expected, errno),
+                    ) => {
+                        assert_eq!(args.start_address, start);
+                        assert_eq!(args.size, size);
+                        assert_eq!(args.operation, uapi::SVM_OP_SET_ATTR);
+                        let actual: Vec<_> = attributes
+                            .iter()
+                            .map(|attribute| (attribute.attribute_type, attribute.value))
+                            .collect();
+                        assert_eq!(actual, expected);
+                        errno
+                    }
                     (connection::Call::SetScratchBackingVa(args), Reply::SetScratch(errno)) => {
                         assert_eq!(args.gpu_id, 42);
                         assert_eq!(args.pad, 0);
@@ -374,6 +404,7 @@ impl Fixture {
                 memory_destroy_uncertain: AtomicBool::new(false),
                 observed: Mutex::new(ObservedEvents::new().unwrap()),
                 host_aliases: Mutex::new(Vec::new()),
+                svm_registrations: Mutex::new(registered_svm::Registry::default()),
                 lost: AtomicBool::new(false),
             })
             .unwrap(),
@@ -3010,6 +3041,7 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
         host_aliases: Mutex::new(Vec::new()),
+        svm_registrations: Mutex::new(registered_svm::Registry::default()),
         lost: AtomicBool::new(false),
     }));
     assert_eq!(
@@ -3031,4 +3063,369 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
     );
     assert!(bindings.bindings.get_mut().unwrap().loss.is_some());
     assert_eq!(destroys.load(Ordering::Relaxed), 2);
+}
+
+const SVM_FINE_GRANT: &[(u32, u32)] = &[
+    (
+        uapi::SVM_ATTR_SET_FLAGS,
+        uapi::SVM_FLAG_HOST_ACCESS | uapi::SVM_FLAG_COHERENT,
+    ),
+    (
+        uapi::SVM_ATTR_CLEAR_FLAGS,
+        uapi::SVM_FLAG_EXT_COHERENT | uapi::SVM_FLAG_GPU_READ_ONLY | uapi::SVM_FLAG_GPU_EXECUTE,
+    ),
+    (uapi::SVM_ATTR_ACCESS_IN_PLACE, 42),
+];
+const SVM_REVOKE: &[(u32, u32)] = &[(uapi::SVM_ATTR_NO_ACCESS, 42)];
+
+fn svm_registration(
+    fixture: &Fixture,
+    address: usize,
+    size: u64,
+    backing: Option<crate::memory::host::HostBackingLease>,
+) -> Result<Owned<KfdRegisteredHost>, Error> {
+    KfdRegisteredHost::create(
+        fixture.vm.clone(),
+        std::iter::empty(),
+        AllocationDesc {
+            size,
+            alignment: 4096,
+        },
+        address,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        backing,
+    )
+}
+
+#[test]
+fn svm_host_registration_reuses_advised_address_without_userptr_bo() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(
+            0x12000,
+            0x2000,
+            &[(uapi::SVM_ATTR_SET_FLAGS, uapi::SVM_FLAG_GPU_READ_MOSTLY)],
+            None,
+        ),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let mut first = svm_registration(&fixture, 0x12345, 4096, None).unwrap();
+    let info = first.cached_info();
+    assert_eq!(info.device_address, 0x12345);
+    assert_eq!(info.host_address, Some(0x12345));
+    assert_eq!(info.size, 4096);
+    assert_eq!(info.native_size, 8192);
+    fixture
+        .vm
+        .kfd()
+        .svm_attributes(
+            0x12000,
+            0x2000,
+            uapi::SVM_OP_SET_ATTR,
+            &mut [uapi::SvmAttribute {
+                attribute_type: uapi::SVM_ATTR_SET_FLAGS,
+                value: uapi::SVM_FLAG_GPU_READ_MOSTLY,
+            }],
+        )
+        .unwrap();
+    first.free().unwrap();
+    first.free().unwrap();
+    let mut second = svm_registration(&fixture, 0x12345, 4096, None).unwrap();
+    second.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_unregister_preserves_shared_page_cover_and_gpu_grants() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x4000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x11000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x13000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x11000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let mut outer = svm_registration(&fixture, 0x10000, 0x4000, None).unwrap();
+    let mut inner = svm_registration(&fixture, 0x11010, 0x1000, None).unwrap();
+    outer.free().unwrap();
+    assert_eq!(inner.device_address(&fixture.vm).unwrap(), 0x11010);
+    inner.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_unregister_retry_accounts_for_new_registration() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x3000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x3000, SVM_REVOKE, Some(errno::EIO)),
+        Reply::Svm(0x11000, 0x1000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x12000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x11000, 0x1000, SVM_REVOKE, None),
+    ]);
+    let mut first = svm_registration(&fixture, 0x10000, 0x3000, None).unwrap();
+    assert!(first.free().is_err());
+    assert!(first.device_address(&fixture.vm).is_err());
+    let mut newer = svm_registration(&fixture, 0x11000, 0x1000, None).unwrap();
+    first.free().unwrap();
+    assert_eq!(newer.device_address(&fixture.vm).unwrap(), 0x11000);
+    newer.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_registration_rejects_conflicting_page_policy_before_native_changes() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x1000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+    ]);
+    let mut first = svm_registration(&fixture, 0x10000, 16, None).unwrap();
+    let result = KfdRegisteredHost::create(
+        fixture.vm.clone(),
+        std::iter::empty(),
+        AllocationDesc {
+            size: 16,
+            alignment: 4096,
+        },
+        0x10100,
+        HostMappingPolicy::Coarse,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
+    );
+    assert_eq!(result.err().unwrap().kind(), ErrorKind::Unsupported);
+    first.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_access_replacement_retains_both_device_sets_until_retry() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x1000, SVM_FINE_GRANT, None),
+        Reply::Svm(
+            0x10000,
+            0x1000,
+            &[(uapi::SVM_ATTR_ACCESS_IN_PLACE, 43)],
+            None,
+        ),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, Some(errno::EIO)),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x10000, 0x1000, &[(uapi::SVM_ATTR_NO_ACCESS, 43)], None),
+    ]);
+    let peer = fixture.peer(43, 0x10000, isize::MAX as u64);
+    let mut allocation = svm_registration(&fixture, 0x10000, 0x1000, None).unwrap();
+    assert!(allocation.set_access(&[&peer]).is_err());
+    assert!(allocation.device_address(&fixture.vm).is_err());
+    assert!(allocation.device_address(&peer).is_err());
+    assert_eq!(
+        allocation.set_access(&[&fixture.vm]).unwrap_err().kind(),
+        ErrorKind::Busy
+    );
+    allocation.set_access(&[&peer]).unwrap();
+    assert!(allocation.device_address(&fixture.vm).is_err());
+    assert_eq!(allocation.device_address(&peer).unwrap(), 0x10000);
+    allocation.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_failed_grant_runs_revoke_before_returning_backing() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x1000, SVM_FINE_GRANT, Some(errno::EIO)),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+    ]);
+    assert!(svm_registration(&fixture, 0x10000, 0x1000, None).is_err());
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_release_failure_retains_owned_page_lease_until_retry() {
+    let mut backing = HostAllocation::allocate(4096, 4096).unwrap();
+    let address = backing.info().host_address;
+    let fixture = Fixture::new([
+        Reply::Svm(address as u64, 4096, SVM_FINE_GRANT, None),
+        Reply::Svm(address as u64, 4096, SVM_REVOKE, Some(errno::EIO)),
+        Reply::Svm(address as u64, 4096, SVM_REVOKE, None),
+    ]);
+    let mut registration = svm_registration(
+        &fixture,
+        address,
+        4096,
+        Some(backing.registration_lease().unwrap()),
+    )
+    .unwrap();
+    assert!(registration.free().is_err());
+    assert_eq!(backing.free().unwrap_err().kind(), ErrorKind::Busy);
+    registration.free().unwrap();
+    backing.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+#[allow(unsafe_code)]
+fn svm_host_process_registration_routes_to_svm_and_does_not_retry_userptr() {
+    let fixture = Fixture::new([
+        Reply::Userptr(0x12000, 0x2000, 0, Some(libc::EADDRINUSE)),
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+        Reply::Userptr(0x12000, 0x2000, 0, Some(libc::EADDRINUSE)),
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, Some(errno::EIO)),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let driver = super::super::LinuxKfdDriver::with_context_lifetime(
+        crate::session::DriverContextLifetime::Process,
+        crate::os::ProcessIdentity::capture().unwrap(),
+    );
+    let device = super::super::DeviceState {
+        vm: fixture.vm.clone(),
+        native: node(),
+        asic_family_id: 0,
+        gpu_counter_frequency_hz: 0,
+    };
+    let request = || crate::memory::HostRegistration {
+        address: 0x12345,
+        policy: HostMappingPolicy::Fine,
+        size: 4096,
+        alignment: 4096,
+        permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+        backing: None,
+    };
+    // SAFETY: The scripted native backend never dereferences the synthetic pages.
+    let mut registration = unsafe { driver.register_host(&device, &[], request()) }.unwrap();
+    assert_eq!(registration.cached_info().device_address, 0x12345);
+    registration.free().unwrap();
+    // SAFETY: The script models a partial native grant followed by revocation.
+    assert!(unsafe { driver.register_host(&device, &[], request()) }.is_err());
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_unregister_preserves_overlap_only_for_the_registered_gpu() {
+    let fixture = Fixture::new([
+        Reply::Svm(
+            0x10000,
+            0x4000,
+            &[
+                (
+                    uapi::SVM_ATTR_SET_FLAGS,
+                    uapi::SVM_FLAG_HOST_ACCESS | uapi::SVM_FLAG_COHERENT,
+                ),
+                (
+                    uapi::SVM_ATTR_CLEAR_FLAGS,
+                    uapi::SVM_FLAG_EXT_COHERENT
+                        | uapi::SVM_FLAG_GPU_READ_ONLY
+                        | uapi::SVM_FLAG_GPU_EXECUTE,
+                ),
+                (uapi::SVM_ATTR_ACCESS_IN_PLACE, 42),
+                (uapi::SVM_ATTR_ACCESS_IN_PLACE, 43),
+            ],
+            None,
+        ),
+        Reply::Svm(0x11000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x13000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x10000, 0x4000, &[(uapi::SVM_ATTR_NO_ACCESS, 43)], None),
+        Reply::Svm(0x11000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let peer = fixture.peer(43, 0x10000, isize::MAX as u64);
+    let mut outer = KfdRegisteredHost::create(
+        fixture.vm.clone(),
+        std::iter::once(peer),
+        AllocationDesc {
+            size: 0x4000,
+            alignment: 4096,
+        },
+        0x10000,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
+    )
+    .unwrap();
+    let mut inner = svm_registration(&fixture, 0x11000, 0x2000, None).unwrap();
+    outer.free().unwrap();
+    assert_eq!(inner.device_address(&fixture.vm).unwrap(), 0x11000);
+    inner.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+#[allow(unsafe_code)]
+fn svm_host_fallback_keeps_the_original_owned_backing_lease() {
+    let mut backing = HostAllocation::allocate(4096, 4096).unwrap();
+    let address = backing.info().host_address;
+    let fixture = Fixture::new([
+        Reply::Userptr(address as u64, 4096, 0, Some(libc::EADDRINUSE)),
+        Reply::Svm(address as u64, 4096, SVM_FINE_GRANT, None),
+        Reply::Svm(address as u64, 4096, SVM_REVOKE, None),
+    ]);
+    let driver = super::super::LinuxKfdDriver::with_context_lifetime(
+        crate::session::DriverContextLifetime::Process,
+        crate::os::ProcessIdentity::capture().unwrap(),
+    );
+    let device = super::super::DeviceState {
+        vm: fixture.vm.clone(),
+        native: node(),
+        asic_family_id: 0,
+        gpu_counter_frequency_hz: 0,
+    };
+    // SAFETY: The owned lease retains the live pages throughout both mechanisms.
+    let mut registration = unsafe {
+        driver.register_host(
+            &device,
+            &[],
+            crate::memory::HostRegistration {
+                address,
+                policy: HostMappingPolicy::Fine,
+                size: 4096,
+                alignment: 4096,
+                permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+                backing: Some(backing.registration_lease().unwrap()),
+            },
+        )
+    }
+    .unwrap();
+    assert_eq!(backing.free().unwrap_err().kind(), ErrorKind::Busy);
+    registration.free().unwrap();
+    backing.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+#[allow(unsafe_code)]
+fn svm_host_fallback_rejects_errors_with_uncertain_or_returned_native_objects() {
+    for (handle, errno) in [(0, errno::EFAULT), (17, libc::EADDRINUSE)] {
+        let mut replies = vec![Reply::Userptr(0x12000, 0x2000, handle, Some(errno))];
+        if handle != 0 {
+            replies.push(Reply::Free(None));
+        }
+        let fixture = Fixture::new(replies);
+        let driver = super::super::LinuxKfdDriver::with_context_lifetime(
+            crate::session::DriverContextLifetime::Process,
+            crate::os::ProcessIdentity::capture().unwrap(),
+        );
+        let device = super::super::DeviceState {
+            vm: fixture.vm.clone(),
+            native: node(),
+            asic_family_id: 0,
+            gpu_counter_frequency_hz: 0,
+        };
+        // SAFETY: The script models output ambiguity without native page access.
+        let result = unsafe {
+            driver.register_host(
+                &device,
+                &[],
+                crate::memory::HostRegistration {
+                    address: 0x12345,
+                    policy: HostMappingPolicy::Fine,
+                    size: 4096,
+                    alignment: 4096,
+                    permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+                    backing: None,
+                },
+            )
+        };
+        assert!(result.is_err());
+        fixture.exhausted();
+    }
 }

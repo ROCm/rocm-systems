@@ -7,6 +7,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -245,7 +246,7 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
 
   Fixture() : gpu_mem("vop3p_fma_mix_mem"), l2("vop3p_fma_mix_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = (ArchTag == 0) ? ROCJITSU_CODE_ARCH_RDNA3 : ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = (ArchTag == 0) ? rocjitsu::IsaFamily::Rdna3 : rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;

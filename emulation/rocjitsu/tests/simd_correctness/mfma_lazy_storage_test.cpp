@@ -5,6 +5,7 @@
 /// @brief Focused MFMA coverage for VGPR reads and writes across lazy chunks.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 
@@ -31,7 +32,7 @@ TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
   constexpr uint32_t input_regs = 4;
   static_assert(source_a / regs_per_chunk != (source_a + input_regs - 1) / regs_per_chunk);
 
-  ExactFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+  ExactFixture fixture(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
   ASSERT_NE(fixture.wf, nullptr);
   fixture.seed(source_a, input_regs, Fmt::F16, Mode::RandomInt, 88);
   fixture.seed(source_b, input_regs, Fmt::F16, Mode::RandomInt, 99);
@@ -60,7 +61,7 @@ TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
   constexpr uint32_t source_b = 64;
   constexpr uint32_t accumulator = 128;
   constexpr uint32_t CONST_ONE = 0x3f800000u;
-  ExactFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+  ExactFixture fixture(rocjitsu::IsaFamily::Cdna4, WF_SIZE);
   ASSERT_NE(fixture.wf, nullptr);
   // Overwrite the whole scalar result before restoring the overlapping source.
   auto reseed = [&] {

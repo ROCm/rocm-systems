@@ -98,7 +98,7 @@ other project without asking.
   this (see the top-level [`CMakeLists.txt`](CMakeLists.txt)). Put
   `/opt/rocm/bin` on `PATH` when running binaries you build.
 - **Compiler**: hipFile is C++20 plus one HIP kernel
-  (`src/amd_detail/backend/memcpy-kernel.hip`), so the project enables the C,
+  (`test/system/amd/io-data-modification-kernel.hip`), so the project enables the C,
   CXX, and HIP languages, and configuring needs ROCm's HIP compiler.
   `amdclang++` is the usual C++ compiler, and the one TheRock uses, but the
   code has to build with upstream Clang and GCC too (see

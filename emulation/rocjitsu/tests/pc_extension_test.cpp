@@ -6,6 +6,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -24,7 +25,7 @@ namespace {
 using namespace rocjitsu;
 
 struct PcArchitecture {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
 };
 
@@ -110,13 +111,13 @@ protected:
   }
 
   uint64_t expected_export(const PcExportCase &test) const {
-    if (GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (GetParam().arch == rocjitsu::IsaFamily::Cdna5)
       return test.signed57;
-    return GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.zero48 : test.signed48;
+    return GetParam().arch == rocjitsu::IsaFamily::Rdna4 ? test.zero48 : test.signed48;
   }
 
   uint64_t expected_target(const PcTargetCase &test) const {
-    return GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5 ? test.target57 : test.target48;
+    return GetParam().arch == rocjitsu::IsaFamily::Cdna5 ? test.target57 : test.target48;
   }
 
   void write_pair(uint32_t reg, uint64_t value) {
@@ -138,13 +139,13 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Architectures, PcExtensionTest,
-                         ::testing::Values(PcArchitecture{ROCJITSU_CODE_ARCH_RDNA1, "Gfx1010"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_RDNA2, "Gfx1030"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_CDNA3, "Gfx942"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_CDNA4, "Gfx950"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250"}),
+                         ::testing::Values(PcArchitecture{rocjitsu::IsaFamily::Rdna1, "Gfx1010"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Rdna2, "Gfx1030"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Rdna3, "Gfx1100"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Rdna4, "Gfx1201"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Cdna3, "Gfx942"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Cdna4, "Gfx950"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Cdna5, "Gfx1250"}),
                          [](const ::testing::TestParamInfo<PcArchitecture> &info) {
                            return std::string(info.param.name);
                          });
@@ -223,7 +224,7 @@ TEST_P(PcExtensionTest, GetpcRoundTripsThroughIndirectBranchesWithLoadBias) {
   };
   wave->set_code_load_bias(kLoadBias);
   for (const PcExportCase &start : starts) {
-    if (start.pc > 0x0000FFFFFFFFFFFFULL && GetParam().arch != ROCJITSU_CODE_ARCH_CDNA5)
+    if (start.pc > 0x0000FFFFFFFFFFFFULL && GetParam().arch != rocjitsu::IsaFamily::Cdna5)
       continue;
     SCOPED_TRACE(::testing::Message() << "pc=" << std::hex << start.pc);
     for (bool swap : {false, true}) {
@@ -276,9 +277,9 @@ TEST_P(PcExtensionTest, LoadBiasPreservesAbsoluteTargetsAndLinkedRel32) {
     ASSERT_TRUE(maybe_s_swappc_b64_4.succeeded());
     ASSERT_NO_FATAL_FAILURE(
         execute(swap ? maybe_s_swappc_b64_4.value() : maybe_s_setpc_b64_3.value()));
-    const uint64_t expected = GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5 ? kPositiveTag
-                              : swap                                      ? 0x2FF0ULL
-                                                                          : kLoadBias + 0x1000;
+    const uint64_t expected = GetParam().arch == rocjitsu::IsaFamily::Cdna5 ? kPositiveTag
+                              : swap                                        ? 0x2FF0ULL
+                                                                            : kLoadBias + 0x1000;
     EXPECT_EQ(wave->pc, expected);
 
     wave->pc = 0x2000;
@@ -289,8 +290,8 @@ TEST_P(PcExtensionTest, LoadBiasPreservesAbsoluteTargetsAndLinkedRel32) {
     ASSERT_TRUE(maybe_s_swappc_b64_2.succeeded());
     ASSERT_NO_FATAL_FAILURE(
         execute(swap ? maybe_s_swappc_b64_2.value() : maybe_s_setpc_b64_1.value()));
-    EXPECT_EQ(wave->pc, GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0x01FFFFFFFFFFF000ULL
-                                                                    : 0x0000FFFFFFFFF000ULL);
+    EXPECT_EQ(wave->pc, GetParam().arch == rocjitsu::IsaFamily::Cdna5 ? 0x01FFFFFFFFFFF000ULL
+                                                                      : 0x0000FFFFFFFFF000ULL);
   }
 }
 

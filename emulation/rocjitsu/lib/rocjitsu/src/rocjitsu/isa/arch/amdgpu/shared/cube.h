@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd.h"
 
 #include <bit>
@@ -107,10 +108,11 @@ Bits execute_bits(Bits x, Bits y, Bits z, uint32_t round_mode, bool quiet_nan) {
 /// @brief Execute a cube operation after source modifiers and before output modifiers.
 /// @details Scalar and SIMD paths share bit-level selection, rounding and NaN handling.
 template <Operation Op, typename Float>
-Float execute(Float x, Float y, Float z, uint32_t round_mode, rj_code_arch_t arch, bool ieee_mode) {
+Float execute(Float x, Float y, Float z, uint32_t round_mode, rocjitsu::IsaFamily arch,
+              bool ieee_mode) {
   using Bits = std::conditional_t<std::is_same_v<Float, float>, uint32_t, util::native<uint32_t>>;
   const bool quiet_nan =
-      arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
+      arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
   return std::bit_cast<Float>(
       detail::execute_bits<Op>(std::bit_cast<Bits>(x), std::bit_cast<Bits>(y),
                                std::bit_cast<Bits>(z), round_mode, quiet_nan));
@@ -120,7 +122,7 @@ Float execute(Float x, Float y, Float z, uint32_t round_mode, rj_code_arch_t arc
 /// @details Flushes subnormals before scaling, preserves NaN payloads, and uses
 /// guest rounding on overflow.
 template <typename Float>
-Float apply_omod(Float value, uint32_t round_mode, rj_code_arch_t arch, bool ieee_mode,
+Float apply_omod(Float value, uint32_t round_mode, rocjitsu::IsaFamily arch, bool ieee_mode,
                  uint32_t omod) {
   omod = fp_mode::effective_omod(arch, 0, ieee_mode, omod);
   if (omod == 0)

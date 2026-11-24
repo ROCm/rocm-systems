@@ -12,6 +12,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -199,7 +200,7 @@ prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wa
   }
   const auto dst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base);
   std::array<uint32_t, 3> words{};
-  if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (cu.arch() == rocjitsu::IsaFamily::Cdna5) {
     words = cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = dst, .vaddr = 0});
   } else {
     const auto encoded = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
@@ -228,8 +229,9 @@ protected:
     return amdgpu::VmAccessOutcome::Complete;
   }
 
-  amdgpu::MemoryAccessCompletion complete_access(Instruction &, amdgpu::Wavefront &,
-                                                 amdgpu::MemoryAccessDeferredCompletion) override {
+  amdgpu::MemoryAccessCompletion
+  complete_access(Instruction &, amdgpu::Wavefront &,
+                  const amdgpu::MemoryAccessCompletionFactory &) override {
     return amdgpu::MemoryAccessCompletion::Complete;
   }
 };
@@ -807,8 +809,8 @@ struct PluginFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
-    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
-        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (cu()->arch() == rocjitsu::IsaFamily::Cdna2 || cu()->arch() == rocjitsu::IsaFamily::Cdna3 ||
+        cu()->arch() == rocjitsu::IsaFamily::Cdna4) {
       // These kernels use the 256-register allocation for ordinary VGPRs.
       RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
     }

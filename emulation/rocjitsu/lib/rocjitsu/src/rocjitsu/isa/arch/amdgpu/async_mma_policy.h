@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/async_inline_operations.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
@@ -21,17 +22,17 @@ namespace rocjitsu::amdgpu::async_mma_policy {
 // All formerly eligible handlers now use issuer-owned rj-arith error state.
 // Keep requested helper counts in configs/checkpoints, but allocate no workers
 // and use synchronous CUs until a handler can safely run on a helper again.
-constexpr bool supported(rj_code_arch_t) { return false; }
+constexpr bool supported(rocjitsu::IsaFamily) { return false; }
 
 inline bool candidate(const Instruction &) { return false; }
 
 // Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
 // This is only a hint: decoded eligibility remains authoritative.
-inline bool encoding_may_be_candidate(rj_code_arch_t arch, uint32_t word) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+inline bool encoding_may_be_candidate(rocjitsu::IsaFamily arch, uint32_t word) {
+  if (arch == rocjitsu::IsaFamily::Cdna4)
     // VOP3P_MFMA, including the scaled-MFMA extension prefix.
     return word >> 23 == 423;
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch != rocjitsu::IsaFamily::Cdna5)
     return true;
   const uint32_t opcode = word >> 16;
   constexpr uint32_t encoding = 0xcc00;

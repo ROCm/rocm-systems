@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/ordered_count.h"
@@ -67,7 +68,8 @@ std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bo
     if (auto mapped = remapped_valu_source(op, *base, width)) {
       // GFX11.5 selects the base of the whole operand. CDNA1 can substitute
       // individual words of a pair, which the per-word scanner handles.
-      if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 || (width == 2 && mapped->hi == mapped->lo + 1))
+      if (cu_->arch() == rocjitsu::IsaFamily::Rdna3_5 ||
+          (width == 2 && mapped->hi == mapped->lo + 1))
         return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(mapped->lo - wf.vgpr_alloc().base),
                            width};
       if (width == 1 || mapped->lo == mapped->hi)
@@ -153,7 +155,7 @@ bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront 
   if (operation == Operation::LDS_DIRECT_LOAD || operation == Operation::DS_DIRECT_LOAD)
     return valid_lds_direct_operand(wf.m0());
   if (operation == Operation::S_BARRIER_SIGNAL_ISFIRST) {
-    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+    if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna4)
       return wf.cu().in_multiwave_workgroup();
     const auto &source = *inst.src_operand(0);
     const auto constant = source.const_value();
@@ -173,7 +175,7 @@ uint64_t MemoryWaitScoreboard::result_lanes(const Instruction &inst, Wavefront &
 
 static bool gfx11_rejects_buffer_load(const Instruction &inst, const Wavefront &wave) {
   const auto arch = wave.cu().arch();
-  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5)
     return false;
   const auto name = inst.mnemonic();
   return (name.starts_with("buffer_load_") || name.starts_with("tbuffer_load_")) &&
@@ -184,7 +186,7 @@ MemoryWaitScoreboard::MemoryLanes MemoryWaitScoreboard::memory_lanes(const Instr
                                                                      Wavefront &wf) {
   if (gfx11_rejects_buffer_load(inst, wf))
     return {wf.exec(), 0};
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 &&
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 &&
       !RegisterAccess(wf).vgpr_results_fit_allocation(inst))
     return {};
   if (inst.is_memory_op() && wf.memory_destination_out_of_range(inst))
@@ -237,8 +239,8 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
       return {0, 0};
     scalar = *lo | (uint64_t{*hi} << 32);
   }
-  if (!result.requests || (!shared_base && wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA1 &&
-                           wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA2))
+  if (!result.requests || (!shared_base && wf.cu().arch() != rocjitsu::IsaFamily::Rdna1 &&
+                           wf.cu().arch() != rocjitsu::IsaFamily::Rdna2))
     return result;
   const auto arch = wf.cu().arch();
   const auto layout = flat_private_layout(arch);
@@ -254,11 +256,12 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
     remaining &= remaining - 1;
     const uint64_t vector =
         address ? registers.vector_control_value(*address, lane).value_or(0) : 0;
-    uint64_t value = scalar +
-                     flat_vector_offset(
-                         vector, modifiers.flat_scalar_address && arch == ROCJITSU_CODE_ARCH_CDNA5,
-                         modifiers.flat_scale) +
-                     modifiers.flat_offset;
+    uint64_t value =
+        scalar +
+        flat_vector_offset(vector,
+                           modifiers.flat_scalar_address && arch == rocjitsu::IsaFamily::Cdna5,
+                           modifiers.flat_scale) +
+        modifiers.flat_offset;
     if (vector_pointer32)
       value = static_cast<uint32_t>(value);
     const uint64_t aperture_pointer = value - segment_offset;
@@ -266,7 +269,7 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
         translate_flat_address(wf, aperture_pointer, lane, layout, segment_offset);
     // GFX10.3 retains any complete element of a partial private tuple.
     // Its decoded width is the first element; GFX10.1 requires the complete transfer.
-    if ((arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) &&
+    if ((arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) &&
         translated.private_address && translated.swizzled &&
         uint64_t{translated.private_offset} + modifiers.flat_access_bytes >
             wf.scratch_lane_size()) {
@@ -280,19 +283,19 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
   return result;
 }
 
-static bool needs_buffer_payload_lanes(const Instruction &inst, rj_code_arch_t arch) {
+static bool needs_buffer_payload_lanes(const Instruction &inst, rocjitsu::IsaFamily arch) {
   const auto name = inst.mnemonic();
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return name.starts_with("buffer_store_") || name.starts_with("buffer_atomic_");
-  return (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-          arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+  return (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+          arch == rocjitsu::IsaFamily::Rdna4) &&
          (name.starts_with("buffer_store_") || name.starts_with("tbuffer_store_")) &&
          name.find("_format_") != std::string_view::npos;
 }
 
 bool MemoryWaitScoreboard::needs_prepared_payload_lanes(const Instruction &inst,
-                                                        rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 && inst.mnemonic().starts_with("image_atomic_")) {
+                                                        rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Rdna4 && inst.mnemonic().starts_with("image_atomic_")) {
     RegisterModifiers modifiers;
     inst.amdgpu_register_modifiers(modifiers);
     return modifiers.image_atomic_data != nullptr;
@@ -305,7 +308,7 @@ void MemoryWaitScoreboard::check_image_atomic_payload(const Instruction &inst,
                                                       uint64_t lanes) {
   // Bound GFX11 image atomics read VDATA for all EXEC lanes. GFX12 fetches the
   // payload only for in-bounds lanes selected during address preparation.
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna4) {
     if (!inst.data())
       return;
     lanes = inst.data_as<VectorMemState>()->lane_mask;
@@ -334,7 +337,7 @@ void MemoryWaitScoreboard::check_image_store_payload(const Instruction &inst, co
 void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront &wf) {
   if (empty() || inst.is_empty_global_transpose(wf.exec()))
     return;
-  const bool is_cdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2;
+  const bool is_cdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Cdna2;
   const bool cdna2_valu = is_cdna2 && (inst.flags() & VALU);
   if ((cdna2_valu && !cdna2::valu_destinations_in_range(inst, wf)) ||
       (inst.is_memory_op() && wf.memory_destination_out_of_range(inst)))
@@ -434,7 +437,7 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const uint32_t resource = modifiers.image_resource->encoding_value();
   const uint32_t word3 = read(resource + 3);
   const auto arch = wf.cu().arch();
-  const bool gfx11 = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool gfx11 = arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
   if (has_gfx11_plus_image_operands(arch) &&
       has_unimplemented_image_sampler_controls(
           read_image_sampler_controls(arch, sample.sampler, read)))
@@ -458,7 +461,7 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const bool linear =
       !native_filter &&
       (compute_feedback || (volume && !sample.query) ||
-       ((!gfx11 && arch != ROCJITSU_CODE_ARCH_RDNA4) ||
+       ((!gfx11 && arch != rocjitsu::IsaFamily::Rdna4) ||
         (sample.linear_candidate &&
          use_linear_image_path(arch, resource, sample.sampler, sample.dim, true, read, backed))));
   const bool gradients =
@@ -467,14 +470,14 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const bool needs_gradients =
       linear
           ? gradients || linear_image_needs_implicit_lod(filter, mip.first, mip.last, sample.gather)
-          : graphics_image_needs_gradients(sample.query,
-                                           graphics_sample_has_fixed_lod(sample.query,
-                                                                         sample.lod_warning, filter,
-                                                                         native_texture)
-                                               ? 0u
-                                           : arch == ROCJITSU_CODE_ARCH_RDNA4 ? (word1 >> 12) & 31u
-                                                                              : (word1 >> 16) & 15u,
-                                           sample.dim, sample.gather, filter);
+          : graphics_image_needs_gradients(
+                sample.query,
+                graphics_sample_has_fixed_lod(sample.query, sample.lod_warning, filter,
+                                              native_texture)
+                    ? 0u
+                : arch == rocjitsu::IsaFamily::Rdna4 ? (word1 >> 12) & 31u
+                                                     : (word1 >> 16) & 15u,
+                sample.dim, sample.gather, filter);
   const bool quad = needs_gradients && (sample.mode == ImageSampleMode::Implicit ||
                                         sample.mode == ImageSampleMode::Bias);
   const bool a16 = modifiers.image_a16;
@@ -503,7 +506,7 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
     result[word].active = bytes;
   }
   // Cube unfolding and GFX10's same-face check read the derivative lanes' face selectors.
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   const unsigned spatial = sample.dim == kImageDimCube && (!linear || gfx10)
                                ? 3u
                                : image_derivative_component_count(sample.dim);
@@ -536,7 +539,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   // Routed image instructions validate their descriptors even with no result lanes.
   // Other RDNA2 memory returns, DS permutations and GET_RESINFO skip their sources
   // when the decoded destination tuple crosses the allocation.
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 && inst.is_memory_wait_producer() &&
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 && inst.is_memory_wait_producer() &&
       (!inst.is_memory_op() || !modifiers.image_address) &&
       !RegisterAccess(wf).vgpr_results_fit_allocation(inst))
     return;
@@ -546,7 +549,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   if (wf.wf_size() != 32 && inst.amdgpu_secondary_operation() != Operation::Unknown)
     return;
   const bool gfx10 =
-      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+      wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 || wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
   const bool gfx10_valu = gfx10 && (inst.flags() & VALU);
   const Operation operation = inst.amdgpu_operation();
   const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
@@ -566,12 +569,13 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                    : ignores_exec && !(inst.flags() & FIRST_ACTIVE_MEMORY_LANE)
                        ? all_lanes
                        : wf.memory_exec(inst);
-  if ((wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+  if ((wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna2) &&
       (operation == Operation::DS_GWS_BARRIER || operation == Operation::DS_GWS_INIT ||
        operation == Operation::DS_GWS_SEMA_BR || operation == Operation::DS_GWS_SEMA_P ||
        operation == Operation::DS_GWS_SEMA_RELEASE_ALL || operation == Operation::DS_GWS_SEMA_V))
     lanes = RegisterAccess(wf).gds_source_lanes(inst);
-  else if (!ordered && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 && inst.is_memory_op())
+  else if (!ordered && wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 && inst.is_memory_op())
     lanes = result_lanes(inst, wf);
   if (const auto &output = modifiers.gfx10_export) {
     if ((wf.status_raw() & (1u << 18)) || !output->valid() || !wf.cu().shader_export_ready())
@@ -597,11 +601,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     });
     return;
   }
-  const bool gfx11 =
-      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool gfx11 = wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+                     wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5;
   const bool gfx12_image_atomic =
-      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 && modifiers.image_atomic_data;
-  const bool gfx11_or_gfx12_sample = (gfx11 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4) &&
+      wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 && modifiers.image_atomic_data;
+  const bool gfx11_or_gfx12_sample = (gfx11 || wf.cu().arch() == rocjitsu::IsaFamily::Rdna4) &&
                                      modifiers.image_sample_sources &&
                                      !modifiers.image_sample_sources->query;
   const bool check_image_result = modifiers.gfx10_lod_query_quad ||
@@ -769,14 +773,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   bool cdna5_type_mismatch = false;
   if (const auto *resource = modifiers.buffer_resource) {
     const auto arch = wf.cu().arch();
-    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
     unsigned first_resource_word = 0;
     if ((gfx11 || gfx12) && !modifiers.scalar_buffer_words) {
       const auto selector = resource->encoding_value();
       std::optional<uint32_t> control;
       if (addr_calc::buffer_resource_range_is_backed(wf, selector))
         control = registers.scalar_control_value(selector + 3);
-      const bool rdna4 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const bool rdna4 = arch == rocjitsu::IsaFamily::Rdna4;
       const auto name = inst.mnemonic();
       const bool typed = addressing == MemoryAddressing::TypedBuffer;
       const bool formatted = typed || name.find("_format_") != std::string_view::npos;
@@ -785,7 +789,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         read_buffer_offset = read_buffer_address = false;
       } else {
         const bool non_buffer = (*control >> 30) != 0;
-        cdna5_type_mismatch = arch == ROCJITSU_CODE_ARCH_CDNA5 && non_buffer;
+        cdna5_type_mismatch = arch == rocjitsu::IsaFamily::Cdna5 && non_buffer;
         const unsigned format = addr_calc::rdna_buffer_resource_format(arch, *control);
         if (formatted && (non_buffer || !format || (typed && !modifiers.encoded_buffer_format))) {
           // Format preparation reads only the descriptor's control word.
@@ -804,9 +808,10 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         const uint32_t offset = modifiers.buffer_offset->encoding_value();
         // MUBUF/MTBUF accept inline constants. VBUFFER uses a 7-bit register
         // selector, and CDNA5 stops before VADDR for encodings above M0.
-        read_buffer_address = (gfx11 && resolve_src_scalar_statically(offset).has_value()) ||
-                              ((arch != ROCJITSU_CODE_ARCH_CDNA5 || offset <= kModernM0Selector) &&
-                               resolve_scalar_register_range(wf, offset, 1).has_value());
+        read_buffer_address =
+            (gfx11 && resolve_src_scalar_statically(offset).has_value()) ||
+            ((arch != rocjitsu::IsaFamily::Cdna5 || offset <= kModernM0Selector) &&
+             resolve_scalar_register_range(wf, offset, 1).has_value());
       }
     }
     const auto words =
@@ -827,11 +832,12 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const bool reverse_dpp =
       (operation == Operation::V_SUBREV_U32 || operation == Operation::V_SUBREV_CO_U32 ||
        operation == Operation::V_SUBREV_NC_U32 || operation == Operation::V_SUBREV_CO_CI_U32) &&
-      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4);
+      (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna4);
   const Operand *routed_source = reverse_dpp ? inst.src_operand(1) : modifiers.src0;
   // Floating DOT4 filters its non-routed source observations with its destinations.
   const bool filtered_dot4 =
-      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 &&
+      wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 &&
       (operation == Operation::V_DOT4_F32_BF8_BF8 || operation == Operation::V_DOT4_F32_BF8_FP8 ||
        operation == Operation::V_DOT4_F32_FP8_BF8 || operation == Operation::V_DOT4_F32_FP8_FP8);
   uint64_t source_lanes = lanes;
@@ -886,7 +892,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   // SRC2 has one register input beyond EXEC (checked above). Its other
   // operand comes from the data share. Both pending-state paths use the
   // address register selected by execution, including its VGPR0 fallback.
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1 && is_ds_src2(operation)) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1 && is_ds_src2(operation)) {
     const auto reg = cdna1::ds_src2_address_register(inst.src_operand(0)->encoding_value(),
                                                      wf.vgpr_alloc().count);
     access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
@@ -895,7 +901,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const bool ds = inst.is_memory_op() &&
                   (addressing == MemoryAddressing::Lds || addressing == MemoryAddressing::Gds ||
                    addressing == MemoryAddressing::DirectLds);
-  const bool ds_vgpr0 = ds && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 &&
+  const bool ds_vgpr0 = ds && wf.cu().arch() == rocjitsu::IsaFamily::Rdna2 &&
                         RegisterAccess::ds_sources_use_vgpr0(inst);
   const auto check_ds_source = [&](const Operand &operand) {
     registers.for_each_ds_source_range(operand, true, [&](RegisterRef reg) {
@@ -960,7 +966,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     // MMA execution applies GPR_IDX only to ordinary VGPRs, never its
     // separate accumulator bank. Keep that bank's decoded identity intact.
-    if (matrix && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    if (matrix && wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
       if (auto reg = registers.gfx115_wmma_register(op, write))
         return reg;
     if (matrix)
@@ -1168,9 +1174,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   std::optional<uint64_t> selection;
   if ((operation == Operation::V_CNDMASK_B16 || operation == Operation::V_CNDMASK_B32) && lanes &&
-      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
-       wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4 ||
-       wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)) {
+      (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Cdna3 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Cdna4 ||
+       wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)) {
     // Check the condition dependency before using its current value to select sources.
     const auto *condition = inst.num_src_operands() > 2 ? inst.src_operand(2) : nullptr;
     if (!condition || condition->is_fieldless()) {
@@ -1206,7 +1214,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const Operand *buffer_payload =
       needs_buffer_payload_lanes(inst, wf.cu().arch()) ? inst.src_operand(0) : nullptr;
   const bool reads_buffer_payload =
-      wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? !cdna5_type_mismatch : read_buffer_address;
+      wf.cu().arch() == rocjitsu::IsaFamily::Cdna5 ? !cdna5_type_mismatch : read_buffer_address;
   auto check_operand = [&](const Operand *op, bool write) {
     const bool mix_preservation =
         !write && op == inst.dst_operand(0) &&
@@ -1237,7 +1245,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       return;
     // gfx1201 DPP8/DPP16 SUBREV substitutes zero for a scalar/inline SRC1.
     if (!write && reverse_dpp && (modifiers.dpp || modifiers.dpp8) && op == routed_source &&
-        reg->cls != RegClass::VGPR && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+        reg->cls != RegClass::VGPR && wf.cu().arch() == rocjitsu::IsaFamily::Rdna4)
       return;
     uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
                               : write                    ? destination_lanes
@@ -1245,10 +1253,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                                          : source_lanes;
     if (!write && op == buffer_payload && inst.data() && inst.data()->tag() == GLOBAL_MEM) {
       const auto &data = *inst.data_as<VectorMemState>();
-      accessed_lanes = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? data.exec_mask : data.lane_mask;
+      accessed_lanes =
+          wf.cu().arch() == rocjitsu::IsaFamily::Cdna5 ? data.exec_mask : data.lane_mask;
     }
     if (!write && !destination_lanes && modifiers.dpp && reg->cls != RegClass::VGPR &&
-        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && operation == Operation::V_ADD_F32 &&
+        wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5 && operation == Operation::V_ADD_F32 &&
         op == inst.src_operand(1))
       return;
     if (!write && op == modifiers.dpp_masked_compare_rhs) {
@@ -1271,9 +1280,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && inst.is_interpolation() &&
-        (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-         wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
+        (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Rdna4)) {
       const uint64_t quads =
           (lanes | (lanes >> 1) | (lanes >> 2) | (lanes >> 3)) & 0x1111111111111111ULL;
       const bool p2 = operation == Operation::V_INTERP_P2_F32 ||
@@ -1356,8 +1365,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       (addressing == MemoryAddressing::Flat ||
        (addressing == MemoryAddressing::Scratch && (inst.flags() & VMEM)))) {
     const auto arch = wf.cu().arch();
-    if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-        arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+        arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) {
       const unsigned segment = (inst.raw_encoding()[0] >> 14) & 3;
       bool uses_scratch = segment == 1;
       const uint32_t private_hi = wf.private_aperture_base() >> 32;
@@ -1437,7 +1446,8 @@ namespace {
 // Whether loads producing this event write their results to registers in issue
 // order within their order class, so overwriting a pending result of the same
 // class does not require a wait.
-bool has_ordered_writeback(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch) {
+bool has_ordered_writeback(const waitcheck_detail::ClassifiedEvent &event,
+                           rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   switch (event.counter) {
   case WaitCounterKind::Load:
@@ -1501,17 +1511,16 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
   }
   if (!pending)
     return;
-  const auto classified = WaitcheckTarget::classify_events(inst, wf.cu().arch());
-  if (classified.failed())
+  auto &classified = classification_scratch_;
+  if (WaitcheckTarget::classify_events_into(inst, wf.cu().arch(), classified).failed())
     return;
-  const auto xevent =
-      std::ranges::find(classified.value(), WaitCounterKind::X, &ClassifiedEvent::counter);
-  const bool replay = outstanding(WaitCounterKind::X) != 0 && xevent != classified.value().end();
+  const auto xevent = std::ranges::find(classified, WaitCounterKind::X, &ClassifiedEvent::counter);
+  const bool replay = outstanding(WaitCounterKind::X) != 0 && xevent != classified.end();
   if (replay)
     xcnt_group(xevent->kind == WaitEventKind::Smem);
-  const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
-                                      &ClassifiedEvent::registers);
-  const bool has_defs = defs != classified.value().end();
+  const auto defs =
+      std::ranges::find(classified, TrackedRegisterSource::Defs, &ClassifiedEvent::registers);
+  const bool has_defs = defs != classified.end();
   const auto order = has_defs && has_ordered_writeback(*defs, wf.cu().arch())
                          ? ordered_write_order(*defs, wf.cu().arch())
                          : kUnordered;
@@ -1559,7 +1568,7 @@ void MemoryWaitScoreboard::clear() {
 }
 
 bool MemoryWaitScoreboard::cancel_last_issue(uint64_t pc, std::span<const WaitCounterType> counters,
-                                             rj_code_arch_t arch, bool xcnt) {
+                                             rocjitsu::IsaFamily arch, bool xcnt) {
   const auto model = waitcnt_model(arch);
   if (model.failed())
     return false;
@@ -1652,7 +1661,8 @@ uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
 }
 
 namespace {
-VmemWriteback vmem_writeback(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch) {
+VmemWriteback vmem_writeback(const waitcheck_detail::ClassifiedEvent &event,
+                             rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   if (has_ordered_vmem_reads(arch) && event.counter == WaitCounterKind::Load) {
     if (event.kind == WaitEventKind::Sample)
@@ -1664,7 +1674,7 @@ VmemWriteback vmem_writeback(const waitcheck_detail::ClassifiedEvent &event, rj_
 }
 
 std::optional<uint32_t> completion_order_kind(const waitcheck_detail::ClassifiedEvent &event,
-                                              rj_code_arch_t arch) {
+                                              rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
   const bool legacy_flat =
@@ -1695,7 +1705,7 @@ std::optional<uint32_t> completion_order_kind(const waitcheck_detail::Classified
 } // namespace
 
 uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &event,
-                                     rj_code_arch_t arch, uint32_t units) {
+                                     rocjitsu::IsaFamily arch, uint32_t units) {
   const auto kind = completion_order_kind(event, arch);
   const auto sequence = issue(event.counter, !kind, kind.value_or(0), units);
   const auto fifo = last_order_[static_cast<size_t>(event.counter)];
@@ -1706,7 +1716,7 @@ uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &ev
 
 uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
                                            const waitcheck_detail::ClassifiedEvent &event,
-                                           rj_code_arch_t arch) {
+                                           rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
 
@@ -1725,7 +1735,7 @@ uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
 
 MemoryWaitScoreboard::WriteOrder
 MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
-                                          rj_code_arch_t arch) const {
+                                          rocjitsu::IsaFamily arch) const {
   const auto kind = completion_order_kind(event, arch);
   if (!kind)
     return kUnordered;
@@ -1985,7 +1995,7 @@ void MemoryWaitScoreboard::xcnt_ordered_write(RegisterRef reg, uint64_t lanes, u
          static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - through));
 }
 
-void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) {
+void MemoryWaitScoreboard::before(const Instruction &inst, rocjitsu::IsaFamily arch) {
   using namespace waitcheck_detail;
   // Most kernels wait well before a queue is full. Avoid classifying the
   // incoming instruction twice unless some ordered class can force progress.
@@ -1999,9 +2009,9 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
                maximum + 1;
       });
   if (full) {
-    const auto events = WaitcheckTarget::classify_events(inst, arch);
-    if (events.succeeded())
-      for (const auto &event : events.value()) {
+    auto &events = classification_scratch_;
+    if (WaitcheckTarget::classify_events_into(inst, arch, events).succeeded())
+      for (const auto &event : events) {
         // Fixed-domain FLAT reserves both counter slots before reading its address.
         // Targets with address-dependent counters apply capacity after routing.
         if (!flat_issues_both_counter_domains(arch) &&
@@ -2017,7 +2027,7 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
           backpressure(event.counter, maximum.value() + 1, issue_units(inst, event, arch));
       }
   }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && outstanding(WaitCounterKind::X) &&
+  if (arch == rocjitsu::IsaFamily::Cdna5 && outstanding(WaitCounterKind::X) &&
       WaitcheckTarget::is_xcnt_drain(inst))
     wait(WaitCounterKind::X, 0);
   if (!inst.is_waitcnt() && !inst.has_embedded_memory_wait())

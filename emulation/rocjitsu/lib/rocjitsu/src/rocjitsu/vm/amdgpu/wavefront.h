@@ -9,6 +9,7 @@
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
@@ -29,6 +30,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -84,6 +86,7 @@ enum class InstructionExecutionError : uint8_t {
   DecodeFailure,
   IllegalInstruction,
   PluginFailure,
+  GwsFailure,
 };
 
 /// @brief Allocation slice within a register file.
@@ -393,7 +396,7 @@ public:
   uint64_t vm_instruction_pc() const {
     if (!drm_shader_addresses_ || pc < (uint64_t{1} << 47))
       return pc;
-    const unsigned bits = cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? 57 : 48;
+    const unsigned bits = cu().arch() == rocjitsu::IsaFamily::Cdna5 ? 57 : 48;
     return (pc >> (bits - 1)) == 1 ? pc | (~uint64_t{0} << bits) : pc;
   }
   /// @brief Read nanoseconds from the selected realtime clock.
@@ -648,7 +651,7 @@ public:
   static constexpr uint32_t IEEE_BIT = 1u << 9;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t kRdna2MemoryViolationEnable = 1u << 20;
-  static constexpr uint32_t VSKIP_BIT = 1u << 28;
+  static constexpr uint32_t VSKIP_BIT = 1u << MODE_VSKIP_SHIFT;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
   /// Short for conditional stack pointer, used by fork/join instructions
   static constexpr uint32_t CSP_SHIFT = 29;
@@ -834,7 +837,7 @@ public:
   bool export_ready() const { return (status_raw() & kStatusExportReadyMask) != 0; }
   bool waits_for_export_grant(uint32_t control) const {
     const bool wait =
-        cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ? (control & 2u) != 0 : (control & 1u) == 0;
+        cu().arch() == rocjitsu::IsaFamily::Rdna4 ? (control & 2u) != 0 : (control & 1u) == 0;
     return wait && !export_ready();
   }
   /// Completed functional exports, keyed by hardware target and row.
@@ -967,8 +970,8 @@ public:
   /// where an asynchronous debugger suspend lands inside it.
   uint32_t sleep_cycles() const { return sleep_cycles_; }
   void set_sleep_cycles(uint32_t cycles) { sleep_cycles_ = cycles; }
-  static constexpr bool supports_sleep_wakeup_credit(rj_code_arch_t arch) {
-    return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  static constexpr bool supports_sleep_wakeup_credit(rocjitsu::IsaFamily arch) {
+    return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
   }
   bool supports_sleep_wakeup_credit() const { return supports_sleep_wakeup_credit(cu().arch()); }
   bool sleep_wakeup() const { return sleep_wakeup_; }
@@ -995,9 +998,9 @@ public:
   void set_shader_halt(uint16_t control) {
     const bool halt = (control & 1u) != 0;
     const auto arch = cu().arch();
-    const bool fatal = (control & 4u) && arch != ROCJITSU_CODE_ARCH_CDNA1 &&
-                       arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-                       arch != ROCJITSU_CODE_ARCH_CDNA4;
+    const bool fatal = (control & 4u) && arch != rocjitsu::IsaFamily::Cdna1 &&
+                       arch != rocjitsu::IsaFamily::Cdna2 && arch != rocjitsu::IsaFamily::Cdna3 &&
+                       arch != rocjitsu::IsaFamily::Cdna4;
     if (fatal) {
       if (uses_separate_trap_ctrl() && !in_trap_handler())
         return;
@@ -1006,8 +1009,8 @@ public:
     } else {
       set_status_halt(halt);
     }
-    if (halt && (fatal || !in_trap_handler()) && cu().arch() != ROCJITSU_CODE_ARCH_RDNA2 &&
-        cu().arch() != ROCJITSU_CODE_ARCH_CDNA2) {
+    if (halt && (fatal || !in_trap_handler()) && cu().arch() != rocjitsu::IsaFamily::Rdna2 &&
+        cu().arch() != rocjitsu::IsaFamily::Cdna2) {
       set_self_halted(true);
       set_debug_halted(true);
     } else if (!halt && self_halted() && !(status_raw() & kStatusFatalHaltMask) &&
@@ -1023,8 +1026,8 @@ public:
   void return_from_trap();
   bool shader_can_access_ttmp() const {
     const auto arch = cu().arch();
-    return (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
-            arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+    return (arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4 &&
+            arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5) ||
            in_trap_handler() || (status_raw() & kStatusPrivMask);
   }
   void set_user_priority(uint32_t priority) {
@@ -1171,6 +1174,31 @@ public:
   void set_fatal_exception_pending(bool pending) { fatal_exception_pending_ = pending; }
   bool fatal_exception_cwsr_valid() const { return fatal_exception_cwsr_valid_; }
   void set_fatal_exception_cwsr_valid(bool valid) { fatal_exception_cwsr_valid_ = valid; }
+
+  /// @brief Why a memory pipeline rejected this wave's access before any VM
+  /// fault reporter saw it.
+  struct MemoryRejection {
+    const char *cause = nullptr; ///< Static description; null when nothing was rejected.
+    bool memviol = false;        ///< Architectural MEMVIOL rather than an unsupported access.
+    explicit operator bool() const { return cause != nullptr; }
+  };
+  /// @brief Record that a memory pipeline failed this wave's access before any
+  /// VM fault reporter saw it.
+  /// @details ROCr acts on a memory-violation status only after the matching VM
+  /// fault event. A failure no reporter covers (an unsupported operation, a
+  /// missing scratch allocation, a retired address space) must instead abort
+  /// the queue, so the compute unit's failure handler consumes this marker.
+  /// @param cause Static description used in the diagnostic.
+  void set_unreported_memory_failure(const char *cause) { memory_rejection_ = {cause, false}; }
+  /// @brief Record an architectural MEMVIOL raised before translation.
+  /// @details Hardware reports it as an aperture violation, which the compute
+  /// unit delivers through the unmaskable memory trap: a trap shader, the
+  /// debugger, or the queue owner, none of which waits for a VM fault event.
+  /// @param cause Static description used in the diagnostic.
+  void raise_memory_violation(const char *cause) { memory_rejection_ = {cause, true}; }
+  /// @brief Consume the rejection recorded by set_unreported_memory_failure()
+  /// or raise_memory_violation().
+  MemoryRejection take_memory_rejection() { return std::exchange(memory_rejection_, {}); }
 
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
@@ -1366,6 +1394,7 @@ public:
     gws_wait_rid_ = kNoGwsWait;
     gws_wait_is_barrier_ = false;
     gws_wait_generation_ = 0;
+    gws_wait_pc_ = 0;
     gws_wait_seq_ = 0;
     gws_wait_steps_ = 0;
     gws_wait_progress_ = 0;
@@ -1407,6 +1436,7 @@ public:
     runtime_suspended_ = false;
     fatal_exception_pending_ = false;
     fatal_exception_cwsr_valid_ = false;
+    memory_rejection_ = {};
     single_step_ = false;
     trap_id_ = 0;
     debug_wave_id_ = 0;
@@ -1540,6 +1570,7 @@ private:
   static constexpr uint32_t kNoGwsWait = 0xffffffff;
   uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
   bool gws_wait_is_barrier_ = false;   ///< Parked at a GWS barrier (vs a semaphore P).
+  uint64_t gws_wait_pc_ = 0;           ///< Issuing PC retained while the issue loop advances pc.
   uint64_t gws_wait_generation_ = 0;   ///< Resource release generation observed at park.
   /// Device-global arrival order stamped on a parked semaphore P-waiter. The GWS
   /// store releases a V/BR credit to the oldest queued waiter first (across all
@@ -1575,9 +1606,10 @@ private:
   bool runtime_suspended_ = false; ///< Queue-suspended by the runtime (queue_percentage 0).
   bool fatal_exception_pending_ = false;
   bool fatal_exception_cwsr_valid_ = false;
-  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
-  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
-  uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
+  MemoryRejection memory_rejection_; ///< See take_memory_rejection().
+  bool single_step_ = false;         ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;             ///< Trap id from the last s_trap (breakpoint = 1).
+  uint64_t debug_wave_id_ = 0;       ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
@@ -1671,7 +1703,7 @@ template <typename Inst> inline void execute_with_empty_memory_mask(Inst &inst, 
 
 /// @brief Apply the wave's GPR_IDX offset to one logical VALU operand role.
 inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, VgprMsbRole role) {
-  const bool cdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2;
+  const bool cdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Cdna2;
   // Relative indexing applies to architectural VGPRs. Accumulator selectors
   // retain their register number, including on ACCVGPR_MOV/READ/WRITE.
   if (cdna2 && vgpr_off >= ACC_VGPR_OFFSET)

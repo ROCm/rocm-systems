@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_timing.h"
@@ -84,7 +85,7 @@ protected:
     return classify_rdna4(*decoder, encoding, wave_size);
   }
 
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
 };
 
 TEST_F(InstructionTimingTest, ClassifiesBlocksAndSerialization) {
@@ -214,7 +215,7 @@ protected:
   void SetUp() override {
     l2.set_backing_memory(&memory);
     ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    config.arch = rocjitsu::IsaFamily::Rdna4;
     config.num_wf_slots = 2;
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 256;
@@ -254,7 +255,7 @@ protected:
   L2Cache l2{"wavefront_slot_l2"};
   std::unique_ptr<ComputeUnitCore> cu;
   std::unique_ptr<WavefrontSlots> slots;
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
 };
 
 TEST_F(WavefrontSlotsTest, LaunchFillsTheReservedSlotInArrivalOrder) {

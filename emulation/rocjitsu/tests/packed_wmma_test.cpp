@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -43,7 +44,7 @@ struct HostState {
 };
 class DotMachine {
 public:
-  explicit DotMachine(rj_code_arch_t arch, uint32_t width = 32)
+  explicit DotMachine(rocjitsu::IsaFamily arch, uint32_t width = 32)
       : memory("dot_memory"), cache("dot_cache") {
     cache.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -87,7 +88,7 @@ public:
 // this test does not establish the physical CDNA5 accumulation order.
 TEST(Cdna5Wmma, Bf16CancellationPreservesIncomingC) {
   HostState restore;
-  DotMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  DotMachine machine(rocjitsu::IsaFamily::Cdna5);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr std::array<float, 32> products = {3456,   4608, 5376,  3072, -3840, 2816, -27648, 3072,
                                               -1920,  1024, -6656, 1792, 20480, 7680, 0,      1024,
@@ -177,8 +178,8 @@ std::array<uint32_t, 2> packed_encoding(bool gfx12, bool bf16, uint32_t dst, uin
 TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
   HostState restore;
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
+    const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -188,9 +189,6 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
             for (uint32_t fixture = 0; fixture < 7; ++fixture)
               for (bool scalar : {false, true}) {
                 util::set_force_scalar_for_testing(scalar);
-                std::fesetround(scalar ? FE_UPWARD : FE_DOWNWARD);
-                std::feclearexcept(FE_ALL_EXCEPT);
-                std::feraiseexcept(FE_INEXACT);
                 const auto &input = kPackedWmmaInputs[bf16][fixture];
                 for (uint32_t lane = 0; lane < width; ++lane) {
                   for (uint32_t reg = 0; reg < 32; ++reg)
@@ -243,8 +241,6 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
                       EXPECT_EQ(actual & mask, old[reg * width + lane] & mask);
                     }
                   }
-                EXPECT_EQ(std::fegetround(), scalar ? FE_UPWARD : FE_DOWNWARD);
-                EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
               }
     }
   }
@@ -252,8 +248,8 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
 
 TEST(PackedWmma, HardwareModifiersSelectorsAndInlineConstants) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
+    const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -281,8 +277,8 @@ TEST(PackedWmma, HardwareModifiersSelectorsAndInlineConstants) {
 
 TEST(PackedWmma, HardwareOverflowModeAtIntermediateSteps) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
+    const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());

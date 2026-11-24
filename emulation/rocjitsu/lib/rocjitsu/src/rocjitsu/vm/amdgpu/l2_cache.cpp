@@ -606,21 +606,37 @@ VmAccessOutcome L2Cache::preflight_atomic_access(uint64_t addr, uint32_t size,
   return admit_access(addr, size, vmid, VmAccessKind::Atomic).outcome;
 }
 
-VmAccessOutcome L2Cache::discard_stale_line_locked(uint64_t addr, uint32_t vmid,
-                                                   uint64_t admission_generation) {
-  simdojo::CacheTag *tag = nullptr;
-  if (!cache_.lookup(addr, &tag, vmid))
-    return VmAccessOutcome::Complete;
-  if (tag->cache_identity != current_cache_identity(vmid)) {
+void L2Cache::discard_rebound_line_locked(uint64_t addr, uint32_t vmid,
+                                          CacheStore::Allocation &line) {
+  if (line.tag && line.tag->cache_identity != current_cache_identity(vmid)) {
     (void)clear_dirty_bytes(CacheStore::line_address(addr), 0, LINE_SIZE, vmid);
-    cache_.invalidate(addr, vmid);
-    return VmAccessOutcome::Complete;
+    CacheStore::invalidate_tag(*line.tag);
+    line = {};
   }
-  if (tag->admission_generation == admission_generation)
+}
+
+VmAccessOutcome L2Cache::lookup_line_locked(uint64_t addr, uint32_t vmid,
+                                            uint64_t admission_generation,
+                                            CacheStore::Allocation &line, bool coherent_read,
+                                            const VmLocalGrantView *local) {
+  line = cache_.lookup_with_data(addr, vmid);
+  if (!line.tag)
     return VmAccessOutcome::Complete;
-  // A different grant can claim another part of this line while the old
-  // grant remains live. Publish its admitted dirty bytes before replacement.
-  return flush_line_locked(addr, vmid);
+  // A full-line hit under the same live grant can reuse its cache identity.
+  if (local && line.tag->cache_identity == local->identity() &&
+      line.tag->admission_generation == admission_generation &&
+      CacheStore::bytes_valid(*line.tag, 0, LINE_SIZE) &&
+      local->covers(CacheStore::line_address(addr), LINE_SIZE))
+    return VmAccessOutcome::Complete;
+  discard_rebound_line_locked(addr, vmid, line);
+  if (line.tag && (line.tag->admission_generation != admission_generation || coherent_read)) {
+    // Publish admitted dirty bytes before a grant replacement or coherent refetch.
+    const VmAccessOutcome outcome = flush_line_locked(addr, vmid, line);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+    line = {};
+  }
+  return VmAccessOutcome::Complete;
 }
 
 uint64_t L2Cache::current_cache_identity(uint32_t vmid) const {
@@ -815,33 +831,20 @@ VmAccessOutcome L2Cache::send_atomic_backing(uint64_t addr, uint32_t size,
   return access_outcome(completion_status);
 }
 
-VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
-                                     bool fetch_on_miss) {
-  const VmAccessOutcome stale_outcome = discard_stale_line_locked(addr, vmid, admission_generation);
-  if (stale_outcome != VmAccessOutcome::Complete)
-    return stale_outcome;
-  simdojo::CacheTag *resident = nullptr;
-  if (cache_.lookup(addr, &resident, vmid)) {
-    if (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, LINE_SIZE))
-      return VmAccessOutcome::Complete;
-
-    uint8_t line_buf[LINE_SIZE];
-    const VmAccessOutcome outcome = send_backing(CacheStore::line_address(addr), line_buf,
-                                                 LINE_SIZE, simdojo::MessageOp::READ, vmid);
-    if (outcome != VmAccessOutcome::Complete)
-      return outcome;
-    cache_.fill_missing_bytes(addr, line_buf, vmid);
-    return VmAccessOutcome::Complete;
-  }
-
-  if (guarded_dirty_allocation_victim(addr))
+VmAccessOutcome L2Cache::allocate_line_locked(uint64_t addr, uint32_t vmid,
+                                              uint64_t admission_generation,
+                                              CacheStore::Allocation &line) {
+  // A victim is guarded only through its dirty-byte mask. As in
+  // clear_dirty_bytes(), this set's lock orders every mask of its lines before
+  // this load, so without any mask the guard would scan the set and refuse
+  // nothing.
+  if (has_dirty_lines_.load(std::memory_order_relaxed) && guarded_dirty_allocation_victim(addr))
     return VmAccessOutcome::Unavailable;
-  uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  simdojo::CacheTag *allocated = cache_.allocate(addr, vmid, &evicted, evicted_data);
-  allocated->admission_generation = admission_generation;
-  allocated->cache_identity = current_cache_identity(vmid);
+  const auto allocated = cache_.allocate_with_data(addr, vmid, &evicted, evicted_data);
+  allocated.tag->admission_generation = admission_generation;
+  allocated.tag->cache_identity = current_cache_identity(vmid);
 
   if (evicted.valid && evicted.dirty) {
     static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
@@ -862,7 +865,7 @@ VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, uint64_t admi
         admitted ? publish_dirty_bytes(evicted_addr, evicted_data, evicted.vmid)
                  : VmAccessOutcome::Complete;
     if (outcome != VmAccessOutcome::Complete) {
-      cache_.invalidate(addr, vmid);
+      CacheStore::invalidate_tag(*allocated.tag);
       CacheStore::Allocation restored = cache_.allocate_with_data(evicted_addr, evicted.vmid);
       *restored.tag = evicted;
       std::memcpy(restored.data, evicted_data, LINE_SIZE);
@@ -870,75 +873,42 @@ VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, uint64_t admi
     }
   }
 
-  // A store supplies only its architectural byte range. Keep all other bytes
-  // absent so the store never speculatively reads backing memory. Dirty victims
-  // are still published before the caller modifies the new line.
-  if (!fetch_on_miss) {
-    simdojo::CacheTag *allocated = nullptr;
-    cache_.lookup(addr, &allocated, vmid);
-    assert(allocated != nullptr);
-    CacheStore::clear_valid_bytes(*allocated);
-    return VmAccessOutcome::Complete;
-  }
-
-  uint8_t line_buf[LINE_SIZE];
-  const VmAccessOutcome outcome =
-      send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
-  if (outcome != VmAccessOutcome::Complete) {
-    cache_.invalidate(addr, vmid);
-    return outcome;
-  }
-  cache_.fill_line(addr, line_buf, vmid);
+  CacheStore::clear_valid_bytes(*allocated.tag);
+  line = allocated;
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome L2Cache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
-                                             uint32_t vmid, uint64_t admission_generation) {
-  const VmAccessOutcome stale_outcome = discard_stale_line_locked(addr, vmid, admission_generation);
-  if (stale_outcome != VmAccessOutcome::Complete)
-    return stale_outcome;
-  simdojo::CacheTag *tag = nullptr;
-  bool allocated_new = false;
-  if (!cache_.lookup(addr, &tag, vmid)) {
-    if (guarded_dirty_allocation_victim(addr))
-      return VmAccessOutcome::Unavailable;
-    simdojo::CacheTag evicted;
-    uint8_t evicted_data[LINE_SIZE];
-    CacheStore::Allocation allocated =
-        cache_.allocate_with_data(addr, vmid, &evicted, evicted_data);
+VmAccessOutcome L2Cache::ensure_write_line_locked(uint64_t addr, uint32_t vmid,
+                                                  uint64_t admission_generation,
+                                                  CacheStore::Allocation &line) {
+  const VmAccessOutcome outcome = lookup_line_locked(addr, vmid, admission_generation, line);
+  if (outcome != VmAccessOutcome::Complete || line.tag)
+    return outcome;
+  return allocate_line_locked(addr, vmid, admission_generation, line);
+}
 
-    if (evicted.valid && evicted.dirty) {
-      static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
-      const uint64_t evicted_addr =
-          (evicted.tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
-          (static_cast<uint64_t>(CacheStore::set_index(addr)) << LINE_SIZE_BITS);
-      const bool admitted = retain_admitted_dirty_bytes(evicted_addr, evicted);
-      if (!admitted)
-        (void)clear_dirty_bytes(evicted_addr, 0, LINE_SIZE, evicted.vmid);
-      const VmAccessOutcome outcome =
-          admitted ? publish_dirty_bytes(evicted_addr, evicted_data, evicted.vmid)
-                   : VmAccessOutcome::Complete;
-      if (outcome != VmAccessOutcome::Complete) {
-        cache_.invalidate(addr, vmid);
-        CacheStore::Allocation restored = cache_.allocate_with_data(evicted_addr, evicted.vmid);
-        *restored.tag = evicted;
-        std::memcpy(restored.data, evicted_data, LINE_SIZE);
-        return outcome;
-      }
-    }
-    tag = allocated.tag;
-    tag->admission_generation = admission_generation;
-    tag->cache_identity = current_cache_identity(vmid);
-    CacheStore::clear_valid_bytes(*tag);
-    allocated_new = true;
+VmAccessOutcome L2Cache::fill_line_locked(uint64_t addr, uint32_t vmid,
+                                          uint64_t admission_generation,
+                                          CacheStore::Allocation &line) {
+  const uint64_t line_addr = CacheStore::line_address(addr);
+  if (line.tag) {
+    uint8_t bytes[LINE_SIZE];
+    const VmAccessOutcome outcome =
+        send_backing(line_addr, bytes, LINE_SIZE, simdojo::MessageOp::READ, vmid);
+    if (outcome == VmAccessOutcome::Complete)
+      CacheStore::fill_missing_bytes(line, bytes);
+    return outcome;
   }
-
-  cache_.write_line(addr, src, CacheStore::line_offset(addr), size, vmid);
-  if (allocated_new) {
-    tag->dirty = false;
-    tag->coherence = simdojo::CoherenceState::EXCLUSIVE;
-  }
-  return VmAccessOutcome::Complete;
+  const VmAccessOutcome allocation = allocate_line_locked(addr, vmid, admission_generation, line);
+  if (allocation != VmAccessOutcome::Complete)
+    return allocation;
+  const VmAccessOutcome outcome =
+      send_backing(line_addr, line.data, LINE_SIZE, simdojo::MessageOp::READ, vmid);
+  if (outcome == VmAccessOutcome::Complete)
+    CacheStore::mark_valid_bytes(*line.tag, 0, LINE_SIZE);
+  else
+    CacheStore::invalidate_tag(*line.tag);
+  return outcome;
 }
 
 bool L2Cache::try_read_scalar_ram(uint64_t addr, uint32_t *dst, uint32_t num_dwords,
@@ -1038,50 +1008,43 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
       copied += chunk;
       continue;
     }
-    const VmAccessOutcome stale_outcome =
-        discard_stale_line_locked(ea, vmid, chunk_admission.generation);
-    if (stale_outcome != VmAccessOutcome::Complete)
-      return stale_outcome;
-
-    if (mtype == Mtype::CC) {
-      // Coherently Cacheable: invalidate L2 line before refetch, mirroring
-      // the L1 CC behavior. This ensures cross-XCD store visibility when
-      // different L2s share a backing store. Dirty data is flushed first.
-      const VmAccessOutcome outcome = flush_line_locked(ea, vmid);
-      if (outcome != VmAccessOutcome::Complete)
-        return outcome;
-    }
-
-    simdojo::CacheTag *resident = nullptr;
-    if (cache_.lookup(ea, &resident, vmid) &&
-        CacheStore::bytes_valid(*resident, line_offset, chunk)) {
-      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    CacheStore::Allocation line;
+    const VmAccessOutcome lookup =
+        lookup_line_locked(ea, vmid, chunk_admission.generation, line, mtype == Mtype::CC);
+    if (lookup != VmAccessOutcome::Complete)
+      return lookup;
+    if (line.tag && CacheStore::bytes_valid(*line.tag, line_offset, chunk)) {
+      std::memcpy(dst + copied, line.data + line_offset, chunk);
       copied += chunk;
       continue;
     }
 
-    if (!can_fetch_range(CacheStore::line_address(ea), LINE_SIZE, vmid)) {
+    const bool full_line = can_fetch_range(CacheStore::line_address(ea), LINE_SIZE, vmid);
+    if (!full_line) {
       const VmAccessOutcome outcome =
           send_backing(ea, dst + copied, chunk, simdojo::MessageOp::READ, vmid);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
-      const VmAccessOutcome cache_outcome =
-          cache_partial_bytes(ea, dst + copied, chunk, vmid, chunk_admission.generation);
-      if (cache_outcome != VmAccessOutcome::Complete)
-        return cache_outcome;
+    }
+    // The backing callbacks can rebind the VM independently of the cache set.
+    discard_rebound_line_locked(ea, vmid, line);
+    if (!full_line) {
+      if (!line.tag) {
+        const VmAccessOutcome allocation =
+            allocate_line_locked(ea, vmid, chunk_admission.generation, line);
+        if (allocation != VmAccessOutcome::Complete)
+          return allocation;
+        line.tag->coherence = simdojo::CoherenceState::EXCLUSIVE;
+      }
+      CacheStore::write_line(line, dst + copied, line_offset, chunk);
     } else {
-      const VmAccessOutcome outcome = ensure_line(ea, vmid, chunk_admission.generation);
+      const VmAccessOutcome outcome = fill_line_locked(ea, vmid, chunk_admission.generation, line);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
-      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+      std::memcpy(dst + copied, line.data + line_offset, chunk);
     }
-    if (mtype == Mtype::CC) {
-      // A coherent read refilled from backing, leaving a clean coherent copy.
-      const bool resident_after_fill = cache_.lookup(ea, &resident, vmid);
-      assert(resident_after_fill && resident);
-      (void)resident_after_fill;
-      resident->coherence = simdojo::CoherenceState::SHARED;
-    }
+    if (mtype == Mtype::CC)
+      line.tag->coherence = simdojo::CoherenceState::SHARED;
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
@@ -1224,13 +1187,9 @@ VmAccessOutcome L2Cache::write_impl(uint64_t addr, const uint8_t *src, uint32_t 
       copied += chunk;
       continue;
     }
-    const VmAccessOutcome stale_outcome =
-        discard_stale_line_locked(ea, vmid, chunk_admission.generation);
-    if (stale_outcome != VmAccessOutcome::Complete)
-      return stale_outcome;
-
+    CacheStore::Allocation line;
     const VmAccessOutcome fill_outcome =
-        ensure_line(ea, vmid, chunk_admission.generation, /*fetch_on_miss=*/false);
+        ensure_write_line_locked(ea, vmid, chunk_admission.generation, line);
     if (fill_outcome != VmAccessOutcome::Complete)
       return fill_outcome;
 
@@ -1238,21 +1197,18 @@ VmAccessOutcome L2Cache::write_impl(uint64_t addr, const uint8_t *src, uint32_t 
                                                        chunk, simdojo::MessageOp::WRITE, vmid);
     if (write_outcome != VmAccessOutcome::Complete)
       return write_outcome;
-    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
-
-    simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag, vmid);
-    assert(tag != nullptr && "ensure_line must guarantee hit");
+    CacheStore::write_line(line, src + copied, line_offset, chunk);
 
     // Write through to backing store for all mtypes. In the simulator, GPU
     // virtual addresses are host-mapped (MAP_FIXED), so hipMemcpy reads from
     // backing store directly. Without write-through, RW-mtype stores remain
     // in L2 as dirty lines and never reach the host-visible pages, causing
     // stale reads on D2H copy.
-    tag->dirty = clear_dirty_bytes(CacheStore::line_address(ea), line_offset, chunk, vmid);
-    tag->coherence = tag->dirty ? simdojo::CoherenceState::MODIFIED
-                                : (mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
-                                                      : simdojo::CoherenceState::EXCLUSIVE);
+    line.tag->dirty = clear_dirty_bytes(CacheStore::line_address(ea), line_offset, chunk, vmid);
+    line.tag->coherence = line.tag->dirty
+                              ? simdojo::CoherenceState::MODIFIED
+                              : (mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
+                                                    : simdojo::CoherenceState::EXCLUSIVE);
 
     diagnostics(ea).writes.fetch_add(1, std::memory_order_relaxed);
     copied += chunk;
@@ -1278,21 +1234,17 @@ VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t v
       return flush_outcome;
     return send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
   }
-  if (same_grant) {
-    const auto *data = cache_.line_data_for_read_if(addr, vmid, 0, [&](const auto &tag) {
-      return tag.cache_identity == local->identity() &&
-             tag.admission_generation == admission.generation &&
-             CacheStore::bytes_valid(tag, 0, LINE_SIZE) && local->covers(line_addr, LINE_SIZE);
-    });
-    if (data) {
-      std::memcpy(line_buf, data, LINE_SIZE);
-      return VmAccessOutcome::Complete;
-    }
+  CacheStore::Allocation line;
+  const VmAccessOutcome lookup = lookup_line_locked(line_addr, vmid, admission.generation, line,
+                                                    false, same_grant ? local : nullptr);
+  if (lookup != VmAccessOutcome::Complete)
+    return lookup;
+  if (!line.tag || !CacheStore::bytes_valid(*line.tag, 0, LINE_SIZE)) {
+    const VmAccessOutcome outcome = fill_line_locked(line_addr, vmid, admission.generation, line);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
   }
-  const VmAccessOutcome outcome = ensure_line(line_addr, vmid, admission.generation);
-  if (outcome != VmAccessOutcome::Complete)
-    return outcome;
-  cache_.read_line(line_addr, line_buf, 0, LINE_SIZE, vmid);
+  std::memcpy(line_buf, line.data, LINE_SIZE);
   return VmAccessOutcome::Complete;
 }
 
@@ -1327,13 +1279,11 @@ VmAccessOutcome L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data,
     return send_backing(line_addr + dirty_offset, const_cast<uint8_t *>(data + dirty_offset),
                         dirty_size, simdojo::MessageOp::WRITE, vmid);
   }
+  CacheStore::Allocation line;
   const VmAccessOutcome fill_outcome =
-      ensure_line(line_addr, vmid, admission.generation, /*fetch_on_miss=*/false);
+      ensure_write_line_locked(line_addr, vmid, admission.generation, line);
   if (fill_outcome != VmAccessOutcome::Complete)
     return fill_outcome;
-  simdojo::CacheTag *tag = nullptr;
-  cache_.lookup(line_addr, &tag, vmid);
-  assert(tag != nullptr && "ensure_line must guarantee hit");
 
   if (mtype == Mtype::CC) {
     const VmAccessOutcome write_outcome =
@@ -1341,37 +1291,38 @@ VmAccessOutcome L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data,
                      dirty_size, simdojo::MessageOp::WRITE, vmid);
     if (write_outcome != VmAccessOutcome::Complete)
       return write_outcome;
-    cache_.write_line(line_addr, data + dirty_offset, dirty_offset, dirty_size, vmid);
-    tag->dirty = clear_dirty_bytes(line_addr, dirty_offset, dirty_size, vmid);
-    tag->coherence =
-        tag->dirty ? simdojo::CoherenceState::MODIFIED : simdojo::CoherenceState::SHARED;
+    CacheStore::write_line(line, data + dirty_offset, dirty_offset, dirty_size);
+    line.tag->dirty = clear_dirty_bytes(line_addr, dirty_offset, dirty_size, vmid);
+    line.tag->coherence =
+        line.tag->dirty ? simdojo::CoherenceState::MODIFIED : simdojo::CoherenceState::SHARED;
   } else {
-    cache_.write_line(line_addr, data + dirty_offset, dirty_offset, dirty_size, vmid);
+    CacheStore::write_line(line, data + dirty_offset, dirty_offset, dirty_size);
     mark_dirty_bytes(line_addr, dirty_offset, dirty_size, vmid);
-    tag->dirty = true;
-    tag->coherence = simdojo::CoherenceState::MODIFIED;
+    line.tag->dirty = true;
+    line.tag->coherence = simdojo::CoherenceState::MODIFIED;
   }
   return VmAccessOutcome::Complete;
 }
 
 VmAccessOutcome L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid) {
-  simdojo::CacheTag *tag = nullptr;
-  if (!cache_.lookup(addr, &tag, vmid))
-    return VmAccessOutcome::Complete;
+  return flush_line_locked(addr, vmid, cache_.lookup_with_data(addr, vmid));
+}
 
-  if (tag->dirty) {
+VmAccessOutcome L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid,
+                                           CacheStore::Allocation line) {
+  if (!line.tag)
+    return VmAccessOutcome::Complete;
+  if (line.tag->dirty) {
     uint64_t line_addr = CacheStore::line_address(addr);
-    if (!retain_admitted_dirty_bytes(line_addr, *tag)) {
+    if (!retain_admitted_dirty_bytes(line_addr, *line.tag)) {
       (void)clear_dirty_bytes(line_addr, 0, LINE_SIZE, vmid);
     } else {
-      const uint8_t *line = cache_.line_data_for_read(addr, vmid);
-      assert(line != nullptr);
-      const VmAccessOutcome outcome = publish_dirty_bytes(line_addr, line, vmid);
+      const VmAccessOutcome outcome = publish_dirty_bytes(line_addr, line.data, vmid);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
   }
-  cache_.invalidate(addr, vmid);
+  CacheStore::invalidate_tag(*line.tag);
   return VmAccessOutcome::Complete;
 }
 

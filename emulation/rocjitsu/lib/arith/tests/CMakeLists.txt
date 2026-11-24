@@ -22,11 +22,13 @@ endfunction()
 
 rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
 
+rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
 rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
 rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
+rj_arith_add_test(rj_arith_mfma_gfx942_exact_test mfma/gfx942_exact_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
@@ -230,7 +232,9 @@ endforeach()
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
     rj_arith_cpu_test
-    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+    PRIVATE
+        RJ_ARITH_IMPL_NAMESPACE=test_cpu
+        "$<FILTER:$<TARGET_PROPERTY:rj_arith,COMPILE_DEFINITIONS>,INCLUDE,^RJ_ARITH_HAVE_>"
 )
 add_subdirectory(headers)
 
@@ -328,6 +332,7 @@ foreach(
         state
         relative
         pseudo
+        gfx1150_fp
 )
     set(target "rj_arith_scalar_${family}_test")
     rj_arith_add_test(${target} scalar/${family}_test.cpp)

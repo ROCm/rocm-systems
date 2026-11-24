@@ -8,6 +8,7 @@
 #include "config_test_util.h"
 #include "decode_test_util.h"
 #include "gws_test_encoding.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "test_paths.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -122,7 +123,7 @@ struct XcdDistributionFixture {
     engine->topology().set_root(loaded.take_root());
     ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
         << admission_diagnostic.message();
-    util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+    util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
     ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
     if (loaded.engine_config.num_threads > 1 &&
         !amdgpu::partition_topology_by_xcds(engine->topology(), soc,
@@ -158,9 +159,9 @@ struct Cdna5ScratchTopologyFixture {
     soc = loaded.soc();
     memory = loaded.memory();
     loaded.engine_config.num_threads = 1;
-    util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
     ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
-    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
     ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
@@ -182,11 +183,11 @@ struct Cdna5ScratchTopologyFixture {
 };
 
 void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
-                            rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
+                            rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4) {
   using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  const uint32_t vgpr_granule = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 16 : 8;
+  const uint32_t vgpr_granule = arch == rocjitsu::IsaFamily::Cdna5 ? 16 : 8;
   RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                      ((256 / vgpr_granule) - 1));
   // CDNA4 uses this count; CDNA5 ignores it and allocates its fixed scalar file.
@@ -213,7 +214,7 @@ void issue(amdgpu::ComputeUnitCore &cu, Decoder &decoder, test::GwsOp op, amdgpu
   const bool has_count = test::gws_has_addr(op);
   if (has_count)
     cu.write_vgpr(wf.vgpr_alloc().base + kCountVgpr, /*lane=*/0, count);
-  const auto words = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, op),
+  const auto words = cdna3::build_ds(test::gws_opcode(rocjitsu::IsaFamily::Cdna3, op),
                                      {.gds = 1, .addr = has_count ? kCountVgpr : uint8_t{0}});
   std::unique_ptr<Instruction> inst(decode_valid(decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -410,7 +411,7 @@ public:
         EXPECT_EQ(regs.read_sgpr(base + 1) & 0xffffu, kDefaultScratchPool >> 32);
       }
       EXPECT_EQ(regs.read_sgpr(base + 6), wg_id);
-      const bool has_wave_id = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+      const bool has_wave_id = wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
       EXPECT_EQ(regs.read_sgpr(base + 7), 2u | (wave_index << 6) |
                                               (has_wave_id ? wave_index << 20 : 0u) |
                                               (wave_index == 0 ? 1u << 31 : 0u));
@@ -446,7 +447,7 @@ TEST(ScratchDispatchAbiTest, SuppliesQueueBaseAndDistinctOffsetsAfterSystemSgprs
   RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT,
                      1);
   fx.memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
-  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA2);
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(endpgm.succeeded());
   fx.memory->write32(kScratchKdAddr + sizeof(kd), endpgm.value());
   auto plugin = std::make_unique<ScratchAbiPlugin>();
@@ -461,8 +462,8 @@ TEST(ScratchDispatchAbiTest, SuppliesQueueBaseAndDistinctOffsetsAfterSystemSgprs
 }
 
 TEST(ScratchDispatchAbiTest, KfdQueueFillsLegacyRdnaDescriptorForBothWaveSizes) {
-  for (const auto &[config, arch] : {std::pair{"rdna1", ROCJITSU_CODE_ARCH_RDNA1},
-                                     std::pair{"rdna2", ROCJITSU_CODE_ARCH_RDNA2}}) {
+  for (const auto &[config, arch] : {std::pair{"rdna1", rocjitsu::IsaFamily::Rdna1},
+                                     std::pair{"rdna2", rocjitsu::IsaFamily::Rdna2}}) {
     for (uint32_t wave_size : {32u, 64u}) {
       SCOPED_TRACE(testing::Message() << config << " wave=" << wave_size);
       // The fixture's doorbell poller must stop before its backing leaves scope.
@@ -621,9 +622,9 @@ TEST(WorkgroupInfoDispatchTest, Cdna3AndCdna4IncludeWaveId) {
 
 TEST(WorkgroupInfoDispatchTest, ZeroUserSgprsPutInfoFirstInBothAqlQueuePaths) {
   for (const char *config : {"gfx942_cdna3.json", "gfx950_mi355x.json"}) {
-    const rj_code_arch_t arch = std::string_view(config).starts_with("gfx942")
-                                    ? ROCJITSU_CODE_ARCH_CDNA3
-                                    : ROCJITSU_CODE_ARCH_CDNA4;
+    const rocjitsu::IsaFamily arch = std::string_view(config).starts_with("gfx942")
+                                         ? rocjitsu::IsaFamily::Cdna3
+                                         : rocjitsu::IsaFamily::Cdna4;
     for (bool kfd : {false, true}) {
       SCOPED_TRACE(testing::Message() << config << " KFD=" << kfd);
       // The queue poller retains this address until the fixture tears it down.
@@ -688,9 +689,9 @@ TEST(WorkgroupInfoDispatchTest, ZeroUserSgprsPutInfoFirstInBothAqlQueuePaths) {
 }
 
 TEST(WorkgroupInfoDispatchTest, ArchitectedWorkgroupIdsDoNotShiftAqlInfo) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     const char *config =
-        arch == ROCJITSU_CODE_ARCH_RDNA4 ? "gfx1201_r9700.json" : "gfx1250_mi455x.json";
+        arch == rocjitsu::IsaFamily::Rdna4 ? "gfx1201_r9700.json" : "gfx1250_mi455x.json";
     SCOPED_TRACE(config);
     XcdDistributionFixture fx;
     ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::Single, 1, test::config_path(config)));
@@ -716,7 +717,7 @@ TEST(WorkgroupInfoDispatchTest, ArchitectedWorkgroupIdsDoNotShiftAqlInfo) {
     ASSERT_TRUE(group->add(std::move(plugin)));
     fx.soc->set_plugin_group(group);
     auto queue = test::make_fanout_queue(fx.memory, fx.soc->assign_queue_owner_cp(0));
-    const uint32_t group_size = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 64 : 128;
+    const uint32_t group_size = arch == rocjitsu::IsaFamily::Cdna5 ? 64 : 128;
     queue->dispatch(kKdAddr, group_size * 2, group_size);
     fx.engine->run();
     EXPECT_EQ(observed->observed(), 4u);
@@ -1814,7 +1815,7 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
     kernel_descriptor_t kd{};
     uint32_t endpgm = 0;
   } kernel;
-  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_s_endpgm.succeeded());
   kernel.endpgm = maybe_s_endpgm.value();
   constexpr uint64_t kKernelVa = 0x20000;
@@ -1842,7 +1843,7 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
   // provided by this queue; waves reuse those physical slots after completion.
   queue_desc.compute_tmpring_size =
       (kTotalCus / kTotalXcds) |
-      ((1024 / isa_properties(ROCJITSU_CODE_ARCH_CDNA4).compute_tmpring_wavesize_granule) << 12);
+      ((1024 / isa_properties(rocjitsu::IsaFamily::Cdna4).compute_tmpring_wavesize_granule) << 12);
   process.map_pages(kKernelVa, &kernel, sizeof(kernel));
   process.map_pages(kRingVa, ring.data(), sizeof(ring));
   process.map_pages(kQueueVa, &queue_desc, sizeof(queue_desc));
@@ -2093,8 +2094,9 @@ TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
         scratch_slots += cu->scratch_slots_per_cu();
     }
     const size_t pool_bytes = per_wave * scratch_slots;
-    ASSERT_NO_FATAL_FAILURE(install_scratch_kernel(
-        *fx.memory, kPrivateBytes, cdna5 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4));
+    ASSERT_NO_FATAL_FAILURE(
+        install_scratch_kernel(*fx.memory, kPrivateBytes,
+                               cdna5 ? rocjitsu::IsaFamily::Cdna5 : rocjitsu::IsaFamily::Cdna4));
 
     // A preceding dispatch left enough backing for the first wave, but not the
     // new grid. Provision the missing tail before admitting any new waves.
@@ -2262,7 +2264,7 @@ TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
   ASSERT_NO_FATAL_FAILURE(
       fx.initialize(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH));
   ASSERT_GE(fx.soc->num_xcds(), 2u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
 
   // The released arrival retires at an s_endpgm (direct-memory fetch; the wave has
   // no address space and vmid 0, so it fetches straight from VRAM).
@@ -2311,7 +2313,7 @@ TEST(XcdDistributionTest, CrossXcdGwsPWaitsForProducerSignal) {
   ASSERT_NO_FATAL_FAILURE(
       fx.initialize(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH));
   ASSERT_GE(fx.soc->num_xcds(), 2u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
 
   // The consumer retires at an s_endpgm once released (direct-memory fetch).
   constexpr uint64_t kPc = 0x200000;
@@ -2361,7 +2363,7 @@ TEST(XcdDistributionTest, CrossXcdGwsPWaitsForLaterProducerDispatch) {
   ASSERT_NO_FATAL_FAILURE(
       fx.initialize(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH));
   ASSERT_GE(fx.soc->num_xcds(), 2u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
   constexpr uint64_t kPc = 0x200000;
   fx.memory->write32(kPc, cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]);
 

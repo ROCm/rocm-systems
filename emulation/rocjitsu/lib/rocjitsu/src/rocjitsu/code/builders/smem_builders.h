@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include <array>
 #include <cstdint>
 
@@ -68,19 +69,19 @@ inline constexpr uint32_t kSmem24BitMaxByteOffset = 0x7FFFFFu;
 /// @returns Failure for a non-AMDGPU architecture.
 /// @param error Optional caller-owned diagnostic emitter, used only on failure.
 inline constexpr util::FailureOr<uint32_t>
-max_smem_byte_offset(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+max_smem_byte_offset(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return kSmem21BitMaxByteOffset;
-  case ROCJITSU_CODE_ARCH_CDNA5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rdna4:
     return kSmem24BitMaxByteOffset;
   default:
     if (error != nullptr)
@@ -114,7 +115,7 @@ max_smem_byte_offset(rj_code_arch_t arch, const util::DiagnosticEmitter *error =
 ///          if @p byte_offset is unaligned or out of range, or for a non-AMDGPU
 ///          architecture.
 inline util::FailureOr<std::array<uint32_t, 2>>
-build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_code_arch_t arch,
+build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rocjitsu::IsaFamily arch,
                      const util::DiagnosticEmitter *error = nullptr) {
   const auto fail = [error](const char *message) -> util::Result {
     if (error != nullptr)
@@ -147,53 +148,53 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
   const auto base = static_cast<uint8_t>(sbase / 2);
   const auto data = static_cast<uint8_t>(sdst);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_smem(
         cdna1::kSLoadDwordx2Smem,
         {.sbase = base, .sdata = data, .soffset_en = 0, .imm = 1, .offset = byte_offset});
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_smem(
         cdna2::kSLoadDwordx2Smem,
         {.sbase = base, .sdata = data, .soffset_en = 0, .imm = 1, .offset = byte_offset});
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_smem(
         cdna3::kSLoadDwordx2Smem,
         {.sbase = base, .sdata = data, .soffset_en = 0, .imm = 1, .offset = byte_offset});
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_smem(
         cdna4::kSLoadDwordx2Smem,
         {.sbase = base, .sdata = data, .soffset_en = 0, .imm = 1, .offset = byte_offset});
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_smem(rdna1::kSLoadDwordx2Smem,
                              {.sbase = base,
                               .sdata = data,
                               .offset = byte_offset,
                               .soffset = static_cast<uint8_t>(rdna1::OPR_SMEM_OFFSET_NULL)});
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_smem(rdna2::kSLoadDwordx2Smem,
                              {.sbase = base,
                               .sdata = data,
                               .offset = byte_offset,
                               .soffset = static_cast<uint8_t>(rdna2::OPR_SMEM_OFFSET_NULL)});
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_smem(rdna3::kSLoadB64Smem,
                              {.sbase = base,
                               .sdata = data,
                               .offset = byte_offset,
                               .soffset = static_cast<uint8_t>(rdna3::OPR_SMEM_OFFSET_NULL)});
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_smem(rdna3_5::kSLoadB64Smem,
                                {.sbase = base,
                                 .sdata = data,
                                 .offset = byte_offset,
                                 .soffset = static_cast<uint8_t>(rdna3_5::OPR_SMEM_OFFSET_NULL)});
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_smem(rdna4::kSLoadB64Smem,
                              {.sbase = base,
                               .sdata = data,
                               .ioffset = byte_offset,
                               .soffset = static_cast<uint8_t>(rdna4::OPR_SMEM_OFFSET_NULL)});
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     // scale_offset is CDNA5-only and left 0: this is a plain byte offset, not an
     // offset scaled by the load's data width.
     return cdna5::build_smem(cdna5::kSLoadB64Smem,
@@ -221,28 +222,28 @@ build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_cod
 /// @returns Failure for a non-AMDGPU architecture.
 /// @param error Optional caller-owned diagnostic emitter, used only on failure.
 inline util::FailureOr<uint32_t>
-build_wait_scalar_loads_complete(rj_code_arch_t arch,
+build_wait_scalar_loads_complete(rocjitsu::IsaFamily arch,
                                  const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return build_sopp_encoding(arch, cdna1::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return build_sopp_encoding(arch, rdna1::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return build_sopp_encoding(arch, rdna2::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return build_sopp_encoding(arch, rdna3::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return build_sopp_encoding(arch, rdna3_5::kSWaitcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0, error);
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0, error);
   default:
     if (error != nullptr)

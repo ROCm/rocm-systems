@@ -3,11 +3,13 @@
 
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -29,11 +31,16 @@ RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workg
   for (int i = 0; i < nWaves; ++i) {
     waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
   }
-  acquired_.assign(static_cast<size_t>(nWaves) * nWaves, 0);
-  // Each wave starts in epoch 1, so 0 means nothing acquired.
-  for (int i = 0; i < nWaves; ++i)
-    acquired(WaveId{i}, WaveId{i}) = 1;
-  exitClock_.assign(nWaves, 0);
+  acquired_.assign(static_cast<size_t>(nWaves) * clockSize(), 0);
+  // Each wave starts in epoch 1, and in handoff epoch 1 of each kind, so 0
+  // means nothing acquired.
+  for (int i = 0; i < nWaves; ++i) {
+    const WaveId wave{i};
+    acquired(wave, wave) = 1;
+    for (int kind = 0; kind < kArrivalKinds; ++kind)
+      acquiredRow(wave)[handoffIndex(static_cast<BarrierCellArrival>(kind), wave)] = 1;
+  }
+  exitClock_.assign(clockSize(), 0);
   ended_.assign(nWaves, false);
   // With no other wave, nothing holds back retirement.
   covered_.assign(nWaves, nWaves == 1 ? std::numeric_limits<uint32_t>::max() : 0);
@@ -87,13 +94,24 @@ void RaceDetector::indexLdsIntervals(EventId eid) {
 }
 
 void RaceDetector::attachSrc2Source(EventId id, IntervalSet sourceReads) {
-  if (sourceReads.empty())
+  attachLdsRead(id, std::move(sourceReads), /*barrierArrive=*/false);
+}
+
+void RaceDetector::attachBarrierArrive(EventId transfer, uint32_t cell) {
+  IntervalSet bytes;
+  bytes.append(static_cast<int>(cell), static_cast<int>(cell) + kBarrierCellBytes);
+  bytes.finalize();
+  attachLdsRead(transfer, std::move(bytes), /*barrierArrive=*/true);
+}
+
+void RaceDetector::attachLdsRead(EventId id, IntervalSet bytes, bool barrierArrive) {
+  if (bytes.empty())
     return;
   events_.markLdsSourceReads(id);
   const auto owner =
       events_.ldsOrder(id) == MemoryOrderClass::LDS ? events_.waveId(id) : WaveId{-1};
-  adjustByteCounts(sourceReads, byteReadCounts, +1, owner);
-  src2Events.push_back({id, std::move(sourceReads)});
+  adjustByteCounts(bytes, byteReadCounts, +1, owner);
+  attachedLdsReads.push_back({id, std::move(bytes), barrierArrive});
 }
 
 void RaceDetector::markEventWaveComplete(EventId eventId) { events_.markComplete(eventId); }
@@ -115,11 +133,24 @@ namespace {
 
 /// Join `from` into `into`, element-wise maximum.
 void joinClock(std::span<uint32_t> into, std::span<const uint32_t> from) {
+  assert(into.size() == from.size());
   for (size_t index = 0; index < into.size(); ++index)
     into[index] = std::max(into[index], from[index]);
 }
 
 } // namespace
+
+void RaceDetector::joinReleased(std::span<uint32_t> clock, WaveId wave,
+                                std::optional<BarrierCellArrival> arrival) const {
+  // Hold back the wave's own handoff epochs, except that of `arrival`.
+  std::array<uint32_t, kArrivalKinds> held;
+  for (int kind = 0; kind < kArrivalKinds; ++kind)
+    held[kind] = clock[handoffIndex(static_cast<BarrierCellArrival>(kind), wave)];
+  joinClock(clock, acquiredRow(wave));
+  for (int kind = 0; kind < kArrivalKinds; ++kind)
+    if (static_cast<BarrierCellArrival>(kind) != arrival)
+      clock[handoffIndex(static_cast<BarrierCellArrival>(kind), wave)] = held[kind];
+}
 
 RaceDetector::BarrierRoundState *RaceDetector::findRound(BarrierRoundId round) {
   for (BarrierRoundState &state : rounds_)
@@ -140,7 +171,7 @@ RaceDetector::BarrierRoundState &RaceDetector::roundState(BarrierRoundId round) 
   slot->completed = false;
   slot->awaiting = 0;
   slot->signalled = 0;
-  slot->clock.assign(waveCount(), 0);
+  slot->clock.assign(clockSize(), 0);
   ++openRounds_;
   // A named barrier's counted signals can be discarded by S_BARRIER_INIT, and
   // its round can complete while no live wave has joined it; neither is
@@ -162,9 +193,7 @@ void RaceDetector::closeRound(BarrierRoundState &state) {
 
 void RaceDetector::barrierSignaled(WaveId wave, BarrierRoundId round) {
   BarrierRoundState &state = roundState(round);
-  const auto row =
-      std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
-  joinClock(state.clock, row);
+  joinReleased(state.clock, wave);
   state.signalled |= uint64_t{1} << wave.value;
   // Events the wave completes from now on wait for its next signal, and so do
   // the LDS operands it reads from now on.
@@ -187,8 +216,7 @@ void RaceDetector::barrierRoundCompleted(BarrierRoundId round, std::span<const W
         const uint64_t bit = uint64_t{1} << wave;
         if ((endedWaves_ & bit) == 0 || (state.signalled & bit) != 0)
           continue;
-        joinClock(state.clock, std::span(acquired_).subspan(static_cast<size_t>(wave) * waveCount(),
-                                                            waveCount()));
+        joinReleased(state.clock, WaveId{wave});
       }
     }
   }
@@ -231,14 +259,12 @@ void RaceDetector::waveEnded(WaveId wave) {
   assert(!ended_[wave.value]);
   ended_[wave.value] = true;
   endedWaves_ |= uint64_t{1} << wave.value;
-  const auto row =
-      std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
-  joinClock(exitClock_, row);
+  joinReleased(exitClock_, wave);
   stopAwaiting(wave, std::nullopt);
   --liveWaves_;
   // The ended wave no longer holds back any other wave's retirement. Where it
   // was the last wave at an owner's coverage, the coverage is recomputed at
-  // the next barrier wait (see staleCoverage_).
+  // the next barrier wait or read of an LDS barrier cell (see staleCoverage_).
   for (int owner = 0; owner < waveCount(); ++owner) {
     if (owner == wave.value || staleCoverage_[owner] ||
         acquired(wave, WaveId{owner}) != covered_[owner])
@@ -284,6 +310,10 @@ void RaceDetector::acquire(WaveId accessor, std::span<const uint32_t> clock) {
     if (wasAtCoverage)
       leaveCoverageMinimum(WaveId{owner});
   }
+  // Handoff epochs order events but retire none, so they have no coverage.
+  const auto row = acquiredRow(accessor);
+  for (int index = waveCount(); index < clockSize(); ++index)
+    row[index] = std::max(row[index], clock[index]);
 }
 
 void RaceDetector::leaveCoverageMinimum(WaveId owner) {
@@ -317,16 +347,75 @@ bool RaceDetector::ordered(WaveId accessor, EventId eventId) const {
   return releaseEpoch != 0 && acquired(accessor, events_.waveId(eventId)) >= releaseEpoch;
 }
 
+bool RaceDetector::handedOffTo(WaveId accessor, EventId eventId) const {
+  const WaveId owner = events_.waveId(eventId);
+  const std::optional<BarrierCellArrival> kind = events_.handoffKind(eventId);
+  return kind && owner != accessor &&
+         acquiredRow(accessor)[handoffIndex(*kind, owner)] >= events_.handoffEpoch(eventId);
+}
+
+RaceDetector::BarrierCell &RaceDetector::barrierCell(uint32_t address) {
+  const auto cell = std::ranges::find(cells_, address, &BarrierCell::address);
+  if (cell != cells_.end())
+    return *cell;
+  return cells_.emplace_back(BarrierCell{.address = address,
+                                         .open = std::vector<uint32_t>(clockSize(), 0),
+                                         .done = std::vector<uint32_t>(clockSize(), 0)});
+}
+
+void RaceDetector::barrierCellArrived(WaveId wave, uint32_t address, BarrierCellArrival kind,
+                                      bool completed) {
+  // With no other wave there is nothing to order, and events retire when
+  // they complete.
+  if (waveCount() == 1)
+    return;
+  uint32_t &handoffEpoch = acquiredRow(wave)[handoffIndex(kind, wave)];
+  waveRaceStates[wave.value].handOffPending(kind, handoffEpoch);
+  BarrierCell &cell = barrierCell(address);
+  joinReleased(cell.open, wave, kind);
+  // Events the wave completes from now on wait for its next release, and so
+  // do the LDS operands it reads from now on. Accesses it issues from now on
+  // wait for its next arrival of this kind.
+  ++acquired(wave, wave);
+  ++handoffEpoch;
+  waveRaceStates[wave.value].forgetLdsOperandReads();
+  if (completed) {
+    joinClock(cell.done, cell.open);
+    std::ranges::fill(cell.open, 0);
+  }
+  if (kind == BarrierCellArrival::Ds) {
+    refreshStaleCoverage();
+    acquire(wave, cell.done);
+  }
+}
+
+// A cell's address fits an int: the plugin reports only cells inside the LDS
+// backing, whose byte addresses the interval sets index as int.
+void RaceDetector::acquireBarrierCells(WaveId wave, const IntervalSet &accessed) {
+  // Indexed: acquiring retires events, which never adds a cell.
+  for (size_t index = 0; index < cells_.size(); ++index) {
+    const int address = static_cast<int>(cells_[index].address);
+    if (!accessed.overlapsRange(address, address + kBarrierCellStateBytes))
+      continue;
+    refreshStaleCoverage();
+    acquire(wave, cells_[index].done);
+  }
+}
+
 bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterType waitCounter) {
   return events_.satisfyWaitCounter(eventId, waitCounter);
 }
 
 void RaceDetector::retireLdsIntervals(EventId eventId) {
-  const auto src2 = std::ranges::find(src2Events, eventId, &Src2Event::id);
-  if (src2 != src2Events.end()) {
-    adjustByteCounts(src2->sourceReads, byteReadCounts, -1);
-    std::iter_swap(src2, src2Events.end() - 1);
-    src2Events.pop_back();
+  // An event can have both a source operand and a barrier cell attached.
+  for (size_t index = 0; index < attachedLdsReads.size();) {
+    if (attachedLdsReads[index].id != eventId) {
+      ++index;
+      continue;
+    }
+    adjustByteCounts(attachedLdsReads[index].bytes, byteReadCounts, -1);
+    std::swap(attachedLdsReads[index], attachedLdsReads.back());
+    attachedLdsReads.pop_back();
   }
   const auto &bytes = events_.ldsIntervals(eventId);
   if (!events_.hasLiveLdsIntervals(eventId))
@@ -354,9 +443,23 @@ void RaceDetector::retireEvent(EventId eventId) {
   events_.markRetired(eventId);
 }
 
-template <typename Visit>
-void RaceDetector::forEachUnacquiredLdsEvent(WaveId accessor, int start, int end,
-                                             Visit visit) const {
+template <typename Matches>
+bool RaceDetector::anyCheckedLdsEvent(WaveId accessor, bool isWrite,
+                                      MemoryOrderClass currentMemoryOrder, int start, int end,
+                                      Matches matches) const {
+  for (EventId eventId : isWrite ? ldsReadEvents : ldsWriteEvents) {
+    // The LDS bytes are safe only when the two operations share a proven FIFO
+    // completion class: operations in the same non-UNORDERED class complete in
+    // issue order. An explicit wait that completed the older access also makes
+    // them safe. A read's destination VGPR remains independently protected by
+    // its wait-counter obligations. LDS write/write ordering is not checked.
+    if (accessor == events_.waveId(eventId) &&
+        (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
+                                                events_.ldsOrder(eventId) == currentMemoryOrder)))
+      continue;
+    if (matches(eventId))
+      return true;
+  }
   for (const WaveRaceState &owner : waveRaceStates) {
     if (owner.getWaveId() == accessor || !owner.barrierPendingMayOverlap(start, end))
       continue;
@@ -364,8 +467,28 @@ void RaceDetector::forEachUnacquiredLdsEvent(WaveId accessor, int start, int end
     const std::vector<EventId> &history = owner.getBarrierPendingEvents();
     for (auto event = history.rbegin();
          event != history.rend() && events_.releaseEpoch(*event) > acquiredEpoch; ++event)
-      visit(*event);
+      if (matches(*event))
+        return true;
   }
+  return false;
+}
+
+template <typename Matches>
+bool RaceDetector::anyCheckedAttachedRead(WaveId accessor, MemoryOrderClass currentMemoryOrder,
+                                          Matches matches) const {
+  for (const AttachedLdsRead &source : attachedLdsReads) {
+    const EventId id = source.id;
+    if (events_.waveId(id) == accessor) {
+      if (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
+                                            events_.ldsOrder(id) == currentMemoryOrder))
+        continue;
+    } else if (ordered(accessor, id) || handedOffTo(accessor, id)) {
+      continue;
+    }
+    if (matches(source))
+      return true;
+  }
+  return false;
 }
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
@@ -376,24 +499,19 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
-  const auto check = [&](EventId eventId) {
-    if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
-      return;
-    // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler(
-          {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
-    }
-  };
-  for (EventId eventId : ldsWriteEvents) {
-    // Operations in the same non-UNORDERED class complete in issue order.
-    if (wave == events_.waveId(eventId) &&
-        (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                                events_.ldsOrder(eventId) == currentMemoryOrder)))
-      continue;
-    check(eventId);
-  }
-  forEachUnacquiredLdsEvent(wave, addr, addr + nBytes, check);
+  anyCheckedLdsEvent(
+      wave, /*isWrite=*/false, currentMemoryOrder, addr, addr + nBytes, [&](EventId eventId) {
+        if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
+          return false;
+        // Report a byte both accesses touch, not the start of this access.
+        if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
+            byte && !handedOffTo(wave, eventId)) {
+          raceHandler(
+              {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
+        }
+        // Report every conflicting event.
+        return false;
+      });
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
@@ -404,51 +522,67 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
-  for (const auto &source : src2Events) {
-    const auto id = source.id;
-    if (events_.waveId(id) == wave) {
-      if (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                            events_.ldsOrder(id) == currentMemoryOrder))
-        continue;
-    } else if (ordered(wave, id)) {
-      continue;
-    }
-    if (const auto byte = source.sourceReads.firstOverlap(addr, addr + nBytes)) {
+  anyCheckedAttachedRead(wave, currentMemoryOrder, [&](const AttachedLdsRead &source) {
+    // An atomic of the cell's width cannot interleave with an arrival.
+    if (source.barrierArrive && atomicBytes == kBarrierCellBytes)
+      return false;
+    if (const auto byte = source.bytes.firstOverlap(addr, addr + nBytes)) {
       RaceViolation violation{
-          RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, id};
-      violation.conflictsWithSrc2Read = true;
+          RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, source.id};
+      (source.barrierArrive ? violation.conflictsWithBarrierArrive
+                            : violation.conflictsWithSrc2Read) = true;
       raceHandler(violation);
     }
-  }
-  const auto check = [&](EventId eventId) {
-    if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
-      return;
-    // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
-    }
-  };
-  for (EventId eventId : ldsReadEvents) {
-    // The LDS bytes are safe only when the two operations share a proven
-    // FIFO completion class, or an explicit wait completed the older event.
-    // The read's destination VGPR remains independently protected by its
-    // wait-counter obligations. This WAR check does not cover LDS
-    // write/write ordering, which is not currently checked.
-    if (wave == events_.waveId(eventId) &&
-        (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                                events_.ldsOrder(eventId) == currentMemoryOrder)))
-      continue;
-    check(eventId);
-  }
-  forEachUnacquiredLdsEvent(wave, addr, addr + nBytes, check);
+    // Report every conflicting event.
+    return false;
+  });
+  anyCheckedLdsEvent(
+      wave, /*isWrite=*/true, currentMemoryOrder, addr, addr + nBytes, [&](EventId eventId) {
+        if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
+          return false;
+        // Report a byte both accesses touch, not the start of this access.
+        if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
+            byte && !handedOffTo(wave, eventId)) {
+          raceHandler(
+              {RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
+        }
+        // Report every conflicting event.
+        return false;
+      });
 }
 
 bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
-                               MemoryOrderClass currentMemoryOrder) const {
+                               MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
+  // Fast path: no live event has bytes in any 16-byte chunk the access touches.
   const std::vector<LdsChunkCounts> &counts = isWrite ? byteReadCounts : byteWriteCounts;
-  return std::ranges::any_of(accessed, [&](const Interval &interval) {
-    return hasPotentialLdsConflict(interval.start, interval.end - interval.start, counts, wave,
-                                   currentMemoryOrder);
+  if (!std::ranges::any_of(accessed, [&](const Interval &interval) {
+        return hasPotentialLdsConflict(interval.start, interval.end - interval.start, counts, wave,
+                                       currentMemoryOrder);
+      }))
+    return false;
+  // Scan the events once for the whole instruction, by the rules the per-lane
+  // checks apply, so a clean access does not repeat the scan for each lane.
+  if (isWrite &&
+      anyCheckedAttachedRead(wave, currentMemoryOrder, [&](const AttachedLdsRead &source) {
+        return !(source.barrierArrive && atomicBytes == kBarrierCellBytes) &&
+               std::ranges::any_of(accessed, [&](const Interval &interval) {
+                 return source.bytes.overlapsRange(interval.start, interval.end);
+               });
+      }))
+    return true;
+  // The fast path found a chunk with live bytes, so `accessed` is not empty.
+  const int start = accessed.begin()->start;
+  const int end = (accessed.end() - 1)->end;
+  return anyCheckedLdsEvent(wave, isWrite, currentMemoryOrder, start, end, [&](EventId eventId) {
+    if (!(isWrite ? events_.readsLds(eventId) : events_.writesLds(eventId)) ||
+        events_.atomicLdsElementMatches(eventId, atomicBytes))
+      return false;
+    const IntervalSet &bytes = events_.ldsIntervals(eventId);
+    return std::ranges::any_of(accessed,
+                               [&](const Interval &interval) {
+                                 return bytes.overlapsRange(interval.start, interval.end);
+                               }) &&
+           !handedOffTo(wave, eventId);
   });
 }
 

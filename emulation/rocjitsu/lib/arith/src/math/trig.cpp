@@ -110,6 +110,30 @@ template <bool Rdna3, bool Cosine>
 
 #endif
 
+// Evaluate an unmodified wave in linear lane order. A whole-register alias
+// is safe because each output depends only on the corresponding input.
+template <bool Cosine>
+void evaluate_wave([[maybe_unused]] uint64_t flags, uint32_t *d, const uint32_t *a, unsigned denorm,
+                   bool quiet_snan) {
+  if constexpr (!Cosine) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::sin_exact_x86_64_v4(d, a, denorm, quiet_snan);
+      return;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::sin_exact_x86_64_v3(d, a, denorm, quiet_snan);
+      return;
+    }
+#endif
+  }
+  for (int lane = 0; lane < 32; ++lane) {
+    d[lane] = rocjitsu::arith::trig::evaluate(a[lane], Cosine, denorm, quiet_snan);
+  }
+}
+
 // Evaluate FP32 sine/cosine for the selected lanes. Reject invalid controls before changing
 // outputs.
 template <bool Cosine, bool Rdna3>
@@ -157,31 +181,35 @@ int trig(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  uint32_t exceptions = 0;
-  uint32_t result[32];
-  for (int lane = 0; lane < 32; ++lane) {
-    uint32_t bits = a[0][lane];
-    if (mode & RJ_ARITH_ALU_ABS_A) {
-      bits &= 0x7fffffff;
-    }
-    if (mode & RJ_ARITH_ALU_NEG_A) {
-      bits ^= 0x80000000;
-    }
-
-    // The borrowed model encodes preservation, whereas API flags encode flushing; invert the two
-    // denormal-control bits.
-    unsigned denorm = 3 ^ (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS ? 1 : 0) ^
-                      (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS ? 2 : 0);
-    uint32_t rounded = rocjitsu::arith::trig::evaluate(bits, Cosine, denorm,
-                                                       !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
-    result[lane] = output<Rdna3, Cosine>(rounded, mode, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
-    if (report && ((exec_mask >> lane) & 1)) {
-      exceptions |= rocjitsu::arith::trig::exceptions<32>(bits, rounded, Cosine, mode);
-    }
+  // API flags request flushing; the captured model takes preservation bits.
+  const unsigned denorm = 3 ^ (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS ? 1 : 0) ^
+                          (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS ? 2 : 0);
+  const bool quiet_snan = !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+  if (exec_mask == UINT32_MAX && !mode && !report) {
+    evaluate_wave<Cosine>(flags, d[0], a[0], denorm, quiet_snan);
+    return RJ_ARITH_SUCCESS;
   }
+
+  uint32_t modified[32];
+  const uint32_t *input = a[0];
+  if (mode & (RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A)) {
+    const uint32_t keep = mode & RJ_ARITH_ALU_ABS_A ? 0x7fffffff : UINT32_MAX;
+    const uint32_t flip = mode & RJ_ARITH_ALU_NEG_A ? 0x80000000 : 0;
+    for (int lane = 0; lane < 32; ++lane) {
+      modified[lane] = (input[lane] & keep) ^ flip;
+    }
+    input = modified;
+  }
+  uint32_t rounded[32];
+  evaluate_wave<Cosine>(flags, rounded, input, denorm, quiet_snan);
+  uint32_t exceptions = 0;
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {
-      d[0][lane] = result[lane];
+      if (report) {
+        exceptions |=
+            rocjitsu::arith::trig::exceptions<32>(input[lane], rounded[lane], Cosine, mode);
+      }
+      d[0][lane] = output<Rdna3, Cosine>(rounded[lane], mode, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
     }
   }
   if (report) {

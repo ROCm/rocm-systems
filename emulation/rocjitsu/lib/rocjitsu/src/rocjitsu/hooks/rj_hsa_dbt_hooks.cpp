@@ -17,6 +17,7 @@
 /// the original ELF may target a different GPU ISA.
 
 #include "hsa/hsa_api_trace.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -169,7 +170,7 @@ struct sigaction g_previous_sigabrt {};
 /// @brief Parsed ISA target used by DBT and HSA agent matching.
 struct TargetInfo {
   std::string_view name;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t mach;
 };
 
@@ -178,10 +179,10 @@ constexpr std::array<uint32_t, 5> kAcceptedConcreteTargetMachs = {
     EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201};
 
 constexpr std::array<TargetInfo, 4> kArchAliases = {{
-    {"cdna3", ROCJITSU_CODE_ARCH_CDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA3)},
-    {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA4)},
-    {"rdna3", ROCJITSU_CODE_ARCH_RDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA3)},
-    {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA4)},
+    {"cdna3", rocjitsu::IsaFamily::Cdna3, elf_mach_for_arch(rocjitsu::IsaFamily::Cdna3)},
+    {"cdna4", rocjitsu::IsaFamily::Cdna4, elf_mach_for_arch(rocjitsu::IsaFamily::Cdna4)},
+    {"rdna3", rocjitsu::IsaFamily::Rdna3, elf_mach_for_arch(rocjitsu::IsaFamily::Rdna3)},
+    {"rdna4", rocjitsu::IsaFamily::Rdna4, elf_mach_for_arch(rocjitsu::IsaFamily::Rdna4)},
 }};
 
 /// @brief Return the byte offset immediately after an API-table field.
@@ -241,8 +242,8 @@ struct HookConfig {
   for (uint32_t mach : kAcceptedConcreteTargetMachs) {
     std::string_view name = elf_mach_name(mach);
     if (value == name) {
-      const rj_code_arch_t arch = arch_for_elf_mach(mach);
-      if (arch != ROCJITSU_CODE_ARCH_INVALID)
+      const rocjitsu::IsaFamily arch = arch_for_elf_mach(mach);
+      if (arch != rocjitsu::IsaFamily::Invalid)
         return TargetInfo{name, arch, mach};
     }
   }
@@ -530,15 +531,15 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
 }
 
 /// @brief Return a compact architecture-family name for diagnostics.
-[[nodiscard]] const char *arch_name(rj_code_arch_t arch) {
+[[nodiscard]] const char *arch_name(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return "cdna3";
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return "cdna4";
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return "rdna3";
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return "rdna4";
   default:
     return "invalid";
@@ -614,7 +615,7 @@ void print_diagnostics(FILE *stream, std::span<const TranslationDiagnostic> diag
 
 /// @brief ISA family and exact ELF machine value detected from a code object.
 struct DetectedElfTarget {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
   uint32_t mach = 0;
 };
 
@@ -4236,7 +4237,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     source_target.arch = config->source_override->arch;
     source_target.mach = config->source_override->mach;
   }
-  if (source_target.arch == ROCJITSU_CODE_ARCH_INVALID || source_target.mach == 0) {
+  if (source_target.arch == rocjitsu::IsaFamily::Invalid || source_target.mach == 0) {
     std::fprintf(stderr, "[rocjitsu-hooks] failed to detect source ISA from code-object ELF\n");
     return HSA_STATUS_ERROR;
   }
@@ -4244,8 +4245,8 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match
   // does not identify the revision. When both revisions are configured, use the
   // selected same-ISA translation profile. Otherwise fail closed.
-  const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                   config->target.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+  const bool gfx1250_same_target = source_target.arch == rocjitsu::IsaFamily::Cdna5 &&
+                                   config->target.arch == rocjitsu::IsaFamily::Cdna5 &&
                                    source_target.mach == config->target.mach;
   const bool have_gfx1250_revisions = config->guest_revision != ProcessorRevision::Unspecified &&
                                       config->host_revision != ProcessorRevision::Unspecified;

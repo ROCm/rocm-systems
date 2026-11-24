@@ -35,19 +35,18 @@ The table shows current effective allocations, including suppression of helpers:
 | 8 | 2/7/0 | 2/7/0 | 8 / 8 |
 | 16 | 8/9/0 | 8/9/0 | 16 / 16 |
 | 24 | 8/17/0 | 8/17/0 | 24 / 24 |
-| 32 | 8/17/0 | 8/25/0 | 24 / 32 |
-| 40 | 8/17/0 | 8/33/0 | 24 / 40 |
-| 48 and above | 8/17/0 | 8/33/0 | 24 / 40 |
+| 32 | 8/25/0 | 8/25/0 | 32 / 32 |
+| 40 | 8/25/0 | 8/33/0 | 32 / 40 |
+| 48 and above | 8/25/0 | 8/41/0 | 32 / 48 |
 
 A budget between entries selects the lower entry; 12 selects 8. Explicit
 `cpu_thread_budget` limits the combined allocation. Larger hosts retain the
 highest table entry. Custom JSON allocations and explicit knobs remain
 available for workloads that benefit from more workers.
 
-The retained server presets request helpers after reaching their engine/dispatch
-ceiling. While no handler is eligible, higher budgets retain 8/17/0 on gfx950 and
-8/33/0 on gfx1250. Re-enabling a handler would make helper allocation effective
-again; it would also require renewed validation of overlap and thread budgets.
+The single-GPU gfx950 and gfx1250 presets allocate their full 32- and
+48-thread budgets to engines and CU dispatch. Their matrix handlers run
+synchronously.
 
 Desktop and MI210 presets stop at 1/24/0; CDNA3 stops at 8/17/0.
 Two- and four-GPU presets keep **1/1/0** for RCCL. Mirage embeds these native

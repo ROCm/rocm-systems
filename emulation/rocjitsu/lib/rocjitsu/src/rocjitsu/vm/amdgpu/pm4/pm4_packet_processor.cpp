@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
@@ -153,7 +154,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       }
       auto &ib = submission.buffers.front();
       if (ib.reset_gds_wave_id) {
-        if (context.arch != ROCJITSU_CODE_ARCH_RDNA1 && context.arch != ROCJITSU_CODE_ARCH_RDNA2)
+        if (context.arch != rocjitsu::IsaFamily::Rdna1 &&
+            context.arch != rocjitsu::IsaFamily::Rdna2)
           return fail("unsupported GDS wave ID reset on this target");
         // GFX10's KMD emits this reset only on a compute ring.
         if (!submission.graphics_engine) {
@@ -256,8 +258,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::PredExec: {
         if (require(1).failed())
           return util::Result::failure();
-        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 && context.arch != ROCJITSU_CODE_ARCH_CDNA4 &&
-             context.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+        if ((context.arch != rocjitsu::IsaFamily::Cdna3 &&
+             context.arch != rocjitsu::IsaFamily::Cdna4 &&
+             context.arch != rocjitsu::IsaFamily::Cdna5) ||
             (words[0] & 0x00ffc000) || context.xcc_id >= 8)
           return fail("unsupported PRED_EXEC control or target");
         const uint32_t skip = words[0] & 0x3fff;
@@ -283,9 +286,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const bool push = command == 1 || command == 3;
         // GFX12 has push/pop only. Reset values are qualified for GFX11.
         if (!submission.graphics_engine || command > 3 ||
-            (reset && (context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-                       (context.arch != ROCJITSU_CODE_ARCH_RDNA3 &&
-                        context.arch != ROCJITSU_CODE_ARCH_RDNA3_5))))
+            (reset && (context.arch == rocjitsu::IsaFamily::Invalid ||
+                       (context.arch != rocjitsu::IsaFamily::Rdna3 &&
+                        context.arch != rocjitsu::IsaFamily::Rdna3_5))))
           return fail("unsupported CLEAR_STATE mode or engine");
         if (push) {
           if (state.saved_context_registers)
@@ -476,10 +479,11 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const uint32_t space = (words[0] >> 4) & 3;
         const uint32_t operation = (words[0] >> 6) & 3;
         if (space == 0 && operation == 1 &&
-            (context.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-             context.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-             context.arch == ROCJITSU_CODE_ARCH_CDNA3 || context.arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-             context.arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+            (context.arch == rocjitsu::IsaFamily::Rdna3 ||
+             context.arch == rocjitsu::IsaFamily::Rdna3_5 ||
+             context.arch == rocjitsu::IsaFamily::Cdna3 ||
+             context.arch == rocjitsu::IsaFamily::Cdna4 ||
+             context.arch == rocjitsu::IsaFamily::Rdna4) &&
             words[1] == 0xe26 && words[2] == 0xe27) {
           // NBIO 4.3/7.9/7.11 and NBIF 6.3 share this HDP_FLUSH_REQ/DONE pair.
           // WR_WAIT_WR_REG requests host-data
@@ -593,8 +597,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const uint32_t index = words[0] >> 28;
         const uint32_t first = words[0] & 0xffff;
         const bool interleave = submission.graphics_engine && index == 2 && first == 0x22f &&
-                                words.size() == 2 && context.arch != ROCJITSU_CODE_ARCH_INVALID &&
-                                context.arch == ROCJITSU_CODE_ARCH_RDNA4;
+                                words.size() == 2 && context.arch != rocjitsu::IsaFamily::Invalid &&
+                                context.arch == rocjitsu::IsaFamily::Rdna4;
         // Index 3 applies the KMD CU mask to RSRC3/4. CU affinity does not
         // change functional shader results; retain the programmed resources.
         // GFX12 index 2 updates the dispatch-interleave shadow. Scheduling
@@ -711,10 +715,10 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::AcquireMem: // ACQUIRE_MEM: earlier dispatches and DMA are already retired.
         // GFX9 carries CP_COHER_CNTL in ordinal 2 and ends with POLL_INTERVAL.
         // Later generations append a GCR control word.
-        if (require((context.arch == ROCJITSU_CODE_ARCH_CDNA1 ||
-                     context.arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-                     context.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                     context.arch == ROCJITSU_CODE_ARCH_CDNA4)
+        if (require((context.arch == rocjitsu::IsaFamily::Cdna1 ||
+                     context.arch == rocjitsu::IsaFamily::Cdna2 ||
+                     context.arch == rocjitsu::IsaFamily::Cdna3 ||
+                     context.arch == rocjitsu::IsaFamily::Cdna4)
                         ? 6
                         : 7)
                 .failed())
@@ -728,9 +732,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if (event == 15 && event_index >= 8 && event_index <= 11) {
           if (require(3).failed())
             return util::Result::failure();
-          const bool supports_streamout_query = context.arch != ROCJITSU_CODE_ARCH_INVALID &&
-                                                (context.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                                                 context.arch == ROCJITSU_CODE_ARCH_RDNA3_5);
+          const bool supports_streamout_query = context.arch != rocjitsu::IsaFamily::Invalid &&
+                                                (context.arch == rocjitsu::IsaFamily::Rdna3 ||
+                                                 context.arch == rocjitsu::IsaFamily::Rdna3_5);
           if (!submission.graphics_engine || !supports_streamout_query ||
               words[0] != (15 | (event_index << 8)) || (words[1] & 7))
             return fail("unsupported PM4 streamout query event");
@@ -767,8 +771,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::StreamoutStatsQuery: {
         if (require(5).failed())
           return util::Result::failure();
-        if (!submission.graphics_engine || context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-            context.arch != ROCJITSU_CODE_ARCH_RDNA4 || (words[0] & 7) || (words[3] & 7) ||
+        if (!submission.graphics_engine || context.arch == rocjitsu::IsaFamily::Invalid ||
+            context.arch != rocjitsu::IsaFamily::Rdna4 || (words[0] & 7) || (words[3] & 7) ||
             words[2] > 3 || address(0) > UINT64_MAX - 79)
           return fail("unsupported PM4 streamout statistics query");
         // GFX12 shaders maintain four needed/written counter pairs in ordinary memory,
@@ -833,8 +837,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         break;
       }
       case Pm4Opcode::DispatchDirectInterleaved:
-        if (!submission.graphics_engine || context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-            context.arch != ROCJITSU_CODE_ARCH_RDNA4)
+        if (!submission.graphics_engine || context.arch == rocjitsu::IsaFamily::Invalid ||
+            context.arch != rocjitsu::IsaFamily::Rdna4)
           return fail("interleaved dispatch requires a GFX12 graphics queue");
         [[fallthrough]];
       case Pm4Opcode::DispatchDirect: {
@@ -847,8 +851,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         break;
       }
       case Pm4Opcode::DispatchIndirectInterleaved:
-        if (!submission.graphics_engine || context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-            context.arch != ROCJITSU_CODE_ARCH_RDNA4)
+        if (!submission.graphics_engine || context.arch == rocjitsu::IsaFamily::Invalid ||
+            context.arch != rocjitsu::IsaFamily::Rdna4)
           return fail("interleaved dispatch requires a GFX12 graphics queue");
         [[fallthrough]];
       case Pm4Opcode::DispatchIndirect: {

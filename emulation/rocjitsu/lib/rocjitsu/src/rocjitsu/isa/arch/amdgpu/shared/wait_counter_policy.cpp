@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
@@ -63,7 +64,7 @@ std::string_view wait_counter_name(WaitCounterKind counter, WaitcntModel model) 
 }
 
 [[nodiscard]] util::FailureOr<uint32_t>
-WaitCounterPolicy::maximum_dependency_wait(rj_code_arch_t arch, WaitCounterKind counter) {
+WaitCounterPolicy::maximum_dependency_wait(rocjitsu::IsaFamily arch, WaitCounterKind counter) {
   const auto model = waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
@@ -71,7 +72,7 @@ WaitCounterPolicy::maximum_dependency_wait(rj_code_arch_t arch, WaitCounterKind 
 }
 
 [[nodiscard]] util::FailureOr<std::optional<uint32_t>>
-WaitCounterPolicy::counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind counter) {
+WaitCounterPolicy::counter_no_wait_value(rocjitsu::IsaFamily arch, WaitCounterKind counter) {
   const auto model = waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
@@ -103,7 +104,7 @@ WaitCounterPolicy::counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind co
   case WaitCounterKind::X:
   case WaitCounterKind::Async:
   case WaitCounterKind::Tensor:
-    return arch == ROCJITSU_CODE_ARCH_CDNA5 ? std::optional<uint32_t>{0x3fu} : std::nullopt;
+    return arch == rocjitsu::IsaFamily::Cdna5 ? std::optional<uint32_t>{0x3fu} : std::nullopt;
   case WaitCounterKind::Km:
     return 0x1fu;
   case WaitCounterKind::Bvh:
@@ -117,14 +118,14 @@ WaitCounterPolicy::counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind co
   }
 }
 
-bool WaitCounterPolicy::is_gfx10_sopk_wait(const Instruction &inst, rj_code_arch_t arch) {
+bool WaitCounterPolicy::is_gfx10_sopk_wait(const Instruction &inst, rocjitsu::IsaFamily arch) {
   // Of the explicit GFX10 waits, only the SOPK forms have two source operands.
-  return (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) &&
+  return (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) &&
          inst.is_waitcnt() && inst.num_src_operands() == 2;
 }
 
 util::FailureOr<std::optional<WaitFields>>
-WaitCounterPolicy::executed_wait_fields(const Instruction &inst, rj_code_arch_t arch,
+WaitCounterPolicy::executed_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch,
                                         const WaitFields &executed_limits) {
   if (is_gfx10_sopk_wait(inst, arch))
     return executed_limits;
@@ -132,7 +133,7 @@ WaitCounterPolicy::executed_wait_fields(const Instruction &inst, rj_code_arch_t 
 }
 
 [[nodiscard]] util::FailureOr<std::optional<WaitFields>>
-WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch) {
+WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rocjitsu::IsaFamily arch) {
   const auto model = waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
@@ -155,7 +156,7 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
 
   const Operation operation = inst.amdgpu_operation();
   if (operation == Operation::S_WAIT_IDLE ||
-      (arch == ROCJITSU_CODE_ARCH_RDNA4 && operation == Operation::S_WAITCNT)) {
+      (arch == rocjitsu::IsaFamily::Rdna4 && operation == Operation::S_WAITCNT)) {
     // RDNA4's compatibility S_WAITCNT is S_WAIT_IDLE regardless of SIMM16.
     for (size_t counter_idx = 0; counter_idx < kWaitCounterCount; ++counter_idx) {
       const auto counter = static_cast<WaitCounterKind>(counter_idx);

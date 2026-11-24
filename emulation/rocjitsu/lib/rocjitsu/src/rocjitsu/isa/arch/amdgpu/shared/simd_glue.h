@@ -34,6 +34,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -93,9 +94,8 @@ constexpr uint32_t screen_partition_4se(uint32_t selector) {
 /// in <stdfloat>; rocjitsu is on C++20 so a local alias.
 using float32_t = float;
 
-/// Module-local override that disables SIMD fast paths. Initialized from
-/// RJ_FORCE_SCALAR at module load; test hooks may override the local copy.
-inline bool simd_force_scalar() { return util::force_scalar(); }
+/// Check the CU policy and the module-local RJ_FORCE_SCALAR override.
+inline bool simd_force_scalar(const Wavefront &wf) { return wf.cu().force_scalar(); }
 
 /// SIMD families exposed to test-only execution-path observation.
 enum class SimdFastPath : uint8_t {
@@ -159,8 +159,8 @@ inline bool dot2_src_needs_half_replication(uint32_t selector) {
 
 /// @brief Return whether floating CLAMP converts a NaN result to positive zero.
 /// @details GFX12 and gfx1250 always convert NaN. Earlier profiles require MODE.DX10_CLAMP.
-inline bool floating_clamp_nan_to_zero(rj_code_arch_t arch, bool dx10_clamp) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || dx10_clamp;
+inline bool floating_clamp_nan_to_zero(rocjitsu::IsaFamily arch, bool dx10_clamp) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || dx10_clamp;
 }
 
 /// @brief Return the floating NaN CLAMP policy for one wavefront.
@@ -447,28 +447,6 @@ inline util::native<uint64_t> simd_ashr_i64(util::native<uint64_t> v, util::nati
   });
 }
 
-inline util::native<int32_t> simd_cvt_i32_f32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<int32_t>(s, [](float32_t value) {
-    if (std::isnan(value))
-      return int32_t{0};
-    if (value >= 2147483648.0f)
-      return std::numeric_limits<int32_t>::max();
-    if (value < -2147483648.0f)
-      return std::numeric_limits<int32_t>::min();
-    return static_cast<int32_t>(value);
-  });
-}
-
-inline util::native<uint32_t> simd_cvt_u32_f32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
-    if (std::isnan(value) || value < 0.0f)
-      return uint32_t{0};
-    if (value >= 4294967296.0f)
-      return std::numeric_limits<uint32_t>::max();
-    return static_cast<uint32_t>(value);
-  });
-}
-
 /// @brief Convert f32 to a zero-extended packed i16 lane.
 /// @details NaN converts to zero and out-of-range values saturate before the
 /// signed 16-bit result is returned in the low half of a uint32_t.
@@ -562,10 +540,10 @@ inline util::native<uint32_t> select_vop3_true16_src(util::native<uint32_t> valu
 
 inline bool cdna_vop3_low_dst_zeroes_high(const Wavefront &wf) {
   switch (wf.cu().arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
   default:
     return false;
@@ -867,10 +845,6 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
 
 /// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
 /// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
-template <typename Op>
-inline Op conversion_f32_to_integer(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
-  return {abs, neg, input_denormal_policy<fp_format::F32>(wf)};
-}
 
 /// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
 inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
@@ -941,7 +915,6 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
                   util::native<uint32_t> src2, bool abs0, bool abs1, bool abs2, bool neg0,
                   bool neg1, bool neg2, uint32_t round_mode, uint32_t denorm_mode, uint32_t omod,
                   bool clamp, bool fp16_ovfl, bool clamp_nan_to_zero, bool quiet_nan) {
-  fp_mode::ScopedEnvironment nearest_environment(0);
   constexpr std::size_t W32 = util::native_width_v<uint32_t>;
   constexpr std::size_t W64 = util::native_width64;
   static_assert(W32 % W64 == 0);
@@ -1225,10 +1198,8 @@ inline util::native<float> pkf32_neg(util::native<float> v, bool do_neg) {
 /// `Scoped` false constructs nothing, leaving host-float functors' code generation
 /// and their host NaN selection untouched.
 ///
-/// VOPD in simd_coverage.h reaches the same policy without this helper: its two
-/// slots are separate computation regions, so each scopes its own chunk loop.
-/// The VOP3P packed-float and FMA MIX helpers keep their existing instruction-wide
-/// scopes, which predate this helper and still span view acquisition.
+/// The VOP3P packed-F32 direct-store paths keep their own instruction-wide scopes,
+/// placed after view acquisition for the same reason.
 template <bool Scoped, typename View, typename Body>
 [[nodiscard]] inline bool run_instruction_chunks(const View &dst, uint32_t round_mode, Body body) {
   if constexpr (Scoped) {
@@ -1256,8 +1227,8 @@ template <typename T, bool Scoped = false, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_simd(Inst &inst, Wavefront &wf, BinOp bin_op,
                                                        uint32_t round_mode = 0) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1303,7 +1274,7 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopd_integer_pair_simd(Wavefront &wf, const Slot &x,
                                                              const Slot &y) {
-  if (wf.wf_size() != 32 || simd_force_scalar())
+  if (wf.wf_size() != 32 || simd_force_scalar(wf))
     return false;
   const auto is_integer_slot = [](const Slot &slot) {
     if (slot.neg != 0 || slot.has_src2_operand || slot.src2_is_imm)
@@ -1403,31 +1374,6 @@ inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
 #endif
 }
 
-template <typename CmpOp>
-  requires(util::has_stdx_simd)
-inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint32_t> mask,
-                                   CmpOp cmp_op) {
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  constexpr std::size_t W = util::native_width64;
-  alignas(64) uint64_t sbuf[W];
-  alignas(64) uint32_t mbuf[W];
-  s.copy_to(sbuf, util::stdx::element_aligned);
-  mask.copy_to(mbuf, util::stdx::element_aligned);
-  uint64_t bits = 0;
-  for (std::size_t i = 0; i < W; ++i) {
-    using One64 = util::stdx::fixed_size_simd<uint64_t, 1>;
-    using One32 = util::stdx::fixed_size_simd<uint32_t, 1>;
-    const One64 sv(&sbuf[i], util::stdx::element_aligned);
-    const One32 mv(&mbuf[i], util::stdx::element_aligned);
-    if (cmp_op(sv, mv)[0])
-      bits |= uint64_t{1} << i;
-  }
-  return bits;
-#else
-  return util::simd_mask_to_bits(cmp_op(s, mask));
-#endif
-}
-
 /// VOP1 unary SIMD fast path. Reads `src0` as `Tin`, applies `un_op`
 /// (`native<Tin> -> native<Tout>`), masked-stores the result to `vdst` as
 /// `Tout`. `Tin` and `Tout` are both 32-bit lane types (possibly different,
@@ -1437,8 +1383,8 @@ inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop1_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<Tout>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1494,8 +1440,8 @@ template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
                                                              CarryOp carry_op,
                                                              WriteResult write_result) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -1550,8 +1496,8 @@ template <typename T, bool Scoped = false, typename Inst, typename FmaOp>
 [[nodiscard]] inline bool try_execute_ternary_vop2_simd(Inst &inst, Wavefront &wf,
                                                         util::native<T> k, FmaOp fma_op,
                                                         uint32_t round_mode = 0) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1593,8 +1539,8 @@ template <typename T, bool Scoped = false, typename Inst, typename FmaOp>
 [[nodiscard]] inline bool try_execute_ternary_vop2_acc_simd(Inst &inst, Wavefront &wf,
                                                             util::native<T> k, FmaOp fma_op,
                                                             uint32_t round_mode = 0) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1634,8 +1580,8 @@ template <typename T, bool Scoped = false, typename Inst, typename FmaOp>
 template <typename T, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop2_f64_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1676,8 +1622,8 @@ template <typename T = double, typename Inst, typename BinOp>
 [[nodiscard]] inline bool try_execute_binary_vop2_f64_simd(Inst &inst, Wavefront &wf,
                                                            BinOp bin_op) {
   static_assert(std::is_same_v<T, double> || std::is_same_v<T, uint64_t>);
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1721,8 +1667,8 @@ template <typename T = double, typename Inst, typename BinOp>
 template <typename T, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop1_f64_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1759,8 +1705,8 @@ template <typename T, typename Inst, typename UnOp>
 template <typename Tout, typename Inst, typename CvtOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cvt_f64_to_b32_simd(Inst &inst, Wavefront &wf, CvtOp cvt_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1796,8 +1742,8 @@ template <typename Tout, typename Inst, typename CvtOp>
 template <typename Tin, typename Inst, typename CvtOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cvt_b32_to_f64_simd(Inst &inst, Wavefront &wf, CvtOp cvt_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1880,8 +1826,8 @@ inline util::native<float> cvt_f32_f16_mode_simd(util::native<uint32_t> raw, con
 template <bool True16, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cvt_f32_f16_vop3_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -1926,8 +1872,8 @@ template <bool True16, typename Inst>
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cndmask_vop2_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -1968,8 +1914,8 @@ template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop2_simd(Inst &
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cndmask_vop3_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;
@@ -2022,8 +1968,8 @@ template <typename T, typename Inst, typename CmpOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,
                                                 WriteResult write_result) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2066,8 +2012,8 @@ template <typename T, typename Inst, typename CmpOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc64_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,
                                                   WriteResult write_result) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vsrc1.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2101,159 +2047,6 @@ template <typename T, typename Inst, typename CmpOp>
                                     [&wf](uint64_t value) { wf.set_vcc_mask(value); });
 }
 
-/// Mixed-width v_cmp_class_f64 SIMD fast path. v_cmp_class_f64 tests a 64-bit f64
-/// src0 against a 32-bit class mask in vsrc1, so unlike the relational VOPC64 path
-/// the two operands have different widths: src0 is read as `native<uint64_t>` raw
-/// bits through a 64-bit RegisterAccess operand view, and the per-lane
-/// mask as a `native_width64`-wide `narrow32<uint32_t>`. The functor
-/// classifies the f64 from its raw bits and tests the class against the mask,
-/// returning a `native_width64`-wide mask packed into VCC exactly like the other
-/// VOPC paths (active lanes only, inactive bits preserved). The classification is
-/// pure bit decode, bit-exact with the scalar body for every input.
-template <typename Inst, typename CmpOp, typename WriteResult>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vopc_class_f64_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,
-                                                          WriteResult write_result) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vsrc1.simd_capable())
-    return false;
-  constexpr std::size_t W = util::native_width64;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  uint64_t vcc = 0;
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand64(inst.src0, exec);
-  auto mask_src = regs.read_operand(inst.vsrc1, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto s = src0.template load_native<uint64_t>(base);
-    const auto mask = mask_src.template load_narrow<uint32_t>(base);
-    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
-    vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
-  }
-  write_result(vcc);
-  return true;
-}
-
-/// Unconstrained fallback for the f64 class path; see the binary-path note.
-template <typename Inst, typename CmpOp, typename WriteResult>
-[[nodiscard]] bool try_execute_vopc_class_f64_simd(Inst &, Wavefront &, CmpOp, WriteResult) {
-  return false;
-}
-
-template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_class_f64_simd(Inst &inst, Wavefront &wf, CmpOp op) {
-  return try_execute_vopc_class_f64_simd(inst, wf, op,
-                                         [&wf](uint64_t value) { wf.set_vcc_mask(value); });
-}
-
-/// VOP3 v_cmp_class_f16/f32 SIMD fast path (32-bit value). The VOP3 form differs
-/// from the VOPC form in three ways, all handled here: (1) the raw result is
-/// passed to a caller-provided architectural commit; (2) the per-instruction
-/// `abs`/`neg` source modifiers are applied
-/// to src0's selected raw bits before classification; `signmask` is passed per op
-/// (0x8000 for f16, 0x80000000 for f32, since both share a uint32 lane); (3) the
-/// class mask is read from `inst.src1`, not `inst.vsrc1`. In true16 mode, f16
-/// VOP3 inputs use op_sel to select each source half before the classify functor
-/// sees the value and mask.
-template <bool True16, typename Inst, typename CmpOp, typename WriteResult>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3_class_b32_simd(Inst &inst, Wavefront &wf,
-                                                          uint32_t signmask, CmpOp cmp_op,
-                                                          WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable())
-    return false;
-  using T = uint32_t;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const bool do_abs = (inst.inst_.abs & (1u << 0)) != 0;
-  const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
-  const bool true16 = True16 && signmask == 0x8000u;
-  const uint32_t opsel = true16 ? vop3_opsel(inst.inst_) : 0u;
-  const auto sm = util::broadcast<T>(signmask);
-  uint64_t vcc = 0;
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    auto a = src0.template load_native<T>(base);
-    auto b = src1.template load_native<T>(base);
-    if (true16) {
-      a = select_vop3_true16_src(a, opsel, 0);
-      b = select_vop3_true16_src(b, opsel, 1);
-    }
-    if (do_abs)
-      a = a & ~sm;
-    if (do_neg)
-      a = a ^ sm;
-    const uint64_t cmp_bits = util::simd_mask_to_bits(cmp_op(a, b));
-    vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
-  }
-  write_result(vcc);
-  return true;
-}
-
-/// Unconstrained fallback for the VOP3 b32 class path; see the binary-path note.
-template <bool True16, typename Inst, typename CmpOp, typename WriteResult>
-[[nodiscard]] bool try_execute_vop3_class_b32_simd(Inst &, Wavefront &, uint32_t, CmpOp,
-                                                   WriteResult) {
-  return false;
-}
-
-/// VOP3 v_cmp_class_f64 SIMD fast path. The 64-bit-value counterpart of
-/// try_execute_vop3_class_b32_simd: src0 is read as `native<uint64_t>` raw bits
-/// through a 64-bit RegisterAccess operand view and the class mask as a
-/// `narrow32<uint32_t>` from `inst.src1`. The packed result is passed to the
-/// generated wrapper's result writer, which owns the final SGPR/EXEC merge.
-/// abs/neg are applied to the 64-bit raw bits (signmask 0x8000000000000000),
-/// using the same classify functor as the VOPC f64 class path.
-template <typename Inst, typename CmpOp, typename WriteResult>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3_class_f64_simd(Inst &inst, Wavefront &wf,
-                                                          uint64_t signmask, CmpOp cmp_op,
-                                                          WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable())
-    return false;
-  constexpr std::size_t W = util::native_width64;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const bool do_abs = (inst.inst_.abs & (1u << 0)) != 0;
-  const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
-  const auto sm = util::broadcast64<uint64_t>(signmask);
-  uint64_t vcc = 0;
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand64(inst.src0, exec);
-  auto mask_src = regs.read_operand(inst.src1, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    auto s = src0.template load_native<uint64_t>(base);
-    if (do_abs)
-      s = s & ~sm;
-    if (do_neg)
-      s = s ^ sm;
-    const auto mask = mask_src.template load_narrow<uint32_t>(base);
-    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
-    vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
-  }
-  write_result(vcc);
-  return true;
-}
-
-/// Unconstrained fallback for the VOP3 f64 class path; see the binary-path note.
-template <typename Inst, typename CmpOp, typename WriteResult>
-[[nodiscard]] bool try_execute_vop3_class_f64_simd(Inst &, Wavefront &, uint64_t, CmpOp,
-                                                   WriteResult) {
-  return false;
-}
-
 /// VOP3 integer/bitwise binary SIMD fast path. Same shape as
 /// try_execute_binary_vop2_simd but reads the VOP3 operands `src0`/`src1`
 /// (instead of `src0`/`vsrc1`). The generated integer/bitwise VOP3 bodies apply
@@ -2267,8 +2060,8 @@ template <typename T, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
   if ((!floating_operation::applies_modifiers_v<BinOp> && inst.inst_.clamp != 0u) ||
-      simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+      simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2304,8 +2097,8 @@ template <typename T, typename Inst, typename BinOp>
 [[nodiscard]] inline bool try_execute_binary_vop3_true16_src_simd(Inst &inst, Wavefront &wf,
                                                                   BinOp bin_op) {
   static_assert(std::is_same_v<T, uint32_t>);
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2353,8 +2146,8 @@ try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op,
       (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
        inst.inst_.clamp != 0u))
     return false;
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2464,8 +2257,8 @@ template <fp_mode::Arithmetic operation, bool True16,
 template <typename T, bool Scoped = false, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_fp_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
@@ -2511,7 +2304,7 @@ template <typename T, bool True16 = false, typename Inst, typename CmpOp, typena
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc_vop3_int_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,
                                                          WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable())
+  if (simd_force_scalar(wf) || !inst.src0.simd_capable() || !inst.src1.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2552,7 +2345,7 @@ template <typename T, typename Inst, typename CmpOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc64_vop3_int_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op,
                                                            WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable())
+  if (simd_force_scalar(wf) || !inst.src0.simd_capable() || !inst.src1.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2591,8 +2384,8 @@ template <typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_fp64_simd(Inst &inst, Wavefront &wf,
                                                             BinOp bin_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = double;
   const uint32_t abs = inst.inst_.abs;
@@ -2633,8 +2426,8 @@ template <typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_raw64_simd(Inst &inst, Wavefront &wf,
                                                              BinOp bin_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint64_t;
   constexpr std::size_t W = util::native_width64;
@@ -2716,8 +2509,8 @@ template <typename Float, typename Inst, typename UnOp>
 template <typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop3_fp64_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = double;
   const uint32_t abs = inst.inst_.abs;
@@ -2768,8 +2561,8 @@ template <bool True16, typename Inst, typename UnOp>
 [[nodiscard]] inline bool
 try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool transcendental = false,
                                  input_denormal::Policy input_policy = {}) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   const uint32_t opsel = vop3_opsel(inst.inst_);
@@ -2849,8 +2642,9 @@ template <typename T, typename Inst, typename TernOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &inst, Wavefront &wf, TernOp tern_op) {
   if ((!floating_operation::applies_modifiers_v<TernOp> && inst.inst_.clamp != 0u) ||
-      simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+      simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2887,7 +2681,7 @@ template <typename T, typename Inst, typename TernOp>
 [[nodiscard]] inline bool try_execute_ternary_vop3_true16_src01_simd(Inst &inst, Wavefront &wf,
                                                                      TernOp tern_op) {
   static_assert(std::is_same_v<T, uint32_t>);
-  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
+  if (inst.inst_.clamp != 0u || simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
       !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
@@ -2927,8 +2721,9 @@ template <typename T, typename Inst, typename TernOp>
 [[nodiscard]] inline bool try_execute_ternary_vop3_true16_simd(Inst &inst, Wavefront &wf,
                                                                TernOp tern_op) {
   static_assert(std::is_same_v<T, uint32_t>);
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2978,8 +2773,9 @@ template <bool Scoped = false, typename Inst, typename FmaOp>
 [[nodiscard]] inline bool try_execute_ternary_vop3_fp_simd(Inst &inst, Wavefront &wf, FmaOp tern_op,
                                                            bool apply_omod = true,
                                                            bool force_output_flush = false) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   using T = float32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -3034,8 +2830,9 @@ template <bool True16, typename Inst, typename TernOp>
     Inst &inst, Wavefront &wf, TernOp tern_op,
     F16TernaryOutputOrder output_order = F16TernaryOutputOrder::ROUND_THEN_MODIFY,
     bool preserve_nan_payload = false) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
   const uint32_t opsel = vop3_opsel(inst.inst_);
@@ -3123,8 +2920,9 @@ try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, TernOp,
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_fma_vop3_fp64_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3169,8 +2967,9 @@ template <typename Inst, typename FmaOp>
 [[nodiscard]] inline bool try_execute_ternary_vop3_fp64_simd(Inst &inst, Wavefront &wf,
                                                              FmaOp tern_op,
                                                              bool apply_omod = true) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   using T = double;
   const uint32_t abs = inst.inst_.abs;
@@ -3219,8 +3018,8 @@ template <bool Scoped = false, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_fmac_vop3_fp_simd(Inst &inst, Wavefront &wf, FmaOp tern_op,
                                                         bool force_output_flush = false) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = float32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -3292,10 +3091,10 @@ template <bool Legacy, typename Inst> inline void execute_cdna2_mad_f32(Inst &in
   } else if (try_execute_fmac_vop3_fp_simd<true>(inst, wf, evaluate)) {
     return;
   }
-  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   auto output = output_modifier_policy<fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   RegisterAccess regs(wf);
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (uint64_t{1} << lane)))
       continue;
@@ -3349,8 +3148,8 @@ inline void execute_cdna2_mad_vop2(Inst &inst, Wavefront &wf) {
                                                     round)) {
     return;
   }
-  fp_mode::ScopedEnvironment environment(round);
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  fp_mode::ScopedEnvironment environment(round);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (uint64_t{1} << lane)))
       continue;
@@ -3369,8 +3168,8 @@ inline void execute_cdna2_mad_vop2(Inst &inst, Wavefront &wf) {
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_fmac_vop3_fp64_mode_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3411,8 +3210,8 @@ template <typename Inst>
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ldexp_vop3_raw64_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint64_t;
   constexpr std::size_t W = util::native_width64;
@@ -3453,8 +3252,8 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 [[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &inst, Wavefront &wf, UnOp un_op,
                                                          bool force_output_flush,
                                                          uint32_t round_mode) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
@@ -3515,8 +3314,9 @@ inline util::native<T> div_fixup_simd(util::native<T> p, util::native<T> d, util
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_div_fmas_f32_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   using T = float32_t;
   const uint32_t abs = inst.inst_.abs;
@@ -3563,8 +3363,9 @@ template <typename Inst> [[nodiscard]] bool try_execute_div_fmas_f32_simd(Inst &
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_div_fmas_f64_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   using T = double;
   const uint32_t abs = inst.inst_.abs;
@@ -3618,8 +3419,8 @@ template <typename Inst, typename ShiftOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_shift64_vop3_simd(Inst &inst, Wavefront &wf,
                                                         ShiftOp shift_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3650,8 +3451,9 @@ template <typename Inst, typename ShiftOp>
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_lshl_add_u64_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -3690,7 +3492,7 @@ template <typename Inst, typename MadOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_mad_wide64_vop3_result_simd(Inst &inst, Wavefront &wf,
                                                                   MadOp mad_op,
                                                                   WriteResult write_result) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+  if (simd_force_scalar(wf) || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if constexpr (requires { inst.inst_.clamp; }) {
@@ -3748,7 +3550,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_binary_vop3_co_result_simd(Inst &inst, Wavefront &wf,
                                                                  CarryOp carry_op,
                                                                  WriteResult write_result) {
-  if (simd_force_scalar() || inst.inst_.clamp || !inst.src0.simd_capable() ||
+  if (simd_force_scalar(wf) || inst.inst_.clamp || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
@@ -3799,7 +3601,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] inline bool try_execute_binary_vop3_cin_result_simd(Inst &inst, Wavefront &wf,
                                                                   CarryOp carry_op,
                                                                   WriteResult write_result) {
-  if (simd_force_scalar() || inst.inst_.clamp || !inst.src0.simd_capable() ||
+  if (simd_force_scalar(wf) || inst.inst_.clamp || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   using T = uint32_t;
@@ -3865,9 +3667,9 @@ template <typename Encoding> inline uint32_t packed_opsel_hi_2(const Encoding &e
 // gfx1100 and gfx1201 apply NEG_LO/NEG_HI to the selected integer source halves.
 // RDNA3.5 follows RDNA3; CDNA5 follows RDNA4 for their common packed operations.
 template <typename Encoding>
-inline uint32_t packed_integer_negations(rj_code_arch_t arch, const Encoding &enc) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+inline uint32_t packed_integer_negations(rocjitsu::IsaFamily arch, const Encoding &enc) {
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+      arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
     return static_cast<uint32_t>(enc.neg) | (static_cast<uint32_t>(enc.neg_hi) << 16);
   return 0;
 }
@@ -4010,14 +3812,13 @@ template <PackedFloatOp Op, bool Bf16, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_packed_float_simd(Inst &inst, Wavefront &wf) {
   constexpr bool Ternary = Op == PackedFloatOp::FMA;
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if constexpr (Ternary) {
     if (!inst.src2.simd_capable())
       return false;
   }
-  fp_mode::ScopedEnvironment nearest_environment(0);
   constexpr std::size_t W = util::native_width64;
   using U = util::narrow32<uint32_t>;
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -4077,8 +3878,8 @@ template <PackedFloatOp Op, bool Bf16, typename Inst>
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_binary_int_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if (inst.inst_.clamp)
     return false;
@@ -4119,8 +3920,9 @@ template <typename Inst, typename Op>
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   if (inst.inst_.clamp)
     return false;
@@ -4172,10 +3974,9 @@ template <typename Inst, typename Op>
 [[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf,
                                                                uint32_t op_sel, uint32_t op_sel_hi,
                                                                Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   auto flush_input = [&wf](util::native<float> value) {
     return (wf.fp_denorm_mode_f32() & 1u) ? value : denormal::flush_value(value);
   };
@@ -4201,11 +4002,13 @@ template <typename Inst, typename Op>
   const bool neg0_hi = inst.inst_.neg_hi & 1u;
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   RegisterAccess regs(wf);
-  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
-                                                                      : ScalarPairMode::Preserve;
+  const auto scalar_mode = wf.cu().arch() == rocjitsu::IsaFamily::Cdna5
+                               ? ScalarPairMode::Replicate32
+                               : ScalarPairMode::Preserve;
   auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
   auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
   auto dst = regs.write_operand_pair32(inst.vdst, exec);
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
@@ -4255,10 +4058,10 @@ template <typename Inst, typename Op>
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf,
                                                                 uint32_t op_sel, uint32_t op_sel_hi,
                                                                 uint32_t op_sel_hi_2, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
-  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   auto flush_input = [&wf](util::native<float> value) {
     return (wf.fp_denorm_mode_f32() & 1u) ? value : denormal::flush_value(value);
   };
@@ -4278,12 +4081,14 @@ template <typename Inst, typename Op>
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   const bool neg2_hi = inst.inst_.neg_hi & 4u;
   RegisterAccess regs(wf);
-  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
-                                                                      : ScalarPairMode::Preserve;
+  const auto scalar_mode = wf.cu().arch() == rocjitsu::IsaFamily::Cdna5
+                               ? ScalarPairMode::Replicate32
+                               : ScalarPairMode::Preserve;
   auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
   auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
   auto src2 = regs.read_operand_pair32(inst.src2, exec, scalar_mode);
   auto dst = regs.write_operand_pair32(inst.vdst, exec);
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
@@ -4333,8 +4138,8 @@ template <typename Inst, typename Op>
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_mov_b32_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if (inst.inst_.op_sel_hi != 3u)
     return false;
@@ -4389,8 +4194,9 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
   // Route integer accumulation policies through the exact scalar instruction body.
   if (isa_properties(wf.cu().arch()).float_dot_accumulation != FloatDotAccumulation::HostF32)
     return false;
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   if (packed_opsel(inst.inst_) != 0u || packed_opsel_hi(inst.inst_) != 3u)
     return false;
@@ -4641,63 +4447,6 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_VOPC64(T, ...)                                                           \
   if (::rocjitsu::amdgpu::try_execute_vopc64_simd<T>(inst, wf, __VA_ARGS__))                       \
-  return
-#endif
-
-/// Mixed-width v_cmp_class_f64 counterpart (64-bit value, 32-bit mask). No type
-/// argument; the class functor `(native<uint64_t> bits, narrow32<uint32_t> mask)
-/// -> mask` is variadic so its commas pass through as one token sequence.
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_VOPC_CLASS_F64(...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_VOPC_CLASS_F64(...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_vopc_class_f64_simd(inst, wf, __VA_ARGS__))                  \
-  return
-#endif
-
-/// VOP3 v_cmp_class_f16/f32 counterpart (32-bit value, abs/neg modifiers, src1
-/// mask, SGPR-pair dst). `SM` is the per-op sign-bit mask (0x8000 / 0x80000000);
-/// the class functor is variadic so its commas pass through.
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_B32(SM, ...)                                                  \
-  if (::rocjitsu::amdgpu::try_execute_vop3_class_b32_simd<false>(                                  \
-          inst, wf, SM, __VA_ARGS__, [&](uint64_t result) {                                        \
-            ::rocjitsu::amdgpu::write_explicit_lane_mask(inst.vdst, wf, result);                   \
-          }))                                                                                      \
-  return
-
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_B32_RESULT(WRITE_RESULT, SM, ...)                             \
-  if (::rocjitsu::amdgpu::try_execute_vop3_class_b32_simd<false>(inst, wf, SM, __VA_ARGS__,        \
-                                                                 WRITE_RESULT))                    \
-  return
-
-/// VOP3 f16 class counterpart for true16 OPSEL source/mask halves.
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32(SM, ...)                                           \
-  if (::rocjitsu::amdgpu::try_execute_vop3_class_b32_simd<true>(                                   \
-          inst, wf, SM, __VA_ARGS__, [&](uint64_t result) {                                        \
-            ::rocjitsu::amdgpu::write_explicit_lane_mask(inst.vdst, wf, result);                   \
-          }))                                                                                      \
-  return
-
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32_RESULT(WRITE_RESULT, SM, ...)                      \
-  if (::rocjitsu::amdgpu::try_execute_vop3_class_b32_simd<true>(inst, wf, SM, __VA_ARGS__,         \
-                                                                WRITE_RESULT))                     \
-  return
-
-/// VOP3 v_cmp_class_f64 counterpart (64-bit value). `SM` is the f64 sign-bit mask
-/// (0x8000000000000000); the class functor is variadic.
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(SM, ...) static_cast<void>(inst)
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64_RESULT(WRITE_RESULT, SM, ...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(SM, ...)                                                  \
-  if (::rocjitsu::amdgpu::try_execute_vop3_class_f64_simd(                                         \
-          inst, wf, SM, __VA_ARGS__, [&](uint64_t result) {                                        \
-            ::rocjitsu::amdgpu::write_explicit_lane_mask(inst.vdst, wf, result);                   \
-          }))                                                                                      \
-  return
-#define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64_RESULT(WRITE_RESULT, SM, ...)                             \
-  if (::rocjitsu::amdgpu::try_execute_vop3_class_f64_simd(inst, wf, SM, __VA_ARGS__,               \
-                                                          WRITE_RESULT))                           \
   return
 #endif
 

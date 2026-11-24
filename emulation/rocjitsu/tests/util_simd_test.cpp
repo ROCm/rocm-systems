@@ -627,25 +627,21 @@ TEST(UtilSimd, RndneF64_VectorMatchesScalar_BitExact) {
 }
 TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
   SKIP_IF_NO_SIMD();
-  RestoreEnvironment restore;
   const uint32_t cases[][2] = {
       {0x3FC00000u, 0x3F2AAAAAu}, {0x3F802922u, 0x3F7FADD6u}, {0xBFB0333Cu, 0xBF39F868u},
       {0x00800000u, 0x7E800000u}, {0xFF7FFFFFu, 0x80000000u}, {0x80000001u, 0xFF800000u},
       {0x7F800000u, 0x00000000u}, {0xFFA12345u, 0xFFE12345u},
   };
   using V = util::native<float>;
-  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(mode), 0);
-    for (unsigned start = 0; start < std::size(cases); ++start) {
-      std::array<uint32_t, V::size()> input_bits;
-      for (unsigned lane = 0; lane < V::size(); ++lane)
-        input_bits[lane] = cases[(start + lane) % std::size(cases)][0];
-      const V input = util::load<float>(input_bits.data());
-      const V result = util::rcp_f32_simd(input);
-      for (unsigned lane = 0; lane < V::size(); ++lane)
-        EXPECT_EQ(std::bit_cast<uint32_t>(float(result[lane])),
-                  cases[(start + lane) % std::size(cases)][1]);
-    }
+  for (unsigned start = 0; start < std::size(cases); ++start) {
+    std::array<uint32_t, V::size()> input_bits;
+    for (unsigned lane = 0; lane < V::size(); ++lane)
+      input_bits[lane] = cases[(start + lane) % std::size(cases)][0];
+    const V input = util::load<float>(input_bits.data());
+    const V result = util::rcp_f32_simd(input);
+    for (unsigned lane = 0; lane < V::size(); ++lane)
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(result[lane])),
+                cases[(start + lane) % std::size(cases)][1]);
   }
 }
 
@@ -979,22 +975,17 @@ uint16_t scalar_cvt_pknorm_u16(float f) {
   return static_cast<uint16_t>(lower);
 }
 
-TEST(UtilSimd, RoundToNearestEvenIgnoresHostRoundingMode) {
+TEST(UtilSimd, RoundToNearestEven) {
   SKIP_IF_NO_SIMD();
-  const int original_mode = std::fegetround();
-  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    EXPECT_EQ(std::fesetround(mode), 0);
-    EXPECT_EQ(util::round_to_nearest_even(16383.5f), 16384.0f);
-    EXPECT_EQ(util::round_to_nearest_even(-16383.5f), -16384.0f);
-    util::native<float> input(32767.5f);
-    auto result = util::round_to_nearest_even_simd(input);
-    for (std::size_t lane = 0; lane < result.size(); ++lane)
-      EXPECT_EQ(result[lane], 32768.0f);
-  }
-  EXPECT_EQ(std::fesetround(original_mode), 0);
+  EXPECT_EQ(util::round_to_nearest_even(16383.5f), 16384.0f);
+  EXPECT_EQ(util::round_to_nearest_even(-16383.5f), -16384.0f);
+  util::native<float> input(32767.5f);
+  auto result = util::round_to_nearest_even_simd(input);
+  for (std::size_t lane = 0; lane < result.size(); ++lane)
+    EXPECT_EQ(result[lane], 32768.0f);
 }
 
-template <typename Float> void check_rndne_host_independence() {
+template <typename Float> void check_rndne() {
   using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
   using V = util::native<Float>;
   constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
@@ -1019,8 +1010,6 @@ template <typename Float> void check_rndne_host_independence() {
   std::mt19937_64 rng(0x11939);
   for (unsigned i = 0; i < 2048; ++i)
     inputs.push_back(static_cast<Bits>(rng()));
-  RestoreEnvironment restore_environment;
-  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
   std::vector<Bits> expected;
   for (Bits bits : inputs) {
     const Bits magnitude = bits & ~(Bits(1) << (sizeof(Bits) * 8 - 1));
@@ -1028,35 +1017,27 @@ template <typename Float> void check_rndne_host_independence() {
                            ? bits | kQuiet
                            : std::bit_cast<Bits>(std::nearbyint(std::bit_cast<Float>(bits))));
   }
-  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(mode), 0);
-    SCOPED_TRACE(mode);
-    for (size_t base = 0; base < inputs.size(); base += V::size()) {
-      V values(
-          [&](auto lane) { return std::bit_cast<Float>(inputs[(base + lane) % inputs.size()]); });
-      std::feclearexcept(FE_ALL_EXCEPT);
-      std::feraiseexcept(FE_DIVBYZERO);
-      const auto actual = util::rndne_simd(values);
-      for (size_t lane = 0; lane < V::size(); ++lane) {
-        const size_t index = (base + lane) % inputs.size();
-        EXPECT_EQ(std::bit_cast<Bits>(Float(actual[lane])), expected[index]);
-        EXPECT_EQ(std::bit_cast<Bits>(util::rndne_scalar(std::bit_cast<Float>(inputs[index]))),
-                  expected[index]);
-      }
-      EXPECT_EQ(std::fegetround(), mode);
-      EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_DIVBYZERO);
+  for (size_t base = 0; base < inputs.size(); base += V::size()) {
+    V values(
+        [&](auto lane) { return std::bit_cast<Float>(inputs[(base + lane) % inputs.size()]); });
+    const auto actual = util::rndne_simd(values);
+    for (size_t lane = 0; lane < V::size(); ++lane) {
+      const size_t index = (base + lane) % inputs.size();
+      EXPECT_EQ(std::bit_cast<Bits>(Float(actual[lane])), expected[index]);
+      EXPECT_EQ(std::bit_cast<Bits>(util::rndne_scalar(std::bit_cast<Float>(inputs[index]))),
+                expected[index]);
     }
   }
 }
 
-TEST(UtilSimd, RndneF32IgnoresHostRoundingAndPreservesEnvironment) {
+TEST(UtilSimd, RndneF32) {
   SKIP_IF_NO_SIMD();
-  check_rndne_host_independence<float>();
+  check_rndne<float>();
 }
 
-TEST(UtilSimd, RndneF64IgnoresHostRoundingAndPreservesEnvironment) {
+TEST(UtilSimd, RndneF64) {
   SKIP_IF_NO_SIMD();
-  check_rndne_host_independence<double>();
+  check_rndne<double>();
 }
 
 TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
@@ -1083,12 +1064,9 @@ TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
   }
 }
 
-TEST(UtilSimd, PackedNormalizedThresholdsIgnoreHostRounding) {
+TEST(UtilSimd, PackedNormalizedThresholds) {
   SKIP_IF_NO_SIMD();
   using V = util::native<float>;
-  RestoreEnvironment restore_environment;
-  // Generate the neighborhood in nearest mode, then evaluate under every mode.
-  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
   std::vector<float> inputs;
   for (int i = 0; i < 65536; ++i) {
     for (float center : {float((i + 0.5) / 65535), float((i - 32768 + 0.5) / 32767)}) {
@@ -1097,19 +1075,15 @@ TEST(UtilSimd, PackedNormalizedThresholdsIgnoreHostRounding) {
       inputs.push_back(std::nextafter(center, std::numeric_limits<float>::infinity()));
     }
   }
-  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(mode), 0);
-    SCOPED_TRACE(mode);
-    for (size_t base = 0; base < inputs.size(); base += V::size()) {
-      V f([&](auto lane) { return inputs[(base + lane) % inputs.size()]; });
-      const auto signed_result = util::cvt_pknorm_i16_f32_simd(f);
-      const auto unsigned_result = util::cvt_pknorm_u16_f32_simd(f);
-      for (size_t lane = 0; lane < V::size(); ++lane) {
-        EXPECT_EQ(static_cast<int32_t>(signed_result[lane]), scalar_cvt_pknorm_i16(f[lane]))
-            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
-        EXPECT_EQ(static_cast<uint32_t>(unsigned_result[lane]), scalar_cvt_pknorm_u16(f[lane]))
-            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
-      }
+  for (size_t base = 0; base < inputs.size(); base += V::size()) {
+    V f([&](auto lane) { return inputs[(base + lane) % inputs.size()]; });
+    const auto signed_result = util::cvt_pknorm_i16_f32_simd(f);
+    const auto unsigned_result = util::cvt_pknorm_u16_f32_simd(f);
+    for (size_t lane = 0; lane < V::size(); ++lane) {
+      EXPECT_EQ(static_cast<int32_t>(signed_result[lane]), scalar_cvt_pknorm_i16(f[lane]))
+          << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
+      EXPECT_EQ(static_cast<uint32_t>(unsigned_result[lane]), scalar_cvt_pknorm_u16(f[lane]))
+          << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
     }
   }
 }

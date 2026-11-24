@@ -59,7 +59,7 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
   struct ncclComm* comm = inputs->comm;
   return kernelId == ncclSymkKernelId_AllGather_LL && ncclSymkIsGfx950(comm) &&
          !rcclSymkFuncForced(comm, inputs->func) && (valid_kmask >> ncclSymkKernelId_AllGather_ST & 1) &&
-         (inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) & 1) &&
+         inputs->tuningMask.test(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST) &&
          (inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg) &&
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
@@ -84,7 +84,7 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
     ncclSymkKernelMask bits;
     bool has(int id) const { return bits >> id & 1; }
   };
-  const AllowMask allowed{valid_kmask & ncclSymkKernelMask(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET)};
+  const AllowMask allowed{valid_kmask & rcclSymkMaskFromTuning(inputs->tuningMask)};
   int st = allowed.has(vecSt) ? vecSt : tmaSt;
   int hier = allowed.has(vecHier) ? vecHier : tmaHier;
   bool hasSt = allowed.has(st);

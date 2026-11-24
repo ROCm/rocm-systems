@@ -31,7 +31,7 @@ void execute_compare_with_exceptions(Wavefront &wave, const Operand &lhs, const 
       wave, active, lhs, rhs, false, selections,
       [&](const uint32_t *const *a, const uint32_t *const *b) {
         if constexpr (util::has_stdx_simd) {
-          if (active && !util::force_scalar()) {
+          if (active && !wave.cu().force_scalar()) {
             detail::record_simd_fast_path(SimdFastPath::VOPC_COMPARE_STATUS);
             using Lane = typename Fmt::Lane;
             constexpr auto width = util::native_width_v<Lane>;

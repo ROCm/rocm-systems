@@ -128,7 +128,7 @@ public:
 
         if(producer_thread.joinable()) producer_thread.join();
         if(consumer_thread.joinable()) consumer_thread.join();
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
         if(s->memory && s->memory->config.spm_sample_count_ptr)
         {
             printf("regRLC_SPM_SAMPLE_CNT = %08x\n",
@@ -591,7 +591,7 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
 
         trace_config.data_buffer_ptr  = memory->GetOutputBuf();
         trace_config.data_buffer_size = memory->GetOutputBufSize();
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
         try
         {
             memory->CreateSampleCountBuf();
