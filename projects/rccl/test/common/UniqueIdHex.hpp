@@ -5,11 +5,11 @@
  ************************************************************************/
 #pragma once
 
-#include <rccl/rccl.h>
-
 #include <cstddef>
 #include <cstdio>
 #include <string>
+
+#include <rccl/rccl.h>
 
 namespace RcclUnitTesting {
 

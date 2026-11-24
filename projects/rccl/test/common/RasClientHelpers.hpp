@@ -5,8 +5,6 @@
  ************************************************************************/
 #pragma once
 
-#include <gtest/gtest.h>
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -19,6 +17,8 @@
 #include <cstring>
 #include <string>
 #include <thread>
+
+#include <gtest/gtest.h>
 
 namespace RcclUnitTesting {
 
@@ -34,8 +34,9 @@ inline int pickFreePort() {
   socklen_t len = sizeof(addr);
   int port = 0;
   if (::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0 &&
-      ::getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) == 0)
+      ::getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) == 0) {
     port = ntohs(addr.sin_port);
+  }
   ::close(s);
   return port;
 }
@@ -79,9 +80,10 @@ inline std::string rasRequest(int port, const std::string& command, const std::s
   std::string body;
   ssize_t n;
   while ((n = ::recv(sock, buf, sizeof(buf), 0)) > 0) body.append(buf, n);
-  if (n < 0)
+  if (n < 0) {
     ADD_FAILURE() << "RAS client request \"" << command << "\": recv failed before the server closed the "
                   << "connection (" << strerror(errno) << ", timeout " << recvTimeout.count() << " s)";
+  }
   ::close(sock);
   return body;
 }
