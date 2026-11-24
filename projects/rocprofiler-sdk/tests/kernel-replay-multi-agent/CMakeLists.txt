@@ -64,7 +64,7 @@ endfunction()
 add_multi_agent_test(test-kernel-replay-multi-agent BUFFER_MIB 256 LEAVE_FREE_MIB 0
                      TIMEOUT 120)
 add_multi_agent_test(
-    test-kernel-replay-multi-agent-host-only
+    test-kernel-replay-multi-agent-host-pinned-only
     BUFFER_MIB
     256
     LEAVE_FREE_MIB
@@ -72,7 +72,7 @@ add_multi_agent_test(
     TIMEOUT
     120
     ENVIRONMENT
-    "KR_SNAPSHOT=host")
+    "KR_SNAPSHOT=host-pinned")
 add_multi_agent_test(
     test-kernel-replay-multi-agent-device-only
     BUFFER_MIB

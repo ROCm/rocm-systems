@@ -71,7 +71,9 @@ rocprofiler_test_c_replay_options_size(void);
 size_t
 rocprofiler_test_c_replay_options_offset_flags(void);
 int
-rocprofiler_test_c_replay_option_snapshot_host(void);
+rocprofiler_test_c_replay_option_snapshot_host_pinned(void);
+int
+rocprofiler_test_c_replay_option_snapshot_disk(void);
 int
 rocprofiler_test_c_replay_operation_last(void);
 int
@@ -260,7 +262,9 @@ TEST(kernel_replay_abi, option_flag_values_are_stable)
 {
     EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_NONE), 0);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE), 1 << 0);
-    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST), 1 << 1);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED), 1 << 1);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE), 1 << 2);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK), 1 << 3);
 }
 
 // New operations must be appended before LAST, never inserted among the existing ones. If this
@@ -412,8 +416,10 @@ TEST(kernel_replay_abi, c_and_cxx_agree_on_the_options_struct)
               sizeof(rocprofiler_kernel_replay_options_t));
     EXPECT_EQ(rocprofiler_test_c_replay_options_offset_flags(),
               offsetof(rocprofiler_kernel_replay_options_t, flags));
-    EXPECT_EQ(rocprofiler_test_c_replay_option_snapshot_host(),
-              static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST));
+    EXPECT_EQ(rocprofiler_test_c_replay_option_snapshot_host_pinned(),
+              static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED));
+    EXPECT_EQ(rocprofiler_test_c_replay_option_snapshot_disk(),
+              static_cast<int>(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK));
 }
 
 TEST(kernel_replay_abi, c_and_cxx_agree_on_enum_values)

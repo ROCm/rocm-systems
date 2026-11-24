@@ -62,8 +62,13 @@ struct replay_plan_t
     memory_snapshot::capture_mode snapshot_mode = memory_snapshot::capture_mode::automatic;
 };
 
+// Why the SDK cannot honor a tool's replay options, or nullptr when it can: a size that does not
+// cover flags, an unknown flag, or a flag naming memory the SDK cannot keep a snapshot in yet.
+const char*
+options_rejection(const rocprofiler_kernel_replay_options_t* options);
+
 // The snapshot's capture mode for a tool's replay options, or nullopt when the SDK cannot honor
-// them: a size that does not cover flags, or an unknown flag.
+// them.
 std::optional<memory_snapshot::capture_mode>
 capture_mode_for(const rocprofiler_kernel_replay_options_t* options);
 

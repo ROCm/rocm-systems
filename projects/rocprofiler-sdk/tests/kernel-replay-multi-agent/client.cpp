@@ -26,9 +26,10 @@
  * @brief Client tool for the multi-agent kernel replay test.
  *
  * LD_PRELOAD-ed alongside main.cpp. It replays every dispatch with workgroup size 192, the
- * workload's accumulate kernel, with three passes on whichever GPU it runs. KR_SNAPSHOT=host or
- * KR_SNAPSHOT=device limits where the SDK keeps the snapshot. At finalize it checks that two GPUs
- * each replayed KR_LAUNCHES dispatches, every one with three passes and one CONFIG PHASE_EXIT.
+ * workload's accumulate kernel, with three passes on whichever GPU it runs. KR_SNAPSHOT=host-pinned
+ * or KR_SNAPSHOT=device limits where the SDK keeps the snapshot. At finalize it checks that two
+ * GPUs each replayed KR_LAUNCHES dispatches, every one with three passes and one CONFIG
+ * PHASE_EXIT.
  */
 
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
@@ -78,8 +79,8 @@ snapshot_options()
 {
     static const auto options = []() {
         auto flags = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_NONE};
-        if(placement_is("host"))
-            flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST;
+        if(placement_is("host-pinned"))
+            flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
         else if(placement_is("device"))
             flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE;
         return rocprofiler_kernel_replay_options_t{sizeof(rocprofiler_kernel_replay_options_t),

@@ -29,6 +29,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 
 namespace kr   = rocprofiler::kernel_replay;
 namespace msnp = rocprofiler::kernel_replay::memory_snapshot;
@@ -41,8 +42,10 @@ options(uint64_t flags)
     return rocprofiler_kernel_replay_options_t{sizeof(rocprofiler_kernel_replay_options_t), flags};
 }
 
-constexpr auto device_flag = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE};
-constexpr auto host_flag   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST};
+constexpr auto device_flag   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE};
+constexpr auto pinned_flag   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED};
+constexpr auto pageable_flag = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE};
+constexpr auto disk_flag     = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK};
 }  // namespace
 
 TEST(kernel_replay_options, no_options_keep_the_default_placement)
@@ -56,28 +59,58 @@ TEST(kernel_replay_options, no_options_keep_the_default_placement)
 TEST(kernel_replay_options, one_snapshot_flag_forces_that_memory)
 {
     const auto device = options(device_flag);
-    const auto host   = options(host_flag);
+    const auto pinned = options(pinned_flag);
     EXPECT_EQ(kr::capture_mode_for(&device), msnp::capture_mode::force_gpu);
-    EXPECT_EQ(kr::capture_mode_for(&host), msnp::capture_mode::force_pinned);
+    EXPECT_EQ(kr::capture_mode_for(&pinned), msnp::capture_mode::force_pinned);
 }
 
 TEST(kernel_replay_options, both_snapshot_flags_leave_the_choice_to_the_sdk)
 {
-    const auto both = options(device_flag | host_flag);
+    const auto both = options(device_flag | pinned_flag);
     EXPECT_EQ(kr::capture_mode_for(&both), msnp::capture_mode::automatic);
+}
+
+TEST(kernel_replay_options, honored_options_have_no_rejection)
+{
+    EXPECT_EQ(kr::options_rejection(nullptr), nullptr);
+    for(auto flags : {uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_NONE},
+                      device_flag,
+                      pinned_flag,
+                      device_flag | pinned_flag})
+    {
+        const auto honored = options(flags);
+        EXPECT_EQ(kr::options_rejection(&honored), nullptr) << "flags=" << flags;
+    }
 }
 
 TEST(kernel_replay_options, an_unknown_flag_is_rejected)
 {
-    const auto unknown = options(uint64_t{1} << 2);
-    const auto mixed   = options(host_flag | (uint64_t{1} << 40));
+    const auto unknown = options(uint64_t{1} << 4);
+    const auto mixed   = options(pinned_flag | (uint64_t{1} << 40));
     EXPECT_FALSE(kr::capture_mode_for(&unknown).has_value());
     EXPECT_FALSE(kr::capture_mode_for(&mixed).has_value());
+    EXPECT_NE(kr::options_rejection(&unknown), nullptr);
+}
+
+TEST(kernel_replay_options, pageable_and_disk_are_not_supported_yet)
+{
+    const auto unknown = options(uint64_t{1} << 4);
+    for(auto flags :
+        {pageable_flag, disk_flag, device_flag | disk_flag, pinned_flag | pageable_flag})
+    {
+        const auto unsupported = options(flags);
+        EXPECT_FALSE(kr::capture_mode_for(&unsupported).has_value()) << "flags=" << flags;
+
+        const auto* reason = kr::options_rejection(&unsupported);
+        ASSERT_NE(reason, nullptr) << "flags=" << flags;
+        EXPECT_NE(std::string{reason}, std::string{kr::options_rejection(&unknown)})
+            << "flags=" << flags;
+    }
 }
 
 TEST(kernel_replay_options, a_size_that_does_not_cover_flags_is_rejected)
 {
-    auto unsized = options(host_flag);
+    auto unsized = options(pinned_flag);
     unsized.size = 0;
     EXPECT_FALSE(kr::capture_mode_for(&unsized).has_value());
 
@@ -87,7 +120,7 @@ TEST(kernel_replay_options, a_size_that_does_not_cover_flags_is_rejected)
 
 TEST(kernel_replay_options, a_larger_size_from_a_newer_tool_is_accepted)
 {
-    auto newer = options(host_flag);
+    auto newer = options(pinned_flag);
     newer.size = sizeof(rocprofiler_kernel_replay_options_t) + sizeof(uint64_t);
     EXPECT_EQ(kr::capture_mode_for(&newer), msnp::capture_mode::force_pinned);
 }

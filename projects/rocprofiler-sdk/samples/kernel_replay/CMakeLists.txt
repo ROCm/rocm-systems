@@ -141,8 +141,8 @@ add_kernel_replay_sample(kernel-replay-basic-hash-once basic_client.cpp ENVIRONM
                          "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")
 add_kernel_replay_sample(kernel-replay-basic-hash-every-pass basic_client.cpp ENVIRONMENT
                          "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-every-pass")
-add_kernel_replay_sample(kernel-replay-basic-host-snapshot basic_client.cpp ENVIRONMENT
-                         "KR_SNAPSHOT=host")
+add_kernel_replay_sample(kernel-replay-basic-host-pinned-snapshot basic_client.cpp
+                         ENVIRONMENT "KR_SNAPSHOT=host-pinned")
 add_kernel_replay_sample(kernel-replay-basic-device-snapshot basic_client.cpp ENVIRONMENT
                          "KR_SNAPSHOT=device")
 add_kernel_replay_sample(kernel-replay-basic-unknown-option basic_client.cpp ENVIRONMENT

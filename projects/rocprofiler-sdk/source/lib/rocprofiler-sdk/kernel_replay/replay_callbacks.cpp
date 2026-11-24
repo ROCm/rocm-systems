@@ -78,6 +78,11 @@ context_has_kernel_replay(const tracing::context_t* ctx)
             ctx->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
                                           ROCPROFILER_KERNEL_REPLAY_CONFIG));
 }
+
+constexpr auto device_flag   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE};
+constexpr auto pinned_flag   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED};
+constexpr auto pageable_flag = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE};
+constexpr auto disk_flag     = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK};
 }  // namespace
 
 void
@@ -191,22 +196,30 @@ make_dispatch_info(const hsa::Queue&              queue,
     return info;
 }
 
+const char*
+options_rejection(const rocprofiler_kernel_replay_options_t* options)
+{
+    if(options == nullptr) return nullptr;
+
+    constexpr auto flags_end = offsetof(rocprofiler_kernel_replay_options_t, flags) +
+                               sizeof(rocprofiler_kernel_replay_options_t::flags);
+    if(options->size < flags_end) return "its size does not cover flags";
+
+    constexpr auto known_flags = device_flag | pinned_flag | pageable_flag | disk_flag;
+    if((options->flags & ~known_flags) != 0) return "it has an unknown flag";
+    if((options->flags & (pageable_flag | disk_flag)) != 0)
+        return "this SDK cannot keep a snapshot in pageable host memory or on disk yet";
+    return nullptr;
+}
+
 std::optional<memory_snapshot::capture_mode>
 capture_mode_for(const rocprofiler_kernel_replay_options_t* options)
 {
     using memory_snapshot::capture_mode;
+    if(options_rejection(options) != nullptr) return std::nullopt;
     if(options == nullptr) return capture_mode::automatic;
-
-    constexpr auto flags_end = offsetof(rocprofiler_kernel_replay_options_t, flags) +
-                               sizeof(rocprofiler_kernel_replay_options_t::flags);
-    if(options->size < flags_end) return std::nullopt;
-
-    constexpr auto device = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE};
-    constexpr auto host   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST};
-    if((options->flags & ~(device | host)) != 0) return std::nullopt;
-
-    if(options->flags == device) return capture_mode::force_gpu;
-    if(options->flags == host) return capture_mode::force_pinned;
+    if(options->flags == device_flag) return capture_mode::force_gpu;
+    if(options->flags == pinned_flag) return capture_mode::force_pinned;
     return capture_mode::automatic;
 }
 
@@ -282,9 +295,9 @@ execute_config_phase_enter(const hsa::Queue&              queue,
         }
         else
         {
-            LOG_FIRST_N(WARNING, 1) << "kernel replay: replay_options has a size that does not "
-                                       "cover flags or an unknown flag; dispatch will not be "
-                                       "replayed";
+            LOG_FIRST_N(WARNING, 1) << "kernel replay: cannot honor replay_options, because "
+                                    << options_rejection(plan.config_data.replay_options)
+                                    << "; dispatch will not be replayed";
             plan.replay_requested = false;
         }
     }

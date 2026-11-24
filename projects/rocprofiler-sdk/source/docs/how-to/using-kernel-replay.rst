@@ -226,13 +226,14 @@ Choose where the snapshot is kept
 
 Keeping the snapshot in device memory makes restores fastest, but an application that allocates
 device memory as it runs can then run out of it. A tool that knows this can keep the snapshot in
-host memory instead, by setting ``replay_options`` during ``CONFIG`` ``PHASE_ENTER``:
+pinned host memory instead, by setting ``replay_options`` during ``CONFIG`` ``PHASE_ENTER``:
 
 .. code-block:: cpp
 
    // Static, because the SDK reads the options after CONFIG PHASE_ENTER returns.
-   static const auto host_only = rocprofiler_kernel_replay_options_t{
-       sizeof(rocprofiler_kernel_replay_options_t), ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST};
+   static const auto pinned_host_only =
+       rocprofiler_kernel_replay_options_t{sizeof(rocprofiler_kernel_replay_options_t),
+                                           ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED};
 
    if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
@@ -242,7 +243,7 @@ host memory instead, by setting ``replay_options`` during ``CONFIG`` ``PHASE_ENT
        if(payload->size >= offsetof(rocprofiler_callback_tracing_kernel_replay_data_t,
                                     replay_options) +
                                sizeof(payload->replay_options))
-           payload->replay_options = &host_only;
+           payload->replay_options = &pinned_host_only;
    }
 
 .. list-table::
@@ -251,27 +252,33 @@ host memory instead, by setting ``replay_options`` during ``CONFIG`` ``PHASE_ENT
 
    * - ``flags``
      - Snapshot
-   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_NONE``, or both snapshot flags
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_NONE``, or both ``SNAPSHOT_DEVICE`` and
+       ``SNAPSHOT_HOST_PINNED``
      - The SDK chooses: device memory first, pinned host memory for what does not fit, using at
        most half of the device's memory and half of the host's available memory. It keeps that
        memory for later replays.
-   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST``
-     - Host memory only, as much as the snapshot needs, so restores are usually slower. The
-       restore kernels still keep a work list in device memory between replays, about 0.2% of the
-       snapshot's size and at least 2 MiB.
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED``
+     - Pinned host memory only, as much as the snapshot needs, so restores are usually slower.
+       Pinned memory cannot be swapped out, so a large snapshot leaves the rest of the system that
+       much less memory. The restore kernels still keep a work list in device memory between
+       replays, about 0.2% of the snapshot's size and at least 2 MiB.
    * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE``
      - Device memory only, as much as the snapshot needs, leaving the application 5% of what is
        free (memory kept from earlier replays counts as free) for the replayed kernel's scratch.
        This needs the SDK's copy kernels for the GPU. They are built for the GPUs in
        ``GPU_TARGETS`` that the SDK's compiler supports, or for every GPU it supports from gfx8
        on when ``GPU_TARGETS`` is empty, and installed in ``share/rocprofiler-sdk/kernel-replay``.
+   * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PAGEABLE`` or
+       ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK``
+     - Not supported yet. Options that set either one are not honored.
 
 With one flag, the SDK applies no limit of its own beyond that reserve, so the tool decides whether
 the application can spare the memory. The SDK frees that memory when the replay ends, including
 memory it kept there from earlier replays, so a tool that switches flags between dispatches makes
-it allocate again. A host-only replay also frees device memory kept by earlier replays. If the
-snapshot does not fit in the memory allowed, or the SDK cannot honor the options (an unknown flag,
-or a ``size`` that does not cover ``flags``), it warns and the dispatch runs once without replay.
+it allocate again. A replay limited to pinned host memory also frees device memory kept by earlier
+replays. If the snapshot does not fit in the memory allowed, or the SDK cannot honor the options
+(an unknown flag, a flag for memory it cannot use yet, or a ``size`` that does not cover
+``flags``), it warns and the dispatch runs once without replay.
 ``samples/kernel_replay/basic_client.cpp`` sets the options from ``KR_SNAPSHOT``.
 
 .. _kernel-replay-limitations:

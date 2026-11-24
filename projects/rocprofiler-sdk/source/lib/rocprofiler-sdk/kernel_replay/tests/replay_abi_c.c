@@ -119,9 +119,15 @@ rocprofiler_test_c_replay_options_offset_flags(void)
 }
 
 int
-rocprofiler_test_c_replay_option_snapshot_host(void)
+rocprofiler_test_c_replay_option_snapshot_host_pinned(void)
 {
-    return (int) ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST;
+    return (int) ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
+}
+
+int
+rocprofiler_test_c_replay_option_snapshot_disk(void)
+{
+    return (int) ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK;
 }
 
 // Enum values as C sees them. An enum whose underlying type differs between the languages would
