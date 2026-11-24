@@ -26,7 +26,6 @@
 #endif
 
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <regex>
@@ -42,17 +41,6 @@ inline bool envCtaPolicyIsZero()
 {
     const int policy = ncclGetEnvCtaPolicy();
     return policy != NCCL_CONFIG_UNDEF_INT && (policy & NCCL_CTA_POLICY_ZERO) != 0;
-}
-
-// CAST jobs set NCCL_NET=IB-CAST (or ib-cast). Classic IB must not take this arm.
-inline bool envNetIsIbCast()
-{
-    const char* net = std::getenv("NCCL_NET");
-    if (net == nullptr || net[0] == '\0') return false;
-    std::string s(net);
-    for (char& c : s)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return s == "IB-CAST";
 }
 
 // Env / driver gates are process-wide, so a rank-local skip is safe. Alloc
@@ -350,25 +338,39 @@ protected:
     }
 
     // Data Initialization and Verification
+    // The fill depends on the element index with an odd period, so data read from a wrong segment or shard
+    // offset (a power of two) differs. Sums stay exact in bf16 up to 16 ranks.
+    static constexpr size_t kFillPeriod = 7;
+    static float fillValue(int rank, size_t i)
+    {
+        return static_cast<float>(rank + 1) + static_cast<float>(i % kFillPeriod);
+    }
+    static float reducedValue(int nRanks, size_t i)
+    {
+        return static_cast<float>(nRanks * (nRanks + 1) / 2) + static_cast<float>(nRanks) * (i % kFillPeriod);
+    }
+
     template<typename T>
     void initSendBuffer(void* buffer, size_t count, int rank)
     {
         ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(buffer, count,
-            [rank](size_t) { return static_cast<T>(static_cast<float>(rank + 1)); }));
+            [rank](size_t i) { return static_cast<T>(fillValue(rank, i)); }));
     }
 
     template<typename T>
     bool verifyAllReduceResult(void* buffer, size_t count, int nRanks)
     {
-        T expected = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
-        return verifyBufferData<T>(buffer, count, [expected](size_t) { return expected; });
+        return verifyBufferData<T>(buffer, count,
+            [nRanks](size_t i) { return static_cast<T>(reducedValue(nRanks, i)); });
     }
 
+    // rank's shard starts rank * count elements into each send buffer.
     template<typename T>
-    bool verifyReduceScatterResult(void* buffer, size_t count, int nRanks)
+    bool verifyReduceScatterResult(void* buffer, size_t count, int nRanks, int rank)
     {
-        T expected = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
-        return verifyBufferData<T>(buffer, count, [expected](size_t) { return expected; });
+        const size_t shard = static_cast<size_t>(rank) * count;
+        return verifyBufferData<T>(buffer, count,
+            [nRanks, shard](size_t i) { return static_cast<T>(reducedValue(nRanks, shard + i)); });
     }
 
     template<typename T>
@@ -377,7 +379,19 @@ protected:
         return verifyBufferData<T>(buffer, countPerRank * nRanks,
             [countPerRank](size_t i) {
                 int srcRank = i / countPerRank;
-                return static_cast<T>(static_cast<float>(srcRank + 1));
+                return static_cast<T>(fillValue(srcRank, i % countPerRank));
+            });
+    }
+
+    // Block s holds rank's block of rank s's send buffer.
+    template<typename T>
+    bool verifyAlltoAllResult(void* buffer, size_t countPerRank, int nRanks, int rank)
+    {
+        const size_t block = static_cast<size_t>(rank) * countPerRank;
+        return verifyBufferData<T>(buffer, countPerRank * nRanks,
+            [countPerRank, block](size_t i) {
+                int srcRank = i / countPerRank;
+                return static_cast<T>(fillValue(srcRank, block + i % countPerRank));
             });
     }
 

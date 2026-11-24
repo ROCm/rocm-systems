@@ -539,6 +539,19 @@ inline bool mpiAllRanks(bool local)
 #define ASSERT_MPI_FALSE(condition) ASSERT_MPI_TRUE(!(condition))
 
 /**
+ * @def ASSERT_MPI_HELPER
+ * @brief ASSERT_NO_FATAL_FAILURE for a helper that uses ASSERT_MPI_*. The ranks that only skipped return here
+ *        too, instead of entering the next collective without the failing rank.
+ */
+#define ASSERT_MPI_HELPER(statement)                                                         \
+    do                                                                                        \
+    {                                                                                         \
+        ASSERT_NO_FATAL_FAILURE(statement);                                                   \
+        if(::testing::Test::IsSkipped()) return;                                              \
+    }                                                                                         \
+    while(0)
+
+/**
  * @def ASSERT_MPI_EQ
  * @brief MPI-aware version of ASSERT_EQ
  *

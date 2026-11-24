@@ -25,30 +25,6 @@
  *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=GraphCapture_*
  */
 
-#include "DeviceBufferHelpers.hpp"
-#include "HybridVmmHelpers.hpp"
-#include "MPITestBase.hpp"
-#include "MPIHelpers.hpp"
-#include "ResourceGuards.hpp"
-#include "TestChecks.hpp"
-#include "CeAllReduceTestHelpers.hpp"
-#include "ce_coll.h"
-#include "comm.h"
-#include "dev_runtime_internal.h"
-#include "rccl_common.h"
-#include "register.h"
-#include "register_inline.h"
-#ifdef ENABLE_FAULT_INJECTION
-#include "ce_fault_inject.h"
-#endif
-#include <algorithm>
-#include <cctype>
-#include <cstdlib>
-#include <regex>
-#include <sstream>
-#include <string>
-#include <vector>
-
 #ifdef MPI_TESTS_ENABLED
 
 #include "RegistrationTestSupport.hpp"
@@ -451,7 +427,7 @@ TEST_F(UBR_ReduceScatter, OutOfPlace_MultiNode)
     ASSERT_MPI_EQ(ncclSuccess, result);
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-    ASSERT_TRUE(verifyReduceScatterResult<T>(recvInfo.buffer, countPerRank, nRanks));
+    ASSERT_TRUE(verifyReduceScatterResult<T>(recvInfo.buffer, countPerRank, nRanks, rank));
 }
 
 class UBR_Broadcast : public RegistrationTestBase {};
@@ -1629,7 +1605,7 @@ protected:
                 resultValid = verifyAllGatherResult<T>(recvBuf, count, nRanks);
                 break;
             case Collective::ReduceScatter:
-                resultValid = verifyReduceScatterResult<T>(recvBuf, count, nRanks);
+                resultValid = verifyReduceScatterResult<T>(recvBuf, count, nRanks, rank);
                 break;
             }
             ASSERT_MPI_TRUE(resultValid);

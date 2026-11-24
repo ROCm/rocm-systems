@@ -3451,6 +3451,36 @@
           "description": "Interleaved CE AllGather and SM AllReduce on same comm; validates no state corruption",
           "test_filter": "CeMPI_Stress.InterleavedCEAllGatherAndSMAllReduce",
           "timeout": 300
+        },
+        {
+          "name": "CE_MultiSegment_SingleNode",
+          "description": "GPU multi-segment AllGather, AlltoAll, AlltoAllv, Scatter, and Gather take single-node CE",
+          "test_filter": "CeMPI_MultiSegment.SingleNodeAllGather:CeMPI_MultiSegment.SingleNodeAlltoAll:CeMPI_MultiSegment.SingleNodeAlltoAllv:CeMPI_MultiSegment.SingleNodeScatter:CeMPI_MultiSegment.SingleNodeGather",
+          "env_variables": {
+            "NCCL_WIN_ENABLE": "1",
+            "NCCL_MULTI_SEGMENT_REGISTER": "1"
+          }
+        },
+        {
+          "name": "CE_MultiSegment_SingleNode_AllReduce",
+          "description": "GPU multi-segment AllReduce takes single-node CE. Separate process because RCCL_CE_ALLREDUCE is cached on first read.",
+          "test_filter": "CeMPI_MultiSegment.SingleNodeAllReduce",
+          "env_variables": {
+            "NCCL_WIN_ENABLE": "1",
+            "NCCL_MULTI_SEGMENT_REGISTER": "1",
+            "RCCL_CE_ALLREDUCE": "1"
+          }
+        },
+        {
+          "name": "CE_MultiSegment_Elastic_Gating",
+          "description": "CE selects the GPU multi-segment window and rejects the elastic window",
+          "test_filter": "UBR_MultiSegment.CE_Elastic_Gating",
+          "env_variables": {
+            "NCCL_WIN_ENABLE": "1",
+            "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+            "NCCL_MULTI_SEGMENT_REGISTER": "1",
+            "RCCL_CE_ALLREDUCE": "1"
+          }
         }
       ]
     },
@@ -3693,6 +3723,113 @@
         }
       ]
     },
+    "ubr_multisegment_comprehensive": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_NET": "IB"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_All_Core",
+          "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter:UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRange*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+        },
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse",
+          "description": "Register once, AllReduce twice - multi-segment registration reuse (IPC or NET)",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Elastic_Gating",
+          "description": "Host-backed symmetric window rejected when NCCL_ELASTIC_BUFFER_REGISTER=0",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Generic_IPC",
+          "description": "Single-node 8-segment AllReduce. IPC cache must record numSegments 8 on every peer.",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa",
+          "description": "Single-node symmetric AllReduce, AllGather, and ReduceScatter on GPU multi-segment windows",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter",
+          "env_variables": {
+            "NCCL_DEBUG_SUBSYS": "REG,TUNING",
+            "RCCL_CE_ALLREDUCE": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
+          "description": "Single-node elastic AllReduce, AllGather, AlltoAll, and ReduceScatter on the normal algorithm",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter",
+          "env_variables": {
+            "NCCL_DEBUG_SUBSYS": "REG,TUNING"
+          }
+        }
+      ]
+    },
+    "ubr_multisegment_hybrid_singlenode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_HYBRID_VMM_REQUIRE": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Hybrid_SingleNode_Registration",
+          "description": "Four ranks on one node. Hybrid window registers and LSA reuses imported host handles.",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeRegistrationAndHandleReuse"
+        },
+        {
+          "name": "UBR_MultiSegment_Hybrid_SingleNode_Collectives",
+          "description": "Hybrid AllGather, AllReduce, and ReduceScatter on one node. Normal algorithm, imported CPU tail.",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeAllGather:UBR_MultiSegment.DeepEP_HybridSingleNodeAllReduce:UBR_MultiSegment.DeepEP_HybridSingleNodeReduceScatter"
+        },
+        {
+          "name": "UBR_MultiSegment_Hybrid_SingleNode_Elastic_Gating",
+          "description": "Same imported-handle layout rejected when elastic registration is off",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeElasticRegistrationDisabled",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        }
+      ]
+    },
     "ce_allreduce_recv_offset": {
       "extends": "ce_base",
       "num_ranks": 2,
@@ -3710,12 +3847,12 @@
         {
           "name": "CE_RecvOffset_Symmetric_Lsa",
           "description": "Registered CE AllReduce into a multi-segment symmetric window at a non-zero receive offset uses the window-relative offset",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+          "test_filter": "UBR_MultiSegment.CE_RecvOffset"
         },
         {
           "name": "CE_RecvOffset_BeforeLegacyRecvOffsetCorruptsResult",
           "description": "BEFORE control: fault injection restores the legacy base-relative offset and the result must be corrupted (ENABLE_FAULT_INJECTION build)",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult"
+          "test_filter": "UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult"
         },
         {
           "name": "CE_RecvOffset_RecvRangePastWindowFallsBack",
@@ -3726,6 +3863,16 @@
           "name": "CE_RecvOffset_RecvRangePastWindowChunkedFallback",
           "description": "Chunked registered CE AllReduce whose receive range runs past the window tail falls back to staging for every chunk",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowChunkedFallback"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowStagingOverflow",
+          "description": "CE AllReduce larger than the staging buffer whose receive range runs past the window tail takes the pipelined staging path and completes",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowStagingOverflow"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangeSpansSegmentsPipelined",
+          "description": "CE AllReduce larger than the staging buffer whose receive range crosses segment boundaries inside the window takes the registered pipelined path",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangeSpansSegmentsPipelined"
         }
       ]
     },
@@ -6158,6 +6305,18 @@
       "name": "CE AllReduce Receive Offset (registered CE, single node)",
       "description": "Registered CE AllReduce into multi-segment symmetric windows: receive-offset AFTER/BEFORE regression and past-window staging fallback.",
       "config": "ce_allreduce_recv_offset",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "description": "All single-node UBR, symmetric-window, elastic, and DeepEP registration tests. NCCL_NET=IB selects IB-MSEG under the switch; unset would select IB-CAST.",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Hybrid single node",
+      "description": "Four ranks on one node. Hybrid registration, handle reuse, AllGather, AllReduce, ReduceScatter, and the elastic-off rejection.",
+      "config": "ubr_multisegment_hybrid_singlenode",
       "enabled": true
     },
     {

@@ -1158,6 +1158,7 @@ if(BUILD_TESTS)
       RegistrationMPITests.cpp
       multisegment/MultiSegmentRegistrationMPITests.cpp
       multisegment/MultiSegmentCollectiveMPITests.cpp
+      multisegment/MultiSegmentCeMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
       GinConnectLeakMPITests.cpp

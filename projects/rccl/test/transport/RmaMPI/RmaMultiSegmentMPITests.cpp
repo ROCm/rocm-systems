@@ -11,8 +11,10 @@
 
 #include "RmaMultiSegmentFixture.hpp"
 
+#include <map>
 #include <numeric>
 #include <random>
+#include <utility>
 
 namespace RCCLRmaTests
 {
@@ -77,7 +79,7 @@ TEST_F(RmaMultiSegmentMPITest, SubPageBoundsRegistrationAndTransfer)
     uint8_t* recvBase = static_cast<uint8_t*>(rb->ptr) + kHeadSkip;
 
     if (worldRank_ == 0)
-        FillBuf(sendBase, registeredBytes, /*seed=*/0x5D);
+        RCCLTestHelpers::FillSegPattern(sendBase, registeredBytes, /*seed=*/0x5D);
     if (worldRank_ == 1)
         FillSentinel(rb->ptr, rb->totalSize, kSentinel);
 
@@ -180,7 +182,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
     const bool flushOff = Rank1Flush(recvMh);
     if (worldRank_ == 1)
     {
-        EXPECT_TRUE(VerifyBuf(recvBuf, kMiB, /*seed=*/0x2D))
+        EXPECT_TRUE(RCCLTestHelpers::VerifySegPattern(recvBuf, kMiB, /*seed=*/0x2D))
             << "data corrupted after single-segment flush";
     }
     Barrier();
@@ -203,7 +205,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
     ASSERT_NE(sigBuf, nullptr);
 
     if (worldRank_ == 0)
-        FillBuf(sb->ptr, kSize, /*seed=*/0x55);
+        RCCLTestHelpers::FillSegPattern(sb->ptr, kSize, /*seed=*/0x55);
 
     void* sigMh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(sigBuf, kSignalSize, &sigMh));
@@ -224,7 +226,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
 
     if (worldRank_ == 1)
     {
-        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x55))
+        EXPECT_TRUE(RCCLTestHelpers::VerifySegPattern(rb->ptr, kSize, /*seed=*/0x55))
             << "multi-segment iputSignal payload mismatch";
         EXPECT_EQ(ReadSignal(sigBuf), 1u)
             << "signal not delivered after multi-segment payload";
@@ -251,7 +253,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalInLaterSegment)
     constexpr uint8_t kSentinel = 0x6E;
 
     if (worldRank_ == 0)
-        FillBuf(sb->ptr, kSize, /*seed=*/0x4C);
+        RCCLTestHelpers::FillSegPattern(sb->ptr, kSize, /*seed=*/0x4C);
     if (worldRank_ == 1)
         FillSentinel(rb->ptr, kSize, kSentinel);
 
@@ -302,7 +304,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalInLaterSegment)
 
     if (worldRank_ == 1)
     {
-        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x4C))
+        EXPECT_TRUE(RCCLTestHelpers::VerifySegPattern(rb->ptr, kSize, /*seed=*/0x4C))
             << "iputSignal payload mismatch";
         std::vector<SignalWord> want;
         for (const auto& c : cases) want.push_back({c.off, c.expect});
@@ -392,7 +394,7 @@ TEST_F(RmaMultiSegmentMPITest, SingleSegmentRegression)
     ASSERT_NO_FATAL_FAILURE(PreparePlainPair(/*seed=*/0x77, &recvBuf, &recvMh));
 
     if (worldRank_ == 1)
-        EXPECT_TRUE(VerifyBuf(recvBuf, kMiB, /*seed=*/0x77));
+        EXPECT_TRUE(RCCLTestHelpers::VerifySegPattern(recvBuf, kMiB, /*seed=*/0x77));
 }
 
 // Ranks with different segment counts are rejected collectively with ncclInvalidUsage before the gathers.
@@ -717,7 +719,7 @@ protected:
         }
         sig_ = AllocBuf(kSignalSize);
         if (prereq_.Skip(sig_ == nullptr, "signal buffer allocation failed")) return "signal buffer allocation failed";
-        FillBuf(src_->ptr, src_->totalSize, SeedOf(worldRank_));
+        RCCLTestHelpers::FillSegPattern(src_->ptr, src_->totalSize, SeedOf(worldRank_));
         EXPECT_EQ(ncclSuccess, RegMr(src_->ptr, src_->totalSize, &srcMh_));
         EXPECT_EQ(ncclSuccess, RegMr(dst_->ptr, dst_->totalSize, &dstMh_));
         EXPECT_EQ(ncclSuccess, RegMr(sig_, kSignalSize, &sigMh_));
@@ -883,13 +885,51 @@ protected:
         {
             const int seed = r.seed < 0 ? e.seed : r.seed;
             for (size_t i = 0; i < r.size; i++)
-                want[r.dstOff + i] = static_cast<uint8_t>((seed + r.srcOff + i) % 256);
+                want[r.dstOff + i] = RCCLTestHelpers::SegPatternByte(seed, r.srcOff + i);
         }
         ASSERT_EQ(hipSuccess, hipMemcpy(got.data(), e.window, e.total, hipMemcpyDeviceToHost));
         const auto diff = std::mismatch(want.begin(), want.end(), got.begin());
         EXPECT_TRUE(diff.first == want.end())
             << "first mismatch at offset " << (diff.first - want.begin()) << ": want 0x" << std::hex
             << int(*diff.first) << " got 0x" << int(*diff.second);
+    }
+
+    // Multi-segment ops posted on one (context, peer) send comm; `known` is false when an op uses a handle other
+    // than srcMh_ or dstMh_, whose layout the fixture cannot map.
+    struct SegPostPlan
+    {
+        rcclIbSegStats before = {};
+        int            nOps   = 0;
+        bool           later  = false;
+        bool           known  = true;
+    };
+
+    const MultiSegmentVmmBuffer* BufferOf(void* mh) const
+    {
+        return mh == srcMh_ ? src_ : mh == dstMh_ ? dst_ : nullptr;
+    }
+
+    std::map<std::pair<int, int>, SegPostPlan> PlanSegmentedPosts(const std::vector<Op>& ops) const
+    {
+        std::map<std::pair<int, int>, SegPostPlan> plans;
+        for (const Op& op : ops)
+        {
+            if (op.chain.size == 0 ||
+                (rcclRmaIbProxyMrSegmentCount(op.localMh) <= 1 && rcclRmaIbProxyMrSegmentCount(op.remoteMh) <= 1))
+                continue;
+            SegPostPlan& plan = plans[{op.ctx, op.peer < 0 ? SendPeer() : op.peer}];
+            plan.nOps++;
+            const MultiSegmentVmmBuffer* local = BufferOf(op.localMh);
+            const MultiSegmentVmmBuffer* remote = BufferOf(op.remoteMh);
+            if (local == nullptr || remote == nullptr)
+            {
+                plan.known = false;
+                continue;
+            }
+            plan.later = plan.later || RCCLTestHelpers::ReachesLaterSegment(*local, op.chain.localOff, *remote,
+                                                                            op.chain.remoteOff, op.chain.size);
+        }
+        return plans;
     }
 
     // Reset the expected windows, post `ops` (an iflush of dst_ after op
@@ -900,6 +940,9 @@ protected:
         for (const Expect& e : expects) FillSentinel(e.window, e.total, kSentinel);
         FillSentinel(sig_, kSignalSize, 0);
         Barrier();
+
+        std::map<std::pair<int, int>, SegPostPlan> plans = PlanSegmentedPosts(ops);
+        for (auto& [key, plan] : plans) plan.before = SegStats(key.first, key.second);
 
         bool ok = true;
         std::vector<void*> reqs(ops.size(), nullptr);
@@ -928,6 +971,10 @@ protected:
         {
             ADD_FAILURE() << "post or wait failed on at least one rank";
             return;
+        }
+        for (const auto& [key, plan] : plans)
+        {
+            if (plan.known) ExpectSegmentedPosts(key.first, key.second, plan.before, plan.nOps, plan.later);
         }
         Barrier();
         for (const Expect& e : expects) ExpectRegions(e);
@@ -1010,7 +1057,7 @@ TEST_F(RmaMultiSegmentPostMPITest, InterleavedSingleAndMultiSegmentOps)
     {
         GTEST_SKIP() << "buffer allocation failed";
     }
-    FillBuf(plainSrc, kPlain, SeedOf(worldRank_));
+    RCCLTestHelpers::FillSegPattern(plainSrc, kPlain, SeedOf(worldRank_));
     void *plainSrcMh = nullptr, *plainDstMh = nullptr, *getMh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(plainSrc, kPlain, &plainSrcMh));
     ASSERT_EQ(ncclSuccess, RegMr(plainDst, kPlain, &plainDstMh));
@@ -1063,7 +1110,7 @@ TEST_F(RmaMultiSegmentPostMPITest, OpsWiderThanOneRoundLandIntact)
     {
         GTEST_SKIP() << "wide window allocation failed";
     }
-    FillBuf(src->ptr, src->totalSize, SeedOf(worldRank_));
+    RCCLTestHelpers::FillSegPattern(src->ptr, src->totalSize, SeedOf(worldRank_));
     void *srcMh = nullptr, *dstMh = nullptr, *getMh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(src->ptr, src->totalSize, &srcMh));
     ASSERT_EQ(ncclSuccess, RegMr(dst->ptr, dst->totalSize, &dstMh));
@@ -1288,7 +1335,7 @@ TEST_F(RmaMultiSegmentPostMPITest, RegistrationChurnKeepsTransfersIntact)
         {
             GTEST_SKIP() << nSeg << "-segment VMM allocation unavailable";
         }
-        FillBuf(l.src->ptr, l.src->totalSize, SeedOf(worldRank_));
+        RCCLTestHelpers::FillSegPattern(l.src->ptr, l.src->totalSize, SeedOf(worldRank_));
         layouts.push_back(l);
     }
 

@@ -17,6 +17,7 @@
 #include "MPIHelpers.hpp"
 #include "MultiSegmentTestSupport.hpp"
 
+#include "transport/net_ib_multiseg/ib_multiseg_mseg.h"
 #include "transport/rccl_mseg.h"
 
 #include <algorithm>
@@ -46,9 +47,11 @@ const RCCLTestHelpers::MsegPrereq kDmaBufPrereq{"UT_NET_IB_MSEG_REQUIRE_DMABUF"}
 void FailIfDmaBufRequired(const char* what) { kDmaBufPrereq.FailIfRequired(what); }
 
 using RCCLHostApiHelpers::AllSentinel;
-using RCCLHostApiHelpers::FillBuf;
 using RCCLHostApiHelpers::FillSentinel;
-using RCCLHostApiHelpers::VerifyBuf;
+using RCCLTestHelpers::FillSegPattern;
+using RCCLTestHelpers::kSegPatternSentinel;
+using RCCLTestHelpers::VerifySegPattern;
+using RCCLTestHelpers::VerifySentinelAround;
 } // namespace
 
 // Register an nSeg window and honor skip/fail from the bool helper. Also sets
@@ -109,59 +112,59 @@ protected:
         return v && atoi(v) == 0;
     }
 
-    // One-directional transfer (rank1 -> rank0) with independent source and
-    // destination registration-relative offsets. This is the general form
-    // required by DeepEP-style per-peer window layouts.
-    void SendRecvChunkAtOffsets(ConnectionPair& pair, void* sBuf, void* rBuf,
-                                size_t srcOff, size_t dstOff, size_t size,
-                                int tag, uint8_t seed) {
+    // One-directional transfer (rank1 -> rank0) of buf[srcOff, +size) into buf[dstOff, +size), with independent
+    // offsets as DeepEP-style per-peer window layouts need. Rank 0's whole window starts as sentinel, so a slice
+    // landing outside the destination fails too, and the sender's counters must show the segmented builder ran.
+    void SendRecvChunkAtOffsets(ConnectionPair& pair, const MultiSegmentVmmBuffer* buf, size_t srcOff, size_t dstOff,
+                                size_t size, int tag, uint8_t seed) {
         const int rank = MPIEnvironment::world_rank;
+        uint8_t* base = static_cast<uint8_t*>(buf->ptr);
+        if (rank == 0) FillSentinel(base, buf->totalSize, kSegPatternSentinel);
+        else FillSegPattern(base + srcOff, size, seed);
+        rcclIbSegStats before = {};
+        if (rank != 0) ASSERT_EQ(ncclSuccess, rcclIbSendCommSegStats(pair.sendComm, &before));
+        MPI_Barrier(MPI_COMM_WORLD);
+
         void* req = nullptr;
+        int sz = 0;
         if (rank == 0) {
-            void* buf = static_cast<uint8_t*>(rBuf) + dstOff;
-            PostSingleRecv(pair.recvComm, buf, size, tag, recvMh_, &req);
-            int sz = 0;
+            PostSingleRecv(pair.recvComm, base + dstOff, size, tag, recvMh_, &req);
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
             EXPECT_EQ(sz, static_cast<int>(size))
                 << "reported recv size srcOff=" << srcOff << " dstOff=" << dstOff;
         } else {
-            FillBuf(static_cast<uint8_t*>(sBuf) + srcOff, size, seed);
-            void* buf = static_cast<uint8_t*>(sBuf) + srcOff;
-            PostSendWithRetry(pair.sendComm, buf, size, tag, sendMh_, &req);
-            int sz = 0;
+            PostSendWithRetry(pair.sendComm, base + srcOff, size, tag, sendMh_, &req);
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+            ExpectSegmentedPost(pair.sendComm, before, buf, srcOff, dstOff, size);
         }
         MPI_Barrier(MPI_COMM_WORLD);
-        if (rank == 0)
-            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(rBuf) + dstOff, size, seed))
-                << "data mismatch srcOff=" << srcOff << " dstOff=" << dstOff
-                << " size=" << size;
+        if (rank == 0) {
+            EXPECT_TRUE(VerifySegPattern(base + dstOff, size, seed))
+                << "srcOff=" << srcOff << " dstOff=" << dstOff << " size=" << size;
+            EXPECT_TRUE(VerifySentinelAround(base, buf->totalSize, dstOff, size, kSegPatternSentinel))
+                << "srcOff=" << srcOff << " dstOff=" << dstOff << " size=" << size;
+        }
         MPI_Barrier(MPI_COMM_WORLD);
     }
 
     // Common same-offset form used by the original test matrix.
-    void SendRecvChunk(ConnectionPair& pair, void* sBuf, void* rBuf,
-                       size_t off, size_t size, int tag, uint8_t seed) {
-        SendRecvChunkAtOffsets(pair, sBuf, rBuf, off, off, size, tag, seed);
+    void SendRecvChunk(ConnectionPair& pair, const MultiSegmentVmmBuffer* buf, size_t off, size_t size, int tag,
+                       uint8_t seed) {
+        SendRecvChunkAtOffsets(pair, buf, off, off, size, tag, seed);
     }
 
-    void SendRecvChunkAtOffsetsChecked(ConnectionPair& pair, void* sBuf, void* rBuf,
-                                       size_t totalSize, size_t srcOff, size_t dstOff,
-                                       size_t size, int tag, uint8_t seed, uint8_t sentinel) {
-        const int rank = MPIEnvironment::world_rank;
-        if (rank == 0) FillSentinel(rBuf, totalSize, sentinel);
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        SendRecvChunkAtOffsets(pair, sBuf, rBuf, srcOff, dstOff, size, tag, seed);
-
-        if (rank == 0) {
-            const size_t tail = totalSize - dstOff - size;
-            EXPECT_TRUE(dstOff == 0 || AllSentinel(rBuf, dstOff, sentinel))
-                << "bytes before destination were overwritten";
-            EXPECT_TRUE(tail == 0 || AllSentinel(static_cast<uint8_t*>(rBuf) + dstOff + size, tail, sentinel))
-                << "bytes after destination were overwritten";
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
+    // A multi-segment window goes through the segmented builder, and only a transfer that reaches a segment past
+    // the first on either side may count as one that did.
+    static void ExpectSegmentedPost(void* sendComm, const rcclIbSegStats& before, const MultiSegmentVmmBuffer* buf,
+                                    size_t srcOff, size_t dstOff, size_t size) {
+        if (buf->nSegments <= 1 || size == 0) return;
+        rcclIbSegStats after = {};
+        ASSERT_EQ(ncclSuccess, rcclIbSendCommSegStats(sendComm, &after));
+        EXPECT_GT(after.posts, before.posts) << "the segmented builder did not post this send";
+        EXPECT_GE(after.wrs - before.wrs, after.posts - before.posts);
+        EXPECT_EQ(after.laterSegPosts > before.laterSegPosts,
+                  RCCLTestHelpers::ReachesLaterSegment(*buf, srcOff, *buf, dstOff, size))
+            << "srcOff=" << srcOff << " dstOff=" << dstOff << " size=" << size;
     }
 
     // Allocate, connect, and register an nSeg window. Returns false on skip
@@ -275,7 +278,7 @@ TEST_F(NetIbMultiSegmentMPITest, PerSegmentRegistrationAndTransfer) {
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
     for (int s = 0; s < kNumSegments; s++)
-        SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, (size_t)s * lastBuf_->segSize, lastBuf_->segSize,
+        SendRecvChunk(pair, lastBuf_, (size_t)s * lastBuf_->segSize, lastBuf_->segSize,
                       /*tag=*/100 + s, /*seed=*/static_cast<uint8_t>(0xA0 + s));
 }
 
@@ -289,7 +292,7 @@ TEST_F(NetIbMultiSegmentMPITest, IntraSegmentOffsetSelection) {
     for (int s = 0; s < kNumSegments; s++) {
         size_t segBase = (size_t)s * lastBuf_->segSize;
         for (size_t sub : {size_t{0}, lastBuf_->segSize / 2, lastBuf_->segSize - chunk})
-            SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, segBase + sub, chunk, tag++,
+            SendRecvChunk(pair, lastBuf_, segBase + sub, chunk, tag++,
                           static_cast<uint8_t>(0x10 + s));
     }
 }
@@ -304,8 +307,7 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_AsymmetricOffsetTransfer) {
     const size_t srcOff = lastBuf_->segSize + 4096; // sender segment 1
     const size_t dstOff = 64 * 1024;                // receiver segment 0
     const size_t size   = 128 * 1024;
-    SendRecvChunkAtOffsets(pair, lastBuf_->ptr, lastBuf_->ptr,
-                           srcOff, dstOff, size, /*tag=*/350, /*seed=*/0xD3);
+    SendRecvChunkAtOffsets(pair, lastBuf_, srcOff, dstOff, size, /*tag=*/350, /*seed=*/0xD3);
 }
 
 // A single transfer that straddles a segment boundary succeeds because the
@@ -318,7 +320,7 @@ TEST_F(NetIbMultiSegmentMPITest, CrossBoundaryTransferSucceeds) {
     // 64 KiB before + 64 KiB after the seg0/seg1 boundary.
     const size_t off  = lastBuf_->segSize - 65536;
     const size_t size = 131072;
-    SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, off, size, /*tag=*/400, /*seed=*/0xC3);
+    SendRecvChunk(pair, lastBuf_, off, size, /*tag=*/400, /*seed=*/0xC3);
 }
 
 // GDR flush flag over a segmented send: once each boundary-crossing receive completes,
@@ -342,7 +344,7 @@ TEST_F(NetIbMultiSegmentMPITest, GdrFlushFlag_SegmentedSendWritesFlag) {
     for (int s = 1; s < kNumSegments; s++) {
         const uint64_t id = s - 1;
         if (rank == 0) IbMsegSetGpuFlushFlagHint(pair.recvComm, 1);
-        SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, (size_t)s * lastBuf_->segSize - size / 2, size,
+        SendRecvChunk(pair, lastBuf_, (size_t)s * lastBuf_->segSize - size / 2, size,
                       /*tag=*/450 + s, /*seed=*/static_cast<uint8_t>(0x50 + s));
         if (rank != 0) continue;
         const int first = (int)((id * count) % nQps);
@@ -371,12 +373,10 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_MultiNodeAsymmetricCrossBoundaryStress) 
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     const size_t seg = lastBuf_->segSize;
-    const size_t total = lastBuf_->totalSize;
     for (int i = 0; i < kIterations; ++i) {
         const auto c = RCCLTestHelpers::BoundaryStress(i, kWideSegments, seg, /*dstMul=*/5, /*dstAdd=*/1, /*rightShift=*/2);
-        SendRecvChunkAtOffsetsChecked(pair, lastBuf_->ptr, lastBuf_->ptr, total,
-                                      c.srcOff, c.dstOff, c.size, /*tag=*/800 + i,
-                                      static_cast<uint8_t>(0x20 + i), /*sentinel=*/0xE5);
+        SendRecvChunkAtOffsets(pair, lastBuf_, c.srcOff, c.dstOff, c.size, /*tag=*/800 + i,
+                               static_cast<uint8_t>(0x20 + i));
     }
 }
 
@@ -386,7 +386,7 @@ TEST_F(NetIbMultiSegmentMPITest, WholeBufferSingleTransfer) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, 0, lastBuf_->totalSize, /*tag=*/500, /*seed=*/0x5E);
+    SendRecvChunk(pair, lastBuf_, 0, lastBuf_->totalSize, /*tag=*/500, /*seed=*/0x5E);
 }
 
 // NEGATIVE: a buffer with more than RCCL_IB_REG_SEG_DEFAULT physical segments is
@@ -495,7 +495,7 @@ TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(1, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, 0, 65536, /*tag=*/300, /*seed=*/0x77);
+    SendRecvChunk(pair, lastBuf_, 0, 65536, /*tag=*/300, /*seed=*/0x77);
 }
 
 // iflush after a recv into a non-zero segment reads that segment's first byte.
@@ -532,10 +532,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
             EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
                 << "flush RDMA read did not complete";
         }
-        EXPECT_TRUE(VerifyBuf(rbuf, chunk, 0xC0)) << "data mismatch after flush";
+        EXPECT_TRUE(VerifySegPattern(rbuf, chunk, 0xC0)) << "data mismatch after flush";
     } else {
         void* sbuf = static_cast<uint8_t*>(lastBuf_->ptr) + off;
-        FillBuf(sbuf, chunk, 0xC0);
+        FillSegPattern(sbuf, chunk, 0xC0);
         void* req = nullptr;
         PostSendWithRetry(pair.sendComm, sbuf, chunk, tag, mh, &req);
         int sz = 0;
@@ -576,11 +576,11 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
             EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
                 << "whole-buffer flush RDMA read did not complete";
         }
-        EXPECT_TRUE(VerifyBuf(rbuf, total, 0xA5))
+        EXPECT_TRUE(VerifySegPattern(rbuf, total, 0xA5))
             << "whole-buffer payload mismatch after flush";
     } else {
         void* sbuf = lastBuf_->ptr;
-        FillBuf(sbuf, total, 0xA5);
+        FillSegPattern(sbuf, total, 0xA5);
         void* req = nullptr;
         PostSendWithRetry(pair.sendComm, sbuf, total, tag, mh, &req);
         int sz = 0;
@@ -630,12 +630,12 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
             int flushSize = 0;
             EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
         }
-        EXPECT_TRUE(VerifyBuf(bufs[0], chunk, 0x62));
-        EXPECT_TRUE(VerifyBuf(bufs[1], chunk, 0x63));
+        EXPECT_TRUE(VerifySegPattern(bufs[0], chunk, 0x62));
+        EXPECT_TRUE(VerifySegPattern(bufs[1], chunk, 0x63));
     } else {
         void* reqs[2] = {};
-        FillBuf(bufs[0], chunk, 0x62);
-        FillBuf(bufs[1], chunk, 0x63);
+        FillSegPattern(bufs[0], chunk, 0x62);
+        FillSegPattern(bufs[1], chunk, 0x63);
         PostSendWithRetry(pair.sendComm, bufs[0], chunk, tags[0], handles[0], &reqs[0]);
         PostSendWithRetry(pair.sendComm, bufs[1], chunk, tags[1], handles[1], &reqs[1]);
         for (int i = 0; i < 2; i++) {
@@ -693,10 +693,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvMixesSingleAndMultiSegmentHandles) {
                 EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess) << "order " << order;
             }
             for (int i = 0; i < 2; i++)
-                EXPECT_TRUE(VerifyBuf(bufs[i], chunk, seeds[i])) << "order " << order << " entry " << i;
+                EXPECT_TRUE(VerifySegPattern(bufs[i], chunk, seeds[i])) << "order " << order << " entry " << i;
         } else {
             void* reqs[2] = {};
-            for (int i = 0; i < 2; i++) FillBuf(bufs[i], chunk, seeds[i]);
+            for (int i = 0; i < 2; i++) FillSegPattern(bufs[i], chunk, seeds[i]);
             for (int i = 0; i < 2; i++)
                 PostSendWithRetry(pair.sendComm, bufs[i], chunk, tags[i], handles[i], &reqs[i]);
             for (int i = 0; i < 2; i++) {
@@ -761,9 +761,9 @@ TEST_F(NetIbMultiSegmentMPITest, HostAndDeviceSingleSegmentRegression) {
                 PostSingleRecv(pair.recvComm, dptr, size, tag, mh, &req);
                 int sz = 0;
                 EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
-                EXPECT_TRUE(VerifyBuf(dptr, size, 0x3C));
+                EXPECT_TRUE(VerifySegPattern(dptr, size, 0x3C));
             } else {
-                FillBuf(dptr, size, 0x3C);
+                FillSegPattern(dptr, size, 0x3C);
                 PostSendWithRetry(pair.sendComm, dptr, size, tag, mh, &req);
                 int sz = 0;
                 EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
@@ -824,7 +824,7 @@ TEST_F(NetIbMultiSegmentMPITest, SendQueueFatChainOversubscribe) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (rank != 0) {
-        FillBuf(src, xfer, 0x51);
+        FillSegPattern(src, xfer, 0x51);
         bool keepPosting = true;
         for (int g = 0; g < kGroups && keepPosting; g++) {
             for (int r = 0; r < kRecvs && keepPosting; r++) {
@@ -921,10 +921,10 @@ TEST_F(NetIbMultiSegmentMPITest, ConcurrentPairsMoveEverySegmentBoundary) {
             PostSingleRecv(pair.recvComm, p, chunk, 700 + s, mh, &req);
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
             EXPECT_EQ(sz, static_cast<int>(chunk)) << "reported size at boundary " << s;
-            EXPECT_TRUE(VerifyBuf(p, chunk, seed)) << "boundary " << s << " from rank " << peer;
+            EXPECT_TRUE(VerifySegPattern(p, chunk, seed)) << "boundary " << s << " from rank " << peer;
             EXPECT_TRUE(AllSentinel(buf->ptr, off, 0xEE)) << "bytes before boundary " << s;
         } else {
-            FillBuf(p, chunk, seed);
+            FillSegPattern(p, chunk, seed);
             PostSendWithRetry(pair.sendComm, p, chunk, 700 + s, mh, &req);
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
         }

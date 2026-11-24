@@ -2567,7 +2567,7 @@
       "num_gpus": 2,
       "timeout": 180,
       "env_variables": {
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
@@ -2579,7 +2579,7 @@
       "tests": [
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa_ReuseSysmemHandles",
-          "description": "Hybrid device+host symmetric window with NCCL_SYM_REUSE_SYSMEM_HANDLES=1: each host owner exports its POSIX fd, every rank joins the owner-fd allgather, and the LSA AllReduce stays correct",
+          "description": "Smoke run of the elastic device+host symmetric window with NCCL_SYM_REUSE_SYSMEM_HANDLES=1: the owner-fd export path runs and the LSA AllReduce stays correct. Handle reuse itself is asserted by the DeepEP HandleReuse tests.",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
         }
       ]
@@ -3301,12 +3301,7 @@
         { "name": "SymCheckMode_Registration_Match", "description": "DEBUG_GLOBAL is transparent when every rank registers matching symmetric windows.", "test_filter": "SymCheckMode_Registration.DebugGlobal_MatchingRegistration_Succeeds" },
         { "name": "SymCheckMode_Registration_Mismatch", "description": "DEBUG_GLOBAL rejects a collective when one rank's buffer is outside any window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_RegistrationMismatch_Rejected" },
         { "name": "SymCheckMode_Registration_OffsetMismatch", "description": "DEBUG_GLOBAL rejects a user-offset mismatch inside the window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_UserOffsetMismatch_Rejected" },
-        { "name": "SymCheckMode_Registration_DefaultMatching", "description": "Without NCCL_CHECK_MODE the registered path still runs and reduces correctly.", "test_filter": "SymCheckMode_Registration.Default_MatchingRegistration_Succeeds" },
-        {
-          "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
-          "description": "Forced-CE BEFORE control that must not complete IPC/NET registration",
-          "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache"
-        }
+        { "name": "SymCheckMode_Registration_DefaultMatching", "description": "Without NCCL_CHECK_MODE the registered path still runs and reduces correctly.", "test_filter": "SymCheckMode_Registration.Default_MatchingRegistration_Succeeds" }
       ]
     },
     "net_ib_branch_coverage": {
@@ -3642,24 +3637,6 @@
           "description": "Non-blocking revoke then shrink on the same parent across 10 iterations, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
-        },
-        {
-          "name": "UBR_MultiSegment_Hybrid_SingleNode_Registration",
-          "description": "Four ranks on one node. Hybrid window registers and LSA reuses imported host handles.",
-          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeRegistrationAndHandleReuse"
-        },
-        {
-          "name": "UBR_MultiSegment_Hybrid_SingleNode_Collectives",
-          "description": "Hybrid AllGather, AllReduce, and ReduceScatter on one node. Normal algorithm, imported CPU tail.",
-          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeAllGather:UBR_MultiSegment.DeepEP_HybridSingleNodeAllReduce:UBR_MultiSegment.DeepEP_HybridSingleNodeReduceScatter"
-        },
-        {
-          "name": "UBR_MultiSegment_Hybrid_SingleNode_Elastic_Gating",
-          "description": "Same imported-handle layout rejected when elastic registration is off",
-          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeElasticRegistrationDisabled",
-          "env_variables": {
-            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
-          }
         }
       ]
     },
@@ -4001,26 +3978,6 @@
           "name": "CE_MultiSegment_SingleNode_AllReduce",
           "description": "GPU multi-segment AllReduce takes single-node CE. Separate process because RCCL_CE_ALLREDUCE is cached on first read.",
           "test_filter": "CeMPI_MultiSegment.SingleNodeAllReduce",
-          "env_variables": {
-            "NCCL_WIN_ENABLE": "1",
-            "NCCL_MULTI_SEGMENT_REGISTER": "1",
-            "RCCL_CE_ALLREDUCE": "1"
-          }
-        },
-        {
-          "name": "CE_MultiSegment_RecvOffset",
-          "description": "CE AllReduce with the receive window one segment past the base",
-          "test_filter": "UBR_MultiSegment.CE_RecvOffset",
-          "env_variables": {
-            "NCCL_WIN_ENABLE": "1",
-            "NCCL_MULTI_SEGMENT_REGISTER": "1",
-            "RCCL_CE_ALLREDUCE": "1"
-          }
-        },
-        {
-          "name": "CE_MultiSegment_RecvOffset_BEFORE",
-          "description": "Faulted twin of CE_RecvOffset. Compiled only with ENABLE_FAULT_INJECTION.",
-          "test_filter": "UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult",
           "env_variables": {
             "NCCL_WIN_ENABLE": "1",
             "NCCL_MULTI_SEGMENT_REGISTER": "1",
@@ -4385,8 +4342,13 @@
         },
         {
           "name": "CE_RecvOffset_RecvRangePastWindowStagingOverflow",
-          "description": "Chunked registered CE AllReduce whose receive range runs past the window tail falls back to staging for every chunk",
+          "description": "CE AllReduce larger than the staging buffer whose receive range runs past the window tail takes the pipelined staging path and completes",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowStagingOverflow"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangeSpansSegmentsPipelined",
+          "description": "CE AllReduce larger than the staging buffer whose receive range crosses segment boundaries inside the window takes the registered pipelined path",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangeSpansSegmentsPipelined"
         }
       ]
     },
@@ -6088,7 +6050,8 @@
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_DEBUG_SUBSYS": "REG",
         "RCCL_MPI_LOG_ALL_RANKS": "1",
-        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0",
+        "RCCL_TEST_NET_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -6453,7 +6416,7 @@
         {
           "name": "UBR_MultiSegment_All_Core",
           "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindow*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter:UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRange*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
@@ -6494,15 +6457,6 @@
           "env_variables": {
             "NCCL_DEBUG_SUBSYS": "REG,TUNING"
           }
-        },
-        {
-          "name": "UBR_MultiSegment_RecvRangePastWindow",
-          "description": "Receive range past the registered window falls back to staging, and staging overflow is rejected",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowFallsBack:UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowStagingOverflow",
-          "env_variables": {
-            "RCCL_CE_ALLREDUCE": "1",
-            "NCCL_CTA_POLICY": "2"
-          }
         }
       ]
     },
@@ -6529,7 +6483,8 @@
         "RCCL_TEST_HYBRID_VMM_REQUIRE": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_NET_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -6585,9 +6540,17 @@
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node AllGather over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
-          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_LsaGin_AllGather:UBR_MultiSegment.Symmetric_LsaGin_AllReduce",
           "env_variables": {
             "NCCL_MULTI_SEGMENT_REGISTER": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin_LegacyFallback",
+          "description": "Cross-node multi-segment AllGather with the GIN symmetric kernels disabled takes the legacy path and still matches",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin_AllGather_LegacyFallback",
+          "env_variables": {
+            "NCCL_SYM_GIN_KERNELS_ENABLE": "0"
           }
         },
         {
@@ -6635,7 +6598,8 @@
         "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_HYBRID_VMM_REQUIRE": "1"
       },
       "tests": [
         {

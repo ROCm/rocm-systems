@@ -12,6 +12,7 @@
 #include <cstdlib>
 
 #include "fakes/ibvwrap_fakes.h"
+#include "../../../common/SegPattern.hpp"
 
 #undef NET_IB_P2P_CC_PATH
 #define NET_IB_P2P_CC_PATH "transport/net_ib_multiseg/shim/p2p.cc"
@@ -444,6 +445,22 @@ TEST_F(NetIbMsegP2pMicrotest, SendCommSegStats_ReadsTheCommCountersAndRejectsNul
   EXPECT_EQ(s.laterSegPosts, 1u);
   EXPECT_EQ(rcclIbSendCommSegStats(nullptr, &s), ncclInvalidArgument);
   EXPECT_EQ(rcclIbSendCommSegStats(&comm, nullptr), ncclInvalidArgument);
+}
+
+// A copy shifted by any power-of-two segment size must differ from the pattern, so a transfer that read or wrote
+// the wrong segment fails the byte check; a period of 256 would hide shifts of 256 bytes and up.
+TEST_F(NetIbMsegP2pMicrotest, SegPattern_DetectsWholeSegmentShiftsAndNeverHitsTheSentinel) {
+  using RCCLTestHelpers::SegPatternByte;
+  for (int seed : {0, 0x21, 0xA7, 0xFF}) {
+    for (size_t shift = 1; shift <= (size_t{1} << 30); shift <<= 1) {
+      size_t same = 0;
+      for (size_t i = 0; i < RCCLTestHelpers::kSegPatternPeriod; ++i)
+        same += SegPatternByte(seed, i) == SegPatternByte(seed, i + shift);
+      EXPECT_EQ(same, 0u) << "seed " << seed << " shift " << shift;
+    }
+    for (size_t i = 0; i < RCCLTestHelpers::kSegPatternPeriod; ++i)
+      EXPECT_NE(SegPatternByte(seed, i), RCCLTestHelpers::kSegPatternSentinel) << "seed " << seed << " byte " << i;
+  }
 }
 
 }  // namespace

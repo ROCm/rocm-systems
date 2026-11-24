@@ -1165,7 +1165,7 @@
       "num_gpus": 2,
       "timeout": 180,
       "env_variables": {
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
@@ -1177,7 +1177,7 @@
       "tests": [
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa_ReuseSysmemHandles",
-          "description": "Hybrid device+host symmetric window with NCCL_SYM_REUSE_SYSMEM_HANDLES=1: each host owner exports its POSIX fd, every rank joins the owner-fd allgather, and the LSA AllReduce stays correct",
+          "description": "Smoke run of the elastic device+host symmetric window with NCCL_SYM_REUSE_SYSMEM_HANDLES=1: the owner-fd export path runs and the LSA AllReduce stays correct. Handle reuse itself is asserted by the DeepEP HandleReuse tests.",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
         }
       ]
@@ -1491,7 +1491,8 @@
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_DEBUG_SUBSYS": "REG",
         "RCCL_MPI_LOG_ALL_RANKS": "1",
-        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0",
+        "RCCL_TEST_NET_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -1827,7 +1828,7 @@
       "num_gpus": 2,
       "timeout": 180,
       "env_variables": {
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_WIN_ENABLE": "1",
@@ -1838,7 +1839,7 @@
         {
           "name": "UBR_MultiSegment_All_Core",
           "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindow*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.GenericGraph:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter:UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter:UBR_MultiSegment.CE_RecvOffset:UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult:UBR_MultiSegment.Symmetric_Lsa_RecvRange*:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment:UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
@@ -1856,6 +1857,28 @@
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
           "env_variables": {
             "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Generic_IPC",
+          "description": "Single-node 8-segment AllReduce. IPC cache must record numSegments 8 on every peer.",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa",
+          "description": "Single-node symmetric AllReduce, AllGather, and ReduceScatter on GPU multi-segment windows",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_AllGather:UBR_MultiSegment.Symmetric_Lsa_ReduceScatter",
+          "env_variables": {
+            "NCCL_DEBUG_SUBSYS": "REG,TUNING",
+            "RCCL_CE_ALLREDUCE": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
+          "description": "Single-node elastic AllReduce, AllGather, AlltoAll, and ReduceScatter on the normal algorithm",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa:UBR_MultiSegment.Symmetric_Elastic_Lsa_AllGather:UBR_MultiSegment.Symmetric_Elastic_Lsa_AlltoAll:UBR_MultiSegment.Symmetric_Elastic_Lsa_ReduceScatter",
+          "env_variables": {
+            "NCCL_DEBUG_SUBSYS": "REG,TUNING"
           }
         }
       ]
@@ -1878,7 +1901,8 @@
         "RCCL_TEST_HYBRID_VMM_REQUIRE": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_NET_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -1934,10 +1958,28 @@
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node AllGather over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
-          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_LsaGin_AllGather:UBR_MultiSegment.Symmetric_LsaGin_AllReduce",
           "env_variables": {
             "NCCL_MULTI_SEGMENT_REGISTER": "1"
           }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin_LegacyFallback",
+          "description": "Cross-node multi-segment AllGather with the GIN symmetric kernels disabled takes the legacy path and still matches",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin_AllGather_LegacyFallback",
+          "env_variables": {
+            "NCCL_SYM_GIN_KERNELS_ENABLE": "0"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Elastic_LsaGin",
+          "description": "DeepEP [GPU][CPU] AllGather, AllReduce, and ReduceScatter register per segment and take the legacy scheduler",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_LsaGin_AllGather:UBR_MultiSegment.Symmetric_Elastic_LsaGin_AllReduce:UBR_MultiSegment.Symmetric_Elastic_LsaGin_ReduceScatter"
+        },
+        {
+          "name": "UBR_MultiSegment_Hybrid_Collectives",
+          "description": "Hybrid imported-host AllGather, AllReduce, and ReduceScatter. AllGather and ReduceScatter write the CPU tail. AllReduce reads the shared host tail: each host segment is its owner's value, added once per rank that maps it. Handle reuse, then the normal algorithm.",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridAllGather:UBR_MultiSegment.DeepEP_HybridAllReduce:UBR_MultiSegment.DeepEP_HybridReduceScatter"
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_RmaRegistration",
@@ -1954,6 +1996,184 @@
           "env_variables": {
             "NCCL_SYM_REUSE_SYSMEM_HANDLES": "0"
           }
+        }
+      ]
+    },
+    "ubr_multisegment_hybrid_singlenode": {
+      "extends": "mseg_base",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_HYBRID_VMM_REQUIRE": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Hybrid_SingleNode_Registration",
+          "description": "Four ranks on one node. Hybrid window registers and LSA reuses imported host handles.",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeRegistrationAndHandleReuse"
+        },
+        {
+          "name": "UBR_MultiSegment_Hybrid_SingleNode_Collectives",
+          "description": "Hybrid AllGather, AllReduce, and ReduceScatter on one node. Normal algorithm, imported CPU tail.",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeAllGather:UBR_MultiSegment.DeepEP_HybridSingleNodeAllReduce:UBR_MultiSegment.DeepEP_HybridSingleNodeReduceScatter"
+        },
+        {
+          "name": "UBR_MultiSegment_Hybrid_SingleNode_Elastic_Gating",
+          "description": "Same imported-handle layout rejected when elastic registration is off",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridSingleNodeElasticRegistrationDisabled",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        }
+      ]
+    },
+    "ubr_multisegment_ce_before": {
+      "extends": "mseg_base",
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1",
+        "NCCL_CTA_POLICY": "2",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
+          "description": "Forced-CE BEFORE control that must not complete IPC/NET registration",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache"
+        }
+      ]
+    },
+    "ce_allreduce_recv_offset": {
+      "extends": "mseg_base",
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_CTA_POLICY": "2",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_RecvOffset_Symmetric_Lsa",
+          "description": "Registered CE AllReduce into a multi-segment symmetric window at a non-zero receive offset uses the window-relative offset",
+          "test_filter": "UBR_MultiSegment.CE_RecvOffset"
+        },
+        {
+          "name": "CE_RecvOffset_BeforeLegacyRecvOffsetCorruptsResult",
+          "description": "BEFORE control: fault injection restores the legacy base-relative offset and the result must be corrupted (ENABLE_FAULT_INJECTION build)",
+          "test_filter": "UBR_MultiSegment.CE_RecvOffset_BeforeLegacyCorruptsResult"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowFallsBack",
+          "description": "Receive range past the window tail disables the registered CE fast path and falls back to staging",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowFallsBack"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowChunkedFallback",
+          "description": "Chunked registered CE AllReduce whose receive range runs past the window tail falls back to staging for every chunk",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowChunkedFallback"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowStagingOverflow",
+          "description": "CE AllReduce larger than the staging buffer whose receive range runs past the window tail takes the pipelined staging path and completes",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowStagingOverflow"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangeSpansSegmentsPipelined",
+          "description": "CE AllReduce larger than the staging buffer whose receive range crosses segment boundaries inside the window takes the registered pipelined path",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangeSpansSegmentsPipelined"
+        }
+      ]
+    },
+    "multisegment_stress_nightly": {
+      "extends": "mseg_base",
+      "timeout": 900,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_MSEG_SQ_STRESS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_SendQueueFatChainOversubscribe",
+          "description": "Opt-in send-queue oversubscribe",
+          "test_filter": "NetIbMultiSegmentMPITest.SendQueueFatChainOversubscribe"
+        },
+        {
+          "name": "NetIB_MultiSeg_DeepEP_MultiNodeAsymmetricCrossBoundaryStress",
+          "description": "DeepEP asymmetric cross-boundary stress",
+          "test_filter": "NetIbMultiSegmentMPITest.DeepEP_MultiNodeAsymmetricCrossBoundaryStress"
+        },
+        {
+          "name": "RMA_MultiSeg_IPutSignalSendQueueOversubscribe",
+          "description": "Opt-in RMA send-queue oversubscribe",
+          "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
+        },
+        {
+          "name": "RMA_MultiSeg_BoundaryStressNoCorruption",
+          "description": "Boundary stress leaves neighboring bytes intact",
+          "test_filter": "RmaMultiSegmentMPITest.BoundaryStressNoCorruption"
+        },
+        {
+          "name": "RMA_MultiSeg_MultiNodeAsymmetricIGetBoundaryStress",
+          "description": "Multi-node asymmetric IGet boundary stress",
+          "test_filter": "RmaMultiSegmentMPITest.MultiNodeAsymmetricIGetBoundaryStress"
+        },
+        {
+          "name": "RMA_MultiSeg_DeepEP_MultiNodeEngramMixedWindowIGetStress",
+          "description": "DeepEP Engram mixed-window IGet stress",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_MultiNodeEngramMixedWindowIGetStress"
+        }
+      ]
+    },
+    "multisegment_hybrid_stress_nightly": {
+      "extends": "mseg_base",
+      "num_ranks": 8,
+      "num_gpus": 4,
+      "timeout": 900,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "DeepEP_HybridMultiNodeIGetStress",
+          "description": "32 iterations alternating the remote node's imported CPU-owner segment",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress"
         }
       ]
     }
@@ -2090,6 +2310,26 @@
     },
     {
       "config": "ubr_multisegment_lsagin_multinode",
+      "enabled": true
+    },
+    {
+      "config": "ubr_multisegment_hybrid_singlenode",
+      "enabled": true
+    },
+    {
+      "config": "ubr_multisegment_ce_before",
+      "enabled": true
+    },
+    {
+      "config": "ce_allreduce_recv_offset",
+      "enabled": true
+    },
+    {
+      "config": "multisegment_stress_nightly",
+      "enabled": true
+    },
+    {
+      "config": "multisegment_hybrid_stress_nightly",
       "enabled": true
     }
   ]

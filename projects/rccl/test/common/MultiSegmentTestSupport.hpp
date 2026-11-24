@@ -13,11 +13,14 @@
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "MPIHelpers.hpp"
 #include "MultiSegmentVmmHelpers.hpp"
+#include "SegPattern.hpp"
 
 // Shared by the NET and RMA multi-segment MPI suites.
 namespace RCCLTestHelpers
@@ -103,6 +106,70 @@ inline BoundaryStressCase BoundaryStress(int i, int nSeg, size_t seg, int dstMul
     const size_t srcBoundary = 1 + static_cast<size_t>(i % (nSeg - 1));
     const size_t dstBoundary = 1 + static_cast<size_t>((i * dstMul + dstAdd) % (nSeg - 1));
     return {srcBoundary * seg - left, dstBoundary * seg - left, left + right};
+}
+
+// Index of the segment of b holding byte off; the last segment for an offset past the end.
+inline int SegmentIndexOf(const MultiSegmentVmmBuffer& b, size_t off)
+{
+    size_t end = 0;
+    for (int s = 0; s < b.nSegments; s++)
+    {
+        end += b.segSizes.empty() ? b.segSize : b.segSizes[s];
+        if (off < end) return s;
+    }
+    return b.nSegments - 1;
+}
+
+// Whether a transfer of size bytes from src[srcOff] to dst[dstOff] reaches a segment past the first on either side.
+inline bool ReachesLaterSegment(const MultiSegmentVmmBuffer& src, size_t srcOff, const MultiSegmentVmmBuffer& dst,
+                                size_t dstOff, size_t size)
+{
+    return size > 0 && (SegmentIndexOf(src, srcOff + size - 1) > 0 || SegmentIndexOf(dst, dstOff + size - 1) > 0);
+}
+
+// Writes SegPatternByte(seed, i) into device or host-mapped buf[0, size).
+inline void FillSegPattern(void* buf, size_t size, int seed)
+{
+    std::vector<uint8_t> tmp(size);
+    for (size_t i = 0; i < size; ++i) tmp[i] = SegPatternByte(seed, i);
+    ASSERT_EQ(hipSuccess, hipMemcpy(buf, tmp.data(), size, hipMemcpyHostToDevice));
+    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+}
+
+// Checks buf[0, size) holds the pattern from `seed`; on a mismatch reports the first offset and the mismatch count.
+inline ::testing::AssertionResult VerifySegPattern(const void* buf, size_t size, int seed)
+{
+    std::vector<uint8_t> got(size);
+    if (hipMemcpy(got.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess || hipDeviceSynchronize() != hipSuccess)
+        return ::testing::AssertionFailure() << "hipMemcpy D2H failed";
+    size_t nBad = 0, first = 0;
+    for (size_t i = 0; i < size; ++i)
+    {
+        if (got[i] == SegPatternByte(seed, i)) continue;
+        if (nBad++ == 0) first = i;
+    }
+    if (nBad == 0) return ::testing::AssertionSuccess();
+    char detail[96];
+    std::snprintf(detail, sizeof(detail), "want 0x%02x got 0x%02x", SegPatternByte(seed, first), got[first]);
+    return ::testing::AssertionFailure() << nBad << " of " << size << " bytes differ (seed " << seed
+                                         << "), first at offset " << first << ": " << detail;
+}
+
+// Checks buf[0, total) is `sentinel` outside [off, off + size).
+inline ::testing::AssertionResult VerifySentinelAround(const void* buf, size_t total, size_t off, size_t size,
+                                                       uint8_t sentinel)
+{
+    std::vector<uint8_t> got(total);
+    if (hipMemcpy(got.data(), buf, total, hipMemcpyDeviceToHost) != hipSuccess || hipDeviceSynchronize() != hipSuccess)
+        return ::testing::AssertionFailure() << "hipMemcpy D2H failed";
+    for (size_t i = 0; i < total; ++i)
+    {
+        if (i >= off && i < off + size) continue;
+        if (got[i] != sentinel)
+            return ::testing::AssertionFailure() << "byte " << i << " outside [" << off << ", " << off + size
+                                                 << ") was overwritten";
+    }
+    return ::testing::AssertionSuccess();
 }
 
 } // namespace RCCLTestHelpers

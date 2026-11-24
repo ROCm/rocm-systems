@@ -49,9 +49,6 @@ constexpr size_t kHybridCpuBytes  = 2 * kMiB;
 
 constexpr const char* kVmmAllocFailed = "a multi-segment VMM allocation failed";
 
-// INFO marker emitted by the backend when the per-segment path fires.
-inline constexpr const char* kMultiSegMarker = "multi-segment buffer";
-
 // Edge-case payload sizes from 0 up to `maxBytes`, anchored around byte/word,
 // page (4K), 64K, and the per-segment boundary `seg`. Deduplicated + sorted.
 inline std::vector<size_t> EdgeCaseSizes(size_t seg, size_t maxBytes)
@@ -298,6 +295,24 @@ protected:
         EXPECT_EQ(stray, 0u) << "stray signal writes; first at offset " << firstStray;
     }
 
+    // Segmented-builder counters of this rank's send comm toward peer in context ctx.
+    rcclIbSegStats SegStats(int ctx, int peer)
+    {
+        rcclIbSegStats s = {};
+        EXPECT_EQ(ncclSuccess, rcclRmaIbProxySegStats(rmaCtx_, ctx, peer, &s)) << "ctx " << ctx << " peer " << peer;
+        return s;
+    }
+
+    // nOps multi-segment transfers since `before` went through the segmented builder, and one addressed a segment
+    // past the first exactly when `later`.
+    void ExpectSegmentedPosts(int ctx, int peer, const rcclIbSegStats& before, int nOps, bool later)
+    {
+        const rcclIbSegStats after = SegStats(ctx, peer);
+        EXPECT_GE(after.posts - before.posts, static_cast<uint64_t>(nOps)) << "ctx " << ctx << " peer " << peer;
+        EXPECT_GE(after.wrs - before.wrs, after.posts - before.posts) << "ctx " << ctx << " peer " << peer;
+        EXPECT_EQ(after.laterSegPosts > before.laterSegPosts, later) << "ctx " << ctx << " peer " << peer;
+    }
+
     // Rank 0 puts to, or gets from, rank 1; src holds the data either way (the remote side of a get).
     ncclResult_t PostToRank1(bool get, size_t srcOff, void* srcMh, size_t size, size_t dstOff, void* dstMh,
                              void** req)
@@ -336,9 +351,13 @@ protected:
         SCOPED_TRACE(context);
         const int target = get ? 0 : 1;
         const size_t checked = dstChecked ? dstChecked : dst->totalSize;
-        if (worldRank_ == 1 - target && size > 0) FillBuf(static_cast<uint8_t*>(src->ptr) + srcOff, size, seed);
+        if (worldRank_ == 1 - target && size > 0) RCCLTestHelpers::FillSegPattern(static_cast<uint8_t*>(src->ptr) + srcOff, size, seed);
         if (worldRank_ == target) FillSentinel(dst->ptr, checked, sentinel);
+        const rcclIbSegStats before = worldRank_ == 0 ? SegStats(0, 1) : rcclIbSegStats{};
         ASSERT_NO_FATAL_FAILURE(Rank0Xfer(get, srcOff, srcMh, size, dstOff, dstMh));
+        if (worldRank_ == 0 && size > 0 &&
+            (rcclRmaIbProxyMrSegmentCount(srcMh) > 1 || rcclRmaIbProxyMrSegmentCount(dstMh) > 1))
+            ExpectSegmentedPosts(0, 1, before, 1, RCCLTestHelpers::ReachesLaterSegment(*src, srcOff, *dst, dstOff, size));
         if (flushOff) *flushOff = Rank1Flush(dstMh);
         if (worldRank_ == target) ExpectPayloadIsolated(dst->ptr, checked, dstOff, size, seed, sentinel, context);
         Barrier();
@@ -387,7 +406,7 @@ protected:
         ASSERT_NE(sendBuf, nullptr);
         ASSERT_NE(*recvBuf, nullptr);
         if (worldRank_ == 0)
-            FillBuf(sendBuf, kMiB, seed);
+            RCCLTestHelpers::FillSegPattern(sendBuf, kMiB, seed);
         void* sendMh = nullptr;
         ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kMiB, &sendMh));
         ASSERT_EQ(ncclSuccess, RegMr(*recvBuf, kMiB, recvMh));
@@ -400,7 +419,7 @@ protected:
     {
         SCOPED_TRACE(context);
         const auto* bytes = static_cast<const uint8_t*>(window);
-        EXPECT_TRUE(VerifyBuf(bytes + offset, size, seed));
+        EXPECT_TRUE(RCCLTestHelpers::VerifySegPattern(bytes + offset, size, seed));
         EXPECT_TRUE(AllSentinel(window, offset, sentinel));
         EXPECT_TRUE(AllSentinel(bytes + offset + size,
                                 totalSize - offset - size, sentinel));

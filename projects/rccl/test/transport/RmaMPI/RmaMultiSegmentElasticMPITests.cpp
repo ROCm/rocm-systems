@@ -78,7 +78,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
     const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
     ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0)) << "no remote peer for local rank " << window->localRank;
 
-    FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, kPayload,
+    RCCLTestHelpers::FillSegPattern(static_cast<uint8_t*>(window->ptr) + remoteOff, kPayload,
             static_cast<uint8_t>(0x30 + worldRank_));
     FillSentinel(window->ptr, kHybridGpuBytes, kSentinel);
 
@@ -116,7 +116,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
             static_cast<size_t>(window->localRank) * kHybridCpuBytes + s.cpuOff;
         const uint8_t seed = static_cast<uint8_t>(0x40 + worldRank_ + i);
 
-        FillBuf(static_cast<uint8_t*>(window->ptr) + ownCpuOff, s.len, seed);
+        RCCLTestHelpers::FillSegPattern(static_cast<uint8_t*>(window->ptr) + ownCpuOff, s.len, seed);
         FillSentinel(window->ptr, kHybridGpuBytes, kSentinel);
         Barrier();
 
@@ -167,10 +167,6 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
     EXPECT_TRUE(AllSentinel(window->ptr, kHybridGpuBytes, kSentinel));
     Barrier();
 }
-
-// findRemotePeerForLocalRank must return a rank on another node with the
-// requested local rank, or -1 when no node has one. Pure MPI topology, so it
-// runs even where the hybrid tests that use it are skipped.
 
 } // namespace RCCLRmaTests
 

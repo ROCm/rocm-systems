@@ -143,6 +143,33 @@ inline ncclResult_t freeDeviceBuffer(void* ptr)
     return ncclMemFree(ptr);
 }
 
+// Pinned host staging for pattern init/verify copies. ROCm 7.0.2.1 pins large pageable
+// copy buffers via SVM, which makes a later hipMemCreate in the process fail with OOM.
+template<typename T>
+class PinnedHostStaging
+{
+public:
+    explicit PinnedHostStaging(size_t num_elements)
+    {
+        static_assert(std::is_trivially_copyable_v<T>, "staging needs trivially copyable T");
+        if(hipHostMalloc(reinterpret_cast<void**>(&data_), num_elements * sizeof(T)) != hipSuccess)
+            data_ = nullptr;
+    }
+    ~PinnedHostStaging()
+    {
+        if(data_)
+            (void)hipHostFree(data_);
+    }
+    PinnedHostStaging(const PinnedHostStaging&)            = delete;
+    PinnedHostStaging& operator=(const PinnedHostStaging&) = delete;
+
+    T* data() { return data_; }
+    T& operator[](size_t i) { return data_[i]; }
+
+private:
+    T* data_ = nullptr;
+};
+
 // ============================================================================
 // Device Buffer Initialization
 // ============================================================================
@@ -184,7 +211,11 @@ hipError_t initializeBufferWithPattern(void*       device_buffer,
         return hipErrorInvalidValue;
     }
 
-    std::vector<T> host_data(num_elements);
+    PinnedHostStaging<T> host_data(num_elements);
+    if(!host_data.data())
+    {
+        return hipErrorOutOfMemory;
+    }
     for(size_t i = 0; i < num_elements; i++)
     {
         host_data[i] = pattern_func(i);
@@ -282,8 +313,12 @@ bool verifyBufferData(const void* device_buffer,
     }
 
     // Download data from device
-    std::vector<T> host_data(num_elements);
-    hipError_t     err = hipMemcpy(host_data.data(),
+    PinnedHostStaging<T> host_data(num_elements);
+    if(!host_data.data())
+    {
+        return false;
+    }
+    hipError_t err = hipMemcpy(host_data.data(),
                                device_buffer,
                                num_elements * sizeof(T),
                                hipMemcpyDeviceToHost);
