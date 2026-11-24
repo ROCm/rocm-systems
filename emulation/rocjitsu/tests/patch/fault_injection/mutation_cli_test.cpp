@@ -5,6 +5,7 @@
 #include "barrier_oracle.h"
 #include "cdna_lds_fixture.h"
 #include "lds_fixture.h"
+#include "remaining_subword_fixture.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
@@ -12,6 +13,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "scoped_temp.h"
+#include "subword_fixture.h"
 #include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
@@ -338,11 +340,13 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   EXPECT_NE(stdout_.find("LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 scalar"),
             std::string::npos);
   EXPECT_NE(stdout_.find("allocated --address-vgpr"), std::string::npos);
+  EXPECT_NE(stdout_.find("Selected subword and transpose forms are also supported."),
+            std::string::npos);
   EXPECT_NE(stdout_.find("the first member of a barrier, or the LDS instruction"),
             std::string::npos);
   EXPECT_EQ(invoke({"--capabilities"}), 0);
   const std::string capabilities = stdout_;
-  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 114);
+  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 215);
   EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
                               "form=ds_store_b32 admission=direct-single-owner\n"),
             std::string::npos);
@@ -372,7 +376,7 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
                 std::string::npos);
   }
   const std::vector<LdsCapability> lds_capabilities = lds_wrong_address_capabilities();
-  ASSERT_EQ(lds_capabilities.size(), 104u);
+  ASSERT_EQ(lds_capabilities.size(), 205u);
   for (const LdsCapability &capability : lds_capabilities) {
     const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
     ASSERT_NE(target, nullptr);
@@ -910,6 +914,61 @@ TEST_F(FaultMutationCli, ListsTwoAddressForms) {
       EXPECT_NE(stdout_.find(target.cdna ? "form=ds_write2st64_b64" : "form=ds_store_2addr_b32"),
                 std::string::npos);
     }
+  }
+}
+
+TEST_F(FaultMutationCli, ListsSubwordAndTransposeForms) {
+  for (const test::LdsFormCase &fixture : test::kSubwordCases) {
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(wave32);
+      SCOPED_TRACE(fixture.form);
+      write(input_, test::make_lds_form_elf(fixture, false, wave32));
+      ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--kind",
+                        "LdsWrongAddress", "--list"}),
+                0);
+      EXPECT_NE(stdout_.find("form=" + std::string(fixture.form)), std::string::npos);
+    }
+  }
+}
+
+TEST_F(FaultMutationCli, ListsRemainingSubwordForms) {
+  for (const test::LdsFormCase &fixture : test::kRemainingSubwordCases) {
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(wave32);
+      SCOPED_TRACE(fixture.form);
+      SCOPED_TRACE(static_cast<int>(fixture.target));
+      write(input_, test::make_lds_form_elf(fixture, false, wave32));
+      ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--kind",
+                        "LdsWrongAddress", "--list"}),
+                0);
+      EXPECT_NE(stdout_.find("form=" + std::string(fixture.form)), std::string::npos);
+    }
+  }
+}
+
+TEST_F(FaultMutationCli, Rdna4Wave32ListsSourceSites) {
+  for (const std::pair<uint32_t, const char *> &row :
+       std::array<std::pair<uint32_t, const char *>, 2>{
+           {{EF_AMDGPU_MACH_AMDGCN_GFX1200, "gfx1200"},
+            {EF_AMDGPU_MACH_AMDGCN_GFX1201, "gfx1201"}}}) {
+    const uint32_t machine = row.first;
+    const char *target = row.second;
+    SCOPED_TRACE(target);
+    write(input_, test::make_lds_load_elf(machine, true, 0));
+    ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--kind",
+                      "LdsWrongAddress", "--list"}),
+              0)
+        << stderr_;
+    EXPECT_NE(stdout_.find("ordinal=0 exact=0 address_vgpr=2 address_bank=0 target=" +
+                           std::string(target) + " form=ds_load_b32\n"),
+              std::string::npos);
+    EXPECT_NE(stdout_.find("ordinal=1 exact=8 address_vgpr=1 address_bank=0 target=" +
+                           std::string(target) + " form=ds_store_b32\n"),
+              std::string::npos);
   }
 }
 

@@ -85,7 +85,7 @@ join_lds_profiles(const std::array<LdsProfile, Sizes> &...groups) {
 #define CDNA5_LDS_PROFILES(...)                                                                    \
   make_lds_profiles(ROCJITSU_CODE_TARGET_GFX1250, IsaFamily::Cdna5, __VA_ARGS__)
 
-constexpr std::array<LdsProfile, 72> kLdsProfiles = join_lds_profiles(
+constexpr std::array<LdsProfile, 145> kLdsProfiles = join_lds_profiles(
     RDNA4_LDS_PROFILES(GFX1200, replace_rdna4_b32_address, "ds_store_b32"),
     RDNA4_LDS_PROFILES(GFX1201, replace_rdna4_b32_address, "ds_store_b32"),
     RDNA4_LDS_PROFILES(GFX1200, replace_rdna4_b32_address, "ds_load_b32"),
@@ -123,7 +123,33 @@ constexpr std::array<LdsProfile, 72> kLdsProfiles = join_lds_profiles(
     CDNA4_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_b32", "ds_read_b64",
                        "ds_write_b64", "ds_read_b128", "ds_read2_b32", "ds_write2_b32",
                        "ds_read2st64_b32", "ds_write2st64_b32", "ds_write2_b64",
-                       "ds_read2st64_b64"));
+                       "ds_read2st64_b64"),
+    CDNA5_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_load_u16", "ds_load_i16", "ds_load_u8",
+                       "ds_load_i8", "ds_store_b8", "ds_store_b8_d16_hi", "ds_store_b16",
+                       "ds_store_b16_d16_hi"),
+    CDNA4_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_u16", "ds_read_b64_tr_b16",
+                       "ds_write_b16", "ds_read_i8", "ds_read_u8", "ds_write_b8",
+                       "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"),
+    RDNA4_LDS_PROFILES(GFX1200, amdgpu::replace_ds_address_field, "ds_load_i8", "ds_load_u8",
+                       "ds_load_i16", "ds_load_u16", "ds_load_u8_d16", "ds_load_u8_d16_hi",
+                       "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
+                       "ds_load_u16_d16_hi", "ds_store_b8", "ds_store_b16", "ds_store_b8_d16_hi",
+                       "ds_store_b16_d16_hi"),
+    RDNA4_LDS_PROFILES(GFX1201, amdgpu::replace_ds_address_field, "ds_load_i8", "ds_load_u8",
+                       "ds_load_i16", "ds_load_u16", "ds_load_u8_d16", "ds_load_u8_d16_hi",
+                       "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
+                       "ds_load_u16_d16_hi", "ds_store_b8", "ds_store_b16", "ds_store_b8_d16_hi",
+                       "ds_store_b16_d16_hi"),
+    CDNA5_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_load_u8_d16", "ds_load_u8_d16_hi",
+                       "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
+                       "ds_load_u16_d16_hi", "ds_load_tr8_b64", "ds_load_tr16_b128"),
+    CDNA3_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_i8", "ds_read_u8", "ds_read_i16",
+                       "ds_read_u16", "ds_read_u8_d16", "ds_read_u8_d16_hi", "ds_read_i8_d16",
+                       "ds_read_i8_d16_hi", "ds_read_u16_d16", "ds_read_u16_d16_hi", "ds_write_b8",
+                       "ds_write_b16", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"),
+    CDNA4_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_i16", "ds_read_u8_d16",
+                       "ds_read_u8_d16_hi", "ds_read_i8_d16", "ds_read_i8_d16_hi",
+                       "ds_read_u16_d16", "ds_read_u16_d16_hi"));
 
 #undef RDNA4_LDS_PROFILES
 #undef CDNA3_LDS_PROFILES

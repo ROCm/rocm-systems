@@ -61,8 +61,9 @@ public:
 
   /// @brief Set the execution plugin group on all CUs (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    for (auto *cu : cus_)
+    for (auto *cu : cus_) {
       cu->set_plugin_group(pg);
+    }
   }
 
   /// @brief Return the number of compute units.
@@ -88,8 +89,9 @@ public:
 
   /// @brief Get or create the SPI for this shader engine.
   ShaderProcessorInput &spi() {
-    if (!spi_)
+    if (!spi_) {
       spi_ = std::make_unique<ShaderProcessorInput>(cus_);
+    }
     return *spi_;
   }
 

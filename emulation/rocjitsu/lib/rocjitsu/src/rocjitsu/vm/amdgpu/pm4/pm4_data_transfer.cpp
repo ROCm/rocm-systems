@@ -18,8 +18,9 @@ Pm4DataTransfer::Pm4DataTransfer(std::optional<uint64_t> source, uint64_t destin
 VmAccessOutcome Pm4DataTransfer::resume(const GpuVmAccess &access) {
   if (source_) {
     const auto outcome = access.read(*source_, data_, completed_bytes_, token_);
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
       return outcome;
+    }
     source_.reset();
     completed_bytes_ = 0;
   }
