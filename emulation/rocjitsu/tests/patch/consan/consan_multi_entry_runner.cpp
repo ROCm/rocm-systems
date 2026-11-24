@@ -107,10 +107,12 @@ struct Entry {
 
 int run(int argc, char **argv) {
   if (argc != 3 ||
-      (std::string_view(argv[2]) != "baseline" && std::string_view(argv[2]) != "instrumented")) {
+      (std::string_view(argv[2]) != "baseline" && std::string_view(argv[2]) != "instrumented" &&
+       std::string_view(argv[2]) != "native-application")) {
     return 3;
   }
   const bool instrumented = std::string_view(argv[2]) == "instrumented";
+  const bool native_application = std::string_view(argv[2]) == "native-application";
   if (hsa_init() != HSA_STATUS_SUCCESS) {
     return 20;
   }
@@ -123,7 +125,7 @@ int run(int argc, char **argv) {
   rj_consan_finish_fn finish = nullptr;
   rj_consan_drain_fn drain = nullptr;
   rj_consan_statistics_fn statistics = nullptr;
-  if (instrumented) {
+  if (instrumented || native_application) {
     const char *path = std::getenv("RJ_CONSAN_PLUGIN_PATH");
     if (path) {
       plugin = ::dlopen(path, RTLD_NOW | RTLD_NOLOAD);
@@ -145,6 +147,13 @@ int run(int argc, char **argv) {
     std::cerr << operation << " failed: " << uint32_t(status) << '\n';
     return false;
   };
+  uint32_t initializations = 1;
+  uint32_t shutdowns = 0;
+  if (native_application) {
+    if (!require(hsa_init(), "second HSA reference"))
+      return 20;
+    ++initializations;
+  }
   hsa_executable_t executable = {};
   hsa_code_object_reader_t reader = {};
   hsa_queue_t *queue = nullptr;
@@ -158,6 +167,19 @@ int run(int argc, char **argv) {
       Entry{.name = "mk_a.kd", .argument_bytes = 16, .group_bytes = 8},
       Entry{.name = "mk_b.kd", .argument_bytes = 32, .group_bytes = 256},
       Entry{.name = "mk_c.kd", .argument_bytes = 24, .group_bytes = 64}};
+  if (native_application) {
+    hsa_amd_queue_create_desc_t descriptor = {};
+    descriptor.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+    descriptor.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+    descriptor.queue_size_bytes = 128 * sizeof(hsa_kernel_dispatch_packet_t);
+    descriptor.priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+    descriptor.engine.compute.type = HSA_QUEUE_TYPE_SINGLE;
+    if (!require(hsa_amd_queue_create(initialized.gpu, &descriptor, 1),
+                 "AMD queue before image load") ||
+        descriptor.queue == nullptr)
+      return 20;
+    queue = descriptor.queue;
+  }
   const int descriptor = ::open(argv[1], O_RDONLY | O_CLOEXEC);
   if (descriptor < 0 ||
       !require(hsa_code_object_reader_create_from_file(descriptor, &reader), "reader") ||
@@ -225,10 +247,18 @@ int run(int argc, char **argv) {
        !require(hsa_amd_agents_allow_access(1, &initialized.gpu, nullptr, arguments),
                 "args access") ||
        !require(hsa_amd_agents_allow_access(1, &initialized.gpu, nullptr, output), "out access") ||
-       !require(hsa_queue_create(initialized.gpu, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0,
-                                 0, &queue),
-                "queue"))) {
+       (!native_application &&
+        !require(hsa_queue_create(initialized.gpu, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0,
+                                  0, &queue),
+                 "queue")))) {
     result = 20;
+  }
+  if (result == 0 && native_application) {
+    if (!require(hsa_shut_down(), "intermediate HSA shutdown")) {
+      result = 22;
+    } else {
+      ++shutdowns;
+    }
   }
   const std::array<uint32_t, 4> order = {0, 1, 2, 0};
   const std::array<uint32_t, 4> seeds = {7, 23, 55, 39};
@@ -238,7 +268,8 @@ int run(int argc, char **argv) {
     const Entry &entry = entries[index];
     const uint32_t seed = seeds[ordinal];
     const uint32_t bias = 100;
-    if (!require(hsa_signal_create(1, 0, nullptr, &signal), "dedicated completion")) {
+    if (!native_application &&
+        !require(hsa_signal_create(1, 0, nullptr, &signal), "dedicated completion")) {
       result = 21;
       break;
     }
@@ -272,7 +303,11 @@ int run(int argc, char **argv) {
                             (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
     hsa_signal_store_screlease(queue->doorbell_signal, write_index);
-    hsa_signal_value_t value = 1;
+    hsa_signal_value_t value = native_application ? 0 : 1;
+    if (native_application && drain() != 0) {
+      std::cerr << "native drain failed; retaining live dispatch resources\n";
+      ::_exit(22);
+    }
     const std::chrono::steady_clock::time_point deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(20);
     while (value == 1 && std::chrono::steady_clock::now() < deadline) {
@@ -297,21 +332,21 @@ int run(int argc, char **argv) {
       result = 23;
     }
     std::cout << "{\"ordinal\":" << ordinal + 1 << ",\"entry\":\"" << entry.name
-              << "\",\"native\":" << (index == 2 ? "true" : "false")
+              << "\",\"native\":" << (native_application || index == 2 ? "true" : "false")
               << ",\"kernarg_bytes\":" << entry.argument_bytes
               << ",\"kernarg_alignment\":" << entry.alignment
               << ",\"group_bytes\":" << entry.group_bytes << ",\"completion\":" << value
               << ",\"output\":[" << actual[0] << ',' << actual[1] << ',' << actual[2] << ','
               << actual[3] << "]}\n";
-    if (drain && drain() != 0) {
+    if (drain && !native_application && drain() != 0) {
       result = 22;
     }
-    if (!require(hsa_signal_destroy(signal), "completion release")) {
+    if (signal.handle && !require(hsa_signal_destroy(signal), "completion release")) {
       result = 22;
     }
     signal = {};
   }
-  const int finish_status = finish ? finish() : 0;
+  const int finish_status = finish && !native_application ? finish() : 0;
   if (finish_status != 0 && result == 0) {
     result = 22;
   }
@@ -337,13 +372,20 @@ int run(int argc, char **argv) {
   if (output && !require(hsa_amd_memory_pool_free(output), "output cleanup") && result == 0) {
     result = 22;
   }
-  if (!require(hsa_shut_down(), "shutdown") && result == 0) {
-    result = 22;
+  if (!require(hsa_shut_down(), "shutdown")) {
+    if (result == 0)
+      result = 22;
+  } else {
+    ++shutdowns;
   }
-  if (plugin) {
+  if (plugin)
     ::dlclose(plugin);
-  }
-  std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
+  std::cout << "{\"app_status\":" << result << ",\"finish_status\":";
+  if (native_application)
+    std::cout << "null";
+  else
+    std::cout << finish_status;
+  std::cout << ",\"initializations\":" << initializations << ",\"shutdowns\":" << shutdowns
             << ",\"loads\":" << loads << ",\"completed\":" << completed
             << ",\"submitted\":" << stats.submitted << ",\"forwarded\":" << stats.forwarded
             << ",\"copied\":" << stats.copied << ",\"written\":" << stats.written

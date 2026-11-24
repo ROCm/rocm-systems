@@ -807,18 +807,24 @@ endif()
 
 if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
     add_dependencies(consan_multi_entry_runner consan_multi_entry_fixture)
-    foreach(_profile IN ITEMS SelectedAB WrongProfile BarrierAB LoopAB)
-        set(_negative)
+    foreach(
+        _profile
+        IN
+        ITEMS SelectedAB WrongProfile BarrierAB LoopAB NativeApplication
+    )
+        set(_profile_options)
         set(_multi_case_image ${_fixture_dir}/multi-entry.hsaco)
         set(_multi_variant no-sync)
         if(_profile STREQUAL "WrongProfile")
-            set(_negative --wrong-profile)
+            set(_profile_options --wrong-profile)
         elseif(_profile STREQUAL "BarrierAB")
             set(_multi_case_image ${_fixture_dir}/multi-entry-barrier.hsaco)
             set(_multi_variant barrier)
         elseif(_profile STREQUAL "LoopAB")
             set(_multi_case_image ${_fixture_dir}/multi-entry-loop.hsaco)
             set(_multi_variant loop)
+        elseif(_profile STREQUAL "NativeApplication")
+            set(_profile_options --native-application)
         endif()
         set(_test ConSanMultiEntrySim.${_profile})
         add_test(
@@ -835,7 +841,7 @@ if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
                 --variant ${_multi_variant} --config
                 ${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --source ${PROJECT_SOURCE_DIR}
-                ${_negative}
+                ${_profile_options}
         )
         rj_test_runtime_dir_env(_runtime ${_test})
         set_tests_properties(

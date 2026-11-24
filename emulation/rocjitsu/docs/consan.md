@@ -176,7 +176,9 @@ files whose entries remain native and uncovered. The runtime verifies their
 complete ELF/metadata inventory and matches both bytes and digest before loading
 them. These images do not require a prepared artifact. An optional selected
 artifact still requires `RJ_CONSAN_ARTIFACT_DIR` and
-`RJ_CONSAN_SELECTION_PROFILE`; native execution cannot substitute for its capture.
+`RJ_CONSAN_SELECTION_PROFILE`, together with `RJ_CONSAN_CAPTURE_PATH` for its
+capture. Native-only execution does not require a capture path; native execution
+cannot substitute for a selected artifact's capture.
 
 This adapter accepts up to 16 live system-memory compute queues, including queues
 created through `hsa_amd_queue_create` before image loading. Queue priority and CU
@@ -202,12 +204,20 @@ application signal. Original barriers pass through while admission is healthy;
 queue profiling calls use the original API. Queue and executable destruction wait
 for their own launches. Drain waits for the submitted prefix even if a later
 launch completes first.
+Coalesced batches apply the execution budget to dispatches individually, so a
+trailing barrier does not consume an execution slot. If a dispatch exceeds that
+budget, following tracked barrier completions receive failure notification while
+pending dispatch ownership is retained.
 
 Native-only finish drains and joins the observer without creating a selected
 capture. Success means native infrastructure completion, with no ConSan probe or
 LDS-analysis coverage. A configured selected artifact that never starts capture
-fails finish. In application mode, HSA shutdown automatically finishes before
-delegating to ROCR. Explicit finish remains available for retaining its status.
+fails finish. In application mode, shutdown automatically finishes before releasing
+the final tracked HSA reference. An intermediate `hsa_shut_down` leaves admission
+open for clients that still hold a reference. Tracking starts with the installing
+`hsa_init` reference and counts successful initialization and shutdown calls
+through the installed API table; cached calls that bypass its hooks are outside
+this contract. Explicit finish remains available for retaining its status.
 An application must treat tool-install failure as failure: ROCR may continue
 running the original program after rejecting a tool.
 

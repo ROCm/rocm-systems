@@ -29,7 +29,8 @@
 /// earlier release of a completed dispatch's signal. A nonzero finish is not a saved
 /// capture; it must be reported even if earlier dispatches completed normally.
 /// The opt-in native application profile has separate null-completion admission
-/// and automatic finish at HSA shutdown; see docs/consan.md. A successful native-only
-/// finish creates no selected capture and provides no analysis coverage.
+/// and automatic finish before releasing the final tracked HSA reference; see
+/// docs/consan.md. A successful native-only finish creates no selected capture
+/// and provides no analysis coverage.
 using rj_consan_drain_fn = int (*)();
 using rj_consan_finish_fn = int (*)();

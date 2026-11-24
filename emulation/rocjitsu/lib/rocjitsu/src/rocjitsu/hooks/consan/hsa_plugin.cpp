@@ -144,6 +144,18 @@ public:
   const AmdExtTable &amd() const { return amd_; }
   bool application_profile() const { return application_profile_; }
 
+  // The lifecycle hooks serialize these reference updates and original HSA
+  // calls outside mutex_: final shutdown synchronously reenters OnUnload.
+  hsa_status_t initialize() {
+    const hsa_status_t status = core_.hsa_init_fn();
+    if (status == HSA_STATUS_SUCCESS)
+      ++hsa_references_;
+    return status;
+  }
+
+  bool final_hsa_reference() const { return hsa_references_ == 1; }
+  void release_hsa_reference() { --hsa_references_; }
+
   void begin_shutdown() {
     std::lock_guard lock(mutex_);
     ++shutdown_calls_;
@@ -559,11 +571,11 @@ public:
       std::lock_guard lock(mutex_);
       if (closed_)
         return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
-      ++queue_creations_;
+      ++native_queue_calls_;
     }
     const auto release = [this](Runtime *) {
       std::lock_guard lock(mutex_);
-      --queue_creations_;
+      --native_queue_calls_;
       condition_.notify_all();
     };
     std::unique_ptr<Runtime, decltype(release)> reservation(this, release);
@@ -702,7 +714,9 @@ public:
         return static_cast<int>(status_);
       }
       closed_ = true;
-      condition_.wait(lock, [&] { return queue_creations_ == 0 && callbacks_ == 0; });
+      condition_.wait(lock, [&] {
+        return queue_creations_ == 0 && native_queue_calls_ == 0 && callbacks_ == 0;
+      });
       if (!started_ && !workers_started_) {
         if (output_ >= 0) {
           const int closed = ::close(output_);
@@ -1056,11 +1070,6 @@ private:
       condition_.notify_all();
     };
     std::unique_ptr<Runtime, decltype(leave)> callback(this, leave);
-    if (count > CaptureLimits{}.executions) {
-      std::lock_guard lock(mutex_);
-      fail_locked(RuntimeStatus::InvalidFacts, "application packet batch exceeds admission budget");
-      return;
-    }
     if (count > 1) {
       // ROCR can coalesce adjacent packets into one callback. Keep their
       // publication order and individual ownership; the enclosing callback
@@ -1614,8 +1623,12 @@ private:
   hsa_amd_memory_pool_t pool_{};
   std::vector<std::unique_ptr<QueueState>> queues_;
   uint32_t queue_creations_ = 0;
+  // Enclosing AMD create calls fence finish, but do not reserve queue capacity.
+  uint32_t native_queue_calls_ = 0;
   uint32_t callbacks_ = 0;
   uint32_t shutdown_calls_ = 0;
+  // ROCR acquires the installing hsa_init reference before calling OnLoad.
+  uint32_t hsa_references_ = 1;
   bool unload_seen_ = false;
   uint64_t next_sequence_ = 0;
   bool workers_started_ = false;
@@ -1642,6 +1655,12 @@ private:
 // unloads its tools. An automatic C++ owner would destroy Runtime too early.
 // OnUnload owns deletion, deferred through any enclosing HSA shutdown call.
 Runtime *runtime = nullptr;
+// Outlive Runtime: final shutdown can delete it while this lock is held.
+std::mutex hsa_lifecycle_mutex;
+// ROCR resets this process-lifetime table in place after unloading its tools.
+// An init already waiting on the lifecycle lock must use its current function,
+// since a saved tool function may have been unmapped by the preceding shutdown.
+std::atomic<CoreApiTable *> lifecycle_core_table = nullptr;
 // Non-owning ROCR core/AMD-extension tables, valid through OnUnload. Runtime
 // keeps original copies; these pointers identify the active tables we patched.
 CoreApiTable *installed_core = nullptr;
@@ -1708,16 +1727,35 @@ hsa_status_t HSA_API signal_destroy(hsa_signal_t signal) {
 hsa_status_t HSA_API profiling(hsa_queue_t *queue, int enabled) {
   return boundary([&] { return runtime->profiling(queue, enabled); });
 }
+hsa_status_t HSA_API initialize() noexcept {
+  std::lock_guard lock(hsa_lifecycle_mutex);
+  if (runtime)
+    return runtime->initialize();
+  const CoreApiTable *core = lifecycle_core_table.load(std::memory_order_acquire);
+  if (core == nullptr || core->hsa_init_fn == nullptr || core->hsa_init_fn == initialize)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  return core->hsa_init_fn();
+}
 hsa_status_t HSA_API shutdown() noexcept {
-  if (runtime->application_profile() && !runtime->finished() && runtime->finish() != 0)
+  std::lock_guard lock(hsa_lifecycle_mutex);
+  Runtime *active = runtime;
+  if (active == nullptr) {
+    const CoreApiTable *core = lifecycle_core_table.load(std::memory_order_acquire);
+    if (core == nullptr || core->hsa_shut_down_fn == nullptr || core->hsa_shut_down_fn == shutdown)
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    return core->hsa_shut_down_fn();
+  }
+  if (active->application_profile() && active->final_hsa_reference() && !active->finished() &&
+      active->finish() != 0)
     return HSA_STATUS_ERROR;
-  if (!runtime->finished()) {
+  if (!active->application_profile() && !active->finished()) {
     diagnostic("call rj_consan_finish before hsa_shut_down");
     return HSA_STATUS_ERROR;
   }
-  Runtime *active = runtime;
   active->begin_shutdown();
   const hsa_status_t status = active->core().hsa_shut_down_fn();
+  if (status == HSA_STATUS_SUCCESS && active->application_profile())
+    active->release_hsa_reference();
   if (active->end_shutdown()) {
     runtime = nullptr;
     delete active;
@@ -1775,6 +1813,10 @@ bool install(HsaApiTable *table) {
     diagnostic("RJ_CONSAN_APPLICATION_PROFILE must be 1 when configured");
     return false;
   }
+  if (application != nullptr && core.hsa_init_fn == nullptr) {
+    diagnostic("application profile requires the HSA initialization API");
+    return false;
+  }
   std::vector<std::shared_ptr<const LoadedNativeImage>> native_images;
   const char *native_paths = std::getenv("RJ_CONSAN_NATIVE_IMAGES");
   if (native_paths != nullptr) {
@@ -1817,8 +1859,12 @@ bool install(HsaApiTable *table) {
     }
   }
   const bool selected = artifacts != nullptr && *artifacts != '\0';
-  if ((!selected && native_images.empty()) || !capture || !*capture) {
-    diagnostic("RJ_CONSAN_ARTIFACT_DIR and RJ_CONSAN_CAPTURE_PATH are required");
+  if (!selected && native_images.empty()) {
+    diagnostic("configure RJ_CONSAN_ARTIFACT_DIR or application-profile RJ_CONSAN_NATIVE_IMAGES");
+    return false;
+  }
+  if (selected && (capture == nullptr || *capture == '\0')) {
+    diagnostic("RJ_CONSAN_CAPTURE_PATH is required for a selected artifact");
     return false;
   }
   const char *profile = std::getenv("RJ_CONSAN_SELECTION_PROFILE");
@@ -1848,9 +1894,12 @@ bool install(HsaApiTable *table) {
     }
     expected_profile[index] = static_cast<uint8_t>((high << 4) | low);
   }
-  runtime = new Runtime(core, amd, selected ? artifacts : "", capture, expected_profile,
-                        application != nullptr, std::move(native_images));
+  runtime = new Runtime(core, amd, selected ? artifacts : "", capture ? capture : "",
+                        expected_profile, application != nullptr, std::move(native_images));
   CoreApiTable &patched = *table->core_;
+  lifecycle_core_table.store(&patched, std::memory_order_release);
+  if (application != nullptr)
+    patched.hsa_init_fn = initialize;
   patched.hsa_code_object_reader_create_from_memory_fn = reader_memory;
   patched.hsa_code_object_reader_create_from_file_fn = reader_file;
   patched.hsa_code_object_reader_destroy_fn = reader_destroy;
@@ -1923,6 +1972,7 @@ extern "C" RJ_API_EXPORT void OnUnload() noexcept {
       (table).field = (original).field;                                                            \
     }                                                                                              \
   } while (false)
+    RJ_CONSAN_RESTORE_HOOK(core, saved, hsa_init_fn, initialize);
     RJ_CONSAN_RESTORE_HOOK(core, saved, hsa_code_object_reader_create_from_memory_fn,
                            reader_memory);
     RJ_CONSAN_RESTORE_HOOK(core, saved, hsa_code_object_reader_create_from_file_fn, reader_file);
