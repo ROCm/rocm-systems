@@ -897,16 +897,16 @@ def test_fp8_widen_selectors_and_pair_result(packed):
         for arch, suffix in [
             ('cdna3', 'gfx942'),
             ('cdna4', 'gfx950'),
-            ('cdna5', 'gfx950'),
+            ('cdna5', 'gfx1250'),
         ]:
-            if arch == 'cdna5' and name == 'V_CVT_F32_FP8':
-                suffix = 'gfx1250'
             for vop3 in (False, True):
                 body = gen_fp8_widen(
                     context(arch, name, ['dst'], ['src'], is_vop3=vop3)
                 )
                 assert f'rj_arith_{name.lower()}_w64_{suffix}' in body
-                assert ('inst_.clamp' in body) == (vop3 and suffix == 'gfx1250')
+                assert ('inst_.clamp' in body) == (
+                    vop3 and arch == 'cdna5' and name == 'V_CVT_F32_FP8'
+                )
                 assert ('execute_fp8_widen_sdwa' in body) == (
                     not packed and not vop3 and arch != 'cdna5'
                 )
@@ -947,6 +947,14 @@ def test_fp8_narrow_modes_and_partial_destination(stochastic):
             assert f'rj_arith_{name.lower()}_w64_{suffix}' in body
             assert 'amdgpu::vop3_opsel(inst_)' in body
             assert ('inst_.clamp' in body) == (suffix == 'gfx1250' and kind == 'FP8')
+            assert (
+                '(wf.fp_denorm_mode_f32() & 2) != (wf.fp_denorm_mode_f16_f64() & 2)'
+                in body
+            ) == (arch == 'cdna4')
+            if arch == 'cdna4':
+                assert body.index('UnsupportedOperandValue') < body.index(
+                    'execute_binary32'
+                )
         assert (
             gen_fp8_narrow(context('rdna4', name, ['dst'], ['a', 'b'], is_vop3=False))
             is None
@@ -1738,17 +1746,26 @@ def test_float16_conversion_architectures_and_layouts(arch):
             if not supported:
                 assert body is None
                 continue
-            assert 'rj_arith_' + name.lower() + '_w64' in body
+            suffix = '_gfx950' if arch == 'cdna4' else ''
+            assert 'rj_arith_' + name.lower() + '_w64' + suffix in body
             assert ('RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body) == (
-                arch == 'cdna5' and name == 'V_CVT_PK_F16_F32'
+                name == 'V_CVT_PK_F16_F32'
             )
+            assert ('RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body) == (
+                arch == 'cdna4' and name in ('V_CVT_PK_BF16_F32', 'V_CVT_SR_BF16_F32')
+            )
+            assert ('float32_flags' in body) == (arch == 'cdna4' and widen)
             assert 'FP16_OVFL' in body
             assert ('execute_bf16_widen_sdwa' in body) == (
                 widen and not vop3 and arch == 'cdna4'
             )
+            if widen and not vop3 and arch == 'cdna4':
+                assert 'flags, d, a' in body
             assert ('execute_ternary32' in body) == packed_sr
             assert ('? 0xC : 0x3' in body) == (widen or single_sr)
-            assert ('inst_.abs & 1' in body) == (not widen and not packed_sr)
+            assert ('inst_.abs & 1' in body) == (
+                (widen and vop3 and arch == 'cdna4') or (not widen and not packed_sr)
+            )
             assert ('inst_.abs & 2' in body) == (
                 not widen and not packed_sr and not single_sr
             )

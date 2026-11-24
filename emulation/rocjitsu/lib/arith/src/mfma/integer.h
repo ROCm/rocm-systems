@@ -107,10 +107,12 @@ void matrix_i8_dot_row(const uint32_t *row, const uint32_t columns[K][M], uint32
 #endif
 }
 
-// Reduce decoded byte matrices and apply optional signed saturation after adding C.
+// Reduce decoded byte matrices and apply optional signed saturation after adding C
+// (or after each 16-element K pass on gfx950).
 template <int M, int K, int Batch, bool Wmma>
-void matrix_i8_kernel(uint64_t controls, bool clamp, uint32_t *const *d, const uint32_t *const *a,
-                      const uint32_t *const *b, const uint32_t *const *c) {
+void matrix_i8_kernel(uint64_t controls, bool clamp, bool clamp_per_pass, uint32_t *const *d,
+                      const uint32_t *const *a, const uint32_t *const *b,
+                      const uint32_t *const *c) {
   constexpr int lanes = Wmma ? 32 : 64;
   alignas(64) uint32_t left[M * K * Batch], right[M * K * Batch];
   matrix_i8_decode<M * K * Batch, lanes>(a, left, !Wmma || (controls & RJ_ARITH_WMMA_SIGNED_A));
@@ -125,6 +127,26 @@ void matrix_i8_kernel(uint64_t controls, bool clamp, uint32_t *const *d, const u
       }
     }
     for (int row = 0; row < M; ++row) {
+      if constexpr (!Wmma && K > 16) {
+        if (clamp && clamp_per_pass) {
+          alignas(64) uint32_t pass_sum[M];
+          for (int col = 0; col < M; ++col) {
+            auto out = matrix_i8_output<M, Batch, Wmma>(row, col, batch);
+            result[batch][row][col] = c[out.reg][out.lane];
+          }
+          for (int pass = 0; pass < K / 16; ++pass) {
+            matrix_i8_dot_row<M, 16>(rows[row] + 16 * pass, columns + 16 * pass, pass_sum);
+            for (int col = 0; col < M; ++col) {
+              int64_t wide = int64_t(bit_cast<int32_t>(result[batch][row][col])) +
+                             bit_cast<int32_t>(pass_sum[col]);
+              result[batch][row][col] = wide > 0x7fffffffLL    ? 0x7fffffffU
+                                        : wide < -0x80000000LL ? 0x80000000U
+                                                               : uint32_t(wide);
+            }
+          }
+          continue;
+        }
+      }
       matrix_i8_dot_row<M, K>(rows[row], columns, result[batch][row]);
       for (int col = 0; col < M; ++col) {
         auto out = matrix_i8_output<M, Batch, Wmma>(row, col, batch);

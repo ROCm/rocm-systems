@@ -80,6 +80,15 @@ Compatibility FP causes. MUL retains inherited input-denormal/range reporting
 without adding gfx12 INVALID causes; OMOD retains its legacy cause suppression.
 Both explicit strict modes remain unqualified for these operations.
 
+gfx950 unscaled OCP FP8/BF8 widening (`v_cvt_{f32,pk_f32}_{fp8,bf8}_gfx950`),
+narrowing (`v_cvt_{pk,sr}_{fp8,bf8}_f32_gfx950`), and BF16/FP16 conversion
+(`v_cvt_f32_bf16_gfx950`, `v_cvt_{pk,sr}_{bf16,f16}_f32_gfx950`) entry points
+are calibrated against MI350X hardware captures and accept mode 2; gfx950
+signed-byte dense MFMA and sparse SMFMAC entry points saturate signed
+accumulation per hardware pass under `RJ_ARITH_FP16_OVFL` and ignore
+`CBSZ`/`ABID`/`BLGP` on single-batch dense forms while unsuffixed shared forms
+preserve gfx942 behavior.
+
 ### Matrix instructions
 
 CDNA matrix support covers twenty dense and twelve sparse gfx942 MFMA/SMFMAC

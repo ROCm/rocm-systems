@@ -10556,8 +10556,19 @@ def test_dense_integer_mfma_library_dispatch(arch, m, k, batch):
     )
     assert f'exec_dense_fp_matrix<{m*k*batch//256}, {outputs}, 64>' in body
     assert 'wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
+    api_suffix = (
+        '_gfx950'
+        if arch == 'cdna4' and (m, k, batch) in {(32, 16, 1), (16, 32, 1)}
+        else ''
+    )
+    assert f'rj_arith_{name.lower()}_w64{api_suffix},' in body
     assert 'inst_.cbsz' in body and 'inst_.blgp' in body and 'inst_.acc_cd' in body
+    if arch == 'cdna4' and batch == 1:
+        assert 'const uint64_t a_lanes = ~uint64_t{0};' in body
+        assert 'const uint64_t b_lanes = ~uint64_t{0};' in body
+        assert 'permute_b_lane' not in body
+    else:
+        assert 'permute_b_lane' in body
 
 
 def test_dense_integer_gfx1250_wmma_library_dispatch():
@@ -10602,7 +10613,8 @@ def test_sparse_integer_mfma_library_dispatch(arch, m, k):
         enc_field_names={'acc_cd'},
     )
     assert f'exec_sparse_matrix<{m*k//512}, {m*k//256}, {m*m//64}, 1, 64>' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
+    api_suffix = '_gfx950' if arch == 'cdna4' and m * k == 1024 else ''
+    assert f'rj_arith_{name.lower()}_w64{api_suffix},' in body
     assert 'inst_.cbsz' in body and 'inst_.abid' in body and 'inst_.acc_cd' in body
 
 

@@ -315,16 +315,55 @@ void check_cdna_float16_conversions(bool bf16) {
                      seed = lane & 1 ? ~0U : 0U;
             uint32_t expected;
             if (op == 0) {
-              expected = (raw >> (selector ? 16 : 0)) << 16;
               if (sdwa) {
-                expected = (expected << 16) | (raw & 0xffff);
+                uint32_t lo16 = raw & 0xffffU;
+                uint32_t widened = lo16 << 16;
+                if ((lo16 & 0x7fffU) > 0x7f80U) {
+                  widened |= 0x00400000U;
+                }
+                expected = (widened << 16) | lo16;
+              } else if (arch == rocjitsu::IsaFamily::Cdna4) {
+                // VOP3 on MI350X honors ABS/NEG/CLAMP; DX10_CLAMP is clear in 0xff, so NaNs
+                // survive quieted while negative/zero finite values clamp to +0.
+                uint32_t bf = (raw >> (selector ? 16 : 0)) & 0xffffU;
+                expected = (bf & 0x7fffU) > 0x7f80U ? (uint32_t(bf | 0x8040U) << 16) : 0U;
+              } else {
+                expected = (raw >> (selector ? 16 : 0)) << 16;
               }
             } else if (op == 1) {
               // These encodings request ABS followed by NEG on both float sources.
-              expected = nearest(std::bit_cast<float>(raw | 0x80000000U), sat) |
-                         (uint32_t(nearest(std::bit_cast<float>(other | 0x80000000U), sat)) << 16);
+              if (arch == rocjitsu::IsaFamily::Cdna4) {
+                auto pk_gfx950 = [&](uint32_t x) -> uint32_t {
+                  uint32_t mag = x & 0x7fffffffU;
+                  if (bf16) {
+                    if (mag > 0x7f800000U) {
+                      return (x >> 16) | 0x0040U;
+                    }
+                    return util::f32_to_bf16_rne_mode(std::bit_cast<float>(x), sat);
+                  }
+                  if (mag > 0x7f800000U) {
+                    return 0xfe00U | ((mag >> 13) & 0x01ffU);
+                  }
+                  // mode_raw 0xff selects RTZ (round mode 3) for FP16.
+                  return util::f32_to_f16_rtz(std::bit_cast<float>(x));
+                };
+                expected = pk_gfx950(raw | 0x80000000U) | (pk_gfx950(other | 0x80000000U) << 16);
+              } else {
+                expected =
+                    nearest(std::bit_cast<float>(raw | 0x80000000U), sat) |
+                    (uint32_t(nearest(std::bit_cast<float>(other | 0x80000000U), sat)) << 16);
+              }
             } else if (arch == rocjitsu::IsaFamily::Cdna4) {
-              uint32_t lo = stochastic(std::bit_cast<float>(raw | 0x80000000U), seed, sat);
+              uint32_t x = raw | 0x80000000U;
+              uint32_t mag = x & 0x7fffffffU;
+              uint32_t lo;
+              if (mag > 0x7f800000U) {
+                lo = bf16 ? ((x >> 16) | 0x0040U) : (0xfe00U | ((mag >> 13) & 0x01ffU));
+              } else if (mag == 0x7f800000U && sat) {
+                lo = bf16 ? 0xff7fU : 0xfbffU;
+              } else {
+                lo = stochastic(std::bit_cast<float>(x), seed, sat);
+              }
               int shift = selector ? 16 : 0;
               expected = (raw & ~(0xffffU << shift)) | (lo << shift);
             } else {
@@ -10504,6 +10543,10 @@ TEST(ArithBridgeTest, CdnaFp8Widening) {
             if (clamp) {
               return 0x7fc00000U;
             } // Selected 0xff is the sole E5M3 NaN.
+            if (arch == rocjitsu::IsaFamily::Cdna4 &&
+                ((op & 1) ? (code & 0x7fU) > 0x7cU : (code & 0x7fU) == 0x7fU)) {
+              return 0xffc00000U;
+            }
             float value =
                 arch == rocjitsu::IsaFamily::Cdna3
                     ? (op & 1 ? util::bf8_e5m2_fnuz_to_f32(code) : util::fp8_e4m3_fnuz_to_f32(code))
@@ -10687,7 +10730,7 @@ TEST(ArithBridgeTest, CdnaFp8Narrowing) {
             }
             raw = (raw & 0x7fffffffU) | 0x80000000U; // ABS then NEG on each FP source.
             value = std::bit_cast<float>(raw);
-            if (arch == rocjitsu::IsaFamily::Cdna5) {
+            if (arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
               if (bf8) {
                 return sr ? conversion::encode_fp8_stochastic<conversion::Bf8>(raw, seed, saturate)
                           : conversion::encode_fp8<conversion::Bf8>(raw, saturate);
@@ -12795,8 +12838,10 @@ TEST(ArithBridgeTest, Bf16SdwaRejectsPendingInputFailure) {
   cdna4::Operand a(32, cdna4::OperandType::OPR_VGPR, 0);
   cdna4::Operand d(32, cdna4::OperandType::OPR_VGPR, 16);
   int inst = 0;
-  arith::execute_bf16_widen_sdwa(inst, *fixture.wave, rj_arith_v_cvt_f32_bf16_w32,
-                                 rj_arith_v_cvt_f32_bf16_w64, d, a);
+  const uint64_t flags =
+      arith::float32_flags(*fixture.wave, fixture.cu->arithmetic_flags(), /*rdna3=*/true);
+  arith::execute_bf16_widen_sdwa(inst, *fixture.wave, rj_arith_v_cvt_f32_bf16_w32_gfx950,
+                                 rj_arith_v_cvt_f32_bf16_w64_gfx950, flags, d, a);
   EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), 0U);
   EXPECT_TRUE(fixture.recorder->writes.empty());
 }
@@ -18286,6 +18331,154 @@ TEST(ArithBridgeTest, WordConversionSdwaOutput) {
   }
 }
 
+TEST(ArithBridgeTest, Gfx950SingleBatchI8MfmaIsolationAndReadMasks) {
+  for (bool cdna4 : {false, true}) {
+    const auto arch = cdna4 ? rocjitsu::IsaFamily::Cdna4 : rocjitsu::IsaFamily::Cdna3;
+    // 1. BLGP=4 on v_mfma_i32_16x16x32_i8: CDNA3 Table 29 broadcasts lanes 0..15 -> D[0][0]=32;
+    // MI350X ignores BLGP on single-batch I8 -> D[0][0]=8.
+    {
+      BridgeFixture f(arch, 64, {ArithmeticSemantics::BitExactEmpirical}, 32);
+      const uint32_t base = f.base();
+      for (uint32_t lane = 0; lane < 64; ++lane) {
+        f.cu->write_vgpr(base + 0, lane, 0x01010101U);
+        f.cu->write_vgpr(base + 1, lane, 0x01010101U);
+        f.cu->write_vgpr(base + 4, lane, lane < 16 ? 0x01010101U : 0U);
+        f.cu->write_vgpr(base + 5, lane, lane < 16 ? 0x01010101U : 0U);
+      }
+      auto words =
+          cdna4 ? cdna4::build_vop3p_mfma(
+                      cdna4::kVMfmaI3216x16x32I8Vop3pMfma,
+                      {.vdst = 16, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 128, .blgp = 4})
+                : cdna3::build_vop3p_mfma(
+                      cdna3::kVMfmaI3216x16x32I8Vop3pMfma,
+                      {.vdst = 16, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 128, .blgp = 4});
+      auto decoded = f.decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      ASSERT_TRUE(f.cu->execute_instruction(decoded.value().get(), *f.wave).succeeded());
+      EXPECT_EQ(f.cu->read_vgpr(base + 16, 0), cdna4 ? 8U : 32U);
+    }
+    // 2. FP16_OVFL=1 with C=0x7ffffffc and K=16 contributions +16 then -16:
+    // CDNA3 retains 0x7ffffffc; MI350X saturates pass 0 to 0x7fffffff then subtracts 16 ->
+    // 0x7fffffef.
+    {
+      BridgeFixture f(arch, 64, {ArithmeticSemantics::BitExactEmpirical}, 32);
+      f.wave->set_mode_raw(Wavefront::FP16_OVFL_BIT);
+      const uint32_t base = f.base();
+      for (uint32_t lane = 0; lane < 64; ++lane) {
+        f.cu->write_vgpr(base + 0, lane, lane < 32 ? 0x01010101U : 0xffffffffU);
+        f.cu->write_vgpr(base + 1, lane, lane < 32 ? 0x01010101U : 0xffffffffU);
+        f.cu->write_vgpr(base + 4, lane, 0x01010101U);
+        f.cu->write_vgpr(base + 5, lane, 0x01010101U);
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          f.cu->write_vgpr(base + 8 + reg, lane, 0x7ffffffcU);
+        }
+      }
+      auto words = cdna4 ? cdna4::build_vop3p_mfma(
+                               cdna4::kVMfmaI3216x16x32I8Vop3pMfma,
+                               {.vdst = 16, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 264})
+                         : cdna3::build_vop3p_mfma(
+                               cdna3::kVMfmaI3216x16x32I8Vop3pMfma,
+                               {.vdst = 16, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 264});
+      auto decoded = f.decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      ASSERT_TRUE(f.cu->execute_instruction(decoded.value().get(), *f.wave).succeeded());
+      EXPECT_EQ(f.cu->read_vgpr(base + 16, 0), cdna4 ? 0x7fffffefU : 0x7ffffffcU);
+    }
+  }
+
+  // 3. CDNA4 single-batch I8 with BLGP=1 must observe all 64 lanes of A and B while returning 64.
+  BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, {ArithmeticSemantics::BitExactEmpirical}, 32);
+  const uint32_t base = f.base();
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    f.cu->write_vgpr(base + 0, lane, 0x01010101U);
+    f.cu->write_vgpr(base + 1, lane, 0x01010101U);
+    f.cu->write_vgpr(base + 4, lane, lane < 32 ? 0x01010101U : 0x03030303U);
+    f.cu->write_vgpr(base + 5, lane, lane < 32 ? 0x01010101U : 0x03030303U);
+  }
+  auto words = cdna4::build_vop3p_mfma(
+      cdna4::kVMfmaI3216x16x32I8Vop3pMfma,
+      {.vdst = 16, .cbsz = 1, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 128, .blgp = 1});
+  auto decoded = f.decoder->decode_window(words);
+  ASSERT_TRUE(decoded.succeeded());
+  f.recorder->reads.clear();
+  ASSERT_TRUE(f.cu->execute_instruction(decoded.value().get(), *f.wave).succeeded());
+  EXPECT_EQ(f.cu->read_vgpr(base + 16, 0), 64U);
+  uint64_t a0_lanes = 0, a1_lanes = 0, b0_lanes = 0, b1_lanes = 0;
+  for (const auto &read : f.recorder->reads) {
+    if (read.reg == base + 0) {
+      a0_lanes |= read.lanes;
+    } else if (read.reg == base + 1) {
+      a1_lanes |= read.lanes;
+    } else if (read.reg == base + 4) {
+      b0_lanes |= read.lanes;
+    } else if (read.reg == base + 5) {
+      b1_lanes |= read.lanes;
+    }
+  }
+  EXPECT_EQ(a0_lanes, ~uint64_t{0});
+  EXPECT_EQ(a1_lanes, ~uint64_t{0});
+  EXPECT_EQ(b0_lanes, ~uint64_t{0});
+  EXPECT_EQ(b1_lanes, ~uint64_t{0});
+}
+
+TEST(ArithBridgeTest, Gfx950ConversionModeAndInfinityPinning) {
+  ArithmeticPolicy policy{ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
+
+  // v_cvt_pk_f16_f32 selects FP16/FP64 rounding even when FP32 stays at RNE.
+  for (bool rtp : {true, false}) {
+    BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, policy);
+    f.wave->set_exec(1);
+    f.wave->set_mode_raw(rtp ? 0xf4U : 0xf8U);
+    f.cu->write_vgpr(f.base(), 0, 0x3f803000U);
+    f.cu->write_vgpr(f.base() + 1, 0, 0xbf803000U);
+    auto inst = f.decoder->decode_window(
+        cdna4::build_vop3(cdna4::kVCvtPkF16F32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257}));
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), rtp ? 0xbc013c02U : 0xbc023c01U);
+  }
+
+  // MI350X (gfx950_cvt_valu.bin idx=553): v_cvt_pk_bf16_f32 always rounds RNE across all MODEs.
+  for (uint32_t mode : {0xf0U, 0xf5U, 0xfaU, 0xffU}) {
+    BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, policy);
+    f.wave->set_exec(1);
+    f.wave->set_mode_raw(mode);
+    f.cu->write_vgpr(f.base(), 0, 0x7e098000U);
+    f.cu->write_vgpr(f.base() + 1, 0, 0x27d38000U);
+    auto inst = f.decoder->decode_window(
+        cdna4::build_vop3(cdna4::kVCvtPkBf16F32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257}));
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), 0x27d47e0aU);
+  }
+
+  // MI350X (gfx950_cvt_valu.bin idx=263/264): v_cvt_sr_bf16_f32 preserves +-Inf when FP16_OVFL=0
+  // and saturates to 0x7f7f/0xff7f when FP16_OVFL=1; v_cvt_sr_bf8_f32 preserves 0x7c/0xfc in both.
+  for (bool ovfl : {false, true}) {
+    for (bool neg : {false, true}) {
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, policy);
+      f.wave->set_exec(1);
+      f.wave->set_mode_raw(0xf0U | (ovfl ? Wavefront::FP16_OVFL_BIT : 0U));
+      f.cu->write_vgpr(f.base(), 0, neg ? 0xff800000U : 0x7f800000U);
+      f.cu->write_vgpr(f.base() + 1, 0, 1U);
+      f.cu->write_vgpr(f.base() + 2, 0, 0xdead0000U);
+      f.cu->write_vgpr(f.base() + 3, 0, 0xdeadbe00U);
+      auto sr_bf16 = f.decoder->decode_window(
+          cdna4::build_vop3(cdna4::kVCvtSrBf16F32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257}));
+      auto sr_bf8 = f.decoder->decode_window(
+          cdna4::build_vop3(cdna4::kVCvtSrBf8F32Vop3, {.vdst = 3, .src0 = 256, .src1 = 257}));
+      ASSERT_TRUE(sr_bf16.succeeded() && sr_bf8.succeeded());
+      ASSERT_TRUE(f.cu->execute_instruction(sr_bf16.value().get(), *f.wave).succeeded());
+      ASSERT_TRUE(f.cu->execute_instruction(sr_bf8.value().get(), *f.wave).succeeded());
+      const uint32_t expected_bf16 =
+          0xdead0000U | ((neg ? 0x8000U : 0U) | (ovfl ? 0x7f7fU : 0x7f80U));
+      const uint32_t expected_bf8 = 0xdeadbe00U | (neg ? 0xfcU : 0x7cU);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), expected_bf16);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 3, 0), expected_bf8);
+    }
+  }
+}
+
 TEST(ArithBridgeTest, Bf16SdwaOutput) {
   // Selector-only SDWA is ordinary widening, including strict semantics.
   for (auto semantics :
@@ -18304,6 +18497,41 @@ TEST(ArithBridgeTest, Bf16SdwaOutput) {
         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
     EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), 0x3f800000U);
     EXPECT_EQ(fixture.wave->trapsts(), 0x100U);
+
+    // Selector-only SDWA honors FP32 denormal controls identically to VOP1 e32 on MI350X
+    // (gfx950_cvt_valu.bin v_cvt_f32_bf16_sdwa_hi idx=568: 0x807fffff -> 0x807f0000 at 0x3f0,
+    // 0x80000000 at 0x300).
+    for (uint32_t mode : {0x300U, 0x3f0U}) {
+      const uint32_t expected = mode == 0x300U ? 0x80000000U : 0x807f0000U;
+      fixture.wave->set_mode_raw(mode);
+
+      fixture.cu->write_vgpr(fixture.base(), 0, 0x4000807fU);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0xdeadbeefU);
+      const auto e32 = cdna4::build_vop1(cdna4::kVCvtF32Bf16Vop1, {.src0 = 256, .vdst = 2});
+      auto e32_inst = fixture.decoder->decode_window(e32);
+      ASSERT_TRUE(e32_inst.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(e32_inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), expected);
+
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0xdeadbeefU);
+      const std::array<uint32_t, 2> sdwa_lo{first[0], (6U << 8) | (4U << 16)};
+      auto sdwa_lo_inst = fixture.decoder->decode_window(sdwa_lo);
+      ASSERT_TRUE(sdwa_lo_inst.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(sdwa_lo_inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), expected);
+
+      fixture.cu->write_vgpr(fixture.base(), 0, 0x807fffffU);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0xdeadbeefU);
+      const std::array<uint32_t, 2> sdwa_hi{first[0], (6U << 8) | (5U << 16)};
+      auto sdwa_hi_inst = fixture.decoder->decode_window(sdwa_hi);
+      ASSERT_TRUE(sdwa_hi_inst.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(sdwa_hi_inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), expected);
+      EXPECT_EQ(fixture.wave->trapsts(), 0x100U);
+    }
   }
 
   const uint32_t inputs[] = {0x007fU, 0x807fU, 0x7f81U, 0xff81U,
@@ -18410,6 +18638,74 @@ TEST(ArithBridgeTest, PackedRtzSdwaOutput) {
           }
           EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), expected) << lane;
         }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx950Fp8NarrowSplitOutputDenormAndGfx1250WidenQualification) {
+  // 1. gfx950 FP8/BF8 narrowing rejects strict modes when F32 and F16/64 output-denormal bits
+  // disagree (0x330 vs 0x3c0), while Compatibility/Loose/AllowLoose continue using the FP32 field.
+  for (uint32_t mode : {0x330U, 0x3c0U, 0x3f0U, 0x300U}) {
+    const bool split = mode == 0x330U || mode == 0x3c0U;
+    const bool preserve_f32 = (mode & 0x20U) != 0;
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                           ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                           ArithmeticSemantics::BitExactEmpirical}) {
+      const bool rejected =
+          split && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                    semantics == ArithmeticSemantics::BitExactEmpirical);
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, {semantics});
+      f.wave->set_exec(1);
+      f.wave->set_mode_raw(mode);
+      f.cu->write_vgpr(f.base(), 0, 0x3c000000U);
+      f.cu->write_vgpr(f.base() + 1, 0, 0x3c000000U);
+      f.cu->write_vgpr(f.base() + 2, 0, rejected ? 0xdeadbeefU : 0U);
+      auto inst = f.decoder->decode_window(
+          cdna4::build_vop3(cdna4::kVCvtPkFp8F32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257}));
+      ASSERT_TRUE(inst.succeeded());
+      f.recorder->writes.clear();
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !rejected);
+      if (rejected) {
+        EXPECT_TRUE(f.recorder->writes.empty());
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), 0xdeadbeefU);
+      } else {
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), preserve_f32 ? 0x00000404U : 0U);
+      }
+    }
+  }
+
+  // 2. gfx1250 BF8 widening and packed FP8/BF8 widening reject strict modes 2 and 3 before writing
+  // D, while Compatibility preserves the inherited OCP signed-NaN result (0x7fc00000 for BF8 0x7d).
+  for (auto semantics :
+       {ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+        ArithmeticSemantics::BitExactEmpirical}) {
+    const bool strict = semantics != ArithmeticSemantics::Compatibility;
+    for (int op = 0; op < 4; ++op) {
+      BridgeFixture f(rocjitsu::IsaFamily::Cdna5, 32, {semantics});
+      f.wave->set_exec(1);
+      f.cu->write_vgpr(f.base(), 0, 0x7d7d7d7dU);
+      f.cu->write_vgpr(f.base() + 2, 0, 0xdeadbeefU);
+      f.cu->write_vgpr(f.base() + 3, 0, 0xdeadbeefU);
+      const auto words =
+          op == 0   ? cdna5::build_vop1(cdna5::kVCvtF32Bf8Vop1, {.src0 = 256, .vdst = 2})
+          : op == 1 ? cdna5::build_vop1(cdna5::kVCvtPkF32Fp8Vop1, {.src0 = 256, .vdst = 2})
+          : op == 2 ? cdna5::build_vop1(cdna5::kVCvtPkF32Bf8Vop1, {.src0 = 256, .vdst = 2})
+                    : cdna5::build_vop1(cdna5::kVCvtF32Fp8Vop1, {.src0 = 256, .vdst = 2});
+      auto inst = f.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      const bool rejected = strict && op < 3;
+      f.recorder->writes.clear();
+      EXPECT_EQ(f.cu->execute_instruction(inst.value().get(), *f.wave).succeeded(), !rejected);
+      if (rejected) {
+        EXPECT_TRUE(f.recorder->writes.empty());
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), 0xdeadbeefU);
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 3, 0), 0xdeadbeefU);
+      } else {
+        const uint32_t expected = (op == 1 || op == 3) ? 0x43d00000U : 0x7fc00000U;
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), expected);
+        EXPECT_EQ(f.cu->read_vgpr(f.base() + 3, 0), (op == 1 || op == 2) ? expected : 0xdeadbeefU);
       }
     }
   }

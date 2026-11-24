@@ -1124,14 +1124,21 @@ def gen_float16_conversion(ctx: ExecuteContext) -> str | None:
         or (not widen and not ctx.is_vop3)
     ):
         return None
-    api = 'rj_arith_' + name.lower()
+    api = 'rj_arith_' + name.lower() + ('_gfx950' if arch == 'cdna4' else '')
     selector = 'amdgpu::vop3_opsel(inst_)' if ctx.is_vop3 else '0u'
     mode = (
         f'({selector} & 1) ? RJ_ARITH_ALU_HIGH_A : 0u'
         if widen
         else (f'({selector} & 8) ? RJ_ARITH_ALU_HIGH_D : 0u' if single_sr else '0u')
     )
-    if not widen and not packed_sr:
+    if widen and arch == 'cdna4' and ctx.is_vop3:
+        mode = (
+            f'({mode}) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | '
+            '((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | '
+            '(uint64_t(inst_.omod) << RJ_ARITH_ALU_OMOD_SHIFT) | '
+            '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)'
+        )
+    elif not widen and not packed_sr:
         mode = f'({mode}) | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
         if not single_sr:
             mode += ' | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u)'
@@ -1141,11 +1148,23 @@ def gen_float16_conversion(ctx: ExecuteContext) -> str | None:
         source_operand = 'word_source'
         prefix = [f'  auto word_source = amdgpu::e32_word_operand({ctx.src_ops[0]});']
         mode = f'(amdgpu::e32_packed_vgpr_operand({ctx.src_ops[0]}) && ({ctx.src_ops[0]}.encoding_value() & 0x80)) ? RJ_ARITH_ALU_HIGH_A : 0u'
-    lines = prefix + [
-        '  uint64_t flags = wf.cu().arithmetic_flags();',
-        '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
-    ]
-    if arch == 'cdna5' and name == 'V_CVT_PK_F16_F32':
+    if widen and arch == 'cdna4':
+        lines = prefix + [
+            '  uint64_t flags = amdgpu::arith::float32_flags(wf, wf.cu().arithmetic_flags(), /*rdna3=*/true);',
+            '  if (wf.fp16_ovfl()) { flags |= RJ_ARITH_FP16_OVFL; }',
+        ]
+    else:
+        lines = prefix + [
+            '  uint64_t flags = wf.cu().arithmetic_flags();',
+            '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+        ]
+    if arch == 'cdna4' and name in ('V_CVT_PK_BF16_F32', 'V_CVT_SR_BF16_F32'):
+        lines.append(
+            '  if (!(wf.fp_denorm_mode_f32() & 1)) { flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS; }'
+        )
+    if name == 'V_CVT_PK_F16_F32':
+        if arch == 'cdna4':
+            lines.append('  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;')
         lines.append(
             '  if (!(wf.fp_denorm_mode_f16_f64() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;'
         )
@@ -1154,7 +1173,7 @@ def gen_float16_conversion(ctx: ExecuteContext) -> str | None:
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
             f'    amdgpu::arith::execute_bf16_widen_sdwa(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            f'        {ctx.dst_ops[0]}, {ctx.src_ops[0]});',
+            f'        flags, {ctx.dst_ops[0]}, {ctx.src_ops[0]});',
             '    return;',
             '  }',
         ]
@@ -1407,6 +1426,22 @@ def gen_fp8_narrow(ctx: ExecuteContext) -> str | None:
         '  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
         '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);',
     ]
+    if arch == 'cdna4':
+        # MI350X captures establish 0x3f0 -> preserved and 0x300 -> flushed on
+        # subnormal FP8/BF8 outputs; reject strict execution when the two
+        # output-denormal fields disagree pending a split-field capture.
+        lines += [
+            '  if (wf.exec() && (wf.fp_denorm_mode_f32() & 2) != (wf.fp_denorm_mode_f16_f64() & 2)) {',
+            '    const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;',
+            '    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||',
+            '        semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {',
+            '      wf.report_instruction_execution_error(',
+            '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+            '      return;',
+            '    }',
+            '  }',
+            '  if (!(wf.fp_denorm_mode_f32() & 2)) { flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS; }',
+        ]
     if half:
         lines.remove('  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;')
         if stochastic:
@@ -1459,9 +1494,7 @@ def gen_fp8_widen(ctx: ExecuteContext) -> str | None:
     elif arch == 'cdna3':
         suffix = '_gfx942'
     elif arch in ('cdna4', 'cdna5'):
-        suffix = (
-            '_gfx1250' if arch == 'cdna5' and mnemonic == 'V_CVT_F32_FP8' else '_gfx950'
-        )
+        suffix = '_gfx1250' if arch == 'cdna5' else '_gfx950'
     api = 'rj_arith_' + mnemonic.lower() + suffix
     selector = 'amdgpu::vop3_opsel(inst_)' if is_vop3 else '0u'
     source_operand, destination_operand = src[0], dst[0]
@@ -1495,7 +1528,8 @@ def gen_fp8_widen(ctx: ExecuteContext) -> str | None:
             + (
                 ' | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)'
                 if is_vop3
-                and (suffix == '_gfx1250' or (half and mnemonic.endswith('_FP8')))
+                and mnemonic.endswith('_FP8')
+                and (suffix == '_gfx1250' or half)
                 else ''
             )
             + (' | ((selector & 8) ? RJ_ARITH_ALU_HIGH_D : 0u)' if half else '')
