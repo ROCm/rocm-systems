@@ -18,9 +18,13 @@ Set the ``gds_backend`` configuration key to ``hipfile`` or set the ``LMCACHE_GD
 NIXL
 ====
 
-`NIXL <https://github.com/ai-dynamo/nixl>`_ is NVIDIA's Inference Xfer Library, which moves data such as KV cache between memory and storage for distributed LLM inference. Its ``AIS`` storage backend is the ROCm counterpart to its ``GDS`` backend. It runs ``hipFileRead()`` and ``hipFileWrite()`` on a pool of worker threads to move data directly between GPU memory and files.
+`NVIDIA Inference Xfer Library (NIXL <https://github.com/ai-dynamo/nixl>`_) transfers data such as key-value cache (KV cache) between memory and storage for distributed LLM inference. Its ``AIS`` storage backend is the ROCm counterpart to the ``GDS`` backend. AIS uses a pool of worker threads to run ``hipFileRead()`` and ``hipFileWrite()``, transferring data directly between GPU memory and files.
 
-To build the backend, pass ``-Drocm_path=/opt/rocm`` (or your ROCm install prefix) to ``meson setup`` when configuring NIXL. To use it, request the ``AIS`` backend from your NIXL agent: call ``nixlAgent::createBackend()`` with ``"AIS"`` in C++, or ``create_backend("AIS")`` or ``nixl_agent_config(backends=["UCX", "AIS"])`` in Python. The backend only supports GPU memory buffers. See the `NIXL AIS plugin documentation <https://github.com/ai-dynamo/nixl/blob/main/src/plugins/rocm_ais/README.md>`_ for more information.
+To build the ``AIS`` backend, pass ``-Drocm_path=/opt/rocm`` (or your ROCm install path) to ``meson setup`` when configuring NIXL. To use it, request the ``AIS`` backend from your NIXL agent: 
+* C++: Call ``nixlAgent::createBackend()`` with ``AIS`` , or
+* Python: ``create_backend("AIS")`` or ``nixl_agent_config(backends=["UCX", "AIS"])``.
+
+The ``AIS`` backend supports only GPU memory buffers. For more information, see the `NIXL AIS plugin documentation <https://github.com/ai-dynamo/nixl/blob/main/src/plugins/rocm_ais/README.md>`_.
 
 fastsafetensors
 ===============
