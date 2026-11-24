@@ -103,10 +103,10 @@ static bool symBatchesAlone(const struct ncclTaskColl* t) {
   return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
 }
 
-// [RCCL] Upper bound on a symmetric launch's tuned channel count: the Symk tuning models cap at
-// ncclSymkAgHierMaxBlocks and the Genk model at min(nChannels, maxCTAs).
+// [RCCL] Upper bound on a symmetric launch's tuned channel count: the Symk tuning models cap at the
+// hierarchical kernels' max blocks and the Genk model at min(nChannels, maxCTAs).
 static int symkMaxLaunchChannels(struct ncclComm* comm) {
-  return std::max(ncclSymkAgHierMaxBlocks, std::min(comm->nChannels, comm->config.maxCTAs));
+  return std::max({ncclSymkAgHierMaxBlocks, ncclSymkRsHierMaxBlocks, std::min(comm->nChannels, comm->config.maxCTAs)});
 }
 
 // [RCCL] Symk/Genk kernels take a 4 KB argument even when workArgsBytes is 5 KB, so a batch must fit 4 KB.
