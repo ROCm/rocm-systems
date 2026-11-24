@@ -151,6 +151,95 @@ function(add_dbgapi_unit_test target_name)
   )
 endfunction()
 
+# add_dbgapi_feature_test(name
+#                        SOURCES src1.cpp [src2.cpp ...]
+#                        [LABELS extra-label ...]
+#                        [LIBS  extra::link ...]
+#                        [REQUIRES_DRIVER]
+#                        [REQUIRES_GPU [gfx_target ...]])
+#
+# REQUIRES_DRIVER  - test needs the kernel driver at runtime; adds the
+#                    "feature-driver" label plus the OS-specific
+#                    "feature-kfd"/"feature-kmd" label.  Tests still
+#                    decide at runtime whether to GTEST_SKIP if the
+#                    driver isn't present (see
+#                    feature/support/capabilities.h).
+#
+# REQUIRES_GPU     - test needs a real GPU.  Without arguments adds
+#                    "feature-gpu".  With architecture names (e.g.
+#                    gfx942) adds "feature-gpu-<arch>" for each one so
+#                    CI can route the test to the right runner.
+function(add_dbgapi_feature_test target_name)
+  # REQUIRES_GPU is declared as a multi-value keyword so callers can
+  # optionally append architecture names (e.g. REQUIRES_GPU gfx942).
+  # When the keyword is used with zero arguments,
+  # cmake_parse_arguments leaves ARG_REQUIRES_GPU undefined and lists
+  # the keyword in ARG_KEYWORDS_MISSING_VALUES instead — without
+  # checking that list we'd silently drop the feature-gpu label for
+  # every test that just wants "some GPU", which is the common case.
+  cmake_parse_arguments(ARG "REQUIRES_DRIVER" "" "SOURCES;LABELS;LIBS;REQUIRES_GPU" ${ARGN})
+
+  if(NOT ARG_SOURCES)
+    message(FATAL_ERROR "add_dbgapi_feature_test(${target_name}): SOURCES is required")
+  endif()
+
+  add_executable(${target_name} ${ARG_SOURCES})
+  _dbgapi_apply_common_test_properties(${target_name})
+
+  target_link_libraries(${target_name} PRIVATE
+    GTest::gtest_main
+    GTest::gmock
+    ${ARG_LIBS})
+
+  set(labels "dbgapi" "feature")
+  if(_DBGAPI_OS_LABEL)
+    list(APPEND labels ${_DBGAPI_OS_LABEL})
+  endif()
+
+  if(ARG_REQUIRES_DRIVER)
+    list(APPEND labels "feature-driver")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      list(APPEND labels "feature-kfd")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+      list(APPEND labels "feature-kmd")
+    endif()
+  endif()
+
+  if(DEFINED ARG_REQUIRES_GPU OR "REQUIRES_GPU" IN_LIST ARG_KEYWORDS_MISSING_VALUES)
+    # The keyword was specified.  Even if no architectures were named,
+    # the test still needs *some* GPU, so always emit "feature-gpu".
+    list(APPEND labels "feature-gpu")
+    foreach(arch IN LISTS ARG_REQUIRES_GPU)
+      list(APPEND labels "feature-gpu-${arch}")
+    endforeach()
+  endif()
+
+  if(ARG_LABELS)
+    list(APPEND labels ${ARG_LABELS})
+  endif()
+  list(REMOVE_DUPLICATES labels)
+
+  add_test(NAME ${target_name} COMMAND ${target_name})
+  set_tests_properties(${target_name} PROPERTIES
+    LABELS "${labels}"
+    WORKING_DIRECTORY $<TARGET_FILE_DIR:${target_name}>)
+
+  if(WIN32)
+    # Windows has no RPATH: the loader only looks next to the executable
+    # and in PATH.  Make the shared amd-dbgapi DLL findable (otherwise the
+    # test dies with 0xC0000135 before main() and never gets to skip).
+    # ENVIRONMENT_MODIFICATION would be cleaner but needs CMake 3.22.
+    set_property(TEST ${target_name} APPEND PROPERTY
+      ENVIRONMENT "PATH=$<TARGET_FILE_DIR:amd-dbgapi>\;$ENV{PATH}")
+  endif()
+
+  install(
+    TARGETS ${target_name}
+    RUNTIME DESTINATION tests/rocdbgapi
+    COMPONENT test
+  )
+endfunction()
+
 # Guarded per-tier even though this file is itself only entered when at
 # least one tier is enabled: ENABLE_TESTS also enables tiers that don't
 # exist yet, so each add_subdirectory() must check its own option
@@ -158,5 +247,9 @@ endfunction()
 # wanted".
 if(ENABLE_UNIT_TESTS)
     add_subdirectory(unit)
+endif()
+
+if(ENABLE_FEATURE_TESTS)
+    add_subdirectory(feature)
 endif()
 
