@@ -9019,8 +9019,9 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
-// DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.
+// The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes in capture,
+// while eager SPX and DPX, whose CE-registered window ends below symMinR2, no table and RCCL_IGNORE_ARCH_TABLE=1 keep
+// the choice symk's withdrawal leaves, with no grid cap.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_RegisteredRerouteFollowsTheArchTable",
@@ -9044,21 +9045,21 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable
         RegisteredAr ar(8);
         ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
         ASSERT_NE(nullptr, ar.comm_->archThresholds);
-        rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false);
-        EXPECT_EQ(ll128, d.algo) << "SPX eager";
-        EXPECT_EQ(256u, d.ddaCap.threads);
-        d = ar.Select(16 * kMiB, /*capturing=*/true);
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "SPX eager, above the CE-registered window");
+        rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true);
         EXPECT_EQ(ll128, d.algo) << "SPX capture";
         EXPECT_EQ(96u, d.ddaCap.blocks);
         ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
         ASSERT_NE(nullptr, ar.comm_->archThresholds);
-        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "DPX eager");
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "DPX eager, above the CE-registered window");
         ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "DPX capture");
         ar.comm_->archThresholds = nullptr;
         ar.ExpectUnchanged(8 * kMiB, false, ceReg, "no table, eager");
         ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "no table, capture");
         ar.comm_->archThresholds = &ar.table_;
-        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "the fixture's table re-routes";
+        d = ar.Select(8 * kMiB, false);
+        EXPECT_EQ(ll128, d.algo) << "the fixture's table re-routes";
+        EXPECT_EQ(256u, d.ddaCap.threads);
         ignoreTable = 1;
         ar.ExpectUnchanged(8 * kMiB, false, ceReg, "RCCL_IGNORE_ARCH_TABLE=1, eager");
         ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "RCCL_IGNORE_ARCH_TABLE=1, capture");

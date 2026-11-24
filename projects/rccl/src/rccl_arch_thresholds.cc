@@ -138,9 +138,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ceRegMax = {
     0,                             // [0] Broadcast      -- not used
     0,                             // [1] Reduce          -- not used
-    8ULL*1024*1024*1024,           // [2] AllGather
+    0,                             // [2] AllGather       -- 0 = disabled: Ring beats CE 1.4-1.8x from 256M (SPX)
     0,                             // [3] ReduceScatter   -- not used
-    256ULL*1024*1024,              // [4] AllReduce
+    4ULL*1024*1024,                // [4] AllReduce       -- non-sum ops below symMinR2; symk or Ring beats CE 1.4-2x from 8M (SPX)
     0,                             // [5] SendRecv        -- not used
     0,                             // [6] Send            -- not used
     0,                             // [7] Recv            -- not used
@@ -187,12 +187,16 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
-  // symTdm*: [2] AllGather -- TDM beats DDA LL128 from 64M; eagerly CE-registered wins past 128M.
+  // symTdm*: [2] AllGather -- TDM beats DDA LL128 from 64M; eagerly DDA LL128 or Ring takes over past 128M.
   // Under graph capture TDM beats Ring to 4G in one tray and to 512M across trays.
   .symTdmMinR2 = {0, 0, 64ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   .symTdmMaxR2 = {0, 0, 128ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   .symTdmMaxR2Graph = {0, 0, 4096ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   .symTdmCrossTrayMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  // symk beats Ring from symMinR2 to 256K elements per rank from 16 ranks: fp32 to 16M on 16 and 32M on 32,
+  // bf16 to 8M on 16 and 16M on 32. On 8 ranks Ring beats it 1.1x at 8M (SPX).
+  .arSymMaxR2PerRankElems = 256ULL*1024,
+  .arSymMaxR2MinRanks = 16,
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -392,9 +396,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ceRegMax = {
     0,                             // [0] Broadcast      -- not used
     0,                             // [1] Reduce          -- not used
-    8ULL*1024*1024*1024,           // [2] AllGather
+    0,                             // [2] AllGather       -- 0 = disabled: hier symk beats CE 2.5-4x from 16M, Ring 2.4x (DPX)
     0,                             // [3] ReduceScatter   -- not used
-    256ULL*1024*1024,              // [4] AllReduce
+    4ULL*1024*1024,                // [4] AllReduce       -- non-sum ops below symMinR2; symk or Ring beats CE 1.3-3.4x from 8M (DPX)
     0,                             // [5] SendRecv        -- not used
     0,                             // [6] Send            -- not used
     0,                             // [7] Recv            -- not used
@@ -408,7 +412,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
-    0,                    // [4] AllReduce
+    0,                    // [4] AllReduce       -- eager cap from arSymMaxR2PerRankElems (DPX)
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
     0,                    // [7] Recv            -- not used on gfx1250
@@ -443,6 +447,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   },
   .agHierSymMinR2 = 16ULL*1024*1024,
   .agHierSymMaxR2 = kThreshUnlimited,
+  // symk beats Ring from symMinR2 to 128K elements per rank: fp32 to 8M on 16 ranks, 16M on 32 and 32M on 64;
+  // bf16 to 8M on 32 and 16M on 64 (DPX).
+  .arSymMaxR2PerRankElems = 128ULL*1024,
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).

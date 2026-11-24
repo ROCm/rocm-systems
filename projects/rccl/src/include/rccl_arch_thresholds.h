@@ -102,6 +102,13 @@ struct rcclArchThresholds {
   // these replace symMinR2 / symMaxR2 / symMaxR2Graph for AllGather. 0 = no hierarchical window.
   size_t agHierSymMinR2;
   size_t agHierSymMaxR2;
+  // AllReduce only, eager R2, in elements per rank: symk runs up to
+  // max(symMaxR2[AllReduce], nRanks x this x the type size), since the symk / Ring crossover grows with
+  // the comm and follows the element count. 0 = symMaxR2 alone. Graph capture keeps symMaxR2Graph,
+  // and RCCL_SYM_K_MAX_BYTES still wins over both.
+  size_t arSymMaxR2PerRankElems;
+  // Smallest comm the arSymMaxR2PerRankElems cap applies to; smaller comms keep symMaxR2. 0 = every comm.
+  int arSymMaxR2MinRanks;
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
