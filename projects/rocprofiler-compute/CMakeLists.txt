@@ -1020,6 +1020,13 @@ add_test(
         tests/unit/test_argparser.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_rocprof_compute
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_rocprof_compute.xml
+        ${COV_OPTION} tests/unit/test_rocprof_compute.py ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------
 # PC sampling tests
 # ---------------------------
@@ -1352,6 +1359,7 @@ if(${ENABLE_COVERAGE})
         test_metric_library_loader
         test_parser
         test_argparser
+        test_rocprof_compute
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
