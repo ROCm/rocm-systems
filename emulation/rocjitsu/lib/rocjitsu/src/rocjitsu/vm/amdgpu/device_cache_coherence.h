@@ -273,8 +273,8 @@ public:
                                   const PreparedWritebackResolver &resolve_writeback);
   /// @brief Return expected prepared backing failures without throwing.
   /// @details Retry returns no leases and emits no terminal diagnostic.
-  /// Configuration errors and internal cache invariant failures retain their
-  /// legacy exceptions.
+  /// Configuration errors and internal cache invariant failures emit terminal
+  /// diagnostics.
   [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult> acquire_cache_maintenance_group(
       std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
       const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error);

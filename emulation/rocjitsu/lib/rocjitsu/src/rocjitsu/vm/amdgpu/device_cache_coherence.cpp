@@ -568,7 +568,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
   std::vector<DeviceCacheDomain> ordered_domains(domains.begin(), domains.end());
   if (std::ranges::any_of(ordered_domains,
                           [](const DeviceCacheDomain &domain) { return !domain.coherence; }))
-    throw util::ConfigError("cache maintenance domains must be non-null");
+    return emit_error.emit() << "cache maintenance domains must be non-null";
   std::ranges::sort(
       ordered_domains, [](const DeviceCacheDomain &lhs, const DeviceCacheDomain &rhs) {
         return std::less<DeviceCacheCoherence *>{}(lhs.coherence.get(), rhs.coherence.get());
@@ -577,7 +577,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
                                  [](const DeviceCacheDomain &lhs, const DeviceCacheDomain &rhs) {
                                    return lhs.coherence.get() == rhs.coherence.get();
                                  }) != ordered_domains.end())
-    throw util::ConfigError("cache maintenance domains must be distinct");
+    return emit_error.emit() << "cache maintenance domains must be distinct";
 
   std::vector<std::shared_ptr<DeviceCacheCoherence>> legacy_domains;
   legacy_domains.reserve(ordered_domains.size());
@@ -586,7 +586,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
   if (operation != DeviceCacheOperation::WritebackInvalidate)
     return acquire_legacy_cache_maintenance_group(legacy_domains, operation, emit_error);
   if (!resolve_writeback)
-    throw util::ConfigError("prepared cache writeback resolver is required");
+    return emit_error.emit() << "prepared cache writeback resolver is required";
   auto retained_l1_gate_domains =
       scoped ? std::make_shared<std::vector<std::shared_ptr<DeviceCacheCoherence>>>(
                    std::move(legacy_domains))
@@ -762,8 +762,9 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
              address - alias.address < alias.size;
     });
   };
-  const auto capture = [&locked, &selected, scoped]() {
+  const auto capture = [&locked, &selected, &fail, scoped]() -> util::FailureOr<Snapshot> {
     Snapshot snapshot;
+    std::string_view capture_failure;
     snapshot.registries.reserve(locked.size());
     for (const DomainLocks &entry : locked) {
       DeviceCacheCoherence *const owner = entry.domain.coherence.get();
@@ -777,8 +778,12 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       for (MemorySideCache *cache : owner->memory_side_caches_) {
         const auto collect = [&](const simdojo::CacheTag &tag, uint64_t address,
                                  const uint8_t *data) {
-          if (data == nullptr)
-            throw util::Exception(std::string_view("memory-side line has no bytes"));
+          if (!capture_failure.empty())
+            return;
+          if (data == nullptr) {
+            capture_failure = "memory-side line has no bytes";
+            return;
+          }
           DirtyLine line{.domain = owner,
                          .gpu_id = entry.domain.gpu_id,
                          .memory_side = cache,
@@ -796,12 +801,18 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
           cache->cache_.for_each_valid_line(collect);
         else if (cache->may_have_dirty_lines_.load(std::memory_order_relaxed))
           cache->cache_.for_each_dirty(collect);
+        if (!capture_failure.empty())
+          return fail(capture_failure);
       }
       for (L2Cache *cache : owner->l2_caches_) {
         const auto collect = [&](const simdojo::CacheTag &tag, uint64_t address,
                                  const uint8_t *data) {
-          if (data == nullptr)
-            throw util::Exception(std::string_view("L2 line has no bytes"));
+          if (!capture_failure.empty())
+            return;
+          if (data == nullptr) {
+            capture_failure = "L2 line has no bytes";
+            return;
+          }
           DirtyLine line{.domain = owner,
                          .gpu_id = entry.domain.gpu_id,
                          .l2 = cache,
@@ -811,8 +822,10 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
           if (tag.dirty && line.selected) {
             std::lock_guard mask_lock(cache->dirty_bytes_mutex_);
             const auto position = cache->dirty_bytes_.find({tag.vmid, address});
-            if (position == cache->dirty_bytes_.end())
-              throw util::Exception(std::string_view("dirty L2 line has no byte mask"));
+            if (position == cache->dirty_bytes_.end()) {
+              capture_failure = "dirty L2 line has no byte mask";
+              return;
+            }
             line.dirty_mask = position->second;
           }
           if (line.selected)
@@ -826,6 +839,8 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
           cache->cache_.for_each_valid_line(collect);
         else if (cache->has_dirty_lines_.load(std::memory_order_relaxed))
           cache->cache_.for_each_dirty(collect);
+        if (!capture_failure.empty())
+          return fail(capture_failure);
       }
     }
     return snapshot;
@@ -893,7 +908,10 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
   const auto acquire = [&]() -> util::FailureOr<CacheMaintenanceGroupResult> {
     if (!acquire_all())
       return CacheMaintenanceGroupResult{.outcome = CacheMaintenanceOutcome::Retry};
-    const Snapshot before = capture();
+    util::FailureOr<Snapshot> captured_before = capture();
+    if (captured_before.failed())
+      return util::Result::failure();
+    const Snapshot before = std::move(captured_before.value());
     bool has_zero_writer = false;
     size_t prepared_write_count = 0;
     size_t prepared_line_count = 0;
@@ -908,7 +926,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         continue;
       if (line.memory_side != nullptr) {
         if (!MemorySideCache::CacheStore::bytes_valid(line.tag, 0, MemorySideCache::LINE_SIZE))
-          throw util::Exception(std::string_view("dirty memory-side line is incomplete"));
+          return fail("dirty memory-side line is incomplete");
         ++prepared_write_count;
       } else {
         bool found_run = false;
@@ -923,12 +941,12 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
           if (begin == byte)
             continue;
           if (!L2Cache::CacheStore::bytes_valid(line.tag, begin, byte - begin))
-            throw util::Exception(std::string_view("dirty L2 run is incomplete"));
+            return fail("dirty L2 run is incomplete");
           ++prepared_write_count;
           found_run = true;
         }
         if (!found_run)
-          throw util::Exception(std::string_view("dirty L2 line has an empty byte mask"));
+          return fail("dirty L2 line has an empty byte mask");
       }
     }
     if (scoped && has_zero_writer)
@@ -1056,7 +1074,10 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
 
     if (!acquire_all())
       return CacheMaintenanceGroupResult{.outcome = CacheMaintenanceOutcome::Retry};
-    const Snapshot after = capture();
+    util::FailureOr<Snapshot> captured_after = capture();
+    if (captured_after.failed())
+      return util::Result::failure();
+    const Snapshot after = std::move(captured_after.value());
     if (!same_snapshot(before, after))
       return CacheMaintenanceGroupResult{.outcome = CacheMaintenanceOutcome::Retry};
     if (scoped) {
@@ -1102,20 +1123,20 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       if (snapshot.l2 != nullptr) {
         L2Cache *const cache = snapshot.l2;
         if (!cache->cache_.lookup(snapshot.address, &tag, snapshot.tag.vmid))
-          throw util::Exception(std::string_view("dirty L2 writer disappeared"));
+          return fail("dirty L2 writer disappeared");
         source = cache->cache_.line_data_for_read(snapshot.address, snapshot.tag.vmid);
         const auto mask = cache->dirty_bytes_.find({snapshot.tag.vmid, snapshot.address});
         if (mask == cache->dirty_bytes_.end() || mask->second != snapshot.dirty_mask)
-          throw util::Exception(std::string_view("dirty L2 mask changed during preparation"));
+          return fail("dirty L2 mask changed during preparation");
       } else {
         MemorySideCache *const cache = snapshot.memory_side;
         if (!cache->cache_.lookup(snapshot.address, &tag, snapshot.tag.vmid))
-          throw util::Exception(std::string_view("dirty memory-side writer disappeared"));
+          return fail("dirty memory-side writer disappeared");
         source = cache->cache_.line_data_for_read(snapshot.address, snapshot.tag.vmid);
       }
       if (source == nullptr || tag == nullptr ||
           !std::equal(source, source + L2Cache::LINE_SIZE, snapshot.bytes.begin()))
-        throw util::Exception(std::string_view("dirty cache writer changed during preparation"));
+        return fail("dirty cache writer changed during preparation");
       commit_lines.push_back({&snapshot, tag, source});
     }
 
@@ -1126,17 +1147,17 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       const uint8_t *source = nullptr;
       if (snapshot.l2 != nullptr) {
         if (!snapshot.l2->cache_.lookup(snapshot.address, &tag, snapshot.tag.vmid))
-          throw util::Exception(std::string_view("selected clean L2 line disappeared"));
+          return fail("selected clean L2 line disappeared");
         source = snapshot.l2->cache_.line_data_for_read(snapshot.address, snapshot.tag.vmid);
       } else {
         if (!snapshot.memory_side->cache_.lookup(snapshot.address, &tag, snapshot.tag.vmid))
-          throw util::Exception(std::string_view("selected clean memory-side line disappeared"));
+          return fail("selected clean memory-side line disappeared");
         source =
             snapshot.memory_side->cache_.line_data_for_read(snapshot.address, snapshot.tag.vmid);
       }
       if (source == nullptr || tag == nullptr ||
           !std::equal(source, source + L2Cache::LINE_SIZE, snapshot.bytes.begin()))
-        throw util::Exception(std::string_view("selected clean cache line changed"));
+        return fail("selected clean cache line changed");
       clean_lines.push_back({&snapshot, tag, source});
     }
 
@@ -1188,7 +1209,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       }
     }
     if (writes.size() != prepared_write_count)
-      throw util::Exception(std::string_view("dirty cache write plan changed"));
+      return fail("dirty cache write plan changed");
 
     std::vector<std::shared_ptr<VmTransferEffectGate>> effect_gates;
     effect_gates.reserve(prepared->size());
